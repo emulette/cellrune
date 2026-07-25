@@ -142,14 +142,23 @@ jobs:
     name: Minimum supported Rust version, warnings denied
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # The workflow-level RUSTUP_TOOLCHAIN pins the current toolchain for every
+    # other job and overrides whatever this one installs, so without this the
+    # gate checked 1.92.0 and could never fail on an MSRV violation.
+    env:
+      RUSTUP_TOOLCHAIN: "1.88.0"
     steps:
       - name: Check out exact revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
+      # This action takes its version from the ref it is used at, and it accepts
+      # no toolchain input, so this SHA must stay on the 1.88.0 tag while every
+      # other job uses the 1.92.0 one. The assertion below is what actually
+      # guards that, because nothing else can tell the two SHAs apart.
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.88.0
+        uses: dtolnay/rust-toolchain@39b0b3842c7e8bbf6904c0bfc3d9006fdd4dc4e0 # 1.88.0
 
       - name: Restore Cargo registry cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -160,6 +169,22 @@ jobs:
             ~/.cargo/git/db
           key: cargo-registry-${{ runner.os }}-1.88.0-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-1.88.0-
+
+      # A gate that silently runs the current compiler looks exactly like a
+      # passing MSRV check. Assert the real version before trusting the result.
+      - name: Require the declared minimum toolchain
+        run: |
+          declared="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
+          actual="$(rustc --version | cut -d' ' -f2)"
+          case "$actual" in
+            "$declared"|"$declared".*) ;;
+            *)
+              printf '::error::MSRV gate ran rustc %s but Cargo.toml declares %s\n' \
+                "$actual" "$declared"
+              exit 1
+              ;;
+          esac
+          printf 'MSRV gate is running rustc %s\n' "$actual"
 
       - name: Check workspace libraries with warnings denied
         env:
