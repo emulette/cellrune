@@ -86,6 +86,22 @@ impl SheetPrefix {
             .as_ref()
             .map(|end| format!("{}:{}", self.name, end))
     }
+
+    /// Returns the offending name when this prefix addresses another workbook.
+    ///
+    /// Excel forbids `[` and `]` in sheet names, so a bracket in the sheet-name position is always
+    /// an external-workbook prefix such as `'[1]Sheet1'!A1` or `'[Book.xlsx]Sheet1'!A1`. The
+    /// unquoted spelling never reaches the parser because the lexer has no bracket token, but the
+    /// quoted spelling arrives as a single sheet-name token. Without this check it would resolve
+    /// as an ordinary missing sheet and produce `#REF!`, which `IFERROR` is allowed to hide —
+    /// exactly the outcome the crate's failure model forbids for an unsupported capability.
+    pub fn external_workbook_detail(&self) -> Option<String> {
+        [Some(&self.name), self.end_name.as_ref()]
+            .into_iter()
+            .flatten()
+            .find(|name| name.contains('['))
+            .cloned()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

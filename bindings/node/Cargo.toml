@@ -21,8 +21,8 @@ todo = "deny"
 unimplemented = "deny"
 
 [dependencies]
-cellrune-binding-support = { path = "../common", version = "=0.1.0" }
-cellrune-interop = { path = "../../crates/cellrune-interop", version = "=0.1.0" }
+cellrune-binding-support = { path = "../common", version = "=0.1.1" }
+cellrune-interop = { path = "../../crates/cellrune-interop", version = "=0.1.1" }
 napi = { version = "=3.11.0", default-features = false, features = ["napi8"] }
 napi-derive = "=3.6.0"
 serde_json = "=1.0.151"

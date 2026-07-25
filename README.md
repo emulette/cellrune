@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.0 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.1 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.0
+cargo add cellrune@0.1.1
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.0"
+cellrune = "0.1.1"
 ```
 
 ## Features
@@ -157,12 +157,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.0 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. After the matching
-registry artifacts are published, install them with:
+The 0.1.1 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.0"
-npm install "@cellrune/node@0.1.0"
+python -m pip install "cellrune==0.1.1"
+npm install "@cellrune/node@0.1.1"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -282,10 +282,13 @@ The following are outside the current scope:
 - spill postfix references such as `A1#`, general `LAMBDA`, and data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 
-CellRune does not claim complete Excel compatibility.
+CellRune does not claim complete Excel compatibility. [`docs/NUMERICS.md`](docs/NUMERICS.md)
+records where calculated values are known to differ from Excel and why, including the iterative
+financial solvers, `DOLLAR` currency formatting, and IEEE-754 arithmetic near zero. Read it before
+comparing results for equality.
 
 Public CI uses generated, redistributable workbook fixtures. Private development corpora and
-native-producer evidence are not distributed or represented as 0.1.0 release gates; validate
+native-producer evidence are not distributed or represented as release gates; validate
 workbooks from your own producers against the supported-capability report before relying on them.
 
 ## License

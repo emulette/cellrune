@@ -183,7 +183,7 @@ fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Formula
                         Some(limit) => issues.push(resource_limit_issue(limit)),
                         None => issues.push(CalculationIssue::new(
                             CalculationIssueCode::ParseError,
-                            Some(parse_error_detail(error.token_index, error.message)),
+                            Some(parse_error_detail(error.position, error.message)),
                         )),
                     },
                     None if has_name_cycle || has_name_limit => {}
@@ -535,6 +535,16 @@ fn inspect_expr(
             inspect_expr(engine, sheet, end, names, local_names, issues);
         }
         Expr::Ref(reference) => {
+            if let Some(detail) = reference
+                .sheet
+                .as_ref()
+                .and_then(SheetPrefix::external_workbook_detail)
+            {
+                issues.push(CalculationIssue::new(
+                    CalculationIssueCode::UnsupportedExpression,
+                    Some(detail),
+                ));
+            }
             if let Some(detail) = reference
                 .sheet
                 .as_ref()

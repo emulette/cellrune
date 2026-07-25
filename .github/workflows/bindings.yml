@@ -85,9 +85,34 @@ jobs:
           --target host
           --output THIRD_PARTY_LICENSES.md
 
+      # A wheel built natively on the runner inherits the runner's glibc, which produced a
+      # manylinux_2_35 tag and locked out RHEL 9 and Amazon Linux 2023 by 0.01 of a glibc version.
+      # Zig links against an explicit older glibc instead, so the baseline is a build input rather
+      # than a property of whichever image GitHub currently ships. The npm tier already
+      # cross-compiles with the same pinned Zig.
+      - name: Install Zig for the glibc baseline
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.14.1
+
+      - name: Build interpreter-specific wheel against the glibc baseline
+        if: runner.os == 'Linux'
+        run: >-
+          maturin build
+          --release
+          --locked
+          --out dist
+          --interpreter python
+          --zig
+          --compatibility manylinux_2_28
+
       - name: Build interpreter-specific wheel
+        if: runner.os != 'Linux'
         run: maturin build --release --locked --out dist --interpreter python
 
+      # The platform tag is the entire compatibility promise, so it is asserted rather than
+      # assumed; `verify_release_artifacts.py` rejects any Linux tag above the declared baseline.
       - name: Verify wheel contents and private-path boundary
         run: >-
           python ../scripts/verify_release_artifacts.py
@@ -101,7 +126,7 @@ jobs:
           --find-links dist
           --only-binary :all:
           --force-reinstall
-          cellrune==0.1.0
+          "cellrune==$(python ../scripts/workspace_version.py)"
 
       - name: Run Python binding conformance
         run: python tests/conformance.py
@@ -211,7 +236,7 @@ jobs:
             --no-index \
             --find-links dist \
             --only-binary :all: \
-            cellrune==0.1.0
+            "cellrune==$(python ../scripts/workspace_version.py)"
           consumer/bin/python tests/conformance.py
           consumer/bin/python tests/introspection.py
 

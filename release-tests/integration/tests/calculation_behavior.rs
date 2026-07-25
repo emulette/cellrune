@@ -128,6 +128,104 @@ fn cross_sheet_range_operator_calculates_the_excel_value_error() {
 }
 
 #[test]
+fn quoted_external_workbook_references_are_unsupported_and_cannot_be_hidden_by_iferror() {
+    // `[1]Sheet1!A1` never reaches the parser because the lexer has no bracket token, but Excel
+    // also stores the quoted spelling, which arrives as one sheet-name token. Resolving it as an
+    // ordinary missing sheet would yield `#REF!` — a spreadsheet error value that `IFERROR` is
+    // allowed to hide — and would report the formula as Supported.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "'[1]Sheet1'!A1"),
+        (1, 2, "IFERROR('[1]Sheet1'!A1,0)"),
+        (1, 3, "SUM('[Book.xlsx]Sheet1'!A1:B2)"),
+        (1, 4, "'Sheet1'!B9"),
+    ]);
+    let report = scan_formula_capabilities(&workbook);
+
+    for column in 1..=3 {
+        assert_capability_issue_code(&report, column, CalculationIssueCode::UnsupportedExpression);
+    }
+    // Excel forbids brackets in sheet names, so an ordinary quoted sheet name must stay supported.
+    assert!(matches!(
+        report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(4))
+            .expect("quoted local sheet capability entry")
+            .capability(),
+        FormulaCapability::Supported
+    ));
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=3 {
+        assert_issue(
+            &calculation,
+            column,
+            CalculationIssueCode::UnsupportedExpression,
+        );
+    }
+}
+
+#[test]
+fn parse_error_details_locate_lex_failures_by_character_and_parse_failures_by_token() {
+    // A lex failure happens before any token exists, so it can only be located by character
+    // offset. Reporting it as a token index mislabels the position.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "SUM(Table1[Amount])"),
+        (1, 2, "\"unterminated"),
+        (1, 3, "1+"),
+        (1, 4, "SUM(1))"),
+    ]);
+    let report = scan_formula_capabilities(&workbook);
+
+    assert_capability_issue(
+        &report,
+        1,
+        CalculationIssueCode::ParseError,
+        Some("character 10: unexpected character in formula"),
+    );
+    assert_capability_issue(
+        &report,
+        2,
+        CalculationIssueCode::ParseError,
+        Some("character 0: unterminated string literal"),
+    );
+    assert_capability_issue(
+        &report,
+        3,
+        CalculationIssueCode::ParseError,
+        Some("token 2: unexpected end of formula"),
+    );
+    assert_capability_issue(
+        &report,
+        4,
+        CalculationIssueCode::ParseError,
+        Some("token 4: unexpected token"),
+    );
+}
+
+#[test]
+fn sums_over_no_numbers_are_positive_zero_like_excel() {
+    // `Iterator::sum` for `f64` folds from `-0.0`, so every kernel that adds Excel values must go
+    // through the shared `excel_sum` helper or an empty sum silently becomes negative zero.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "SUM(Z1:Z5)"),
+        (1, 2, "SUMSQ(Z1:Z5)"),
+        (1, 3, "NPV(0.1,Z1:Z5)"),
+        (1, 4, "SUM(-0)"),
+        (1, 5, "SUM(1,2,3)"),
+        (1, 6, "AVERAGE(2,4)"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=4 {
+        assert_positive_zero(&calculation, column);
+    }
+    assert_number(&calculation, 5, 6.0, 0.0);
+    assert_number(&calculation, 6, 3.0, 0.0);
+}
+
+#[test]
 fn dynamic_arrays_calculate_and_data_tables_remain_explicitly_unsupported() {
     let sheet_id = SheetId::new(1).expect("valid sheet ID");
     let mut sheet = Sheet::new(
@@ -2091,6 +2189,19 @@ fn assert_issue(
         panic!("expected unavailable calculation result in column {column}");
     };
     assert_eq!(issue.code(), expected);
+}
+
+fn assert_positive_zero(calculation: &cellrune::CalculationSnapshot, column: u32) {
+    let Some(CalculationCellResult::Value(CellValue::Number(number))) =
+        calculation.cell(cell_id(column))
+    else {
+        panic!("expected a numeric calculation result in column {column}");
+    };
+    assert_eq!(number.get(), 0.0, "unexpected magnitude in column {column}");
+    assert!(
+        !number.get().is_sign_negative(),
+        "column {column} produced negative zero, which Excel reports as 0",
+    );
 }
 
 fn assert_number(

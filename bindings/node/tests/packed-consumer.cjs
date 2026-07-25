@@ -7,7 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const PACKAGE_NAME = "@cellrune/node";
-const PACKAGE_VERSION = "0.1.0";
+// Derived from the manifest under test so a version bump cannot leave this behind.
+const PACKAGE_VERSION = require("../package.json").version;
 const THIRD_PARTY_LICENSES = "THIRD_PARTY_LICENSES.md";
 const ROOT_ARCHIVE_FILES = [
   "LICENSE",

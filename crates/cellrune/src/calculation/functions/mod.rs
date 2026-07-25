@@ -58,7 +58,7 @@ pub(super) fn call_function(
         Some(FunctionGroup::DateAdditional) => {
             date_additional::call(engine, context, &normalized, args)
         }
-        Some(FunctionGroup::Dynamic) => dynamic::map_scalar(engine, context, args),
+        Some(FunctionGroup::Dynamic) => dynamic::call(engine, context, &normalized, args),
         Some(FunctionGroup::Array) => array::call_scalar(engine, context, &normalized, args),
         Some(FunctionGroup::Statistical) => statistical::call(engine, context, &normalized, args),
         Some(FunctionGroup::StatisticalAdditional) => {

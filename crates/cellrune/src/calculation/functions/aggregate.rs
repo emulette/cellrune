@@ -4,7 +4,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::value::{ErrorKind, Value};
-use super::util::{ArgumentValue, collect_argument_values, required_number};
+use super::util::{ArgumentValue, collect_argument_values, excel_sum, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -77,9 +77,9 @@ fn aggregate_numbers(
         }
     }
     let result = match aggregate {
-        Aggregate::Sum => numbers.iter().sum(),
+        Aggregate::Sum => excel_sum(numbers.iter().copied()),
         Aggregate::Average if numbers.is_empty() => return Value::Error(ErrorKind::Div0),
-        Aggregate::Average => numbers.iter().sum::<f64>() / numbers.len() as f64,
+        Aggregate::Average => excel_sum(numbers.iter().copied()) / numbers.len() as f64,
         Aggregate::Min => numbers.into_iter().reduce(f64::min).unwrap_or(0.0),
         Aggregate::Max => numbers.into_iter().reduce(f64::max).unwrap_or(0.0),
         Aggregate::Product if numbers.is_empty() => 0.0,

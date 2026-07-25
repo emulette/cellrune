@@ -2,7 +2,9 @@ use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::calendar::date_from_serial;
-use super::util::{collect_argument_values, collect_argument_values_with_counter, required_number};
+use super::util::{
+    collect_argument_values, collect_argument_values_with_counter, excel_sum, required_number,
+};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -166,11 +168,12 @@ fn npv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    let total = cashflows
-        .iter()
-        .enumerate()
-        .map(|(index, value)| value / (1.0 + rate).powi(index as i32 + 1))
-        .sum();
+    let total = excel_sum(
+        cashflows
+            .iter()
+            .enumerate()
+            .map(|(index, value)| value / (1.0 + rate).powi(index as i32 + 1)),
+    );
     financial_value(total)
 }
 

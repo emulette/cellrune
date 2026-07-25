@@ -16,10 +16,12 @@ workspace = true
 capability-fs = ["cellrune/capability-fs", "dep:cap-std"]
 
 [dependencies]
-cap-std = { version = "=4.0.2", optional = true }
-cellrune = { path = "../cellrune", version = "=0.1.0" }
-schemars = "=1.2.1"
-serde = { version = "=1.0.229", features = ["derive"] }
+# Caret ranges here too, so this crate stays publishable without a dependency-requirement change.
+# The intra-workspace `cellrune` requirement stays exact because the two crates release in lockstep.
+cap-std = { version = "4.0.2", optional = true }
+cellrune = { path = "../cellrune", version = "=0.1.1" }
+schemars = "1.2.1"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
 serde_json = "=1.0.151"

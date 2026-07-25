@@ -9,7 +9,7 @@ license = "MIT"
 cargo-fuzz = true
 
 [dependencies]
-cellrune = { version = "=0.1.0", path = "../crates/cellrune" }
+cellrune = { version = "=0.1.1", path = "../crates/cellrune" }
 libfuzzer-sys = "=0.4.13"
 
 [[bin]]

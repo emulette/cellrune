@@ -33,6 +33,11 @@ impl Engine<'_> {
         reference: &Reference,
     ) -> Result<Rect, ErrorKind> {
         let sheet = match &reference.sheet {
+            // An external workbook is an unsupported capability, not a missing sheet. Returning
+            // `Ref` here would let `IFERROR` hide it and would disagree with the capability scan.
+            Some(prefix) if prefix.external_workbook_detail().is_some() => {
+                return Err(ErrorKind::Unsupported);
+            }
             Some(prefix) if prefix.end_name.is_some() => return Err(ErrorKind::Unsupported),
             Some(prefix) => self
                 .workbook

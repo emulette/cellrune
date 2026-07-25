@@ -7,6 +7,54 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-25
+
+### Changed
+
+- Linux wheels target a `manylinux_2_28` (glibc 2.28) baseline instead of `manylinux_2_35`. The
+  previous tag came from whichever glibc the build runner happened to ship, and it excluded RHEL 9
+  and Amazon Linux 2023 by 0.01 of a glibc version; both fell back to the source distribution,
+  which requires a Rust toolchain the installing user rarely has. The baseline is now an explicit
+  build input, produced with the same pinned Zig the npm platform packages already use, and the
+  resulting platform tag is asserted during release verification rather than assumed.
+- Dependency requirements of the published `cellrune` crate are caret ranges instead of `=` pins.
+  An exact pin made the crate unresolvable alongside any dependent needing a newer patch of the
+  same dependency, with no remedy available to that dependent. Build reproducibility continues to
+  come from the committed `Cargo.lock`. Two new gates bound the ranges: a per-pull-request job
+  compiles the declared floors against the minimum supported Rust version, and a scheduled job
+  compiles the newest compatible graph against it.
+
+### Fixed
+
+- Quoted external-workbook references such as `'[1]Sheet1'!A1` were reported as supported and
+  evaluated to `#REF!`. Because that is a spreadsheet error value rather than an engine issue,
+  `IFERROR` could hide it, so a workbook could return a plausible number for a formula the engine
+  cannot evaluate. Both the capability scan and evaluation now reject the external prefix. The
+  unquoted spelling was already rejected, as the formula lexer has no bracket token.
+- `SUM`, `SUMSQ`, and `NPV` returned negative zero when no numbers participated. `Iterator::sum`
+  for `f64` folds from `-0.0`, which is the additive identity for floats but not the value Excel
+  reports. A shared summation helper now folds from `+0.0`.
+- Formula parse-error details labelled every position as `token N`, but a lexing failure has no
+  token stream and was reporting a character offset under that label. Lexing failures now report
+  `character N` and parsing failures continue to report `token N`.
+- The lambda function group dispatched without inspecting the normalized function name, unlike
+  every sibling group. A second function in that group would have silently evaluated as `MAP`.
+- A release version bump had to be repeated by hand in more places than the release checklist
+  listed, and the ones it missed — a pnpm lockfile, a generated loader shim, the packaged-consumer
+  lockfile, and the release verification scripts — fail only during a release run. Every version
+  is now derived from the workspace manifest where possible, and a new gate asserts that the
+  remaining declarations agree.
+
+### Documentation
+
+- The 0.1.0 entry claimed capability detection for unsupported external, structured, and
+  spill-postfix formula forms. Only 3-D and data-table forms have dedicated detection; the other
+  three surface as `calculation.parse_error`, and structured references and spill-postfix
+  references still do after this release. The entry has been corrected.
+- Added `docs/NUMERICS.md`, which records where calculated values deliberately differ from Excel,
+  the Excel build each statement was measured against, and which function families are unmeasured.
+- Installation instructions no longer describe the registry artifacts as pending.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added
@@ -33,8 +81,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - Excel-compatible `INDEX` zero row/column references, including scalar implicit intersection,
   reference composition, incremental dependencies, and row, column, or full-rectangle array
   materialization.
-- Capability detection for unsupported external, 3-D, structured, spill-postfix, data-table, and
-  other statically recognizable out-of-scope formula forms.
+- Capability detection for unsupported 3-D and data-table formula forms.
 - Verified recalculation writing that binds results to the exact source, updates typed caches,
   removes stale calculation chains, preserves unrelated package content, and supports strict or
   explicit cache-invalidation policy.
@@ -75,5 +122,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/emulette/cellrune/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/emulette/cellrune/releases/tag/v0.1.0

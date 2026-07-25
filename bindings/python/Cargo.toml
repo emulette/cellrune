@@ -20,8 +20,8 @@ extension-module = ["pyo3/extension-module"]
 workspace = true
 
 [dependencies]
-cellrune-binding-support = { path = "../common", version = "=0.1.0" }
-cellrune-interop = { path = "../../crates/cellrune-interop", version = "=0.1.0" }
+cellrune-binding-support = { path = "../common", version = "=0.1.1" }
+cellrune-interop = { path = "../../crates/cellrune-interop", version = "=0.1.1" }
 pyo3 = { version = "=0.29.0", features = ["macros"] }
 serde_json = "=1.0.151"
 

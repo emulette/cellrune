@@ -54,6 +54,17 @@
 //! Reading never executes macros or follows external links. Calculation is explicit and does not
 //! mutate or implicitly write a workbook. Recalculated result materialization is a separate
 //! explicit operation on package-backed documents.
+//!
+//! # Numeric contract
+//!
+//! Calculated numbers are not guaranteed to be bit-identical to Excel's.
+//! [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
+//! records every known deliberate difference, the Excel build each statement was
+//! measured against, and which function families remain unmeasured. The differences that most
+//! often surprise callers are the iterative financial solvers (`IRR`, `XIRR`, `RATE`), which search
+//! longer than Excel and therefore return values where Excel reports `#NUM!`, and IEEE-754
+//! arithmetic near zero, which is not snapped to zero the way Excel snaps it. Compare results with
+//! a tolerance rather than for equality.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

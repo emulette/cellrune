@@ -11,7 +11,12 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from verify_release_artifacts import Entry, archive_entries, validate_mcp
+from verify_release_artifacts import (
+    EXPECTED_VERSION,
+    Entry,
+    archive_entries,
+    validate_mcp,
+)
 
 
 class ArchiveEntryTests(unittest.TestCase):
@@ -94,10 +99,10 @@ class ArchiveEntryTests(unittest.TestCase):
 
     def test_mcp_bundle_requires_one_exact_prefix(self) -> None:
         entries = [
-            Entry("cellrune-mcp-0.1.0-target/cellrune-mcp", b"binary"),
+            Entry(f"cellrune-mcp-{EXPECTED_VERSION}-target/cellrune-mcp", b"binary"),
             Entry("other/LICENSE", b"license"),
             Entry(
-                "cellrune-mcp-0.1.0-target/THIRD_PARTY_LICENSES.md",
+                f"cellrune-mcp-{EXPECTED_VERSION}-target/THIRD_PARTY_LICENSES.md",
                 b"Artifact target: `target`",
             ),
         ]
@@ -105,7 +110,7 @@ class ArchiveEntryTests(unittest.TestCase):
             validate_mcp(entries)
 
     def test_mcp_bundle_rejects_extra_files(self) -> None:
-        prefix = "cellrune-mcp-0.1.0-target"
+        prefix = f"cellrune-mcp-{EXPECTED_VERSION}-target"
         entries = [
             Entry(f"{prefix}/cellrune-mcp", b"binary"),
             Entry(f"{prefix}/LICENSE", b"license"),

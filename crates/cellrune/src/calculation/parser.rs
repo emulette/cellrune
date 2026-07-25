@@ -9,9 +9,22 @@ use super::{
     EXCEL_MAX_ROWS,
 };
 
+/// Where a formula failed, in the only unit that is meaningful for that failure.
+///
+/// Lexing runs before any token stream exists, so a lex failure can only be located by character
+/// offset. Parsing consumes tokens, so a parse failure is located by token index. Reporting both
+/// as one number under a single label is wrong for one of the two cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorPosition {
+    /// Zero-based character offset into the formula text.
+    Character(usize),
+    /// Zero-based index into the lexed token stream.
+    Token(usize),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
-    pub token_index: usize,
+    pub position: ErrorPosition,
     pub message: &'static str,
     pub limit: Option<CalculationLimitKind>,
 }
@@ -19,7 +32,7 @@ pub struct ParseError {
 impl From<LexError> for ParseError {
     fn from(error: LexError) -> Self {
         ParseError {
-            token_index: error.position,
+            position: ErrorPosition::Character(error.position),
             message: error.message,
             limit: error.limit,
         }
@@ -103,7 +116,7 @@ fn validate_ast_limits(
 
 fn limit_error(token_index: usize, limit: CalculationLimitKind) -> ParseError {
     ParseError {
-        token_index,
+        position: ErrorPosition::Token(token_index),
         message: ERROR_PARSE_UNEXPECTED_TOKEN,
         limit: Some(limit),
     }
@@ -148,7 +161,7 @@ fn split_cell_ident(ident: &str) -> Option<(String, Option<u32>)> {
 impl Parser {
     fn error(&self, message: &'static str) -> ParseError {
         ParseError {
-            token_index: self.cursor,
+            position: ErrorPosition::Token(self.cursor),
             message,
             limit: None,
         }

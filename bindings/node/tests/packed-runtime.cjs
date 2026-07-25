@@ -7,7 +7,8 @@ const { createRequire } = require("node:module");
 const path = require("node:path");
 
 const PACKAGE_NAME = "@cellrune/node";
-const PACKAGE_VERSION = "0.1.0";
+// Derived from the manifest under test so a version bump cannot leave this behind.
+const PACKAGE_VERSION = require("../package.json").version;
 
 async function main() {
   const consumerDirectory = process.argv[2];

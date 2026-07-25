@@ -46,6 +46,61 @@ jobs:
           --config fuzz/deny.toml
           check advisories
 
+  # The second input that moves without a commit from us. `cellrune` publishes caret ranges, so a
+  # fresh resolve on a dependent's machine can pick up dependency releases we have never compiled.
+  #
+  # `resolver = "3"` already makes resolution MSRV-aware, so a dependency that *declares* a
+  # `rust-version` above ours is held back automatically and cannot break a 1.88 consumer. That is
+  # why this job runs a plain `cargo update` rather than `--ignore-rust-version`: it reproduces the
+  # graph a 1.88 consumer would actually be given, not a hypothetical one.
+  #
+  # The gap it closes is the case MSRV-aware resolution cannot see: a dependency that raises its
+  # real minimum without declaring `rust-version` at all. Several crates in this graph declare
+  # none, `cap-std` among them, so nothing but compiling the resolved graph can catch it.
+  # Scheduled rather than per-push for the same reason as the advisory tier: our commit and our
+  # lockfile did not change, upstream did. A failure here means a published promise is false, and
+  # the fix is an upper bound on the offending requirement or a raised `rust-version`.
+  latest-dependencies:
+    name: Newest compatible dependencies on the declared MSRV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: "1.88.0"
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@39b0b3842c7e8bbf6904c0bfc3d9006fdd4dc4e0 # 1.88.0
+
+      - name: Require the declared minimum toolchain
+        run: |
+          declared="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
+          actual="$(rustc --version | cut -d' ' -f2)"
+          case "$actual" in
+            "$declared"|"$declared".*) ;;
+            *)
+              printf '::error::latest-dependency gate ran rustc %s but Cargo.toml declares %s\n' \
+                "$actual" "$declared"
+              exit 1
+              ;;
+          esac
+          printf 'latest-dependency gate is running rustc %s\n' "$actual"
+
+      - name: Update to the newest semver-compatible dependency graph
+        run: cargo update
+
+      - name: Report the resolved graph for triage
+        run: cargo tree --package cellrune --all-features --edges normal
+
+      # No `--locked`: the point of this job is to leave the committed lockfile behind.
+      - name: Check the updated graph with warnings denied
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --workspace --lib --all-features
+
   fuzz:
     name: Bounded nightly sanitizer campaign
     runs-on: ubuntu-24.04

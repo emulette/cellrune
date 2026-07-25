@@ -82,6 +82,16 @@ pub(super) fn required_text(
     super::super::coerce::to_text(&engine.eval_scalar(context, expr))
 }
 
+/// Adds Excel numeric values using `+0.0` as the additive identity.
+///
+/// `Iterator::sum` for `f64` folds from `-0.0`, which is the true additive identity for floats
+/// because `-0.0 + x == x` holds even when `x` is `-0.0`. That makes an empty sum negative zero,
+/// while Excel reports `0` for a sum over no numbers. Spreadsheet kernels must therefore not use
+/// `Iterator::sum` directly.
+pub(super) fn excel_sum(values: impl IntoIterator<Item = f64>) -> f64 {
+    values.into_iter().fold(0.0, |total, value| total + value)
+}
+
 pub(super) fn excel_numeric_arguments(
     engine: &Engine<'_>,
     context: EvalContext<'_>,

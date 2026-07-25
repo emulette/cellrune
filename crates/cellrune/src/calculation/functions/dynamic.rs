@@ -5,6 +5,18 @@ use super::super::operators::element_at;
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
 
+pub(super) fn call(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    name: &str,
+    args: &[Expr],
+) -> Value {
+    match name {
+        "MAP" => map_scalar(engine, context, args),
+        _ => Value::Error(ErrorKind::Unsupported),
+    }
+}
+
 pub(super) fn map_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -51,7 +63,7 @@ pub(super) fn map_array(
     Ok(Array { rows, cols, data })
 }
 
-pub(super) fn map_scalar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+fn map_scalar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     match map_array(engine, context, args) {
         Ok(array) => array
             .data

@@ -12,13 +12,15 @@ import tarfile
 import time
 import zipfile
 
+from workspace_version import workspace_version
+
 ERROR_PREFIX = "MCP packaging failed"
 MESSAGE_SOURCE_DATE_EPOCH_INVALID = (
     "SOURCE_DATE_EPOCH must be set to a Unix timestamp"
 )
 MESSAGE_EXECUTABLE_MISSING = "CellRune MCP executable not found under {path}"
 MESSAGE_BUNDLE_FILE_MISSING = "required bundle file is missing: {path}"
-VERSION = "0.1.0"
+VERSION = workspace_version()
 NOTICE_NAME = "THIRD_PARTY_LICENSES.md"
 
 

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-CellRune is at `0.1.0`. Fixes are published on the latest release only.
+CellRune is at `0.1.1`. Fixes are published on the latest release only.
 
 ## Reporting a vulnerability
 

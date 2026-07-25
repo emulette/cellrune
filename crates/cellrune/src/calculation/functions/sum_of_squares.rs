@@ -1,7 +1,7 @@
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
-use super::util::excel_numeric_arguments;
+use super::util::{excel_numeric_arguments, excel_sum};
 
 const MAX_EXCEL_ARGUMENTS: usize = 255;
 
@@ -34,7 +34,7 @@ fn sumsq(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
         Ok(numbers) => numbers,
         Err(kind) => return Value::Error(kind),
     };
-    finite(numbers.into_iter().map(|number| number * number).sum())
+    finite(excel_sum(numbers.into_iter().map(|number| number * number)))
 }
 
 fn paired(

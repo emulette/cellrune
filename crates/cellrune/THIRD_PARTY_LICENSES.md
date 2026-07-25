@@ -6,7 +6,7 @@ under their own licenses; this notice does not relicense them.
 ## Runtime dependency graph
 
 The following table records the normal dependency graph selected by
-`cargo tree --locked -p cellrune --edges normal` for CellRune 0.1.0.
+`cargo tree --locked -p cellrune --edges normal` for CellRune 0.1.1.
 Transitive dependencies are included so the release boundary can be audited
 without confusing development-only tools with shipped library requirements.
 

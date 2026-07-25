@@ -15,6 +15,9 @@ import tarfile
 import zipfile
 from dataclasses import dataclass
 
+from workspace_version import workspace_version
+
+EXPECTED_VERSION = workspace_version()
 ERROR_PREFIX = "binding artifact verification failed"
 ERROR_MESSAGES = {
     "archive.empty": "archive is empty",
@@ -30,7 +33,7 @@ ERROR_MESSAGES = {
     "artifact.none": "no artifacts were selected",
     "manifest.missing": "required manifest missing: {name}",
     "manifest.not_object": "manifest is not an object: {name}",
-    "npm.version": "npm package version is not 0.1.0",
+    "npm.version": f"npm package version is not {EXPECTED_VERSION}",
     "npm.homepage": "npm homepage does not match the public repository",
     "npm.repository": "npm repository metadata is missing or incorrect",
     "npm.issues": "npm issue tracker metadata is missing or incorrect",
@@ -48,6 +51,16 @@ ERROR_MESSAGES = {
     "wheel.third_party": "wheel does not contain third-party license texts",
     "wheel.metadata": "wheel metadata is missing",
     "wheel.public_metadata": "wheel version or public project URLs are incomplete",
+    "wheel.wheel_metadata": "wheel is missing its .dist-info/WHEEL tag record",
+    "wheel.linux_baseline": (
+        "Linux wheel platform tag {tag} requires a newer glibc than the supported "
+        "baseline {expected}; distributions at or below that baseline, including "
+        "RHEL 9 and Amazon Linux 2023, would fall back to the sdist"
+    ),
+    "wheel.linux_unrepaired": (
+        "Linux wheel platform tag {tag} declares no glibc baseline at all, so it is "
+        "installable only on the machine that built it"
+    ),
     "sdist.top_level": "sdist must have exactly one top-level directory",
     "sdist.required": "sdist is missing {name}",
     "sdist.compiled": "sdist contains a compiled artifact",
@@ -62,10 +75,13 @@ ERROR_MESSAGES = {
     "target.required": "wheel verification requires --expected-target",
     "target.host": "rustc did not report a host target",
 }
+# RHEL 8 is the oldest baseline still worth carrying, and it is the one that also admits RHEL 9
+# and Amazon Linux 2023 (both glibc 2.34). A wheel tagged above this silently falls back to the
+# sdist on those distributions, which requires a Rust toolchain the installing user rarely has.
+EXPECTED_LINUX_PLATFORM_TAG = "manylinux_2_28"
 EXPECTED_REPOSITORY = "git+https://github.com/emulette/cellrune.git"
 EXPECTED_HOMEPAGE = "https://github.com/emulette/cellrune#readme"
 EXPECTED_ISSUES = "https://github.com/emulette/cellrune/issues"
-EXPECTED_VERSION = "0.1.0"
 NOTICE_NAME = "THIRD_PARTY_LICENSES.md"
 CACHE_SEGMENTS = frozenset(
     {
@@ -322,16 +338,57 @@ def validate_wheel(entries: list[Entry], expected_target: str | None) -> str:
         raise artifact_error("wheel.metadata")
     decoded = metadata.decode("utf-8")
     required_metadata = (
-        "Version: 0.1.0",
+        f"Version: {EXPECTED_VERSION}",
         "Project-URL: Homepage, https://github.com/emulette/cellrune",
         "Project-URL: Issues, https://github.com/emulette/cellrune/issues",
     )
     if not all(value in decoded for value in required_metadata):
         raise artifact_error("wheel.public_metadata")
+    validate_wheel_platform_tag(entries)
     if expected_target is None:
         raise artifact_error("target.required")
     validate_target_notice(entries, expected_target)
     return "wheel"
+
+
+def validate_wheel_platform_tag(entries: list[Entry]) -> None:
+    """Reject a Linux wheel built against a newer glibc than the supported baseline.
+
+    The platform tag is what pip matches against the installing machine, so it is the whole of the
+    compatibility promise. It is read from the ``WHEEL`` record rather than the file name because
+    the record is what the wheel actually carries once it has been renamed or re-uploaded.
+    """
+    wheel_metadata = next(
+        (entry.data for entry in entries if entry.name.endswith(".dist-info/WHEEL")),
+        None,
+    )
+    if wheel_metadata is None:
+        raise artifact_error("wheel.wheel_metadata")
+    tags = [
+        line.split(":", 1)[1].strip()
+        for line in wheel_metadata.decode("utf-8").splitlines()
+        if line.startswith("Tag:")
+    ]
+    if not tags:
+        raise artifact_error("wheel.wheel_metadata")
+    ceiling = _glibc_baseline(EXPECTED_LINUX_PLATFORM_TAG)
+    for tag in tags:
+        platform = tag.rsplit("-", 1)[-1]
+        if platform.startswith("linux_"):
+            raise artifact_error("wheel.linux_unrepaired", tag=tag)
+        baseline = _glibc_baseline(platform)
+        # A baseline at or below the declared one is strictly more installable, so only a
+        # higher requirement is a defect. musl and non-Linux tags carry no glibc baseline.
+        if baseline is not None and ceiling is not None and baseline > ceiling:
+            raise artifact_error(
+                "wheel.linux_baseline", tag=tag, expected=EXPECTED_LINUX_PLATFORM_TAG
+            )
+
+
+def _glibc_baseline(platform_tag: str) -> tuple[int, int] | None:
+    """Return the ``(major, minor)`` glibc version a ``manylinux_X_Y`` tag requires."""
+    match = re.match(r"manylinux_(\d+)_(\d+)", platform_tag)
+    return (int(match.group(1)), int(match.group(2))) if match else None
 
 
 def validate_sdist(entries: list[Entry]) -> str:

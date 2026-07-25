@@ -1,3 +1,5 @@
+use super::parser::ErrorPosition;
+
 pub(crate) const ERROR_LEX_UNEXPECTED_CHARACTER: &str = "unexpected character in formula";
 pub(crate) const ERROR_LEX_UNTERMINATED_STRING: &str = "unterminated string literal";
 pub(crate) const ERROR_LEX_UNTERMINATED_SHEET_NAME: &str = "unterminated quoted sheet name";
@@ -22,6 +24,13 @@ pub(super) const MESSAGE_CIRCULAR_REFERENCE: &str = "formula participates in a c
 pub(super) const MESSAGE_BLOCKED_BY_UPSTREAM: &str =
     "formula depends on a cell that could not be calculated";
 
-pub(super) fn parse_error_detail(token_index: usize, message: &str) -> String {
-    format!("token {token_index}: {message}")
+pub(super) const DETAIL_POSITION_CHARACTER: &str = "character";
+pub(super) const DETAIL_POSITION_TOKEN: &str = "token";
+
+pub(super) fn parse_error_detail(position: ErrorPosition, message: &str) -> String {
+    let (label, index) = match position {
+        ErrorPosition::Character(index) => (DETAIL_POSITION_CHARACTER, index),
+        ErrorPosition::Token(index) => (DETAIL_POSITION_TOKEN, index),
+    };
+    format!("{label} {index}: {message}")
 }
