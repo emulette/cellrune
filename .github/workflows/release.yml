@@ -114,6 +114,58 @@ jobs:
   # crates.io and npm cannot mint their first release over OIDC, so 0.1.0 uses
   # tokens for those two. Once the crate and the nine npm packages exist, attach
   # their trusted publishers, delete both secrets, and drop the token lines here.
+  # cellrune-mcp is not published to any registry, so this release is the only
+  # way to obtain the binary the README tells MCP clients to launch. Without it
+  # the verified bundles expire with the workflow artifacts. A GitHub release can
+  # be edited or deleted, unlike a registry upload, so it needs no reviewer gate.
+  github-release:
+    name: Publish the GitHub release with MCP bundles
+    needs: complete
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download every verified MCP archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: mcp-*
+          path: mcp-bundles
+          merge-multiple: true
+
+      - name: Publish the release from the changelog entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          awk -v heading="## [$version]" '
+            index($0, heading) == 1 { capture = 1; next }
+            capture && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            printf '::error::CHANGELOG.md has no %s section\n' "$version"
+            exit 1
+          fi
+          bundles="$(find mcp-bundles -type f | sort)"
+          if [ "$(printf '%s\n' "$bundles" | wc -l)" -ne 3 ]; then
+            printf '::error::expected 3 MCP bundles, found:\n%s\n' "$bundles"
+            exit 1
+          fi
+          printf '%s\n' "$bundles"
+          # shellcheck disable=SC2086
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            $bundles
+
   publish-crates-io:
     name: Publish cellrune to crates.io
     needs: complete

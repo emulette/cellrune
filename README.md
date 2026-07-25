@@ -224,6 +224,10 @@ The server also publishes read-only JSON resources at `cellrune://support/functi
 `--log-level`; run `cellrune-mcp --help` for their defaults. Values outside the server's compiled
 policy limits are rejected at startup.
 
+`cellrune-mcp` is not published to a package registry. Prebuilt bundles for Linux, macOS, and
+Windows are attached to each [GitHub release](https://github.com/emulette/cellrune/releases),
+alongside their license materials and build provenance.
+
 An MCP client can launch a release binary with configuration equivalent to:
 
 ```json
