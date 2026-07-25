@@ -64,6 +64,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   since the repository went public, so the defect surfaced only on the tier's first manual
   dispatch. cargo-fuzz is now built from crates.io with `cargo install --locked`, which keeps the
   exact-version pin and the registry checksum verification.
+- The npm publish job could not authenticate. Trusted publishing requires npm 11.5.1 to exchange
+  the job's OIDC identity for a registry credential, and Node 22 bundles npm 10, which publishes
+  without credentials and receives the rejection masked as E404. The nine-package dry-run gate
+  cannot catch this because a dry run never authenticates, so the failure surfaced on the first
+  real upload — before any package was published, leaving the retry clean. The job now upgrades
+  to a pinned npm 11 before publishing.
 
 ### Documentation
 

@@ -238,6 +238,14 @@ jobs:
           node-version: 22.23.1
           registry-url: https://registry.npmjs.org
 
+      # Trusted publishing needs the npm CLI to exchange the job's OIDC identity for a registry
+      # credential, which npm learned in 11.5.1. Node 22 bundles npm 10, which cannot attempt the
+      # exchange at all: it publishes without credentials and the registry masks the rejection as
+      # E404. The dry-run gate below cannot catch this, because a dry run never authenticates —
+      # the 0.1.1 release failed exactly here, on the first real upload.
+      - name: Install an npm that can mint OIDC credentials
+        run: npm install -g npm@11.18.0
+
       - name: Download verified npm archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
