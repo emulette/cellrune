@@ -174,6 +174,7 @@ jobs:
     environment: crates-io
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Check out exact release revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -183,9 +184,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
 
+      # Exchanges this job's OIDC identity for a token that expires in 30
+      # minutes and is revoked when the job ends, so no registry credential is
+      # stored in the repository.
+      - name: Mint a short-lived crates.io token
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
       - name: Publish the crate
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
         run: cargo publish --package cellrune --locked
 
   publish-pypi:
@@ -276,16 +284,16 @@ jobs:
       # and would leave the scope half released. Prove all nine are acceptable
       # before any of them is sent.
       - name: Reject the release unless every archive would publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           while IFS= read -r archive; do
             npm publish "$archive" --access public --dry-run
           done < publish-order.txt
 
+      # No NODE_AUTH_TOKEN: every package trusts this repository, workflow, and
+      # environment, so npm authenticates from the job's OIDC identity. That also
+      # sidesteps the account's 2FA, which no longer sits between CI and a
+      # publish the way a granular token did.
       - name: Publish every package, main package last
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           while IFS= read -r archive; do
             printf '::group::%s\n' "$archive"
