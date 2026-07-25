@@ -135,8 +135,34 @@ jobs:
           check THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
           exit "$status"
 
+      # Both READMEs are also the long_description PyPI renders and the front page crates.io and
+      # npm render, none of which resolve a repository-relative path. A relative link is a 404 for
+      # every reader who did not arrive through GitHub.
+      - name: Require absolute links in published READMEs
+        run: |
+          grep -Hno ']([^)]*)' README.md bindings/node/README.md \
+            | sed 's/](\(.*\))$/\1/' \
+            | awk '
+                BEGIN { FS = ":"; status = 0 }
+                {
+                  file = $1
+                  line = $2
+                  target = substr($0, length(file) + length(line) + 3)
+                }
+                target !~ /^(https?:\/\/|#)/ {
+                  printf "::error file=%s,line=%s::relative link %s does not resolve on PyPI, crates.io, or npm\n", file, line, target
+                  status = 1
+                }
+                END { exit status }
+              '
+
       - name: Test release archive boundary validation
         run: python3 bindings/scripts/test_verify_release_artifacts.py
+
+      # Most of this gate's checks are patterns over generated files. A pattern that matched
+      # nothing would agree with every version, so its own drift has to be tested too.
+      - name: Test version consistency gate
+        run: python3 bindings/scripts/test_check_version_consistency.py
 
       # A partial version bump does not fail where it was made. It fails inside a release run,
       # after the irreversible publish approvals, because a lockfile or a generated shim still
@@ -196,61 +222,6 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --workspace --lib --all-features --locked
-
-  # `cellrune` is published, so its dependency requirements are caret ranges rather than `=` pins:
-  # an exact pin makes the crate unresolvable alongside any dependent that needs a newer patch of
-  # the same crate. The committed `Cargo.lock` keeps our own builds reproducible, but it also means
-  # no other gate ever exercises the bottom of those ranges. This job resolves every direct
-  # requirement down to its declared floor and compiles that graph against the declared MSRV, so a
-  # floor that is too low fails here instead of in a dependent's build.
-  dependency-floor:
-    name: Declared dependency floors on the MSRV
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      RUSTUP_TOOLCHAIN: "1.88.0"
-    steps:
-      - name: Check out exact revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      # `-Z direct-minimal-versions` is resolver-only, so the nightly is a tool here rather than
-      # the compiler under test. It is pinned to the same date as the fuzz tier. Plain
-      # `-Z minimal-versions` is deliberately not used: it also minimises transitive crates, which
-      # fails on third-party under-declaration rather than on anything this workspace controls.
-      - name: Install pinned nightly resolver
-        run: rustup toolchain install nightly-2026-07-22 --profile minimal
-
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@39b0b3842c7e8bbf6904c0bfc3d9006fdd4dc4e0 # 1.88.0
-
-      - name: Resolve every direct requirement to its declared floor
-        run: >-
-          cargo +nightly-2026-07-22
-          -Z direct-minimal-versions
-          generate-lockfile
-
-      # A gate that silently ran the current compiler would look exactly like a passing check.
-      - name: Require the declared minimum toolchain
-        run: |
-          declared="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
-          actual="$(rustc --version | cut -d' ' -f2)"
-          case "$actual" in
-            "$declared"|"$declared".*) ;;
-            *)
-              printf '::error::floor gate ran rustc %s but Cargo.toml declares %s\n' \
-                "$actual" "$declared"
-              exit 1
-              ;;
-          esac
-          printf 'floor gate is running rustc %s\n' "$actual"
-
-      # No `--locked`: the lockfile was just regenerated on purpose.
-      - name: Check the floor graph with warnings denied
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check --workspace --lib --all-features
 
   platform-tests:
     name: Core and MCP (${{ matrix.os }})

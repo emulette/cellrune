@@ -373,20 +373,30 @@ def validate_wheel_platform_tag(entries: list[Entry]) -> None:
         raise artifact_error("wheel.wheel_metadata")
     ceiling = _glibc_baseline(EXPECTED_LINUX_PLATFORM_TAG)
     for tag in tags:
-        platform = tag.rsplit("-", 1)[-1]
-        if platform.startswith("linux_"):
-            raise artifact_error("wheel.linux_unrepaired", tag=tag)
-        baseline = _glibc_baseline(platform)
-        # A baseline at or below the declared one is strictly more installable, so only a
-        # higher requirement is a defect. musl and non-Linux tags carry no glibc baseline.
-        if baseline is not None and ceiling is not None and baseline > ceiling:
-            raise artifact_error(
-                "wheel.linux_baseline", tag=tag, expected=EXPECTED_LINUX_PLATFORM_TAG
-            )
+        # PEP 425 allows a compressed tag set, whose platform field joins several tags with '.'.
+        # pip installs the wheel when any one of them matches the installing machine, so the
+        # loosest component is what the wheel promises while the strictest is what it needs. Every
+        # component has to be inspected: reading the field as one tag lets a legacy alias in first
+        # position hide a newer glibc requirement behind it.
+        for platform in tag.rsplit("-", 1)[-1].split("."):
+            if platform.startswith("linux_"):
+                raise artifact_error("wheel.linux_unrepaired", tag=tag)
+            baseline = _glibc_baseline(platform)
+            # A baseline at or below the declared one is strictly more installable, so only a
+            # higher requirement is a defect. musl and non-Linux tags carry no glibc baseline.
+            if baseline is not None and ceiling is not None and baseline > ceiling:
+                raise artifact_error(
+                    "wheel.linux_baseline", tag=tag, expected=EXPECTED_LINUX_PLATFORM_TAG
+                )
 
 
 def _glibc_baseline(platform_tag: str) -> tuple[int, int] | None:
-    """Return the ``(major, minor)`` glibc version a ``manylinux_X_Y`` tag requires."""
+    """Return the ``(major, minor)`` glibc version a ``manylinux_X_Y`` tag requires.
+
+    The pre-PEP 600 aliases (``manylinux1``, ``manylinux2010``, ``manylinux2014``) return ``None``.
+    They stand for glibc 2.5, 2.12, and 2.17, all below any baseline this project would target, and
+    the caller only rejects a requirement above its ceiling.
+    """
     match = re.match(r"manylinux_(\d+)_(\d+)", platform_tag)
     return (int(match.group(1)), int(match.group(2))) if match else None
 

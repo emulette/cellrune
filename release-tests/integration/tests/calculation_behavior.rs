@@ -138,12 +138,23 @@ fn quoted_external_workbook_references_are_unsupported_and_cannot_be_hidden_by_i
         (1, 2, "IFERROR('[1]Sheet1'!A1,0)"),
         (1, 3, "SUM('[Book.xlsx]Sheet1'!A1:B2)"),
         (1, 4, "'Sheet1'!B9"),
+        (1, 5, "'C:\\Reports\\[Q1.xlsx]Sheet1'!A1"),
     ]);
     let report = scan_formula_capabilities(&workbook);
 
     for column in 1..=3 {
         assert_capability_issue_code(&report, column, CalculationIssueCode::UnsupportedExpression);
     }
+    // Excel writes the saved path into the sheet token, so the prefix carries a drive colon. That
+    // colon marks no end sheet: the reader must see the whole path and one diagnosis, not a
+    // truncated one plus a 3-D sheet range the formula does not contain.
+    assert_capability_issue(
+        &report,
+        5,
+        CalculationIssueCode::UnsupportedExpression,
+        Some("C:\\Reports\\[Q1.xlsx]Sheet1"),
+    );
+    assert_capability_issue_count(&report, 5, 1);
     // Excel forbids brackets in sheet names, so an ordinary quoted sheet name must stay supported.
     assert!(matches!(
         report
@@ -156,13 +167,43 @@ fn quoted_external_workbook_references_are_unsupported_and_cannot_be_hidden_by_i
     ));
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    for column in 1..=3 {
+    for column in [1, 2, 3, 5] {
         assert_issue(
             &calculation,
             column,
             CalculationIssueCode::UnsupportedExpression,
         );
     }
+}
+
+#[test]
+fn external_workbook_references_built_by_indirect_stay_catchable() {
+    // The capability scan cannot read a reference that only exists once INDIRECT's text argument
+    // has been evaluated, so it reports these cells as supported. Raising an engine issue during
+    // calculation would contradict that report and leave the cell — and everything downstream of
+    // it — unavailable with no way to recover. Excel answers `#REF!` for text it cannot resolve to
+    // a reference, and `IFERROR` may hide that because nothing ever promised it would resolve.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "IFERROR(INDIRECT(A2),42)"),
+        (2, 1, "\"'[Book1.xlsx]Sheet1'!A1\""),
+        (1, 2, "INDIRECT(A2)"),
+        (1, 3, "IFERROR(INDIRECT(\"'NoSuchSheet'!A1\"),42)"),
+        (1, 4, "IFERROR(INDIRECT(\"'Sheet1:Sheet3'!A1\"),42)"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 42.0, 0.0);
+    assert_eq!(
+        calculation.cell(cell_id(2)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Reference
+        )))
+    );
+    // A missing sheet already behaved this way; an unsupported reference form discovered inside
+    // the text must not be the one case that becomes uncatchable.
+    assert_number(&calculation, 3, 42.0, 0.0);
+    assert_number(&calculation, 4, 42.0, 0.0);
 }
 
 #[test]
@@ -204,25 +245,34 @@ fn parse_error_details_locate_lex_failures_by_character_and_parse_failures_by_to
 }
 
 #[test]
-fn sums_over_no_numbers_are_positive_zero_like_excel() {
-    // `Iterator::sum` for `f64` folds from `-0.0`, so every kernel that adds Excel values must go
-    // through the shared `excel_sum` helper or an empty sum silently becomes negative zero.
+fn calculated_zeros_are_positive_like_excel() {
+    // Float kernels reach `-0.0` by several routes: `Iterator::sum` folds from it, `f64::min` and
+    // `f64::max` may return either operand when both compare equal, and `Iterator::product`
+    // inherits the sign of an odd number of negative factors. Excel's number model has no negative
+    // zero, so the calculation boundary normalizes rather than each kernel remembering to.
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Z1:Z5)"),
         (1, 2, "SUMSQ(Z1:Z5)"),
         (1, 3, "NPV(0.1,Z1:Z5)"),
         (1, 4, "SUM(-0)"),
-        (1, 5, "SUM(1,2,3)"),
-        (1, 6, "AVERAGE(2,4)"),
+        (1, 5, "MIN(-0)"),
+        (1, 6, "MAX(-0)"),
+        (1, 7, "MIN(0,-0)"),
+        (1, 8, "PRODUCT(-1,0)"),
+        (1, 9, "AVERAGEA(-0)"),
+        (1, 10, "MINA(-0)"),
+        (1, 11, "MAXA(-0)"),
+        (1, 12, "SUM(1,2,3)"),
+        (1, 13, "AVERAGE(2,4)"),
     ]);
     assert!(scan_formula_capabilities(&workbook).is_supported());
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    for column in 1..=4 {
+    for column in 1..=11 {
         assert_positive_zero(&calculation, column);
     }
-    assert_number(&calculation, 5, 6.0, 0.0);
-    assert_number(&calculation, 6, 3.0, 0.0);
+    assert_number(&calculation, 12, 6.0, 0.0);
+    assert_number(&calculation, 13, 3.0, 0.0);
 }
 
 #[test]
@@ -2282,6 +2332,26 @@ fn assert_capability_issue_code(
     assert!(
         issues.iter().any(|issue| issue.code() == expected),
         "missing issue {expected:?} in column {column}: {issues:?}",
+    );
+}
+
+fn assert_capability_issue_count(
+    report: &cellrune::FormulaCapabilityReport,
+    column: u32,
+    expected: usize,
+) {
+    let entry = report
+        .entries()
+        .iter()
+        .find(|entry| entry.cell() == cell_id(column))
+        .expect("formula capability entry");
+    let FormulaCapability::Unsupported(issues) = entry.capability() else {
+        panic!("formula capability must be unsupported in column {column}");
+    };
+    assert_eq!(
+        issues.len(),
+        expected,
+        "unexpected issue count in column {column}: {issues:?}",
     );
 }
 

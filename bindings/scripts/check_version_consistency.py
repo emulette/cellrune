@@ -9,6 +9,11 @@ places beyond the documented checklist, three of which would have failed a relea
 
 This gate derives the expected version from `[workspace.package]` and checks every other
 declaration against it, so an incomplete bump fails on the pull request that made it.
+
+Every check here is written so that finding nothing is a failure rather than a pass. A gate whose
+regex stops matching because a generator changed its output, or whose file was moved, would
+otherwise report the same green result as a correct bump — and would do so precisely when a
+declaration had drifted out from under it.
 """
 
 from __future__ import annotations
@@ -23,9 +28,28 @@ from workspace_version import repository_root, workspace_version
 ERROR_PREFIX = "version consistency check failed"
 MESSAGE_MISMATCH = "{path}: {label} is {actual}, expected {expected}"
 MESSAGE_MISSING = "{path}: no {label} found"
-MESSAGE_UNREADABLE = "{path}: cannot be read"
+MESSAGE_UNREADABLE = "{path}: cannot be read: {reason}"
 
 NODE_PLATFORM_DIRECTORY = "bindings/node/npm"
+NODE_PLATFORM_SCOPE = "@cellrune/node-"
+SKIPPED_DIRECTORIES = frozenset({"target", "node_modules", ".git"})
+
+# Documentation and policy files that name the release version in prose or in an install command.
+# A stale literal here is not caught by any build: it ships on the crates.io and PyPI project
+# pages and on the repository front page, telling users to install a version that is not current
+# and — in SECURITY.md — naming the wrong version as the one receiving fixes.
+PROSE_VERSION_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    ("README.md", r"The CellRune Rust crate ([0-9][^\s]*) requires", "crate version"),
+    ("README.md", r"cargo add cellrune@([^\s`]+)", "cargo add version"),
+    ("README.md", r'^cellrune = "([^"]+)"', "crate requirement"),
+    ("README.md", r"The ([0-9][^\s]*) release line targets", "release line"),
+    ("README.md", r'pip install "cellrune==([^"]+)"', "pip install version"),
+    ("README.md", r'npm install "@cellrune/node@([^"]+)"', "npm install version"),
+    ("bindings/node/README.md", r"npm install @cellrune/node@([^\s`]+)", "npm install version"),
+    ("SECURITY.md", r"CellRune is at `([^`]+)`", "supported version"),
+    ("llms.txt", r"The current public version is ([0-9][^\s,]*)", "public version"),
+    ("llms.txt", r"Version ([0-9][^\s]*) contains", "catalog version"),
+)
 
 
 def _fail(messages: list[str]) -> int:
@@ -34,64 +58,109 @@ def _fail(messages: list[str]) -> int:
     return 1
 
 
-def _json_version(root: pathlib.Path, relative: str) -> tuple[str, str | None]:
-    path = root / relative
+def _read_json(path: pathlib.Path, relative: str, problems: list[str]) -> dict | None:
+    """Parse a JSON manifest, recording a diagnostic instead of raising on malformed input."""
     if not path.is_file():
-        return relative, None
-    return relative, json.loads(path.read_text(encoding="utf-8")).get("version")
+        problems.append(MESSAGE_MISSING.format(path=relative, label="file"))
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        problems.append(MESSAGE_UNREADABLE.format(path=relative, reason=error))
+        return None
 
 
-def _text_matches(root: pathlib.Path, relative: str, pattern: re.Pattern[str]) -> list[str]:
-    path = root / relative
+def _read_text(path: pathlib.Path, relative: str, problems: list[str]) -> str | None:
     if not path.is_file():
-        return []
-    return pattern.findall(path.read_text(encoding="utf-8"))
+        problems.append(MESSAGE_MISSING.format(path=relative, label="file"))
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        problems.append(MESSAGE_UNREADABLE.format(path=relative, reason=error))
+        return None
+
+
+def _check_matches(
+    text: str,
+    relative: str,
+    pattern: re.Pattern[str],
+    label: str,
+    expected: str,
+    problems: list[str],
+    *,
+    minimum: int = 1,
+) -> None:
+    """Compare every capture of ``pattern`` against ``expected``.
+
+    ``minimum`` is the number of matches the declaration is known to contain. Falling below it
+    means the pattern no longer describes the file, which has to be reported: a check that matches
+    nothing agrees with everything.
+    """
+    found = pattern.findall(text)
+    if len(found) < minimum:
+        problems.append(
+            MESSAGE_MISSING.format(path=relative, label=f"{label} (expected {minimum} or more)")
+        )
+        return
+    for actual in sorted(set(found)):
+        if actual != expected:
+            problems.append(
+                MESSAGE_MISMATCH.format(
+                    path=relative, label=label, actual=actual, expected=expected
+                )
+            )
 
 
 def check(root: pathlib.Path, expected: str) -> list[str]:
     problems: list[str] = []
 
     # Python distribution metadata.
-    pyproject = _text_matches(
-        root,
-        "bindings/python/pyproject.toml",
-        re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE),
-    )
-    if not pyproject:
-        problems.append(
-            MESSAGE_MISSING.format(path="bindings/python/pyproject.toml", label="version")
-        )
-    elif pyproject[0] != expected:
-        problems.append(
-            MESSAGE_MISMATCH.format(
-                path="bindings/python/pyproject.toml",
-                label="version",
-                actual=pyproject[0],
-                expected=expected,
-            )
+    relative = "bindings/python/pyproject.toml"
+    if (text := _read_text(root / relative, relative, problems)) is not None:
+        _check_matches(
+            text,
+            relative,
+            re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE),
+            "version",
+            expected,
+            problems,
         )
 
     # Root npm manifest, its optional platform dependencies, and each platform manifest.
-    relative, version = _json_version(root, "bindings/node/package.json")
-    if version is None:
-        problems.append(MESSAGE_MISSING.format(path=relative, label="version"))
-    elif version != expected:
-        problems.append(
-            MESSAGE_MISMATCH.format(
-                path=relative, label="version", actual=version, expected=expected
+    relative = "bindings/node/package.json"
+    manifest = _read_json(root / relative, relative, problems)
+    if manifest is not None:
+        version = manifest.get("version")
+        if version is None:
+            problems.append(MESSAGE_MISSING.format(path=relative, label="version"))
+        elif version != expected:
+            problems.append(
+                MESSAGE_MISMATCH.format(
+                    path=relative, label="version", actual=version, expected=expected
+                )
             )
-        )
 
-    manifest_path = root / "bindings/node/package.json"
-    if manifest_path.is_file():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        for name, requirement in sorted(
-            manifest.get("optionalDependencies", {}).items()
-        ):
+        # Only the workspace's own platform packages track the release version. A third-party
+        # optional dependency legitimately carries its own, so requiring every entry to equal the
+        # release version would block any pull request that added one.
+        optional = manifest.get("optionalDependencies", {})
+        platform_requirements = {
+            name: requirement
+            for name, requirement in optional.items()
+            if name.startswith(NODE_PLATFORM_SCOPE)
+        }
+        if not platform_requirements:
+            problems.append(
+                MESSAGE_MISSING.format(
+                    path=relative, label=f"optionalDependencies on {NODE_PLATFORM_SCOPE}*"
+                )
+            )
+        for name, requirement in sorted(platform_requirements.items()):
             if requirement != expected:
                 problems.append(
                     MESSAGE_MISMATCH.format(
-                        path="bindings/node/package.json",
+                        path=relative,
                         label=f"optionalDependencies['{name}']",
                         actual=requirement,
                         expected=expected,
@@ -99,10 +168,20 @@ def check(root: pathlib.Path, expected: str) -> list[str]:
                 )
 
     platform_root = root / NODE_PLATFORM_DIRECTORY
-    for platform_manifest in sorted(platform_root.glob("*/package.json")):
-        relative = str(platform_manifest.relative_to(root))
-        version = json.loads(platform_manifest.read_text(encoding="utf-8")).get("version")
-        if version != expected:
+    platform_manifests = sorted(platform_root.glob("*/package.json"))
+    if not platform_manifests:
+        problems.append(
+            MESSAGE_MISSING.format(path=NODE_PLATFORM_DIRECTORY, label="platform manifest")
+        )
+    for platform_manifest in platform_manifests:
+        relative = platform_manifest.relative_to(root).as_posix()
+        contents = _read_json(platform_manifest, relative, problems)
+        if contents is None:
+            continue
+        version = contents.get("version")
+        if version is None:
+            problems.append(MESSAGE_MISSING.format(path=relative, label="version"))
+        elif version != expected:
             problems.append(
                 MESSAGE_MISMATCH.format(
                     path=relative, label="version", actual=version, expected=expected
@@ -110,73 +189,118 @@ def check(root: pathlib.Path, expected: str) -> list[str]:
             )
 
     # pnpm resolves platform packages with `--frozen-lockfile`, so a stale specifier is fatal.
-    # Only the workspace's own platform packages track the release version; third-party
-    # development dependencies legitimately carry their own.
-    lock_path = root / "bindings/node/pnpm-lock.yaml"
-    if lock_path.is_file():
-        lock_text = lock_path.read_text(encoding="utf-8")
-        for match in re.finditer(
-            r"'(@cellrune/node-[a-z0-9-]+)':\s*\n\s+specifier:\s*([^\s]+)", lock_text
-        ):
-            if match.group(2) != expected:
-                problems.append(
-                    MESSAGE_MISMATCH.format(
-                        path="bindings/node/pnpm-lock.yaml",
-                        label=f"specifier for {match.group(1)}",
-                        actual=match.group(2),
-                        expected=expected,
-                    )
+    relative = "bindings/node/pnpm-lock.yaml"
+    if (text := _read_text(root / relative, relative, problems)) is not None:
+        specifiers = re.findall(
+            rf"'({re.escape(NODE_PLATFORM_SCOPE)}[a-z0-9-]+)':\s*\n\s+specifier:\s*(\S+)", text
+        )
+        if not specifiers:
+            problems.append(
+                MESSAGE_MISSING.format(
+                    path=relative, label=f"specifier for {NODE_PLATFORM_SCOPE}*"
                 )
-
-    # Intra-workspace requirements release in lockstep and are pinned exactly.
-    for manifest in sorted(root.glob("**/Cargo.toml")):
-        if any(
-            segment in {"target", "node_modules", ".git"} for segment in manifest.parts
-        ):
-            continue
-        relative = str(manifest.relative_to(root))
-        for match in re.finditer(
-            r'(cellrune[a-z-]*)\s*=\s*\{[^}]*version\s*=\s*"=([^"]+)"', manifest.read_text(
-                encoding="utf-8"
             )
-        ):
-            if match.group(2) != expected:
+        for name, specifier in specifiers:
+            if specifier != expected:
                 problems.append(
                     MESSAGE_MISMATCH.format(
                         path=relative,
-                        label=f"exact requirement on {match.group(1)}",
-                        actual=match.group(2),
+                        label=f"specifier for {name}",
+                        actual=specifier,
                         expected=expected,
                     )
                 )
 
-    # The generated napi shim embeds the version it enforces at load time.
-    native = _text_matches(
-        root,
-        "bindings/node/native.js",
-        re.compile(r"bindingPackageVersion !== '(\d+\.\d+\.\d+)'"),
-    )
-    for found in set(native):
-        if found != expected:
-            problems.append(
-                MESSAGE_MISMATCH.format(
-                    path="bindings/node/native.js",
-                    label="enforced binding version",
-                    actual=found,
-                    expected=expected,
+    # Intra-workspace requirements release in lockstep and are pinned exactly. The skip list is
+    # applied to the path relative to the root: `root.glob` yields absolute paths, so matching
+    # against every ancestor component would disable the whole check on a runner whose workspace
+    # happens to sit under a directory named `target`.
+    exact_requirement = re.compile(r'(cellrune[a-z-]*)\s*=\s*\{[^}]*version\s*=\s*"=([^"]+)"')
+    checked_manifests = 0
+    for manifest_path in sorted(root.glob("**/Cargo.toml")):
+        relative_path = manifest_path.relative_to(root)
+        if SKIPPED_DIRECTORIES.intersection(relative_path.parts):
+            continue
+        relative = relative_path.as_posix()
+        text = _read_text(manifest_path, relative, problems)
+        if text is None:
+            continue
+        checked_manifests += 1
+        for name, requirement in exact_requirement.findall(text):
+            if requirement != expected:
+                problems.append(
+                    MESSAGE_MISMATCH.format(
+                        path=relative,
+                        label=f"exact requirement on {name}",
+                        actual=requirement,
+                        expected=expected,
+                    )
                 )
+    if not checked_manifests:
+        problems.append(MESSAGE_MISSING.format(path="Cargo.toml", label="workspace manifest"))
+
+    # The packaged-consumer manifest resolves the crate from the directory `cargo package` writes,
+    # whose name carries the version. That literal is not a requirement, so the pin check above
+    # cannot see it, and a bump that misses it fails the `package` job with a missing manifest.
+    relative = "release-tests/package-consumer/Cargo.toml"
+    if (text := _read_text(root / relative, relative, problems)) is not None:
+        _check_matches(
+            text,
+            relative,
+            re.compile(r'path\s*=\s*"[^"]*/cellrune-([0-9][^"/]*)"'),
+            "packaged crate directory",
+            expected,
+            problems,
+        )
+
+    relative = "release-tests/package-consumer/Cargo.lock"
+    if (text := _read_text(root / relative, relative, problems)) is not None:
+        _check_matches(
+            text,
+            relative,
+            re.compile(r'^name = "cellrune"\nversion = "([^"]+)"', re.MULTILINE),
+            "locked cellrune version",
+            expected,
+            problems,
+        )
+
+    # The generated napi shim embeds the version it enforces at load time, once in the comparison
+    # and once in the message that comparison raises. Checking only the comparison would let a
+    # regenerated shim tell a user to reinstall to reach the previous release.
+    relative = "bindings/node/native.js"
+    if (text := _read_text(root / relative, relative, problems)) is not None:
+        _check_matches(
+            text,
+            relative,
+            re.compile(r"""bindingPackageVersion !== ['"](\d+\.\d+\.\d+)['"]"""),
+            "enforced binding version",
+            expected,
+            problems,
+        )
+        _check_matches(
+            text,
+            relative,
+            re.compile(r"version mismatch, expected (\d+\.\d+\.\d+) but got"),
+            "enforced binding version message",
+            expected,
+            problems,
+        )
+
+    # Documentation and policy prose. These ship to the registry project pages.
+    for relative, pattern, label in PROSE_VERSION_PATTERNS:
+        if (text := _read_text(root / relative, relative, problems)) is not None:
+            _check_matches(
+                text, relative, re.compile(pattern, re.MULTILINE), label, expected, problems
             )
 
     # The changelog drives the release notes, so the version must have its own dated section.
-    changelog = root / "CHANGELOG.md"
-    if changelog.is_file():
+    relative = "CHANGELOG.md"
+    if (text := _read_text(root / relative, relative, problems)) is not None:
         if not re.search(
-            rf"^## \[{re.escape(expected)}\] - \d{{4}}-\d{{2}}-\d{{2}}$",
-            changelog.read_text(encoding="utf-8"),
-            re.MULTILINE,
+            rf"^## \[{re.escape(expected)}\] - \d{{4}}-\d{{2}}-\d{{2}}$", text, re.MULTILINE
         ):
             problems.append(
-                MESSAGE_MISSING.format(path="CHANGELOG.md", label=f"dated [{expected}] section")
+                MESSAGE_MISSING.format(path=relative, label=f"dated [{expected}] section")
             )
 
     return problems

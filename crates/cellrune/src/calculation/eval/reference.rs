@@ -196,7 +196,18 @@ impl Engine<'_> {
                         None => ErrorKind::Ref,
                     }
                 })?;
-            return self.resolve_rect_expr(context, &parsed);
+            // The capability scan cannot look inside this text, so an unsupported reference form
+            // built here is one it reported as supported. Surfacing it as an engine issue would
+            // make the workbook yield unavailable cells that the scan promised were calculable,
+            // and no `IFERROR` could recover. Excel answers `#REF!` for text it cannot resolve to
+            // a reference, so degrade to that; a resource limit is a genuine engine outcome and
+            // still propagates.
+            return self
+                .resolve_rect_expr(context, &parsed)
+                .map_err(|error| match error {
+                    ErrorKind::Unsupported => ErrorKind::Ref,
+                    other => other,
+                });
         }
         if !normalized.eq_ignore_ascii_case("OFFSET") || args.len() < 3 || args.len() > 5 {
             return Err(ErrorKind::Value);

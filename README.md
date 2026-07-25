@@ -282,7 +282,8 @@ The following are outside the current scope:
 - spill postfix references such as `A1#`, general `LAMBDA`, and data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 
-CellRune does not claim complete Excel compatibility. [`docs/NUMERICS.md`](docs/NUMERICS.md)
+CellRune does not claim complete Excel compatibility.
+[`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
 records where calculated values are known to differ from Excel and why, including the iterative
 financial solvers, `DOLLAR` currency formatting, and IEEE-754 arithmetic near zero. Read it before
 comparing results for equality.

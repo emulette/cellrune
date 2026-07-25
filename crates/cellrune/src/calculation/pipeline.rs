@@ -535,6 +535,9 @@ fn inspect_expr(
             inspect_expr(engine, sheet, end, names, local_names, issues);
         }
         Expr::Ref(reference) => {
+            // One reference carries one diagnosis, and the workbook prefix is the outer one: a
+            // reader told to remove a 3-D range from a formula that has none is routed to the
+            // wrong remedy. Evaluation resolves the prefix in the same order.
             if let Some(detail) = reference
                 .sheet
                 .as_ref()
@@ -544,8 +547,7 @@ fn inspect_expr(
                     CalculationIssueCode::UnsupportedExpression,
                     Some(detail),
                 ));
-            }
-            if let Some(detail) = reference
+            } else if let Some(detail) = reference
                 .sheet
                 .as_ref()
                 .and_then(SheetPrefix::sheet_range_detail)

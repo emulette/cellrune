@@ -345,10 +345,17 @@ impl Parser {
                 self.cursor += 1;
                 self.expect(&Token::Bang)?;
                 // Sheet names cannot contain ':', so a quoted colon marks a 3-D sheet range
-                // stored as one token ('Sheet1:Sheet3'!A1).
+                // stored as one token ('Sheet1:Sheet3'!A1). An external-workbook prefix is the
+                // exception: Excel writes the saved path into that token, so
+                // 'C:\Reports\[Q1.xlsx]Sheet1'!A1 carries a drive colon that names no end sheet.
+                // Splitting it would drop the drive letter from the reported detail and claim a
+                // 3-D range the formula does not contain.
+                let external_workbook = name.contains('[');
                 let (name, end_name) = match name.split_once(':') {
-                    Some((start, end)) => (start.to_owned(), Some(end.to_owned())),
-                    None => (name, None),
+                    Some((start, end)) if !external_workbook => {
+                        (start.to_owned(), Some(end.to_owned()))
+                    }
+                    _ => (name, None),
                 };
                 let body = self.parse_ref_body()?;
                 Ok(Expr::Ref(Reference {

@@ -16,6 +16,7 @@ from verify_release_artifacts import (
     Entry,
     archive_entries,
     validate_mcp,
+    validate_wheel_platform_tag,
 )
 
 
@@ -122,6 +123,55 @@ class ArchiveEntryTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(RuntimeError, r"^mcp\.boundary:"):
             validate_mcp(entries)
+
+
+class WheelPlatformTagTests(unittest.TestCase):
+    """The platform tag is the whole of the wheel's compatibility promise."""
+
+    @staticmethod
+    def wheel_entries(tag: str) -> list[Entry]:
+        return [
+            Entry(
+                "cellrune.dist-info/WHEEL",
+                f"Wheel-Version: 1.0\nGenerator: maturin\nTag: {tag}\n".encode("utf-8"),
+            )
+        ]
+
+    def test_declared_baseline_is_accepted(self) -> None:
+        validate_wheel_platform_tag(self.wheel_entries("cp310-abi3-manylinux_2_28_x86_64"))
+
+    def test_older_baseline_is_accepted(self) -> None:
+        # A lower requirement installs everywhere the declared one does, and more besides.
+        validate_wheel_platform_tag(self.wheel_entries("cp310-abi3-manylinux_2_17_x86_64"))
+
+    def test_newer_baseline_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, r"^wheel\.linux_baseline:"):
+            validate_wheel_platform_tag(self.wheel_entries("cp310-abi3-manylinux_2_35_x86_64"))
+
+    def test_compressed_tag_set_cannot_hide_a_newer_baseline(self) -> None:
+        # pip installs on a match against any component, so a legacy alias in first position makes
+        # the wheel look installable on glibc 2.17 while the binary in it needs 2.35.
+        with self.assertRaisesRegex(RuntimeError, r"^wheel\.linux_baseline:"):
+            validate_wheel_platform_tag(
+                self.wheel_entries("cp314-cp314-manylinux2014_x86_64.manylinux_2_35_x86_64")
+            )
+
+    def test_compressed_tag_set_within_the_baseline_is_accepted(self) -> None:
+        validate_wheel_platform_tag(
+            self.wheel_entries("cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64")
+        )
+
+    def test_unrepaired_linux_tag_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, r"^wheel\.linux_unrepaired:"):
+            validate_wheel_platform_tag(self.wheel_entries("cp310-abi3-linux_x86_64"))
+
+    def test_musl_and_non_linux_tags_carry_no_glibc_baseline(self) -> None:
+        validate_wheel_platform_tag(self.wheel_entries("cp310-abi3-musllinux_1_2_x86_64"))
+        validate_wheel_platform_tag(self.wheel_entries("cp310-abi3-macosx_11_0_arm64"))
+
+    def test_missing_wheel_record_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, r"^wheel\.wheel_metadata:"):
+            validate_wheel_platform_tag([Entry("cellrune/__init__.py", b"")])
 
 
 if __name__ == "__main__":

@@ -20,9 +20,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - Dependency requirements of the published `cellrune` crate are caret ranges instead of `=` pins.
   An exact pin made the crate unresolvable alongside any dependent needing a newer patch of the
   same dependency, with no remedy available to that dependent. Build reproducibility continues to
-  come from the committed `Cargo.lock`. Two new gates bound the ranges: a per-pull-request job
-  compiles the declared floors against the minimum supported Rust version, and a scheduled job
-  compiles the newest compatible graph against it.
+  come from the committed `Cargo.lock`. Two new scheduled gates bound the ranges: one runs the test
+  suite against the declared floors on the minimum supported Rust version, and one runs it against
+  the newest compatible graph. Both resolve live rather than from the lockfile, so they are
+  scheduled alongside the advisory tier rather than gating pull requests: a failure there means
+  upstream moved, not that the commit under test did.
 
 ### Fixed
 
@@ -30,10 +32,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   evaluated to `#REF!`. Because that is a spreadsheet error value rather than an engine issue,
   `IFERROR` could hide it, so a workbook could return a plausible number for a formula the engine
   cannot evaluate. Both the capability scan and evaluation now reject the external prefix. The
-  unquoted spelling was already rejected, as the formula lexer has no bracket token.
-- `SUM`, `SUMSQ`, and `NPV` returned negative zero when no numbers participated. `Iterator::sum`
-  for `f64` folds from `-0.0`, which is the additive identity for floats but not the value Excel
-  reports. A shared summation helper now folds from `+0.0`.
+  unquoted spelling was already rejected, as the formula lexer has no bracket token. A reference
+  built at run time by `INDIRECT` is the deliberate exception: the scan cannot read inside the
+  text argument, so it reports the cell as supported, and evaluation answers `#REF!` there as
+  Excel does rather than an engine issue the scan never predicted and no caller could recover
+  from. An external prefix written as a saved path keeps its drive letter and is reported once,
+  not also as a 3-D sheet range the formula does not contain.
+- Calculated zeros could be negative. `Iterator::sum` for `f64` folds from `-0.0`, `f64::min` and
+  `f64::max` may return either operand when both compare equal, and `Iterator::product` inherits
+  the sign of an odd number of negative factors, so `SUM`, `MIN`, `MAX`, `PRODUCT`, and the `*A`
+  variants could each report `-0` where Excel reports `0`. The boundary every calculated value
+  crosses now normalizes negative zero, rather than each kernel being expected to.
 - Formula parse-error details labelled every position as `token N`, but a lexing failure has no
   token stream and was reporting a character offset under that label. Lexing failures now report
   `character N` and parsing failures continue to report `token N`.
@@ -43,7 +52,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   listed, and the ones it missed — a pnpm lockfile, a generated loader shim, the packaged-consumer
   lockfile, and the release verification scripts — fail only during a release run. Every version
   is now derived from the workspace manifest where possible, and a new gate asserts that the
-  remaining declarations agree.
+  remaining declarations agree, including the install commands and the supported-version statement
+  that ship on the registry project pages. Every check in that gate fails when its pattern matches
+  nothing, so a moved file or a regenerated shim cannot report the same green result as a correct
+  bump, and the gate has its own tests.
+- A Linux wheel could declare a compressed platform-tag set whose first component was a legacy
+  alias, which hid a newer glibc requirement behind it from the release verification. Every
+  component of the set is now checked against the supported baseline.
 
 ### Documentation
 
@@ -53,6 +68,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   references still do after this release. The entry has been corrected.
 - Added `docs/NUMERICS.md`, which records where calculated values deliberately differ from Excel,
   the Excel build each statement was measured against, and which function families are unmeasured.
+  It is linked absolutely: both published READMEs are also the long description crates.io, PyPI,
+  and npm render, none of which resolve a repository-relative path, and a gate now enforces that.
 - Installation instructions no longer describe the registry artifacts as pending.
 
 ## [0.1.0] - 2026-07-25

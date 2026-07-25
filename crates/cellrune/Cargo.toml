@@ -28,7 +28,9 @@ capability-fs = ["dep:cap-std"]
 # This crate is published, so its requirements must stay caret ranges. An `=` pin here makes
 # `cellrune` unresolvable alongside any dependent that needs a newer patch of the same crate, and
 # the only remedy would be a new CellRune release. Reproducibility comes from the committed
-# `Cargo.lock`, and the caret bounds are gated by the `minimal-versions` and `latest-deps` CI jobs.
+# `Cargo.lock`. Both ends of each range are tested by the scheduled `dependency-floor` and
+# `latest-dependencies` jobs, which run the suite rather than compiling, and are scheduled rather
+# than per-push because they resolve live and so fail on upstream releases, not on our commits.
 cap-std = { version = "4.0.2", optional = true }
 libm = { version = "0.2.16", default-features = false }
 quick-xml = { version = "0.41.0", default-features = false }

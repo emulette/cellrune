@@ -95,11 +95,105 @@ jobs:
       - name: Report the resolved graph for triage
         run: cargo tree --package cellrune --all-features --edges normal
 
+      # Not `cargo check`: a dependency inside a caret range can compile and still read, hash, or
+      # format differently, and a caller who resolved that graph would be the first to notice.
       # No `--locked`: the point of this job is to leave the committed lockfile behind.
-      - name: Check the updated graph with warnings denied
+      - name: Test the updated graph with warnings denied
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --workspace --lib --all-features
+        run: >-
+          cargo test
+          --workspace
+          --lib
+          --bins
+          --tests
+          --examples
+          --all-features
+
+  # The bottom of the same ranges. `cellrune` publishes caret ranges, so a dependent may resolve
+  # any version from the declared floor upward, and the committed `Cargo.lock` means no other gate
+  # ever compiles the bottom. This job resolves every direct requirement down to its declared floor
+  # and tests that graph against the declared MSRV, so a floor that is too low fails here instead
+  # of in a dependent's build.
+  #
+  # Scheduled rather than per-push for the same reason as the two tiers above: `generate-lockfile`
+  # resolves the whole graph live from crates.io without `--locked`, so an upstream release of any
+  # transitive crate can fail this job while our commit and our lockfile are unchanged. On the
+  # pull-request tier that would redden every open pull request over a change nobody here made.
+  dependency-floor:
+    name: Declared dependency floors on the MSRV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: "1.88.0"
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # `-Z direct-minimal-versions` is resolver-only, so the nightly is a tool here rather than
+      # the compiler under test. It is pinned to the same date as the fuzz tier. Plain
+      # `-Z minimal-versions` is deliberately not used: it also minimises transitive crates, which
+      # fails on third-party under-declaration rather than on anything this workspace controls.
+      - name: Install pinned nightly resolver
+        run: rustup toolchain install nightly-2026-07-22 --profile minimal
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@39b0b3842c7e8bbf6904c0bfc3d9006fdd4dc4e0 # 1.88.0
+
+      - name: Keep the committed lockfile for comparison
+        run: cp Cargo.lock Cargo.lock.committed
+
+      - name: Resolve every direct requirement to its declared floor
+        run: >-
+          cargo +nightly-2026-07-22
+          -Z direct-minimal-versions
+          generate-lockfile
+
+      # Semver unification can legitimately hold a direct dependency above its declared floor when
+      # a transitive crate requires more, so "every direct requirement equals its floor" is not an
+      # assertion this job can make. What it can do is refuse to be silent: when the floor
+      # resolution reproduces the committed graph exactly, this job compiled what the `msrv` job
+      # already compiles, and the log has to say so rather than read as a passing floor check.
+      - name: Report what the floor resolution changed
+        run: |
+          if diff -q Cargo.lock.committed Cargo.lock >/dev/null; then
+            printf '::notice::floor resolution reproduced the committed lockfile exactly, so no declared floor sits below the locked graph and this run exercised no new resolution\n'
+          else
+            printf 'floor resolution differs from the committed lockfile:\n'
+            diff -u Cargo.lock.committed Cargo.lock || true
+          fi
+          rm Cargo.lock.committed
+
+      # A gate that silently ran the current compiler would look exactly like a passing check.
+      - name: Require the declared minimum toolchain
+        run: |
+          declared="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
+          actual="$(rustc --version | cut -d' ' -f2)"
+          case "$actual" in
+            "$declared"|"$declared".*) ;;
+            *)
+              printf '::error::floor gate ran rustc %s but Cargo.toml declares %s\n' \
+                "$actual" "$declared"
+              exit 1
+              ;;
+          esac
+          printf 'floor gate is running rustc %s\n' "$actual"
+
+      # Not `cargo check`, for the same reason as the job above: compiling proves nothing about
+      # what a floor dependency returns. No `--locked`: the lockfile was just regenerated.
+      - name: Test the floor graph with warnings denied
+        env:
+          RUSTFLAGS: -D warnings
+        run: >-
+          cargo test
+          --workspace
+          --lib
+          --bins
+          --tests
+          --examples
+          --all-features
 
   fuzz:
     name: Bounded nightly sanitizer campaign
