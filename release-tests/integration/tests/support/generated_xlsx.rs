@@ -1,0 +1,257 @@
+use std::fs;
+use std::io::{Cursor, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use zip::CompressionMethod;
+use zip::write::{SimpleFileOptions, ZipWriter};
+
+static TEMPORARY_WORKBOOK_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>"#;
+
+const ROOT_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+const WORKBOOK: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <workbookPr date1904="0"/>
+  <sheets>
+    <sheet name="Inputs" sheetId="1" r:id="rId1"/>
+    <sheet name="Calculations" sheetId="2" r:id="rId2"/>
+  </sheets>
+  <definedNames>
+    <definedName name="InputAmount">Inputs!$B$2</definedName>
+  </definedNames>
+  <calcPr calcId="191029" calcMode="auto" fullCalcOnLoad="0" forceFullCalc="0"/>
+</workbook>"#;
+
+const WORKBOOK_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#;
+
+const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>
+  <cellXfs count="2">
+    <xf numFmtId="0"/>
+    <xf numFmtId="164" applyNumberFormat="1"/>
+  </cellXfs>
+</styleSheet>"#;
+
+const XLSB_CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/>
+</Types>"#;
+
+const XLSB_ROOT_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.bin"/>
+</Relationships>"#;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProducerProfile {
+    Excel,
+    OpenPyxl,
+    LibreOffice,
+    GoogleSheets,
+}
+
+impl ProducerProfile {
+    const fn retains_saved_results(self) -> bool {
+        !matches!(self, Self::OpenPyxl)
+    }
+}
+
+pub fn generated_workbook(profile: ProducerProfile) -> Vec<u8> {
+    generated_workbook_with_archive_comment(profile, None)
+}
+
+pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
+    generated_workbook_with_archive_comment(profile, Some(comment))
+}
+
+fn generated_workbook_with_archive_comment(
+    profile: ProducerProfile,
+    archive_comment: Option<&str>,
+) -> Vec<u8> {
+    let inputs = inputs_worksheet(profile);
+    let calculations = calculations_worksheet(profile);
+    build_archive(
+        &[
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", WORKBOOK),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+            ("xl/styles.xml", STYLES),
+            ("xl/worksheets/sheet1.xml", &inputs),
+            ("xl/worksheets/sheet2.xml", &calculations),
+        ],
+        archive_comment,
+    )
+}
+
+pub fn generated_xlsb_package() -> Vec<u8> {
+    build_archive(
+        &[
+            ("[Content_Types].xml", XLSB_CONTENT_TYPES),
+            ("_rels/.rels", XLSB_ROOT_RELATIONSHIPS),
+            ("xl/workbook.bin", "binary workbook placeholder"),
+        ],
+        None,
+    )
+}
+
+fn inputs_worksheet(profile: ProducerProfile) -> String {
+    let logical = match profile {
+        ProducerProfile::LibreOffice => r#"<c r="B4" t="b"><f>TRUE()</f><v>1</v></c>"#,
+        _ => r#"<c r="B4" t="b"><v>1</v></c>"#,
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="2"><c r="B2"><v>42.5</v></c></row>
+    <row r="3"><c r="B3" t="inlineStr"><is><t>CellRune</t></is></c></row>
+    <row r="4">{logical}</row>
+    <row r="5"><c r="B5" s="1"><v>46225</v></c></row>
+    <row r="6"><c r="B6" t="inlineStr"><is><t>한글 Ω</t></is></c></row>
+    <row r="7"><c r="B7"><v>-3.25</v></c></row>
+  </sheetData>
+</worksheet>"#
+    )
+}
+
+fn calculations_worksheet(profile: ProducerProfile) -> String {
+    let double = formula_cell(profile, "B2", "Inputs!B2*2", None, "85");
+    let sum = formula_cell(profile, "B3", "SUM(Inputs!B2,7.5)", None, "50");
+    let lower = formula_cell(profile, "B4", "LOWER(Inputs!B3)", Some("str"), "cellrune");
+    let not = formula_cell(profile, "B5", "NOT(Inputs!B4)", Some("b"), "0");
+    let empty_text = formula_cell(
+        profile,
+        "B6",
+        "IF(Inputs!B2&gt;0,&quot;&quot;,&quot;x&quot;)",
+        Some("str"),
+        "",
+    );
+    let date = formula_cell(profile, "B7", "Inputs!B5+1", None, "46226")
+        .replace(r#"r="B7""#, r#"r="B7" s="1""#);
+    let division_by_zero = formula_cell(
+        profile,
+        "B8",
+        "1/0",
+        Some(if matches!(profile, ProducerProfile::GoogleSheets) {
+            "str"
+        } else {
+            "e"
+        }),
+        "#DIV/0!",
+    );
+    let unicode = formula_cell(
+        profile,
+        "B9",
+        "Inputs!B6&amp;&quot; / &quot;&amp;TEXT(Inputs!B2,&quot;0.0&quot;)",
+        Some("str"),
+        "한글 Ω / 42.5",
+    );
+    let false_literal = match profile {
+        ProducerProfile::LibreOffice => r#"<c r="C5" t="b"><f>FALSE()</f><v>0</v></c>"#,
+        _ => r#"<c r="C5" t="b"><v>0</v></c>"#,
+    };
+    let error_literal = match profile {
+        ProducerProfile::LibreOffice => r#"<c r="C8" t="e"><f>#DIV/0!</f><v>#DIV/0!</v></c>"#,
+        _ => r#"<c r="C8" t="e"><v>#DIV/0!</v></c>"#,
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="2">{double}</row>
+    <row r="3">{sum}</row>
+    <row r="4">{lower}</row>
+    <row r="5">{not}{false_literal}</row>
+    <row r="6">{empty_text}</row>
+    <row r="7">{date}</row>
+    <row r="8">{division_by_zero}{error_literal}</row>
+    <row r="9">{unicode}</row>
+  </sheetData>
+</worksheet>"#
+    )
+}
+
+fn formula_cell(
+    profile: ProducerProfile,
+    address: &str,
+    formula: &str,
+    value_type: Option<&str>,
+    saved_value: &str,
+) -> String {
+    let value_type = value_type.map_or_else(String::new, |kind| format!(r#" t="{kind}""#));
+    let saved_result = if profile.retains_saved_results() {
+        format!("<v>{saved_value}</v>")
+    } else {
+        String::new()
+    };
+    format!(r#"<c r="{address}"{value_type}><f>{formula}</f>{saved_result}</c>"#)
+}
+
+fn build_archive(entries: &[(&str, &str)], archive_comment: Option<&str>) -> Vec<u8> {
+    let mut output = Cursor::new(Vec::new());
+    {
+        let mut writer = ZipWriter::new(&mut output);
+        if let Some(comment) = archive_comment {
+            writer
+                .set_comment(comment)
+                .expect("set generated XLSX archive comment");
+        }
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (name, contents) in entries {
+            writer
+                .start_file(*name, options)
+                .expect("start generated XLSX part");
+            writer
+                .write_all(contents.as_bytes())
+                .expect("write generated XLSX part");
+        }
+        writer.finish().expect("finish generated XLSX archive");
+    }
+    output.into_inner()
+}
+
+pub struct TemporaryWorkbook {
+    path: PathBuf,
+}
+
+impl TemporaryWorkbook {
+    pub fn new(bytes: &[u8]) -> Self {
+        let sequence = TEMPORARY_WORKBOOK_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "cellrune-generated-{}-{sequence}.xlsx",
+            std::process::id()
+        ));
+        fs::write(&path, bytes).expect("write temporary generated workbook");
+        Self { path }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TemporaryWorkbook {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}

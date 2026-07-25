@@ -1,0 +1,35 @@
+{
+  "name": "@cellrune/node-win32-arm64-msvc",
+  "version": "0.1.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "cellrune.win32-arm64-msvc.node",
+  "files": [
+    "cellrune.win32-arm64-msvc.node",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "description": "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing",
+  "license": "MIT",
+  "homepage": "https://github.com/emulette/cellrune#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emulette/cellrune.git",
+    "directory": "bindings/node/npm/win32-arm64-msvc"
+  },
+  "bugs": {
+    "url": "https://github.com/emulette/cellrune/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "win32"
+  ]
+}

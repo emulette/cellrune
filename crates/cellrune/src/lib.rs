@@ -1,0 +1,117 @@
+//! Bounded XLSX/XLSM reading, deterministic calculation, editing, and writing.
+//!
+//! `CellRune` separates source data from recalculated results:
+//!
+//! 1. [`read_xlsx_path`], [`read_xlsx_bytes`], or [`read_xlsx`] creates an immutable
+//!    [`WorkbookSnapshot`].
+//! 2. [`scan_formula_capabilities`] reports formulas that require unsupported capabilities.
+//! 3. [`calculate_workbook`] creates a separate owned [`CalculationSnapshot`] without changing
+//!    the source workbook or its saved XLSX results.
+//!
+//! # Quick start
+//!
+//! ```no_run
+//! use cellrune::{
+//!     CalculationOptions, FiniteNumber, ReadOptions, calculate_workbook, read_xlsx_path,
+//!     scan_formula_capabilities,
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let workbook = read_xlsx_path("input.xlsx", ReadOptions::default())?;
+//! let capabilities = scan_formula_capabilities(&workbook);
+//!
+//! let options = CalculationOptions::default()
+//!     .with_today_serial(FiniteNumber::new(46_225.0)?);
+//! let calculation = calculate_workbook(&workbook, options);
+//!
+//! if let Some(sheet) = workbook.sheet_by_name("Sheet1") {
+//!     let source_cell = sheet.cell_by_a1("A1")?;
+//!     let _ = source_cell;
+//! }
+//!
+//! println!(
+//!     "{} of {} formulas are statically supported; {} results were recorded",
+//!     capabilities.supported_count(),
+//!     capabilities.formula_count(),
+//!     calculation.len(),
+//! );
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Failure model
+//!
+//! `CellRune` keeps failures at their owning boundary:
+//!
+//! - [`XlsxReadError`] means no trustworthy workbook snapshot could be produced. Its
+//!   [`XlsxReadError::code`] is stable and machine-readable.
+//! - [`Diagnostic`] records a compatibility caveat on a successfully read workbook.
+//! - [`CalculationIssue`] explains why one formula has no recalculated value. Unsupported engine
+//!   capabilities are not converted into Excel errors and cannot be hidden by `IFERROR`.
+//! - [`CellValue::Error`] represents an actual spreadsheet error value.
+//! - [`ValidationError`] rejects invalid caller-provided model values and addresses.
+//!
+//! Reading never executes macros or follows external links. Calculation is explicit and does not
+//! mutate or implicitly write a workbook. Recalculated result materialization is a separate
+//! explicit operation on package-backed documents.
+
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+mod address;
+mod calculation;
+mod cell;
+mod defined_name;
+mod diagnostic;
+mod draft;
+mod error;
+mod formula;
+mod presentation;
+mod workbook;
+mod xlsx;
+
+pub use address::{CellAddress, CellRange, Column, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, Row};
+pub use calculation::{
+    ApplyChangesError, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
+    CalculationDelta, CalculationDeltaCell, CalculationDeltaPage, CalculationExecutionMode,
+    CalculationIssue, CalculationIssueCode, CalculationLimits, CalculationOptions,
+    CalculationOptionsError, CalculationSnapshot, CancellationToken, CompletedCalculation,
+    FormulaCapability, FormulaCapabilityEntry, FormulaCapabilityReport, FunctionCatalogEntry,
+    FunctionSupport, FunctionUsageEntry, FunctionUsageReport, MaterializedCalculationCell,
+    MaterializedResultOrigin, PreparedCalculation, PreparedEditBatch, RecalculationMode,
+    SessionError, SessionErrorCode, SessionLimits, WorkbookCalculationSession, calculate_workbook,
+    scan_formula_capabilities, scan_formula_capabilities_with_options, scan_function_usage,
+    scan_function_usage_with_options, supported_function_catalog,
+};
+pub use cell::{
+    Cell, CellContent, CellValue, ExcelError, FiniteNumber, NumberFormat, NumberFormatKind,
+};
+pub use defined_name::{DefinedName, DefinedNameScope};
+pub use diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticSeverity, InputHash, Provenance, ProviderIdentity,
+    SourceId, SourceLocation,
+};
+pub use draft::{EditBatch, EditReceipt, WorkbookChange, WorkbookDraft};
+pub use error::{ValidationError, ValidationErrorCode};
+pub use formula::{
+    FormulaCell, FormulaDialect, FormulaMetadata, FormulaText, SavedResult, SavedResultIssue,
+    SharedFormulaRole,
+};
+pub use presentation::{
+    CellPhonetics, ColumnPhoneticVisibility, DocumentPresentation, FrozenPane, PhoneticAlignment,
+    PhoneticProperties, PhoneticRun, PhoneticTextRange, PhoneticType, PhoneticWriteOptions,
+};
+pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
+pub use workbook::{
+    CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,
+    WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
+};
+pub use xlsx::{
+    OpenOptions, PackageSummary, ReadLimits, ReadOptions, ReadOptionsError, RecalculatedWorkbook,
+    RecalculationWriteOptions, RecalculationWritePolicy, WriteLimits, WriteOptions,
+    WriteOptionsError, WriteProvenance, WriteReport, XlsxDocument, XlsxDocumentKind, XlsxErrorCode,
+    XlsxReadError, XlsxWriteError, XlsxWriteErrorCode, inspect_package, open_xlsx_document,
+    open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx, read_xlsx_bytes, read_xlsx_path,
+    write_preserved_xlsx_bytes, write_recalculated_xlsx, write_recalculated_xlsx_bytes,
+    write_recalculated_xlsx_path, write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_path,
+};

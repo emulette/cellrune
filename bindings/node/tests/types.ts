@@ -1,0 +1,55 @@
+import {
+  CellRuneError,
+  type CalculationDelta,
+  type CellValue,
+  type EditReceipt,
+  type RangePage,
+  type WorkbookChange,
+  Workbook,
+} from "@cellrune/node";
+import type { Buffer } from "node:buffer";
+
+// @ts-expect-error CellRuneError instances are created by the binding.
+new CellRuneError("manual construction is unsupported");
+
+async function check(): Promise<void> {
+  const workbook: Workbook = Workbook.create();
+  workbook.setNumber("Sheet1", "A1", 1);
+  workbook.setFormula("Sheet1", "B1", "=A1+1");
+  await workbook.calculate();
+  const changes: readonly WorkbookChange[] = [
+    {
+      kind: "setValue",
+      sheet: "Sheet1",
+      address: "A1",
+      value: { kind: "number", value: 2 },
+    },
+  ];
+  const receipt: EditReceipt = workbook.applyChanges(
+    workbook.summary().semanticRevision,
+    changes,
+  );
+  receipt.calculationChangedCells.length;
+  receipt.calculationMetadataChanged.valueOf();
+  const delta: CalculationDelta = await workbook.recalculate({
+    mode: "incremental",
+  });
+  delta.resultRevision === receipt.resultRevision;
+  workbook.changesSince(0n);
+  const page: RangePage = workbook.readRange("Sheet1", "A1", "B1");
+  const value: CellValue = page.cells[0].sourceValue;
+  if (value.kind === "number") {
+    value.value.toFixed(2);
+  }
+  const bytes: Buffer = await workbook.toBytes();
+  const reopened: Workbook = await Workbook.fromBytes(bytes);
+  reopened.close();
+  reopened.close();
+  reopened.closed.valueOf();
+}
+
+void check().catch((error: unknown) => {
+  if (error instanceof CellRuneError) {
+    error.code.toUpperCase();
+  }
+});

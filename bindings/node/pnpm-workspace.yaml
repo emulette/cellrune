@@ -1,0 +1,6 @@
+packages:
+  - "."
+  - "npm/*"
+
+linkWorkspacePackages: true
+preferWorkspacePackages: true

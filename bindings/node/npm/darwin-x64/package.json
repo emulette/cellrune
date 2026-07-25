@@ -1,0 +1,35 @@
+{
+  "name": "@cellrune/node-darwin-x64",
+  "version": "0.1.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "cellrune.darwin-x64.node",
+  "files": [
+    "cellrune.darwin-x64.node",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "description": "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing",
+  "license": "MIT",
+  "homepage": "https://github.com/emulette/cellrune#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emulette/cellrune.git",
+    "directory": "bindings/node/npm/darwin-x64"
+  },
+  "bugs": {
+    "url": "https://github.com/emulette/cellrune/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin"
+  ]
+}

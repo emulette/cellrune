@@ -1,0 +1,718 @@
+name: Language bindings
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/bindings.yml"
+      - "bindings/**"
+      - "crates/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "LICENSE"
+      - "README.md"
+      - "rust-toolchain.toml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bindings.yml"
+      - "bindings/**"
+      - "crates/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "LICENSE"
+      - "README.md"
+      - "rust-toolchain.toml"
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUSTUP_TOOLCHAIN: "1.92.0"
+
+concurrency:
+  group: bindings-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{
+          fromJSON(
+            github.event_name == 'pull_request' &&
+            '{"include":[{"os":"ubuntu-24.04","python":"3.10"},{"os":"ubuntu-24.04","python":"3.14"},{"os":"macos-15","python":"3.14"},{"os":"windows-2025","python":"3.14"}]}' ||
+            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"python":["3.10","3.11","3.12","3.13","3.14"]}'
+          )
+        }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bindings/python
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: bindings/python/requirements-dev.txt
+
+      - name: Configure path-remapped release builds
+        run: python ../scripts/configure_reproducible_rust.py
+
+      - name: Install build and type tools
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Verify native dependency license bundles
+        run: python ../scripts/generate_third_party_licenses.py --check
+
+      - name: Select the host wheel dependency licenses
+        run: >-
+          python ../scripts/generate_third_party_licenses.py
+          --package cellrune-python
+          --target host
+          --output THIRD_PARTY_LICENSES.md
+
+      - name: Build interpreter-specific wheel
+        run: maturin build --release --locked --out dist --interpreter python
+
+      - name: Verify wheel contents and private-path boundary
+        run: >-
+          python ../scripts/verify_release_artifacts.py
+          --expected-target host
+          dist
+
+      - name: Install only the built wheel
+        run: >-
+          python -m pip install
+          --no-index
+          --find-links dist
+          --only-binary :all:
+          --force-reinstall
+          cellrune==0.1.0
+
+      - name: Run Python binding conformance
+        run: python tests/conformance.py
+
+      - name: Run Python interactive-session tests
+        run: python tests/interactive.py
+
+      - name: Run Python introspection tests
+        run: python tests/introspection.py
+
+      - name: Run Python responsiveness tests
+        run: python tests/responsiveness.py
+
+      - name: Execute the typed Python usage sample
+        run: python tests/typing_check.py
+
+      - name: Check Python types
+        run: mypy --strict tests/typing_check.py
+
+      - name: Upload verified wheel
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: python-wheel-${{ matrix.os }}-${{ matrix.python }}
+          path: bindings/python/dist/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  python-wheel-attestation:
+    name: Attest release wheels
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: python
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download every verified wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: python-wheel-*
+          path: release-wheels
+          merge-multiple: true
+
+      - name: Attest verified wheels
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: release-wheels/*.whl
+
+  python-source-artifact:
+    name: Build Python source publication artifact
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bindings/python
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: bindings/python/requirements-dev.txt
+
+      - name: Configure path-remapped release builds
+        run: python ../scripts/configure_reproducible_rust.py
+
+      - name: Install locked build tools
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Test release helper target detection
+        run: python ../scripts/test_generate_third_party_licenses.py
+
+      - name: Verify native dependency license bundles
+        run: python ../scripts/generate_third_party_licenses.py --check
+
+      - name: Fetch the locked source-build graph
+        run: cargo fetch --locked
+
+      - name: Build the sdist and rebuild its wheel
+        run: >-
+          maturin build
+          --release
+          --offline
+          --sdist
+          --out dist
+          --interpreter python
+
+      - name: Verify the cross-platform sdist publication archive
+        run: python ../scripts/verify_release_artifacts.py dist/*.tar.gz
+
+      - name: Install and exercise the rebuilt wheel offline
+        run: |
+          python -m venv consumer
+          consumer/bin/python -m pip install \
+            --no-index \
+            --find-links dist \
+            --only-binary :all: \
+            cellrune==0.1.0
+          consumer/bin/python tests/conformance.py
+          consumer/bin/python tests/introspection.py
+
+      - name: Upload verified Python archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: python-source-publication-archive
+          path: bindings/python/dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  python-source-attestation:
+    name: Attest release Python source archive
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: python-source-artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified Python source archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: python-source-publication-archive
+          path: release-python-source
+
+      - name: Attest Python publication archive
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: release-python-source/*.tar.gz
+
+  node:
+    name: Node.js ${{ matrix.node }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{
+          fromJSON(
+            github.event_name == 'pull_request' &&
+            '{"include":[{"os":"ubuntu-24.04","node":22},{"os":"ubuntu-24.04","node":26},{"os":"macos-15","node":22},{"os":"windows-2025","node":22}]}' ||
+            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"node":[22,24,26]}'
+          )
+        }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.22.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+          cache-dependency-path: bindings/node/pnpm-lock.yaml
+
+      - name: Configure path-remapped release builds
+        run: python ../scripts/configure_reproducible_rust.py
+
+      - name: Install locked development dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify native dependency license bundles
+        run: python ../scripts/generate_third_party_licenses.py --check
+
+      - name: Select the host native dependency licenses
+        run: >-
+          python ../scripts/generate_third_party_licenses.py
+          --package cellrune-node
+          --target host
+          --output "${{ runner.temp }}/cellrune-node-THIRD_PARTY_LICENSES.md"
+
+      - name: Build native addon and generated declarations
+        run: pnpm build
+
+      - name: Check reviewed public declarations
+        run: pnpm typecheck
+
+      - name: Run CommonJS, ESM, conformance, and event-loop tests
+        run: pnpm test
+
+      - name: Install and exercise the packed npm artifact
+        run: pnpm test:package
+        env:
+          CELLRUNE_THIRD_PARTY_LICENSES: ${{ runner.temp }}/cellrune-node-THIRD_PARTY_LICENSES.md
+          CELLRUNE_VERIFY_ARCHIVES: "1"
+
+  node-platform-build:
+    name: Build Node platform package (${{ matrix.target }})
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            flags: ""
+            macos_deployment_target: "11.0"
+            needs_zig: false
+            cargo_tool: ""
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            flags: ""
+            macos_deployment_target: "10.13"
+            needs_zig: false
+            cargo_tool: ""
+          - target: aarch64-pc-windows-msvc
+            runner: ubuntu-24.04
+            flags: --cross-compile
+            needs_zig: false
+            cargo_tool: cargo-xwin@0.23.0
+          - target: x86_64-pc-windows-msvc
+            runner: ubuntu-24.04
+            flags: --cross-compile
+            needs_zig: false
+            cargo_tool: cargo-xwin@0.23.0
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            flags: --use-napi-cross
+            needs_zig: false
+            cargo_tool: ""
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04
+            flags: --cross-compile
+            needs_zig: true
+            cargo_tool: cargo-zigbuild@0.23.0
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            flags: --use-napi-cross
+            needs_zig: false
+            cargo_tool: ""
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            flags: --cross-compile
+            needs_zig: true
+            cargo_tool: cargo-zigbuild@0.23.0
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Configure path-remapped release builds
+        run: python ../scripts/configure_reproducible_rust.py
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.22.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+          cache-dependency-path: bindings/node/pnpm-lock.yaml
+
+      - name: Install Zig
+        if: matrix.needs_zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.14.1
+
+      - name: Install cross-compilation cargo tools
+        if: matrix.cargo_tool != ''
+        uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2
+        with:
+          tool: ${{ matrix.cargo_tool }}
+          fallback: none
+
+      - name: Install locked development dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build target-specific native addon
+        run: >-
+          pnpm exec napi build
+          --platform
+          --release
+          --strip
+          --target ${{ matrix.target }}
+          ${{ matrix.flags }}
+          --js native.js
+          --dts native.d.ts
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
+          XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin
+
+      - name: Strip non-runtime native symbols
+        run: python ../scripts/strip_native_artifacts.py ./*.node
+
+      - name: Verify native release boundary
+        run: python ../scripts/verify_release_artifacts.py ./*.node
+
+      - name: Upload native addon
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: node-${{ matrix.target }}
+          path: bindings/node/*.node
+          if-no-files-found: error
+          retention-days: 7
+
+  node-platform-host:
+    name: Install Node platform package (${{ matrix.target }})
+    if: github.event_name != 'pull_request'
+    needs: node-platform-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.23.1
+
+      - name: Download native addon
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: node-${{ matrix.target }}
+          path: bindings/node
+
+      - name: Install and exercise the packed platform artifact
+        run: node tests/packed-consumer.cjs
+
+  node-platform-linux:
+    name: Install Node platform package (${{ matrix.target }})
+    if: github.event_name != 'pull_request'
+    needs: node-platform-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            image: node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            image: node:22.23.1-alpine3.24@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            image: node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            image: node:22.23.1-alpine3.24@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download native addon
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: node-${{ matrix.target }}
+          path: bindings/node
+
+      - name: Install and exercise the packed platform artifact
+        run: >-
+          docker run
+          --rm
+          --volume "${{ github.workspace }}:/build"
+          --workdir /build/bindings/node
+          ${{ matrix.image }}
+          node tests/packed-consumer.cjs
+
+  node-platform-assembly:
+    name: Assemble every Node platform package
+    if: github.event_name != 'pull_request'
+    needs:
+      - node-platform-build
+      - node-platform-host
+      - node-platform-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.22.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+          cache-dependency-path: bindings/node/pnpm-lock.yaml
+
+      - name: Install locked development dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch the locked native dependency graph
+        run: cargo fetch --locked
+
+      - name: Download every native addon
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: node-*
+          path: bindings/node/artifacts
+          merge-multiple: true
+
+      - name: Assemble platform packages
+        run: pnpm exec napi artifacts --output-dir artifacts --npm-dir npm
+
+      - name: Verify checked-in dependency license unions
+        run: python ../scripts/generate_third_party_licenses.py --check
+
+      - name: Generate target-exact native dependency licenses
+        run: |
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target aarch64-apple-darwin --output npm/darwin-arm64/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target x86_64-apple-darwin --output npm/darwin-x64/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target aarch64-unknown-linux-gnu --output npm/linux-arm64-gnu/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target aarch64-unknown-linux-musl --output npm/linux-arm64-musl/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target x86_64-unknown-linux-gnu --output npm/linux-x64-gnu/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target x86_64-unknown-linux-musl --output npm/linux-x64-musl/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target aarch64-pc-windows-msvc --output npm/win32-arm64-msvc/THIRD_PARTY_LICENSES.md
+          python ../scripts/generate_third_party_licenses.py --package cellrune-node --target x86_64-pc-windows-msvc --output npm/win32-x64-msvc/THIRD_PARTY_LICENSES.md
+
+      - name: Verify all assembled packages and exercise the host artifact
+        run: pnpm test:package
+        env:
+          CELLRUNE_REQUIRE_ALL_PLATFORM_BINARIES: "1"
+          CELLRUNE_VERIFY_ARCHIVES: "1"
+
+      - name: Pack and verify every npm publication artifact
+        run: |
+          mkdir release
+          npm pack ./ --pack-destination release
+          for package in ./npm/*; do
+            npm pack "$package" --pack-destination release
+          done
+          python ../scripts/verify_release_artifacts.py release
+
+      - name: Upload verified npm archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-publication-archives
+          path: bindings/node/release/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  node-platform-attestation:
+    name: Attest release npm archives
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: node-platform-assembly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified npm archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: npm-publication-archives
+          path: release-npm
+
+      - name: Attest npm publication archives
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: release-npm/*.tgz
+
+  mcp-binary:
+    name: Build MCP binary bundle (${{ matrix.target }})
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Configure path-remapped release builds
+        run: python bindings/scripts/configure_reproducible_rust.py
+
+      - name: Verify native dependency license bundles
+        run: python bindings/scripts/generate_third_party_licenses.py --check
+
+      - name: Select target-exact MCP dependency licenses
+        run: >-
+          python bindings/scripts/generate_third_party_licenses.py
+          --package cellrune-mcp
+          --target ${{ matrix.target }}
+          --output crates/cellrune-mcp/THIRD_PARTY_LICENSES.md
+
+      - name: Build MCP server
+        run: cargo build --locked --release --package cellrune-mcp
+
+      - name: Exercise the built MCP executable
+        run: cargo run --locked --release --package cellrune-mcp -- --help
+
+      - name: Package MCP server with license materials
+        run: >-
+          python bindings/scripts/package_mcp.py
+          --binary target/release
+          --target ${{ matrix.target }}
+          --output release
+
+      - name: Verify MCP publication archive
+        run: python bindings/scripts/verify_release_artifacts.py release
+
+      - name: Exercise MCP executable from the publication archive
+        run: python bindings/scripts/exercise_mcp_bundle.py release
+
+      - name: Upload verified MCP archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mcp-${{ matrix.target }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  mcp-binary-attestation:
+    name: Attest release MCP archives
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: mcp-binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified MCP archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: mcp-*
+          path: release-mcp
+          merge-multiple: true
+
+      - name: Attest MCP publication archives
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: release-mcp/*

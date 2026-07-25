@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "initial_changes": [
+    {
+      "kind": "set_value",
+      "sheet": "Sheet1",
+      "address": "A1",
+      "value": { "kind": "number", "value": 10.0 }
+    },
+    {
+      "kind": "set_formula",
+      "sheet": "Sheet1",
+      "address": "B1",
+      "formula": "=A1*2",
+      "dynamic_range": null
+    },
+    {
+      "kind": "set_formula",
+      "sheet": "Sheet1",
+      "address": "C1",
+      "formula": "=B1+5",
+      "dynamic_range": null
+    },
+    {
+      "kind": "set_formula",
+      "sheet": "Sheet1",
+      "address": "D1",
+      "formula": "=1+1",
+      "dynamic_range": null
+    }
+  ],
+  "incremental_changes": [
+    {
+      "kind": "set_value",
+      "sheet": "Sheet1",
+      "address": "A1",
+      "value": { "kind": "number", "value": 20.0 }
+    }
+  ],
+  "expected": {
+    "initial_revision": 1,
+    "incremental_revision": 2,
+    "incremental_mode": "incremental",
+    "incremental_evaluated_count": 2,
+    "b1": 40.0,
+    "c1": 45.0,
+    "revision_error": "session.revision_mismatch"
+  }
+}

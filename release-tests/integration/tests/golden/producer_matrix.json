@@ -1,0 +1,134 @@
+{
+  "schema": "cellrune_producer_golden_v3",
+  "expected_date_system": "excel1900",
+  "expected_sheets": [
+    "Inputs",
+    "Calculations"
+  ],
+  "literals": [
+    {
+      "cell": "Inputs!B2",
+      "value": { "kind": "number", "value": 42.5 }
+    },
+    {
+      "cell": "Inputs!B3",
+      "value": { "kind": "text", "value": "CellRune" }
+    },
+    {
+      "cell": "Inputs!B4",
+      "value": { "kind": "logical", "value": true }
+    },
+    {
+      "cell": "Inputs!B5",
+      "value": { "kind": "number", "value": 46225.0 },
+      "number_format": "date"
+    },
+    {
+      "cell": "Inputs!B6",
+      "value": { "kind": "text", "value": "한글 Ω" }
+    },
+    {
+      "cell": "Inputs!B7",
+      "value": { "kind": "number", "value": -3.25 }
+    },
+    {
+      "cell": "Calculations!C5",
+      "value": { "kind": "logical", "value": false }
+    },
+    {
+      "cell": "Calculations!C8",
+      "value": { "kind": "error", "value": "#DIV/0!" }
+    }
+  ],
+  "formulas": [
+    {
+      "cell": "Calculations!B2",
+      "text": "Inputs!B2*2",
+      "value": { "kind": "number", "value": 85.0 }
+    },
+    {
+      "cell": "Calculations!B3",
+      "text": "SUM(Inputs!B2,7.5)",
+      "value": { "kind": "number", "value": 50.0 }
+    },
+    {
+      "cell": "Calculations!B4",
+      "text": "LOWER(Inputs!B3)",
+      "value": { "kind": "text", "value": "cellrune" }
+    },
+    {
+      "cell": "Calculations!B5",
+      "text": "NOT(Inputs!B4)",
+      "value": { "kind": "logical", "value": false }
+    },
+    {
+      "cell": "Calculations!B6",
+      "text": "IF(Inputs!B2>0,\"\",\"x\")",
+      "value": { "kind": "text", "value": "" }
+    },
+    {
+      "cell": "Calculations!B7",
+      "text": "Inputs!B5+1",
+      "value": { "kind": "number", "value": 46226.0 },
+      "number_format": "date"
+    },
+    {
+      "cell": "Calculations!B8",
+      "text": "1/0",
+      "value": { "kind": "error", "value": "#DIV/0!" }
+    },
+    {
+      "cell": "Calculations!B9",
+      "text": "Inputs!B6&\" / \"&TEXT(Inputs!B2,\"0.0\")",
+      "value": { "kind": "text", "value": "한글 Ω / 42.5" }
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "excel",
+      "golden_profile": "excel",
+      "saved_results": "present",
+      "saved_result_overrides": [],
+      "literal_formula_rewrites": []
+    },
+    {
+      "id": "openpyxl",
+      "golden_profile": "open_pyxl",
+      "saved_results": "missing",
+      "saved_result_overrides": [],
+      "literal_formula_rewrites": []
+    },
+    {
+      "id": "libreoffice",
+      "golden_profile": "libre_office",
+      "saved_results": "present",
+      "saved_result_overrides": [],
+      "literal_formula_rewrites": [
+        {
+          "cell": "Inputs!B4",
+          "text": "TRUE()"
+        },
+        {
+          "cell": "Calculations!C5",
+          "text": "FALSE()"
+        },
+        {
+          "cell": "Calculations!C8",
+          "text": "#DIV/0!"
+        }
+      ]
+    },
+    {
+      "id": "google_sheets",
+      "golden_profile": "google_sheets",
+      "saved_results": "present",
+      "saved_result_overrides": [
+        {
+          "cell": "Calculations!B8",
+          "value": { "kind": "text", "value": "#DIV/0!" }
+        }
+      ],
+      "literal_formula_rewrites": []
+    }
+  ]
+}

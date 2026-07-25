@@ -1,0 +1,494 @@
+# CellRune
+
+> Pure Rust XLSX/XLSM reader with deterministic, explicitly scoped formula
+> calculation and a package-backed round-trip document foundation. Reading and
+> calculation are separate operations, macros are never executed, external
+> links are never followed, and parsing, calculation, and writing costs are
+> bounded.
+
+This file is a condensed, code-accurate reference for coding agents and other
+tools that add `cellrune` as a dependency. It is hand-maintained against the
+`pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
+as a bug in this file, not in the crate. The current public version is 0.1.0,
+uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+task-focused patterns are shipped as `examples/` in the crate package and live
+at `crates/cellrune/examples/` in the repository workspace.
+
+## Quick start
+
+```rust
+use cellrune::{
+    CalculationOptions, ReadOptions, calculate_workbook, read_xlsx_path, scan_formula_capabilities,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let workbook = read_xlsx_path("input.xlsx", ReadOptions::default())?;
+    let capabilities = scan_formula_capabilities(&workbook);
+
+    if capabilities.is_supported() {
+        let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+        println!("calculated {} formulas", calculation.len());
+    }
+
+    Ok(())
+}
+```
+
+Reading and calculation are separate calls. Reading alone never calculates a
+formula; calculating never mutates the `WorkbookSnapshot` you read or the
+XLSX file's own saved results. Volatile functions `TODAY()` and `NOW()`
+require explicit deterministic inputs through `CalculationOptions`, or the
+formula reports `VolatileInputMissing` instead of guessing.
+
+For round-trip work, `open_xlsx_document_*` retains the exact input archive
+privately and binds it to a SHA-256 `InputHash`.
+`write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
+`write_recalculated_xlsx_path` materialize a `CalculationSnapshot` made from
+that exact document, preserve unrelated package content, and reopen the output
+before success. The default strict policy produces no artifact if any result
+is unavailable. `write_preserved_xlsx_bytes` produces an unchanged
+preservation copy.
+
+`WorkbookDraft::new()` creates a canonical XLSX workbook.
+`WorkbookDraft::from_document(&XlsxDocument)` creates a preservation-backed edit
+session. Effective calculation-semantic mutations advance the semantic
+revision; presentation-only mutations use a separate revision, and accepted
+no-ops keep the corresponding revision unchanged. Calculate `draft.workbook()`
+after the final semantic edit, then call `write_xlsx_draft_bytes`,
+`write_xlsx_draft`, or `write_xlsx_draft_path`.
+
+`open_xlsx_document_*` also captures a separate `DocumentPresentation`.
+It exposes shared/inline phonetic runs, explicit/effective phonetic visibility,
+and default frozen panes without changing `CellValue::Text` or the calculation
+fingerprint. `WorkbookDraft` provides atomic annotated-text and frozen-pane
+mutations with a separate presentation revision. `PhoneticTextRange` uses
+zero-based half-open UTF-16 code-unit offsets; when a range is applied to base
+text, its boundaries are validated not to split a surrogate pair. See
+`write_phonetic_workbook` and `inspect_phonetic_workbook` in the examples.
+
+For AI hosts, the separate `cellrune-mcp` binary provides local stdio MCP
+`2025-11-25` tools over `cellrune-interop::WorkbookSession`. It exposes
+high-level workbook lifecycle, summary, range, usage, capability, batch edit,
+recalculation, delta, and Save As operations—not one tool per spreadsheet
+function. Configured filesystem roots are canonicalized at startup; every
+workbook path supplied to a tool must be absolute and resolve inside one of
+those roots. It has no remote transport. The 11 tools are `workbook_create`,
+`workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
+`workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_apply_changes`, `workbook_recalculate`,
+`workbook_changes_since`, and `workbook_save_as`.
+Read-only JSON resources expose the versioned function catalog at
+`cellrune://support/functions` and active session metadata through the
+`cellrune://sessions/{session_id}/summary` template. Operators can bound
+resident sessions, idle lifetime, response bytes, and workbook bytes with
+the corresponding `cellrune-mcp --help` options. Input validation and parsing
+use the same capability-bound file handle and archive-byte ceiling. At
+capacity, create/open may evict the least-recently-used idle session; active
+sessions are never evicted.
+
+The Python `Workbook` is a context manager. Python and Node.js `Workbook`
+objects also expose `closed` and an idempotent `close()`. Once `close()`
+returns, the binding-owned native session has been released. An active
+calculation is cooperatively cancelled, and subsequent operations fail with
+the stable `interop.session.closed` code.
+
+## Naming conventions
+
+These patterns are consistent across the entire public API. When a function
+or method isn't shown in an example below, generalize from these rules rather
+than guessing a name from a different XLSX crate (`calamine`,
+`rust_xlsxwriter`, `umya-spreadsheet`, etc.) — their shapes do not carry over.
+
+- **Everything public is re-exported at the crate root.** Always
+  `use cellrune::X`. Internal module paths such as `cellrune::xlsx::...` or
+  `cellrune::calculation::...` are private implementation detail and are never
+  part of the contract.
+- **Validated newtypes are constructed through `::new(...)` or a named
+  variant, returning `Result<Self, ValidationError>`.** There is no public way
+  to build an invalid instance. Examples: `Row::new(u32)`,
+  `Column::new(u32)`, `SheetId::new(u32)`, `FiniteNumber::new(f64)`,
+  `CellAddress::from_indices(row, column)`, `CellAddress::from_a1("A1")`,
+  `SheetName::new(String)`, `DiagnosticCode::new(String)`,
+  `SourceId::new(String)`, `FormulaText::from_xlsx(String)` /
+  `FormulaText::from_user_input(String)`, `DefinedName::new(...)`,
+  `ProviderIdentity::new(name, version)`, `Diagnostic::new(...)`,
+  `CellRange::new(start, end)`.
+- **Limit construction is family-specific:** `ReadLimits`, `WriteLimits`, and
+  `CalculationLimits` start from `Default::default()` and use
+  `.with_max_x(value)`, returning `ReadOptionsError`, `WriteOptionsError`, or
+  `CalculationOptionsError` when a zero budget is rejected. `SessionLimits`
+  uses either `Default::default()` or the five-argument
+  `SessionLimits::new(...) -> Result<Self, SessionError>`; it has no
+  `with_*` setters. Option constructors and non-budget setters such as
+  `ReadOptions::new`, `WriteOptions::new`,
+  `RecalculationWriteOptions::new`,
+  `CalculationOptions::with_today_serial`,
+  `CalculationOptions::with_now_serial`, and
+  `CalculationOptions::with_limits` return `Self` directly.
+- **Getters are bare nouns, never `get_`-prefixed,** and are frequently
+  `const fn` (`.code()`, `.severity()`, `.limits()`,
+  `.max_dependency_edges()`, `.today_serial()`).
+- **Eleven public failure/value families, owned by different boundaries — never mixed:**
+  see the Error taxonomy table below. Pick the family by *what layer failed*,
+  not by guessing a generic `Error`/`Result` shape.
+- **Public enums that may grow new variants are `#[non_exhaustive]`**
+  (`CellValue`, `ExcelError`, `ValidationError`, `ValidationErrorCode`, `XlsxErrorCode`,
+  `XlsxWriteErrorCode`, `ReadOptionsError`, `WriteOptionsError`,
+  `CalculationOptionsError`, `CalculationIssueCode`, `SessionErrorCode`,
+  `CalculationDecisionReason`, `MaterializedResultOrigin`, `FormulaDialect`,
+  `FormulaMetadata`, `WorkbookChange`, `XlsxDocumentKind`,
+  `RecalculationWritePolicy`, `PhoneticType`, and `PhoneticAlignment`). A
+  `match` on one of these needs a wildcard arm even if every current variant
+  is handled.
+- **Every stable machine code exposes `.as_str()`,** returning `&str` or
+  `&'static str` for programmatic comparison and logging
+  (`XlsxErrorCode::as_str`, `DiagnosticCode::as_str`,
+  `CalculationIssueCode::as_str`, `ExcelError::as_str`). Never branch on the
+  human-readable `Display`/message string — only on `.code()`/`.as_str()`.
+- **Sheet and defined-name lookups are case-insensitive** but preserve and
+  return the original spelling (`WorkbookSnapshot::sheet_by_name`,
+  `DefinedName::name`).
+- **`CellAddress::from_a1` / `Sheet::cell_by_a1` accept only an unqualified
+  A1 address** (`"A1"`, `"XFD1048576"`) — no sheet prefix, no `$` anchors.
+  Those belong to formula-reference syntax, which this workbook-lookup helper
+  deliberately rejects.
+
+## Public API surface
+
+### Entry points — reading
+
+- `read_xlsx_path(path: impl AsRef<Path>, options: ReadOptions) -> Result<WorkbookSnapshot, XlsxReadError>`
+- `read_xlsx_bytes(bytes: &[u8], options: ReadOptions) -> Result<WorkbookSnapshot, XlsxReadError>`
+- `read_xlsx<R: Read + Seek>(reader: R, options: ReadOptions) -> Result<WorkbookSnapshot, XlsxReadError>`
+- `inspect_package<R: Read + Seek>(reader: R, options: ReadOptions) -> Result<PackageSummary, XlsxReadError>` —
+  discovers ZIP/OOXML parts (workbook, worksheets, styles, shared strings,
+  external links, macros) under the same resource budget as a full read,
+  without interpreting workbook semantics.
+- `open_xlsx_document_path`, `open_xlsx_document_bytes`, and
+  `open_xlsx_document<R: Read + Seek + Send + 'static>` return an
+  `XlsxDocument` under the `OpenOptions`/`ReadLimits` budget. The document
+  retains no host path and exposes no ZIP or XML types.
+- `ReadOptions::default()` / `ReadOptions::new(ReadLimits)`, `.limits()`
+- `ReadLimits::default()` + 21 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
+  archive bytes, ZIP entry count, per-entry/total uncompressed bytes,
+  compression ratio, XML depth/attributes, sheet count, cells per
+  sheet/total, shared string count/bytes/total bytes, defined names, and
+  formula bytes per-cell/total, plus phonetic runs, annotated references, and
+  phonetic text bytes.
+
+### Workbook model — read-only, format-neutral
+
+- `WorkbookSnapshot`: `.sheets() -> &[Sheet]`, `.sheet_by_id(SheetId)`,
+  `.sheet_by_name(&str)`, `.defined_names()`, `.diagnostics()`,
+  `.date_system()`, `.calculation_hints()`, `.source()`, `.provenance()`.
+- `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
+  `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
+  `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`.
+- `Cell`: `.address()`, `.content() -> &CellContent`, `.number_format()`.
+- `CellContent::Literal(CellValue) | Formula(FormulaCell)`.
+- `CellValue` (`#[non_exhaustive]`): `Blank | Number(FiniteNumber) | Text(String) | Logical(bool) | Error(ExcelError)`.
+- `CellAddress`: `::from_a1(&str)`, `::from_indices(row, column)`, `.row()`,
+  `.column()`; `Display` renders `"A1"` style.
+- `Row` / `Column`: 1-based, validated against `1..=1_048_576` /
+  `1..=16_384` (`EXCEL_MAX_ROWS` / `EXCEL_MAX_COLUMNS`).
+- `CellRange::new(start, end)`, `.start()`, `.end()`, `.height()`, `.width()`,
+  `.contains(CellAddress)`.
+- `FiniteNumber::new(f64)` — rejects NaN/±infinity; required wrapper for
+  every numeric cell value and numeric option (e.g. `TODAY()`/`NOW()` serials).
+- `SheetId`, `SheetName`, `SheetVisibility` (`Visible | Hidden | VeryHidden`),
+  `DateSystem` (`Excel1900 | Excel1904`), `CalculationMode`,
+  `CalculationHints`, `WorkbookSource` / `WorkbookSourceKind`.
+- `DefinedName`: `.name()`, `.scope()` (`DefinedNameScope::Workbook | Sheet(SheetId)`),
+  `.formula() -> &FormulaText`, `.hidden()`.
+
+### Package-backed document and preservation writing
+
+- `XlsxDocument`: `.workbook()`, `.input_hash()`, `.kind()`,
+  `.semantic_revision()`, `.presentation()`, `.presentation_revision()`,
+  `.package_summary()`, `.workbook_part()`, and `.worksheet_part(SheetId)`.
+- `XlsxDocumentKind`: `Xlsx | Xlsm`. Macro parts are retained but never
+  executed.
+- `write_preserved_xlsx_bytes(&XlsxDocument, WriteOptions) ->
+  Result<Vec<u8>, XlsxWriteError>` raw-copies every unchanged ZIP entry.
+- `write_recalculated_xlsx_bytes(&XlsxDocument, &CalculationSnapshot,
+  RecalculationWriteOptions) -> Result<RecalculatedWorkbook,
+  XlsxWriteError>` prepares owned verified bytes plus a `WriteReport`.
+- `write_recalculated_xlsx(&XlsxDocument, &CalculationSnapshot, &mut impl
+  Write, RecalculationWriteOptions) -> Result<WriteReport, XlsxWriteError>`
+  prepares and verifies all bytes before touching the writer.
+- `write_recalculated_xlsx_path(...) -> Result<WriteReport,
+  XlsxWriteError>` uses a sibling temporary file and refuses existing
+  destinations unless `WriteOptions::with_replace_existing(true)` is set.
+- `RecalculationWritePolicy`: `RequireComplete` (default) or
+  `InvalidateUnavailable`. Invalidation removes stale caches, requests host
+  recalculation, and records every affected cell and diagnostic.
+- `WriteReport`: `.is_complete()`, `.policy()`, `.materialized_count()`,
+  `.invalidated_cells()`, `.changed_parts()`, `.removed_parts()`,
+  `.diagnostics()`, and `.provenance()`.
+- `RecalculatedWorkbook`: `.bytes()`, `.into_bytes()`, `.report()`,
+  `.into_parts()`, and `.save_path(...)`.
+- With the optional `capability-fs` feature,
+  `RecalculatedWorkbook::save_in_directory(&cap_std::fs::Dir, file_name,
+  WriteOptions)` installs beneath an already-open directory identity. The
+  destination must be one relative file name; this is the primitive used by
+  the MCP Save As boundary.
+- `WriteOptions::default()` refuses implicit destination replacement.
+  `WriteLimits` owns output, entry, XML, edit, result, relationship, temporary
+  storage, and verification budgets.
+- Branch on `XlsxWriteError::code()` /
+  `XlsxWriteErrorCode::as_str()`, never on human-readable messages.
+
+### Workbook authoring and typed edits
+
+- `WorkbookDraft::new()` starts with visible `Sheet1`;
+  `WorkbookDraft::from_document(&XlsxDocument)` retains the exact source
+  package privately.
+- `.workbook()`, `.presentation()`, `.semantic_revision()`,
+  `.presentation_revision()`, `.is_document_backed()`.
+- `.set_cell_value(...)`, `.set_cell_formula(...)`,
+  `.set_cell_dynamic_formula(..., Option<CellRange>)`, `.clear_cell(...)`,
+  `.set_cell_number_format(...)`.
+- `.set_annotated_text(...)`, `.set_phonetics(...)`, `.clear_phonetics(...)`,
+  `.set_frozen_pane(...)`, `.clear_frozen_pane(...)`.
+- `.add_sheet(...)`, `.rename_sheet(...)`, `.set_sheet_visibility(...)`.
+- `.set_defined_name(...)`, `.remove_defined_name(...)`,
+  `.set_date_system(...)`, `.set_calculation_hints(...)`.
+- `NumberFormat::built_in(...)` and `NumberFormat::custom(...)` validate the
+  built-in/custom ID boundary. `NumberFormatKind` distinguishes general,
+  numeric, date, time, date-time, and duration interpretation. Custom formats
+  require a nonempty code.
+- `write_xlsx_draft_bytes`, `write_xlsx_draft`, and
+  `write_xlsx_draft_path` require a `CalculationSnapshot` produced from the
+  current `draft.workbook()`. New drafts produce deterministic canonical
+  XLSX; document drafts preserve unrelated XLSX/XLSM parts.
+- Dynamic formulas can be authored in canonical drafts. Existing
+  document-backed dynamic formulas can be recalculated and cache-rewritten,
+  but adding or replacing one through a document draft fails with
+  `UnsupportedPreservation` until source metadata-index merging is available.
+
+### XLSX presentation
+
+- `DocumentPresentation`: `.revision()`, `.diagnostics()`,
+  `.frozen_pane(SheetId)`, `.worksheet_phonetic_properties(SheetId)`,
+  `.row_phonetic_visibility(SheetId, Row)`,
+  `.column_phonetic_visibility(SheetId)`, and
+  `.cell_phonetics(SheetId, CellAddress)`.
+- `CellPhonetics`: `.runs()`, `.properties()`,
+  `.explicit_cell_visibility()`, `.explicit_row_visibility()`,
+  `.explicit_column_visibility()`, and `.effective_visibility()`.
+- `PhoneticTextRange::new(start_utf16, end_utf16)`, `.start_utf16()`,
+  `.end_utf16()`; when a range is validated against its base text, a boundary
+  cannot split a surrogate pair.
+- `PhoneticRun::new(range, text)`, `.base_range()`, `.text()`.
+- `PhoneticProperties::new(font_id)`, `.font_id()`,
+  `.effective_font_id()`, `.phonetic_type()`, `.alignment()`,
+  `.with_phonetic_type(...)`, `.with_alignment(...)`.
+- `PhoneticType`: `FullWidthKatakana | HalfWidthKatakana | Hiragana |
+  NoConversion`; `PhoneticAlignment`: `NoControl | Left | Center |
+  Distributed`.
+- `ColumnPhoneticVisibility` records one column range and whether phonetics
+  are shown for it.
+- `PhoneticWriteOptions::show()` / `hide()` / `new(bool)`,
+  `.with_properties(...)`.
+- `FrozenPane::new(frozen_rows, frozen_columns)`, `.frozen_rows()`,
+  `.frozen_columns()`, `.is_clear()`.
+- Canonical authoring supports default font record `0`; source rich-text
+  phonetic edits and right-to-left frozen-pane edits fail closed with
+  `UnsupportedPreservation`.
+
+### Atomic batches and persistent recalculation sessions
+
+- `WorkbookChange` is the non-exhaustive typed mutation union. Construct
+  changes with `set_cell_value`, `set_cell_formula`,
+  `set_cell_dynamic_formula`, `clear_cell`, `set_cell_number_format`,
+  `add_sheet`, `rename_sheet`, `set_sheet_visibility`, `set_defined_name`,
+  `remove_defined_name`, `set_date_system`, and `set_calculation_hints`.
+- `EditBatch::new(changes)` preserves operation order.
+  `WorkbookDraft::apply_changes(batch)` stages once and commits one semantic
+  revision or rolls the complete batch back. If every accepted operation is
+  a semantic no-op, the receipt keeps the base revision and reports no
+  topology or calculation-metadata change.
+- `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
+  draft plus persistent parsed formulas, dependency state, results, dirty
+  roots, and bounded delta history.
+- `session.apply_changes(expected_revision, batch)` returns `EditReceipt`;
+  it distinguishes all source/format changes from calculation-semantic
+  changes and reports topology/metadata impact. Stale writers fail with
+  `SessionErrorCode::RevisionMismatch`.
+- To validate and size an edit before committing it, call
+  `session.prepare_changes(expected_revision, batch)`. The returned
+  `PreparedEditBatch` exposes the prospective `.workbook()` and `.receipt()`;
+  `session.install_changes(prepared)` commits only if its base revision is
+  still current.
+- `session.recalculate(RecalculationMode::Auto, options, token)` returns a
+  `CalculationDelta`. `Auto` uses a proven dirty subset and falls back to
+  full calculation for formula/name/sheet/options or uncertain dynamic/spill
+  topology. Forced `Incremental` fails closed when unsafe.
+- For work outside a session lock, call `prepare_recalculation`, run the
+  returned `PreparedCalculation`, then call `install`. `CancellationToken`
+  provides cooperative cancellation. Running a prepared calculation returns
+  `CompletedCalculation`; cancellation or a newer workbook revision never
+  replaces the installed current result.
+- `CalculationDelta` distinguishes dirty, evaluated, changed, and removed
+  materialized cells. `CalculationDeltaCell` carries each changed cell,
+  materialization origin, and result. `CalculationExecutionMode` reports
+  `Incremental | Full`, while non-exhaustive `CalculationDecisionReason`
+  explains why that schedule was selected. `changes_since(cursor, limit)`
+  returns a bounded `CalculationDeltaPage`.
+- `SessionLimits` bounds batch operations, evaluated formulas, delta cells,
+  retained deltas, and page size. `SessionErrorCode` is the stable
+  machine-readable error family.
+- `ApplyChangesError` distinguishes a staged `ValidationError` from a
+  `SessionError`. `SessionError` exposes `.code()`, `.message()`, and
+  `.detail()`.
+
+### Formula storage — independent of calculation
+
+- `FormulaCell`: `.dialect()`, `.text() -> Option<&FormulaText>`,
+  `.saved_result() -> &SavedResult`, `.metadata() -> &FormulaMetadata`,
+  `.recalculate_always()`.
+- `FormulaText::from_xlsx(String)` / `::from_user_input(String)`, `.as_str()`.
+- `SavedResult`: `Missing | Present(CellValue) | Invalid(SavedResultIssue)` —
+  the value the *file itself* cached. `calculate_workbook` never reads or
+  writes this; it is a separate, independent fact about the source.
+- `FormulaMetadata` (`#[non_exhaustive]`): `Normal | Shared{..} | Array{..} | DynamicArray{..} | DataTable{..}`.
+- `SharedFormulaRole`: `Anchor | Follower { anchor }`.
+- `FormulaDialect` (`#[non_exhaustive]`): currently only `ExcelA1`.
+
+### Capability scan — optional pre-check before calculating
+
+- `scan_formula_capabilities(&WorkbookSnapshot) -> FormulaCapabilityReport`
+- `scan_formula_capabilities_with_options(&WorkbookSnapshot, CalculationOptions) -> FormulaCapabilityReport` —
+  use this (with the same `CalculationLimits` you'll pass to
+  `calculate_workbook`) to align static parse, name, and dependency budgets.
+  Evaluation-only limits such as materialized array cells, calculated text
+  bytes, and data-dependent iterations can still surface during calculation.
+- `FormulaCapabilityReport`: `.entries()`, `.formula_count()`,
+  `.supported_count()`, `.unsupported_count()`, `.is_supported()`.
+- `FormulaCapabilityEntry`: `.cell()` and `.capability()`.
+- `FormulaCapability`: `Supported | Unsupported(Vec<CalculationIssue>)`.
+- Not calling this first changes nothing: an uncalculated, unsupported
+  formula reports the first deterministically ordered `CalculationIssue`
+  from that scan when you call `calculate_workbook` directly. The scan only
+  lets you decide *before* paying for a full recalculation.
+
+### Function catalog and workbook demand
+
+- `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
+  deterministic accepted-name catalog for this build. Each entry exposes
+  `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
+  `.is_official()`. Version 0.1.0 contains 278 official Excel-facing names
+  (265 official kernels plus 13 aliases) and one non-official compatibility
+  entry for the OOXML dummy-function marker.
+- `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
+  `scan_function_usage_with_options(&WorkbookSnapshot, CalculationOptions)`
+  count normalized function calls without calculating the workbook.
+- `FunctionUsageEntry` exposes `.name()`, `.support()`, `.call_count()`,
+  `.formula_count()`, and up to eight deterministic `.sample_cells()`.
+  `FunctionUsageReport` also records parsed and unparsed formula counts.
+- `FunctionSupport`: `Supported | Unsupported`; it is independent from
+  whether a particular call later produces an Excel error value.
+
+### Calculation
+
+- `calculate_workbook(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot` —
+  stateless full recalculation and the correctness oracle; never mutates the
+  source snapshot.
+- `CalculationOptions::default().with_today_serial(FiniteNumber).with_now_serial(FiniteNumber).with_limits(CalculationLimits)` —
+  `TODAY()` and `NOW()` never read the host clock. Omitting the corresponding
+  serial makes that formula report `VolatileInputMissing`.
+- `CalculationLimits::default()` + 7 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
+  budgets: formula tokens, AST nodes, AST nesting depth, dependency edges,
+  array cells, calculated text bytes, and data-dependent function
+  iterations.
+- `CalculationSnapshot`: `.cell(CalculationCellId) -> Option<&CalculationCellResult>`,
+  `.cells()`, `.materialized_cell(CalculationCellId)`,
+  `.materialized_cells()`, `.len()`, `.is_empty()`, `.options()`,
+  `.provenance()`.
+- `MaterializedCalculationCell` carries `.origin()` and `.result()`.
+  `MaterializedResultOrigin` distinguishes a direct formula cell, a cell in
+  a legacy-array region, and a cell in a dynamic-spill region; array origins
+  carry their anchor and complete result range.
+- `CalculationCellId::new(SheetId, CellAddress)`.
+- `CalculationCellResult`: `Value(CellValue) | Unavailable(CalculationIssue)`.
+- `INDEX(reference, 0, column)` returns the selected complete column,
+  `INDEX(reference, row, 0)` returns the selected complete row, and zero for
+  both indexes returns the complete reference. Scalar formulas apply legacy
+  implicit intersection; array contexts materialize the selected rectangle.
+
+### Diagnostics and provenance
+
+- `DiagnosticSeverity`: `Info | Warning | Error`.
+- `SourceLocation::source`, `::sheet`, and `::cell` construct source-linked
+  locations; `.with_byte_offset(...)` adds a zero-based byte offset.
+- `Provenance` pairs a `ProviderIdentity` with an optional `InputHash`.
+- `WriteProvenance` records the input hash, semantic and presentation
+  revisions, calculator identity, and deterministic calculation options used
+  by a completed write.
+
+## Error taxonomy — pick the right one, never mix
+
+| Type | Means | Result exists? | Machine check |
+| --- | --- | --- | --- |
+| `ValidationError` | Caller-supplied address/name/number/model value violates an invariant | No object is produced | `.code(): ValidationErrorCode`; match on the non-exhaustive enum only when structured fields are needed |
+| `ReadOptionsError` | A `ReadLimits` budget was invalid (zero) | Fails before reading starts | Match on the enum variant |
+| `CalculationOptionsError` | A `CalculationLimits` budget was invalid (zero) | Fails before calculation starts | Match on the enum variant |
+| `XlsxReadError` | No trustworthy `WorkbookSnapshot` could be produced at all | No snapshot | `.code(): XlsxErrorCode`, `.source_id()`, `.detail()` |
+| `WriteOptionsError` | A `WriteLimits` budget was invalid (zero) | Fails before writing starts | Match on the enum variant |
+| `XlsxWriteError` | The source/calculation binding, package plan, write budget, destination, or completed output was invalid | No successful output artifact | `.code(): XlsxWriteErrorCode`, `.source_id()`, `.detail()` |
+| `ApplyChangesError` | An atomic session edit failed either session-state or workbook validation | No edit is committed | Match `Session` or `Validation` |
+| `SessionError` | Revision, incremental-safety, cancellation, cursor, or session resource rules rejected an operation | Session remains valid; installation is rejected when applicable | `.code(): SessionErrorCode`, `.detail()` |
+| `Diagnostic` | Read succeeded, but a compatibility caveat exists (e.g. external link, macro) | Snapshot exists, on `.diagnostics()` | `.code(): DiagnosticCode`, `.severity()`, `.location()` |
+| `CalculationIssue` | One specific formula could not be calculated | Independent formulas can still produce results; dependents may report `BlockedByUpstream` | `.code(): CalculationIssueCode`, `.detail()` |
+| `CellValue::Error(ExcelError)` | An actual spreadsheet error value (`#DIV/0!`, `#REF!`, ...) | This *is* the cell's value | `.as_str()` on the `ExcelError` |
+
+An unsupported engine capability is never converted into an `ExcelError` and
+can never be hidden by a spreadsheet-side `IFERROR`/`IFNA` — it always
+surfaces as a `CalculationIssue`, which is a Rust-level fact about the
+engine, not a spreadsheet-level fact about the data.
+
+## Scope / non-goals
+
+CellRune supports ordinary Transitional SpreadsheetML workbooks and a scoped
+set of Excel formula syntax and functions. Call `scan_formula_capabilities`
+to check a workbook before relying on calculated values. Out of scope for the
+current version:
+
+- `.xls`, `.xlsb`, `.ods`, and CSV.
+- Macro, add-in, external-workbook, query, or data-connection execution.
+- Table structured references and 3-D references.
+- Spill postfix references such as `A1#`, general `LAMBDA`, and data-table
+  calculation.
+- Iterative calculation and automatic host-time or random inputs (`TODAY()`
+  and `NOW()` are supported only through explicit `CalculationOptions` inputs).
+
+CellRune does not claim complete Excel compatibility.
+
+## Runnable examples
+
+The repository path is `crates/cellrune/examples/`; the published crate
+package path is `examples/`. From the repository root use
+`cargo run -p cellrune --example <name> -- [arguments]`. From an extracted
+crate package use `cargo run --example <name> -- [arguments]`.
+
+- `read_only_inspection.rs` — read a workbook and inspect cells/diagnostics
+  without ever calling `calculate_workbook`.
+- `capability_scan_only.rs` — the scan-before-calculate pattern and how to
+  branch on `FormulaCapability`.
+- `handle_read_error.rs` — match on `XlsxErrorCode` for a deliberately
+  invalid input; the stable-code contract, concretely.
+- `compare_saved_vs_calculated.rs` — reads a formula's `SavedResult` and a
+  fresh `calculate_workbook` result side by side, demonstrating that neither
+  operation touches the other.
+- `read_and_calculate.rs` — the full pipeline against a real file (takes a
+  path argument); also prints per-issue diagnostics for a whole workbook.
+- `create_and_write.rs` — creates, calculates, and writes a canonical workbook
+  (optional destination path argument).
+- `recalculate_and_save.rs` — opens an XLSX/XLSM package, recalculates it, and
+  performs verified Save As (input and output path arguments).
+- `dynamic_array_write.rs` — authors, calculates, and writes a canonical
+  `FILTER` spill (optional destination path argument).
+- `inspect_phonetic_workbook.rs` — prints frozen-pane and phonetic metadata
+  from an input workbook (input path argument).
+- `write_phonetic_workbook.rs` — authors annotated text and a frozen pane
+  (output path argument).

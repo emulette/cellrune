@@ -1,0 +1,79 @@
+{
+  "name": "@cellrune/node",
+  "version": "0.1.0",
+  "description": "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing",
+  "license": "MIT",
+  "homepage": "https://github.com/emulette/cellrune#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emulette/cellrune.git",
+    "directory": "bindings/node"
+  },
+  "bugs": {
+    "url": "https://github.com/emulette/cellrune/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "main": "wrapper.js",
+  "module": "index.mjs",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./wrapper.js",
+      "import": "./index.mjs"
+    }
+  },
+  "files": [
+    "lib",
+    "wrapper.js",
+    "native.js",
+    "index.mjs",
+    "index.d.ts",
+    "native.d.ts",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "napi build --platform --release --strip --js native.js --dts native.d.ts",
+    "build:debug": "napi build --platform --js native.js --dts native.d.ts",
+    "test": "node tests/conformance.cjs && node tests/interactive.cjs && node tests/import.mjs && node tests/boundary.cjs && node tests/responsiveness.cjs",
+    "test:package": "node tests/packed-consumer.cjs",
+    "typecheck": "tsc --noEmit --strict --types node --module nodenext --moduleResolution nodenext --target es2022 tests/types.ts"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.7.4",
+    "@types/node": "26.1.1",
+    "typescript": "7.0.2"
+  },
+  "optionalDependencies": {
+    "@cellrune/node-darwin-arm64": "0.1.0",
+    "@cellrune/node-darwin-x64": "0.1.0",
+    "@cellrune/node-linux-arm64-gnu": "0.1.0",
+    "@cellrune/node-linux-arm64-musl": "0.1.0",
+    "@cellrune/node-linux-x64-gnu": "0.1.0",
+    "@cellrune/node-linux-x64-musl": "0.1.0",
+    "@cellrune/node-win32-arm64-msvc": "0.1.0",
+    "@cellrune/node-win32-x64-msvc": "0.1.0"
+  },
+  "napi": {
+    "binaryName": "cellrune",
+    "packageName": "@cellrune/node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "aarch64-pc-windows-msvc",
+      "x86_64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl"
+    ]
+  }
+}

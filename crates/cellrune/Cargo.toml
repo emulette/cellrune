@@ -1,0 +1,32 @@
+[package]
+name = "cellrune"
+description = "Bounded XLSX/XLSM reading, deterministic calculation, editing, and writing for Rust"
+documentation = "https://docs.rs/cellrune"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+keywords = ["xlsx", "excel", "spreadsheet", "formula", "parser"]
+categories = ["parser-implementations"]
+publish = true
+
+[lints]
+workspace = true
+
+# docs.rs builds default features only, which would omit the whole capability
+# write path from the published documentation.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+capability-fs = ["dep:cap-std"]
+
+[dependencies]
+cap-std = { version = "=4.0.2", optional = true }
+libm = { version = "=0.2.16", default-features = false }
+quick-xml = { version = "=0.41.0", default-features = false }
+sha2 = { version = "=0.11.0", default-features = false }
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

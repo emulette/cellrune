@@ -1,0 +1,86 @@
+name: Release gate
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-ref:
+    name: Require a semantic version release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Reject refs that are not a vMAJOR.MINOR.PATCH tag
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          case "$RELEASE_REF" in
+            refs/tags/v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) printf 'not a release tag: %s\n' "$RELEASE_REF" >&2; exit 1 ;;
+          esac
+
+  core:
+    name: Exact core, package, MSRV, platform, and policy gates
+    needs: release-ref
+    uses: ./.github/workflows/ci.yml
+
+  bindings:
+    name: Exact wheel, npm, and MCP publication gates
+    needs: release-ref
+    uses: ./.github/workflows/bindings.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  large-workbook:
+    name: Release 50k read, calculate, write, and reopen gate
+    needs: release-ref
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Run large-workbook benchmark contract
+        run: |
+          cargo bench \
+            --package cellrune-integration-tests \
+            --bench hardening \
+            --locked \
+            -- 50000 1 | tee hardening-benchmark.txt
+          python release-tests/scripts/verify_benchmark.py hardening-benchmark.txt
+
+  complete:
+    name: All release gates passed
+    if: always()
+    needs:
+      - release-ref
+      - core
+      - bindings
+      - large-workbook
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every release gate
+        env:
+          CORE_RESULT: ${{ needs.core.result }}
+          BINDINGS_RESULT: ${{ needs.bindings.result }}
+          BENCHMARK_RESULT: ${{ needs.large-workbook.result }}
+        run: |
+          test "$CORE_RESULT" = "success"
+          test "$BINDINGS_RESULT" = "success"
+          test "$BENCHMARK_RESULT" = "success"

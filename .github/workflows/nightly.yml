@@ -1,0 +1,140 @@
+name: Nightly hardening
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-hardening
+  cancel-in-progress: true
+
+jobs:
+  # Every other gate re-runs an unchanged commit against a pinned toolchain and a
+  # locked dependency graph, so a nightly repeat of them proves nothing. The
+  # advisory database is the one input that moves on its own, which is the only
+  # reason this tier is scheduled rather than triggered by a push.
+  advisories:
+    name: Fresh advisory database check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Install pinned cargo-deny
+        uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
+      - name: Check the workspace against today's advisories
+        run: cargo deny --all-features check advisories
+
+      - name: Check the standalone fuzz graph against today's advisories
+        run: >-
+          cargo deny
+          --manifest-path fuzz/Cargo.toml
+          --config fuzz/deny.toml
+          check advisories
+
+  fuzz:
+    name: Bounded nightly sanitizer campaign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install pinned nightly toolchain
+        run: rustup toolchain install nightly-2026-07-22 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2
+        with:
+          tool: cargo-fuzz@0.13.2
+          fallback: none
+
+      - name: Restore fuzz dependency cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: fuzz-registry-${{ runner.os }}-nightly-2026-07-22-${{ hashFiles('fuzz/Cargo.lock') }}
+          restore-keys: fuzz-registry-${{ runner.os }}-nightly-2026-07-22-
+
+      - name: Require the checked-in fuzz dependency graph
+        run: >-
+          cargo +nightly-2026-07-22
+          metadata
+          --manifest-path fuzz/Cargo.toml
+          --locked
+          --format-version 1
+          --no-deps
+          > /dev/null
+
+      - name: Run reader, calculation, session, writer, and formula-rewrite targets
+        run: |
+          for target in \
+            xlsx_reader \
+            formula_calculation \
+            interactive_session \
+            xlsx_writer_rewrite
+          do
+            cargo +nightly-2026-07-22 fuzz run "$target" -- \
+              -max_total_time=300 \
+              -timeout=15 \
+              -rss_limit_mb=2048 \
+              -print_final_stats=1
+          done
+
+      - name: Upload fuzz failures
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+          retention-days: 14
+
+  large-workbook:
+    name: 50k read, calculate, write, and reopen gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Run large-workbook benchmark contract
+        run: |
+          cargo bench \
+            --package cellrune-integration-tests \
+            --bench hardening \
+            --locked \
+            -- 50000 1 | tee hardening-benchmark.txt
+          python release-tests/scripts/verify_benchmark.py hardening-benchmark.txt
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-hardening-benchmark
+          path: hardening-benchmark.txt
+          if-no-files-found: error
+          retention-days: 30

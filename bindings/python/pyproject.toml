@@ -1,0 +1,44 @@
+[build-system]
+requires = ["maturin==1.14.1"]
+build-backend = "maturin"
+
+[project]
+name = "cellrune"
+version = "0.1.0"
+description = "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing"
+readme = "../../README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+authors = [{ name = "CellRune contributors" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Rust",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/emulette/cellrune"
+Repository = "https://github.com/emulette/cellrune"
+Issues = "https://github.com/emulette/cellrune/issues"
+Changelog = "https://github.com/emulette/cellrune/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+features = ["extension-module"]
+module-name = "cellrune._native"
+python-source = "python"
+strip = true
+exclude = [
+  "python/cellrune/__pycache__",
+  "python/cellrune/**/*.pyc",
+]
+
+[tool.maturin.sbom]
+rust = false
+auditwheel = false
