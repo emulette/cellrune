@@ -92,7 +92,7 @@ are not part of this binary notice.
 | `thiserror` | `2.0.19` | `MIT OR Apache-2.0` |
 | `thread_local` | `1.1.10` | `MIT OR Apache-2.0` |
 | `tokio` | `1.53.1` | `MIT` |
-| `tokio-util` | `0.7.18` | `MIT` |
+| `tokio-util` | `0.7.19` | `MIT` |
 | `tracing` | `0.1.44` | `MIT` |
 | `tracing-core` | `0.1.36` | `MIT` |
 | `tracing-subscriber` | `0.3.23` | `MIT` |
@@ -4732,7 +4732,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### License text 63
 
-Components: `tokio 1.53.1`, `tokio-util 0.7.18`
+Components: `tokio 1.53.1`, `tokio-util 0.7.19`
 
 Source filenames: `LICENSE`
 
