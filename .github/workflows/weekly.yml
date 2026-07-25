@@ -1,0 +1,32 @@
+name: Weekly binding drift
+
+# The pinned toolchain and locked dependency graph make a scheduled repeat of the
+# push tiers pointless, but the hosted runner images update on their own roughly
+# every week. Cross-compiled targets, macOS deployment targets, and the musl
+# container checks are exactly what that drift breaks, and nothing else notices
+# during a quiet period. This tier runs on the same cadence as the drift it looks
+# for rather than nightly, which would cost seven times the jobs to learn the
+# same thing a few days sooner.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-binding-drift
+  cancel-in-progress: true
+
+jobs:
+  # bindings.yml declares id-token and attestations on its tag-gated attestation
+  # jobs. A caller must grant every permission the called workflow declares, even
+  # for jobs their `if` conditions will skip, or the whole run fails at startup.
+  bindings:
+    name: Full binding and MCP artifact tier
+    uses: ./.github/workflows/bindings.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
