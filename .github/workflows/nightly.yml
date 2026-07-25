@@ -208,12 +208,6 @@ jobs:
       - name: Install pinned nightly toolchain
         run: rustup toolchain install nightly-2026-07-22 --profile minimal
 
-      - name: Install pinned cargo-fuzz
-        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
-        with:
-          tool: cargo-fuzz@0.13.2
-          fallback: none
-
       - name: Restore fuzz dependency cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -223,6 +217,15 @@ jobs:
             ~/.cargo/git/db
           key: fuzz-registry-${{ runner.os }}-nightly-2026-07-22-${{ hashFiles('fuzz/Cargo.lock') }}
           restore-keys: fuzz-registry-${{ runner.os }}-nightly-2026-07-22-
+
+      # `install-action` has no cargo-fuzz manifest, so the prebuilt path would be the
+      # cargo-binstall fallback this workflow deliberately refuses — and cargo-fuzz publishes no
+      # prebuilt binaries for it to fetch anyway. Building from crates.io keeps the exact-version
+      # pin and lets cargo verify the source against the registry checksums. The previous step
+      # failed on this tier's first ever run: the schedule had never fired since the repository
+      # went public.
+      - name: Install pinned cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
 
       - name: Require the checked-in fuzz dependency graph
         run: >-

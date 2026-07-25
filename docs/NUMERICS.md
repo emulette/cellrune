@@ -67,8 +67,10 @@ correction that snaps a near-zero addition or subtraction result to exactly zero
 Compare such results with a tolerance rather than for equality. Note that this also affects
 comparisons: a formula of the form `=(0.1+0.2-0.3)=0` is `FALSE` in CellRune and `TRUE` in Excel.
 
-Signed zero is not part of this difference. A sum over no numbers returns positive zero, matching
-Excel; see the 0.1.1 entry in `CHANGELOG.md`.
+Signed zero is not part of this difference. No calculated value is negative zero: the engine
+normalizes `-0.0` at the boundary where calculated values leave the calculation, so an empty
+`SUM`, `MIN(-0)`, and `PRODUCT(-1,0)` all return positive zero as Excel reports; see the 0.1.1
+entry in `CHANGELOG.md`.
 
 ### Matching: dates, including the 1900 leap-year bug
 

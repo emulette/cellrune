@@ -59,6 +59,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - A Linux wheel could declare a compressed platform-tag set whose first component was a legacy
   alias, which hid a newer glibc requirement behind it from the release verification. Every
   component of the set is now checked against the supported baseline.
+- The nightly fuzz tier could not install its fuzzer. `taiki-e/install-action` has no cargo-fuzz
+  manifest, the job deliberately disables the binstall fallback, and the schedule had never fired
+  since the repository went public, so the defect surfaced only on the tier's first manual
+  dispatch. cargo-fuzz is now built from crates.io with `cargo install --locked`, which keeps the
+  exact-version pin and the registry checksum verification.
 
 ### Documentation
 
