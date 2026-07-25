@@ -36,6 +36,11 @@ without confusing development-only tools with shipped library requirements.
 `libm`, `quick-xml`, `sha2`, and `zip` are CellRune's direct runtime dependencies.
 The remaining crates are selected transitively by those dependencies.
 
+The table covers the default feature set. The optional `capability-fs` feature adds
+`cap-std` and its transitive graph, which this table does not enumerate. Those crates
+are permissive and are license-gated in CI, because `deny.toml` sets `all-features = true`.
+List them with `cargo tree --locked -p cellrune --features capability-fs --edges normal`.
+
 ## Development dependencies
 
 `calamine` is used only for differential development audits. `serde` and

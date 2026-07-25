@@ -116,12 +116,24 @@ jobs:
       - name: Compile every standalone fuzz target
         run: cargo check --manifest-path fuzz/Cargo.toml --bins --locked
 
+      # Every copy is reported, not just the first, and the mismatch is printed.
+      # A bare `cmp -s` chain aborts silently and says only which step failed.
       - name: Verify packaged license text
         run: |
-          cmp -s LICENSE crates/cellrune/LICENSE
-          cmp -s LICENSE bindings/python/LICENSE
-          cmp -s LICENSE bindings/node/LICENSE
-          cmp -s THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
+          status=0
+          check() {
+            if cmp -s "$1" "$2"; then
+              return 0
+            fi
+            printf '::error file=%s::does not match %s\n' "$2" "$1"
+            diff -u "$1" "$2" || true
+            status=1
+          }
+          check LICENSE crates/cellrune/LICENSE
+          check LICENSE bindings/python/LICENSE
+          check LICENSE bindings/node/LICENSE
+          check THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
+          exit "$status"
 
       - name: Test release archive boundary validation
         run: python3 bindings/scripts/test_verify_release_artifacts.py
