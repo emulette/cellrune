@@ -250,10 +250,13 @@ jobs:
           for archive in release/*.tgz; do
             name="$(tar -xzOf "$archive" package/package.json |
               node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
+            # The ./ prefix is load bearing. npm parses a bare `dir/file.tgz`
+            # as the GitHub shorthand owner/repo and tries to clone it, so
+            # without it every publish fails on `git ls-remote`.
             if [ "$name" = "@cellrune/node" ]; then
-              printf '%s\n' "$archive" >> main-archive.txt
+              printf './%s\n' "$archive" >> main-archive.txt
             else
-              printf '%s\n' "$archive" >> platform-archives.txt
+              printf './%s\n' "$archive" >> platform-archives.txt
             fi
           done
           platforms="$(wc -l < platform-archives.txt)"
