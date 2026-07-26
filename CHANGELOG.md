@@ -7,6 +7,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ## [Unreleased]
 
+### Added
+
+- Two accessors for consuming phonetic (ruby) annotations. `CellPhonetics::resolved_runs` takes the
+  cell's base text and returns each run's range translated from UTF-16 code units — what XLSX
+  stores — into the byte offsets Rust indexes with, as `ResolvedPhoneticRun`. Byte offsets rather
+  than character indices, so no consumer's indexing convention is built into the core.
+  `DocumentPresentation::phonetic_cell_entries` iterates the cells of a sheet that carry at least
+  one run, in row-major address order, reporting exactly the visibility `cell_phonetics` reports
+  for the same address. Cells whose annotation holds only `phoneticPr` display properties without
+  `rPh` runs are skipped by that iterator and remain reachable through `cell_phonetics`.
+  Presentation state does not hold cell text, so the base text comes from the workbook snapshot;
+  the iterator's documentation carries a compiled example of that join.
+
 ### Changed
 
 - CellRune is dual-licensed under `MIT OR Apache-2.0` at the recipient's option, instead of the MIT

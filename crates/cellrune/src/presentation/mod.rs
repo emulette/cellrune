@@ -5,7 +5,7 @@ mod state;
 
 pub use phonetic::{
     PhoneticAlignment, PhoneticProperties, PhoneticRun, PhoneticTextRange, PhoneticType,
-    PhoneticWriteOptions,
+    PhoneticWriteOptions, ResolvedPhoneticRun,
 };
 pub use state::{CellPhonetics, ColumnPhoneticVisibility, DocumentPresentation, FrozenPane};
 

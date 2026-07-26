@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::ValidationError;
 
 /// A half-open range in zero-based UTF-16 code units over the base cell text.
@@ -227,6 +229,108 @@ impl PhoneticAnnotation {
     }
 }
 
+/// One phonetic run resolved into byte offsets over concrete base text.
+///
+/// Stored ranges are UTF-16 code-unit offsets because that is what XLSX records. Rust string
+/// indexing is byte based, so a consumer needs the translation before it can slice the base text
+/// or convert into its own annotation model. This type carries the translated range together with
+/// the run it came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedPhoneticRun<'a> {
+    // Held as two scalars rather than a `Range<usize>` so the type stays `Copy`.
+    start_bytes: usize,
+    end_bytes: usize,
+    run: &'a PhoneticRun,
+}
+
+impl<'a> ResolvedPhoneticRun<'a> {
+    /// Returns the half-open byte range the run annotates within the base text it was resolved
+    /// against.
+    ///
+    /// The range always falls on `char` boundaries of that text, so slicing with it never panics.
+    pub const fn base_bytes(&self) -> Range<usize> {
+        self.start_bytes..self.end_bytes
+    }
+
+    /// Returns the annotated slice of the base text this run was resolved against.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `base_text` is not the string the run was resolved against.
+    pub fn base_slice<'text>(&self, base_text: &'text str) -> &'text str {
+        &base_text[self.base_bytes()]
+    }
+
+    /// Returns the displayed phonetic text.
+    pub fn text(&self) -> &'a str {
+        self.run.text()
+    }
+
+    /// Returns the source run, including its original UTF-16 range.
+    pub const fn run(&self) -> &'a PhoneticRun {
+        self.run
+    }
+}
+
+/// Translates every run's UTF-16 range into byte offsets over `base_text`.
+///
+/// Runs are returned in source order. The base text is walked once regardless of run count.
+pub(crate) fn resolve_runs<'a>(
+    runs: &'a [PhoneticRun],
+    base_text: &str,
+) -> Result<Vec<ResolvedPhoneticRun<'a>>, ValidationError> {
+    if runs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (boundaries, base_utf16_len) = utf16_boundaries(base_text);
+    runs.iter()
+        .map(|run| {
+            let range = run.base_range();
+            // Checked before the boundary lookup so an out-of-range end reports the length it
+            // exceeded rather than being reported as a split surrogate.
+            if range.end_utf16() > base_utf16_len {
+                return Err(ValidationError::PhoneticRangeOutOfBounds {
+                    end: range.end_utf16(),
+                    base_utf16_len,
+                });
+            }
+            let start = byte_offset_at(&boundaries, range.start_utf16())?;
+            let end = byte_offset_at(&boundaries, range.end_utf16())?;
+            Ok(ResolvedPhoneticRun {
+                start_bytes: start,
+                end_bytes: end,
+                run,
+            })
+        })
+        .collect()
+}
+
+/// Returns `(utf16_offset, byte_offset)` pairs for every `char` boundary, and the total UTF-16
+/// length. Both components of each pair increase monotonically, which is what lets the lookup
+/// below binary search.
+fn utf16_boundaries(text: &str) -> (Vec<(u32, usize)>, u32) {
+    // Byte length, not `chars().count()`: every char occupies at least one byte, so this is an
+    // upper bound on the entry count and reserves without a second pass over the text. Counting
+    // chars exactly would make the "walked once" promise above false.
+    let mut boundaries = Vec::with_capacity(text.len().saturating_add(1));
+    boundaries.push((0_u32, 0_usize));
+    let mut utf16 = 0_u32;
+    for (byte_index, character) in text.char_indices() {
+        utf16 = utf16.saturating_add(character.len_utf16() as u32);
+        boundaries.push((utf16, byte_index + character.len_utf8()));
+    }
+    (boundaries, utf16)
+}
+
+fn byte_offset_at(boundaries: &[(u32, usize)], offset: u32) -> Result<usize, ValidationError> {
+    boundaries
+        .binary_search_by_key(&offset, |(utf16, _)| *utf16)
+        .map(|index| boundaries[index].1)
+        // A miss means the offset lands inside a surrogate pair: it is within the text but is not
+        // a char boundary, so no byte offset represents it.
+        .map_err(|_| ValidationError::PhoneticRangeSplitsSurrogate { offset })
+}
+
 pub(crate) fn validate_authoring_runs(
     base_text: &str,
     runs: &[PhoneticRun],
@@ -299,8 +403,8 @@ fn is_xml_10_char(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        PhoneticRun, PhoneticTextRange, validate_authoring_runs, validate_source_runs,
-        validate_utf16_boundary,
+        PhoneticRun, PhoneticTextRange, resolve_runs, validate_authoring_runs,
+        validate_source_runs, validate_utf16_boundary,
     };
     use crate::ValidationError;
 
@@ -327,6 +431,87 @@ mod tests {
             validate_utf16_boundary("ab", 3),
             Err(ValidationError::PhoneticRangeSplitsSurrogate { offset: 3 })
         );
+    }
+
+    #[test]
+    fn resolution_translates_utf16_ranges_into_byte_ranges() {
+        // "😀" is one char, two UTF-16 code units, four UTF-8 bytes: the offsets diverge in both
+        // directions, which is the whole reason this API exists.
+        let base = "😀ab";
+        let runs = vec![
+            PhoneticRun::new(PhoneticTextRange::new(0, 2).expect("range"), "え").expect("run"),
+            PhoneticRun::new(PhoneticTextRange::new(2, 4).expect("range"), "び").expect("run"),
+        ];
+        let resolved = resolve_runs(&runs, base).expect("resolves");
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].base_bytes(), 0..4);
+        assert_eq!(resolved[0].base_slice(base), "😀");
+        assert_eq!(resolved[0].text(), "え");
+        assert_eq!(resolved[1].base_bytes(), 4..6);
+        assert_eq!(resolved[1].base_slice(base), "ab");
+        assert_eq!(resolved[1].run().base_range().start_utf16(), 2);
+    }
+
+    #[test]
+    fn resolution_rejects_a_boundary_inside_a_surrogate_pair() {
+        let runs = vec![
+            PhoneticRun::new(PhoneticTextRange::new(0, 1).expect("range"), "え").expect("run"),
+        ];
+        assert_eq!(
+            resolve_runs(&runs, "😀A"),
+            Err(ValidationError::PhoneticRangeSplitsSurrogate { offset: 1 })
+        );
+    }
+
+    #[test]
+    fn resolution_rejects_an_end_past_the_utf16_length() {
+        let runs =
+            vec![PhoneticRun::new(PhoneticTextRange::new(1, 3).expect("range"), "x").expect("run")];
+        assert_eq!(
+            resolve_runs(&runs, "ab"),
+            Err(ValidationError::PhoneticRangeOutOfBounds {
+                end: 3,
+                base_utf16_len: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn resolution_reports_out_of_bounds_before_a_split_for_the_same_run() {
+        // The end is both past the length and mid-surrogate. Reporting the length it exceeded is
+        // the actionable message; "splits a surrogate" would send the caller looking at encoding.
+        let runs =
+            vec![PhoneticRun::new(PhoneticTextRange::new(0, 5).expect("range"), "x").expect("run")];
+        assert_eq!(
+            resolve_runs(&runs, "😀"),
+            Err(ValidationError::PhoneticRangeOutOfBounds {
+                end: 5,
+                base_utf16_len: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn resolution_accepts_the_full_span_and_an_empty_run_list() {
+        let runs = vec![
+            PhoneticRun::new(PhoneticTextRange::new(0, 2).expect("range"), "ぜ").expect("run"),
+        ];
+        let resolved = resolve_runs(&runs, "😀").expect("resolves");
+        assert_eq!(resolved[0].base_bytes(), 0..4);
+        assert_eq!(resolve_runs(&[], "anything"), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn resolution_handles_unordered_and_overlapping_source_runs() {
+        // The reader tolerates these (validate_source_runs only reports them), so resolution must
+        // not assume sorted input.
+        let runs = vec![
+            PhoneticRun::new(PhoneticTextRange::new(2, 4).expect("range"), "b").expect("run"),
+            PhoneticRun::new(PhoneticTextRange::new(0, 3).expect("range"), "a").expect("run"),
+        ];
+        let resolved = resolve_runs(&runs, "abcd").expect("resolves");
+        assert_eq!(resolved[0].base_bytes(), 2..4);
+        assert_eq!(resolved[1].base_bytes(), 0..3);
     }
 
     #[test]

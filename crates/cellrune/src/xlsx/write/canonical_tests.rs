@@ -169,6 +169,101 @@ fn canonical_writer_round_trips_phonetics_and_frozen_panes() {
     );
 }
 
+/// The consumption path end to end: author annotations, write, reopen, then reach the runs the
+/// way an external consumer must — enumerate annotated cells, join the base text back out of the
+/// snapshot, and translate the stored UTF-16 ranges into byte offsets.
+///
+/// The base text mixes an astral-plane character with a BMP one so the UTF-16 offsets, the byte
+/// offsets, and the `char` count are three different numbers. A translation that confused any two
+/// of them would still pass on ASCII.
+#[test]
+fn round_tripped_phonetics_resolve_to_byte_ranges_over_the_reopened_base_text() {
+    const BASE: &str = "😀明日";
+
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    let annotated = address("B2");
+    // UTF-16: the emoji occupies 0..2, then 明 at 2..3 and 日 at 3..4.
+    let runs = vec![
+        PhoneticRun::new(PhoneticTextRange::new(0, 2).expect("range"), "にこ").expect("run"),
+        PhoneticRun::new(PhoneticTextRange::new(2, 4).expect("range"), "あした").expect("run"),
+    ];
+    draft
+        .set_annotated_text(
+            sheet_id,
+            annotated,
+            BASE,
+            runs,
+            PhoneticWriteOptions::show(),
+        )
+        .expect("annotated text");
+    // A plain text cell in between, to prove the iterator yields only annotated cells.
+    draft
+        .set_cell_value(
+            sheet_id,
+            address("A1"),
+            CellValue::Text("no annotation".to_owned()),
+        )
+        .expect("set value");
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), crate::OpenOptions::default()).expect("reopen");
+
+    let entries: Vec<_> = reopened
+        .presentation()
+        .phonetic_cell_entries(sheet_id)
+        .collect();
+    assert_eq!(entries.len(), 1, "only the annotated cell is yielded");
+    let (address_out, phonetics) = entries[0];
+    assert_eq!(address_out, annotated);
+
+    let sheet = reopened
+        .workbook()
+        .sheet_by_id(sheet_id)
+        .expect("sheet survives the round trip");
+    let CellContent::Literal(CellValue::Text(base_text)) = sheet
+        .cell(address_out)
+        .expect("annotated cell survives")
+        .content()
+    else {
+        panic!("annotated cells are text cells");
+    };
+    assert_eq!(base_text, BASE);
+
+    let resolved = phonetics
+        .resolved_runs(base_text)
+        .expect("ranges resolve against the text they were read with");
+    assert_eq!(resolved.len(), 2);
+    assert_eq!(resolved[0].base_bytes(), 0..4);
+    assert_eq!(resolved[0].base_slice(base_text), "😀");
+    assert_eq!(resolved[0].text(), "にこ");
+    assert_eq!(resolved[1].base_bytes(), 4..10);
+    assert_eq!(resolved[1].base_slice(base_text), "明日");
+    assert_eq!(resolved[1].text(), "あした");
+
+    // Passing the wrong cell's text is caught only when the ranges do not fit it.
+    assert_eq!(
+        phonetics.resolved_runs("ab"),
+        Err(ValidationError::PhoneticRangeOutOfBounds {
+            end: 4,
+            base_utf16_len: 2,
+        })
+    );
+
+    // And this is the case it cannot catch: "no annotation" is longer than the runs need, so every
+    // range still lands on a char boundary and resolution succeeds with meaningless slices. No
+    // validation can detect this, because nothing distinguishes one 13-unit string from another.
+    // It is the reason the accessor hangs off the per-cell view instead of off PhoneticTextRange,
+    // and the reason the iterator's documentation spells out the join.
+    let mismatched = phonetics
+        .resolved_runs("no annotation")
+        .expect("ranges fit, so nothing here is detectable as wrong");
+    assert_eq!(mismatched[0].base_slice("no annotation"), "no");
+}
+
 #[test]
 fn canonical_writer_round_trips_xml_normalization_sensitive_text() {
     let mut draft = WorkbookDraft::new();

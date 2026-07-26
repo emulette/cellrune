@@ -6,6 +6,7 @@ use crate::{
     ValidationError,
 };
 
+use super::phonetic::{ResolvedPhoneticRun, resolve_runs};
 use super::{PhoneticAnnotation, PhoneticProperties, PhoneticRun};
 
 /// A validated frozen-pane position expressed as fixed row and column counts.
@@ -157,6 +158,25 @@ impl<'a> CellPhonetics<'a> {
     pub const fn effective_visibility(self) -> bool {
         self.effective_visibility
     }
+
+    /// Translates every stored run's UTF-16 range into byte offsets over `base_text`.
+    ///
+    /// `base_text` must be the literal text of the cell these annotations belong to, which lives in
+    /// the workbook snapshot rather than in presentation state. See
+    /// [`DocumentPresentation::phonetic_cell_entries`] for the join.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::PhoneticRangeOutOfBounds`] when a run reaches past the UTF-16
+    /// length of `base_text`, and [`ValidationError::PhoneticRangeSplitsSurrogate`] when a run
+    /// boundary falls inside a surrogate pair. Both indicate `base_text` is not the text these runs
+    /// were read against.
+    pub fn resolved_runs(
+        self,
+        base_text: &str,
+    ) -> Result<Vec<ResolvedPhoneticRun<'a>>, ValidationError> {
+        resolve_runs(self.runs, base_text)
+    }
 }
 
 /// XLSX presentation metadata kept separate from calculation semantics.
@@ -214,6 +234,76 @@ impl DocumentPresentation {
     ) -> Option<CellPhonetics<'_>> {
         let sheet = self.sheets.get(&sheet_id)?;
         let cell = sheet.cell_phonetics.get(&address)?;
+        Some(Self::resolve_cell_phonetics(sheet, address, cell))
+    }
+
+    /// Iterates cells that carry at least one phonetic run, in row-major address order.
+    ///
+    /// **Two kinds of cell are skipped**, both because they would hand the caller an empty run
+    /// list — there is no phonetic text to read from either:
+    ///
+    /// - cells that declare only a `ph` visibility flag and no annotation at all;
+    /// - cells whose annotation carries `phoneticPr` display properties but no `rPh` runs. A
+    ///   shared string item with a `<phoneticPr>` and no `<rPh>` is ordinary in Japanese
+    ///   workbooks, and the reader preserves its font, type, and alignment. Those properties
+    ///   configure the display of runs that do not exist, so this iterator does not surface them.
+    ///
+    /// Use [`Self::cell_phonetics`] to reach either kind. Every yielded [`CellPhonetics`] reports
+    /// the same visibility that `cell_phonetics` reports for the same address.
+    ///
+    /// Presentation state does not hold cell text, so the base text needed by
+    /// [`CellPhonetics::resolved_runs`] must be read from the workbook snapshot using the yielded
+    /// address:
+    ///
+    /// ```
+    /// # use cellrune::{CellContent, CellValue, DocumentPresentation, SheetId, WorkbookSnapshot};
+    /// # fn example(
+    /// #     presentation: &DocumentPresentation,
+    /// #     workbook: &WorkbookSnapshot,
+    /// #     sheet_id: SheetId,
+    /// # ) -> Result<(), cellrune::ValidationError> {
+    /// let sheet = workbook
+    ///     .sheet_by_id(sheet_id)
+    ///     .expect("sheet belongs to this workbook");
+    /// for (address, phonetics) in presentation.phonetic_cell_entries(sheet_id) {
+    ///     let Some(CellContent::Literal(CellValue::Text(base_text))) =
+    ///         sheet.cell(address).map(|cell| cell.content())
+    ///     else {
+    ///         continue;
+    ///     };
+    ///     for run in phonetics.resolved_runs(base_text)? {
+    ///         println!("{address}: {} -> {}", run.base_slice(base_text), run.text());
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn phonetic_cell_entries(
+        &self,
+        sheet_id: SheetId,
+    ) -> impl Iterator<Item = (CellAddress, CellPhonetics<'_>)> {
+        self.sheets
+            .get(&sheet_id)
+            .into_iter()
+            .flat_map(|sheet| {
+                sheet
+                    .cell_phonetics
+                    .iter()
+                    .map(move |(address, cell)| (sheet, *address, cell))
+            })
+            .filter_map(|(sheet, address, cell)| {
+                let phonetics = Self::resolve_cell_phonetics(sheet, address, cell);
+                (!phonetics.runs.is_empty()).then_some((address, phonetics))
+            })
+    }
+
+    /// Single definition of Cell → row → column visibility precedence, shared by the per-cell
+    /// lookup and the iterator so the two can never report different visibility.
+    fn resolve_cell_phonetics<'sheet>(
+        sheet: &'sheet SheetPresentation,
+        address: CellAddress,
+        cell: &'sheet CellPresentation,
+    ) -> CellPhonetics<'sheet> {
         let row = sheet.row_phonetic_visibility.get(&address.row()).copied();
         let column = sheet
             .column_phonetic_visibility
@@ -223,14 +313,14 @@ impl DocumentPresentation {
             .map(|range| range.visible());
         let effective = cell.explicit_visibility.or(row).or(column).unwrap_or(false);
         let annotation = cell.annotation.as_deref();
-        Some(CellPhonetics {
+        CellPhonetics {
             runs: annotation.map_or(&[], PhoneticAnnotation::runs),
             properties: annotation.and_then(PhoneticAnnotation::properties),
             explicit_cell_visibility: cell.explicit_visibility,
             explicit_row_visibility: row,
             explicit_column_visibility: column,
             effective_visibility: effective,
-        })
+        }
     }
 
     /// Returns whether no presentation metadata or diagnostics are present.
@@ -463,5 +553,142 @@ mod tests {
         assert_eq!(resolved.explicit_column_visibility(), Some(true));
         assert_eq!(resolved.explicit_row_visibility(), Some(false));
         assert!(!resolved.effective_visibility());
+    }
+
+    fn annotated(text: &str) -> CellPresentation {
+        let run =
+            PhoneticRun::new(PhoneticTextRange::new(0, 1).expect("range"), text).expect("run");
+        CellPresentation {
+            annotation: Some(Arc::new(PhoneticAnnotation::new(vec![run], None))),
+            explicit_visibility: None,
+        }
+    }
+
+    #[test]
+    fn entries_skip_cells_that_declare_only_visibility() {
+        let sheet_id = SheetId::new(1).expect("sheet");
+        let annotated_address = CellAddress::from_a1("A1").expect("address");
+        let visibility_only = CellAddress::from_a1("A2").expect("address");
+        let mut presentation = DocumentPresentation::default();
+        let sheet = presentation.sheet_mut(sheet_id);
+        sheet
+            .cell_phonetics
+            .insert(annotated_address, annotated("か"));
+        sheet.cell_phonetics.insert(
+            visibility_only,
+            CellPresentation {
+                annotation: None,
+                explicit_visibility: Some(true),
+            },
+        );
+
+        let addresses: Vec<_> = presentation
+            .phonetic_cell_entries(sheet_id)
+            .map(|(address, _)| address)
+            .collect();
+        assert_eq!(addresses, vec![annotated_address]);
+        // The skipped cell is still reachable through the per-cell lookup.
+        assert!(
+            presentation
+                .cell_phonetics(sheet_id, visibility_only)
+                .is_some()
+        );
+    }
+
+    /// A shared string item carrying `<phoneticPr>` with no `<rPh>` is ordinary in Japanese
+    /// workbooks, and the reader keeps its properties as an annotation with an empty run list.
+    /// Skipping it here is deliberate — there is no phonetic text to hand a consumer — so the
+    /// case is pinned rather than left to the `runs.is_empty()` filter by accident.
+    #[test]
+    fn entries_skip_annotations_that_carry_properties_but_no_runs() {
+        let sheet_id = SheetId::new(1).expect("sheet");
+        let properties_only = CellAddress::from_a1("A1").expect("address");
+        let mut presentation = DocumentPresentation::default();
+        presentation.sheet_mut(sheet_id).cell_phonetics.insert(
+            properties_only,
+            CellPresentation {
+                annotation: Some(Arc::new(PhoneticAnnotation::new(
+                    Vec::new(),
+                    Some(crate::PhoneticProperties::new(1)),
+                ))),
+                explicit_visibility: None,
+            },
+        );
+
+        assert_eq!(presentation.phonetic_cell_entries(sheet_id).count(), 0);
+        // The properties are not lost, only routed through the per-cell accessor.
+        let single = presentation
+            .cell_phonetics(sheet_id, properties_only)
+            .expect("annotation is still reachable");
+        assert!(single.runs().is_empty());
+        assert_eq!(single.properties().map(|value| value.font_id()), Some(1));
+    }
+
+    #[test]
+    fn entries_iterate_in_row_major_order() {
+        let sheet_id = SheetId::new(1).expect("sheet");
+        let mut presentation = DocumentPresentation::default();
+        let sheet = presentation.sheet_mut(sheet_id);
+        for a1 in ["B2", "A1", "B1", "A2"] {
+            let address = CellAddress::from_a1(a1).expect("address");
+            sheet.cell_phonetics.insert(address, annotated("か"));
+        }
+
+        let addresses: Vec<String> = presentation
+            .phonetic_cell_entries(sheet_id)
+            .map(|(address, _)| address.to_string())
+            .collect();
+        assert_eq!(addresses, vec!["A1", "B1", "A2", "B2"]);
+    }
+
+    #[test]
+    fn entries_report_the_same_visibility_as_the_per_cell_lookup() {
+        let sheet_id = SheetId::new(1).expect("sheet");
+        let mut presentation = DocumentPresentation::default();
+        let sheet = presentation.sheet_mut(sheet_id);
+        sheet.column_phonetic_visibility.push(
+            ColumnPhoneticVisibility::new(
+                Column::new(1).expect("A"),
+                Column::new(3).expect("C"),
+                true,
+            )
+            .expect("range"),
+        );
+        sheet
+            .row_phonetic_visibility
+            .insert(Row::new(2).expect("row"), false);
+        for a1 in ["A1", "B2", "C3"] {
+            let address = CellAddress::from_a1(a1).expect("address");
+            sheet.cell_phonetics.insert(address, annotated("か"));
+        }
+
+        for (address, entry) in presentation.phonetic_cell_entries(sheet_id) {
+            let single = presentation
+                .cell_phonetics(sheet_id, address)
+                .expect("same cell resolves through the per-cell lookup");
+            assert_eq!(
+                entry.effective_visibility(),
+                single.effective_visibility(),
+                "{address}"
+            );
+            assert_eq!(
+                entry.explicit_row_visibility(),
+                single.explicit_row_visibility(),
+                "{address}"
+            );
+            assert_eq!(
+                entry.explicit_column_visibility(),
+                single.explicit_column_visibility(),
+                "{address}"
+            );
+            assert_eq!(entry.runs(), single.runs(), "{address}");
+        }
+    }
+
+    #[test]
+    fn entries_are_empty_for_an_unknown_sheet() {
+        let presentation = DocumentPresentation::default();
+        let sheet_id = SheetId::new(9).expect("sheet");
+        assert_eq!(presentation.phonetic_cell_entries(sheet_id).count(), 0);
     }
 }

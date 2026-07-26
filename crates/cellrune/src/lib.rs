@@ -113,6 +113,7 @@ pub use formula::{
 pub use presentation::{
     CellPhonetics, ColumnPhoneticVisibility, DocumentPresentation, FrozenPane, PhoneticAlignment,
     PhoneticProperties, PhoneticRun, PhoneticTextRange, PhoneticType, PhoneticWriteOptions,
+    ResolvedPhoneticRun,
 };
 pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
 pub use workbook::{
