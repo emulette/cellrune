@@ -292,12 +292,6 @@ The following are outside the current scope:
 - spill postfix references such as `A1#`, general `LAMBDA`, and data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 
-Some of those are planned and some are deliberate boundaries.
-[`docs/ROADMAP.md`](https://github.com/emulette/cellrune/blob/main/docs/ROADMAP.md)
-separates the two, records the expected order of the planned work and the prerequisites between
-pieces, and states which items will not be implemented. Its version assignments are a plan rather
-than a commitment.
-
 CellRune does not claim complete Excel compatibility.
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
 records where calculated values are known to differ from Excel and why, including the iterative
