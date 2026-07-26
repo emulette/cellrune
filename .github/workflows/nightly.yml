@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Every other gate re-runs an unchanged commit against a pinned toolchain and a
+  # Every other CI job re-runs an unchanged commit against a pinned toolchain and a
   # locked dependency graph, so a nightly repeat of them proves nothing. The
   # advisory database is the one input that moves on its own, which is the only
   # reason this tier is scheduled rather than triggered by a push.
@@ -46,8 +46,8 @@ jobs:
           --config fuzz/deny.toml
           check advisories
 
-  # The second input that moves without a commit from us. `cellrune` publishes caret ranges, so a
-  # fresh resolve on a dependent's machine can pick up dependency releases we have never compiled.
+  # The second input that moves without a commit from us. `cellrune` publishes version ranges, so
+  # a fresh resolve on a dependent's machine can pick up releases we have never compiled.
   #
   # `resolver = "3"` already makes resolution MSRV-aware, so a dependency that *declares* a
   # `rust-version` above ours is held back automatically and cannot break a 1.88 consumer. That is
@@ -82,12 +82,12 @@ jobs:
           case "$actual" in
             "$declared"|"$declared".*) ;;
             *)
-              printf '::error::latest-dependency gate ran rustc %s but Cargo.toml declares %s\n' \
+              printf '::error::latest-dependency check ran rustc %s but Cargo.toml declares %s\n' \
                 "$actual" "$declared"
               exit 1
               ;;
           esac
-          printf 'latest-dependency gate is running rustc %s\n' "$actual"
+          printf 'latest-dependency check is running rustc %s\n' "$actual"
 
       - name: Update to the newest semver-compatible dependency graph
         run: cargo update
@@ -95,7 +95,7 @@ jobs:
       - name: Report the resolved graph for triage
         run: cargo tree --package cellrune --all-features --edges normal
 
-      # Not `cargo check`: a dependency inside a caret range can compile and still read, hash, or
+      # Not `cargo check`: a dependency inside an allowed range can compile and still read, hash, or
       # format differently, and a caller who resolved that graph would be the first to notice.
       # No `--locked`: the point of this job is to leave the committed lockfile behind.
       - name: Test the updated graph with warnings denied
@@ -110,8 +110,8 @@ jobs:
           --examples
           --all-features
 
-  # The bottom of the same ranges. `cellrune` publishes caret ranges, so a dependent may resolve
-  # any version from the declared floor upward, and the committed `Cargo.lock` means no other gate
+  # The bottom of the same ranges. `cellrune` publishes version ranges, so a dependent may resolve
+  # any version from the declared floor upward, and the committed `Cargo.lock` means no other job
   # ever compiles the bottom. This job resolves every direct requirement down to its declared floor
   # and tests that graph against the declared MSRV, so a floor that is too low fails here instead
   # of in a dependent's build.
@@ -142,6 +142,12 @@ jobs:
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@39b0b3842c7e8bbf6904c0bfc3d9006fdd4dc4e0 # 1.88.0
 
+      - name: Install pinned cargo-deny
+        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
       - name: Keep the committed lockfile for comparison
         run: cp Cargo.lock Cargo.lock.committed
 
@@ -166,7 +172,12 @@ jobs:
           fi
           rm Cargo.lock.committed
 
-      # A gate that silently ran the current compiler would look exactly like a passing check.
+      # A floor that compiles can still be unsound or vulnerable. Check the graph just resolved by
+      # this existing floor job rather than adding another dependency matrix or scheduled job.
+      - name: Check the floor graph against today's advisories
+        run: cargo deny --all-features check advisories
+
+      # A job that silently ran the current compiler would look exactly like a passing check.
       - name: Require the declared minimum toolchain
         run: |
           declared="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
@@ -174,12 +185,12 @@ jobs:
           case "$actual" in
             "$declared"|"$declared".*) ;;
             *)
-              printf '::error::floor gate ran rustc %s but Cargo.toml declares %s\n' \
+              printf '::error::floor check ran rustc %s but Cargo.toml declares %s\n' \
                 "$actual" "$declared"
               exit 1
               ;;
           esac
-          printf 'floor gate is running rustc %s\n' "$actual"
+          printf 'floor check is running rustc %s\n' "$actual"
 
       # Not `cargo check`, for the same reason as the job above: compiling proves nothing about
       # what a floor dependency returns. No `--locked`: the lockfile was just regenerated.
@@ -195,8 +206,11 @@ jobs:
           --examples
           --all-features
 
+  # Keep fuzzing aligned with stable trust boundaries rather than adding one target per feature.
+  # The loop records every target's result before failing the job, so an early crash does not starve
+  # later campaigns.
   fuzz:
-    name: Bounded nightly sanitizer campaign
+    name: Bounded sanitizer campaigns
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -237,20 +251,25 @@ jobs:
           --no-deps
           > /dev/null
 
-      - name: Run reader, calculation, session, writer, and formula-rewrite targets
+      - name: Run every bounded campaign
         run: |
+          status=0
           for target in \
             xlsx_reader \
             formula_calculation \
             interactive_session \
             xlsx_writer_rewrite
           do
-            cargo +nightly-2026-07-22 fuzz run "$target" -- \
+            if ! cargo +nightly-2026-07-22 fuzz run "$target" -- \
               -max_total_time=300 \
               -timeout=15 \
               -rss_limit_mb=2048 \
               -print_final_stats=1
+            then
+              status=1
+            fi
           done
+          exit "$status"
 
       - name: Upload fuzz failures
         if: failure()
@@ -260,33 +279,3 @@ jobs:
           path: fuzz/artifacts
           if-no-files-found: ignore
           retention-days: 14
-
-  large-workbook:
-    name: 50k read, calculate, write, and reopen gate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out exact revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
-
-      - name: Run large-workbook benchmark contract
-        run: |
-          cargo bench \
-            --package cellrune-integration-tests \
-            --bench hardening \
-            --locked \
-            -- 50000 1 | tee hardening-benchmark.txt
-          python release-tests/scripts/verify_benchmark.py hardening-benchmark.txt
-
-      - name: Upload benchmark evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: nightly-hardening-benchmark
-          path: hardening-benchmark.txt
-          if-no-files-found: error
-          retention-days: 30

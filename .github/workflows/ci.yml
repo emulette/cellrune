@@ -218,10 +218,12 @@ jobs:
           esac
           printf 'MSRV gate is running rustc %s\n' "$actual"
 
-      - name: Check workspace libraries with warnings denied
+      # `--all-targets`, not `--lib`: tests, benches, and the extractor binary must also build
+      # on the declared floor, or the floor only holds for the part of the tree users import.
+      - name: Check every workspace target with warnings denied
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --workspace --lib --all-features --locked
+        run: cargo check --workspace --all-targets --all-features --locked
 
   platform-tests:
     name: Core and MCP (${{ matrix.os }})
