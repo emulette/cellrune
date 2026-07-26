@@ -1,6 +1,8 @@
+use super::super::ArithmeticSemantics;
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
+use super::super::operators::CANCELLATION_WINDOW;
 use super::super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone)]
@@ -82,14 +84,48 @@ pub(super) fn required_text(
     super::super::coerce::to_text(&engine.eval_scalar(context, expr))
 }
 
-/// Adds Excel numeric values using `+0.0` as the additive identity.
+/// Adds Excel numeric values using `+0.0` as the additive identity, under the engine's configured
+/// arithmetic policy.
 ///
 /// `Iterator::sum` for `f64` folds from `-0.0`, which is the true additive identity for floats
 /// because `-0.0 + x == x` holds even when `x` is `-0.0`. That makes an empty sum negative zero,
 /// while Excel reports `0` for a sum over no numbers. Spreadsheet kernels must therefore not use
 /// `Iterator::sum` directly.
-pub(super) fn excel_sum(values: impl IntoIterator<Item = f64>) -> f64 {
-    values.into_iter().fold(0.0, |total, value| total + value)
+///
+/// A running total is also a chain of additions, so it accumulates exactly the residue the
+/// operator path corrects. Without the same correction here, one release would answer
+/// `=A1+A2+A3` and `=SUM(A1:A3)` differently, which is not a compatibility mode but a
+/// contradiction. The correction is applied at each step, against the term that produced it,
+/// matching what `a + b + c` does in the operator path.
+pub(super) fn excel_sum(engine: &Engine<'_>, values: impl IntoIterator<Item = f64>) -> f64 {
+    let excel_near_zero = matches!(
+        engine.arithmetic_semantics(),
+        ArithmeticSemantics::ExcelNearZero
+    );
+    values.into_iter().fold(0.0, |total, value| {
+        let next = total + value;
+        if excel_near_zero {
+            correct_sum_cancellation(total, value, next)
+        } else {
+            next
+        }
+    })
+}
+
+/// The `excel_sum` counterpart of the operator path's cancellation correction.
+///
+/// Kept beside the fold rather than shared with `operators.rs` because that function also decides
+/// which operators are eligible; here every step is an addition by construction.
+fn correct_sum_cancellation(total: f64, value: f64, next: f64) -> f64 {
+    if next == 0.0 {
+        return next;
+    }
+    let larger = total.abs().max(value.abs());
+    if next.abs() < larger * CANCELLATION_WINDOW {
+        0.0
+    } else {
+        next
+    }
 }
 
 pub(super) fn excel_numeric_arguments(

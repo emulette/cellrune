@@ -77,9 +77,9 @@ fn aggregate_numbers(
         }
     }
     let result = match aggregate {
-        Aggregate::Sum => excel_sum(numbers.iter().copied()),
+        Aggregate::Sum => excel_sum(engine, numbers.iter().copied()),
         Aggregate::Average if numbers.is_empty() => return Value::Error(ErrorKind::Div0),
-        Aggregate::Average => excel_sum(numbers.iter().copied()) / numbers.len() as f64,
+        Aggregate::Average => excel_sum(engine, numbers.iter().copied()) / numbers.len() as f64,
         Aggregate::Min => numbers.into_iter().reduce(f64::min).unwrap_or(0.0),
         Aggregate::Max => numbers.into_iter().reduce(f64::max).unwrap_or(0.0),
         Aggregate::Product if numbers.is_empty() => 0.0,

@@ -404,12 +404,47 @@ impl FunctionUsageReport {
     }
 }
 
+/// How arithmetic treats a sum or difference that cancels to near zero.
+///
+/// Excel corrects such a result to exactly zero; IEEE-754 keeps the residue left by representing
+/// decimal literals in binary. The difference is visible beyond the number itself, because a
+/// residue of `5.551115123125783e-17` makes `=(0.1+0.2-0.3)=0` false.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum ArithmeticSemantics {
+    /// Snap a cancelling sum or difference to zero, as Excel does.
+    #[default]
+    ExcelNearZero,
+    /// Return the IEEE-754 result unchanged, as releases up to 0.1.2 did.
+    Ieee754,
+}
+
+/// How the iterative financial solvers decide they have failed.
+///
+/// `IRR`, `XIRR`, and `RATE` have no closed form, so their answers depend on the search that
+/// produced them. Excel's search method is undocumented; what Microsoft does document is the
+/// iteration budget and the convergence tolerance, and that budget is what decides whether a given
+/// input yields a number or `#NUM!`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum FinancialSolverSemantics {
+    /// Stop at the iteration budget and tolerance Microsoft documents per function, so inputs
+    /// Excel abandons produce `#NUM!` here too.
+    #[default]
+    ExcelIterationBudget,
+    /// Search longer and converge tighter than Excel, as releases up to 0.1.2 did. Returns a value
+    /// for some inputs where Excel returns `#NUM!`.
+    ExtendedSearch,
+}
+
 /// Deterministic inputs for volatile calculation behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CalculationOptions {
     today_serial: Option<FiniteNumber>,
     now_serial: Option<FiniteNumber>,
     limits: CalculationLimits,
+    arithmetic: ArithmeticSemantics,
+    financial_solver: FinancialSolverSemantics,
 }
 
 impl CalculationOptions {
@@ -444,6 +479,31 @@ impl CalculationOptions {
     /// Returns the configured formula calculation resource limits.
     pub const fn limits(self) -> CalculationLimits {
         self.limits
+    }
+
+    /// Selects how a cancelling sum or difference is treated.
+    pub const fn with_arithmetic_semantics(mut self, arithmetic: ArithmeticSemantics) -> Self {
+        self.arithmetic = arithmetic;
+        self
+    }
+
+    /// Returns the configured near-zero arithmetic policy.
+    pub const fn arithmetic_semantics(self) -> ArithmeticSemantics {
+        self.arithmetic
+    }
+
+    /// Selects how the iterative financial solvers decide they have failed.
+    pub const fn with_financial_solver_semantics(
+        mut self,
+        financial_solver: FinancialSolverSemantics,
+    ) -> Self {
+        self.financial_solver = financial_solver;
+        self
+    }
+
+    /// Returns the configured financial solver policy.
+    pub const fn financial_solver_semantics(self) -> FinancialSolverSemantics {
+        self.financial_solver
     }
 }
 

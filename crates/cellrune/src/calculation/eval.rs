@@ -200,6 +200,14 @@ impl<'workbook> Engine<'workbook> {
         self.dependency_limit_exceeded
     }
 
+    pub(super) const fn arithmetic_semantics(&self) -> crate::ArithmeticSemantics {
+        self.options.arithmetic_semantics()
+    }
+
+    pub(super) const fn financial_solver_semantics(&self) -> crate::FinancialSolverSemantics {
+        self.options.financial_solver_semantics()
+    }
+
     pub(super) fn max_array_cells(&self) -> u64 {
         self.options.limits().max_array_cells()
     }

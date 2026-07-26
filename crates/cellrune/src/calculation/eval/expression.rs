@@ -74,6 +74,7 @@ impl Engine<'_> {
                 &self.eval_scalar(context, left),
                 &self.eval_scalar(context, right),
                 self.options.limits().max_text_bytes(),
+                self.arithmetic_semantics(),
             ),
         }
     }
@@ -117,6 +118,7 @@ impl Engine<'_> {
                 &self.eval_array(context, right)?,
                 self.options.limits().max_text_bytes(),
                 self.options.limits().max_array_cells(),
+                self.arithmetic_semantics(),
             ),
             Expr::Unary { op, operand } => {
                 let array = self.eval_array(context, operand)?;

@@ -1,3 +1,4 @@
+use super::super::FinancialSolverSemantics;
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
@@ -169,6 +170,7 @@ fn npv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Err(kind) => return Value::Error(kind),
     };
     let total = excel_sum(
+        engine,
         cashflows
             .iter()
             .enumerate()
@@ -440,16 +442,36 @@ fn numeric_cashflows(
     Ok(values)
 }
 
+/// Iteration budget and step tolerance for the two solver policies.
+///
+/// The Excel figures are the ones Microsoft documents for `IRR`, `XIRR`, and `RATE`: at most
+/// twenty passes, and convergence declared once the estimate moves by less than `0.0000001`. What
+/// is *not* documented is the search Excel runs inside that budget, so this reproduces when Excel
+/// gives up, not how it looks. Two searches with the same budget can still disagree about which
+/// borderline inputs converge, and that residue is a documented difference rather than a defect.
+const EXCEL_SOLVER_ITERATIONS: u64 = 20;
+const EXCEL_SOLVER_TOLERANCE: f64 = 1e-7;
+const EXTENDED_SOLVER_ITERATIONS: u64 = 100;
+const EXTENDED_SOLVER_TOLERANCE: f64 = 1e-10;
+
 fn solve_newton(
     engine: &Engine<'_>,
     work_per_iteration: usize,
     mut guess: f64,
     function: impl Fn(f64) -> (f64, f64),
 ) -> Value {
+    let (max_iterations, tolerance) = match engine.financial_solver_semantics() {
+        FinancialSolverSemantics::ExcelIterationBudget => {
+            (EXCEL_SOLVER_ITERATIONS, EXCEL_SOLVER_TOLERANCE)
+        }
+        FinancialSolverSemantics::ExtendedSearch => {
+            (EXTENDED_SOLVER_ITERATIONS, EXTENDED_SOLVER_TOLERANCE)
+        }
+    };
     let Ok(work_per_iteration) = u64::try_from(work_per_iteration.max(1)) else {
         return Value::Error(ErrorKind::Num);
     };
-    for iteration in 1_u64..=100 {
+    for iteration in 1_u64..=max_iterations {
         let Some(work) = work_per_iteration.checked_mul(iteration) else {
             return Value::Error(ErrorKind::Num);
         };
@@ -464,7 +486,7 @@ fn solve_newton(
             return Value::Error(ErrorKind::Num);
         }
         let next = guess - value / derivative;
-        if (next - guess).abs() <= 1e-10 {
+        if (next - guess).abs() <= tolerance {
             return financial_value(next);
         }
         guess = next;

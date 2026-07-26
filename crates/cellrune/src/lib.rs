@@ -62,11 +62,19 @@
 //! Calculated numbers are not guaranteed to be bit-identical to Excel's.
 //! [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
 //! records every known deliberate difference, the Excel build each statement was
-//! measured against, and which function families remain unmeasured. The differences that most
-//! often surprise callers are the iterative financial solvers (`IRR`, `XIRR`, `RATE`), which search
-//! longer than Excel and therefore return values where Excel reports `#NUM!`, and IEEE-754
-//! arithmetic near zero, which is not snapped to zero the way Excel snaps it. Compare results with
-//! a tolerance rather than for equality.
+//! measured against, and which function families remain unmeasured. Compare results with a
+//! tolerance rather than for equality.
+//!
+//! Two behaviors are selectable through [`CalculationOptions`], and both default to matching
+//! Excel rather than to what releases up to 0.1.2 did:
+//!
+//! - [`ArithmeticSemantics`] decides whether a sum or difference that cancels to near zero is
+//!   corrected to zero, as Excel does, or left as the IEEE-754 residue.
+//! - [`FinancialSolverSemantics`] decides whether `IRR`, `XIRR`, and `RATE` stop at the iteration
+//!   budget Microsoft documents, or search longer and return values where Excel reports `#NUM!`.
+//!
+//! Select [`ArithmeticSemantics::Ieee754`] and [`FinancialSolverSemantics::ExtendedSearch`] to
+//! restore the 0.1.2 behavior.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -85,16 +93,17 @@ mod xlsx;
 
 pub use address::{CellAddress, CellRange, Column, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, Row};
 pub use calculation::{
-    ApplyChangesError, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
-    CalculationDelta, CalculationDeltaCell, CalculationDeltaPage, CalculationExecutionMode,
-    CalculationIssue, CalculationIssueCode, CalculationLimits, CalculationOptions,
-    CalculationOptionsError, CalculationSnapshot, CancellationToken, CompletedCalculation,
-    FormulaCapability, FormulaCapabilityEntry, FormulaCapabilityReport, FunctionCatalogEntry,
-    FunctionSupport, FunctionUsageEntry, FunctionUsageReport, MaterializedCalculationCell,
-    MaterializedResultOrigin, PreparedCalculation, PreparedEditBatch, RecalculationMode,
-    SessionError, SessionErrorCode, SessionLimits, WorkbookCalculationSession, calculate_workbook,
-    scan_formula_capabilities, scan_formula_capabilities_with_options, scan_function_usage,
-    scan_function_usage_with_options, supported_function_catalog,
+    ApplyChangesError, ArithmeticSemantics, CalculationCellId, CalculationCellResult,
+    CalculationDecisionReason, CalculationDelta, CalculationDeltaCell, CalculationDeltaPage,
+    CalculationExecutionMode, CalculationIssue, CalculationIssueCode, CalculationLimits,
+    CalculationOptions, CalculationOptionsError, CalculationSnapshot, CancellationToken,
+    CompletedCalculation, FinancialSolverSemantics, FormulaCapability, FormulaCapabilityEntry,
+    FormulaCapabilityReport, FunctionCatalogEntry, FunctionSupport, FunctionUsageEntry,
+    FunctionUsageReport, MaterializedCalculationCell, MaterializedResultOrigin,
+    PreparedCalculation, PreparedEditBatch, RecalculationMode, SessionError, SessionErrorCode,
+    SessionLimits, WorkbookCalculationSession, calculate_workbook, scan_formula_capabilities,
+    scan_formula_capabilities_with_options, scan_function_usage, scan_function_usage_with_options,
+    supported_function_catalog,
 };
 pub use cell::{
     Cell, CellContent, CellValue, ExcelError, FiniteNumber, NumberFormat, NumberFormatKind,

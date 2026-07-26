@@ -21,23 +21,39 @@ formula cell. That makes any Excel-authored workbook both a test input and its o
 
 ## Verified
 
-### Deliberate difference: iterative financial solvers
+### Selectable: iterative financial solvers
 
 `IRR`, `XIRR`, and `RATE` are root-finding functions with no closed form, so their results depend on
-the search that produced them.
+the search that produced them. From 0.1.3 the search budget is a calculation option.
 
-| | CellRune | Excel (documented) |
+| | Default (`ExcelIterationBudget`) | Opt-in (`ExtendedSearch`) |
 | --- | --- | --- |
-| Method | Newton–Raphson | undocumented |
-| Maximum iterations | 100 | 20 |
-| Convergence tolerance | `1e-10` on the step | `1e-7` relative |
+| Method | Newton–Raphson | Newton–Raphson |
+| Maximum iterations | 20 | 100 |
+| Convergence tolerance | `1e-7` on the step | `1e-10` on the step |
 
-CellRune searches longer and converges tighter. The practical consequence is not a rounding
-difference: **CellRune returns a value for some inputs where Excel returns `#NUM!`**, because Excel
-abandons the search after 20 attempts. Where both converge, results agree well within `1e-8`.
+The default reproduces the iteration budget and tolerance Microsoft documents for these three
+functions, so an input Excel abandons is abandoned here too and yields `#NUM!`.
 
-This is a deliberate choice in favour of the mathematically better answer. Treat a CellRune result
-with an Excel `#NUM!` counterpart as a difference in search effort, not as a defect on either side.
+**What the default does not reproduce is Excel's search itself, which Microsoft does not document.**
+Two searches with the same budget can still disagree about which borderline inputs converge. Expect
+agreement on which inputs are hopeless, not a guarantee of an identical `#NUM!` boundary.
+
+Releases 0.1.0 through 0.1.2 behaved as `ExtendedSearch` does, with no way to select otherwise.
+That search returns a value for some inputs where Excel returns `#NUM!`. It remains available:
+
+```rust
+use cellrune::{CalculationOptions, FinancialSolverSemantics};
+
+let options = CalculationOptions::default()
+    .with_financial_solver_semantics(FinancialSolverSemantics::ExtendedSearch);
+```
+
+The default changed because a compatibility engine's job is to agree with the tool its inputs came
+from. Searching longer produces the mathematically better answer, but it produces it where Excel
+produces an error, and a caller comparing the two sees a defect rather than an improvement.
+Whichever policy is selected, both find the same root when both converge; they differ only in when
+they give up.
 
 ### Deliberate difference: `DOLLAR` currency formatting
 
@@ -51,24 +67,58 @@ depends on. There is currently no explicit locale input to opt into the host con
 
 Differences of this kind are formatting differences, not calculation failures.
 
-### Deliberate difference: IEEE-754 arithmetic near zero
+### Selectable: arithmetic that cancels to near zero
 
-CellRune evaluates arithmetic operators in IEEE-754 double precision and does not reproduce Excel's
-correction that snaps a near-zero addition or subtraction result to exactly zero.
+Writing `0.1` in binary is inexact, so a sum or difference of decimal literals can leave a residue
+where the exact answer is zero. Excel corrects such a result to zero; IEEE-754 does not. From 0.1.3
+this is a calculation option, and the correction is the default.
 
-| Formula | CellRune | Excel |
+| Formula | Default (`ExcelNearZero`) | Opt-in (`Ieee754`) |
 | --- | --- | --- |
-| `=0.1+0.2-0.3` | `5.551115123125783e-17` | `0` |
-| `=(0.5-0.4)-0.1` | `-2.7755575615628914e-17` | `0` |
-| `=1.1-1` | `0.10000000000000009` | `0.1` |
+| `=0.1+0.2-0.3` | `0` | `5.551115123125783e-17` |
+| `=(0.5-0.4)-0.1` | `0` | `-2.7755575615628914e-17` |
+| `=SUM(0.1,0.2,-0.3)` | `0` | `5.551115123125783e-17` |
 
-Compare such results with a tolerance rather than for equality. Note that this also affects
-comparisons: a formula of the form `=(0.1+0.2-0.3)=0` is `FALSE` in CellRune and `TRUE` in Excel.
+The correction is applied at each addition and subtraction, in the operator path and in the running
+total that `SUM`, `AVERAGE`, `SUMIF`, `SUBTOTAL`, and `NPV` share. That matters beyond the number
+itself: `=(0.1+0.2-0.3)=0` is `TRUE` under the default and `FALSE` under `Ieee754`, and the same
+choice reaches every `IF` branch that compares a computed value against zero.
 
-Signed zero is not part of this difference. No calculated value is negative zero: the engine
-normalizes `-0.0` at the boundary where calculated values leave the calculation, so an empty
-`SUM`, `MIN(-0)`, and `PRODUCT(-1,0)` all return positive zero as Excel reports; see the 0.1.1
-entry in `CHANGELOG.md`.
+Releases 0.1.0 through 0.1.2 behaved as `Ieee754` does. It remains available:
+
+```rust
+use cellrune::{ArithmeticSemantics, CalculationOptions};
+
+let options = CalculationOptions::default()
+    .with_arithmetic_semantics(ArithmeticSemantics::Ieee754);
+```
+
+#### What the correction deliberately does not reach
+
+The window is relative to the operands of the operation being corrected, so it removes residue
+created *at that operation's magnitude*. `=100.1-100-0.1` is exactly zero and still returns
+`-5.689893001203927e-15`: the residue was created by the first subtraction, where it is a small
+fraction of `100.1`, and by the second subtraction the operands are around `0.1`, where the same
+residue is far too large to look like cancellation noise.
+
+Widening the window is not the fix. `=1.0000000000001-1` is a difference the author meant, sits at
+almost the same relative magnitude, and is well within the fifteen significant digits Excel keeps —
+so any threshold that catches the first corrupts the second. Separating them requires carrying an
+error term through every intermediate, which is a different engine rather than a wider constant.
+
+**Compare calculated numbers with a tolerance rather than for equality**, under either policy.
+
+#### Not part of this: fifteen-digit display
+
+`=1.1-1` shows `0.1` in Excel and `0.10000000000000009` here, and that is a *display* difference,
+not this correction. Excel stores the same residue — `=(1.1-1)=0.1` is `FALSE` in Excel too — and
+renders to fifteen significant digits. No arithmetic policy changes that value, and none should.
+
+#### Not part of this: signed zero
+
+No calculated value is negative zero under either policy. The engine normalizes `-0.0` at the
+boundary where calculated values leave the calculation, so an empty `SUM`, `MIN(-0)`, and
+`PRODUCT(-1,0)` all return positive zero as Excel reports; see the 0.1.1 entry in `CHANGELOG.md`.
 
 ### Matching: dates, including the 1900 leap-year bug
 

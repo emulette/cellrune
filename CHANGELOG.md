@@ -20,8 +20,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   Presentation state does not hold cell text, so the base text comes from the workbook snapshot;
   the iterator's documentation carries a compiled example of that join.
 
+- Two calculation compatibility modes on `CalculationOptions`, both defaulting to Excel's behavior
+  rather than to what 0.1.2 did. `ArithmeticSemantics::ExcelNearZero` corrects a sum or difference
+  that cancels to near zero, so `=0.1+0.2-0.3` is `0` and `=(0.1+0.2-0.3)=0` is `TRUE`; the
+  correction applies to the operator path, to the array path, and to the running total shared by
+  `SUM`, `AVERAGE`, `SUMIF`, `SUBTOTAL`, and `NPV`, so `=A1+A2+A3` and `=SUM(A1:A3)` cannot
+  disagree. `FinancialSolverSemantics::ExcelIterationBudget` stops `IRR`, `XIRR`, and `RATE` at the
+  twenty iterations and `1e-7` tolerance Microsoft documents, so inputs Excel abandons produce
+  `#NUM!` here too. `ArithmeticSemantics::Ieee754` and `FinancialSolverSemantics::ExtendedSearch`
+  restore the previous behavior. `docs/NUMERICS.md` records both, including what the near-zero
+  correction deliberately does not reach.
+
 ### Changed
 
+- **Calculated numbers change by default.** Arithmetic that cancels to near zero now returns zero,
+  and the financial solvers now give up where Excel gives up instead of searching four times
+  longer. Callers who depended on 0.1.2's numbers should select `ArithmeticSemantics::Ieee754` and
+  `FinancialSolverSemantics::ExtendedSearch`; callers comparing against Excel need no change.
 - CellRune is dual-licensed under `MIT OR Apache-2.0` at the recipient's option, instead of the MIT
   License alone. Apache-2.0 supplies an explicit patent grant that MIT does not, which some
   adopters require, and dual licensing under both is the Rust ecosystem's convention. Releases

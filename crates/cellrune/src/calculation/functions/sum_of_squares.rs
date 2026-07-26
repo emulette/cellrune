@@ -34,7 +34,10 @@ fn sumsq(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
         Ok(numbers) => numbers,
         Err(kind) => return Value::Error(kind),
     };
-    finite(excel_sum(numbers.into_iter().map(|number| number * number)))
+    finite(excel_sum(
+        engine,
+        numbers.into_iter().map(|number| number * number),
+    ))
 }
 
 fn paired(
