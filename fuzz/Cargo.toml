@@ -10,7 +10,10 @@ cargo-fuzz = true
 
 [dependencies]
 cellrune = { version = "=0.1.1", path = "../crates/cellrune" }
-libfuzzer-sys = "0.4.0"
+# The fuzz graph is excluded from the workspace and always built --locked, so neither the
+# floor nor the newest-compatible suite can exercise a range here. Pin the one version the
+# nightly campaign actually runs; this is a tool input, not a compatibility floor.
+libfuzzer-sys = "=0.4.13"
 
 [[bin]]
 name = "xlsx_reader"

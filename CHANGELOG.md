@@ -31,10 +31,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - Rust dependency requirements now declare the oldest API-compatible, advisory-clean versions
   instead of using the release that happened to be newest when each manifest was edited. All
   workspace requirements live in the root manifest, the lockfile still selects the reproducible
-  current graph, and broad ranges are bounded to the release families exercised by the floor and
-  newest-compatible suites. Seventeen of twenty-one external Rust floors moved down; four remain
-  at their current releases because they are the first secure version or belong to the same
-  release family (`quick-xml`, PyO3 and its build helper, and `calamine`).
+  current graph, and every release family a broad range admits is exercised by the floor or the
+  newest-compatible suite. Fifteen of the twenty external workspace floors moved down; five
+  remain at their current releases because they are the first secure version or belong to the
+  same release family (`quick-xml`, PyO3 and its build helper, and `calamine`), or because their
+  types appear in CellRune's public signatures and a public dependency must stay within one
+  semver family (`cap-std`). The fuzz crate's `libfuzzer-sys` stays exact-pinned as a tool
+  input: its graph is excluded from the workspace and always built `--locked`, so no suite
+  could exercise a range there.
 - The `conformance/` fixtures now live in `binding-contract/`, which is what they are: a
   cross-binding API behavior contract exercised by the Rust interop, Python, and Node test
   suites. Two 1 KB fixtures cannot carry an Excel conformance claim, so the `conformance/` name

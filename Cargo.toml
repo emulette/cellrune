@@ -28,7 +28,10 @@ publish = false
 # These are compatibility floors, not snapshots. The committed lockfile supplies the reproducible
 # graph; the nightly floor and newest-compatible runs exercise both ends of these requirements.
 calamine = { version = "0.36.0", default-features = false }
-cap-std = ">=3.4.1, <5"
+# `cap_std::fs::Dir` appears in published signatures, so this public dependency must stay
+# within one semver family: a multi-major range would let a dependent's resolver hand
+# CellRune a different `Dir` than the dependent's own.
+cap-std = ">=4.0.2, <5"
 clap = { version = ">=4.0.27, <5", features = ["derive"] }
 libm = { version = ">=0.1.3, <0.3", default-features = false }
 napi = { version = ">=3.0.0, <4", default-features = false, features = ["napi8"] }
@@ -45,7 +48,9 @@ rmcp = { version = ">=2.0.0, <3", default-features = false, features = [
 schemars = "1.0.0"
 serde = { version = "1.0.194", features = ["derive"] }
 serde_json = "1.0.127"
-sha2 = { version = ">=0.9.0, <0.12", default-features = false }
+# 0.10.0 is yanked, so 0.10.1 is the lowest version this range can actually resolve — a floor
+# below it would claim a configuration no suite (and no dependent) can ever build.
+sha2 = { version = ">=0.10.1, <0.12", default-features = false }
 tokio = { version = ">=1.44.2, <2", features = [
     "io-std",
     "macros",

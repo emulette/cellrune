@@ -53,7 +53,11 @@ A dependency floor must satisfy all of these conditions:
 - every version admitted by a cross-major range uses the same tested API and behavior boundary.
 
 Security can therefore keep a floor above the first version that merely compiles. Keep an explicit
-upper bound when CellRune intentionally spans multiple semver-incompatible release lines. Do not
+upper bound when CellRune intentionally spans multiple semver-incompatible release lines, and
+never span more families than the floor and newest-compatible suites actually resolve — a family
+in the middle of a range would be admitted untested. A dependency whose types appear in
+CellRune's public signatures must stay within one semver family: a multi-major range would let a
+dependent's resolver hand CellRune a different copy of that type than the dependent's own. Do not
 replace a floor with the current release during routine upgrades; update `Cargo.lock` instead.
 Test a proposed floor in a temporary worktree with:
 
