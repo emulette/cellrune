@@ -146,7 +146,7 @@ fn run(workbook_path: &Path, metadata_path: &Path, output_path: &Path) -> Result
                         ValueEncoding::Number { .. } => Tolerance::Scaled {
                             epsilon: SCALED_EPSILON,
                         },
-                        _ => Tolerance::Exact,
+                        _ => Tolerance::Exact {},
                     };
                     let result = calculation
                         .cell(CalculationCellId::new(sheet.id(), cell.address()))

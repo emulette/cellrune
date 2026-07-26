@@ -48,20 +48,20 @@ fn conformance_matrices_hold_against_their_recorded_oracles() {
 fn collect_matrices() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance");
     let mut matrices = Vec::new();
-    let entries = fs::read_dir(&root)
-        .unwrap_or_else(|error| panic!("conformance suite at {}: {error}", root.display()));
+    collect_matrices_into(&root, &mut matrices);
+    matrices.sort();
+    matrices
+}
+
+/// Collects every `.json` matrix under `directory` at any depth, so a matrix added in a deeper
+/// grouping cannot be silently excluded from the suite.
+fn collect_matrices_into(directory: &Path, matrices: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("conformance suite at {}: {error}", directory.display()));
     for entry in entries {
         let path = entry.expect("conformance suite directory entry").path();
         if path.is_dir() {
-            for nested in fs::read_dir(&path).expect("oracle directory must be readable") {
-                let nested = nested.expect("oracle directory entry").path();
-                if nested
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-                {
-                    matrices.push(nested);
-                }
-            }
+            collect_matrices_into(&path, matrices);
         } else if path
             .extension()
             .is_some_and(|extension| extension == "json")
@@ -69,8 +69,6 @@ fn collect_matrices() -> Vec<PathBuf> {
             matrices.push(path);
         }
     }
-    matrices.sort();
-    matrices
 }
 
 fn verify_matrix(path: &Path, matrix: &Matrix) {

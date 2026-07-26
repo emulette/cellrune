@@ -107,10 +107,14 @@ pub struct CaseEntry {
 }
 
 /// A cell value in matrix encoding, shared by literals and expectations.
+///
+/// Variants without data are zero-field struct variants, not unit variants: serde does not
+/// apply `deny_unknown_fields` to unit variants of internally tagged enums, and hand-edited
+/// matrices must fail loudly on a stray field instead of silently dropping it.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ValueEncoding {
-    Blank,
+    Blank {},
     Number {
         value: f64,
     },
@@ -127,11 +131,14 @@ pub enum ValueEncoding {
 }
 
 /// How a case's actual value is compared against its expected value.
+///
+/// `Exact` is a zero-field struct variant for the same reason as [`ValueEncoding::Blank`]:
+/// unit variants opt out of `deny_unknown_fields` under internal tagging.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Tolerance {
     /// Structural equality; finite numbers compare with exact `f64` equality.
-    Exact,
+    Exact {},
     /// `|actual - expected| <= epsilon * max(|actual|, |expected|, 1)` — relative with a unit
     /// floor, the same rule the external-corpus audit applies.
     Scaled { epsilon: f64 },
@@ -141,7 +148,7 @@ impl Tolerance {
     /// Returns whether this comparison policy is bounded and meaningful.
     pub fn is_valid(self) -> bool {
         match self {
-            Self::Exact => true,
+            Self::Exact {} => true,
             Self::Scaled { epsilon } => epsilon.is_finite() && (0.0..=1.0).contains(&epsilon),
         }
     }
@@ -169,7 +176,7 @@ pub enum CellruneStatus {
 /// schema must be extended deliberately, not silently.
 pub fn encode_cell_value(value: &CellValue) -> ValueEncoding {
     match value {
-        CellValue::Blank => ValueEncoding::Blank,
+        CellValue::Blank => ValueEncoding::Blank {},
         CellValue::Number(number) => ValueEncoding::Number {
             value: number.get(),
         },
@@ -192,7 +199,7 @@ pub fn encode_cell_value(value: &CellValue) -> ValueEncoding {
 /// Excel display forms.
 pub fn decode_cell_value(value: &ValueEncoding) -> Result<CellValue, String> {
     match value {
-        ValueEncoding::Blank => Ok(CellValue::Blank),
+        ValueEncoding::Blank {} => Ok(CellValue::Blank),
         ValueEncoding::Number { value } => FiniteNumber::new(*value)
             .map(CellValue::Number)
             .map_err(|_| format!("{MESSAGE_NON_FINITE_NUMBER}: {value}")),
@@ -228,13 +235,13 @@ pub fn values_match(actual: &CellValue, expected: &ValueEncoding, tolerance: Tol
     }
     match (actual, expected) {
         (CellValue::Number(actual), ValueEncoding::Number { value: expected }) => match tolerance {
-            Tolerance::Exact => actual.get() == *expected,
+            Tolerance::Exact {} => actual.get() == *expected,
             Tolerance::Scaled { epsilon } => {
                 let scale = actual.get().abs().max(expected.abs()).max(1.0);
                 (actual.get() - *expected).abs() <= epsilon * scale
             }
         },
-        (CellValue::Blank, ValueEncoding::Blank) => true,
+        (CellValue::Blank, ValueEncoding::Blank {}) => true,
         (CellValue::Text(actual), ValueEncoding::Text { value: expected }) => actual == expected,
         (CellValue::Logical(actual), ValueEncoding::Logical { value: expected }) => {
             actual == expected
@@ -248,11 +255,11 @@ pub fn values_match(actual: &CellValue, expected: &ValueEncoding, tolerance: Tol
 
 #[cfg(test)]
 mod tests {
-    use super::Tolerance;
+    use super::{Tolerance, ValueEncoding};
 
     #[test]
     fn tolerance_accepts_only_bounded_finite_policies() {
-        assert!(Tolerance::Exact.is_valid());
+        assert!(Tolerance::Exact {}.is_valid());
         assert!(Tolerance::Scaled { epsilon: 0.0 }.is_valid());
         assert!(Tolerance::Scaled { epsilon: 1.0 }.is_valid());
         assert!(
@@ -273,6 +280,28 @@ mod tests {
                 epsilon: f64::INFINITY,
             }
             .is_valid()
+        );
+    }
+
+    #[test]
+    fn dataless_variants_reject_unknown_fields() {
+        assert!(serde_json::from_str::<ValueEncoding>(r#"{"kind":"blank"}"#).is_ok());
+        assert!(serde_json::from_str::<ValueEncoding>(r#"{"kind":"blank","value":5}"#).is_err());
+        assert!(serde_json::from_str::<Tolerance>(r#"{"mode":"exact"}"#).is_ok());
+        assert!(serde_json::from_str::<Tolerance>(r#"{"mode":"exact","epsilon":1e-8}"#).is_err());
+    }
+
+    #[test]
+    fn data_variants_reject_unknown_fields() {
+        assert!(serde_json::from_str::<ValueEncoding>(r#"{"kind":"number","value":1.5}"#).is_ok());
+        assert!(
+            serde_json::from_str::<ValueEncoding>(r#"{"kind":"number","value":1.5,"bogus":true}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<Tolerance>(r#"{"mode":"scaled","epsilon":1e-8}"#).is_ok());
+        assert!(
+            serde_json::from_str::<Tolerance>(r#"{"mode":"scaled","epsilon":1e-8,"bogus":1}"#)
+                .is_err()
         );
     }
 }
