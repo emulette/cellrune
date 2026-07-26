@@ -55,6 +55,10 @@ class Workbook:
         *,
         today_serial: float | None = None,
         now_serial: float | None = None,
+        arithmetic_semantics: Literal["excel_near_zero", "ieee_754"] = "excel_near_zero",
+        financial_solver_semantics: Literal[
+            "excel_iteration_budget", "extended_search"
+        ] = "excel_iteration_budget",
     ) -> CalculationReport: ...
     def recalculate(
         self,
@@ -62,6 +66,10 @@ class Workbook:
         mode: Literal["auto", "incremental", "full"] = "auto",
         today_serial: float | None = None,
         now_serial: float | None = None,
+        arithmetic_semantics: Literal["excel_near_zero", "ieee_754"] = "excel_near_zero",
+        financial_solver_semantics: Literal[
+            "excel_iteration_budget", "extended_search"
+        ] = "excel_iteration_budget",
     ) -> CalculationDelta: ...
     def apply_changes(
         self,

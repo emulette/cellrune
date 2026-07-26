@@ -26,14 +26,13 @@ formula cell. That makes any Excel-authored workbook both a test input and its o
 `IRR`, `XIRR`, and `RATE` are root-finding functions with no closed form, so their results depend on
 the search that produced them. From 0.1.3 the search budget is a calculation option.
 
-| | Default (`ExcelIterationBudget`) | Opt-in (`ExtendedSearch`) |
-| --- | --- | --- |
-| Method | Newton–Raphson | Newton–Raphson |
-| Maximum iterations | 20 | 100 |
-| Convergence tolerance | `1e-7` on the step | `1e-10` on the step |
+| Function | Default maximum | Default step tolerance | `ExtendedSearch` |
+| --- | --- | --- | --- |
+| `IRR`, `RATE` | 20 | `1e-7` | 100 / `1e-10` |
+| `XIRR` | 100 | `1e-8` | 100 / `1e-10` |
 
-The default reproduces the iteration budget and tolerance Microsoft documents for these three
-functions, so an input Excel abandons is abandoned here too and yields `#NUM!`.
+The default reproduces the function-specific iteration budgets and tolerances Microsoft documents.
+When CellRune's Newton search exhausts the applicable budget, it returns `#NUM!`.
 
 **What the default does not reproduce is Excel's search itself, which Microsoft does not document.**
 Two searches with the same budget can still disagree about which borderline inputs converge. Expect
@@ -78,11 +77,17 @@ this is a calculation option, and the correction is the default.
 | `=0.1+0.2-0.3` | `0` | `5.551115123125783e-17` |
 | `=(0.5-0.4)-0.1` | `0` | `-2.7755575615628914e-17` |
 | `=SUM(0.1,0.2,-0.3)` | `0` | `5.551115123125783e-17` |
+| `=100.1-100-0.1` | `0` | `-5.689893001203927e-15` |
 
-The correction is applied at each addition and subtraction, in the operator path and in the running
-total that `SUM`, `AVERAGE`, `SUMIF`, `SUBTOTAL`, and `NPV` share. That matters beyond the number
-itself: `=(0.1+0.2-0.3)=0` is `TRUE` under the default and `FALSE` under `Ieee754`, and the same
-choice reaches every `IF` branch that compares a computed value against zero.
+The correction is applied at each addition and subtraction, in the operator path and in the
+policy-aware running totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, and
+`NPV`. Alongside the `f64` result, scalar addition/subtraction trees and aggregate accumulators
+carry an exact trace of the parsed decimal inputs. `NPV` carries the same proof as an exact
+rational trace through discounting. A result is replaced with zero only when that trace is exactly
+zero; there is no widened near-zero interval that can swallow a neighboring real difference. That
+matters beyond the number itself:
+`=(0.1+0.2-0.3)=0` is `TRUE` under the default and `FALSE` under `Ieee754`, and the same choice
+reaches every `IF` branch that compares a computed value against zero.
 
 Releases 0.1.0 through 0.1.2 behaved as `Ieee754` does. It remains available:
 
@@ -93,18 +98,10 @@ let options = CalculationOptions::default()
     .with_arithmetic_semantics(ArithmeticSemantics::Ieee754);
 ```
 
-#### What the correction deliberately does not reach
-
-The window is relative to the operands of the operation being corrected, so it removes residue
-created *at that operation's magnitude*. `=100.1-100-0.1` is exactly zero and still returns
-`-5.689893001203927e-15`: the residue was created by the first subtraction, where it is a small
-fraction of `100.1`, and by the second subtraction the operands are around `0.1`, where the same
-residue is far too large to look like cancellation noise.
-
-Widening the window is not the fix. `=1.0000000000001-1` is a difference the author meant, sits at
-almost the same relative magnitude, and is well within the fifteen significant digits Excel keeps —
-so any threshold that catches the first corrupts the second. Separating them requires carrying an
-error term through every intermediate, which is a different engine rather than a wider constant.
+The release suite checks this policy against an exact fixed-point decimal reference. Its committed
+generated cases include both `=100.1-100-0.1`, which must become zero, and
+`=100.1-100-0.099999999999999`, whose exact value is `1e-15` and must remain nonzero. Operator,
+array, ordinary aggregate, and conditional aggregate paths are also compared under both modes.
 
 **Compare calculated numbers with a tolerance rather than for equality**, under either policy.
 

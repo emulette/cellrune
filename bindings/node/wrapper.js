@@ -24,6 +24,7 @@ const {
   requireNonNegativeInteger,
   requireOptionalBoolean,
   requireOptionalFinite,
+  requireOptionalString,
   requireOptions,
   requireString,
   requireU64BigInt,
@@ -97,10 +98,17 @@ class Workbook {
     requireOptions(options);
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
+    requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
+    requireOptionalString(
+      options.financialSolverSemantics,
+      "financialSolverSemantics",
+    );
     const task = withSyncErrors(() =>
       this.#session().calculate(
         options.todaySerial ?? null,
         options.nowSerial ?? null,
+        options.arithmeticSemantics ?? null,
+        options.financialSolverSemantics ?? null,
       ),
     );
     return normalizeCalculationReport(await withErrors(task));
@@ -114,11 +122,18 @@ class Workbook {
     }
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
+    requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
+    requireOptionalString(
+      options.financialSolverSemantics,
+      "financialSolverSemantics",
+    );
     const task = withSyncErrors(() =>
       this.#session().recalculate(
         mode,
         options.todaySerial ?? null,
         options.nowSerial ?? null,
+        options.arithmeticSemantics ?? null,
+        options.financialSolverSemantics ?? null,
       ),
     );
     return normalizeCalculationDelta(await withErrors(task));

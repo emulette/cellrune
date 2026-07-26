@@ -6,8 +6,8 @@ export declare class NativeWorkbook {
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
   functionUsage(): NativeFunctionUsageReport
-  calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCalculationReport>
-  recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCalculationDelta>
+  calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationReport>
+  recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationDelta>
   applyChanges(expectedRevision: string, batchJson: string): NativeEditReceipt
   changesSince(cursor: string, limit: number): NativeCalculationDeltaPage
   cancelCalculation(): boolean

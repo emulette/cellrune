@@ -394,6 +394,92 @@ fn stdio_workflow_matches_the_rust_interop_session() {
 }
 
 #[test]
+fn calculation_compatibility_modes_are_stdio_visible() {
+    let root = TestDirectory::new("calculation-modes");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A1",
+                    "formula": "=100.1-100-0.1",
+                    "dynamic_range": null
+                },
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A2",
+                    "formula": "=IRR({-1,100000})",
+                    "dynamic_range": null
+                }
+            ]
+        }),
+    ));
+
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full"}),
+    ));
+    let defaults = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({
+            "session_id": session_id,
+            "sheet": "Sheet1",
+            "start": "A1",
+            "end": "A2"
+        }),
+    ));
+    assert_eq!(
+        defaults["cells"][0]["calculated"]["value"]["value"],
+        json!(0.0)
+    );
+    assert_eq!(
+        defaults["cells"][1]["calculated"]["value"]["value"],
+        json!("#NUM!")
+    );
+
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({
+            "session_id": session_id,
+            "mode": "full",
+            "arithmetic_semantics": "ieee_754",
+            "financial_solver_semantics": "extended_search"
+        }),
+    ));
+    let legacy = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({
+            "session_id": session_id,
+            "sheet": "Sheet1",
+            "start": "A1",
+            "end": "A2"
+        }),
+    ));
+    assert_ne!(
+        legacy["cells"][0]["calculated"]["value"]["value"],
+        json!(0.0)
+    );
+    let rate = legacy["cells"][1]["calculated"]["value"]["value"]
+        .as_f64()
+        .expect("extended search produces a number");
+    assert!((rate - 99_999.0).abs() < 1e-5);
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
 fn response_limit_failures_do_not_commit_session_edit_calculation_or_file_state() {
     let root = TestDirectory::new("response-limit");
     let mut mcp = McpProcess::start(&root.path, &["--max-response-bytes", "1024"]);

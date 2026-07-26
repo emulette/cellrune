@@ -1,4 +1,5 @@
 use super::CalculationLimitKind;
+use super::ast::NumberLiteral;
 use super::value::ErrorKind;
 use super::{
     ERROR_LEX_UNEXPECTED_CHARACTER, ERROR_LEX_UNKNOWN_ERROR_LITERAL,
@@ -7,7 +8,7 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Number(f64),
+    Number(NumberLiteral),
     Str(String),
     Ident(String),
     QuotedSheet(String),
@@ -201,7 +202,7 @@ pub fn lex(input: &str, max_tokens: u64) -> Result<Vec<Token>, LexError> {
                     limit: None,
                 })?;
                 tokens.push(if number.is_finite() {
-                    Token::Number(number)
+                    Token::Number(NumberLiteral::from_literal(number, &literal))
                 } else {
                     Token::ErrorLit(ErrorKind::Num)
                 });

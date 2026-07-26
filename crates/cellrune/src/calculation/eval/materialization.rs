@@ -1,7 +1,8 @@
+use super::expression::ArrayEvaluation;
 use super::reference::cell_at;
 use super::{Engine, public_to_internal, value_from_calculation_result};
 use crate::calculation::limits::CalculationLimitKind;
-use crate::calculation::runtime::{Array, CellId, Rect};
+use crate::calculation::runtime::{CellId, Rect};
 use crate::calculation::value::{ErrorKind, Value};
 use crate::calculation::{CalculationSnapshot, MaterializedResultOrigin};
 use crate::{CellContent, FormulaMetadata, WorkbookSnapshot};
@@ -49,6 +50,9 @@ impl Engine<'_> {
                 internal_id,
                 value_from_calculation_result(materialized.result()),
             );
+            if let Some(trace) = previous.numeric_decimal_trace(public_id) {
+                self.numeric_decimal_traces.insert(internal_id, trace);
+            }
             if let MaterializedResultOrigin::DynamicSpill { anchor, range } = materialized.origin()
                 && public_id == anchor
                 && let Some(internal_anchor) = public_to_internal(self.workbook, anchor)
@@ -113,20 +117,21 @@ impl Engine<'_> {
         &mut self,
         anchor: CellId,
         range: Rect,
-        result: Result<Array, ErrorKind>,
+        result: Result<ArrayEvaluation, ErrorKind>,
     ) {
         let declared_cells = range.height().checked_mul(range.width());
-        let array = match declared_cells
+        let evaluated = match declared_cells
             .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))
             .and_then(|cells| self.ensure_array_cells(cells))
             .and(result)
         {
-            Ok(array) => array,
+            Ok(evaluated) => evaluated,
             Err(kind) => {
                 self.results.insert(anchor, Value::Error(kind));
                 return;
             }
         };
+        let array = evaluated.array;
         for row in range.row_start..=range.row_end {
             for column in range.col_start..=range.col_end {
                 let array_row = row - range.row_start;
@@ -144,6 +149,14 @@ impl Engine<'_> {
                         value
                     },
                 );
+                let trace_index = array_row as usize * array.cols as usize + array_column as usize;
+                if let Some(Some(trace)) = evaluated.decimal_traces.get(trace_index)
+                    && array_row < array.rows
+                    && array_column < array.cols
+                {
+                    self.numeric_decimal_traces
+                        .insert((range.sheet, row, column), *trace);
+                }
             }
         }
     }
@@ -152,15 +165,16 @@ impl Engine<'_> {
         &mut self,
         anchor: CellId,
         declared_range: Option<Rect>,
-        result: Result<Array, ErrorKind>,
+        result: Result<ArrayEvaluation, ErrorKind>,
     ) {
-        let array = match result {
-            Ok(array) => array,
+        let evaluated = match result {
+            Ok(evaluated) => evaluated,
             Err(kind) => {
                 self.results.insert(anchor, Value::Error(kind));
                 return;
             }
         };
+        let array = evaluated.array;
         let Some(range) = (Rect {
             sheet: anchor.0,
             row_start: anchor.1,
@@ -192,6 +206,12 @@ impl Engine<'_> {
                         value
                     },
                 );
+                let trace_index = (row - range.row_start) as usize * array.cols as usize
+                    + (column - range.col_start) as usize;
+                if let Some(Some(trace)) = evaluated.decimal_traces.get(trace_index) {
+                    self.numeric_decimal_traces
+                        .insert((range.sheet, row, column), *trace);
+                }
             }
         }
         self.dynamic_spills.insert(anchor, range);

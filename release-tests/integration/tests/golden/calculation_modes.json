@@ -1,0 +1,102 @@
+{
+  "schema": "cellrune_calculation_modes_v1",
+  "arithmetic_cases": [
+    {
+      "id": "simple_decimal_cancellation",
+      "formula": "0.1 + 0.2 - 0.3",
+      "oracle": "exact_decimal"
+    },
+    {
+      "id": "subtraction_cancellation",
+      "formula": "0.5 - 0.4 - 0.1",
+      "oracle": "exact_decimal"
+    },
+    {
+      "id": "larger_intermediate_cancellation",
+      "formula": "100.1 - 100.0 - 0.1",
+      "oracle": "exact_decimal"
+    },
+    {
+      "id": "meaningful_small_difference",
+      "formula": "1.0000000000001 - 1.0",
+      "oracle": "exact_decimal"
+    },
+    {
+      "id": "meaningful_small_difference_after_large_intermediate",
+      "formula": "100.1 - 100.0 - 0.099999999999999",
+      "oracle": "exact_decimal"
+    },
+    {
+      "id": "meaningful_sixteenth_digit_difference",
+      "formula": "1.0000000000000004 - 1.0",
+      "oracle": "exact_decimal"
+    },
+    {
+      "id": "ordinary_nonzero_sum",
+      "formula": "0.1 + 0.2",
+      "oracle": "exact_decimal"
+    }
+  ],
+  "solver_cases": [
+    {
+      "id": "irr_periodic",
+      "function": "irr",
+      "formula": "IRR({-100,60,60})",
+      "oracle": "residual_and_bisection",
+      "cashflows": [-100.0, 60.0, 60.0],
+      "dates": [],
+      "periods": 0.0,
+      "payment": 0.0,
+      "present": 0.0,
+      "future": 0.0,
+      "payment_type": 0.0,
+      "lower": -0.9,
+      "upper": 1.0
+    },
+    {
+      "id": "xirr_annual",
+      "function": "xirr",
+      "formula": "XIRR({-100,120},{45000,45365})",
+      "oracle": "residual_and_bisection",
+      "cashflows": [-100.0, 120.0],
+      "dates": [45000.0, 45365.0],
+      "periods": 0.0,
+      "payment": 0.0,
+      "present": 0.0,
+      "future": 0.0,
+      "payment_type": 0.0,
+      "lower": -0.9,
+      "upper": 1.0
+    },
+    {
+      "id": "xirr_requires_more_than_twenty_newton_steps",
+      "function": "xirr",
+      "formula": "XIRR({-1,100000},{45000,45365})",
+      "oracle": "residual_and_bisection",
+      "cashflows": [-1.0, 100000.0],
+      "dates": [45000.0, 45365.0],
+      "periods": 0.0,
+      "payment": 0.0,
+      "present": 0.0,
+      "future": 0.0,
+      "payment_type": 0.0,
+      "lower": 0.0,
+      "upper": 200000.0
+    },
+    {
+      "id": "rate_annuity",
+      "function": "rate",
+      "formula": "RATE(10,-100,800)",
+      "oracle": "residual_and_bisection",
+      "cashflows": [],
+      "dates": [],
+      "periods": 10.0,
+      "payment": -100.0,
+      "present": 800.0,
+      "future": 0.0,
+      "payment_type": 0.0,
+      "lower": -0.9,
+      "upper": 1.0
+    }
+  ]
+}

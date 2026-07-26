@@ -1,13 +1,14 @@
 use super::super::ArithmeticSemantics;
 use super::super::ast::Expr;
+use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
-use super::super::operators::CANCELLATION_WINDOW;
 use super::super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone)]
 pub(super) struct ArgumentValue {
     pub(super) value: Value,
+    pub(super) decimal_trace: Option<DecimalTrace>,
     pub(super) from_collection: bool,
     pub(super) from_single_cell_reference: bool,
 }
@@ -44,25 +45,40 @@ pub(super) fn collect_argument_values_with_counter(
             engine.ensure_array_cells(*visited_cells)?;
             for row in rect.row_start..=row_end {
                 for column in rect.col_start..=rect.col_end {
+                    let cell = (rect.sheet, row, column);
+                    let value = engine.cell_value(cell);
+                    let decimal_trace = match &value {
+                        Value::Number(_) => engine.numeric_decimal_trace(cell),
+                        _ => None,
+                    };
                     values.push(ArgumentValue {
-                        value: engine.cell_value((rect.sheet, row, column)),
+                        value,
+                        decimal_trace,
                         from_collection: true,
                         from_single_cell_reference: rect.is_single_cell(),
                     });
                 }
             }
         } else {
-            let array = engine.eval_array(context, arg)?;
-            let from_collection = !array.is_scalar() || matches!(arg, Expr::Array(_));
+            let evaluated = engine.eval_array_with_trace(context, arg)?;
+            let from_collection = !evaluated.array.is_scalar() || matches!(arg, Expr::Array(_));
             *visited_cells = visited_cells
-                .checked_add(array.data.len() as u64)
+                .checked_add(evaluated.array.data.len() as u64)
                 .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
             engine.ensure_array_cells(*visited_cells)?;
-            values.extend(array.data.into_iter().map(|value| ArgumentValue {
-                value,
-                from_collection,
-                from_single_cell_reference: false,
-            }));
+            values.extend(
+                evaluated
+                    .array
+                    .data
+                    .into_iter()
+                    .zip(evaluated.decimal_traces)
+                    .map(|(value, decimal_trace)| ArgumentValue {
+                        value,
+                        decimal_trace,
+                        from_collection,
+                        from_single_cell_reference: false,
+                    }),
+            );
         }
     }
     Ok(values)
@@ -73,7 +89,15 @@ pub(super) fn required_number(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Result<f64, ErrorKind> {
-    super::super::coerce::to_number(&engine.eval_scalar(context, expr))
+    required_number_with_trace(engine, context, expr).map(|(number, _)| number)
+}
+
+pub(super) fn required_number_with_trace(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &Expr,
+) -> Result<(f64, Option<DecimalTrace>), ErrorKind> {
+    engine.eval_number_with_trace(context, expr)
 }
 
 pub(super) fn required_text(
@@ -97,34 +121,47 @@ pub(super) fn required_text(
 /// `=A1+A2+A3` and `=SUM(A1:A3)` differently, which is not a compatibility mode but a
 /// contradiction. The correction is applied at each step, against the term that produced it,
 /// matching what `a + b + c` does in the operator path.
-pub(super) fn excel_sum(engine: &Engine<'_>, values: impl IntoIterator<Item = f64>) -> f64 {
-    let excel_near_zero = matches!(
-        engine.arithmetic_semantics(),
-        ArithmeticSemantics::ExcelNearZero
-    );
-    values.into_iter().fold(0.0, |total, value| {
-        let next = total + value;
-        if excel_near_zero {
-            correct_sum_cancellation(total, value, next)
-        } else {
-            next
-        }
-    })
+/// Policy-aware streaming accumulator shared by ordinary and conditional aggregates.
+///
+/// Besides the running `f64`, this carries the exact parsed-decimal sum when it fits in the bounded
+/// trace representation. A later term is snapped only when that exact sum is zero.
+pub(super) struct ExcelSum {
+    excel_near_zero: bool,
+    total: f64,
+    decimal_trace: Option<DecimalTrace>,
 }
 
-/// The `excel_sum` counterpart of the operator path's cancellation correction.
-///
-/// Kept beside the fold rather than shared with `operators.rs` because that function also decides
-/// which operators are eligible; here every step is an addition by construction.
-fn correct_sum_cancellation(total: f64, value: f64, next: f64) -> f64 {
-    if next == 0.0 {
-        return next;
+impl ExcelSum {
+    pub(super) fn new(engine: &Engine<'_>) -> Self {
+        Self {
+            excel_near_zero: matches!(
+                engine.arithmetic_semantics(),
+                ArithmeticSemantics::ExcelNearZero
+            ),
+            total: 0.0,
+            decimal_trace: Some(DecimalTrace::ZERO),
+        }
     }
-    let larger = total.abs().max(value.abs());
-    if next.abs() < larger * CANCELLATION_WINDOW {
-        0.0
-    } else {
-        next
+
+    pub(super) fn add_with_trace(&mut self, value: f64, decimal_trace: Option<DecimalTrace>) {
+        let next = self.total + value;
+        if !self.excel_near_zero {
+            self.total = next;
+            return;
+        }
+
+        self.decimal_trace = self
+            .decimal_trace
+            .and_then(|total| total.add(decimal_trace?));
+        if self.decimal_trace.is_some_and(DecimalTrace::is_zero) {
+            self.total = 0.0;
+        } else {
+            self.total = next;
+        }
+    }
+
+    pub(super) const fn total(&self) -> f64 {
+        self.total
     }
 }
 

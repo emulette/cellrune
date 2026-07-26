@@ -163,6 +163,7 @@ fn deterministic_calculation_options_and_edits_invalidate_saved_state() {
         .calculate(CalculationOptionsDto {
             today_serial: Some(45_000.0),
             now_serial: Some(45_000.25),
+            ..CalculationOptionsDto::default()
         })
         .expect("deterministic inputs must calculate");
     assert_eq!(report.value_count, 2);
@@ -233,6 +234,7 @@ fn deterministic_calculation_options_and_edits_invalidate_saved_state() {
         .calculate(CalculationOptionsDto {
             today_serial: Some(f64::NAN),
             now_serial: None,
+            ..CalculationOptionsDto::default()
         })
         .expect_err("non-finite deterministic input must fail");
     assert_eq!(validation_error.kind(), InteropErrorKind::Validation);

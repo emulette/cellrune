@@ -38,6 +38,12 @@ function requireOptionalFinite(value, name) {
   }
 }
 
+function requireOptionalString(value, name) {
+  if (value !== undefined) {
+    requireString(value, name);
+  }
+}
+
 function requireOptionalBoolean(value, name) {
   if (value !== undefined && typeof value !== "boolean") {
     throw inputError(`${name} must be a boolean`);
@@ -76,6 +82,7 @@ module.exports = {
   requireObject,
   requireOptionalBoolean,
   requireOptionalFinite,
+  requireOptionalString,
   requireOptions,
   requireProtocolFinite,
   requireProtocolString,

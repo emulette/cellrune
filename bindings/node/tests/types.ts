@@ -17,6 +17,10 @@ async function check(): Promise<void> {
   workbook.setNumber("Sheet1", "A1", 1);
   workbook.setFormula("Sheet1", "B1", "=A1+1");
   await workbook.calculate();
+  await workbook.calculate({
+    arithmeticSemantics: "ieee_754",
+    financialSolverSemantics: "extended_search",
+  });
   const changes: readonly WorkbookChange[] = [
     {
       kind: "setValue",

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::ast::Expr;
 use super::convert::value_from_cell;
+use super::decimal::DecimalTrace;
 use super::graph::DependencyGraph;
 use super::lambda::{LambdaBinding, binding_value};
 use super::limits::CalculationLimitKind;
@@ -12,7 +13,7 @@ use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
     CalculationOptions,
 };
-use crate::{CellContent, FiniteNumber, WorkbookSnapshot};
+use crate::{CellContent, CellValue, FiniteNumber, WorkbookSnapshot};
 
 mod dependency;
 mod expression;
@@ -115,6 +116,7 @@ pub struct Engine<'workbook> {
     defined_name_asts: Vec<Option<Expr>>,
     dependencies: DependencyGraph,
     results: BTreeMap<CellId, Value>,
+    numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
     dynamic_spills: BTreeMap<CellId, Rect>,
@@ -160,6 +162,25 @@ impl<'workbook> Engine<'workbook> {
             CellContent::Literal(value) => value_from_cell(value),
             CellContent::Formula(_) => Value::Error(ErrorKind::Unsupported),
         }
+    }
+
+    pub(super) fn numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
+        if let Some(trace) = self.numeric_decimal_traces.get(&cell) {
+            return Some(*trace);
+        }
+        let source = self
+            .workbook
+            .sheets()
+            .get(cell.0)
+            .and_then(|sheet| cell_at(sheet, cell.1, cell.2))?;
+        let CellContent::Literal(CellValue::Number(number)) = source.content() else {
+            return None;
+        };
+        DecimalTrace::from_number(number.get())
+    }
+
+    pub(super) fn calculated_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
+        self.numeric_decimal_traces.get(&cell).copied()
     }
 
     pub(super) fn has_unavailable_dependency(
@@ -254,7 +275,10 @@ impl<'workbook> Engine<'workbook> {
     }
 }
 
-fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {
+pub(super) fn public_to_internal(
+    workbook: &WorkbookSnapshot,
+    cell: CalculationCellId,
+) -> Option<CellId> {
     let sheet = workbook
         .sheets()
         .iter()

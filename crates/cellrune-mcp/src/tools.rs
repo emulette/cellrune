@@ -1,7 +1,8 @@
 use cellrune_interop::{
-    CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto, CapabilityPageDto,
-    CompletedRecalculation, EditReceiptDto, FunctionUsageReportDto, InteropError, RangePageDto,
-    RangeRequestDto, WorkbookSession, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
+    CapabilityPageDto, CompletedRecalculation, EditReceiptDto, FinancialSolverSemanticsDto,
+    FunctionUsageReportDto, InteropError, RangePageDto, RangeRequestDto, WorkbookSession,
+    WriteOptionsDto,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool, tool_router};
@@ -221,7 +222,12 @@ can be calculated with the supplied deterministic TODAY/NOW serial values.",
     ) -> Result<Json<CapabilityPageDto>, McpError> {
         let handle = self.sessions.get(&args.session_id)?;
         let workbook = handle.workbook().clone();
-        let options = calculation_options(args.today_serial, args.now_serial);
+        let options = calculation_options(
+            args.today_serial,
+            args.now_serial,
+            args.arithmetic_semantics,
+            args.financial_solver_semantics,
+        );
         let offset = args.offset;
         let limit = args.limit;
         let page = join_result(
@@ -293,7 +299,12 @@ with actual mode, reason, revisions, evaluated count, changed cells, and removal
             let mut workbook = handle.workbook().lock().await;
             workbook.prepare_recalculation(
                 args.mode,
-                calculation_options(args.today_serial, args.now_serial),
+                calculation_options(
+                    args.today_serial,
+                    args.now_serial,
+                    args.arithmetic_semantics,
+                    args.financial_solver_semantics,
+                ),
             )?
         };
         let request_id = prepared.request_id();
@@ -446,10 +457,14 @@ impl CellruneMcpServer {
 fn calculation_options(
     today_serial: Option<f64>,
     now_serial: Option<f64>,
+    arithmetic_semantics: ArithmeticSemanticsDto,
+    financial_solver_semantics: FinancialSolverSemanticsDto,
 ) -> CalculationOptionsDto {
     CalculationOptionsDto {
         today_serial,
         now_serial,
+        arithmetic_semantics,
+        financial_solver_semantics,
     }
 }
 

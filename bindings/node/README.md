@@ -55,7 +55,10 @@ try {
 ```
 
 `Workbook` supports typed errors, revision-checked edit batches, incremental
-calculation deltas, and deterministic `todaySerial` and `nowSerial` inputs.
+calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and explicit
+`arithmeticSemantics` / `financialSolverSemantics` compatibility policies. The latter accept
+`"ieee_754"` and `"extended_search"` when a caller needs the calculation behavior shipped through
+0.1.2; omitted fields select the Excel-compatible defaults.
 `close()` is idempotent. Once it returns, the binding-owned native session has
 been released. An active calculation is cooperatively cancelled, and later
 operations fail with `interop.session.closed`.

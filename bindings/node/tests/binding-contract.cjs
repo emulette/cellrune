@@ -39,6 +39,34 @@ async function main() {
     assert.equal(values.get(expected.address), expected.value);
   }
 
+  workbook.setFormula("Sheet1", "A3", "=100.1-100-0.1");
+  workbook.setFormula("Sheet1", "A4", "=IRR({-1,100000})");
+  await workbook.recalculate({ mode: "full" });
+  const defaults = workbook.readRange("Sheet1", "A3", "A4", { limit: 2 }).cells;
+  assert.equal(defaults[0].calculated.value.value, 0);
+  assert.equal(defaults[1].calculated.value.value, "#NUM!");
+  await workbook.recalculate({
+    mode: "full",
+    arithmeticSemantics: "ieee_754",
+    financialSolverSemantics: "extended_search",
+  });
+  const legacy = workbook.readRange("Sheet1", "A3", "A4", { limit: 2 }).cells;
+  assert.notEqual(legacy[0].calculated.value.value, 0);
+  assert.ok(Math.abs(legacy[1].calculated.value.value - 99999) < 1e-5);
+  await assert.rejects(
+    workbook.calculate({ arithmeticSemantics: "binary" }),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "interop.calculation.arithmetic_semantics_invalid",
+  );
+  await assert.rejects(
+    workbook.calculate({ financialSolverSemantics: "unbounded" }),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code ===
+        "interop.calculation.financial_solver_semantics_invalid",
+  );
+
   const bytes = await workbook.toBytes();
   const reopened = await Workbook.fromBytes(bytes);
   assert.equal(reopened.summary().documentKind, "xlsx");

@@ -23,13 +23,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - Two calculation compatibility modes on `CalculationOptions`, both defaulting to Excel's behavior
   rather than to what 0.1.2 did. `ArithmeticSemantics::ExcelNearZero` corrects a sum or difference
   that cancels to near zero, so `=0.1+0.2-0.3` is `0` and `=(0.1+0.2-0.3)=0` is `TRUE`; the
-  correction applies to the operator path, to the array path, and to the running total shared by
-  `SUM`, `AVERAGE`, `SUMIF`, `SUBTOTAL`, and `NPV`, so `=A1+A2+A3` and `=SUM(A1:A3)` cannot
-  disagree. `FinancialSolverSemantics::ExcelIterationBudget` stops `IRR`, `XIRR`, and `RATE` at the
-  twenty iterations and `1e-7` tolerance Microsoft documents, so inputs Excel abandons produce
-  `#NUM!` here too. `ArithmeticSemantics::Ieee754` and `FinancialSolverSemantics::ExtendedSearch`
-  restore the previous behavior. `docs/NUMERICS.md` records both, including what the near-zero
-  correction deliberately does not reach.
+  correction applies to the operator path, to the array path, and to the policy-aware running
+  totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, and `NPV`, so
+  `=A1+A2+A3` and `=SUM(A1:A3)` cannot disagree. The arithmetic path carries an exact trace of
+  parsed decimal inputs through intermediate sums, and `NPV` extends it as an exact rational trace
+  through discounting, so `=100.1-100-0.1` becomes zero while
+  `=100.1-100-0.099999999999999` remains nonzero. `FinancialSolverSemantics::ExcelIterationBudget`
+  applies Microsoft's
+  function-specific convergence policy: 20 iterations/`1e-7` for `IRR` and `RATE`, and 100
+  iterations/`1e-8` for `XIRR`. `ArithmeticSemantics::Ieee754` and
+  `FinancialSolverSemantics::ExtendedSearch` restore the previous behavior. The two axes are also
+  transported by the Rust interop DTO and exposed by the Python, Node.js, and MCP boundaries.
+  `docs/NUMERICS.md` records both policies and their independent release-test oracles.
 
 ### Changed
 

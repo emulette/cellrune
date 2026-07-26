@@ -171,10 +171,10 @@ impl<'a> CellPhonetics<'a> {
     /// length of `base_text`, and [`ValidationError::PhoneticRangeSplitsSurrogate`] when a run
     /// boundary falls inside a surrogate pair. Both indicate `base_text` is not the text these runs
     /// were read against.
-    pub fn resolved_runs(
+    pub fn resolved_runs<'text>(
         self,
-        base_text: &str,
-    ) -> Result<Vec<ResolvedPhoneticRun<'a>>, ValidationError> {
+        base_text: &'text str,
+    ) -> Result<Vec<ResolvedPhoneticRun<'a, 'text>>, ValidationError> {
         resolve_runs(self.runs, base_text)
     }
 }
@@ -272,7 +272,7 @@ impl DocumentPresentation {
     ///         continue;
     ///     };
     ///     for run in phonetics.resolved_runs(base_text)? {
-    ///         println!("{address}: {} -> {}", run.base_slice(base_text), run.text());
+    ///         println!("{address}: {} -> {}", run.base_slice(), run.text());
     ///     }
     /// }
     /// # Ok(())

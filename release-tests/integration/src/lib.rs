@@ -2,3 +2,4 @@
 
 pub mod conformance;
 pub mod decimal_reference;
+pub mod financial_reference;

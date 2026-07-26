@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::ast::{Expr, SheetPrefix};
 use super::convert::cell_from_value;
 use super::error::parse_error_detail;
-use super::eval::{CompiledWorkbook, Engine};
+use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::{is_supported_function, normalize_name};
 use super::lambda::{canonical_parameter_name, definition as lambda_definition};
 use super::value::{ErrorKind, Value};
@@ -340,7 +340,22 @@ fn snapshot_from_engine(
         }
     }
     let materialized_cells = build_materialization_view(workbook, engine, &cells);
-    CalculationSnapshot::new(cells, materialized_cells, workbook, options)
+    let numeric_decimal_traces = cells
+        .keys()
+        .filter_map(|public_id| {
+            let internal_id = public_to_internal(workbook, *public_id)?;
+            engine
+                .calculated_decimal_trace(internal_id)
+                .map(|trace| (*public_id, trace))
+        })
+        .collect();
+    CalculationSnapshot::new(
+        cells,
+        materialized_cells,
+        numeric_decimal_traces,
+        workbook,
+        options,
+    )
 }
 
 fn build_materialization_view(

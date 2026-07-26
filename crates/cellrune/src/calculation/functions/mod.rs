@@ -177,7 +177,7 @@ fn call_elementwise_array(
 fn value_as_expr(value: &Value) -> Expr {
     match value {
         Value::Blank => Expr::Missing,
-        Value::Number(number) => Expr::Number(*number),
+        Value::Number(number) => Expr::number(*number),
         Value::Text(text) => Expr::Text(text.clone()),
         Value::Logical(value) => Expr::Logical(*value),
         Value::Error(kind) => Expr::ErrorLit(*kind),

@@ -24,6 +24,10 @@ const MESSAGE_REVISION_OR_CURSOR_INVALID: &str =
     "revision or cursor must be an unsigned 64-bit integer";
 const MESSAGE_RECALCULATION_MODE_INVALID: &str =
     "recalculation mode must be auto, incremental, or full";
+const MESSAGE_ARITHMETIC_SEMANTICS_INVALID: &str =
+    "arithmetic semantics must be excel_near_zero or ieee_754";
+const MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID: &str =
+    "financial solver semantics must be excel_iteration_budget or extended_search";
 const MESSAGE_NUMBER_INVALID: &str =
     "number must be an integer or floating-point value; booleans are not accepted";
 const MESSAGE_ARCHIVE_LIMIT_INVALID: &str = "archive byte limit must be greater than zero";
@@ -206,6 +210,22 @@ impl InteropError {
         Self::input(
             "interop.calculation.mode_invalid",
             MESSAGE_RECALCULATION_MODE_INVALID,
+        )
+    }
+
+    /// Creates the stable invalid arithmetic-semantics error used by typed bindings.
+    pub fn invalid_arithmetic_semantics() -> Self {
+        Self::input(
+            "interop.calculation.arithmetic_semantics_invalid",
+            MESSAGE_ARITHMETIC_SEMANTICS_INVALID,
+        )
+    }
+
+    /// Creates the stable invalid financial-solver-semantics error used by typed bindings.
+    pub fn invalid_financial_solver_semantics() -> Self {
+        Self::input(
+            "interop.calculation.financial_solver_semantics_invalid",
+            MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID,
         )
     }
 

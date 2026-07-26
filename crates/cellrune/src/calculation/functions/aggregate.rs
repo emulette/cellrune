@@ -1,10 +1,11 @@
 use super::super::ast::Expr;
 use super::super::criteria::{Criteria, WildcardStepBudget, parse_criteria};
+use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::value::{ErrorKind, Value};
-use super::util::{ArgumentValue, collect_argument_values, excel_sum, required_number};
+use super::util::{ArgumentValue, ExcelSum, collect_argument_values, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -59,17 +60,19 @@ fn aggregate_numbers(
     let mut numbers = Vec::new();
     for ArgumentValue {
         value,
+        decimal_trace,
         from_collection,
         ..
     } in values
     {
         match value {
-            Value::Number(number) => numbers.push(number),
+            Value::Number(number) => numbers.push((number, decimal_trace)),
             Value::Logical(logical) if !from_collection => {
-                numbers.push(if logical { 1.0 } else { 0.0 });
+                let number = if logical { 1.0 } else { 0.0 };
+                numbers.push((number, DecimalTrace::from_number(number)));
             }
             Value::Text(text) if !from_collection => match text.parse::<f64>() {
-                Ok(number) => numbers.push(number),
+                Ok(number) => numbers.push((number, DecimalTrace::from_number(number))),
                 Err(_) => return Value::Error(ErrorKind::Value),
             },
             Value::Error(kind) => return Value::Error(kind),
@@ -77,15 +80,31 @@ fn aggregate_numbers(
         }
     }
     let result = match aggregate {
-        Aggregate::Sum => excel_sum(engine, numbers.iter().copied()),
+        Aggregate::Sum => traced_sum(engine, &numbers),
         Aggregate::Average if numbers.is_empty() => return Value::Error(ErrorKind::Div0),
-        Aggregate::Average => excel_sum(engine, numbers.iter().copied()) / numbers.len() as f64,
-        Aggregate::Min => numbers.into_iter().reduce(f64::min).unwrap_or(0.0),
-        Aggregate::Max => numbers.into_iter().reduce(f64::max).unwrap_or(0.0),
+        Aggregate::Average => traced_sum(engine, &numbers) / numbers.len() as f64,
+        Aggregate::Min => numbers
+            .into_iter()
+            .map(|(number, _)| number)
+            .reduce(f64::min)
+            .unwrap_or(0.0),
+        Aggregate::Max => numbers
+            .into_iter()
+            .map(|(number, _)| number)
+            .reduce(f64::max)
+            .unwrap_or(0.0),
         Aggregate::Product if numbers.is_empty() => 0.0,
-        Aggregate::Product => numbers.into_iter().product(),
+        Aggregate::Product => numbers.into_iter().map(|(number, _)| number).product(),
     };
     finite_number(result)
+}
+
+fn traced_sum(engine: &Engine<'_>, numbers: &[(f64, Option<DecimalTrace>)]) -> f64 {
+    let mut sum = ExcelSum::new(engine);
+    for (number, decimal_trace) in numbers {
+        sum.add_with_trace(*number, *decimal_trace);
+    }
+    sum.total()
 }
 
 fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -203,7 +222,7 @@ fn conditional_aggregate(
     if visits.is_none_or(|cells| engine.ensure_array_cells(cells).is_err()) {
         return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells));
     }
-    let mut total = 0.0_f64;
+    let mut total = ExcelSum::new(engine);
     let mut count = 0_u64;
     let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
     for row_offset in 0..iter_rows as u32 {
@@ -229,13 +248,14 @@ fn conditional_aggregate(
             if !matched {
                 continue;
             }
-            match engine.cell_value((
+            let cell = (
                 parsed.value_range.sheet,
                 parsed.value_range.row_start + row_offset,
                 parsed.value_range.col_start + col_offset,
-            )) {
+            );
+            match engine.cell_value(cell) {
                 Value::Number(number) => {
-                    total += number;
+                    total.add_with_trace(number, engine.numeric_decimal_trace(cell));
                     count += 1;
                 }
                 Value::Error(kind) => return Value::Error(kind),
@@ -244,12 +264,12 @@ fn conditional_aggregate(
         }
     }
     match operation {
-        ConditionalAggregate::SumIf | ConditionalAggregate::SumIfs => finite_number(total),
+        ConditionalAggregate::SumIf | ConditionalAggregate::SumIfs => finite_number(total.total()),
         ConditionalAggregate::AverageIf | ConditionalAggregate::AverageIfs if count == 0 => {
             Value::Error(ErrorKind::Div0)
         }
         ConditionalAggregate::AverageIf | ConditionalAggregate::AverageIfs => {
-            finite_number(total / count as f64)
+            finite_number(total.total() / count as f64)
         }
     }
 }

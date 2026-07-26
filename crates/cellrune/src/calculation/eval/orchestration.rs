@@ -30,6 +30,7 @@ impl<'workbook> Engine<'workbook> {
             defined_name_asts: Vec::new(),
             dependencies: BTreeMap::new(),
             results: BTreeMap::new(),
+            numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
             array_regions: collect_array_regions(workbook),
             dynamic_spills: BTreeMap::new(),
@@ -139,6 +140,7 @@ impl<'workbook> Engine<'workbook> {
             defined_name_asts: compiled.defined_name_asts.clone(),
             dependencies: compiled.dependencies.clone(),
             results: BTreeMap::new(),
+            numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
             array_regions: collect_array_regions(workbook),
             dynamic_spills: BTreeMap::new(),
@@ -180,6 +182,7 @@ impl<'workbook> Engine<'workbook> {
     ) -> bool {
         if dirty.is_none() {
             self.results.clear();
+            self.numeric_decimal_traces.clear();
             self.retained_results.clear();
             self.dynamic_spills.clear();
             self.array_regions.retain(|region| !region.provisional);
@@ -209,7 +212,7 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_array(EvalContext::for_cell(cell), &expr),
+                Some(expr) => self.eval_array_with_trace(EvalContext::for_cell(cell), &expr),
                 None => Err(ErrorKind::Unsupported),
             };
             self.materialize_legacy_array(cell, range, result);
@@ -221,7 +224,7 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_array(EvalContext::for_cell(cell), &expr),
+                Some(expr) => self.eval_array_with_trace(EvalContext::for_cell(cell), &expr),
                 None => Err(ErrorKind::Unsupported),
             };
             self.materialize_dynamic_array(cell, declared_range, result);
@@ -234,12 +237,19 @@ impl<'workbook> Engine<'workbook> {
             Some(_) if self.name_cycle_cells.contains(&cell) => {
                 Value::Error(ErrorKind::Unsupported)
             }
-            Some(expr) => match self.eval_scalar(EvalContext::for_cell(cell), &expr) {
-                // Excel materializes a blank final formula result as numeric zero while
-                // retaining Blank during expression and function evaluation.
-                Value::Blank => Value::Number(0.0),
-                value => value,
-            },
+            Some(expr) => {
+                let evaluated = self.eval_scalar_with_trace(EvalContext::for_cell(cell), &expr);
+                if let (Value::Number(_), Some(trace)) = (&evaluated.value, evaluated.decimal_trace)
+                {
+                    self.numeric_decimal_traces.insert(cell, trace);
+                }
+                match evaluated.value {
+                    // Excel materializes a blank final formula result as numeric zero while
+                    // retaining Blank during expression and function evaluation.
+                    Value::Blank => Value::Number(0.0),
+                    value => value,
+                }
+            }
             None => Value::Error(ErrorKind::Unsupported),
         };
         self.results.insert(cell, value);

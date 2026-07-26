@@ -78,6 +78,9 @@ contains a structured `Unavailable(CalculationIssue)`. One unavailable formula d
 independent results; dependent formulas report `BlockedByUpstream` when applicable.
 Volatile functions require deterministic inputs through `CalculationOptions`:
 `with_today_serial` for `TODAY()` and `with_now_serial` for `NOW()`. Use
+`with_arithmetic_semantics` and `with_financial_solver_semantics` to opt into the raw IEEE-754 and
+extended-search behavior shipped through 0.1.2; the defaults select Excel-compatible cancellation
+and Microsoft's function-specific solver budgets. Use
 `supported_function_catalog` for the build's exact function surface and `scan_function_usage` to
 summarize the functions used by a workbook. `scan_formula_capabilities` remains available as an
 optional static inventory for migration planning and user-interface reporting; calculation does
@@ -188,6 +191,11 @@ with Workbook.create() as workbook:
     workbook.set_number("Sheet1", "A1", 41.0)
     workbook.set_formula("Sheet1", "B1", "=A1+1")
     workbook.calculate()
+    # 0.1.2-compatible calculation remains available when required:
+    workbook.calculate(
+        arithmetic_semantics="ieee_754",
+        financial_solver_semantics="extended_search",
+    )
     workbook.save("output.xlsx")
 ```
 
@@ -201,6 +209,10 @@ try {
   workbook.setNumber("Sheet1", "A1", 41);
   workbook.setFormula("Sheet1", "B1", "=A1+1");
   await workbook.calculate();
+  await workbook.calculate({
+    arithmeticSemantics: "ieee_754",
+    financialSolverSemantics: "extended_search",
+  });
   await workbook.save("output.xlsx");
 } finally {
   workbook.close();

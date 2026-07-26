@@ -1,6 +1,29 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Transport-safe arithmetic compatibility policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub enum ArithmeticSemanticsDto {
+    /// Correct a cancelling sum or difference to exact zero.
+    #[default]
+    #[serde(rename = "excel_near_zero")]
+    ExcelNearZero,
+    /// Preserve the raw IEEE-754 result used through CellRune 0.1.2.
+    #[serde(rename = "ieee_754")]
+    Ieee754,
+}
+
+/// Transport-safe iterative financial solver policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FinancialSolverSemanticsDto {
+    /// Apply Microsoft's function-specific iteration budget and tolerance.
+    #[default]
+    ExcelIterationBudget,
+    /// Use the longer, tighter search used through CellRune 0.1.2.
+    ExtendedSearch,
+}
+
 /// Deterministic inputs supplied to one calculation.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -9,6 +32,12 @@ pub struct CalculationOptionsDto {
     pub today_serial: Option<f64>,
     /// Excel serial returned by `NOW()`.
     pub now_serial: Option<f64>,
+    /// Policy for cancelling addition and subtraction.
+    #[serde(default)]
+    pub arithmetic_semantics: ArithmeticSemanticsDto,
+    /// Policy for `IRR`, `XIRR`, and `RATE` convergence.
+    #[serde(default)]
+    pub financial_solver_semantics: FinancialSolverSemanticsDto,
 }
 
 /// Requested stateful recalculation policy.

@@ -1,4 +1,7 @@
-use cellrune_interop::{EditBatchDto, WorkbookSummaryDto, WriteReportDto};
+use cellrune_interop::{
+    ArithmeticSemanticsDto, EditBatchDto, FinancialSolverSemanticsDto, WorkbookSummaryDto,
+    WriteReportDto,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +57,12 @@ pub(crate) struct CapabilityArgs {
     pub(crate) today_serial: Option<f64>,
     /// Optional finite Excel serial returned by `NOW()`.
     pub(crate) now_serial: Option<f64>,
+    /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
+    #[serde(default)]
+    pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
+    /// Financial convergence policy; omitted selects Microsoft's function-specific budgets.
+    #[serde(default)]
+    pub(crate) financial_solver_semantics: FinancialSolverSemanticsDto,
     /// Zero-based formula-entry offset; omitted or zero starts at the first formula.
     #[serde(default)]
     pub(crate) offset: u64,
@@ -89,6 +98,12 @@ pub(crate) struct RecalculateArgs {
     pub(crate) today_serial: Option<f64>,
     /// Optional finite Excel serial returned by `NOW()`.
     pub(crate) now_serial: Option<f64>,
+    /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
+    #[serde(default)]
+    pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
+    /// Financial convergence policy; omitted selects Microsoft's function-specific budgets.
+    #[serde(default)]
+    pub(crate) financial_solver_semantics: FinancialSolverSemanticsDto,
 }
 
 /// Input for a page of installed recalculation deltas.

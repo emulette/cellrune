@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    CalculationOptionsDto, EditBatchDto, InteropError, RangeRequestDto, RecalculationModeDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationOptionsDto, EditBatchDto, FinancialSolverSemanticsDto,
+    InteropError, RangeRequestDto, RecalculationModeDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
@@ -72,14 +73,18 @@ impl NativeWorkbook {
         &self,
         today_serial: Option<f64>,
         now_serial: Option<f64>,
-    ) -> AsyncTask<CalculateTask> {
-        AsyncTask::new(CalculateTask {
+        arithmetic_semantics: Option<String>,
+        financial_solver_semantics: Option<String>,
+    ) -> napi::Result<AsyncTask<CalculateTask>> {
+        Ok(AsyncTask::new(CalculateTask {
             session: Arc::clone(&self.session),
-            options: CalculationOptionsDto {
+            options: calculation_options(
                 today_serial,
                 now_serial,
-            },
-        })
+                arithmetic_semantics.as_deref(),
+                financial_solver_semantics.as_deref(),
+            )?,
+        }))
     }
 
     #[napi(ts_return_type = "Promise<NativeCalculationDelta>")]
@@ -88,14 +93,18 @@ impl NativeWorkbook {
         mode: String,
         today_serial: Option<f64>,
         now_serial: Option<f64>,
+        arithmetic_semantics: Option<String>,
+        financial_solver_semantics: Option<String>,
     ) -> napi::Result<AsyncTask<RecalculateTask>> {
         Ok(AsyncTask::new(RecalculateTask {
             session: Arc::clone(&self.session),
             mode: recalculation_mode(&mode)?,
-            options: CalculationOptionsDto {
+            options: calculation_options(
                 today_serial,
                 now_serial,
-            },
+                arithmetic_semantics.as_deref(),
+                financial_solver_semantics.as_deref(),
+            )?,
         }))
     }
 
@@ -278,4 +287,33 @@ fn recalculation_mode(value: &str) -> napi::Result<RecalculationModeDto> {
         "full" => Ok(RecalculationModeDto::Full),
         _ => Err(napi_error(InteropError::invalid_recalculation_mode())),
     }
+}
+
+fn calculation_options(
+    today_serial: Option<f64>,
+    now_serial: Option<f64>,
+    arithmetic_semantics: Option<&str>,
+    financial_solver_semantics: Option<&str>,
+) -> napi::Result<CalculationOptionsDto> {
+    let arithmetic_semantics = match arithmetic_semantics.unwrap_or("excel_near_zero") {
+        "excel_near_zero" => ArithmeticSemanticsDto::ExcelNearZero,
+        "ieee_754" => ArithmeticSemanticsDto::Ieee754,
+        _ => return Err(napi_error(InteropError::invalid_arithmetic_semantics())),
+    };
+    let financial_solver_semantics =
+        match financial_solver_semantics.unwrap_or("excel_iteration_budget") {
+            "excel_iteration_budget" => FinancialSolverSemanticsDto::ExcelIterationBudget,
+            "extended_search" => FinancialSolverSemanticsDto::ExtendedSearch,
+            _ => {
+                return Err(napi_error(
+                    InteropError::invalid_financial_solver_semantics(),
+                ));
+            }
+        };
+    Ok(CalculationOptionsDto {
+        today_serial,
+        now_serial,
+        arithmetic_semantics,
+        financial_solver_semantics,
+    })
 }

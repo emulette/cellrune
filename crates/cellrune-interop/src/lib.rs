@@ -12,11 +12,12 @@ mod error;
 mod service;
 
 pub use dto::{
-    CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
-    CalculationReportDto, CalculationResultDto, CapabilityEntryDto, CapabilityPageDto, CellDto,
-    CellReferenceDto, CellValueDto, EditBatchDto, EditReceiptDto, FunctionCatalogEntryDto,
-    FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto,
-    RangeRequestDto, RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, WorkbookChangeDto,
+    ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
+    CalculationOptionsDto, CalculationReportDto, CalculationResultDto, CapabilityEntryDto,
+    CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, EditBatchDto, EditReceiptDto,
+    FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
+    FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto, RangeRequestDto,
+    RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, WorkbookChangeDto,
     WorkbookSummaryDto, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};

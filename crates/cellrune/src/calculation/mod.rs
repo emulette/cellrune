@@ -5,11 +5,13 @@ use std::collections::BTreeMap;
 use crate::{
     CellAddress, CellValue, FiniteNumber, Provenance, ProviderIdentity, SheetId, WorkbookSnapshot,
 };
+use decimal::DecimalTrace;
 
 mod ast;
 mod coerce;
 mod convert;
 mod criteria;
+mod decimal;
 mod error;
 mod eval;
 mod functions;
@@ -569,6 +571,7 @@ impl MaterializedCalculationCell {
 pub struct CalculationSnapshot {
     cells: BTreeMap<CalculationCellId, CalculationCellResult>,
     materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
+    numeric_decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
     options: CalculationOptions,
     provenance: Provenance,
     source_revision: u64,
@@ -579,6 +582,7 @@ impl CalculationSnapshot {
     pub(crate) fn new(
         cells: BTreeMap<CalculationCellId, CalculationCellResult>,
         materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
+        numeric_decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
         source: &WorkbookSnapshot,
         options: CalculationOptions,
     ) -> Self {
@@ -589,6 +593,7 @@ impl CalculationSnapshot {
         Self {
             cells,
             materialized_cells,
+            numeric_decimal_traces,
             options,
             provenance,
             source_revision: source.semantic_revision(),
@@ -623,6 +628,13 @@ impl CalculationSnapshot {
         self.materialized_cells
             .iter()
             .map(|(cell, result)| (*cell, result))
+    }
+
+    pub(in crate::calculation) fn numeric_decimal_trace(
+        &self,
+        cell: CalculationCellId,
+    ) -> Option<DecimalTrace> {
+        self.numeric_decimal_traces.get(&cell).copied()
     }
 
     /// Returns the number of formula results.

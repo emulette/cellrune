@@ -18,6 +18,10 @@ def check() -> None:
     workbook.set_number("Sheet1", "A1", 1.0)
     workbook.set_formula("Sheet1", "B1", "=A1+1")
     workbook.calculate()
+    workbook.calculate(
+        arithmetic_semantics="ieee_754",
+        financial_solver_semantics="extended_search",
+    )
     changes: list[WorkbookChange] = [
         {
             "kind": "set_value",
@@ -31,7 +35,11 @@ def check() -> None:
     )
     assert isinstance(receipt["calculation_changed_cells"], list)
     assert isinstance(receipt["calculation_metadata_changed"], bool)
-    delta: CalculationDelta = workbook.recalculate(mode="incremental")
+    delta: CalculationDelta = workbook.recalculate(
+        mode="incremental",
+        arithmetic_semantics="ieee_754",
+        financial_solver_semantics="extended_search",
+    )
     assert delta["result_revision"] == receipt["result_revision"]
     workbook.changes_since(0)
     page: RangePage = workbook.read_range("Sheet1", "A1", "B1")

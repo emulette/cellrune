@@ -1,10 +1,12 @@
 use super::super::FinancialSolverSemantics;
 use super::super::ast::Expr;
+use super::super::decimal::{DecimalTrace, RationalTrace};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::calendar::date_from_serial;
 use super::util::{
-    collect_argument_values, collect_argument_values_with_counter, excel_sum, required_number,
+    collect_argument_values, collect_argument_values_with_counter, required_number,
+    required_number_with_trace,
 };
 
 pub(super) fn call(
@@ -146,7 +148,7 @@ fn ppmt(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     }
     if let Some(payment_type) = args.get(5) {
         if payment_args.len() == 3 {
-            payment_args.push(Expr::Number(0.0));
+            payment_args.push(Expr::number(0.0));
         }
         payment_args.push(payment_type.clone());
     }
@@ -160,22 +162,41 @@ fn npv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() < 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let rate = match required_number(engine, context, &args[0]) {
-        Ok(rate) if rate != -1.0 => rate,
+    let (rate, rate_trace) = match required_number_with_trace(engine, context, &args[0]) {
+        Ok((rate, rate_trace)) if rate != -1.0 => (rate, rate_trace),
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),
     };
-    let cashflows = match numeric_cashflows(engine, context, &args[1..]) {
+    let cashflows = match numeric_cashflows_with_trace(engine, context, &args[1..]) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    let total = excel_sum(
-        engine,
-        cashflows
-            .iter()
-            .enumerate()
-            .map(|(index, value)| value / (1.0 + rate).powi(index as i32 + 1)),
-    );
+    let base_trace = rate_trace
+        .and_then(|rate| DecimalTrace::ONE.add(rate))
+        .and_then(RationalTrace::from_decimal);
+    let mut total = 0.0;
+    let mut exact_total = Some(RationalTrace::ZERO);
+    for (index, (cashflow, cashflow_trace)) in cashflows.into_iter().enumerate() {
+        let Ok(period) = i32::try_from(index + 1) else {
+            return Value::Error(ErrorKind::Num);
+        };
+        let discounted = cashflow / (1.0 + rate).powi(period);
+        let rational_period = u32::try_from(period).ok();
+        let discounted_trace = cashflow_trace
+            .and_then(RationalTrace::from_decimal)
+            .and_then(|cashflow| cashflow.divide(base_trace?.pow(rational_period?)?));
+        exact_total = exact_total.and_then(|total| total.add(discounted_trace?));
+        let next = total + discounted;
+        total = if matches!(
+            engine.arithmetic_semantics(),
+            super::super::ArithmeticSemantics::ExcelNearZero
+        ) && exact_total.is_some_and(RationalTrace::is_zero)
+        {
+            0.0
+        } else {
+            next
+        };
+    }
     financial_value(total)
 }
 
@@ -200,18 +221,24 @@ fn irr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         },
         None => 0.1,
     };
-    solve_newton(engine, cashflows.len(), guess, |rate| {
-        let mut value = 0.0;
-        let mut derivative = 0.0;
-        for (period, cashflow) in cashflows.iter().enumerate() {
-            let power = (1.0 + rate).powi(period as i32);
-            value += cashflow / power;
-            if period > 0 {
-                derivative -= period as f64 * cashflow / (1.0 + rate).powi(period as i32 + 1);
+    solve_newton(
+        engine,
+        SolverFunction::Irr,
+        cashflows.len(),
+        guess,
+        |rate| {
+            let mut value = 0.0;
+            let mut derivative = 0.0;
+            for (period, cashflow) in cashflows.iter().enumerate() {
+                let power = (1.0 + rate).powi(period as i32);
+                value += cashflow / power;
+                if period > 0 {
+                    derivative -= period as f64 * cashflow / (1.0 + rate).powi(period as i32 + 1);
+                }
             }
-        }
-        (value, derivative)
-    })
+            (value, derivative)
+        },
+    )
 }
 
 fn xirr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -281,19 +308,25 @@ fn xirr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         },
         None => 0.1,
     };
-    solve_newton(engine, cashflows.len(), guess, |rate| {
-        let base = 1.0 + rate;
-        let mut value = 0.0;
-        let mut derivative = 0.0;
-        for (cashflow, date) in cashflows.iter().zip(&dates) {
-            let years = (*date - start_date) / 365.0;
-            value += cashflow / base.powf(years);
-            if years != 0.0 {
-                derivative -= years * cashflow / base.powf(years + 1.0);
+    solve_newton(
+        engine,
+        SolverFunction::Xirr,
+        cashflows.len(),
+        guess,
+        |rate| {
+            let base = 1.0 + rate;
+            let mut value = 0.0;
+            let mut derivative = 0.0;
+            for (cashflow, date) in cashflows.iter().zip(&dates) {
+                let years = (*date - start_date) / 365.0;
+                value += cashflow / base.powf(years);
+                if years != 0.0 {
+                    derivative -= years * cashflow / base.powf(years + 1.0);
+                }
             }
-        }
-        (value, derivative)
-    })
+            (value, derivative)
+        },
+    )
 }
 
 fn rate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -312,7 +345,7 @@ fn rate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         values[4],
         if args.len() == 6 { values[5] } else { 0.1 },
     );
-    solve_newton(engine, 1, guess, |rate| {
+    solve_newton(engine, SolverFunction::Rate, 1, guess, |rate| {
         let power = (1.0 + rate).powf(periods);
         let factor = if rate.abs() < 1e-12 {
             periods
@@ -431,10 +464,19 @@ fn numeric_cashflows(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<f64>, ErrorKind> {
+    numeric_cashflows_with_trace(engine, context, args)
+        .map(|values| values.into_iter().map(|(number, _)| number).collect())
+}
+
+fn numeric_cashflows_with_trace(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Vec<(f64, Option<DecimalTrace>)>, ErrorKind> {
     let mut values = Vec::new();
     for item in collect_argument_values(engine, context, args)? {
         match item.value {
-            Value::Number(number) => values.push(number),
+            Value::Number(number) => values.push((number, item.decimal_trace)),
             Value::Error(kind) => return Err(kind),
             Value::Blank | Value::Text(_) | Value::Logical(_) => {}
         }
@@ -442,36 +484,55 @@ fn numeric_cashflows(
     Ok(values)
 }
 
-/// Iteration budget and step tolerance for the two solver policies.
-///
-/// The Excel figures are the ones Microsoft documents for `IRR`, `XIRR`, and `RATE`: at most
-/// twenty passes, and convergence declared once the estimate moves by less than `0.0000001`. What
-/// is *not* documented is the search Excel runs inside that budget, so this reproduces when Excel
-/// gives up, not how it looks. Two searches with the same budget can still disagree about which
-/// borderline inputs converge, and that residue is a documented difference rather than a defect.
-const EXCEL_SOLVER_ITERATIONS: u64 = 20;
-const EXCEL_SOLVER_TOLERANCE: f64 = 1e-7;
+/// Iterative function whose documented Excel convergence policy is being applied.
+#[derive(Debug, Clone, Copy)]
+enum SolverFunction {
+    Irr,
+    Xirr,
+    Rate,
+}
+
+/// One solver's maximum iteration count and step tolerance.
+#[derive(Debug, Clone, Copy)]
+struct SolverPolicy {
+    max_iterations: u64,
+    tolerance: f64,
+}
+
+/// Microsoft documents a function-specific budget: `IRR` and `RATE` try 20 times, while `XIRR`
+/// tries 100 times. Their published percentage tolerances also differ by one decimal place.
+const EXCEL_IRR_RATE_POLICY: SolverPolicy = SolverPolicy {
+    max_iterations: 20,
+    tolerance: 1e-7,
+};
+const EXCEL_XIRR_POLICY: SolverPolicy = SolverPolicy {
+    max_iterations: 100,
+    tolerance: 1e-8,
+};
 const EXTENDED_SOLVER_ITERATIONS: u64 = 100;
 const EXTENDED_SOLVER_TOLERANCE: f64 = 1e-10;
 
 fn solve_newton(
     engine: &Engine<'_>,
+    solver_function: SolverFunction,
     work_per_iteration: usize,
     mut guess: f64,
     function: impl Fn(f64) -> (f64, f64),
 ) -> Value {
-    let (max_iterations, tolerance) = match engine.financial_solver_semantics() {
-        FinancialSolverSemantics::ExcelIterationBudget => {
-            (EXCEL_SOLVER_ITERATIONS, EXCEL_SOLVER_TOLERANCE)
-        }
-        FinancialSolverSemantics::ExtendedSearch => {
-            (EXTENDED_SOLVER_ITERATIONS, EXTENDED_SOLVER_TOLERANCE)
-        }
+    let policy = match engine.financial_solver_semantics() {
+        FinancialSolverSemantics::ExcelIterationBudget => match solver_function {
+            SolverFunction::Irr | SolverFunction::Rate => EXCEL_IRR_RATE_POLICY,
+            SolverFunction::Xirr => EXCEL_XIRR_POLICY,
+        },
+        FinancialSolverSemantics::ExtendedSearch => SolverPolicy {
+            max_iterations: EXTENDED_SOLVER_ITERATIONS,
+            tolerance: EXTENDED_SOLVER_TOLERANCE,
+        },
     };
     let Ok(work_per_iteration) = u64::try_from(work_per_iteration.max(1)) else {
         return Value::Error(ErrorKind::Num);
     };
-    for iteration in 1_u64..=max_iterations {
+    for iteration in 1_u64..=policy.max_iterations {
         let Some(work) = work_per_iteration.checked_mul(iteration) else {
             return Value::Error(ErrorKind::Num);
         };
@@ -486,7 +547,7 @@ fn solve_newton(
             return Value::Error(ErrorKind::Num);
         }
         let next = guess - value / derivative;
-        if (next - guess).abs() <= tolerance {
+        if (next - guess).abs() <= policy.tolerance {
             return financial_value(next);
         }
         guess = next;

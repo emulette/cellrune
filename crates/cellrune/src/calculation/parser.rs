@@ -476,6 +476,7 @@ impl Parser {
         let leading_absolute = self.eat(&Token::Dollar);
         match self.peek().cloned() {
             Some(Token::Number(number)) => {
+                let number = number.value();
                 let row = number as u32;
                 if number.fract() != 0.0 || row == 0 || row > EXCEL_MAX_ROWS {
                     return Err(self.error(ERROR_PARSE_INVALID_REFERENCE));
@@ -509,6 +510,7 @@ impl Parser {
                     let Some(Token::Number(number)) = self.advance() else {
                         return Err(self.error(ERROR_PARSE_INVALID_REFERENCE));
                     };
+                    let number = number.value();
                     let row = number as u32;
                     if number.fract() != 0.0 || row == 0 || row > EXCEL_MAX_ROWS {
                         return Err(self.error(ERROR_PARSE_INVALID_REFERENCE));

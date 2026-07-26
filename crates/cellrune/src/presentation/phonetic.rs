@@ -236,14 +236,15 @@ impl PhoneticAnnotation {
 /// or convert into its own annotation model. This type carries the translated range together with
 /// the run it came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolvedPhoneticRun<'a> {
+pub struct ResolvedPhoneticRun<'run, 'text> {
     // Held as two scalars rather than a `Range<usize>` so the type stays `Copy`.
     start_bytes: usize,
     end_bytes: usize,
-    run: &'a PhoneticRun,
+    run: &'run PhoneticRun,
+    base_text: &'text str,
 }
 
-impl<'a> ResolvedPhoneticRun<'a> {
+impl<'run, 'text> ResolvedPhoneticRun<'run, 'text> {
     /// Returns the half-open byte range the run annotates within the base text it was resolved
     /// against.
     ///
@@ -254,20 +255,19 @@ impl<'a> ResolvedPhoneticRun<'a> {
 
     /// Returns the annotated slice of the base text this run was resolved against.
     ///
-    /// # Panics
-    ///
-    /// Panics when `base_text` is not the string the run was resolved against.
-    pub fn base_slice<'text>(&self, base_text: &'text str) -> &'text str {
-        &base_text[self.base_bytes()]
+    /// The resolved value retains that exact base-text borrow, so a caller cannot accidentally
+    /// pair the byte range with a different cell's string.
+    pub fn base_slice(&self) -> &'text str {
+        &self.base_text[self.base_bytes()]
     }
 
     /// Returns the displayed phonetic text.
-    pub fn text(&self) -> &'a str {
+    pub fn text(&self) -> &'run str {
         self.run.text()
     }
 
     /// Returns the source run, including its original UTF-16 range.
-    pub const fn run(&self) -> &'a PhoneticRun {
+    pub const fn run(&self) -> &'run PhoneticRun {
         self.run
     }
 }
@@ -275,10 +275,10 @@ impl<'a> ResolvedPhoneticRun<'a> {
 /// Translates every run's UTF-16 range into byte offsets over `base_text`.
 ///
 /// Runs are returned in source order. The base text is walked once regardless of run count.
-pub(crate) fn resolve_runs<'a>(
-    runs: &'a [PhoneticRun],
-    base_text: &str,
-) -> Result<Vec<ResolvedPhoneticRun<'a>>, ValidationError> {
+pub(crate) fn resolve_runs<'run, 'text>(
+    runs: &'run [PhoneticRun],
+    base_text: &'text str,
+) -> Result<Vec<ResolvedPhoneticRun<'run, 'text>>, ValidationError> {
     if runs.is_empty() {
         return Ok(Vec::new());
     }
@@ -300,6 +300,7 @@ pub(crate) fn resolve_runs<'a>(
                 start_bytes: start,
                 end_bytes: end,
                 run,
+                base_text,
             })
         })
         .collect()
@@ -445,10 +446,10 @@ mod tests {
         let resolved = resolve_runs(&runs, base).expect("resolves");
         assert_eq!(resolved.len(), 2);
         assert_eq!(resolved[0].base_bytes(), 0..4);
-        assert_eq!(resolved[0].base_slice(base), "😀");
+        assert_eq!(resolved[0].base_slice(), "😀");
         assert_eq!(resolved[0].text(), "え");
         assert_eq!(resolved[1].base_bytes(), 4..6);
-        assert_eq!(resolved[1].base_slice(base), "ab");
+        assert_eq!(resolved[1].base_slice(), "ab");
         assert_eq!(resolved[1].run().base_range().start_utf16(), 2);
     }
 

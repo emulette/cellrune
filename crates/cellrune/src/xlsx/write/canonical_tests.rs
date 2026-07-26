@@ -64,6 +64,7 @@ fn empty_plan(source: &WorkbookSnapshot) -> MaterializationPlan {
     let calculation = CalculationSnapshot::new(
         BTreeMap::new(),
         BTreeMap::new(),
+        BTreeMap::new(),
         source,
         CalculationOptions::default(),
     );
@@ -238,10 +239,10 @@ fn round_tripped_phonetics_resolve_to_byte_ranges_over_the_reopened_base_text() 
         .expect("ranges resolve against the text they were read with");
     assert_eq!(resolved.len(), 2);
     assert_eq!(resolved[0].base_bytes(), 0..4);
-    assert_eq!(resolved[0].base_slice(base_text), "😀");
+    assert_eq!(resolved[0].base_slice(), "😀");
     assert_eq!(resolved[0].text(), "にこ");
     assert_eq!(resolved[1].base_bytes(), 4..10);
-    assert_eq!(resolved[1].base_slice(base_text), "明日");
+    assert_eq!(resolved[1].base_slice(), "明日");
     assert_eq!(resolved[1].text(), "あした");
 
     // Passing the wrong cell's text is caught only when the ranges do not fit it.
@@ -253,15 +254,13 @@ fn round_tripped_phonetics_resolve_to_byte_ranges_over_the_reopened_base_text() 
         })
     );
 
-    // And this is the case it cannot catch: "no annotation" is longer than the runs need, so every
-    // range still lands on a char boundary and resolution succeeds with meaningless slices. No
-    // validation can detect this, because nothing distinguishes one 13-unit string from another.
-    // It is the reason the accessor hangs off the per-cell view instead of off PhoneticTextRange,
-    // and the reason the iterator's documentation spells out the join.
+    // A longer wrong string can still satisfy the stored UTF-16 ranges at resolution time, because
+    // presentation state deliberately does not own workbook cell contents. Once resolved, however,
+    // the run retains the exact string it was checked against and cannot be sliced with another.
     let mismatched = phonetics
         .resolved_runs("no annotation")
-        .expect("ranges fit, so nothing here is detectable as wrong");
-    assert_eq!(mismatched[0].base_slice("no annotation"), "no");
+        .expect("ranges fit the supplied text");
+    assert_eq!(mismatched[0].base_slice(), "no");
 }
 
 #[test]
@@ -686,6 +685,7 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
     let legacy_calculation = CalculationSnapshot::new(
         BTreeMap::new(),
         legacy_materialized,
+        BTreeMap::new(),
         &expected,
         CalculationOptions::default(),
     );
@@ -715,6 +715,7 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
     let direct_calculation = CalculationSnapshot::new(
         direct_cells,
         direct_materialized,
+        BTreeMap::new(),
         &expected,
         CalculationOptions::default(),
     );
@@ -751,6 +752,7 @@ fn incomplete_materialization_alone_requires_host_recalculation_flags() {
     let calculation = CalculationSnapshot::new(
         cells,
         materialized,
+        BTreeMap::new(),
         &expected,
         CalculationOptions::default(),
     );

@@ -196,6 +196,7 @@ fn rejected_recalculation_request_does_not_cancel_the_active_request() {
             CalculationOptionsDto {
                 today_serial: Some(f64::NAN),
                 now_serial: None,
+                ..CalculationOptionsDto::default()
             },
         )
         .expect_err("non-finite options must be rejected");

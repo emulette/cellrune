@@ -1,5 +1,6 @@
 use std::fmt;
 
+use super::decimal::DecimalTrace;
 use super::value::ErrorKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,9 +111,39 @@ pub struct Reference {
     pub body: RefBody,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct NumberLiteral {
+    value: f64,
+    decimal_trace: Option<DecimalTrace>,
+}
+
+impl NumberLiteral {
+    pub(super) fn from_literal(value: f64, literal: &str) -> Self {
+        Self {
+            value,
+            decimal_trace: DecimalTrace::from_literal(literal),
+        }
+    }
+
+    pub(super) fn from_number(value: f64) -> Self {
+        Self {
+            value,
+            decimal_trace: DecimalTrace::from_number(value),
+        }
+    }
+
+    pub(super) const fn value(self) -> f64 {
+        self.value
+    }
+
+    pub(super) const fn decimal_trace(self) -> Option<DecimalTrace> {
+        self.decimal_trace
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Number(f64),
+    Number(NumberLiteral),
     Text(String),
     Logical(bool),
     ErrorLit(ErrorKind),
@@ -139,6 +170,12 @@ pub enum Expr {
     Paren(Box<Expr>),
     Array(Vec<Vec<Expr>>),
     Missing,
+}
+
+impl Expr {
+    pub(super) fn number(value: f64) -> Self {
+        Self::Number(NumberLiteral::from_number(value))
+    }
 }
 
 pub fn column_label(column: u32) -> String {
@@ -232,7 +269,7 @@ impl fmt::Display for Expr {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Number(number) => {
-                formatter.write_str(&super::value::number_to_general_text(*number))
+                formatter.write_str(&super::value::number_to_general_text(number.value()))
             }
             Expr::Text(text) => write!(formatter, "\"{}\"", text.replace('"', "\"\"")),
             Expr::Logical(true) => formatter.write_str("TRUE"),

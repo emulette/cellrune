@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    CalculationOptionsDto, EditBatchDto, InteropError, RangeRequestDto, RecalculationModeDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationOptionsDto, EditBatchDto, FinancialSolverSemanticsDto,
+    InteropError, RangeRequestDto, RecalculationModeDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -100,17 +101,30 @@ impl Workbook {
         conversion::function_usage(py, &report)
     }
 
-    #[pyo3(signature = (*, today_serial=None, now_serial=None))]
+    #[pyo3(signature = (
+        *,
+        today_serial=None,
+        now_serial=None,
+        arithmetic_semantics="excel_near_zero",
+        financial_solver_semantics="excel_iteration_budget"
+    ))]
     pub fn calculate<'py>(
         &self,
         py: Python<'py>,
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
+        arithmetic_semantics: &str,
+        financial_solver_semantics: &str,
     ) -> PyResult<Bound<'py, PyDict>> {
         let today_serial =
             optional_number_from_python(today_serial).map_err(|error| into_py_error(py, error))?;
         let now_serial =
             optional_number_from_python(now_serial).map_err(|error| into_py_error(py, error))?;
+        let arithmetic_semantics = parse_arithmetic_semantics(arithmetic_semantics)
+            .map_err(|error| into_py_error(py, error))?;
+        let financial_solver_semantics =
+            parse_financial_solver_semantics(financial_solver_semantics)
+                .map_err(|error| into_py_error(py, error))?;
         let prepared = self
             .lock(py)?
             .prepare_recalculation(
@@ -118,6 +132,8 @@ impl Workbook {
                 CalculationOptionsDto {
                     today_serial,
                     now_serial,
+                    arithmetic_semantics,
+                    financial_solver_semantics,
                 },
             )
             .map_err(|error| into_py_error(py, error))?;
@@ -143,19 +159,33 @@ impl Workbook {
         conversion::calculation_report(py, &report)
     }
 
-    #[pyo3(signature = (*, mode="auto", today_serial=None, now_serial=None))]
+    #[pyo3(signature = (
+        *,
+        mode="auto",
+        today_serial=None,
+        now_serial=None,
+        arithmetic_semantics="excel_near_zero",
+        financial_solver_semantics="excel_iteration_budget"
+    ))]
     pub fn recalculate<'py>(
         &self,
         py: Python<'py>,
         mode: &str,
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
+        arithmetic_semantics: &str,
+        financial_solver_semantics: &str,
     ) -> PyResult<Bound<'py, PyDict>> {
         let mode = parse_recalculation_mode(mode).map_err(|error| into_py_error(py, error))?;
         let today_serial =
             optional_number_from_python(today_serial).map_err(|error| into_py_error(py, error))?;
         let now_serial =
             optional_number_from_python(now_serial).map_err(|error| into_py_error(py, error))?;
+        let arithmetic_semantics = parse_arithmetic_semantics(arithmetic_semantics)
+            .map_err(|error| into_py_error(py, error))?;
+        let financial_solver_semantics =
+            parse_financial_solver_semantics(financial_solver_semantics)
+                .map_err(|error| into_py_error(py, error))?;
         let prepared = self
             .lock(py)?
             .prepare_recalculation(
@@ -163,6 +193,8 @@ impl Workbook {
                 CalculationOptionsDto {
                     today_serial,
                     now_serial,
+                    arithmetic_semantics,
+                    financial_solver_semantics,
                 },
             )
             .map_err(|error| into_py_error(py, error))?;
@@ -440,5 +472,23 @@ fn parse_recalculation_mode(value: &str) -> Result<RecalculationModeDto, Interop
         "incremental" => Ok(RecalculationModeDto::Incremental),
         "full" => Ok(RecalculationModeDto::Full),
         _ => Err(InteropError::invalid_recalculation_mode()),
+    }
+}
+
+fn parse_arithmetic_semantics(value: &str) -> Result<ArithmeticSemanticsDto, InteropError> {
+    match value {
+        "excel_near_zero" => Ok(ArithmeticSemanticsDto::ExcelNearZero),
+        "ieee_754" => Ok(ArithmeticSemanticsDto::Ieee754),
+        _ => Err(InteropError::invalid_arithmetic_semantics()),
+    }
+}
+
+fn parse_financial_solver_semantics(
+    value: &str,
+) -> Result<FinancialSolverSemanticsDto, InteropError> {
+    match value {
+        "excel_iteration_budget" => Ok(FinancialSolverSemanticsDto::ExcelIterationBudget),
+        "extended_search" => Ok(FinancialSolverSemanticsDto::ExtendedSearch),
+        _ => Err(InteropError::invalid_financial_solver_semantics()),
     }
 }

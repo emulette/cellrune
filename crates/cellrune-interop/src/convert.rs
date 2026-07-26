@@ -1,23 +1,34 @@
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationDecisionReason, CalculationDelta,
-    CalculationDeltaPage, CalculationExecutionMode, CalculationOptions, CalculationSnapshot,
-    CellAddress, CellContent, CellValue, EditReceipt, ExcelError, FiniteNumber,
-    MaterializedResultOrigin, RecalculationMode, RecalculationWriteOptions,
-    RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility, WorkbookDraft,
-    WorkbookSnapshot, WriteOptions, XlsxDocumentKind,
+    ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
+    CalculationDelta, CalculationDeltaPage, CalculationExecutionMode, CalculationOptions,
+    CalculationSnapshot, CellAddress, CellContent, CellValue, EditReceipt, ExcelError,
+    FinancialSolverSemantics, FiniteNumber, MaterializedResultOrigin, RecalculationMode,
+    RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility,
+    WorkbookDraft, WorkbookSnapshot, WriteOptions, XlsxDocumentKind,
 };
 
 use crate::{
-    CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
-    CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto, CellValueDto,
-    EditReceiptDto, INTEROP_SCHEMA_VERSION, InteropError, RecalculationModeDto, SavedValueStateDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
+    CalculationOptionsDto, CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto,
+    CellValueDto, EditReceiptDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION,
+    InteropError, RecalculationModeDto, SavedValueStateDto, WritableCellValueDto, WriteOptionsDto,
+    WriteReportDto,
 };
 
 pub(crate) fn calculation_options(
     options: CalculationOptionsDto,
 ) -> Result<CalculationOptions, InteropError> {
-    let mut converted = CalculationOptions::default();
+    let mut converted = CalculationOptions::default()
+        .with_arithmetic_semantics(match options.arithmetic_semantics {
+            ArithmeticSemanticsDto::ExcelNearZero => ArithmeticSemantics::ExcelNearZero,
+            ArithmeticSemanticsDto::Ieee754 => ArithmeticSemantics::Ieee754,
+        })
+        .with_financial_solver_semantics(match options.financial_solver_semantics {
+            FinancialSolverSemanticsDto::ExcelIterationBudget => {
+                FinancialSolverSemantics::ExcelIterationBudget
+            }
+            FinancialSolverSemanticsDto::ExtendedSearch => FinancialSolverSemantics::ExtendedSearch,
+        });
     if let Some(value) = options.today_serial {
         converted = converted.with_today_serial(FiniteNumber::new(value)?);
     }

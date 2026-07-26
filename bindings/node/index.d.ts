@@ -79,6 +79,10 @@ export interface WorkbookSummary {
 export interface CalculationOptions {
   readonly todaySerial?: number;
   readonly nowSerial?: number;
+  readonly arithmeticSemantics?: "excel_near_zero" | "ieee_754";
+  readonly financialSolverSemantics?:
+    | "excel_iteration_budget"
+    | "extended_search";
 }
 
 export interface CalculationReport {
