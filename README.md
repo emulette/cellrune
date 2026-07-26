@@ -27,7 +27,7 @@ cellrune = "0.1.2"
 - preserves sheet order, sparse cells, formulas, saved results, defined names, and relevant
   number-format metadata;
 - expands shared formulas while preserving absolute and relative references;
-- reports unsupported formula capabilities before calculation;
+- returns typed formula values and stable per-cell calculation issues in one result snapshot;
 - reports normalized per-workbook function demand and exposes the implemented function catalog;
 - applies configurable limits to ZIP, XML, workbook, formula, dependency, text, and array work;
 - never executes macros, never follows external links, and never reads the host clock for
@@ -51,16 +51,20 @@ cellrune = "0.1.2"
 
 ```rust
 use cellrune::{
-    CalculationOptions, ReadOptions, calculate_workbook, read_xlsx_path, scan_formula_capabilities,
+    CalculationCellResult, CalculationOptions, ReadOptions, calculate_workbook, read_xlsx_path,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workbook = read_xlsx_path("input.xlsx", ReadOptions::default())?;
-    let capabilities = scan_formula_capabilities(&workbook);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
 
-    if capabilities.is_supported() {
-        let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-        println!("calculated {} formulas", calculation.len());
+    for (cell, result) in calculation.cells() {
+        match result {
+            CalculationCellResult::Value(value) => println!("{cell:?}: {value:?}"),
+            CalculationCellResult::Unavailable(issue) => {
+                eprintln!("{cell:?}: {}", issue.code().as_str());
+            }
+        }
     }
 
     Ok(())
@@ -68,10 +72,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Reading and calculation are separate operations. `calculate_workbook` does not modify the source
-`WorkbookSnapshot` or its saved XLSX results. Volatile functions require deterministic inputs
-through `CalculationOptions`: `with_today_serial` for `TODAY()` and `with_now_serial` for `NOW()`.
-Use `supported_function_catalog` for the build's exact function surface and
-`scan_function_usage` to rank the supported and unsupported functions actually used by a workbook.
+`WorkbookSnapshot` or its saved XLSX results. It attempts every formula in the workbook:
+successfully calculated cells contain a typed `Value`, while a cell that cannot be calculated
+contains a structured `Unavailable(CalculationIssue)`. One unavailable formula does not suppress
+independent results; dependent formulas report `BlockedByUpstream` when applicable.
+Volatile functions require deterministic inputs through `CalculationOptions`:
+`with_today_serial` for `TODAY()` and `with_now_serial` for `NOW()`. Use
+`supported_function_catalog` for the build's exact function surface and `scan_function_usage` to
+summarize the functions used by a workbook. `scan_formula_capabilities` remains available as an
+optional static inventory for migration planning and user-interface reporting; calculation does
+not require it.
 `INDEX` follows Excel's zero-index reference behavior: a zero row or column selects the complete
 corresponding column or row, and zero for both selects the complete input range. Scalar formulas
 apply legacy implicit intersection, while array formulas can materialize the selected rectangle.
@@ -271,8 +281,8 @@ npx --yes @modelcontextprotocol/inspector@1.0.0 \
 ## Scope
 
 CellRune supports ordinary Transitional SpreadsheetML workbooks and a scoped set of Excel formula
-syntax and functions. Use `scan_formula_capabilities` to check a workbook before relying on
-calculated values.
+syntax and functions. Unsupported formulas are returned as explicit per-cell calculation issues;
+other formulas continue to calculate.
 
 The following are outside the current scope:
 
@@ -285,8 +295,7 @@ The following are outside the current scope:
 CellRune does not claim complete Excel compatibility.
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
 records where calculated values are known to differ from Excel and why, including the iterative
-financial solvers, `DOLLAR` currency formatting, and IEEE-754 arithmetic near zero. Read it before
-comparing results for equality.
+financial solvers, `DOLLAR` currency formatting, and IEEE-754 arithmetic near zero.
 
 ## Verification
 
@@ -313,8 +322,8 @@ from Excel, LibreOffice, Google Sheets, and openpyxl passing 4 of 4.
 
 The normal workspace tests use generated, redistributable workbook fixtures and the expectation
 matrices above. Private development corpora and native-producer evidence are not distributed or
-represented as release blockers; validate workbooks from your own producers against the
-supported-capability report before relying on them.
+represented as release blockers. Formula support gaps remain visible as structured issues in the
+returned calculation snapshot and do not hide independently calculated values.
 
 [`docs/ENGINE_COMPARISON.md`](https://github.com/emulette/cellrune/blob/main/docs/ENGINE_COMPARISON.md)
 records a separate observational comparison of eleven workbook calculation engines: the measured

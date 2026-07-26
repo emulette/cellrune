@@ -36,14 +36,5 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    if capabilities.is_supported() {
-        println!("safe to call calculate_workbook next");
-    } else {
-        println!(
-            "calculate_workbook is still safe to call: unsupported formulas report a \
-             CalculationIssue instead of a wrong value"
-        );
-    }
-
     Ok(())
 }

@@ -1,12 +1,10 @@
-# Numeric contract
+# Numerical behavior
 
-Where CellRune's calculated values are intended to match Microsoft Excel exactly, where they are
-intended to match within a tolerance, and where they deliberately differ.
+This reference describes where CellRune's calculated values match Microsoft Excel exactly, where
+they match within a tolerance, and where the engines deliberately differ.
 
-This file records only what has been verified. Function families that have not yet been measured
-against a recorded Excel oracle are listed as unverified rather than given an aspirational
-tolerance. A tolerance table that has not been measured would be the same kind of unverifiable
-claim this file exists to remove.
+The statements below are tied to recorded workbooks and named Excel builds. Function families not
+yet measured against that reference are listed separately.
 
 ## Reference oracle
 

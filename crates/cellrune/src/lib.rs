@@ -4,21 +4,21 @@
 //!
 //! 1. [`read_xlsx_path`], [`read_xlsx_bytes`], or [`read_xlsx`] creates an immutable
 //!    [`WorkbookSnapshot`].
-//! 2. [`scan_formula_capabilities`] reports formulas that require unsupported capabilities.
-//! 3. [`calculate_workbook`] creates a separate owned [`CalculationSnapshot`] without changing
+//! 2. [`calculate_workbook`] creates a separate owned [`CalculationSnapshot`] without changing
 //!    the source workbook or its saved XLSX results.
+//! 3. Each formula result is either a typed [`CalculationCellResult::Value`] or a structured
+//!    [`CalculationCellResult::Unavailable`] issue.
 //!
 //! # Quick start
 //!
 //! ```no_run
 //! use cellrune::{
-//!     CalculationOptions, FiniteNumber, ReadOptions, calculate_workbook, read_xlsx_path,
-//!     scan_formula_capabilities,
+//!     CalculationCellResult, CalculationOptions, FiniteNumber, ReadOptions, calculate_workbook,
+//!     read_xlsx_path,
 //! };
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let workbook = read_xlsx_path("input.xlsx", ReadOptions::default())?;
-//! let capabilities = scan_formula_capabilities(&workbook);
 //!
 //! let options = CalculationOptions::default()
 //!     .with_today_serial(FiniteNumber::new(46_225.0)?);
@@ -29,12 +29,14 @@
 //!     let _ = source_cell;
 //! }
 //!
-//! println!(
-//!     "{} of {} formulas are statically supported; {} results were recorded",
-//!     capabilities.supported_count(),
-//!     capabilities.formula_count(),
-//!     calculation.len(),
-//! );
+//! for (cell, result) in calculation.cells() {
+//!     match result {
+//!         CalculationCellResult::Value(value) => println!("{cell:?}: {value:?}"),
+//!         CalculationCellResult::Unavailable(issue) => {
+//!             eprintln!("{cell:?}: {}", issue.code().as_str());
+//!         }
+//!     }
+//! }
 //! # Ok(())
 //! # }
 //! ```

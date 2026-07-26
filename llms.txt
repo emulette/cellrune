@@ -18,16 +18,20 @@ at `crates/cellrune/examples/` in the repository workspace.
 
 ```rust
 use cellrune::{
-    CalculationOptions, ReadOptions, calculate_workbook, read_xlsx_path, scan_formula_capabilities,
+    CalculationCellResult, CalculationOptions, ReadOptions, calculate_workbook, read_xlsx_path,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workbook = read_xlsx_path("input.xlsx", ReadOptions::default())?;
-    let capabilities = scan_formula_capabilities(&workbook);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
 
-    if capabilities.is_supported() {
-        let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-        println!("calculated {} formulas", calculation.len());
+    for (cell, result) in calculation.cells() {
+        match result {
+            CalculationCellResult::Value(value) => println!("{cell:?}: {value:?}"),
+            CalculationCellResult::Unavailable(issue) => {
+                eprintln!("{cell:?}: {}", issue.code().as_str());
+            }
+        }
     }
 
     Ok(())
@@ -36,9 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Reading and calculation are separate calls. Reading alone never calculates a
 formula; calculating never mutates the `WorkbookSnapshot` you read or the
-XLSX file's own saved results. Volatile functions `TODAY()` and `NOW()`
-require explicit deterministic inputs through `CalculationOptions`, or the
-formula reports `VolatileInputMissing` instead of guessing.
+XLSX file's own saved results. Calculation attempts every formula and returns
+either a typed `CalculationCellResult::Value` or a structured
+`CalculationCellResult::Unavailable` issue for each one. Independent formulas
+still produce values when another formula is unavailable. Volatile functions
+`TODAY()` and `NOW()` require explicit deterministic inputs through
+`CalculationOptions`, or the formula reports `VolatileInputMissing` instead
+of guessing.
 
 For round-trip work, `open_xlsx_document_*` retains the exact input archive
 privately and binds it to a SHA-256 `InputHash`.
@@ -355,7 +363,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `SharedFormulaRole`: `Anchor | Follower { anchor }`.
 - `FormulaDialect` (`#[non_exhaustive]`): currently only `ExcelA1`.
 
-### Capability scan — optional pre-check before calculating
+### Capability inventory — optional
 
 - `scan_formula_capabilities(&WorkbookSnapshot) -> FormulaCapabilityReport`
 - `scan_formula_capabilities_with_options(&WorkbookSnapshot, CalculationOptions) -> FormulaCapabilityReport` —
@@ -367,10 +375,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.supported_count()`, `.unsupported_count()`, `.is_supported()`.
 - `FormulaCapabilityEntry`: `.cell()` and `.capability()`.
 - `FormulaCapability`: `Supported | Unsupported(Vec<CalculationIssue>)`.
-- Not calling this first changes nothing: an uncalculated, unsupported
-  formula reports the first deterministically ordered `CalculationIssue`
-  from that scan when you call `calculate_workbook` directly. The scan only
-  lets you decide *before* paying for a full recalculation.
+- The inventory is static: it does not calculate values, inspect saved values,
+  or change what `calculate_workbook` returns. Use it for bulk migration
+  planning, support dashboards, or user interfaces that need a formula-surface
+  inventory. Normal workbook calculation does not require it.
 
 ### Function catalog and workbook demand
 
@@ -450,9 +458,9 @@ engine, not a spreadsheet-level fact about the data.
 ## Scope / non-goals
 
 CellRune supports ordinary Transitional SpreadsheetML workbooks and a scoped
-set of Excel formula syntax and functions. Call `scan_formula_capabilities`
-to check a workbook before relying on calculated values. Out of scope for the
-current version:
+set of Excel formula syntax and functions. Unsupported formulas appear as
+structured per-cell calculation issues while independent formulas continue to
+calculate. Out of scope for the current version:
 
 - `.xls`, `.xlsb`, `.ods`, and CSV.
 - Macro, add-in, external-workbook, query, or data-connection execution.
@@ -473,8 +481,8 @@ crate package use `cargo run --example <name> -- [arguments]`.
 
 - `read_only_inspection.rs` — read a workbook and inspect cells/diagnostics
   without ever calling `calculate_workbook`.
-- `capability_scan_only.rs` — the scan-before-calculate pattern and how to
-  branch on `FormulaCapability`.
+- `capability_scan_only.rs` — build an optional static formula-capability
+  inventory and inspect `FormulaCapability`.
 - `handle_read_error.rs` — match on `XlsxErrorCode` for a deliberately
   invalid input; the stable-code contract, concretely.
 - `compare_saved_vs_calculated.rs` — reads a formula's `SavedResult` and a
