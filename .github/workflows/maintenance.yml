@@ -1,24 +1,63 @@
-name: Nightly hardening
+name: Maintenance
 
+# Manual only. Every check here reads an input that this repository does not control — the
+# advisory database, the live crates.io resolution at both ends of the published ranges, the
+# hosted runner images — so none of them can be answered by a push tier. But none of them needs
+# to be answered on a clock either: what they exist for is to be run deliberately, before a tag.
+#
+# The schedules that used to drive this (nightly hardening and the weekly binding tier) are gone.
+# The workflow is NOT gone with them, and that distinction is the whole point: CONTRIBUTING.md's
+# "Before tagging a release" section makes a dispatch of these jobs part of the pre-tag procedure.
+# Deleting the file would remove the entry point that procedure depends on and leave no way to
+# reach `dependency-floor` at all, since `-Z direct-minimal-versions` needs a nightly toolchain
+# that no local checkout is required to have.
+#
+# A gate that has never been run has never passed. The fuzz tier below was uninstallable from the
+# repository's first commit and nobody knew, because its schedule had not fired since the
+# repository went public. If you change one of these jobs, dispatch it in the same commit.
+#
+# Every tier is individually selectable. Running the whole workflow to answer one question makes
+# the pre-tag habit expensive, and an expensive habit is the one that gets skipped.
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      advisories:
+        description: "Check the workspace against today's advisory database"
+        type: boolean
+        default: true
+      latest_dependencies:
+        description: "Compile the newest compatible dependency graph on the declared MSRV"
+        type: boolean
+        default: false
+      dependency_floor:
+        description: "Compile every direct requirement resolved to its declared floor"
+        type: boolean
+        default: false
+      fuzz:
+        description: "Run the bounded sanitizer campaigns"
+        type: boolean
+        default: false
+      binding_artifacts:
+        description: "Build the full cross-compiled binding and MCP artifact tier"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: nightly-hardening
+  group: maintenance
   cancel-in-progress: true
 
 jobs:
   # Every other CI job re-runs an unchanged commit against a pinned toolchain and a
-  # locked dependency graph, so a nightly repeat of them proves nothing. The
-  # advisory database is the one input that moves on its own, which is the only
-  # reason this tier is scheduled rather than triggered by a push.
+  # locked dependency graph, so repeating them here proves nothing. The advisory
+  # database is an input that moves on its own; between runs of this workflow, a new
+  # advisory reaches the repository through Dependabot security updates and through the
+  # `cargo deny` step that every pull request runs.
   advisories:
     name: Fresh advisory database check
+    if: inputs.advisories
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -62,6 +101,7 @@ jobs:
   # the fix is an upper bound on the offending requirement or a raised `rust-version`.
   latest-dependencies:
     name: Newest compatible dependencies on the declared MSRV
+    if: inputs.latest_dependencies
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -122,6 +162,7 @@ jobs:
   # pull-request tier that would redden every open pull request over a change nobody here made.
   dependency-floor:
     name: Declared dependency floors on the MSRV
+    if: inputs.dependency_floor
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -211,6 +252,7 @@ jobs:
   # later campaigns.
   fuzz:
     name: Bounded sanitizer campaigns
+    if: inputs.fuzz
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -275,7 +317,23 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: nightly-fuzz-artifacts
+          name: maintenance-fuzz-artifacts
           path: fuzz/artifacts
           if-no-files-found: ignore
           retention-days: 14
+
+  # What the deleted weekly tier actually existed for. Its stated subject was never "run the
+  # binding tests again" — it was hosted runner images, which update roughly weekly and break
+  # exactly three things: the eight cross-compiled targets, the macOS deployment targets, and the
+  # musl container checks. Nothing else in the repository notices that drift.
+  #
+  # With the full artifact matrix now built only on the tag, that breakage would otherwise first
+  # appear during a release run. This job is how it gets found before one instead.
+  binding-artifacts:
+    name: Full binding and MCP artifact tier
+    if: inputs.binding_artifacts
+    uses: ./.github/workflows/bindings.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write

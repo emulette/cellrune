@@ -45,6 +45,45 @@ verification lands as ordinary tests, suite cases, or observational commands by 
 promoting anything to a required job is an explicit maintainer decision, never a side effect of
 adding the verification.
 
+## When CI runs what
+
+Pull requests and pushes to `main` run source checks on Linux. The platform matrix and every
+distributable artifact are built where they are published — on the release tag.
+
+| Event | What runs |
+| --- | --- |
+| Pull request | `quality` and `msrv`, plus one Python and one Node smoke job when bindings are touched |
+| Push to `main` | The above, plus macOS and Windows core tests and the packaged-crate consumer |
+| `v*` tag | Everything, then publication |
+| `Maintenance` dispatch | Whichever tiers you select — see below |
+
+The Python and Node smoke jobs run the **declared floor** (Python 3.10, Node 22), not the newest
+runtime. Breakage on a new runtime is caught by Dependabot and by the tag build; breakage on the
+floor is caught by nothing else and would ship.
+
+## Before tagging a release
+
+Nothing here runs on a schedule. Four checks read inputs this repository does not control — the
+advisory database, live crates.io resolution at both ends of the published version ranges, and the
+hosted runner images — so they cannot be answered by a push tier and are not useful on a clock
+either. Run them deliberately, from the **Maintenance** workflow's `Run workflow` button:
+
+| Input | Run it when |
+| --- | --- |
+| `advisories` | Always. Cheap. |
+| `latest_dependencies` | The release touched dependency requirements or the MSRV |
+| `dependency_floor` | The release touched dependency requirements. Resolves every direct requirement to its declared floor, which no other job ever compiles |
+| `fuzz` | The release touched the parser, the reader, the writer, or the session |
+| `binding_artifacts` | The release touched anything cross-compiled. Builds the eight targets, the macOS deployment targets, and the musl containers — the things hosted-runner image drift breaks, and which nothing else builds until the tag itself |
+
+A gate that has never been run has never passed. The fuzz tier was uninstallable from the first
+commit and nobody knew, because its schedule had not fired since the repository went public; it
+was found only by dispatching it manually before a tag. If you change one of these jobs, dispatch
+it in the same commit.
+
+Then check that `[workspace.package] version` in `Cargo.toml` matches the tag you intend to push —
+`release.yml` rejects a tag that disagrees, but fixing it after the tag is more work than before.
+
 ## Benchmarks
 
 The 50k-workbook benchmark is an observational command, not a CI job or a release blocker:

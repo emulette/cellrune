@@ -44,12 +44,19 @@ jobs:
     name: Python ${{ matrix.python }} (${{ matrix.os }})
     strategy:
       fail-fast: false
+      # The full product is what gets published, so it is built where publication happens: the
+      # tag, plus maintenance dispatch for checking runner-image drift ahead of one.
+      #
+      # Everywhere else this runs a single job on the DECLARED FLOOR. The wheels are not abi3,
+      # so 3.10 is compiled separately from 3.14 and is the version a new syntax or a raised
+      # pyo3 requirement breaks first. Breakage on the newest runtime is caught by Dependabot
+      # and by the tag build; breakage on the floor is caught by nothing else and ships.
       matrix: >-
         ${{
           fromJSON(
-            github.event_name == 'pull_request' &&
-            '{"include":[{"os":"ubuntu-24.04","python":"3.10"},{"os":"ubuntu-24.04","python":"3.14"},{"os":"macos-15","python":"3.14"},{"os":"windows-2025","python":"3.14"}]}' ||
-            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"python":["3.10","3.11","3.12","3.13","3.14"]}'
+            (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
+            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"python":["3.10","3.11","3.12","3.13","3.14"]}' ||
+            '{"include":[{"os":"ubuntu-24.04","python":"3.10"}]}'
           )
         }}
     runs-on: ${{ matrix.os }}
@@ -78,9 +85,6 @@ jobs:
 
       - name: Install build and type tools
         run: python -m pip install --require-hashes -r requirements-dev.txt
-
-      - name: Verify native dependency license bundles
-        run: python ../scripts/generate_third_party_licenses.py --check
 
       - name: Select the host wheel dependency licenses
         run: >-
@@ -151,7 +155,7 @@ jobs:
         run: mypy --strict tests/typing_check.py
 
       - name: Upload verified wheel
-        if: github.event_name != 'pull_request'
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: python-wheel-${{ matrix.os }}-${{ matrix.python }}
@@ -159,32 +163,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  python-wheel-attestation:
-    name: Attest release wheels
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: python
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Download every verified wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: python-wheel-*
-          path: release-wheels
-          merge-multiple: true
-
-      - name: Attest verified wheels
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
-        with:
-          subject-path: release-wheels/*.whl
-
   python-source-artifact:
     name: Build Python source publication artifact
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -211,12 +192,6 @@ jobs:
 
       - name: Install locked build tools
         run: python -m pip install --require-hashes -r requirements-dev.txt
-
-      - name: Test release helper target detection
-        run: python ../scripts/test_generate_third_party_licenses.py
-
-      - name: Verify native dependency license bundles
-        run: python ../scripts/generate_third_party_licenses.py --check
 
       - name: Fetch the locked source-build graph
         run: cargo fetch --locked
@@ -252,38 +227,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  python-source-attestation:
-    name: Attest release Python source archive
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: python-source-artifact
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Download verified Python source archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: python-source-publication-archive
-          path: release-python-source
-
-      - name: Attest Python publication archive
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
-        with:
-          subject-path: release-python-source/*.tar.gz
-
   node:
     name: Node.js ${{ matrix.node }} (${{ matrix.os }})
     strategy:
       fail-fast: false
+      # Same rule as the Python tier: full product on the tag and on maintenance dispatch, the
+      # declared floor from `engines.node` (`>=22`) everywhere else.
       matrix: >-
         ${{
           fromJSON(
-            github.event_name == 'pull_request' &&
-            '{"include":[{"os":"ubuntu-24.04","node":22},{"os":"ubuntu-24.04","node":26},{"os":"macos-15","node":22},{"os":"windows-2025","node":22}]}' ||
-            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"node":[22,24,26]}'
+            (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
+            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"node":[22,24,26]}' ||
+            '{"include":[{"os":"ubuntu-24.04","node":22}]}'
           )
         }}
     runs-on: ${{ matrix.os }}
@@ -318,9 +273,6 @@ jobs:
       - name: Install locked development dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify native dependency license bundles
-        run: python ../scripts/generate_third_party_licenses.py --check
-
       - name: Select the host native dependency licenses
         run: >-
           python ../scripts/generate_third_party_licenses.py
@@ -345,7 +297,7 @@ jobs:
 
   node-platform-build:
     name: Build Node platform package (${{ matrix.target }})
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -469,7 +421,7 @@ jobs:
 
   node-platform-host:
     name: Install Node platform package (${{ matrix.target }})
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: node-platform-build
     strategy:
       fail-fast: false
@@ -510,7 +462,7 @@ jobs:
 
   node-platform-linux:
     name: Install Node platform package (${{ matrix.target }})
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: node-platform-build
     strategy:
       fail-fast: false
@@ -553,7 +505,7 @@ jobs:
 
   node-platform-assembly:
     name: Assemble every Node platform package
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs:
       - node-platform-build
       - node-platform-host
@@ -600,9 +552,6 @@ jobs:
       - name: Assemble platform packages
         run: pnpm exec napi artifacts --output-dir artifacts --npm-dir npm
 
-      - name: Verify checked-in dependency license unions
-        run: python ../scripts/generate_third_party_licenses.py --check
-
       - name: Generate target-exact native dependency licenses
         run: |
           python ../scripts/generate_third_party_licenses.py --package cellrune-node --target aarch64-apple-darwin --output npm/darwin-arm64/THIRD_PARTY_LICENSES.md
@@ -637,31 +586,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  node-platform-attestation:
-    name: Attest release npm archives
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: node-platform-assembly
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Download verified npm archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-publication-archives
-          path: release-npm
-
-      - name: Attest npm publication archives
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
-        with:
-          subject-path: release-npm/*.tgz
-
   mcp-binary:
     name: Build MCP binary bundle (${{ matrix.target }})
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -685,9 +612,6 @@ jobs:
 
       - name: Configure path-remapped release builds
         run: python bindings/scripts/configure_reproducible_rust.py
-
-      - name: Verify native dependency license bundles
-        run: python bindings/scripts/generate_third_party_licenses.py --check
 
       - name: Select target-exact MCP dependency licenses
         run: >-

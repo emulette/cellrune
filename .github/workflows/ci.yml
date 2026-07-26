@@ -21,7 +21,9 @@ jobs:
   quality:
     name: Format, lint, tests, and docs
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # Absorbed the former dependency-policy job; cargo deny resolves eight targets with all
+    # features and clones a fresh advisory database, so the budget absorbed its allowance too.
+    timeout-minutes: 90
     steps:
       - name: Check out exact revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -194,6 +196,38 @@ jobs:
       - name: Verify every published version declaration agrees
         run: python3 bindings/scripts/check_version_consistency.py
 
+      # This script's own unit test covers its host-target detection. It used to live in the
+      # Python source-artifact job, which is now tag-gated, so a pull request editing the
+      # script would have run it without ever running its tests.
+      - name: Test release helper target detection
+        run: python3 bindings/scripts/test_generate_third_party_licenses.py
+
+      # Moved out of the binding matrix. `--check` compares the committed license bundles against
+      # the dependency graph and reads nothing host-specific, so running it once per matrix
+      # element asked the same question up to fifteen times on a tag. The per-host `--target host`
+      # selection stays in the binding jobs, because that answer really does differ per element.
+      - name: Verify checked-in native dependency license bundles
+        run: python3 bindings/scripts/generate_third_party_licenses.py --check
+
+      # Merged in from the former standalone dependency-policy job. Both invocations are cheap
+      # next to the compile above, and a separate job paid a second checkout and toolchain
+      # install to run two commands.
+      - name: Install pinned cargo-deny
+        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
+      - name: Check workspace dependency policy
+        run: cargo deny --all-features check
+
+      - name: Check standalone fuzz dependency policy
+        run: >-
+          cargo deny
+          --manifest-path fuzz/Cargo.toml
+          --config fuzz/deny.toml
+          check
+
   msrv:
     name: Minimum supported Rust version, warnings denied
     runs-on: ubuntu-24.04
@@ -249,8 +283,13 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check --workspace --all-targets --all-features --locked
 
+  # Not on pull requests. This is a `cap-std` XLSX library, so path handling and file semantics
+  # really do differ across these three platforms and the tier cannot be dropped outright — but
+  # a PR changing formula evaluation does not need to learn it on Windows before it merges.
+  # `release.yml` calls this workflow on the tag, so the tier still gates every publication.
   platform-tests:
     name: Core and MCP (${{ matrix.os }})
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -288,37 +327,12 @@ jobs:
       - name: Run MCP stdio protocol gate
         run: cargo test --package cellrune-mcp --test stdio_workflow --locked
 
-  dependency-policy:
-    name: Rust dependency and license policy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out exact revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
-
-      - name: Install pinned cargo-deny
-        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
-        with:
-          tool: cargo-deny@0.20.2
-          fallback: none
-
-      - name: Check workspace dependency policy
-        run: cargo deny --all-features check
-
-      - name: Check standalone fuzz dependency policy
-        run: >-
-          cargo deny
-          --manifest-path fuzz/Cargo.toml
-          --config fuzz/deny.toml
-          check
-
+  # Not on pull requests, same reasoning as platform-tests. Kept on main and on the tag because
+  # runbook 4.1 lists the packaged-consumer resolve among the failures that otherwise surface
+  # only during a release run, after the irreversible publish approvals.
   package:
     name: Packaged crate and standalone consumer
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
