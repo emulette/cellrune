@@ -43,7 +43,7 @@
   "scripts": {
     "build": "napi build --platform --release --strip --js native.js --dts native.d.ts",
     "build:debug": "napi build --platform --js native.js --dts native.d.ts",
-    "test": "node tests/conformance.cjs && node tests/interactive.cjs && node tests/import.mjs && node tests/boundary.cjs && node tests/responsiveness.cjs",
+    "test": "node tests/binding-contract.cjs && node tests/interactive.cjs && node tests/import.mjs && node tests/boundary.cjs && node tests/responsiveness.cjs",
     "test:package": "node tests/packed-consumer.cjs",
     "typecheck": "tsc --noEmit --strict --types node --module nodenext --moduleResolution nodenext --target es2022 tests/types.ts"
   },

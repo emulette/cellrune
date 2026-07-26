@@ -11,7 +11,7 @@ from cellrune import CellRuneError, Workbook, WorkbookChange
 
 def main() -> None:
     corpus_path = (
-        Path(__file__).resolve().parents[3] / "conformance" / "interactive-v1.json"
+        Path(__file__).resolve().parents[3] / "binding-contract" / "interactive-v1.json"
     )
     corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
     workbook = Workbook.create()

@@ -11,7 +11,7 @@ async function main() {
     "..",
     "..",
     "..",
-    "conformance",
+    "binding-contract",
     "interactive-v1.json",
   );
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));

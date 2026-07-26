@@ -7,7 +7,7 @@ from typing import cast
 
 from cellrune import CellRuneError, Workbook
 
-CORPUS_PATH = pathlib.Path(__file__).parents[3] / "conformance" / "v1.json"
+CORPUS_PATH = pathlib.Path(__file__).parents[3] / "binding-contract" / "v1.json"
 
 
 def assert_error(code: str, operation: Callable[[], object]) -> None:

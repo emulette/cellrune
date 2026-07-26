@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/bindings.yml"
       - "bindings/**"
+      - "binding-contract/**"
       - "crates/**"
       - "Cargo.lock"
       - "Cargo.toml"
@@ -16,6 +17,7 @@ on:
     paths:
       - ".github/workflows/bindings.yml"
       - "bindings/**"
+      - "binding-contract/**"
       - "crates/**"
       - "Cargo.lock"
       - "Cargo.toml"
@@ -128,8 +130,8 @@ jobs:
           --force-reinstall
           "cellrune==$(python ../scripts/workspace_version.py)"
 
-      - name: Run Python binding conformance
-        run: python tests/conformance.py
+      - name: Run Python binding contract
+        run: python tests/binding_contract.py
 
       - name: Run Python interactive-session tests
         run: python tests/interactive.py
@@ -237,7 +239,7 @@ jobs:
             --find-links dist \
             --only-binary :all: \
             "cellrune==$(python ../scripts/workspace_version.py)"
-          consumer/bin/python tests/conformance.py
+          consumer/bin/python tests/binding_contract.py
           consumer/bin/python tests/introspection.py
 
       - name: Upload verified Python archives
@@ -330,7 +332,7 @@ jobs:
       - name: Check reviewed public declarations
         run: pnpm typecheck
 
-      - name: Run CommonJS, ESM, conformance, and event-loop tests
+      - name: Run CommonJS, ESM, binding contract, and event-loop tests
         run: pnpm test
 
       - name: Install and exercise the packed npm artifact

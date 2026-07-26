@@ -28,9 +28,10 @@ struct Expected {
 
 #[test]
 fn versioned_interactive_corpus_matches_batch_delta_and_error_contract() {
-    let corpus: Corpus =
-        serde_json::from_str(include_str!("../../../conformance/interactive-v1.json"))
-            .expect("valid interactive corpus");
+    let corpus: Corpus = serde_json::from_str(include_str!(
+        "../../../binding-contract/interactive-v1.json"
+    ))
+    .expect("valid interactive corpus");
     assert_eq!(corpus.schema_version, 1);
     let mut session = WorkbookSession::create();
 

@@ -6,7 +6,7 @@ const path = require("node:path");
 const { CellRuneError, Workbook } = require("..");
 
 async function main() {
-  const corpusPath = path.join(__dirname, "..", "..", "..", "conformance", "v1.json");
+  const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const workbook = Workbook.create();
   for (const operation of corpus.operations) {

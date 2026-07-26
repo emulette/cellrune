@@ -48,8 +48,8 @@ struct ExpectedNumber {
 }
 
 fn corpus() -> Corpus {
-    serde_json::from_str(include_str!("../../../conformance/v1.json"))
-        .expect("conformance corpus must remain valid")
+    serde_json::from_str(include_str!("../../../binding-contract/v1.json"))
+        .expect("binding contract corpus must remain valid")
 }
 
 fn build_session(corpus: &Corpus) -> WorkbookSession {
