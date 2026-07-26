@@ -21,9 +21,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   (`extract_conformance_matrix`) accepts ordinary and resolved shared formulas and rejects
   workbook metadata the v1 matrix cannot reproduce.
 - A semver invariant inside the existing test suite (`tests/public_api.rs`). The sixteen exported
-  enums that are not `non_exhaustive` are matched without wildcard arms and the positional
-  signature of `WorkbookSnapshot::new_with_metadata` is pinned to a function-pointer constant.
-  This remains one test as the API grows.
+  enums that are not `non_exhaustive` are matched without wildcard arms with every variant
+  payload bound at its exact type, and function-pointer constants pin the positional signatures
+  of `WorkbookSnapshot::new_with_metadata` and the monomorphic read → calculate → write entry
+  points. This remains one test as the API grows.
 
 ### Changed
 

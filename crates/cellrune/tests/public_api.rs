@@ -4,26 +4,54 @@
 //! breaking change, and under Cargo's 0.x rules a breaking change requires 0.2.0. This is one
 //! compile-time invariant inside the normal test suite, not one test per enum. The matches below
 //! deliberately have no wildcard arm, so the invariant grows as data while the test surface stays
-//! fixed.
+//! fixed. Every variant payload is pinned at its exact type through [`payload`], whose
+//! inference cannot deref-coerce, so changing a payload's type — including wrapping it in a
+//! `Box` or another `Deref` wrapper — is a compile error too, not only adding a variant.
 //!
-//! The function-pointer constant freezes the positional signature of
-//! `WorkbookSnapshot::new_with_metadata` for the same reason: an eighth positional argument is
-//! a breaking change. Extension happens through builder methods, not through this signature.
+//! The function-pointer constants freeze positional signatures for the same reason: an extra
+//! positional argument or a changed parameter type is a breaking change. Extension happens
+//! through builder methods and option structs, not through these signatures. Pinned are
+//! `WorkbookSnapshot::new_with_metadata` and the monomorphic read → calculate → write entry
+//! points; their generic companions (`read_xlsx_path`, `write_recalculated_xlsx`, …) share the
+//! same shapes minus the generic parameter and are not separately pinnable as function pointers.
+//! Trait implementations are not pinned here.
 //!
 //! When a change here is intentional, it must ship in 0.2.0 and be recorded in the changelog;
 //! updating this file is part of that decision, never a side effect.
 
+use std::marker::PhantomData;
+
 use cellrune::{
     ApplyChangesError, CalculationCellResult, CalculationExecutionMode, CalculationHints,
-    CalculationMode, CellContent, CellValue, DateSystem, DefinedName, DefinedNameScope, Diagnostic,
-    DiagnosticSeverity, FormulaCapability, FunctionSupport, NumberFormatKind, Provenance,
-    RecalculationMode, SavedResult, SharedFormulaRole, Sheet, SheetVisibility, ValidationError,
-    WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
+    CalculationIssue, CalculationMode, CalculationOptions, CalculationSnapshot, CellAddress,
+    CellContent, CellValue, DateSystem, DefinedName, DefinedNameScope, Diagnostic,
+    DiagnosticSeverity, FormulaCapability, FormulaCapabilityReport, FormulaCell, FunctionSupport,
+    NumberFormatKind, Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode,
+    RecalculationWriteOptions, SavedResult, SavedResultIssue, SessionError, SharedFormulaRole,
+    Sheet, SheetId, SheetVisibility, ValidationError, WorkbookSnapshot, WorkbookSource,
+    WorkbookSourceKind, XlsxDocument, XlsxReadError, XlsxWriteError, calculate_workbook,
+    read_xlsx_bytes, scan_formula_capabilities, write_recalculated_xlsx_bytes,
 };
+
+/// Captures a payload binding's exact type. The intermediate `let pinned = payload(…);` at every
+/// call site is load-bearing: it has no expected type, so `T` unifies with the binding itself and
+/// deref coercion cannot substitute a `Box`/`Arc` wrapper. Assigning the result to
+/// `PhantomData<Expected>` afterwards is then an exact-type equation. A one-step
+/// `let _: &Expected = binding;` would be a coercion site and would miss wrapper changes.
+fn payload<T>(_: &T) -> PhantomData<T> {
+    PhantomData
+}
 
 fn frozen_cell_content(content: &CellContent) {
     match content {
-        CellContent::Literal(_) | CellContent::Formula(_) => {}
+        CellContent::Literal(value) => {
+            let pinned = payload(value);
+            let _: PhantomData<CellValue> = pinned;
+        }
+        CellContent::Formula(formula) => {
+            let pinned = payload(formula);
+            let _: PhantomData<FormulaCell> = pinned;
+        }
     }
 }
 
@@ -49,13 +77,25 @@ fn frozen_calculation_mode(mode: CalculationMode) {
 
 fn frozen_defined_name_scope(scope: &DefinedNameScope) {
     match scope {
-        DefinedNameScope::Workbook | DefinedNameScope::Sheet(_) => {}
+        DefinedNameScope::Workbook => {}
+        DefinedNameScope::Sheet(sheet) => {
+            let pinned = payload(sheet);
+            let _: PhantomData<SheetId> = pinned;
+        }
     }
 }
 
 fn frozen_saved_result(result: &SavedResult) {
     match result {
-        SavedResult::Missing | SavedResult::Present(_) | SavedResult::Invalid(_) => {}
+        SavedResult::Missing => {}
+        SavedResult::Present(value) => {
+            let pinned = payload(value);
+            let _: PhantomData<CellValue> = pinned;
+        }
+        SavedResult::Invalid(issue) => {
+            let pinned = payload(issue);
+            let _: PhantomData<SavedResultIssue> = pinned;
+        }
     }
 }
 
@@ -73,13 +113,24 @@ fn frozen_calculation_execution_mode(mode: CalculationExecutionMode) {
 
 fn frozen_apply_changes_error(error: &ApplyChangesError) {
     match error {
-        ApplyChangesError::Session(_) | ApplyChangesError::Validation(_) => {}
+        ApplyChangesError::Session(session) => {
+            let pinned = payload(session);
+            let _: PhantomData<SessionError> = pinned;
+        }
+        ApplyChangesError::Validation(validation) => {
+            let pinned = payload(validation);
+            let _: PhantomData<ValidationError> = pinned;
+        }
     }
 }
 
 fn frozen_formula_capability(capability: &FormulaCapability) {
     match capability {
-        FormulaCapability::Supported | FormulaCapability::Unsupported(_) => {}
+        FormulaCapability::Supported => {}
+        FormulaCapability::Unsupported(issues) => {
+            let pinned = payload(issues);
+            let _: PhantomData<Vec<CalculationIssue>> = pinned;
+        }
     }
 }
 
@@ -91,7 +142,14 @@ fn frozen_function_support(support: FunctionSupport) {
 
 fn frozen_calculation_cell_result(result: &CalculationCellResult) {
     match result {
-        CalculationCellResult::Value(_) | CalculationCellResult::Unavailable(_) => {}
+        CalculationCellResult::Value(value) => {
+            let pinned = payload(value);
+            let _: PhantomData<CellValue> = pinned;
+        }
+        CalculationCellResult::Unavailable(issue) => {
+            let pinned = payload(issue);
+            let _: PhantomData<CalculationIssue> = pinned;
+        }
     }
 }
 
@@ -114,7 +172,11 @@ fn frozen_diagnostic_severity(severity: DiagnosticSeverity) {
 
 fn frozen_shared_formula_role(role: SharedFormulaRole) {
     match role {
-        SharedFormulaRole::Anchor | SharedFormulaRole::Follower { .. } => {}
+        SharedFormulaRole::Anchor => {}
+        SharedFormulaRole::Follower { anchor } => {
+            let pinned = payload(&anchor);
+            let _: PhantomData<CellAddress> = pinned;
+        }
     }
 }
 
@@ -137,6 +199,22 @@ const _FROZEN_NEW_WITH_METADATA: fn(
     WorkbookSource,
     Provenance,
 ) -> Result<WorkbookSnapshot, ValidationError> = WorkbookSnapshot::new_with_metadata;
+
+const _FROZEN_READ_XLSX_BYTES: fn(&[u8], ReadOptions) -> Result<WorkbookSnapshot, XlsxReadError> =
+    read_xlsx_bytes;
+
+const _FROZEN_CALCULATE_WORKBOOK: fn(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot =
+    calculate_workbook;
+
+const _FROZEN_SCAN_FORMULA_CAPABILITIES: fn(&WorkbookSnapshot) -> FormulaCapabilityReport =
+    scan_formula_capabilities;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_WRITE_RECALCULATED_XLSX_BYTES: fn(
+    &XlsxDocument,
+    &CalculationSnapshot,
+    RecalculationWriteOptions,
+) -> Result<RecalculatedWorkbook, XlsxWriteError> = write_recalculated_xlsx_bytes;
 
 #[test]
 fn the_frozen_enums_are_exhaustively_matched() {
