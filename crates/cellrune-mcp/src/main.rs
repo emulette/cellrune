@@ -73,6 +73,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_max_level(LevelFilter::from(cli.log_level))
+        // MCP hosts capture stderr as plain text. Passing `false` is supported even without the
+        // `ansi` feature and keeps escape codes out of the logs if a future dependency enables
+        // that feature through unification.
+        .with_ansi(false)
         .with_writer(std::io::stderr)
         .try_init()?;
 
