@@ -32,12 +32,41 @@ bindings and test them without updating either dependency graph:
 ```bash
 python -m pip install --require-hashes -r bindings/python/requirements-dev.txt
 (cd bindings/python && maturin develop --release --locked)
-(cd bindings/python && python tests/conformance.py && python tests/interactive.py && python tests/introspection.py && python tests/responsiveness.py && python tests/typing_check.py && mypy --strict tests/typing_check.py)
+(cd bindings/python && python tests/binding_contract.py && python tests/interactive.py && python tests/introspection.py && python tests/responsiveness.py && python tests/typing_check.py && mypy --strict tests/typing_check.py)
 (cd bindings/node && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck && pnpm test)
 ```
 
 The release workflows are the normative definition for target-specific wheels, npm platform
 packages, MCP bundles, license notices, offline consumers, and provenance.
+
+## Dependency requirements
+
+External Rust requirements for workspace members are defined once in `[workspace.dependencies]`
+in the root `Cargo.toml`. A version there is the lowest supported dependency, not the version used
+for reproducible builds; the checked-in `Cargo.lock` records the latter.
+
+A dependency floor must satisfy all of these conditions:
+
+- every API and feature CellRune uses is present;
+- the full workspace suite passes on Rust 1.88 with the direct dependency minimized;
+- the resolved floor graph passes the repository's advisory policy; and
+- every version admitted by a cross-major range uses the same tested API and behavior boundary.
+
+Security can therefore keep a floor above the first version that merely compiles. Keep an explicit
+upper bound when CellRune intentionally spans multiple semver-incompatible release lines. Do not
+replace a floor with the current release during routine upgrades; update `Cargo.lock` instead.
+Test a proposed floor in a temporary worktree with:
+
+```bash
+cargo +nightly-2026-07-22 -Z direct-minimal-versions generate-lockfile
+RUSTUP_TOOLCHAIN=1.88.0 RUSTFLAGS="-D warnings" cargo test --workspace --lib --bins --tests --examples --all-features
+cargo deny --all-features check
+```
+
+Exact versions remain appropriate for CellRune crates and npm platform packages that are released
+in lockstep. Python hash locks, the Python build backend, npm development tools, and their lockfiles
+are reproducible tool inputs rather than downstream compatibility requirements; update and verify
+those intentionally instead of treating them as dependency floors.
 
 ## Requirements
 

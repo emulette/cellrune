@@ -288,9 +288,32 @@ records where calculated values are known to differ from Excel and why, includin
 financial solvers, `DOLLAR` currency formatting, and IEEE-754 arithmetic near zero. Read it before
 comparing results for equality.
 
-Public CI uses generated, redistributable workbook fixtures. Private development corpora and
-native-producer evidence are not distributed or represented as release gates; validate
-workbooks from your own producers against the supported-capability report before relying on them.
+## Verification
+
+The `conformance/` tree carries redistributable expectation matrices — every literal, every
+formula, and the value a recorded oracle saved for that formula — and the normal workspace test
+run reconstructs each matrix, calculates it, and compares CellRune's values with the oracle's.
+The first matrix is the Apache POI `FormulaEvalTestData` corpus (Apache-2.0): 1,295
+formula cases against the workbook's saved Microsoft Excel 2013 calculation cache, of which
+1,290 match within a scale-relative `1e-8` and 5 are divergences documented case by case where
+that 2013-era cache predates current Excel behavior. Documented divergences are enforced in
+both directions: the test fails if CellRune stops matching where it must, and also if a
+recorded divergence quietly disappears or changes shape.
+
+Development audits recorded against the private corpus (2026-07-24, not distributed) add: a
+Microsoft Excel for Mac 16.111 recalculation of the same corpus matching CellRune on all 1,287
+non-locale results within `1e-8`, with the eight `DOLLAR` locale strings documented in
+`docs/NUMERICS.md`; full-span audits of 14 real workbooks — 331,322 calculation entries with
+748 unavailable results: 695 blocked by unavailable upstream cells, 44 circular references,
+and 9 formula containers without stored text, none caused by an unsupported function or
+expression; the largest of them, roughly 250,000 calculated formulas, completing its
+full preserve, recalculate, and reopen audit in 5 minutes 22 seconds; and producer fixtures
+from Excel, LibreOffice, Google Sheets, and openpyxl passing 4 of 4.
+
+Public CI uses generated, redistributable workbook fixtures and the expectation matrices above.
+Private development corpora and native-producer evidence are not distributed or represented as
+release blockers; validate workbooks from your own producers against the supported-capability
+report before relying on them.
 
 ## License
 

@@ -7,6 +7,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ## [Unreleased]
 
+### Added
+
+- A single data-driven conformance expectation suite. `conformance/` holds redistributable
+  matrices — every literal, every formula, and the value a recorded oracle saved for it — and
+  the normal workspace test run reconstructs every matrix and compares CellRune's calculation
+  against the oracle. New functions and syntax add cases to this suite rather than new jobs.
+  The first matrix is the Apache POI `FormulaEvalTestData` corpus (Apache-2.0): 1,295 cases
+  against a saved Microsoft Excel 2013 calculation cache, 1,290 matching within a
+  scale-relative `1e-8` and 5 divergences documented case by case. A documented divergence is
+  enforced in both directions, so neither the oracle side nor the CellRune side of it can drift
+  silently, and a divergence without an explanatory note fails the test. An extraction tool
+  (`extract_conformance_matrix`) accepts ordinary and resolved shared formulas and rejects
+  workbook metadata the v1 matrix cannot reproduce.
+- A semver invariant inside the existing test suite (`tests/public_api.rs`). The sixteen exported
+  enums that are not `non_exhaustive` are matched without wildcard arms and the positional
+  signature of `WorkbookSnapshot::new_with_metadata` is pinned to a function-pointer constant.
+  This remains one test as the API grows.
+
+### Changed
+
+- Rust dependency requirements now declare the oldest API-compatible, advisory-clean versions
+  instead of using the release that happened to be newest when each manifest was edited. All
+  workspace requirements live in the root manifest, the lockfile still selects the reproducible
+  current graph, and broad ranges are bounded to the release families exercised by the floor and
+  newest-compatible suites. Seventeen of twenty-one external Rust floors moved down; four remain
+  at their current releases because they are the first secure version or belong to the same
+  release family (`quick-xml`, PyO3 and its build helper, and `calamine`).
+- The `conformance/` fixtures now live in `binding-contract/`, which is what they are: a
+  cross-binding API behavior contract exercised by the Rust interop, Python, and Node test
+  suites. Two 1 KB fixtures cannot carry an Excel conformance claim, so the `conformance/` name
+  is reserved for the Excel expectation suite that can.
+- The nightly sanitizer campaign remains one job over four stable trust boundaries. It records
+  every target's result before failing, so one crash cannot starve later campaigns and new
+  functions do not create new fuzz jobs.
+- The MSRV check covers `--all-targets` rather than `--lib`, so tests, benches, and the
+  extraction tool must also build on the declared floor.
+- The 50k benchmark remains an explicit observational command rather than a scheduled job or
+  release blocker. Functional correctness remains covered by the generated-workbook tests.
+
+### Documentation
+
+- The README carries a Verification section: the public conformance-suite numbers with their
+  exact oracle, and the private-audit results (Excel for Mac 16.111 corpus recalculation,
+  14-workbook full-span audits, the 250k-formula timing, and the 4-of-4 producer matrix) with
+  their provenance and non-distribution stated.
+
 ## [0.1.1] - 2026-07-25
 
 ### Changed
