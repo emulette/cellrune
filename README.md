@@ -303,7 +303,8 @@ recorded divergence quietly disappears or changes shape.
 Development audits recorded against the private corpus (2026-07-24, not distributed) add: a
 Microsoft Excel for Mac 16.111 recalculation of the same corpus matching CellRune on all 1,287
 non-locale results within `1e-8`, with the eight `DOLLAR` locale strings documented in
-`docs/NUMERICS.md`; full-span audits of 14 real workbooks — 331,322 calculation entries with
+[`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md);
+full-span audits of 14 real workbooks — 331,322 calculation entries with
 748 unavailable results: 695 blocked by unavailable upstream cells, 44 circular references,
 and 9 formula containers without stored text, none caused by an unsupported function or
 expression; the largest of them, roughly 250,000 calculated formulas, completing its
