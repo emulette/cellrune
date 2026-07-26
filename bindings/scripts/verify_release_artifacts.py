@@ -47,7 +47,7 @@ ERROR_MESSAGES = {
     "npm.platform_native": "platform npm archive must contain exactly one native binary",
     "npm.platform_boundary": "platform npm archive contains an unexpected file",
     "wheel.native": "wheel must contain exactly one native extension",
-    "wheel.project_license": "wheel does not contain the CellRune license",
+    "wheel.project_license": "wheel does not contain both CellRune license texts",
     "wheel.third_party": "wheel does not contain third-party license texts",
     "wheel.metadata": "wheel metadata is missing",
     "wheel.public_metadata": "wheel version or public project URLs are incomplete",
@@ -65,7 +65,7 @@ ERROR_MESSAGES = {
     "sdist.required": "sdist is missing {name}",
     "sdist.compiled": "sdist contains a compiled artifact",
     "mcp.executable": "MCP bundle must contain exactly one server executable",
-    "mcp.project_license": "MCP bundle does not contain the CellRune license",
+    "mcp.project_license": "MCP bundle does not contain both CellRune license texts",
     "mcp.third_party": "MCP bundle does not contain third-party license texts",
     "mcp.boundary": "MCP bundle contains unexpected files: {files}",
     "license.target_graph": "binary artifact does not contain a target-exact dependency notice",
@@ -83,6 +83,11 @@ EXPECTED_REPOSITORY = "git+https://github.com/emulette/cellrune.git"
 EXPECTED_HOMEPAGE = "https://github.com/emulette/cellrune#readme"
 EXPECTED_ISSUES = "https://github.com/emulette/cellrune/issues"
 NOTICE_NAME = "THIRD_PARTY_LICENSES.md"
+# CellRune is dual-licensed, so every artifact carries both texts. This is the single definition
+# every artifact boundary below reads: the npm root set, the npm platform set, the wheel license
+# directory, and the MCP bundle set are exact-set comparisons, and a license file added to only
+# some of them fails during a release run rather than in a pull request.
+LICENSE_NAMES = ("LICENSE-MIT", "LICENSE-APACHE")
 CACHE_SEGMENTS = frozenset(
     {
         ".git",
@@ -105,7 +110,7 @@ PRIVATE_PATH_PATTERNS = (
 )
 ROOT_NPM_FILES = frozenset(
     {
-        "package/LICENSE",
+        *(f"package/{name}" for name in LICENSE_NAMES),
         "package/README.md",
         f"package/{NOTICE_NAME}",
         "package/index.d.ts",
@@ -299,7 +304,7 @@ def validate_npm(entries: list[Entry]) -> str:
     if not package_name.startswith("@cellrune/node-"):
         raise artifact_error("npm.name_unexpected", name=package_name)
     required = {
-        "package/LICENSE",
+        *(f"package/{name}" for name in LICENSE_NAMES),
         "package/README.md",
         f"package/{NOTICE_NAME}",
         "package/package.json",
@@ -324,7 +329,10 @@ def validate_wheel(entries: list[Entry], expected_target: str | None) -> str:
     ]
     if len(native_files) != 1:
         raise artifact_error("wheel.native")
-    if not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
+    if not all(
+        any(name.endswith(f".dist-info/licenses/{license_name}") for name in names)
+        for license_name in LICENSE_NAMES
+    ):
         raise artifact_error("wheel.project_license")
     if not any(
         name.endswith(f".dist-info/licenses/{NOTICE_NAME}") for name in names
@@ -434,7 +442,7 @@ def validate_mcp(entries: list[Entry]) -> str:
     ]
     if len(binaries) != 1:
         raise artifact_error("mcp.executable")
-    if "LICENSE" not in basenames:
+    if not all(license_name in basenames for license_name in LICENSE_NAMES):
         raise artifact_error("mcp.project_license")
     if NOTICE_NAME not in basenames:
         raise artifact_error("mcp.third_party")
@@ -445,7 +453,7 @@ def validate_mcp(entries: list[Entry]) -> str:
     binary_name = pathlib.PurePosixPath(binaries[0]).name
     expected_names = {
         f"{prefix}/{binary_name}",
-        f"{prefix}/LICENSE",
+        *(f"{prefix}/{name}" for name in LICENSE_NAMES),
         f"{prefix}/{NOTICE_NAME}",
     }
     if set(names) != expected_names:

@@ -7,12 +7,13 @@
   "main": "cellrune.linux-arm64-musl.node",
   "files": [
     "cellrune.linux-arm64-musl.node",
-    "LICENSE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
     "README.md",
     "THIRD_PARTY_LICENSES.md"
   ],
   "description": "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "homepage": "https://github.com/emulette/cellrune#readme",
   "repository": {
     "type": "git",

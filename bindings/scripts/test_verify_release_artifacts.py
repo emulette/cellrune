@@ -13,6 +13,7 @@ from pathlib import Path
 
 from verify_release_artifacts import (
     EXPECTED_VERSION,
+    LICENSE_NAMES,
     Entry,
     archive_entries,
     validate_mcp,
@@ -101,7 +102,7 @@ class ArchiveEntryTests(unittest.TestCase):
     def test_mcp_bundle_requires_one_exact_prefix(self) -> None:
         entries = [
             Entry(f"cellrune-mcp-{EXPECTED_VERSION}-target/cellrune-mcp", b"binary"),
-            Entry("other/LICENSE", b"license"),
+            *(Entry(f"other/{name}", b"license") for name in LICENSE_NAMES),
             Entry(
                 f"cellrune-mcp-{EXPECTED_VERSION}-target/THIRD_PARTY_LICENSES.md",
                 b"Artifact target: `target`",
@@ -114,7 +115,7 @@ class ArchiveEntryTests(unittest.TestCase):
         prefix = f"cellrune-mcp-{EXPECTED_VERSION}-target"
         entries = [
             Entry(f"{prefix}/cellrune-mcp", b"binary"),
-            Entry(f"{prefix}/LICENSE", b"license"),
+            *(Entry(f"{prefix}/{name}", b"license") for name in LICENSE_NAMES),
             Entry(
                 f"{prefix}/THIRD_PARTY_LICENSES.md",
                 b"Artifact target: `target`",
@@ -123,6 +124,28 @@ class ArchiveEntryTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(RuntimeError, r"^mcp\.boundary:"):
             validate_mcp(entries)
+
+    # A dual-licensed artifact that ships only one of the two texts satisfies neither license's
+    # redistribution condition, and every check that would notice runs during a release. Each
+    # name is dropped in turn so a bundle cannot lose one and stay green.
+    def test_mcp_bundle_requires_every_license_text(self) -> None:
+        prefix = f"cellrune-mcp-{EXPECTED_VERSION}-target"
+        for omitted in LICENSE_NAMES:
+            with self.subTest(omitted=omitted):
+                entries = [
+                    Entry(f"{prefix}/cellrune-mcp", b"binary"),
+                    *(
+                        Entry(f"{prefix}/{name}", b"license")
+                        for name in LICENSE_NAMES
+                        if name != omitted
+                    ),
+                    Entry(
+                        f"{prefix}/THIRD_PARTY_LICENSES.md",
+                        b"Artifact target: `target`",
+                    ),
+                ]
+                with self.assertRaisesRegex(RuntimeError, r"^mcp\.project_license:"):
+                    validate_mcp(entries)
 
 
 class WheelPlatformTagTests(unittest.TestCase):

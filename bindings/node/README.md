@@ -61,5 +61,7 @@ been released. An active calculation is cooperatively cancelled, and later
 operations fail with `interop.session.closed`.
 See the declarations bundled with the package for the complete API.
 
-CellRune is licensed under the MIT License. The native package's dependency
-notices are in `THIRD_PARTY_LICENSES.md`.
+CellRune is dual-licensed under either the MIT License or the Apache License,
+Version 2.0, at your option. Both texts ship with this package as `LICENSE-MIT`
+and `LICENSE-APACHE`. The native package's dependency notices are in
+`THIRD_PARTY_LICENSES.md`.

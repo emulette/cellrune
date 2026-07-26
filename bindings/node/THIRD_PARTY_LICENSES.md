@@ -1,7 +1,7 @@
 # Third-party licenses
 
-CellRune is distributed under the MIT License. Native release artifacts
-use the third-party components below under their own licenses.
+CellRune is distributed under the MIT OR Apache-2.0 licenses. Native release
+artifacts use the third-party components below under their own licenses.
 
 This checked-in file is a conservative all-target union. It may list
 components that are not linked into a particular target artifact.

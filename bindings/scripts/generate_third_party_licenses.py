@@ -272,8 +272,8 @@ def render_bundle(
     lines = [
         "# Third-party licenses",
         "",
-        "CellRune is distributed under the MIT License. Native release artifacts",
-        "use the third-party components below under their own licenses.",
+        "CellRune is distributed under the MIT OR Apache-2.0 licenses. Native release",
+        "artifacts use the third-party components below under their own licenses.",
         "",
         graph_description,
         "",

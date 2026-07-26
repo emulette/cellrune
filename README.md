@@ -333,5 +333,14 @@ It is a report, not a composite score, compatibility claim, CI threshold, or rel
 
 ## License
 
-CellRune is available under the MIT License. Dependency license information is provided in
+CellRune is dual-licensed under either the [MIT
+License](https://github.com/emulette/cellrune/blob/main/LICENSE-MIT) or the [Apache License,
+Version 2.0](https://github.com/emulette/cellrune/blob/main/LICENSE-APACHE), at your option.
+Apache-2.0 carries an explicit patent grant; MIT does not. Choosing either one satisfies the whole
+of CellRune's terms, and every distributed artifact carries both texts.
+
+Releases 0.1.0 through 0.1.2 were published under the MIT License alone; the dual license applies
+from the next release onward. Dependency license information is provided in
 `THIRD_PARTY_LICENSES.md`.
+
+Unless you state otherwise, a contribution you submit is licensed under the same dual terms.

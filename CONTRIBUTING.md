@@ -102,6 +102,16 @@ those intentionally instead of treating them as dependency floors.
 - Validate every dependency against the repository policy.
 - Keep the packaged license and third-party notice identical to their repository copies.
 
-Unless stated otherwise, contributions are licensed under the MIT License. By submitting a
-contribution, you confirm that you have the right to provide it under that license. CellRune does
+## License
+
+CellRune is dual-licensed under either the MIT License (`LICENSE-MIT`) or the Apache License,
+Version 2.0 (`LICENSE-APACHE`), at the recipient's option.
+
+Unless stated otherwise, a contribution you intentionally submit for inclusion in CellRune is
+licensed under those same dual terms, with no additional terms or conditions. By submitting a
+contribution, you confirm that you have the right to provide it under both licenses. CellRune does
 not require a separate contributor license agreement or commit sign-off.
+
+Every distributed artifact carries both license texts, so a new distribution boundary has to copy
+both. The `Verify packaged license text` step in `ci.yml` enumerates the copies and compares each
+one against the repository original.

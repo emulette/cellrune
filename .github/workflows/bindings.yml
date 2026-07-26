@@ -9,7 +9,8 @@ on:
       - "crates/**"
       - "Cargo.lock"
       - "Cargo.toml"
-      - "LICENSE"
+      - "LICENSE-MIT"
+      - "LICENSE-APACHE"
       - "README.md"
       - "rust-toolchain.toml"
   push:
@@ -21,7 +22,8 @@ on:
       - "crates/**"
       - "Cargo.lock"
       - "Cargo.toml"
-      - "LICENSE"
+      - "LICENSE-MIT"
+      - "LICENSE-APACHE"
       - "README.md"
       - "rust-toolchain.toml"
   workflow_call:

@@ -22,6 +22,9 @@ MESSAGE_EXECUTABLE_MISSING = "CellRune MCP executable not found under {path}"
 MESSAGE_BUNDLE_FILE_MISSING = "required bundle file is missing: {path}"
 VERSION = workspace_version()
 NOTICE_NAME = "THIRD_PARTY_LICENSES.md"
+# CellRune is dual-licensed; the bundle carries both texts. `verify_release_artifacts.py` compares
+# the bundle's member list as an exact set, so this tuple and its `LICENSE_NAMES` must agree.
+LICENSE_NAMES = ("LICENSE-MIT", "LICENSE-APACHE")
 
 
 def source_date_epoch() -> int:
@@ -49,7 +52,10 @@ def bundle_files(
 ) -> tuple[tuple[str, pathlib.Path, int], ...]:
     return (
         (binary.name, binary, 0o755),
-        ("LICENSE", repository_root / "LICENSE", 0o644),
+        *(
+            (name, repository_root / name, 0o644)
+            for name in LICENSE_NAMES
+        ),
         (
             NOTICE_NAME,
             third_party_notice,

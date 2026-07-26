@@ -7,6 +7,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ## [Unreleased]
 
+### Changed
+
+- CellRune is dual-licensed under `MIT OR Apache-2.0` at the recipient's option, instead of the MIT
+  License alone. Apache-2.0 supplies an explicit patent grant that MIT does not, which some
+  adopters require, and dual licensing under both is the Rust ecosystem's convention. Releases
+  0.1.0 through 0.1.2 remain published under MIT alone; the dual license applies from the next
+  release onward. Every distributed artifact — crate, wheel, sdist, npm root and platform
+  packages, and MCP bundles — now carries `LICENSE-MIT` and `LICENSE-APACHE` in place of the single
+  `LICENSE` file, and the release verifier's exact-set artifact boundaries require both.
+- The packaged-license CI gate enumerates its copies from the list of distribution directories
+  rather than naming each file. The previous per-file list covered three of the eleven copies: the
+  eight npm platform packages carried license text that no gate compared against the repository
+  original, so a divergence there would have been published.
+
 ## [0.1.2] - 2026-07-26
 
 ### Added

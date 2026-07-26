@@ -8,8 +8,8 @@ version = "0.1.2"
 description = "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing"
 readme = "../../README.md"
 requires-python = ">=3.10"
-license = "MIT"
-license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "CellRune contributors" }]
 classifiers = [
   "Development Status :: 4 - Beta",

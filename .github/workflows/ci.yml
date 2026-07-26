@@ -118,6 +118,11 @@ jobs:
 
       # Every copy is reported, not just the first, and the mismatch is printed.
       # A bare `cmp -s` chain aborts silently and says only which step failed.
+      #
+      # CellRune is dual-licensed, so every distribution boundary carries both texts and both
+      # have to match the repository originals. The copies are enumerated from the directory
+      # list rather than written out one by one: a per-file list silently stopped covering the
+      # eight npm platform packages, whose license files were published unverified.
       - name: Verify packaged license text
         run: |
           status=0
@@ -129,9 +134,28 @@ jobs:
             diff -u "$1" "$2" || true
             status=1
           }
-          check LICENSE crates/cellrune/LICENSE
-          check LICENSE bindings/python/LICENSE
-          check LICENSE bindings/node/LICENSE
+          for directory in \
+            crates/cellrune \
+            bindings/python \
+            bindings/node \
+            bindings/node/npm/darwin-arm64 \
+            bindings/node/npm/darwin-x64 \
+            bindings/node/npm/linux-arm64-gnu \
+            bindings/node/npm/linux-arm64-musl \
+            bindings/node/npm/linux-x64-gnu \
+            bindings/node/npm/linux-x64-musl \
+            bindings/node/npm/win32-arm64-msvc \
+            bindings/node/npm/win32-x64-msvc
+          do
+            for name in LICENSE-MIT LICENSE-APACHE; do
+              if [ ! -f "$directory/$name" ]; then
+                printf '::error file=%s::missing license copy\n' "$directory/$name"
+                status=1
+                continue
+              fi
+              check "$name" "$directory/$name"
+            done
+          done
           check THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
           exit "$status"
 

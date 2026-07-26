@@ -1,7 +1,8 @@
 # Third-party licenses
 
-CellRune is distributed under the MIT License. Its Cargo dependencies remain
-under their own licenses; this notice does not relicense them.
+CellRune is distributed under the MIT OR Apache-2.0 licenses. Its Cargo
+dependencies remain under their own licenses; this notice does not relicense
+them.
 
 ## Runtime dependency graph
 
@@ -56,9 +57,10 @@ cargo deny list --layout crate
 cargo deny check
 ```
 
-The `.crate` source archive contains CellRune's source, MIT license, and this
-notice, not copies of dependency source trees. Cargo obtains each dependency
-separately with that crate's own license files and registry metadata.
+The `.crate` source archive contains CellRune's source, both of its license
+texts, and this notice, not copies of dependency source trees. Cargo obtains
+each dependency separately with that crate's own license files and registry
+metadata.
 
 Before distributing an executable or another artifact that bundles or
 statically links third-party software:
