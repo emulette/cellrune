@@ -316,6 +316,12 @@ Private development corpora and native-producer evidence are not distributed or 
 release blockers; validate workbooks from your own producers against the supported-capability
 report before relying on them.
 
+[`docs/ENGINE_COMPARISON.md`](https://github.com/emulette/cellrune/blob/main/docs/ENGINE_COMPARISON.md)
+records a separate observational comparison of eleven workbook calculation engines: the measured
+targets and input sources, the typed comparison protocol, aggregate coverage and saved-value
+agreement, observed failure differences, and the audit corrections applied before publication.
+It is a report, not a composite score, compatibility claim, CI threshold, or release gate.
+
 ## License
 
 CellRune is available under the MIT License. Dependency license information is provided in
