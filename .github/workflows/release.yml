@@ -85,6 +85,11 @@ jobs:
   # GitHub environment, which is where a required reviewer belongs: a registry upload cannot be
   # undone, and crates.io and PyPI both refuse to ever reuse a version number.
   #
+  # Because they refuse reuse, every publish job is also re-run safe: it first checks whether
+  # its registry already holds this version and skips the upload when it does. A rerun of a
+  # partially published tag therefore converges on fully published instead of failing red on
+  # the registries that succeeded the first time — which is how both prior releases ended.
+  #
   # crates.io and npm cannot mint their first release over OIDC, so 0.1.0 uses
   # tokens for those two. Once the crate and the nine npm packages exist, attach
   # their trusted publishers, delete both secrets, and drop the token lines here.
@@ -105,7 +110,29 @@ jobs:
         with:
           persist-credentials: false
 
+      # The release is complete only when its three MCP bundles are attached. A
+      # create that failed mid-upload leaves the release existing but partial,
+      # so existence alone must not short-circuit a rerun.
+      - name: Skip when the GitHub release is already complete
+        id: github-release-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          state=absent
+          if assets="$(gh release view "$RELEASE_TAG" --json assets \
+            --jq '.assets | length' 2>/dev/null)"; then
+            if [ "$assets" -eq 3 ]; then
+              state=complete
+            else
+              state=partial
+            fi
+          fi
+          printf 'release %s: %s\n' "$RELEASE_TAG" "$state"
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+
       - name: Download every verified MCP archive
+        if: steps.github-release-state.outputs.state != 'complete'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: mcp-*
@@ -113,10 +140,25 @@ jobs:
           merge-multiple: true
 
       - name: Publish the release from the changelog entry
+        if: steps.github-release-state.outputs.state != 'complete'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_STATE: ${{ steps.github-release-state.outputs.state }}
         run: |
+          bundles="$(find mcp-bundles -type f | sort)"
+          if [ "$(printf '%s\n' "$bundles" | wc -l)" -ne 3 ]; then
+            printf '::error::expected 3 MCP bundles, found:\n%s\n' "$bundles"
+            exit 1
+          fi
+          printf '%s\n' "$bundles"
+          if [ "$RELEASE_STATE" = "partial" ]; then
+            # Finish the interrupted create: attach the verified bundles to the
+            # existing release, replacing any half-uploaded asset.
+            # shellcheck disable=SC2086
+            gh release upload "$RELEASE_TAG" --clobber $bundles
+            exit 0
+          fi
           version="${RELEASE_TAG#v}"
           awk -v heading="## [$version]" '
             index($0, heading) == 1 { capture = 1; next }
@@ -127,12 +169,6 @@ jobs:
             printf '::error::CHANGELOG.md has no %s section\n' "$version"
             exit 1
           fi
-          bundles="$(find mcp-bundles -type f | sort)"
-          if [ "$(printf '%s\n' "$bundles" | wc -l)" -ne 3 ]; then
-            printf '::error::expected 3 MCP bundles, found:\n%s\n' "$bundles"
-            exit 1
-          fi
-          printf '%s\n' "$bundles"
           # shellcheck disable=SC2086
           gh release create "$RELEASE_TAG" \
             --title "$RELEASE_TAG" \
@@ -155,17 +191,42 @@ jobs:
         with:
           persist-credentials: false
 
+      # A version the index already serves cannot be published again, so a rerun
+      # after a partial release must skip it rather than fail on it. A probe
+      # failure leaves `published` false: publishing stays the authoritative act
+      # and at worst reproduces the old duplicate-version error.
+      - name: Skip when crates.io already serves this version
+        id: crates-io-state
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          published=false
+          if response="$(curl --fail --silent --show-error \
+            --header 'User-Agent: cellrune-release (https://github.com/emulette/cellrune)' \
+            "https://crates.io/api/v1/crates/cellrune/versions")"; then
+            if printf '%s' "$response" | jq --exit-status --arg version "$version" \
+              'any(.versions[]; .num == $version)' >/dev/null; then
+              printf 'cellrune %s is already on crates.io; skipping\n' "$version"
+              published=true
+            fi
+          fi
+          printf 'published=%s\n' "$published" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust toolchain
+        if: steps.crates-io-state.outputs.published != 'true'
         uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
 
       # Exchanges this job's OIDC identity for a token that expires in 30
       # minutes and is revoked when the job ends, so no registry credential is
       # stored in the repository.
       - name: Mint a short-lived crates.io token
+        if: steps.crates-io-state.outputs.published != 'true'
         id: crates-io-auth
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: Publish the crate
+        if: steps.crates-io-state.outputs.published != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
         run: cargo publish --package cellrune --locked
@@ -193,8 +254,12 @@ jobs:
           name: python-source-publication-archive
           path: dist
 
+      # skip-existing makes a rerun after a partial release converge: files PyPI
+      # already holds are skipped instead of failing the whole upload.
       - name: Publish wheels and source archive
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          skip-existing: true
 
   publish-npm:
     name: Publish the @cellrune packages to npm
@@ -262,8 +327,7 @@ jobs:
           cat platform-archives.txt main-archive.txt > publish-order.txt
           cat publish-order.txt
 
-      # npm refuses to republish a version, so a partial upload cannot be retried
-      # and would leave the scope half released. Prove all nine are acceptable
+      # npm refuses to republish a version, so prove all nine are acceptable
       # before any of them is sent.
       - name: Reject the release unless every archive would publish
         run: |
@@ -275,9 +339,25 @@ jobs:
       # environment, so npm authenticates from the job's OIDC identity. That also
       # sidesteps the account's 2FA, which no longer sits between CI and a
       # publish the way a granular token did.
+      #
+      # A package is skipped only when `npm view` prints a version for it, so a
+      # rerun after a partial upload finishes the remainder instead of failing on
+      # the packages that succeeded. The non-empty check matters: some npm
+      # releases exit 0 with empty output for a missing version of an existing
+      # package, and treating that as published would drop the package from the
+      # release.
       - name: Publish every package, main package last
         run: |
           while IFS= read -r archive; do
+            manifest="$(tar -xzOf "$archive" package/package.json)"
+            name="$(printf '%s' "$manifest" |
+              node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
+            version="$(printf '%s' "$manifest" |
+              node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')"
+            if [ -n "$(npm view "${name}@${version}" version 2>/dev/null)" ]; then
+              printf 'skipping %s@%s: already on the registry\n' "$name" "$version"
+              continue
+            fi
             printf '::group::%s\n' "$archive"
             npm publish "$archive" --access public --provenance
             printf '::endgroup::\n'

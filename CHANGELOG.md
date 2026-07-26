@@ -50,6 +50,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   extraction tool must also build on the declared floor.
 - The 50k benchmark remains an explicit observational command rather than a scheduled job or
   release blocker. Functional correctness remains covered by the generated-workbook tests.
+- Release publish jobs are re-run safe. The crates.io, npm, and GitHub-release jobs probe for
+  what is already live and skip it — the GitHub release also counts its attached bundles, so an
+  interrupted asset upload is completed rather than skipped — and the PyPI upload passes
+  `skip-existing`. A rerun of a partially published tag therefore converges on fully published
+  instead of ending red: the final runs of both prior releases stayed red because their
+  already-published registries could only fail again or be rejected by hand.
 
 ### Fixed
 
