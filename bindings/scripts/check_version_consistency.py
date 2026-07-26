@@ -47,6 +47,7 @@ PROSE_VERSION_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("README.md", r'npm install "@cellrune/node@([^"]+)"', "npm install version"),
     ("bindings/node/README.md", r"npm install @cellrune/node@([^\s`]+)", "npm install version"),
     ("SECURITY.md", r"CellRune is at `([^`]+)`", "supported version"),
+    ("docs/ROADMAP.md", r"Current release: \*\*([0-9][^\s*]*)\*\*", "roadmap current release"),
     ("llms.txt", r"The current public version is ([0-9][^\s,]*)", "public version"),
     ("llms.txt", r"Version ([0-9][^\s]*) contains", "catalog version"),
 )

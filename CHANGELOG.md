@@ -7,6 +7,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ## [Unreleased]
 
+### Added
+
+- `docs/ROADMAP.md` records the planned release order, what each version makes visible to callers,
+  the hard prerequisites between them, and what stays out of scope. The scope statement in the
+  README says what is unsupported today; the roadmap says which of those items are planned and in
+  what order, so adopting CellRune no longer requires guessing whether a listed gap is permanent.
+  Version assignments are a plan rather than a commitment, which the document states. The
+  version-consistency gate covers the roadmap's current-release literal alongside the other prose
+  version declarations, so the line that separates shipped work from planned work cannot go stale
+  at a release tag.
+
 ### Changed
 
 - CellRune is dual-licensed under `MIT OR Apache-2.0` at the recipient's option, instead of the MIT

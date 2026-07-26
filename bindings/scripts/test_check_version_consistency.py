@@ -159,6 +159,21 @@ class VersionConsistencyTests(unittest.TestCase):
         )
         self.assert_reports(root, "supported version")
 
+    def test_stale_roadmap_current_release_is_reported(self) -> None:
+        # The roadmap separates planned work from what already shipped, and it anchors that
+        # distinction on one literal. A stale one moves the boundary: work released in the
+        # current version keeps reading as planned.
+        root = self.tree()
+        path = root / "docs/ROADMAP.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                f"Current release: **{self.expected}**",
+                f"Current release: **{self.stale}**",
+            ),
+            encoding="utf-8",
+        )
+        self.assert_reports(root, "roadmap current release")
+
     def test_missing_platform_manifests_are_reported(self) -> None:
         root = self.tree()
         shutil.rmtree(root / "bindings/node/npm")
