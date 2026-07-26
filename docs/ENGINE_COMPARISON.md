@@ -252,6 +252,37 @@ These are terminal observations from the named versions and inputs. The report
 does not promote an adapter traceback to a confirmed upstream root cause, and
 it does not link an issue that the relevant maintainer has not confirmed.
 
+### Reduced inputs for three of those stops
+
+Three of the stops above were narrowed to a minimal input, each with a control
+input differing only in the trigger. This records what the reduced inputs
+demonstrate on the measured versions. It remains a local observation: no
+maintainer has confirmed any of it, and none of these engines is claimed to be
+defective on any version other than the one measured.
+
+- **LogiSheets 1.8.0.** The trigger is a `<calcPr>` element that omits the
+  optional `calcId` attribute. A 2 KB workbook with `<calcPr/>` panics; the same
+  workbook with `<calcPr calcId="152511"/>` loads, and so does one with no
+  `calcPr` element at all. The SWR workbook is a Google Sheets export and
+  carries a bare `<calcPr/>`, while the NYMEX workbook carries `calcId` and
+  loaded with full agreement. A separate input showed that omitting the
+  optional `xl/styles.xml` part panics at a different site.
+- **xlcalculator 0.5.0.** The tokenizer raises `IndexError` for any formula
+  ending in a space or newline, with no workbook involved:
+  `ExcelParser().getTokens("=A1*3 ")`.
+- **formulas 1.3.4.** `OFFSET` is not the trigger. `=SUM(A1:OFFSET(A1,2,0))`
+  parses and so does `=SUM(A1:OFFSET($A$1,2,0))`; what fails is a `$`-anchored
+  left operand of the range operator combined with a sheet-qualified or
+  function-valued right operand, as in `=SUM($A$1:OFFSET(A1,2,0))`. The SWR
+  formula matched that shape. A related parse gap for a function-valued left
+  operand at the top level is the subject of the still-open upstream
+  [issue #101](https://github.com/vinci1it2000/formulas/issues/101) from 2022,
+  whose own reported case parses on 1.3.4.
+
+Reduced inputs were prepared so the observations can be reported upstream in a
+form a maintainer can act on. Where an upstream report already exists, the
+intent is to add to it rather than duplicate it.
+
 ## Upstream-corpus observations
 
 The following table keeps CellRune's results next to the engine that owns each
