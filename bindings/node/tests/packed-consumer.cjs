@@ -10,8 +10,12 @@ const PACKAGE_NAME = "@cellrune/node";
 // Derived from the manifest under test so a version bump cannot leave this behind.
 const PACKAGE_VERSION = require("../package.json").version;
 const THIRD_PARTY_LICENSES = "THIRD_PARTY_LICENSES.md";
+// CellRune is dual-licensed, so every published archive carries both texts. This is the single
+// definition the root and platform archive assertions below read: a boundary that ships one text
+// and omits the other fails here rather than on the registry.
+const LICENSE_NAMES = ["LICENSE-MIT", "LICENSE-APACHE"];
 const ROOT_ARCHIVE_FILES = [
-  "LICENSE",
+  ...LICENSE_NAMES,
   "README.md",
   THIRD_PARTY_LICENSES,
   "index.d.ts",
@@ -122,7 +126,16 @@ function validatePlatformManifests(packageRoot) {
     assert.ok(manifest.files.includes(manifest.main));
     assert.ok(manifest.files.includes("README.md"));
     assert.ok(manifest.files.includes(THIRD_PARTY_LICENSES));
-    assert.ok(fs.existsSync(path.join(platformRoot, "LICENSE")));
+    for (const licenseName of LICENSE_NAMES) {
+      assert.ok(
+        manifest.files.includes(licenseName),
+        `${manifest.name} must declare ${licenseName}`,
+      );
+      assert.ok(
+        fs.existsSync(path.join(platformRoot, licenseName)),
+        `${manifest.name} must contain ${licenseName}`,
+      );
+    }
     assertPublicMetadata(manifest, `bindings/node/npm/${directory}`);
     if (requireAllBinaries) {
       assert.deepEqual(
@@ -195,7 +208,7 @@ async function main() {
     assert.deepEqual(
       platformPack.files,
       [
-        "LICENSE",
+        ...LICENSE_NAMES,
         "README.md",
         THIRD_PARTY_LICENSES,
         nativeName,
