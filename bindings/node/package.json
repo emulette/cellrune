@@ -1,6 +1,6 @@
 {
   "name": "@cellrune/node",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Headless XLSX/XLSM reading, deterministic calculation, editing, and writing",
   "license": "MIT",
   "homepage": "https://github.com/emulette/cellrune#readme",
@@ -53,14 +53,14 @@
     "typescript": "7.0.2"
   },
   "optionalDependencies": {
-    "@cellrune/node-darwin-arm64": "0.1.1",
-    "@cellrune/node-darwin-x64": "0.1.1",
-    "@cellrune/node-linux-arm64-gnu": "0.1.1",
-    "@cellrune/node-linux-arm64-musl": "0.1.1",
-    "@cellrune/node-linux-x64-gnu": "0.1.1",
-    "@cellrune/node-linux-x64-musl": "0.1.1",
-    "@cellrune/node-win32-arm64-msvc": "0.1.1",
-    "@cellrune/node-win32-x64-msvc": "0.1.1"
+    "@cellrune/node-darwin-arm64": "0.1.2",
+    "@cellrune/node-darwin-x64": "0.1.2",
+    "@cellrune/node-linux-arm64-gnu": "0.1.2",
+    "@cellrune/node-linux-arm64-musl": "0.1.2",
+    "@cellrune/node-linux-x64-gnu": "0.1.2",
+    "@cellrune/node-linux-x64-musl": "0.1.2",
+    "@cellrune/node-win32-arm64-msvc": "0.1.2",
+    "@cellrune/node-win32-x64-msvc": "0.1.2"
   },
   "napi": {
     "binaryName": "cellrune",

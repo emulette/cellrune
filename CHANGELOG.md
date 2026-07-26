@@ -7,12 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-26
+
 ### Added
 
 - A single data-driven conformance expectation suite. `conformance/` holds redistributable
   matrices — every literal, every formula, and the value a recorded oracle saved for it — and
   the normal workspace test run reconstructs every matrix and compares CellRune's calculation
-  against the oracle. New functions and syntax add cases to this suite rather than new jobs.
+  against the oracle. New functions and syntax extend the same data set.
   The first matrix is the Apache POI `FormulaEvalTestData` corpus (Apache-2.0): 1,295 cases
   against a saved Microsoft Excel 2013 calculation cache, 1,290 matching within a
   scale-relative `1e-8` and 5 divergences documented case by case. A documented divergence is
@@ -218,6 +220,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/emulette/cellrune/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/emulette/cellrune/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/emulette/cellrune/releases/tag/v0.1.0
