@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.2 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.3 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.2
+cargo add cellrune@0.1.3
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.2"
+cellrune = "0.1.3"
 ```
 
 ## Features
@@ -167,12 +167,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.2 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.3 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.2"
-npm install "@cellrune/node@0.1.2"
+python -m pip install "cellrune==0.1.3"
+npm install "@cellrune/node@0.1.3"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

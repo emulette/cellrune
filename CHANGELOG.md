@@ -5,7 +5,7 @@ All notable changes to CellRune are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Releases follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.3] - 2026-07-27
 
 ### Added
 
@@ -40,8 +40,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - CellRune is dual-licensed under `MIT OR Apache-2.0` at the recipient's option, instead of the MIT
   License alone. Apache-2.0 supplies an explicit patent grant that MIT does not, which some
   adopters require, and dual licensing under both is the Rust ecosystem's convention. Releases
-  0.1.0 through 0.1.2 remain published under MIT alone; the dual license applies from the next
-  release onward. Every distributed artifact — crate, wheel, sdist, npm root and platform
+  0.1.0 through 0.1.2 remain published under MIT alone; the dual license applies from 0.1.3
+  onward. Every distributed artifact — crate, wheel, sdist, npm root and platform
   packages, and MCP bundles — now carries `LICENSE-MIT` and `LICENSE-APACHE` in place of the single
   `LICENSE` file, and the release verifier's exact-set artifact boundaries require both.
 - The packaged-license CI gate enumerates its copies from the list of distribution directories
@@ -262,7 +262,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/emulette/cellrune/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/emulette/cellrune/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/emulette/cellrune/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/emulette/cellrune/releases/tag/v0.1.0
