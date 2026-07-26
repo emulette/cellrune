@@ -48,8 +48,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   functions do not create new fuzz jobs.
 - The MSRV check covers `--all-targets` rather than `--lib`, so tests, benches, and the
   extraction tool must also build on the declared floor.
-- The 50k benchmark remains an explicit observational command rather than a scheduled job or
-  release blocker. Functional correctness remains covered by the generated-workbook tests.
+- The 50k benchmark is demoted from a scheduled nightly job and a required release gate to an
+  explicit observational command, documented in `CONTRIBUTING.md`, and its output-verifier
+  script is removed with the jobs. Release gates are deliberately limited to stable validation
+  boundaries that guard irreversible failures; the benchmark keeps its internal correctness
+  assertions, and functional correctness remains covered by the generated-workbook tests.
 - Release publish jobs are re-run safe. The crates.io, npm, and GitHub-release jobs probe for
   what is already live and skip it — the GitHub release also counts its attached bundles, so an
   interrupted asset upload is completed rather than skipped — and the PyPI upload passes

@@ -39,6 +39,25 @@ python -m pip install --require-hashes -r bindings/python/requirements-dev.txt
 The release workflows are the normative definition for target-specific wheels, npm platform
 packages, MCP bundles, license notices, offline consumers, and provenance.
 
+CI and release gates are deliberately few. A gate exists only to stop an irreversible failure —
+a registry upload, a wrong-version tag — or to keep a stable validation boundary green. New
+verification lands as ordinary tests, suite cases, or observational commands by default;
+promoting anything to a required job is an explicit maintainer decision, never a side effect of
+adding the verification.
+
+## Benchmarks
+
+The 50k-workbook benchmark is an observational command, not a CI job or a release blocker:
+
+```bash
+cargo bench --package cellrune-integration-tests --bench hardening --locked -- 50000 1
+```
+
+It reads, calculates, writes, and reopens a generated 50,000-row workbook and asserts formula
+correctness internally, so a run that completes is a run that passed. Timing varies with runner
+noise and input shape; record the number and environment in the pull request when a change is
+expected to move it, and do not turn it into a gate.
+
 ## Dependency requirements
 
 External Rust requirements for workspace members are defined once in `[workspace.dependencies]`
