@@ -25,6 +25,7 @@ const DETAIL_ADDITION_ALREADY_EXISTS: &str = "addition targets an existing packa
 const DETAIL_REPLACE_AND_REMOVE_PART: &str =
     "one package part cannot be replaced and removed in the same plan";
 const DETAIL_SOURCE_PART_NOT_FOUND: &str = "source package part was not found";
+const DETAIL_ARCHIVE_COMMENT_TOO_LONG: &str = "ZIP archive comment exceeds 65535 bytes";
 
 /// Rebuilds an opened package by raw-copying every unchanged ZIP entry.
 ///
@@ -340,9 +341,14 @@ impl PackageWritePlan {
         let mut input = ZipArchive::new(Cursor::new(source.bytes())).map_err(zip_read_error)?;
         let output = Cursor::new(Vec::new());
         let mut writer = ZipWriter::new(output);
-        writer
-            .set_raw_comment(self.archive_comment.clone())
-            .map_err(zip_write_error)?;
+        if self.archive_comment.len() > usize::from(u16::MAX) {
+            return Err(XlsxWriteError::new(XlsxWriteErrorCode::Io)
+                .with_detail(DETAIL_ARCHIVE_COMMENT_TOO_LONG));
+        }
+        // zip 7.2 through 8.4 returns `()`, while 8.5+ returns a `Result` only when the comment
+        // exceeds the length checked above. Discarding the version-dependent success value keeps
+        // the write path compatible without weakening the archive boundary.
+        let _ = writer.set_raw_comment(self.archive_comment.clone());
         for operation in &self.operations {
             match operation {
                 PackageWriteOperation::CopyOriginal {
@@ -761,7 +767,7 @@ mod tests {
         let mut output = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut output);
-            writer.set_comment("cellrune").expect("archive comment");
+            let _ = writer.set_comment("cellrune");
             writer
                 .start_file(
                     "stored.xml",
@@ -789,9 +795,25 @@ mod tests {
     fn compressed_payload(bytes: &[u8], index: usize) -> Vec<u8> {
         let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("archive");
         let file = archive.by_index(index).expect("entry");
-        let start = usize::try_from(file.data_start().expect("data start must be available"))
+        let start = usize::try_from(DataStartResult::expect_data_start(file.data_start()))
             .expect("data start");
         let length = usize::try_from(file.compressed_size()).expect("compressed size");
         bytes[start..start + length].to_vec()
+    }
+
+    trait DataStartResult {
+        fn expect_data_start(self) -> u64;
+    }
+
+    impl DataStartResult for u64 {
+        fn expect_data_start(self) -> u64 {
+            self
+        }
+    }
+
+    impl DataStartResult for Option<u64> {
+        fn expect_data_start(self) -> u64 {
+            self.expect("data start must be available")
+        }
     }
 }

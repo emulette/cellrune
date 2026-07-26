@@ -212,9 +212,7 @@ fn build_archive(entries: &[(&str, &str)], archive_comment: Option<&str>) -> Vec
     {
         let mut writer = ZipWriter::new(&mut output);
         if let Some(comment) = archive_comment {
-            writer
-                .set_comment(comment)
-                .expect("set generated XLSX archive comment");
+            let _ = writer.set_comment(comment);
         }
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
         for (name, contents) in entries {
