@@ -185,6 +185,14 @@ pub(super) fn parse(
                             presentation,
                             &budget,
                         )?;
+                    } else if depth == 2 && local_name == SHEET_DATA {
+                        // An empty sheet is serialized by Excel and every mainstream producer
+                        // as a self-closing <sheetData/>, which arrives as an Empty event, not
+                        // Start; it satisfies the required-sheetData rule all the same.
+                        if state.saw_sheet_data {
+                            return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
+                        }
+                        state.saw_sheet_data = true;
                     } else if state
                         .sheet_data_depth
                         .is_some_and(|parent| depth == parent + 1)

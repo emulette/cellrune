@@ -232,6 +232,51 @@ fn duplicate_sheet_data_is_rejected() {
 }
 
 #[test]
+fn empty_sheet_with_self_closing_sheet_data_is_read() {
+    let empty = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData/>
+</worksheet>"#;
+    let snapshot = read_xlsx(
+        Cursor::new(build_archive(empty, SHARED_STRINGS)),
+        ReadOptions::default(),
+    )
+    .expect("a workbook with an empty sheet must be readable");
+    assert_eq!(
+        snapshot.sheet_by_name("First").expect("empty sheet").len(),
+        0
+    );
+    assert_eq!(
+        snapshot.sheet_by_name("Second").expect("data sheet").len(),
+        1
+    );
+}
+
+#[test]
+fn duplicate_self_closing_sheet_data_is_rejected() {
+    for worksheet in [
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <sheetData/>
+</worksheet>"#,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData></sheetData>
+  <sheetData/>
+</worksheet>"#,
+    ] {
+        let error = read_xlsx(
+            Cursor::new(build_archive(worksheet, SHARED_STRINGS)),
+            ReadOptions::default(),
+        )
+        .expect_err("duplicate sheet data");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidWorksheet);
+    }
+}
+
+#[test]
 fn document_mode_captures_frozen_panes_while_snapshot_mode_ignores_them() {
     let sheet = SHEET_ONE.replace(
         "<sheetData>",

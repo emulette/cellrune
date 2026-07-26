@@ -46,6 +46,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - The 50k benchmark remains an explicit observational command rather than a scheduled job or
   release blocker. Functional correctness remains covered by the generated-workbook tests.
 
+### Fixed
+
+- A workbook containing an empty sheet was rejected with `xlsx.invalid_worksheet`. Excel and
+  every mainstream producer serialize an empty sheet as a self-closing `<sheetData/>`, which
+  the reader's required-sheetData rule did not recognize as the element's empty form, so even a
+  brand-new workbook saved by Excel failed to open. Empty sheets now read as sheets with no
+  cells; a duplicated `<sheetData/>` is still rejected.
+
 ### Documentation
 
 - The README carries a Verification section: the public conformance-suite numbers with their
