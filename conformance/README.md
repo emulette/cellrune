@@ -79,6 +79,12 @@ Excel rich errors can store `#VALUE!` in `<v>` while `vm` points to the actual m
 as `#SPILL!`. Such cases set `excel_rich_error: true`; the checker treats the typed expectation as
 authoritative and requires an error fallback in the workbook.
 
+When an implementation activates a case that is already present in the tracked workbook, do not
+regenerate the workbook. Change only that case's reviewed classification (normally
+`not_implemented` to `match`) and run the checker. Regeneration is required only when formulas,
+inputs, or Excel-saved cache values themselves change. This keeps the independent Excel
+observation stable while implementation progress changes.
+
 ## Updating the CellRune workbook
 
 The tracked generator and pre-Excel validation tools live in the private planning repository
