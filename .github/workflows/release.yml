@@ -16,7 +16,9 @@ jobs:
   release-ref:
     name: Validate the release contract
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Carries the dependency-policy and default-feature compilations that pull requests no
+    # longer run, so the budget covers a cold build of the published crate.
+    timeout-minutes: 45
     steps:
       - name: Reject refs that are not a vMAJOR.MINOR.PATCH tag
         env:
@@ -50,6 +52,16 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Restore Cargo registry cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-1.92.0-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-1.92.0-
 
       - name: Verify every published version declaration agrees
         run: python3 bindings/scripts/check_version_consistency.py
@@ -110,6 +122,36 @@ jobs:
                 }
                 END { exit status }
               '
+
+      # Advisories are excluded on purpose. They read a live database, so a CVE disclosed
+      # between two runs would change whether an unchanged tag can publish; `maintenance.yml`
+      # owns that check. Licenses, bans, and sources resolve from the committed lockfile alone
+      # and are reproducible for a given revision. They belong here because a dependency under
+      # a disallowed license cannot be pulled back out of a downstream lockfile once a registry
+      # accepts the upload, and `deny.toml` is what enforces `wildcards = "deny"` on the
+      # requirement ranges we publish.
+      - name: Install pinned cargo-deny
+        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
+      - name: Check workspace dependency policy
+        run: cargo deny --all-features check licenses bans sources
+
+      - name: Check standalone fuzz dependency policy
+        run: >-
+          cargo deny
+          --manifest-path fuzz/Cargo.toml
+          --config fuzz/deny.toml
+          check licenses bans sources
+
+      # Feature unification through cellrune-mcp means a workspace-wide --all-features run
+      # always enables every optional feature, so no other gate compiles the published crate's
+      # own default feature set. crates.io never lets a version number be reused, so a
+      # default-feature break has to fail before the upload rather than after it.
+      - name: Test the published crate's default features
+        run: cargo test --package cellrune --lib --tests --locked
 
   core:
     name: Core, package, MSRV, and platform validation
