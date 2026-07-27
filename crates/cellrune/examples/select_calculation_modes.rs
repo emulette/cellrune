@@ -12,17 +12,18 @@ use cellrune::{
     WorkbookDraft, calculate_workbook,
 };
 
-/// Formulas whose exact decimal value is zero, and one whose value genuinely is not.
+/// Formulas that expose Excel's narrow correction boundary, plus one real difference.
 ///
-/// The near-zero policy decides only the first group; the last row is here to show that a real
-/// difference of comparable magnitude is preserved rather than swallowed.
+/// The first group is corrected, the sixth row cancels exactly but lies outside Excel's observed
+/// binary boundary, and the last row is a real difference that must not be swallowed.
 const ARITHMETIC: &[(&str, &str)] = &[
     ("A1", "=0.1+0.2-0.3"),
     ("A2", "=SUM(0.1,0.2,-0.3)"),
     ("A3", "=SUMPRODUCT({0.1,0.2,-0.3})"),
     ("A4", "=NPV(0.1,11,-12.1)"),
     ("A5", "=(0.1+0.2-0.3)=0"),
-    ("A6", "=100.1-100-0.099999999999999"),
+    ("A6", "=100.1-100-0.1"),
+    ("A7", "=100.1-100-0.099999999999999"),
 ];
 
 /// An `IRR` whose answer depends on how long the solver is allowed to search.
@@ -61,9 +62,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!();
     println!(
-        "The correction fires only when the exact decimal value is zero, so the last arithmetic \
-         row is identical under both policies. Compare calculated numbers with a tolerance rather \
-         than for equality under either one; see docs/NUMERICS.md."
+        "The correction requires both exact cancellation and Excel's observed relative binary \
+         boundary. The final two arithmetic rows are therefore identical under both policies. \
+         Compare calculated numbers with a tolerance rather than for equality under either one; \
+         see docs/NUMERICS.md."
     );
     Ok(())
 }

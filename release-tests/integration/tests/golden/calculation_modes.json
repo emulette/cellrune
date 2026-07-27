@@ -1,40 +1,47 @@
 {
-  "schema": "cellrune_calculation_modes_v1",
+  "schema": "cellrune_calculation_modes_v2",
   "arithmetic_cases": [
     {
       "id": "simple_decimal_cancellation",
       "formula": "0.1 + 0.2 - 0.3",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": true
     },
     {
       "id": "subtraction_cancellation",
       "formula": "0.5 - 0.4 - 0.1",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": true
     },
     {
       "id": "larger_intermediate_cancellation",
       "formula": "100.1 - 100.0 - 0.1",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": false
     },
     {
       "id": "meaningful_small_difference",
       "formula": "1.0000000000001 - 1.0",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": false
     },
     {
       "id": "meaningful_small_difference_after_large_intermediate",
       "formula": "100.1 - 100.0 - 0.099999999999999",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": false
     },
     {
       "id": "meaningful_sixteenth_digit_difference",
       "formula": "1.0000000000000004 - 1.0",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": false
     },
     {
       "id": "ordinary_nonzero_sum",
       "formula": "0.1 + 0.2",
-      "oracle": "exact_decimal"
+      "oracle": "excel_saved_cache",
+      "expected_zero": false
     }
   ],
   "solver_cases": [

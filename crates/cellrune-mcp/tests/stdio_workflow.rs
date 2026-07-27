@@ -412,7 +412,7 @@ fn calculation_compatibility_modes_are_stdio_visible() {
                     "kind": "set_formula",
                     "sheet": "Sheet1",
                     "address": "A1",
-                    "formula": "=100.1-100-0.1",
+                    "formula": "=0.1+0.2-0.3",
                     "dynamic_range": null
                 },
                 {

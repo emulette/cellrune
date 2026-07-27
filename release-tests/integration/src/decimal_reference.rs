@@ -1,13 +1,14 @@
 //! An exact decimal reference for the near-zero arithmetic question.
 //!
-//! The compatibility mode added in 0.1.3 has to decide one thing: when a sum or difference
-//! cancels, is the residue an artefact of writing decimal literals in binary, or a number the
-//! workbook author meant? Excel is not the authority on that — arithmetic is. A chain of `+` and
-//! `-` over decimal literals has an exact value, and this module computes it.
+//! The compatibility mode added in 0.1.3 first has to decide whether a sum or difference really
+//! cancels, rather than merely landing near zero. A chain of `+` and `-` over decimal literals has
+//! an exact value, and this module computes it. Excel's saved cache then supplies the independent
+//! binary-residue boundary for the cases whose exact value is zero.
 //!
 //! Decimal literals are scaled to integers, so addition and subtraction are exact and the answer
 //! is a fact rather than a measurement. That makes this a reference implementation, not a golden
-//! file: it calculates the expected result instead of recording whatever the engine produced.
+//! file: it proves the cancellation predicate instead of recording whatever the engine produced.
+//! It is necessary but not sufficient for applying the Excel compatibility correction.
 //!
 //! Deliberately no new dependency. `i128` at a fixed scale covers every literal these tests use
 //! with room to spare, and reaching for a rational-arithmetic crate would put a floor and an

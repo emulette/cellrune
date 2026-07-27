@@ -68,8 +68,8 @@
 //! Two behaviors are selectable through [`CalculationOptions`], and both default to matching
 //! Excel rather than to what releases up to 0.1.2 did:
 //!
-//! - [`ArithmeticSemantics`] decides whether a sum or difference that cancels to near zero is
-//!   corrected to zero, as Excel does, or left as the IEEE-754 residue.
+//! - [`ArithmeticSemantics`] decides whether Excel's narrow near-zero correction is applied to a
+//!   decimal/rational cancellation, or every IEEE-754 residue is preserved.
 //! - [`FinancialSolverSemantics`] decides whether `IRR`, `XIRR`, and `RATE` stop at the iteration
 //!   budget Microsoft documents, or search longer and return values where Excel reports `#NUM!`.
 //!

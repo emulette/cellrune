@@ -7,10 +7,27 @@
 ///
 /// Every operation is checked and returns `None` on overflow, so a trace that cannot be represented
 /// exactly stops the chain instead of asserting a cancellation it did not prove.
+///
+/// Excel's binary correction boundary is narrower than exact decimal cancellation. The helper
+/// below supplies that second half of the decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DecimalTrace {
     coefficient: i128,
     exponent: i32,
+}
+
+/// Returns whether one exact cancellation is also within Excel's observed binary correction
+/// boundary.
+///
+/// Excel does not replace every nonzero IEEE-754 residue whose decimal expression is exactly zero.
+/// It corrects a final addition or subtraction when the residue is within fifteen-decimal-digit
+/// precision relative to the cancelling operands. This distinguishes `0.1+0.2-0.3` (saved as zero)
+/// from `100.1-100-0.1` (saved with its residue).
+pub(super) fn is_excel_near_zero_cancellation(left: f64, right: f64, result: f64) -> bool {
+    if result == 0.0 {
+        return true;
+    }
+    result.abs() <= left.abs().max(right.abs()) * 1e-15
 }
 
 impl DecimalTrace {
@@ -295,7 +312,7 @@ fn signed_gcd(left: i128, right: i128) -> Option<i128> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DecimalTrace, RationalTrace};
+    use super::{DecimalTrace, RationalTrace, is_excel_near_zero_cancellation};
 
     #[test]
     fn traces_distinguish_exact_cancellation_from_real_small_differences() {
@@ -312,6 +329,32 @@ mod tests {
                 .expect("fixture fits");
             assert!(!real_difference.is_zero(), "{literal}");
         }
+    }
+
+    #[test]
+    fn excel_correction_uses_fifteen_digit_relative_precision() {
+        let adjacent_left: f64 = 1.1 - 1.0;
+        let adjacent_right: f64 = 0.1;
+        assert!(is_excel_near_zero_cancellation(
+            adjacent_left,
+            adjacent_right,
+            adjacent_left - adjacent_right,
+        ));
+
+        let distant_left: f64 = 100.1 - 100.0;
+        let distant_right: f64 = 0.1;
+        assert!(
+            distant_left
+                .abs()
+                .to_bits()
+                .abs_diff(distant_right.to_bits())
+                > 6
+        );
+        assert!(!is_excel_near_zero_cancellation(
+            distant_left,
+            distant_right,
+            distant_left - distant_right,
+        ));
     }
 
     #[test]

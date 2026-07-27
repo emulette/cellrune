@@ -406,15 +406,16 @@ impl FunctionUsageReport {
     }
 }
 
-/// How arithmetic treats a sum or difference that cancels to near zero.
+/// How arithmetic treats Excel's narrow near-zero cancellation case.
 ///
-/// Excel corrects such a result to exactly zero; IEEE-754 keeps the residue left by representing
-/// decimal literals in binary. The difference is visible beyond the number itself, because a
-/// residue of `5.551115123125783e-17` makes `=(0.1+0.2-0.3)=0` false.
+/// Excel corrects some addition and subtraction residues to exactly zero, but preserves others
+/// even when the decimal expression cancels exactly. IEEE-754 keeps every such residue. The
+/// difference is visible beyond the number itself, because a residue of
+/// `5.551115123125783e-17` makes `=(0.1+0.2-0.3)=0` false.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum ArithmeticSemantics {
-    /// Snap a cancelling sum or difference to zero, as Excel does.
+    /// Apply Excel's observed relative correction when an exact trace proves cancellation.
     #[default]
     ExcelNearZero,
     /// Return the IEEE-754 result unchanged, as releases up to 0.1.2 did.

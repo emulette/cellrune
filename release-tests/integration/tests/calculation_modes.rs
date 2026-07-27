@@ -1,10 +1,9 @@
-//! Verification for the 0.1.3 calculation compatibility modes.
+//! Verification for the 0.1.4 Excel-saved-cache boundary of the calculation compatibility modes.
 //!
 //! Three tiers, in the order the roadmap fixes:
 //!
-//! 1. A self-generated oracle decides what is correct. For arithmetic that is exact decimal
-//!    evaluation; for the solvers it is the residual, which is closed-form even though the root is
-//!    not. Neither needs Excel or another engine.
+//! 1. A committed oracle decides what is correct. Arithmetic uses values observed in Excel's saved
+//!    cache; solvers use the residual, which is closed-form even though the root is not.
 //! 2. Metamorphic invariants that need no expected value at all, and so cover inputs no table
 //!    enumerates.
 //! 3. Excel's recorded behaviour, which only the existing conformance corpus can speak to, and
@@ -37,12 +36,13 @@ struct ArithmeticCase {
     id: String,
     formula: String,
     oracle: ArithmeticOracle,
+    expected_zero: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ArithmeticOracle {
-    ExactDecimal,
+    ExcelSavedCache,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -252,23 +252,20 @@ const CHAINS: &[&str] = &[
     "1.0000000000000004 - 1.0",
 ];
 
-/// TIER 1 — the exact decimal reference decides, and the mode must agree with it.
-///
-/// This is the criterion the roadmap fixes: the snap fires when, and only when, the exact value is
-/// zero. Firing more widely would corrupt results the author meant; firing more narrowly would
-/// leave the mode not doing its job.
+/// TIER 1 — exact decimal cancellation is necessary but Excel's observed relative boundary decides.
 #[test]
-fn excel_mode_snaps_exactly_the_chains_whose_exact_value_is_zero() {
+fn excel_mode_matches_the_observed_cancellation_boundary() {
     let results = numbers(CHAINS, excel_mode());
     let ieee_results = numbers(CHAINS, ieee_mode());
     for ((chain, result), ieee_result) in CHAINS.iter().zip(results).zip(ieee_results) {
         let (first, rest) = parse_chain(chain);
         let exact = evaluate(first, &rest);
         let result = result.unwrap_or_else(|| panic!("{chain} produced no number"));
-        if exact.is_zero() {
+        let expected_zero = exact.is_zero() && *chain != "100.1 - 100.0 - 0.1";
+        if expected_zero {
             assert_eq!(
                 result, 0.0,
-                "{chain} is exactly zero but the Excel mode returned {result:e}"
+                "{chain} is inside Excel's correction boundary but returned {result:e}"
             );
             assert!(
                 result.is_sign_positive(),
@@ -278,7 +275,7 @@ fn excel_mode_snaps_exactly_the_chains_whose_exact_value_is_zero() {
             assert_ne!(
                 result,
                 0.0,
-                "{chain} is exactly {} but the Excel mode snapped it to zero",
+                "{chain} has exact value {} but Excel preserves this binary result",
                 exact.to_f64()
             );
             assert_eq!(
@@ -314,16 +311,21 @@ fn ieee_mode_keeps_the_residue_for_chains_that_cancel() {
     );
 }
 
-/// TIER 1 — an inherited residue must be corrected without erasing a nearby real difference.
+/// TIER 1 — a large inherited residue is preserved without erasing a nearby real difference.
 #[test]
-fn inherited_residue_is_corrected_without_erasing_a_real_difference() {
+fn large_inherited_residue_is_preserved_without_erasing_a_real_difference() {
     let inherited = numbers(&["100.1 - 100.0 - 0.1"], excel_mode())[0].expect("number");
+    let inherited_ieee = numbers(&["100.1 - 100.0 - 0.1"], ieee_mode())[0].expect("number");
     let (first, rest) = parse_chain("100.1 - 100.0 - 0.1");
     assert!(
         evaluate(first, &rest).is_zero(),
         "the chain is exactly zero"
     );
-    assert_eq!(inherited, 0.0, "an exact decimal cancellation must snap");
+    assert_ne!(
+        inherited, 0.0,
+        "Excel preserves this larger inherited residue"
+    );
+    assert_eq!(inherited.to_bits(), inherited_ieee.to_bits());
 
     // The case a wider window would break: a real difference at a comparable relative magnitude.
     let meant = numbers(&["1.0000000000001 - 1.0"], excel_mode())[0].expect("number");
@@ -333,16 +335,21 @@ fn inherited_residue_is_corrected_without_erasing_a_real_difference() {
     );
 }
 
-/// TIER 1 — the exact decimal trace follows a calculated value across a cell dependency.
+/// TIER 1 — the exact decimal trace and binary boundary both cross a cell dependency.
 #[test]
-fn inherited_residue_is_corrected_across_formula_cells() {
-    let formulas = ["100.1 - 100.0", "A1 - 0.1"];
-    let excel = numbers(&formulas, excel_mode());
-    let ieee = numbers(&formulas, ieee_mode());
+fn cancellation_boundary_is_preserved_across_formula_cells() {
+    let preserved = ["100.1 - 100.0", "A1 - 0.1"];
+    let excel = numbers(&preserved, excel_mode());
+    let ieee = numbers(&preserved, ieee_mode());
+    assert_eq!(excel[1].map(f64::to_bits), ieee[1].map(f64::to_bits));
+
+    let corrected = ["0.1 + 0.2", "A1 - 0.3"];
+    let excel = numbers(&corrected, excel_mode());
+    let ieee = numbers(&corrected, ieee_mode());
     assert_eq!(excel[1], Some(0.0));
     assert!(
         ieee[1].is_some_and(|value| value != 0.0),
-        "the legacy path must preserve the inherited residue"
+        "the IEEE path must preserve the smaller inherited residue"
     );
 }
 
@@ -365,11 +372,11 @@ fn calculated_function_results_do_not_create_false_exactness() {
     assert_eq!(excel.to_bits(), ieee.to_bits());
 }
 
-/// TIER 1 — every committed generated arithmetic case is decided by the exact decimal oracle.
+/// TIER 1 — every committed arithmetic case matches an Excel saved-cache observation.
 #[test]
-fn generated_arithmetic_manifest_matches_the_exact_decimal_oracle() {
+fn generated_arithmetic_manifest_matches_the_excel_observations() {
     let manifest = calculation_modes_manifest();
-    assert_eq!(manifest.schema, "cellrune_calculation_modes_v1");
+    assert_eq!(manifest.schema, "cellrune_calculation_modes_v2");
     let formulas: Vec<&str> = manifest
         .arithmetic_cases
         .iter()
@@ -377,14 +384,19 @@ fn generated_arithmetic_manifest_matches_the_exact_decimal_oracle() {
         .collect();
     let results = numbers(&formulas, excel_mode());
     for (case, result) in manifest.arithmetic_cases.iter().zip(results) {
-        assert_eq!(case.oracle, ArithmeticOracle::ExactDecimal);
+        assert_eq!(case.oracle, ArithmeticOracle::ExcelSavedCache);
         let (first, rest) = parse_chain(&case.formula);
         let exact = evaluate(first, &rest);
         let result = result.unwrap_or_else(|| panic!("{} produced no number", case.id));
         assert_eq!(
             result == 0.0,
-            exact.is_zero(),
-            "{}: result {result:e} disagrees with exact decimal value {}",
+            case.expected_zero,
+            "{}: result {result:e} disagrees with the Excel saved-cache observation",
+            case.id,
+        );
+        assert!(
+            exact.is_zero() || !case.expected_zero,
+            "{}: a real decimal difference must never be marked for correction: {}",
             case.id,
             exact.to_f64()
         );
@@ -446,6 +458,7 @@ fn the_operator_path_and_the_aggregate_path_agree_within_each_mode() {
         ("0.1 + 0.2 - 0.3", "SUM(0.1,0.2,-0.3)"),
         ("0.7 + 0.1 - 0.8", "SUM(0.7,0.1,-0.8)"),
         ("4.56 - 1.23 - 3.33", "SUM(4.56,-1.23,-3.33)"),
+        ("100.1 - 100.0 - 0.1", "SUM(100.1,-100.0,-0.1)"),
         ("1.1 - 1.0", "SUM(1.1,-1.0)"),
         (
             "100.1 - 100.0 - 0.099999999999999",
@@ -591,10 +604,20 @@ fn the_array_path_applies_the_same_arithmetic_policy() {
     ];
     let excel = numbers(ARRAYS, excel_mode());
     let ieee = numbers(ARRAYS, ieee_mode());
-    for ((formula, excel), ieee) in ARRAYS.iter().zip(excel).zip(ieee) {
-        assert_eq!(excel, Some(0.0), "{formula}");
+    for (((formula, excel), ieee), expected_zero) in
+        ARRAYS.iter().zip(excel).zip(ieee).zip([true, false])
+    {
         let ieee = ieee.unwrap_or_else(|| panic!("{formula} produced no number"));
-        assert_ne!(ieee, 0.0, "{formula} did not preserve its IEEE residue");
+        if expected_zero {
+            assert_eq!(excel, Some(0.0), "{formula}");
+            assert_ne!(ieee, 0.0, "{formula} did not preserve its IEEE residue");
+        } else {
+            assert_eq!(
+                excel.map(f64::to_bits),
+                Some(ieee.to_bits()),
+                "{formula} did not preserve Excel's larger cancellation residue"
+            );
+        }
     }
 }
 

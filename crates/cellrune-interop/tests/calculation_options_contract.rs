@@ -34,7 +34,7 @@ fn omitted_transport_fields_keep_the_new_defaults_and_explicit_modes_round_trip(
 fn interop_transports_both_calculation_compatibility_axes() {
     let mut session = WorkbookSession::create();
     session
-        .set_formula("Sheet1", "A1", "=100.1-100-0.1", None)
+        .set_formula("Sheet1", "A1", "=0.1+0.2-0.3", None)
         .expect("arithmetic formula");
     session
         .set_formula("Sheet1", "A2", "=IRR({-1,100000})", None)

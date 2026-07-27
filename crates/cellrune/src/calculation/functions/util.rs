@@ -1,6 +1,6 @@
 use super::super::ArithmeticSemantics;
 use super::super::ast::Expr;
-use super::super::decimal::{DecimalTrace, RationalTrace};
+use super::super::decimal::{DecimalTrace, RationalTrace, is_excel_near_zero_cancellation};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
@@ -188,7 +188,9 @@ impl<Trace: ExactTrace> ExcelSum<Trace> {
         self.exact_total = self
             .exact_total
             .and_then(|total| total.combined_with(trace?));
-        if self.exact_total.is_some_and(ExactTrace::is_exact_zero) {
+        if self.exact_total.is_some_and(ExactTrace::is_exact_zero)
+            && is_excel_near_zero_cancellation(self.total, value, next)
+        {
             self.total = 0.0;
         } else {
             self.total = next;
