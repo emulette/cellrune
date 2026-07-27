@@ -1,0 +1,29 @@
+{
+  "schema": "cellrune_excel_oracle_metadata_v1",
+  "workbook": "workbook.xlsx",
+  "sha256": "12f1dcef889c20fe54a09857790ba9803a7b061cc9fc5b85d0038cd6c86faa79",
+  "formula_cells": 36,
+  "date_system": "excel1900",
+  "iterative_calculation": false,
+  "case_selection": {
+    "mode": "all_formula_results"
+  },
+  "source": {
+    "name": "Apache POI MatrixFormulaEvalTestData.xlsx",
+    "license": "Apache-2.0",
+    "url": "https://github.com/apache/poi/blob/23ecb9a1722f41d7ac57b6d2c0bc4603c7e447d4/test-data/spreadsheet/MatrixFormulaEvalTestData.xlsx",
+    "revision": "23ecb9a1722f41d7ac57b6d2c0bc4603c7e447d4"
+  },
+  "generator": {
+    "name": null,
+    "revision": null
+  },
+  "oracle": {
+    "application": "Microsoft Excel",
+    "version": "2016 (AppVersion 16.0300)",
+    "channel": null,
+    "os": "Windows path recorded in workbook metadata",
+    "locale": null,
+    "saved_at": "2017-07-27T16:40:08Z"
+  }
+}

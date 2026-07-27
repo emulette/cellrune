@@ -1,0 +1,29 @@
+{
+  "schema": "cellrune_excel_oracle_metadata_v1",
+  "workbook": "workbook.xlsx",
+  "sha256": "01b21647d53501e8ec10f4eb522945d41ea3c8d1fdd57f8b0142ec34884c33eb",
+  "formula_cells": 1295,
+  "date_system": "excel1900",
+  "iterative_calculation": false,
+  "case_selection": {
+    "mode": "all_formula_cells"
+  },
+  "source": {
+    "name": "Apache POI FormulaEvalTestData_Copy.xlsx",
+    "license": "Apache-2.0",
+    "url": "https://github.com/apache/poi/blob/b6a21ab3aa2e2b1ab04c3af4f9b0d0cbdc4fa710/test-data/spreadsheet/FormulaEvalTestData_Copy.xlsx",
+    "revision": "b6a21ab3aa2e2b1ab04c3af4f9b0d0cbdc4fa710"
+  },
+  "generator": {
+    "name": null,
+    "revision": null
+  },
+  "oracle": {
+    "application": "Microsoft Excel",
+    "version": "2013 (AppVersion 15.0300)",
+    "channel": null,
+    "os": null,
+    "locale": "en-US currency formatting observed in saved DOLLAR results",
+    "saved_at": "2016-02-15T20:02:51Z"
+  }
+}

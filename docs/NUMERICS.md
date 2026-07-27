@@ -8,16 +8,19 @@ yet measured against that reference are listed separately.
 
 ## Reference oracle
 
-Compatibility statements are made against a named build, not against "Excel" in general.
+Compatibility statements are made against committed, named saved-cache baselines, not against
+"Excel" in general.
 
-| Property | Value |
-| --- | --- |
-| Product | Microsoft Excel for Mac 16.111 |
-| Locale | Korean system locale, `1900` date system |
-| Recorded | 2026-07-24 |
+| Workbook source | Excel cache producer | Locale | Recorded |
+| --- | --- | --- | --- |
+| CellRune formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | not recorded; `1900` date system | 2026-07-27 |
+| Apache POI formula fixture | Microsoft Excel 2013, AppVersion `15.0300` | en-US currency formatting observed; `1900` date system | 2016-02-15 |
+| Apache POI matrix fixture | Microsoft Excel 2016, AppVersion `16.0300` | not recorded; `1900` date system | 2017-07-27 |
 
 Excel's own results travel inside every workbook it saves, as the cached `<v>` value of each
 formula cell. That makes any Excel-authored workbook both a test input and its own ground truth.
+The binary workbooks, hashes, host metadata, and reviewed classifications are committed under
+`conformance/`.
 
 ## Verified
 
@@ -68,8 +71,9 @@ Differences of this kind are formatting differences, not calculation failures.
 ### Selectable: arithmetic that cancels to near zero
 
 Writing `0.1` in binary is inexact, so a sum or difference of decimal literals can leave a residue
-where the exact answer is zero. Excel corrects such a result to zero; IEEE-754 does not. From 0.1.3
-this is a calculation option, and the correction is the default.
+where the exact answer is zero. Excel corrects some such results to zero but preserves others;
+IEEE-754 preserves every residue. From 0.1.3 this is a calculation option, and Excel's narrow
+correction is the default.
 
 | Formula | Default (`ExcelNearZero`) | Opt-in (`Ieee754`) |
 | --- | --- | --- |
@@ -77,7 +81,7 @@ this is a calculation option, and the correction is the default.
 | `=(0.5-0.4)-0.1` | `0` | `-2.7755575615628914e-17` |
 | `=SUM(0.1,0.2,-0.3)` | `0` | `5.551115123125783e-17` |
 | `=SUMPRODUCT({0.1,0.2,-0.3})` | `0` | `5.551115123125783e-17` |
-| `=100.1-100-0.1` | `0` | `-5.689893001203927e-15` |
+| `=100.1-100-0.1` | `-5.689893001203927e-15` | `-5.689893001203927e-15` |
 
 The correction is applied at each addition and subtraction, in the operator path and in the
 policy-aware running totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`,
@@ -85,9 +89,22 @@ policy-aware running totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`
 aggregate accumulators carry an exact trace of the parsed decimal inputs. `SUMPRODUCT` multiplies
 before it adds, and the product of two exact decimals is itself an exact decimal, so its terms stay
 traceable. `NPV` divides before it adds, and carries the same proof as an exact rational trace
-through discounting. A result is replaced with zero only when that trace is exactly
-zero; there is no widened near-zero interval that can swallow a neighboring real difference. That
-matters beyond the number itself:
+through discounting.
+
+A result is replaced with zero only when both of these conditions hold:
+
+1. the exact decimal or rational trace is zero; and
+2. the binary residue is at most `1e-15 * max(abs(left), abs(right))` for the cancelling
+   operation.
+
+The exact trace prevents a nearby real difference from being swallowed. The relative binary
+boundary distinguishes Excel's saved zero for `=0.1+0.2-0.3` from its saved residue for
+`=100.1-100-0.1`. The `1e-15` coefficient is an empirical compatibility contract pinned by the
+committed Excel workbook; Microsoft describes its near-zero correction and 15-digit precision but
+does not publish this boundary as an algorithm. See Microsoft's
+[floating-point accuracy note](https://learn.microsoft.com/en-us/troubleshoot/microsoft-365-apps/excel/floating-point-arithmetic-inaccurate-result).
+
+The choice matters beyond the number itself:
 `=(0.1+0.2-0.3)=0` is `TRUE` under the default and `FALSE` under `Ieee754`, and the same choice
 reaches every `IF` branch that compares a computed value against zero.
 
@@ -100,11 +117,13 @@ let options = CalculationOptions::default()
     .with_arithmetic_semantics(ArithmeticSemantics::Ieee754);
 ```
 
-The release suite checks this policy against an exact fixed-point decimal reference. Its committed
-generated cases include both `=100.1-100-0.1`, which must become zero, and
-`=100.1-100-0.099999999999999`, whose exact value is `1e-15` and must remain nonzero. Operator,
-array, ordinary aggregate, conditional aggregate, and `SUMPRODUCT` paths are also compared under
-both modes, including a `SUMPRODUCT` whose terms cancel only after the multiplication.
+The ordinary regression suite checks exact-trace propagation and the relative boundary in
+table-driven cases. The separate local oracle audit checks both
+`=0.1+0.2-0.3`, which Excel saved as zero, and `=100.1-100-0.1`, which Excel saved with its residue,
+using bit-exact comparisons. It also keeps
+`=100.1-100-0.099999999999999`, whose exact value is nonzero, nonzero. Operator, array, ordinary
+aggregate, conditional aggregate, and `SUMPRODUCT` paths are compared under both modes, including
+a `SUMPRODUCT` whose terms cancel only after multiplication.
 
 Under `Ieee754` no path consults the exact trace, so none is computed.
 
@@ -131,17 +150,19 @@ The `1904` date system is handled separately and has no such adjustment.
 
 ### Measured agreement
 
-A workbook of 1,295 formula cells recalculated and saved by the reference oracle above compares as
-follows:
+The explicit local audit currently records:
 
-| Outcome | Cells |
-| --- | ---: |
-| Exact match | 1,259 |
-| Match within `1e-8` | 28 |
-| `DOLLAR` locale difference | 8 |
-| No calculated value produced | 0 |
+| Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
+| Apache POI matrix fixture | 266 | 158 | 48 | 60 | 0 | 0 |
+| CellRune formula oracle | 661 | 381 | 10 | 242 | 26 | 2 |
 
-Excluding the eight formatting differences, all 1,287 remaining results match within `1e-8`.
+`match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
+while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
+the Excel value and the current CellRune value with an explanatory note. The other states make
+unsupported or non-comparable cases explicit rather than dropping them from the denominator.
+These counts are an audit inventory, not a composite score or release threshold.
 
 ## Unverified
 

@@ -188,7 +188,8 @@ fn patch_calc_properties_start(
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
         let replace = matches!(attribute.key.as_ref(), b"fullCalcOnLoad" | b"forceFullCalc")
-            || (hints.is_some() && matches!(attribute.key.as_ref(), b"calcMode" | b"calcId"));
+            || (hints.is_some()
+                && matches!(attribute.key.as_ref(), b"calcMode" | b"calcId" | b"iterate"));
         if !replace {
             patched.push_attribute(attribute);
         }
@@ -215,6 +216,9 @@ fn push_calculation_attributes(
         }
         if let Some(id) = hints.calculation_id() {
             element.push_attribute(("calcId", id.to_string().as_str()));
+        }
+        if let Some(iterative) = hints.iterative_calculation() {
+            element.push_attribute(("iterate", if iterative { "1" } else { "0" }));
         }
         let full = request_host_recalculation || hints.full_calculation_on_load().unwrap_or(false);
         let force = request_host_recalculation || hints.force_full_calculation().unwrap_or(false);

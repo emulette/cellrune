@@ -37,9 +37,9 @@ Lightbend, Inc. (https://www.lightbend.com/).
 
 CellRune modification notice
 
-The file excel-2013-15.0300/formula-eval-test-data.json is derived from the
-Apache POI FormulaEvalTestData test corpus. CellRune converted the workbook
-fixture into a non-binary expectation matrix, recorded source and oracle
-provenance, and added per-case CellRune status and divergence notes. The
-derived material remains available under the Apache License, Version 2.0;
-see LICENSE-APACHE-2.0 in this directory.
+The files formula-eval-test-data/workbook.xlsx and
+matrix-formula-eval-test-data/workbook.xlsx are unmodified copies of Apache POI
+test fixtures, renamed and redistributed with source revisions and hashes.
+CellRune added metadata and per-case expectation files without modifying the
+workbooks. The Apache-derived material remains available under the Apache
+License, Version 2.0; see LICENSE-APACHE-2.0 in this directory.

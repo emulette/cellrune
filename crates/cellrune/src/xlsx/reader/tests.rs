@@ -34,7 +34,7 @@ const WORKBOOK: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
     <sheet name="Second" sheetId="2" state="hidden" rel:id="rId2"/>
     <sheet name="First" sheetId="1" rel:id="rId1"/>
   </sheets>
-  <calcPr calcId="7" calcMode="manual" fullCalcOnLoad="1" forceFullCalc="0"/>
+  <calcPr calcId="7" calcMode="manual" fullCalcOnLoad="1" forceFullCalc="0" iterate="1"/>
 </workbook>"#;
 
 const WORKBOOK_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -102,6 +102,10 @@ fn reads_workbook_metadata_and_supported_literal_types() {
     assert_eq!(
         snapshot.calculation_hints().force_full_calculation(),
         Some(false)
+    );
+    assert_eq!(
+        snapshot.calculation_hints().iterative_calculation(),
+        Some(true)
     );
     assert_eq!(snapshot.source().kind(), WorkbookSourceKind::Reader);
     assert!(snapshot.source().byte_length().is_some());

@@ -1,18 +1,19 @@
 use std::collections::BTreeMap;
 
 use super::{
-    calculation_hints_match, draft_semantics_match, generated_worksheet_xml, optional_false_matches,
+    calculation_hints_match, draft_semantics_match, generated_worksheet_xml,
+    optional_false_matches, workbook_xml,
 };
 use crate::calculation::{MaterializedCalculationCell, MaterializedResultOrigin};
 use crate::{
     CalculationCellId, CalculationCellResult, CalculationHints, CalculationIssue,
     CalculationIssueCode, CalculationMode, CalculationOptions, CalculationSnapshot, CellAddress,
-    CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope, FiniteNumber,
-    FormulaText, FrozenPane, NumberFormat, NumberFormatKind, PhoneticAlignment, PhoneticProperties,
-    PhoneticRun, PhoneticTextRange, PhoneticType, PhoneticWriteOptions, Provenance,
-    ProviderIdentity, RecalculationWriteOptions, SavedResult, Sheet, SheetId, SheetName,
-    SheetVisibility, ValidationError, WorkbookDraft, WorkbookSnapshot, WorkbookSource,
-    WriteOptions, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
+    CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope,
+    DocumentPresentation, FiniteNumber, FormulaText, FrozenPane, NumberFormat, NumberFormatKind,
+    PhoneticAlignment, PhoneticProperties, PhoneticRun, PhoneticTextRange, PhoneticType,
+    PhoneticWriteOptions, Provenance, ProviderIdentity, RecalculationWriteOptions, SavedResult,
+    Sheet, SheetId, SheetName, SheetVisibility, ValidationError, WorkbookDraft, WorkbookSnapshot,
+    WorkbookSource, WriteOptions, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
     write_recalculated_xlsx_bytes, write_xlsx_draft_bytes,
 };
 
@@ -787,6 +788,11 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
     ));
     assert!(!calculation_hints_match(
         baseline,
+        baseline.with_iterative_calculation(Some(true)),
+        false
+    ));
+    assert!(!calculation_hints_match(
+        baseline,
         CalculationHints::new(
             Some(CalculationMode::Automatic),
             Some(43),
@@ -847,6 +853,19 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
         ),
         true
     ));
+}
+
+#[test]
+fn canonical_workbook_writes_iterative_calculation_hint() {
+    let workbook = snapshot(
+        vec![base_sheet()],
+        Vec::new(),
+        DateSystem::Excel1900,
+        CalculationHints::default().with_iterative_calculation(Some(true)),
+    );
+    let xml = workbook_xml(&workbook, &DocumentPresentation::default(), false)
+        .expect("canonical workbook XML");
+    assert!(xml.contains(r#"iterate="1""#));
 }
 
 #[test]

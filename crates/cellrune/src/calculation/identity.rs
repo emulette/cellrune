@@ -117,6 +117,7 @@ impl SemanticHash {
         self.optional_u32(value.calculation_id());
         self.optional_bool(value.full_calculation_on_load());
         self.optional_bool(value.force_full_calculation());
+        self.optional_bool(value.iterative_calculation());
     }
 
     fn optional_u32(&mut self, value: Option<u32>) {

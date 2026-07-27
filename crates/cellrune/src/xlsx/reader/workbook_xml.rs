@@ -296,12 +296,14 @@ fn parse_calculation_hints(
     let calculation_id = optional_u32(attributes.unqualified("calcId"), budget)?;
     let full_calculation_on_load = optional_bool(attributes.unqualified("fullCalcOnLoad"), budget)?;
     let force_full_calculation = optional_bool(attributes.unqualified("forceFullCalc"), budget)?;
+    let iterative_calculation = optional_bool(attributes.unqualified("iterate"), budget)?;
     Ok(CalculationHints::new(
         mode,
         calculation_id,
         full_calculation_on_load,
         force_full_calculation,
-    ))
+    )
+    .with_iterative_calculation(iterative_calculation))
 }
 
 fn required<'a>(

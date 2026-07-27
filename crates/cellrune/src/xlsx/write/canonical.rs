@@ -400,6 +400,7 @@ fn workbook_xml(
         || hints.calculation_id().is_some()
         || hints.full_calculation_on_load().is_some()
         || hints.force_full_calculation().is_some()
+        || hints.iterative_calculation().is_some()
         || request_host_recalculation
     {
         xml.push_str("<calcPr");
@@ -416,6 +417,13 @@ fn workbook_xml(
             xml.push_str(" calcId=\"");
             xml.push_str(&id.to_string());
             xml.push('"');
+        }
+        if let Some(iterative) = hints.iterative_calculation() {
+            xml.push_str(if iterative {
+                " iterate=\"1\""
+            } else {
+                " iterate=\"0\""
+            });
         }
         let full = request_host_recalculation || hints.full_calculation_on_load().unwrap_or(false);
         let force = request_host_recalculation || hints.force_full_calculation().unwrap_or(false);
@@ -714,6 +722,10 @@ fn calculation_hints_match(
 ) -> bool {
     expected.mode() == actual.mode()
         && expected.calculation_id() == actual.calculation_id()
+        && optional_false_matches(
+            expected.iterative_calculation(),
+            actual.iterative_calculation(),
+        )
         && if request_host_recalculation {
             actual.full_calculation_on_load() == Some(true)
                 && actual.force_full_calculation() == Some(true)

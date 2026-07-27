@@ -307,6 +307,7 @@ pub struct CalculationHints {
     calculation_id: Option<u32>,
     full_calculation_on_load: Option<bool>,
     force_full_calculation: Option<bool>,
+    iterative_calculation: Option<bool>,
 }
 
 impl CalculationHints {
@@ -322,7 +323,14 @@ impl CalculationHints {
             calculation_id,
             full_calculation_on_load,
             force_full_calculation,
+            iterative_calculation: None,
         }
+    }
+
+    /// Returns a copy with the declared iterative-calculation flag.
+    pub const fn with_iterative_calculation(mut self, iterative_calculation: Option<bool>) -> Self {
+        self.iterative_calculation = iterative_calculation;
+        self
     }
 
     /// Returns the declared calculation mode.
@@ -343,6 +351,11 @@ impl CalculationHints {
     /// Returns the force-full-calculation flag.
     pub const fn force_full_calculation(self) -> Option<bool> {
         self.force_full_calculation
+    }
+
+    /// Returns the declared iterative-calculation flag.
+    pub const fn iterative_calculation(self) -> Option<bool> {
+        self.iterative_calculation
     }
 }
 

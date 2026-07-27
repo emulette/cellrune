@@ -8,12 +8,13 @@ fn part() -> PartPath {
 
 #[test]
 fn existing_calculation_properties_preserve_producer_fields() {
-    let source = br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets/><calcPr calcId="191029" calcMode="manual" fullCalcOnLoad="0" forceFullCalc="0" concurrentCalc="1"/></workbook>"#;
+    let source = br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets/><calcPr calcId="191029" calcMode="manual" fullCalcOnLoad="0" forceFullCalc="0" iterate="1" concurrentCalc="1"/></workbook>"#;
     let output =
         patch_calculation_properties(source, &part(), true, WriteLimits::default()).expect("patch");
     let output = String::from_utf8(output).expect("UTF-8 XML");
     assert!(output.contains(r#"calcId="191029""#));
     assert!(output.contains(r#"calcMode="manual""#));
+    assert!(output.contains(r#"iterate="1""#));
     assert!(output.contains(r#"concurrentCalc="1""#));
     assert!(output.contains(r#"fullCalcOnLoad="1""#));
     assert!(output.contains(r#"forceFullCalc="1""#));
