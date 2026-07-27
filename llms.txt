@@ -71,7 +71,9 @@ and default frozen panes without changing `CellValue::Text` or the calculation
 fingerprint. `WorkbookDraft` provides atomic annotated-text and frozen-pane
 mutations with a separate presentation revision. `PhoneticTextRange` uses
 zero-based half-open UTF-16 code-unit offsets; when a range is applied to base
-text, its boundaries are validated not to split a surrogate pair. See
+text, its boundaries are validated not to split a surrogate pair.
+`CellPhonetics::resolved_runs` performs that translation into byte offsets, so
+a consumer never writes its own UTF-16 conversion. See
 `write_phonetic_workbook` and `inspect_phonetic_workbook` in the examples.
 
 For AI hosts, the separate `cellrune-mcp` binary provides local stdio MCP
@@ -528,7 +530,13 @@ crate package use `cargo run --example <name> -- [arguments]`.
   performs verified Save As (input and output path arguments).
 - `dynamic_array_write.rs` — authors, calculates, and writes a canonical
   `FILTER` spill (optional destination path argument).
-- `inspect_phonetic_workbook.rs` — prints frozen-pane and phonetic metadata
-  from an input workbook (input path argument).
+- `inspect_phonetic_workbook.rs` — prints frozen-pane metadata and, for each
+  annotated cell, the byte range and base slice each run covers; shows the
+  `phonetic_cell_entries` → workbook base text → `resolved_runs` join a
+  consumer needs (input path argument).
 - `write_phonetic_workbook.rs` — authors annotated text and a frozen pane
   (output path argument).
+- `select_calculation_modes.rs` — calculates the same formulas under the
+  default Excel-compatible policies and under the 0.1.2 opt-ins, so the numbers
+  `ArithmeticSemantics` and `FinancialSolverSemantics` change are visible side
+  by side (no arguments).
