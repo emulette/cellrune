@@ -329,7 +329,7 @@ jobs:
 
   # Not on pull requests, same reasoning as platform-tests. Kept on main and on the tag because the
   # packaged-consumer resolve is one of the failures that otherwise surfaces only during a release
-  # run, after the irreversible publish approvals. See "Before tagging a release" in CONTRIBUTING.md.
+  # run, after the irreversible publish approvals.
   package:
     name: Packaged crate and standalone consumer
     if: github.event_name != 'pull_request'

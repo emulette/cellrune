@@ -4,10 +4,8 @@ This report records an observational comparison measured on 2026-07-26. It
 describes what eleven workbook calculation engines returned for two large
 workbooks and four upstream test corpora under one typed comparison protocol.
 
-The report is not a composite score, quality ranking, compatibility guarantee,
-CI threshold, or release gate. Workbook acceptance, calculation coverage,
-agreement with saved values, failure handling, runtime, and memory are separate
-observations.
+Workbook acceptance, calculation coverage, agreement with saved values, failure
+handling, runtime, and memory are reported as separate observations.
 
 ## Targets
 
@@ -38,8 +36,8 @@ evaluators were outside the comparison.
 | EarlyRetirementNow SWR Toolbox v2.0 XLSX export | [official public workbook article](https://earlyretirementnow.com/2018/08/29/google-sheet-updates-swr-series-part-28/); Google Sheets saved values | 251,164 | `2f69abd87af7d534cd6e3db727a962116614fba705467c09cc205139df3bdcef` |
 | `Enron_Nymex_cal_Spreads.xlsx` local copy | Enron spreadsheet corpus-derived; Microsoft Excel AppVersion `15.0300` saved values | 34,583 | `68d62ed6713b61f8534b9d18a55cd1159b051bbbd39ffba08f58296a51da729c` |
 
-The exact acquisition URL for the NYMEX copy was not retained, so this report
-does not claim one. The hash and package metadata identify the measured file.
+The acquisition URL for the NYMEX copy was not retained; the hash and package
+metadata identify the measured file.
 
 ### Upstream engine corpora
 
@@ -332,25 +330,11 @@ Historical runs retained runner-source hashes but not full source snapshots.
 The harness now snapshots each unique runner source once per new session in
 addition to recording hashes.
 
-## Interpretation limits
+## What was measured
 
-- Saved values are empirical references, not universal correctness oracles.
-- Google Sheets agreement and Microsoft Excel agreement are not interchangeable.
-- The NYMEX observation applies to the exact file hash and saved state listed
-  above.
-- The large-workbook sample is two files: one Google Sheets export and one
-  workbook with an Excel 2013-era saved cache. It contains no large workbook
-  authored and saved by a current Excel release.
-- Exact historical acquisition commits for the four upstream corpora were not
-  retained.
-- Results depend on the measured engine versions, adapters, host, runtime
-  versions, and timeout policy.
-- Wall time and peak RSS are single-host observations, not stable performance
-  rankings.
-- The comparison harness, third-party workbook copies, and per-cell result
-  streams are retained development evidence but are not distributed in this
-  repository. The public report provides source links, hashes, configuration,
-  protocol, and aggregates; it is not independently reproducible from this
-  repository alone.
-- This report measures CellRune 0.1.1 and does not change the current release's
-  documented XLSX or formula support.
+- CellRune 0.1.1, and the engine versions listed under Targets.
+- Two large workbooks: one Google Sheets export and one with an Excel 2013-era
+  saved cache. No large workbook saved by a current Excel release.
+- Wall time and peak RSS on a single host.
+- The comparison harness and third-party workbook copies are not distributed
+  here; the report carries the source links, hashes, protocol, and aggregates.

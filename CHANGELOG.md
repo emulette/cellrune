@@ -9,33 +9,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 
 ### Added
 
-- Two accessors for consuming phonetic (ruby) annotations. `CellPhonetics::resolved_runs` takes the
-  cell's base text and returns each run's range translated from UTF-16 code units — what XLSX
-  stores — into the byte offsets Rust indexes with, as `ResolvedPhoneticRun`. Byte offsets rather
-  than character indices, so no consumer's indexing convention is built into the core.
-  `DocumentPresentation::phonetic_cell_entries` iterates the cells of a sheet that carry at least
-  one run, in row-major address order, reporting exactly the visibility `cell_phonetics` reports
-  for the same address. Cells whose annotation holds only `phoneticPr` display properties without
-  `rPh` runs are skipped by that iterator and remain reachable through `cell_phonetics`.
-  Presentation state does not hold cell text, so the base text comes from the workbook snapshot;
-  the iterator's documentation carries a compiled example of that join.
-
-- Two calculation compatibility modes on `CalculationOptions`, both defaulting to Excel's behavior
-  rather than to what 0.1.2 did. `ArithmeticSemantics::ExcelNearZero` corrects a sum or difference
-  that cancels to near zero, so `=0.1+0.2-0.3` is `0` and `=(0.1+0.2-0.3)=0` is `TRUE`; the
-  correction applies to the operator path, to the array path, and to the policy-aware running
-  totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, `SUMPRODUCT`, and `NPV`,
-  so `=A1+A2+A3`, `=SUM(A1:A3)` and `=SUMPRODUCT(A1:A3)` cannot disagree. The arithmetic path
-  carries an exact trace of parsed decimal inputs through intermediate sums, `SUMPRODUCT` carries it
-  through the products it forms, and `NPV` extends it as an exact rational trace
-  through discounting, so `=100.1-100-0.1` becomes zero while
-  `=100.1-100-0.099999999999999` remains nonzero. `FinancialSolverSemantics::ExcelIterationBudget`
-  applies Microsoft's
-  function-specific convergence policy: 20 iterations/`1e-7` for `IRR` and `RATE`, and 100
-  iterations/`1e-8` for `XIRR`. `ArithmeticSemantics::Ieee754` and
-  `FinancialSolverSemantics::ExtendedSearch` restore the previous behavior. The two axes are also
-  transported by the Rust interop DTO and exposed by the Python, Node.js, and MCP boundaries.
-  `docs/NUMERICS.md` records both policies and their independent release-test oracles.
+- `CellPhonetics::resolved_runs` returns each phonetic run's range as byte offsets into the cell's
+  base text, translated from the UTF-16 code units XLSX stores, as `ResolvedPhoneticRun`.
+- `DocumentPresentation::phonetic_cell_entries` iterates a sheet's cells that carry at least one
+  run, in address order. Cells holding only `phoneticPr` display properties without `rPh` runs are
+  skipped and remain reachable through `cell_phonetics`.
+- `ArithmeticSemantics` on `CalculationOptions` selects how arithmetic that cancels to near zero is
+  handled. The default `ExcelNearZero` returns `0` for `=0.1+0.2-0.3`, in the operator path, the
+  array path, and `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, `SUMPRODUCT` and `NPV`.
+  `Ieee754` keeps the residue, as 0.1.2 did.
+- `FinancialSolverSemantics` on `CalculationOptions` selects the solver budget. The default
+  `ExcelIterationBudget` applies Microsoft's documented policy — 20 iterations/`1e-7` for `IRR` and
+  `RATE`, 100/`1e-8` for `XIRR`. `ExtendedSearch` searches longer, as 0.1.2 did.
+- Both options are carried by the interop DTO and exposed by the Python, Node.js, and MCP
+  boundaries. `docs/NUMERICS.md` records the policies.
 
 ### Changed
 
@@ -43,17 +30,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   and the financial solvers now give up where Excel gives up instead of searching four times
   longer. Callers who depended on 0.1.2's numbers should select `ArithmeticSemantics::Ieee754` and
   `FinancialSolverSemantics::ExtendedSearch`; callers comparing against Excel need no change.
-- CellRune is dual-licensed under `MIT OR Apache-2.0` at the recipient's option, instead of the MIT
-  License alone. Apache-2.0 supplies an explicit patent grant that MIT does not, which some
-  adopters require, and dual licensing under both is the Rust ecosystem's convention. Releases
-  0.1.0 through 0.1.2 remain published under MIT alone; the dual license applies from 0.1.3
-  onward. Every distributed artifact — crate, wheel, sdist, npm root and platform
-  packages, and MCP bundles — now carries `LICENSE-MIT` and `LICENSE-APACHE` in place of the single
-  `LICENSE` file, and the release verifier's exact-set artifact boundaries require both.
-- The packaged-license CI gate enumerates its copies from the list of distribution directories
-  rather than naming each file. The previous per-file list covered three of the eleven copies: the
-  eight npm platform packages carried license text that no gate compared against the repository
-  original, so a divergence there would have been published.
+- CellRune is dual-licensed under `MIT OR Apache-2.0` instead of MIT alone. Releases 0.1.0 through
+  0.1.2 remain under MIT; the dual license applies from 0.1.3 onward. Every distributed artifact
+  now carries `LICENSE-MIT` and `LICENSE-APACHE` in place of the single `LICENSE` file.
+- The packaged-license CI gate enumerates its copies from the distribution directories rather than
+  naming each file. The previous list covered three of the eleven copies, so the eight npm platform
+  packages carried license text no gate compared against the original.
 
 ## [0.1.2] - 2026-07-26
 
@@ -99,10 +81,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 - The MSRV check covers `--all-targets` rather than `--lib`, so tests, benches, and the
   extraction tool must also build on the declared floor.
 - The 50k benchmark is demoted from a scheduled nightly job and a required release gate to an
-  explicit observational command, documented in `CONTRIBUTING.md`, and its output-verifier
-  script is removed with the jobs. Release gates are deliberately limited to stable validation
-  boundaries that guard irreversible failures; the benchmark keeps its internal correctness
-  assertions, and functional correctness remains covered by the generated-workbook tests.
+  explicit observational command, and its output-verifier script is removed with the jobs. The
+  benchmark keeps its internal correctness assertions, and functional correctness remains
+  covered by the generated-workbook tests.
 - Release publish jobs are re-run safe. The crates.io, npm, and GitHub-release jobs probe for
   what is already live and skip it — the GitHub release also counts its attached bundles, so an
   interrupted asset upload is completed rather than skipped — and the PyPI upload passes

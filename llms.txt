@@ -504,8 +504,6 @@ calculate. Out of scope for the current version:
 - Iterative calculation and automatic host-time or random inputs (`TODAY()`
   and `NOW()` are supported only through explicit `CalculationOptions` inputs).
 
-CellRune does not claim complete Excel compatibility.
-
 ## Runnable examples
 
 The repository path is `crates/cellrune/examples/`; the published crate

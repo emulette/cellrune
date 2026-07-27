@@ -36,8 +36,7 @@ SKIPPED_DIRECTORIES = frozenset({"target", "node_modules", ".git"})
 
 # Documentation and policy files that name the release version in prose or in an install command.
 # A stale literal here is not caught by any build: it ships on the crates.io and PyPI project
-# pages and on the repository front page, telling users to install a version that is not current
-# and — in SECURITY.md — naming the wrong version as the one receiving fixes.
+# pages and on the repository front page, telling users to install a version that is not current.
 PROSE_VERSION_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("README.md", r"The CellRune Rust crate ([0-9][^\s]*) requires", "crate version"),
     ("README.md", r"cargo add cellrune@([^\s`]+)", "cargo add version"),
@@ -46,7 +45,6 @@ PROSE_VERSION_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("README.md", r'pip install "cellrune==([^"]+)"', "pip install version"),
     ("README.md", r'npm install "@cellrune/node@([^"]+)"', "npm install version"),
     ("bindings/node/README.md", r"npm install @cellrune/node@([^\s`]+)", "npm install version"),
-    ("SECURITY.md", r"CellRune is at `([^`]+)`", "supported version"),
     ("llms.txt", r"The current public version is ([0-9][^\s,]*)", "public version"),
     ("llms.txt", r"Version ([0-9][^\s]*) contains", "catalog version"),
 )

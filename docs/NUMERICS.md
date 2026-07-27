@@ -34,9 +34,8 @@ the search that produced them. From 0.1.3 the search budget is a calculation opt
 The default reproduces the function-specific iteration budgets and tolerances Microsoft documents.
 When CellRune's Newton search exhausts the applicable budget, it returns `#NUM!`.
 
-**What the default does not reproduce is Excel's search itself, which Microsoft does not document.**
-Two searches with the same budget can still disagree about which borderline inputs converge. Expect
-agreement on which inputs are hopeless, not a guarantee of an identical `#NUM!` boundary.
+The default reproduces the budget, not Excel's search itself, which Microsoft does not document.
+Two searches with the same budget can still disagree on which borderline inputs converge.
 
 Releases 0.1.0 through 0.1.2 behaved as `ExtendedSearch` does, with no way to select otherwise.
 That search returns a value for some inputs where Excel returns `#NUM!`. It remains available:
@@ -107,10 +106,7 @@ generated cases include both `=100.1-100-0.1`, which must become zero, and
 array, ordinary aggregate, conditional aggregate, and `SUMPRODUCT` paths are also compared under
 both modes, including a `SUMPRODUCT` whose terms cancel only after the multiplication.
 
-Under `Ieee754` no path consults the exact trace, so none is computed: the policy that opts out of
-the correction does not pay for it.
-
-**Compare calculated numbers with a tolerance rather than for equality**, under either policy.
+Under `Ieee754` no path consults the exact trace, so none is computed.
 
 #### Not part of this: fifteen-digit display
 
@@ -163,5 +159,5 @@ Priority for measurement is statistical, then closed-form financial, then math.
 ## Reporting a difference
 
 Open an issue with the formula text, the input values, the CellRune result, and the Excel result
-together with the Excel build that produced it. A difference against an unnamed Excel version
-cannot be acted on, because the answer may differ between builds.
+together with the Excel build that produced it. Excel's answer can differ between builds, so the
+build matters.

@@ -1,23 +1,23 @@
 name: Maintenance
 
-# Manual only. Every check here reads an input that this repository does not control — the
-# advisory database, the live crates.io resolution at both ends of the published ranges, the
-# hosted runner images — so none of them can be answered by a push tier. But none of them needs
-# to be answered on a clock either: what they exist for is to be run deliberately, before a tag.
+# Manual only. Every check here reads an input this repository does not control — the advisory
+# database, live crates.io resolution at both ends of the published ranges, the hosted runner
+# images — so none can be answered by a push tier.
 #
-# The schedules that used to drive this (nightly hardening and the weekly binding tier) are gone.
-# The workflow is NOT gone with them, and that distinction is the whole point: CONTRIBUTING.md's
-# "Before tagging a release" section makes a dispatch of these jobs part of the pre-tag procedure.
-# Deleting the file would remove the entry point that procedure depends on and leave no way to
-# reach `dependency-floor` at all, since `-Z direct-minimal-versions` needs a nightly toolchain
-# that no local checkout is required to have.
+# Before tagging a release, dispatch the tiers that apply:
 #
-# A gate that has never been run has never passed. The fuzz tier below was uninstallable from the
-# repository's first commit and nobody knew, because its schedule had not fired since the
-# repository went public. If you change one of these jobs, dispatch it in the same commit.
+#   advisories          always; it is cheap
+#   latest_dependencies the release touched dependency requirements or the MSRV
+#   dependency_floor    the release touched dependency requirements. Resolves every direct
+#                       requirement to its declared floor, which no other job compiles
+#   fuzz                the release touched the parser, reader, writer, or session
+#   binding_artifacts   the release touched anything cross-compiled. Builds the eight targets,
+#                       the macOS deployment targets, and the musl containers, which nothing
+#                       else builds until the tag itself
 #
-# Every tier is individually selectable. Running the whole workflow to answer one question makes
-# the pre-tag habit expensive, and an expensive habit is the one that gets skipped.
+# Then check that `[workspace.package] version` in Cargo.toml matches the tag.
+#
+# If you change one of these jobs, dispatch it in the same commit.
 on:
   workflow_dispatch:
     inputs:

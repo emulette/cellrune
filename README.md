@@ -304,48 +304,22 @@ The following are outside the current scope:
 - spill postfix references such as `A1#`, general `LAMBDA`, and data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 
-CellRune does not claim complete Excel compatibility.
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
-records where calculated values are known to differ from Excel and why, including `DOLLAR`
-currency formatting and fifteen-digit display. It also records the two axes that are *selectable*
-rather than divergent: from 0.1.3, arithmetic that cancels to near zero and the iterative
-financial solvers both default to Excel's behavior, and
-`ArithmeticSemantics::Ieee754`/`FinancialSolverSemantics::ExtendedSearch` restore what releases up
-to 0.1.2 did.
+records where calculated values differ from Excel and why, and documents the two calculation
+options added in 0.1.3: `ArithmeticSemantics` and `FinancialSolverSemantics`, which default to
+Excel's behavior and can be set to `Ieee754` and `ExtendedSearch` for what 0.1.2 did.
 
 ## Verification
 
-The `conformance/` tree carries redistributable expectation matrices — every literal, every
-formula, and the value a recorded oracle saved for that formula — and the normal workspace test
-run reconstructs each matrix, calculates it, and compares CellRune's values with the oracle's.
-The first matrix is the Apache POI `FormulaEvalTestData` corpus (Apache-2.0): 1,295
-formula cases against the workbook's saved Microsoft Excel 2013 calculation cache, of which
-1,290 match within a scale-relative `1e-8` and 5 are divergences documented case by case where
-that 2013-era cache predates current Excel behavior. Documented divergences are enforced in
-both directions: the test fails if CellRune stops matching where it must, and also if a
-recorded divergence quietly disappears or changes shape.
+The `conformance/` tree carries expectation matrices — every literal, every formula, and the value
+a recorded oracle saved for that formula — and `cargo test` reconstructs each matrix, calculates
+it, and compares the results against the oracle.
 
-Development audits recorded against the private corpus (2026-07-24, not distributed) add: a
-Microsoft Excel for Mac 16.111 recalculation of the same corpus matching CellRune on all 1,287
-non-locale results within `1e-8`, with the eight `DOLLAR` locale strings documented in
-[`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md);
-full-span audits of 14 real workbooks — 331,322 calculation entries with
-748 unavailable results: 695 blocked by unavailable upstream cells, 44 circular references,
-and 9 formula containers without stored text, none caused by an unsupported function or
-expression; the largest of them, roughly 250,000 calculated formulas, completing its
-full preserve, recalculate, and reopen audit in 5 minutes 22 seconds; and producer fixtures
-from Excel, LibreOffice, Google Sheets, and openpyxl passing 4 of 4.
-
-The normal workspace tests use generated, redistributable workbook fixtures and the expectation
-matrices above. Private development corpora and native-producer evidence are not distributed or
-represented as release blockers. Formula support gaps remain visible as structured issues in the
-returned calculation snapshot and do not hide independently calculated values.
-
-[`docs/ENGINE_COMPARISON.md`](https://github.com/emulette/cellrune/blob/main/docs/ENGINE_COMPARISON.md)
-records a separate observational comparison of eleven workbook calculation engines: the measured
-targets and input sources, the typed comparison protocol, aggregate coverage and saved-value
-agreement, observed failure differences, and the audit corrections applied before publication.
-It is a report, not a composite score, compatibility claim, CI threshold, or release gate.
+The first matrix is the Apache POI `FormulaEvalTestData` corpus (Apache-2.0): 1,295 formula cases
+against the workbook's saved Microsoft Excel 2013 calculation cache. 1,290 match within a
+scale-relative `1e-8`; 5 are documented divergences where the 2013-era cache predates current
+Excel behavior. Divergences are enforced in both directions, so neither side of one can change
+without the test failing.
 
 ## License
 

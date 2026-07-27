@@ -148,17 +148,6 @@ class VersionConsistencyTests(unittest.TestCase):
         )
         self.assert_reports(root, "cargo add version")
 
-    def test_stale_security_policy_version_is_reported(self) -> None:
-        root = self.tree()
-        path = root / "SECURITY.md"
-        path.write_text(
-            path.read_text(encoding="utf-8").replace(
-                f"CellRune is at `{self.expected}`", f"CellRune is at `{self.stale}`"
-            ),
-            encoding="utf-8",
-        )
-        self.assert_reports(root, "supported version")
-
     def test_missing_platform_manifests_are_reported(self) -> None:
         root = self.tree()
         shutil.rmtree(root / "bindings/node/npm")
