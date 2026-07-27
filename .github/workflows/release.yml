@@ -14,9 +14,9 @@ concurrency:
 
 jobs:
   release-ref:
-    name: Require a semantic version release tag
+    name: Validate the release contract
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Reject refs that are not a vMAJOR.MINOR.PATCH tag
         env:
@@ -48,42 +48,102 @@ jobs:
           fi
           printf 'releasing version %s\n' "$declared"
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Verify every published version declaration agrees
+        run: python3 bindings/scripts/check_version_consistency.py
+
+      - name: Verify checked-in native dependency license bundles
+        run: python3 bindings/scripts/generate_third_party_licenses.py --check
+
+      - name: Verify packaged license text
+        run: |
+          status=0
+          check() {
+            if cmp -s "$1" "$2"; then
+              return 0
+            fi
+            printf '::error file=%s::does not match %s\n' "$2" "$1"
+            diff -u "$1" "$2" || true
+            status=1
+          }
+          for directory in \
+            crates/cellrune \
+            bindings/python \
+            bindings/node \
+            bindings/node/npm/darwin-arm64 \
+            bindings/node/npm/darwin-x64 \
+            bindings/node/npm/linux-arm64-gnu \
+            bindings/node/npm/linux-arm64-musl \
+            bindings/node/npm/linux-x64-gnu \
+            bindings/node/npm/linux-x64-musl \
+            bindings/node/npm/win32-arm64-msvc \
+            bindings/node/npm/win32-x64-msvc
+          do
+            for name in LICENSE-MIT LICENSE-APACHE; do
+              if [ ! -f "$directory/$name" ]; then
+                printf '::error file=%s::missing license copy\n' "$directory/$name"
+                status=1
+                continue
+              fi
+              check "$name" "$directory/$name"
+            done
+          done
+          check THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
+          exit "$status"
+
+      - name: Require absolute links in published READMEs
+        run: |
+          grep -Hno ']([^)]*)' README.md bindings/node/README.md \
+            | sed 's/](\(.*\))$/\1/' \
+            | awk '
+                BEGIN { FS = ":"; status = 0 }
+                {
+                  file = $1
+                  line = $2
+                  target = substr($0, length(file) + length(line) + 3)
+                }
+                target !~ /^(https?:\/\/|#)/ {
+                  printf "::error file=%s,line=%s::relative link %s does not resolve on PyPI, crates.io, or npm\n", file, line, target
+                  status = 1
+                }
+                END { exit status }
+              '
+
   core:
-    name: Core, package, MSRV, platform, and policy validation
+    name: Core, package, MSRV, and platform validation
     needs: release-ref
     uses: ./.github/workflows/ci.yml
 
-  bindings:
-    name: Wheel, npm, and MCP publication validation
+  python-artifacts:
+    name: Python publication artifacts
     needs: release-ref
     uses: ./.github/workflows/bindings.yml
+    with:
+      scope: python
+
+  node-artifacts:
+    name: Node publication artifacts
+    needs: release-ref
+    uses: ./.github/workflows/bindings.yml
+    with:
+      scope: node
+
+  mcp-artifacts:
+    name: MCP publication artifacts
+    needs: release-ref
+    uses: ./.github/workflows/bindings.yml
+    with:
+      scope: mcp
     permissions:
       contents: read
       id-token: write
       attestations: write
 
-  complete:
-    name: Release validation passed
-    if: always()
-    needs:
-      - release-ref
-      - core
-      - bindings
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Require every validation workflow
-        env:
-          CORE_RESULT: ${{ needs.core.result }}
-          BINDINGS_RESULT: ${{ needs.bindings.result }}
-        run: |
-          test "$CORE_RESULT" = "success"
-          test "$BINDINGS_RESULT" = "success"
-
-  # Every publish job below depends on `complete`, so nothing reaches a registry
-  # until both reusable validation workflows have passed. Each one also names a
-  # GitHub environment, which is where a required reviewer belongs: a registry upload cannot be
-  # undone, and crates.io and PyPI both refuse to ever reuse a version number.
+  # Each publish job waits only for its own product validation. Registry jobs also name a GitHub
+  # environment, which is where a required reviewer belongs: an upload cannot be undone, and
+  # crates.io and PyPI both refuse to ever reuse a version number.
   #
   # Because they refuse reuse, every publish job is also re-run safe: it first checks whether
   # its registry already holds this version and skips the upload when it does. A rerun of a
@@ -99,7 +159,7 @@ jobs:
   # be edited or deleted, unlike a registry upload, so it needs no reviewer gate.
   github-release:
     name: Publish the GitHub release with MCP bundles
-    needs: complete
+    needs: mcp-artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -178,7 +238,7 @@ jobs:
 
   publish-crates-io:
     name: Publish cellrune to crates.io
-    needs: complete
+    needs: core
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: crates-io
@@ -233,7 +293,7 @@ jobs:
 
   publish-pypi:
     name: Publish cellrune to PyPI
-    needs: complete
+    needs: python-artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: pypi
@@ -263,7 +323,7 @@ jobs:
 
   publish-npm:
     name: Publish the @cellrune packages to npm
-    needs: complete
+    needs: node-artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: npm

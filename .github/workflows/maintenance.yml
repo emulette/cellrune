@@ -53,8 +53,8 @@ jobs:
   # Every other CI job re-runs an unchanged commit against a pinned toolchain and a
   # locked dependency graph, so repeating them here proves nothing. The advisory
   # database is an input that moves on its own; between runs of this workflow, a new
-  # advisory reaches the repository through Dependabot security updates and through the
-  # `cargo deny` step that every pull request runs.
+  # advisory reaches the repository through Dependabot security updates and this
+  # explicitly dispatched current-database check.
   advisories:
     name: Fresh advisory database check
     if: inputs.advisories
@@ -333,6 +333,8 @@ jobs:
     name: Full binding and MCP artifact tier
     if: inputs.binding_artifacts
     uses: ./.github/workflows/bindings.yml
+    with:
+      scope: all
     permissions:
       contents: read
       id-token: write

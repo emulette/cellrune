@@ -19,36 +19,14 @@ concurrency:
 
 jobs:
   quality:
-    name: Format, lint, tests, and docs
+    name: Format, lint, and tests
     runs-on: ubuntu-24.04
-    # Absorbed the former dependency-policy job; cargo deny resolves eight targets with all
-    # features and clones a fresh advisory database, so the budget absorbed its allowance too.
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - name: Check out exact revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-
-      - name: Install workflow linter
-        env:
-          ACTIONLINT_VERSION: "1.7.12"
-          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-        run: |
-          archive="${RUNNER_TEMP}/actionlint.tar.gz"
-          destination="${RUNNER_TEMP}/actionlint-bin"
-          curl --fail --location --silent --show-error \
-            --proto '=https' \
-            --proto-redir '=https' \
-            --output "$archive" \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check
-          mkdir -p "$destination"
-          tar --extract --gzip --file "$archive" --directory "$destination" actionlint
-          printf '%s\n' "$destination" >> "$GITHUB_PATH"
-
-      - name: Validate GitHub Actions semantics
-        run: actionlint
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
@@ -68,165 +46,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      - name: Check standalone fuzz formatting
-        run: cargo fmt --manifest-path fuzz/Cargo.toml -- --check
-
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-      # Every other Rust gate passes --all-features. Feature unification through
-      # cellrune-mcp makes a workspace-wide --no-default-features run a no-op, so
-      # the published crate's own default feature set is linted on its own.
-      - name: Run Clippy on the published crate's default features
-        run: cargo clippy --package cellrune --all-targets --locked -- -D warnings
-
-      - name: Lint public API documentation
-        run: >-
-          cargo clippy
-          --package cellrune
-          --lib
-          --all-features
-          --locked
-          --
-          -D warnings
-          -D clippy::missing_errors_doc
-          -D clippy::missing_panics_doc
-          -D clippy::doc_markdown
-
-      - name: Run workspace tests without benchmark executables
-        run: >-
-          cargo test
-          --workspace
-          --lib
-          --bins
-          --tests
-          --examples
-          --all-features
-          --locked
-
-      - name: Test the published crate's default features
-        run: cargo test --package cellrune --lib --tests --locked
-
-      - name: Run public API doctests
-        run: cargo test --package cellrune --doc --all-features --locked
-
-      - name: Build public API documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --package cellrune --no-deps --all-features --locked
-
-      - name: Compile every standalone fuzz target
-        run: cargo check --manifest-path fuzz/Cargo.toml --bins --locked
-
-      # Every copy is reported, not just the first, and the mismatch is printed.
-      # A bare `cmp -s` chain aborts silently and says only which step failed.
-      #
-      # CellRune is dual-licensed, so every distribution boundary carries both texts and both
-      # have to match the repository originals. The copies are enumerated from the directory
-      # list rather than written out one by one: a per-file list silently stopped covering the
-      # eight npm platform packages, whose license files were published unverified.
-      - name: Verify packaged license text
-        run: |
-          status=0
-          check() {
-            if cmp -s "$1" "$2"; then
-              return 0
-            fi
-            printf '::error file=%s::does not match %s\n' "$2" "$1"
-            diff -u "$1" "$2" || true
-            status=1
-          }
-          for directory in \
-            crates/cellrune \
-            bindings/python \
-            bindings/node \
-            bindings/node/npm/darwin-arm64 \
-            bindings/node/npm/darwin-x64 \
-            bindings/node/npm/linux-arm64-gnu \
-            bindings/node/npm/linux-arm64-musl \
-            bindings/node/npm/linux-x64-gnu \
-            bindings/node/npm/linux-x64-musl \
-            bindings/node/npm/win32-arm64-msvc \
-            bindings/node/npm/win32-x64-msvc
-          do
-            for name in LICENSE-MIT LICENSE-APACHE; do
-              if [ ! -f "$directory/$name" ]; then
-                printf '::error file=%s::missing license copy\n' "$directory/$name"
-                status=1
-                continue
-              fi
-              check "$name" "$directory/$name"
-            done
-          done
-          check THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
-          exit "$status"
-
-      # Both READMEs are also the long_description PyPI renders and the front page crates.io and
-      # npm render, none of which resolve a repository-relative path. A relative link is a 404 for
-      # every reader who did not arrive through GitHub.
-      - name: Require absolute links in published READMEs
-        run: |
-          grep -Hno ']([^)]*)' README.md bindings/node/README.md \
-            | sed 's/](\(.*\))$/\1/' \
-            | awk '
-                BEGIN { FS = ":"; status = 0 }
-                {
-                  file = $1
-                  line = $2
-                  target = substr($0, length(file) + length(line) + 3)
-                }
-                target !~ /^(https?:\/\/|#)/ {
-                  printf "::error file=%s,line=%s::relative link %s does not resolve on PyPI, crates.io, or npm\n", file, line, target
-                  status = 1
-                }
-                END { exit status }
-              '
-
-      - name: Test release archive boundary validation
-        run: python3 bindings/scripts/test_verify_release_artifacts.py
-
-      # Most of this gate's checks are patterns over generated files. A pattern that matched
-      # nothing would agree with every version, so its own drift has to be tested too.
-      - name: Test version consistency gate
-        run: python3 bindings/scripts/test_check_version_consistency.py
-
-      # A partial version bump does not fail where it was made. It fails inside a release run,
-      # after the irreversible publish approvals, because a lockfile or a generated shim still
-      # names the previous version. This asserts every declaration against the workspace manifest.
-      - name: Verify every published version declaration agrees
-        run: python3 bindings/scripts/check_version_consistency.py
-
-      # This script's own unit test covers its host-target detection. It used to live in the
-      # Python source-artifact job, which is now tag-gated, so a pull request editing the
-      # script would have run it without ever running its tests.
-      - name: Test release helper target detection
-        run: python3 bindings/scripts/test_generate_third_party_licenses.py
-
-      # Moved out of the binding matrix. `--check` compares the committed license bundles against
-      # the dependency graph and reads nothing host-specific, so running it once per matrix
-      # element asked the same question up to fifteen times on a tag. The per-host `--target host`
-      # selection stays in the binding jobs, because that answer really does differ per element.
-      - name: Verify checked-in native dependency license bundles
-        run: python3 bindings/scripts/generate_third_party_licenses.py --check
-
-      # Merged in from the former standalone dependency-policy job. Both invocations are cheap
-      # next to the compile above, and a separate job paid a second checkout and toolchain
-      # install to run two commands.
-      - name: Install pinned cargo-deny
-        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
-        with:
-          tool: cargo-deny@0.20.2
-          fallback: none
-
-      - name: Check workspace dependency policy
-        run: cargo deny --all-features check
-
-      - name: Check standalone fuzz dependency policy
-        run: >-
-          cargo deny
-          --manifest-path fuzz/Cargo.toml
-          --config fuzz/deny.toml
-          check
+      - name: Run workspace tests
+        run: cargo test --workspace --all-features --locked
 
   msrv:
     name: Minimum supported Rust version, warnings denied

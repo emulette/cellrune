@@ -27,6 +27,12 @@ on:
       - "README.md"
       - "rust-toolchain.toml"
   workflow_call:
+    inputs:
+      scope:
+        description: "Artifact ecosystem: all, python, node, or mcp"
+        required: false
+        type: string
+        default: all
   workflow_dispatch:
 
 permissions:
@@ -36,12 +42,31 @@ env:
   RUSTUP_TOOLCHAIN: "1.92.0"
 
 concurrency:
-  group: bindings-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    bindings-${{ github.workflow }}-${{ inputs.scope || 'all' }}-${{
+      github.event.pull_request.number || github.ref
+    }}
   cancel-in-progress: true
 
 jobs:
+  validate-scope:
+    name: Validate reusable artifact scope
+    if: inputs.scope != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a known ecosystem
+        env:
+          ARTIFACT_SCOPE: ${{ inputs.scope }}
+        run: |
+          case "$ARTIFACT_SCOPE" in
+            all|python|node|mcp) ;;
+            *) printf 'unknown artifact scope: %s\n' "$ARTIFACT_SCOPE" >&2; exit 1 ;;
+          esac
+
   python:
     name: Python ${{ matrix.python }} (${{ matrix.os }})
+    if: inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'python'
     strategy:
       fail-fast: false
       # The full product is what gets published, so it is built where publication happens: the
@@ -54,7 +79,9 @@ jobs:
       matrix: >-
         ${{
           fromJSON(
-            (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
+            (startsWith(github.ref, 'refs/tags/v') ||
+              github.event_name == 'workflow_dispatch' ||
+              inputs.scope != '') &&
             '{"os":["ubuntu-24.04","macos-15","windows-2025"],"python":["3.10","3.11","3.12","3.13","3.14"]}' ||
             '{"include":[{"os":"ubuntu-24.04","python":"3.10"}]}'
           )
@@ -155,7 +182,10 @@ jobs:
         run: mypy --strict tests/typing_check.py
 
       - name: Upload verified wheel
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          github.event_name == 'workflow_dispatch' ||
+          inputs.scope != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: python-wheel-${{ matrix.os }}-${{ matrix.python }}
@@ -165,7 +195,11 @@ jobs:
 
   python-source-artifact:
     name: Build Python source publication artifact
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'python') &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+        github.event_name == 'workflow_dispatch' ||
+        inputs.scope != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -229,18 +263,14 @@ jobs:
 
   node:
     name: Node.js ${{ matrix.node }} (${{ matrix.os }})
+    if: inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'node'
     strategy:
       fail-fast: false
-      # Same rule as the Python tier: full product on the tag and on maintenance dispatch, the
-      # declared floor from `engines.node` (`>=22`) everywhere else.
-      matrix: >-
-        ${{
-          fromJSON(
-            (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
-            '{"os":["ubuntu-24.04","macos-15","windows-2025"],"node":[22,24,26]}' ||
-            '{"include":[{"os":"ubuntu-24.04","node":22}]}'
-          )
-        }}
+      # Compatibility smoke stays on the declared floor. Tag jobs below build and install every
+      # actual native artifact, so repeating 22/24/26 across three hosts adds no release product.
+      matrix:
+        os: [ubuntu-24.04]
+        node: [22]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
@@ -297,7 +327,11 @@ jobs:
 
   node-platform-build:
     name: Build Node platform package (${{ matrix.target }})
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'node') &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+        github.event_name == 'workflow_dispatch' ||
+        inputs.scope != '')
     strategy:
       fail-fast: false
       matrix:
@@ -421,7 +455,11 @@ jobs:
 
   node-platform-host:
     name: Install Node platform package (${{ matrix.target }})
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'node') &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+        github.event_name == 'workflow_dispatch' ||
+        inputs.scope != '')
     needs: node-platform-build
     strategy:
       fail-fast: false
@@ -462,7 +500,11 @@ jobs:
 
   node-platform-linux:
     name: Install Node platform package (${{ matrix.target }})
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'node') &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+        github.event_name == 'workflow_dispatch' ||
+        inputs.scope != '')
     needs: node-platform-build
     strategy:
       fail-fast: false
@@ -505,7 +547,11 @@ jobs:
 
   node-platform-assembly:
     name: Assemble every Node platform package
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'node') &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+        github.event_name == 'workflow_dispatch' ||
+        inputs.scope != '')
     needs:
       - node-platform-build
       - node-platform-host
@@ -588,7 +634,11 @@ jobs:
 
   mcp-binary:
     name: Build MCP binary bundle (${{ matrix.target }})
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'mcp') &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+        github.event_name == 'workflow_dispatch' ||
+        inputs.scope != '')
     strategy:
       fail-fast: false
       matrix:
@@ -649,7 +699,9 @@ jobs:
 
   mcp-binary-attestation:
     name: Attest release MCP archives
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'mcp') &&
+      startsWith(github.ref, 'refs/tags/v')
     needs: mcp-binary
     runs-on: ubuntu-24.04
     timeout-minutes: 15

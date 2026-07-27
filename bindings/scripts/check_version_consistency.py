@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Assert every published version declaration agrees with the workspace manifest.
 
-CellRune publishes one version across three registries and a GitHub Release, and several gates
-resolve with `--locked` or `--frozen-lockfile`. A bump that reaches most declarations but not all
-of them does not fail where it was made; it fails much later, inside a release run, after the
-irreversible steps have already been approved. The 0.1.1 bump found stale declarations in eight
-places beyond the documented checklist, three of which would have failed a release outright.
+CellRune publishes one version across three registries and a GitHub Release, and several build
+steps resolve with `--locked` or `--frozen-lockfile`. A bump that reaches most declarations but not
+all of them otherwise fails much later in the release. The 0.1.1 bump found stale declarations in
+eight places beyond the documented checklist, three of which would have failed a release outright.
 
-This gate derives the expected version from `[workspace.package]` and checks every other
-declaration against it, so an incomplete bump fails on the pull request that made it.
+This release-contract check derives the expected version from `[workspace.package]` and checks
+every other declaration against it. Developers run it locally while preparing a release, and the
+tag workflow runs it before artifact builds or any publication job.
 
 Every check here is written so that finding nothing is a failure rather than a pass. A gate whose
 regex stops matching because a generator changed its output, or whose file was moved, would
@@ -47,6 +47,16 @@ PROSE_VERSION_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("bindings/node/README.md", r"npm install @cellrune/node@([^\s`]+)", "npm install version"),
     ("llms.txt", r"The current public version is ([0-9][^\s,]*)", "public version"),
     ("llms.txt", r"Version ([0-9][^\s]*) contains", "catalog version"),
+    (
+        "THIRD_PARTY_LICENSES.md",
+        r"for CellRune (\d+\.\d+\.\d+)\.",
+        "runtime license graph version",
+    ),
+    (
+        "crates/cellrune/THIRD_PARTY_LICENSES.md",
+        r"for CellRune (\d+\.\d+\.\d+)\.",
+        "packaged runtime license graph version",
+    ),
 )
 
 
@@ -141,7 +151,7 @@ def check(root: pathlib.Path, expected: str) -> list[str]:
 
         # Only the workspace's own platform packages track the release version. A third-party
         # optional dependency legitimately carries its own, so requiring every entry to equal the
-        # release version would block any pull request that added one.
+        # release version would reject any ordinary third-party optional dependency.
         optional = manifest.get("optionalDependencies", {})
         platform_requirements = {
             name: requirement
