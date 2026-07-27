@@ -20,10 +20,12 @@ pub(super) fn affected_formulas(
     }
     let mut dirty = BTreeSet::new();
     for (formula, rects) in compiled.dependency_rectangles() {
-        if rects.iter().any(|rect| {
-            changed_by_sheet
-                .get(rect.sheet)
-                .is_some_and(|changed| rect_contains_any(*rect, changed))
+        if rects.iter().any(|span| {
+            span.rects().any(|rect| {
+                changed_by_sheet
+                    .get(rect.sheet)
+                    .is_some_and(|changed| rect_contains_any(rect, changed))
+            })
         }) {
             dirty.insert(*formula);
         }

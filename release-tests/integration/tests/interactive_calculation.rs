@@ -295,6 +295,96 @@ fn index_reference_dependencies_remain_incrementally_safe() {
     }
 }
 
+#[test]
+fn three_d_dependencies_invalidate_incremental_consumers_across_the_span() {
+    let mut session = WorkbookCalculationSession::create();
+    let first = SheetId::new(1).expect("constant sheet ID");
+    let added = session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::add_sheet(
+                    SheetName::new("Sheet2").expect("valid second sheet name"),
+                ),
+                WorkbookChange::add_sheet(
+                    SheetName::new("Sheet3").expect("valid third sheet name"),
+                ),
+            ]),
+        )
+        .expect("additional sheets")
+        .created_sheet_ids()
+        .to_vec();
+    let fourth_name = SheetName::new("Sheet4").expect("valid fourth sheet name");
+    let fourth = session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::add_sheet(fourth_name)]),
+        )
+        .expect("outside sheet")
+        .created_sheet_ids()[0];
+    let [second, third] = added.as_slice() else {
+        panic!("two span sheets must be created");
+    };
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([
+                WorkbookChange::set_cell_value(first, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_value(*second, address("A1"), number(2.0)),
+                WorkbookChange::set_cell_value(*third, address("A1"), number(3.0)),
+                WorkbookChange::set_cell_value(fourth, address("A1"), number(4.0)),
+                WorkbookChange::set_cell_formula(
+                    first,
+                    address("B1"),
+                    formula("SUM(Sheet1:Sheet3!A1)"),
+                ),
+            ]),
+        )
+        .expect("3-D dependency workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    for (sheet, value, expected, evaluated) in [
+        (*second, 20.0, 24.0, 1),
+        (first, 10.0, 33.0, 1),
+        (*third, 30.0, 60.0, 1),
+        (fourth, 40.0, 60.0, 0),
+    ] {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet,
+                    address("A1"),
+                    number(value),
+                )]),
+            )
+            .expect("dependency edit");
+        let delta = session
+            .recalculate(
+                RecalculationMode::Incremental,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("incremental 3-D recalculation");
+
+        assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+        assert_eq!(delta.evaluated_count(), evaluated);
+        assert_eq!(
+            session
+                .calculation()
+                .expect("installed incremental calculation")
+                .cell(CalculationCellId::new(first, address("B1"))),
+            Some(&CalculationCellResult::Value(number(expected))),
+        );
+    }
+}
+
 /// A spill member is not a formula cell, so its exact decimal has to be carried in the snapshot
 /// under its own address or an incremental pass cannot restore it.
 ///

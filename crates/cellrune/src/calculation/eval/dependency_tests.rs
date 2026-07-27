@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use super::{Engine, EvalContext};
-use crate::calculation::runtime::Rect;
+use crate::calculation::runtime::{Rect, RectSpan};
 use crate::{
-    CalculationOptions, CellAddress, DefinedName, DefinedNameScope, FormulaText, SheetId,
-    WorkbookDraft,
+    CalculationLimits, CalculationOptions, CellAddress, CellRange, DefinedName, DefinedNameScope,
+    FormulaText, SheetId, SheetName, WorkbookDraft,
 };
 
 #[test]
@@ -82,6 +82,95 @@ fn unresolved_dynamic_dependencies_honor_map_scope() {
     );
 }
 
+#[test]
+fn three_d_dependencies_stay_compact_and_cover_every_formula_sheet() {
+    let mut draft = WorkbookDraft::new();
+    let first = SheetId::new(1).expect("default sheet ID");
+    let second = draft
+        .add_sheet(SheetName::new("Sheet2").expect("valid sheet name"))
+        .expect("second sheet");
+    let third = draft
+        .add_sheet(SheetName::new("Sheet3").expect("valid sheet name"))
+        .expect("third sheet");
+    for sheet in [first, second, third] {
+        draft
+            .set_cell_formula(sheet, address("A1"), formula("1"))
+            .expect("input formula");
+    }
+    draft
+        .set_cell_formula(
+            first,
+            address("B1"),
+            formula("SUM(Sheet1:Sheet3!A1,Sheet3:Sheet1!A1)"),
+        )
+        .expect("3-D formula");
+
+    let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
+    let spans = engine
+        .dependency_rectangles()
+        .remove(&(0, 1, 2))
+        .expect("consumer dependency spans");
+
+    assert_eq!(
+        spans.len(),
+        1,
+        "equivalent forward and reverse spans must share one compact dependency"
+    );
+    assert_eq!(
+        spans[0].rects().map(|rect| rect.sheet).collect::<Vec<_>>(),
+        vec![0, 1, 2],
+    );
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 2)),
+        Some(&vec![(0, 1, 1), (1, 1, 1), (2, 1, 1)]),
+    );
+
+    for (max_edges, exceeded) in [(3, false), (2, true)] {
+        let limits = CalculationLimits::default()
+            .with_max_dependency_edges(max_edges)
+            .expect("nonzero dependency limit");
+        let limited = Engine::evaluate(
+            draft.workbook(),
+            CalculationOptions::default().with_limits(limits),
+        );
+        assert_eq!(
+            limited.dependency_limit_exceeded, exceeded,
+            "max_dependency_edges={max_edges}",
+        );
+    }
+}
+
+#[test]
+fn three_d_dependencies_connect_intermediate_array_owners() {
+    let mut draft = WorkbookDraft::new();
+    let first = SheetId::new(1).expect("default sheet ID");
+    let second = draft
+        .add_sheet(SheetName::new("Sheet2").expect("valid sheet name"))
+        .expect("second sheet");
+    draft
+        .add_sheet(SheetName::new("Sheet3").expect("valid sheet name"))
+        .expect("third sheet");
+    draft
+        .set_cell_dynamic_formula(
+            second,
+            address("A1"),
+            formula("SEQUENCE(2)"),
+            Some(CellRange::new(address("A1"), address("A2")).expect("valid spill range")),
+        )
+        .expect("intermediate array formula");
+    draft
+        .set_cell_formula(first, address("B1"), formula("SUM(Sheet1:Sheet3!A2)"))
+        .expect("3-D spill consumer");
+
+    let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
+
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 2)),
+        Some(&vec![(1, 1, 1)]),
+        "the referenced spill follower must depend on its intermediate-sheet anchor",
+    );
+}
+
 fn has_unresolved_dynamic_dependency(engine: &Engine<'_>, cell: (usize, u32, u32)) -> bool {
     let expr = engine.parsed_expr(cell).expect("parsed test formula");
     engine.expr_has_unresolved_dynamic_dependency(
@@ -102,7 +191,7 @@ fn collect_reference_selection_inputs(engine: &Engine<'_>, cell: (usize, u32, u3
         &mut Vec::new(),
         &mut output,
     );
-    output
+    output.iter().flat_map(RectSpan::rects).collect()
 }
 
 fn rect(row: u32, column: u32) -> Rect {

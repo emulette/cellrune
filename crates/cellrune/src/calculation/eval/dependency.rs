@@ -6,7 +6,7 @@ use crate::calculation::ast::Expr;
 use crate::calculation::functions::normalize_name;
 use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_lambda_local, walk_lambda_scope};
-use crate::calculation::runtime::Rect;
+use crate::calculation::runtime::{Rect, RectSpan};
 
 impl Engine<'_> {
     pub(super) fn dependencies_cancellable(
@@ -66,7 +66,7 @@ impl Engine<'_> {
         })
     }
 
-    pub(super) fn dependency_rectangles(&self) -> BTreeMap<super::CellId, Vec<Rect>> {
+    pub(super) fn dependency_rectangles(&self) -> BTreeMap<super::CellId, Vec<RectSpan>> {
         let mut result = BTreeMap::new();
         for (cell, expr) in &self.asts {
             let mut rects = Vec::new();
@@ -77,15 +77,7 @@ impl Engine<'_> {
                 &mut Vec::new(),
                 &mut rects,
             );
-            rects.sort_by_key(|rect| {
-                (
-                    rect.sheet,
-                    rect.row_start,
-                    rect.col_start,
-                    rect.row_end,
-                    rect.col_end,
-                )
-            });
+            rects.sort_by_key(RectSpan::sort_key);
             rects.dedup();
             result.insert(*cell, rects);
         }
@@ -202,31 +194,33 @@ impl Engine<'_> {
                 &mut rects,
             );
             let mut cell_dependencies = Vec::new();
-            for rect in rects {
-                if cancelled() {
-                    return Err(());
-                }
-                if rect.is_single_cell() {
-                    if formula_cells[rect.sheet].contains(&(rect.row_start, rect.col_start)) {
-                        cell_dependencies.push((rect.sheet, rect.row_start, rect.col_start));
+            for span in rects {
+                for rect in span.rects() {
+                    if cancelled() {
+                        return Err(());
                     }
-                    if let Some(owner) =
-                        self.array_owner((rect.sheet, rect.row_start, rect.col_start))
+                    if rect.is_single_cell() {
+                        if formula_cells[rect.sheet].contains(&(rect.row_start, rect.col_start)) {
+                            cell_dependencies.push((rect.sheet, rect.row_start, rect.col_start));
+                        }
+                        if let Some(owner) =
+                            self.array_owner((rect.sheet, rect.row_start, rect.col_start))
+                        {
+                            cell_dependencies.push(owner);
+                        }
+                        continue;
+                    }
+                    for (row, column) in formula_cells[rect.sheet]
+                        .range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
                     {
-                        cell_dependencies.push(owner);
+                        if *column >= rect.col_start && *column <= rect.col_end {
+                            cell_dependencies.push((rect.sheet, *row, *column));
+                        }
                     }
-                    continue;
-                }
-                for (row, column) in
-                    formula_cells[rect.sheet].range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
-                {
-                    if *column >= rect.col_start && *column <= rect.col_end {
-                        cell_dependencies.push((rect.sheet, *row, *column));
-                    }
-                }
-                for region in &self.array_regions {
-                    if rects_intersect(&rect, &region.rect) {
-                        cell_dependencies.push(region.anchor);
+                    for region in &self.array_regions {
+                        if rects_intersect(&rect, &region.rect) {
+                            cell_dependencies.push(region.anchor);
+                        }
                     }
                 }
             }
@@ -260,17 +254,17 @@ impl Engine<'_> {
         expr: &Expr,
         names: &mut BTreeSet<String>,
         local_names: &mut Vec<String>,
-        output: &mut Vec<Rect>,
+        output: &mut Vec<RectSpan>,
     ) {
         match expr {
             Expr::Ref(reference) => {
-                if let Ok(rect) = self.resolve_reference(context.sheet(), reference) {
-                    output.push(rect);
+                if let Ok(span) = self.resolve_reference_span(context.sheet(), reference) {
+                    output.push(span);
                 }
             }
             Expr::Range { start, end } => {
                 if let Ok(rect) = self.resolve_rect_expr(context, expr) {
-                    output.push(rect);
+                    output.push(RectSpan::single(rect));
                 }
                 self.collect_dependency_rects(context, start, names, local_names, output);
                 self.collect_dependency_rects(context, end, names, local_names, output);
@@ -288,7 +282,7 @@ impl Engine<'_> {
             }
             Expr::ImplicitIntersection(inner) => {
                 if let Ok(rect) = self.resolve_rect_expr(context, expr) {
-                    output.push(rect);
+                    output.push(RectSpan::single(rect));
                     let mut selection_names = BTreeSet::new();
                     self.collect_reference_selection_inputs(
                         context,
@@ -319,12 +313,12 @@ impl Engine<'_> {
                     && let Some(value_range) = value_anchor
                         .resized_from_anchor(criteria_range.height(), criteria_range.width())
                 {
-                    output.push(value_range);
+                    output.push(RectSpan::single(value_range));
                 }
                 if matches!(normalized.as_str(), "OFFSET" | "INDIRECT")
                     && let Ok(rect) = self.resolve_dynamic_rect(context, name, args)
                 {
-                    output.push(rect);
+                    output.push(RectSpan::single(rect));
                 }
                 if walk_lambda_scope(name, args, local_names, |arg, scope| {
                     self.collect_dependency_rects(context, arg, names, scope, output);
@@ -356,7 +350,7 @@ impl Engine<'_> {
         expr: &Expr,
         names: &mut BTreeSet<String>,
         local_names: &mut Vec<String>,
-        output: &mut Vec<Rect>,
+        output: &mut Vec<RectSpan>,
     ) {
         match expr {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {

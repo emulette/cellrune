@@ -90,7 +90,15 @@ pub(super) struct RectSpan {
 
 impl RectSpan {
     pub(super) fn new(sheets: SheetSpan, rect: Rect) -> Self {
+        let rect = Rect {
+            sheet: *sheets.sheets.start(),
+            ..rect
+        };
         Self { sheets, rect }
+    }
+
+    pub(super) fn single(rect: Rect) -> Self {
+        Self::new(SheetSpan::single(rect.sheet), rect)
     }
 
     pub(super) fn rects(&self) -> impl Iterator<Item = Rect> + '_ {
@@ -99,6 +107,19 @@ impl RectSpan {
 
     pub(super) fn is_sheet_range(&self) -> bool {
         self.sheets.is_explicit_range()
+    }
+
+    pub(super) fn sort_key(&self) -> (usize, usize, bool, u32, u32, u32, u32, bool) {
+        (
+            *self.sheets.sheets.start(),
+            *self.sheets.sheets.end(),
+            self.sheets.explicit_range,
+            self.rect.row_start,
+            self.rect.col_start,
+            self.rect.row_end,
+            self.rect.col_end,
+            self.rect.whole_rows,
+        )
     }
 
     pub(super) fn into_rect(self) -> Result<Rect, ErrorKind> {

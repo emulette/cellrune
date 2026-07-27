@@ -7,7 +7,7 @@ use super::graph::DependencyGraph;
 use super::lambda::{LambdaBinding, binding_value};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
-use super::runtime::{CellId, Rect};
+use super::runtime::{CellId, Rect, RectSpan};
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
@@ -30,7 +30,7 @@ pub(super) struct CompiledWorkbook {
     asts: BTreeMap<CellId, Expr>,
     defined_name_asts: Vec<Option<Expr>>,
     dependencies: DependencyGraph,
-    dependency_rectangles: BTreeMap<CellId, Vec<Rect>>,
+    dependency_rectangles: BTreeMap<CellId, Vec<RectSpan>>,
     parse_failures: BTreeMap<CellId, ParseError>,
     name_cycle_cells: BTreeSet<CellId>,
     name_limit_cells: BTreeSet<CellId>,
@@ -46,7 +46,7 @@ impl CompiledWorkbook {
         &self.dependencies
     }
 
-    pub(super) fn dependency_rectangles(&self) -> &BTreeMap<CellId, Vec<Rect>> {
+    pub(super) fn dependency_rectangles(&self) -> &BTreeMap<CellId, Vec<RectSpan>> {
         &self.dependency_rectangles
     }
 
