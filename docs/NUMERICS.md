@@ -156,7 +156,7 @@ The explicit local audit currently records:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 158 | 48 | 60 | 0 | 0 |
-| CellRune formula oracle | 661 | 381 | 10 | 242 | 26 | 2 |
+| CellRune formula oracle | 672 | 386 | 10 | 248 | 26 | 2 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both

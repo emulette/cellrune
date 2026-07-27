@@ -324,7 +324,7 @@ cargo run \
 
 This audit is deliberately separate from `cargo test`, CI, and publication. It covers 1,295
 formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
-matrix fixture, and 661 selected results from the CellRune-authored formula oracle. Every selected
+matrix fixture, and 672 selected results from the CellRune-authored formula oracle. Every selected
 case is classified; missing or extra classifications fail locally. The older POI formula cache
 currently has 1,290 matches and 5 documented divergences, enforced in both directions.
 
