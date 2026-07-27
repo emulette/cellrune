@@ -309,8 +309,12 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                     }
                 };
                 let expected = ObservedValue::from_expectation(expectation);
-                if values_match(&actual, &expected, expectation.comparator) == Ok(true) {
-                    problems.push(format!("{context}: divergent case now matches Excel"));
+                match values_match(&actual, &expected, expectation.comparator) {
+                    Ok(true) => {
+                        problems.push(format!("{context}: divergent case now matches Excel"));
+                    }
+                    Ok(false) => {}
+                    Err(error) => problems.push(format!("{context}: {error}")),
                 }
                 let Some(recorded) = ObservedValue::from_recorded_cellrune(expectation) else {
                     problems.push(format!(

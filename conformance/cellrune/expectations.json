@@ -1814,13 +1814,23 @@
     "classification": "match",
     "excel_value": "2.0884875837625446E-45",
     "excel_type": "n",
-    "excel_rich_error": false
+    "excel_rich_error": false,
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 0.0,
+      "rel": 1e-12
+    }
   },
   "Arithmetic!F52": {
     "classification": "match",
     "excel_value": "2.0884875837625446E-45",
     "excel_type": "n",
-    "excel_rich_error": false
+    "excel_rich_error": false,
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 0.0,
+      "rel": 1e-12
+    }
   },
   "Arithmetic!F53": {
     "classification": "match",
