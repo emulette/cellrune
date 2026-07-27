@@ -7,6 +7,31 @@ use super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 pub(super) type CellId = (usize, u32, u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ArrayExtent {
+    row_end: u32,
+}
+
+impl ArrayExtent {
+    pub(super) const fn new(row_end: u32) -> Self {
+        Self {
+            row_end: if row_end == 0 { 1 } else { row_end },
+        }
+    }
+
+    pub(super) const fn row_end(self) -> u32 {
+        self.row_end
+    }
+
+    pub(super) const fn merged(self, other: Self) -> Self {
+        Self::new(if self.row_end >= other.row_end {
+            self.row_end
+        } else {
+            other.row_end
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Rect {
     pub(super) sheet: usize,
     pub(super) row_start: u32,

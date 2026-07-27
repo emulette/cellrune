@@ -534,7 +534,7 @@ fn index_array(
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
     let rect = engine.resolve_index_rect(context, args)?;
-    engine.array_from_rect(rect)
+    engine.array_from_rect(context, &args[0], rect)
 }
 
 fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

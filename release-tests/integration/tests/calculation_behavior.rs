@@ -1640,6 +1640,85 @@ fn implicit_intersection_uses_the_formula_cell_position() {
 }
 
 #[test]
+fn whole_column_arrays_share_one_extent_and_one_cumulative_budget() {
+    let calculation_sheet = formula_sheet(
+        1,
+        "Calculation",
+        &[
+            (1, 1, "SUM(LongData!A:A*ShortData!B:B)"),
+            (1, 2, "SUM(INDEX(LongData!A:A,0))"),
+            (1, 3, "SUM(EmptyData!A:A*1)"),
+            (1, 4, "SUM(-LongData!A:A)"),
+            (1, 5, "SUM(LongData!A:A*INDEX(LongData!A:A,0))"),
+        ],
+    );
+    let mut long_data = Sheet::new(
+        SheetId::new(2).expect("valid sheet ID"),
+        SheetName::new("LongData").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    for (address, value) in [("A1", 1.0), ("A2", 2.0), ("A3", 3.0)] {
+        insert_number(&mut long_data, address, value);
+    }
+    let mut short_data = Sheet::new(
+        SheetId::new(3).expect("valid sheet ID"),
+        SheetName::new("ShortData").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    for (address, value) in [("B1", 10.0), ("B2", 20.0)] {
+        insert_number(&mut short_data, address, value);
+    }
+    let empty_data = Sheet::new(
+        SheetId::new(4).expect("valid sheet ID"),
+        SheetName::new("EmptyData").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    let workbook = workbook_with_sheets_and_names(
+        vec![calculation_sheet, long_data, short_data, empty_data],
+        &[],
+    );
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 50.0, 0.0);
+    assert_number(&calculation, 2, 6.0, 0.0);
+    assert_number(&calculation, 3, 0.0, 0.0);
+    assert_number(&calculation, 4, -6.0, 0.0);
+    assert_number(&calculation, 5, 14.0, 0.0);
+
+    for (max_array_cells, succeeds) in [(9, true), (8, false)] {
+        let limits = CalculationLimits::default()
+            .with_max_array_cells(max_array_cells)
+            .expect("nonzero array limit");
+        let limited =
+            calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+        if succeeds {
+            assert_number(&limited, 1, 50.0, 0.0);
+            assert_number(&limited, 5, 14.0, 0.0);
+        } else {
+            assert_issue(&limited, 1, CalculationIssueCode::ResourceLimitExceeded);
+            assert_issue(&limited, 5, CalculationIssueCode::ResourceLimitExceeded);
+        }
+        assert_number(&limited, 2, 6.0, 0.0);
+        assert_number(&limited, 3, 0.0, 0.0);
+        assert_number(&limited, 4, -6.0, 0.0);
+    }
+
+    for (max_array_cells, succeeds) in [(6, true), (5, false)] {
+        let limits = CalculationLimits::default()
+            .with_max_array_cells(max_array_cells)
+            .expect("nonzero array limit");
+        let limited =
+            calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+        if succeeds {
+            assert_number(&limited, 4, -6.0, 0.0);
+        } else {
+            assert_issue(&limited, 4, CalculationIssueCode::ResourceLimitExceeded);
+        }
+    }
+}
+
+#[test]
 fn cross_sheet_references_use_the_workbook_unicode_name_index() {
     let workbook = workbook_with_sheets_and_names(
         vec![

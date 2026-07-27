@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use super::reference::is_reference_returning_function;
 use super::{Engine, EvalContext};
 use crate::calculation::ArithmeticSemantics;
@@ -8,7 +10,7 @@ use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{
     apply_binary, apply_unary, broadcast_index, broadcast_shape, element_at,
 };
-use crate::calculation::runtime::{Array, Rect};
+use crate::calculation::runtime::{Array, ArrayExtent, Rect};
 use crate::calculation::value::{ErrorKind, Value};
 
 pub(super) struct ScalarEvaluation {
@@ -53,6 +55,31 @@ impl ArrayEvaluation {
             array: Array::scalar(evaluated.value),
             decimal_traces: vec![evaluated.decimal_trace],
         }
+    }
+}
+
+struct ArrayEvaluationContext {
+    extent: Option<ArrayExtent>,
+    visited_cells: u64,
+}
+
+impl ArrayEvaluationContext {
+    const fn new(extent: Option<ArrayExtent>) -> Self {
+        Self {
+            extent,
+            visited_cells: 0,
+        }
+    }
+
+    fn charge(&mut self, engine: &Engine<'_>, cells: u64) -> Result<(), ErrorKind> {
+        if self.extent.is_none() {
+            return engine.ensure_array_cells(cells);
+        }
+        self.visited_cells = self
+            .visited_cells
+            .checked_add(cells)
+            .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+        engine.ensure_array_cells(self.visited_cells)
     }
 }
 
@@ -294,8 +321,19 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ArrayEvaluation, ErrorKind> {
+        let extent = self.array_extent(context, expr, &mut BTreeSet::new());
+        let mut evaluation = ArrayEvaluationContext::new(extent);
+        self.eval_array_with_trace_at_extent(context, expr, &mut evaluation)
+    }
+
+    fn eval_array_with_trace_at_extent(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+        evaluation: &mut ArrayEvaluationContext,
+    ) -> Result<ArrayEvaluation, ErrorKind> {
         match expr {
-            Expr::Paren(inner) => self.eval_array_with_trace(context, inner),
+            Expr::Paren(inner) => self.eval_array_with_trace_at_extent(context, inner, evaluation),
             Expr::ImplicitIntersection(inner) => Ok(ArrayEvaluation::scalar(
                 self.eval_implicit_intersection_with_trace(context, inner),
             )),
@@ -313,7 +351,7 @@ impl Engine<'_> {
                     return Err(ErrorKind::Value);
                 }
                 let rect = span.into_rect().map_err(|_| ErrorKind::Value)?;
-                self.array_from_rect_with_trace(rect)
+                self.array_from_rect_with_trace(rect, evaluation)
             }
             Expr::Array(rows) => {
                 let cols = rows.first().map_or(0, Vec::len);
@@ -321,7 +359,7 @@ impl Engine<'_> {
                     return Err(ErrorKind::Value);
                 }
                 let cell_count = (rows.len() as u64) * (cols as u64);
-                self.ensure_array_cells(cell_count)?;
+                evaluation.charge(self, cell_count)?;
                 let (data, decimal_traces): (Vec<Value>, Vec<Option<DecimalTrace>>) = rows
                     .iter()
                     .flat_map(|row| {
@@ -340,13 +378,13 @@ impl Engine<'_> {
                 })
             }
             Expr::Binary { op, left, right } => {
-                let left = self.eval_array_with_trace(context, left)?;
-                let right = self.eval_array_with_trace(context, right)?;
+                let left = self.eval_array_with_trace_at_extent(context, left, evaluation)?;
+                let right = self.eval_array_with_trace_at_extent(context, right, evaluation)?;
                 let (rows, cols) = broadcast_shape(&left.array, &right.array)?;
                 let cells = u64::from(rows)
                     .checked_mul(u64::from(cols))
                     .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
-                self.ensure_array_cells(cells)?;
+                evaluation.charge(self, cells)?;
                 let mut data = Vec::with_capacity(cells as usize);
                 let mut decimal_traces = Vec::with_capacity(cells as usize);
                 for row in 0..rows {
@@ -374,8 +412,12 @@ impl Engine<'_> {
                 })
             }
             Expr::Unary { op, operand } => {
-                let operand = self.eval_array_with_trace(context, operand)?;
+                let operand = self.eval_array_with_trace_at_extent(context, operand, evaluation)?;
                 let (rows, cols) = (operand.array.rows, operand.array.cols);
+                let cells = u64::from(rows)
+                    .checked_mul(u64::from(cols))
+                    .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+                evaluation.charge(self, cells)?;
                 let (data, decimal_traces): (Vec<Value>, Vec<Option<DecimalTrace>>) = operand
                     .array
                     .data
@@ -399,7 +441,14 @@ impl Engine<'_> {
             }
             Expr::Call { name, args } => {
                 if let Some(result) = call_function_array(self, context, name, args) {
-                    result.map(ArrayEvaluation::untracked)
+                    let array = result?;
+                    if evaluation.extent.is_some() {
+                        let cells = u64::from(array.rows)
+                            .checked_mul(u64::from(array.cols))
+                            .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+                        evaluation.charge(self, cells)?;
+                    }
+                    Ok(ArrayEvaluation::untracked(array))
                 } else {
                     Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
                         call_function(self, context, name, args),
@@ -412,12 +461,22 @@ impl Engine<'_> {
         }
     }
 
-    pub(in crate::calculation) fn array_from_rect(&self, rect: Rect) -> Result<Array, ErrorKind> {
-        self.array_from_rect_with_trace(rect)
+    pub(in crate::calculation) fn array_from_rect(
+        &self,
+        context: EvalContext<'_>,
+        source: &Expr,
+        rect: Rect,
+    ) -> Result<Array, ErrorKind> {
+        let extent = self.array_extent(context, source, &mut BTreeSet::new());
+        self.array_from_rect_with_trace(rect, &mut ArrayEvaluationContext::new(extent))
             .map(|evaluated| evaluated.array)
     }
 
-    fn array_from_rect_with_trace(&self, rect: Rect) -> Result<ArrayEvaluation, ErrorKind> {
+    fn array_from_rect_with_trace(
+        &self,
+        rect: Rect,
+        evaluation: &mut ArrayEvaluationContext,
+    ) -> Result<ArrayEvaluation, ErrorKind> {
         if rect.is_single_cell() {
             let cell = (rect.sheet, rect.row_start, rect.col_start);
             return Ok(ArrayEvaluation::scalar(ScalarEvaluation {
@@ -425,27 +484,89 @@ impl Engine<'_> {
                 decimal_trace: self.numeric_decimal_trace(cell),
             }));
         }
-        if rect.whole_rows {
-            return Err(ErrorKind::Unsupported);
-        }
-        let cells = rect.height() * rect.width();
-        self.ensure_array_cells(cells)?;
+        let row_end = if rect.whole_rows {
+            evaluation
+                .extent
+                .ok_or(ErrorKind::Unsupported)?
+                .row_end()
+                .min(rect.row_end)
+        } else {
+            rect.row_end
+        };
+        let rows = if row_end < rect.row_start {
+            0
+        } else {
+            u64::from(row_end - rect.row_start) + 1
+        };
+        let cells = rows
+            .checked_mul(rect.width())
+            .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+        evaluation.charge(self, cells)?;
         let mut data = Vec::with_capacity(cells as usize);
         let mut decimal_traces = Vec::with_capacity(cells as usize);
-        for row in rect.row_start..=rect.row_end {
-            for column in rect.col_start..=rect.col_end {
-                let cell = (rect.sheet, row, column);
-                data.push(self.cell_value(cell));
-                decimal_traces.push(self.numeric_decimal_trace(cell));
+        if row_end >= rect.row_start {
+            for row in rect.row_start..=row_end {
+                for column in rect.col_start..=rect.col_end {
+                    let cell = (rect.sheet, row, column);
+                    data.push(self.cell_value(cell));
+                    decimal_traces.push(self.numeric_decimal_trace(cell));
+                }
             }
         }
         Ok(ArrayEvaluation {
             array: Array {
-                rows: rect.height() as u32,
+                rows: rows as u32,
                 cols: rect.width() as u32,
                 data,
             },
             decimal_traces,
         })
+    }
+
+    fn array_extent(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+        names: &mut BTreeSet<String>,
+    ) -> Option<ArrayExtent> {
+        if let Ok(span) = self.resolve_rect_span_expr(context, expr) {
+            return span
+                .rects()
+                .filter(|rect| rect.whole_rows)
+                .map(|rect| ArrayExtent::new(self.clamped_row_end(&rect)))
+                .reduce(ArrayExtent::merged);
+        }
+        match expr {
+            Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
+                self.array_extent(context, inner, names)
+            }
+            Expr::Binary { left, right, .. } => match (
+                self.array_extent(context, left, names),
+                self.array_extent(context, right, names),
+            ) {
+                (Some(left), Some(right)) => Some(left.merged(right)),
+                (Some(extent), None) | (None, Some(extent)) => Some(extent),
+                (None, None) => None,
+            },
+            Expr::Name(name) if context.binding(name).is_none() => {
+                let key = name.to_ascii_lowercase();
+                if !names.insert(key) {
+                    return None;
+                }
+                self.resolve_name_expr(context.sheet(), name)
+                    .and_then(|named| self.array_extent(context, named, names))
+            }
+            Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::ErrorLit(_)
+            | Expr::Missing
+            | Expr::Ref(_)
+            | Expr::Range { .. }
+            | Expr::Name(_)
+            | Expr::ImplicitIntersection(_)
+            | Expr::Array(_)
+            | Expr::Call { .. } => None,
+        }
     }
 }
