@@ -327,9 +327,9 @@ jobs:
       - name: Run MCP stdio protocol gate
         run: cargo test --package cellrune-mcp --test stdio_workflow --locked
 
-  # Not on pull requests, same reasoning as platform-tests. Kept on main and on the tag because
-  # runbook 4.1 lists the packaged-consumer resolve among the failures that otherwise surface
-  # only during a release run, after the irreversible publish approvals.
+  # Not on pull requests, same reasoning as platform-tests. Kept on main and on the tag because the
+  # packaged-consumer resolve is one of the failures that otherwise surfaces only during a release
+  # run, after the irreversible publish approvals. See "Before tagging a release" in CONTRIBUTING.md.
   package:
     name: Packaged crate and standalone consumer
     if: github.event_name != 'pull_request'
