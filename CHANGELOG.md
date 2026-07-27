@@ -5,6 +5,32 @@ All notable changes to CellRune are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Releases follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+This file records concise user-visible and release-operator changes. Design rationale, test
+inventories, and measurements belong in the linked documentation rather than in release entries.
+
+## [0.1.4] - 2026-07-27
+
+### Added
+
+- Committed Excel-saved binary oracle workbooks and an explicit local audit command replace the
+  generated JSON conformance matrix. The audit is not part of CI or publication.
+- `CalculationHints` retains the optional XLSX iterative-calculation declaration across read and
+  write operations.
+
+### Changed
+
+- `ExcelNearZero` now matches Excel's observed narrow correction boundary:
+  `=0.1+0.2-0.3` becomes zero, while `=100.1-100-0.1` keeps its residue.
+- CI runs the normal Rust regression suite; Excel oracles, external corpora, engine comparisons,
+  and accuracy metrics remain explicit local development checks.
+- Release validation and publication dependencies are separated by core, Python, Node.js, and MCP
+  artifact family.
+
+### Fixed
+
+- Formula analysis now handles nested calls, defined names, and lambda shadowing consistently,
+  preventing stale incremental results and misclassified volatile-input failures.
+
 ## [0.1.3] - 2026-07-27
 
 ### Added
@@ -249,7 +275,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/emulette/cellrune/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/emulette/cellrune/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/emulette/cellrune/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/emulette/cellrune/compare/v0.1.0...v0.1.1

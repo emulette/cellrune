@@ -145,7 +145,7 @@ def main() -> None:
             lambda: recalculate_with_invalid_solver_semantics(workbook, "unbounded"),
         )
 
-        workbook.set_formula("Sheet1", "A3", "=100.1-100-0.1")
+        workbook.set_formula("Sheet1", "A3", "=0.1+0.2-0.3")
         workbook.set_formula("Sheet1", "A4", "=IRR({-1,100000})")
         workbook.recalculate(mode="full")
         defaults = workbook.read_range("Sheet1", "A3", "A4", limit=2)["cells"]

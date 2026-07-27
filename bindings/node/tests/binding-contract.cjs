@@ -39,7 +39,7 @@ async function main() {
     assert.equal(values.get(expected.address), expected.value);
   }
 
-  workbook.setFormula("Sheet1", "A3", "=100.1-100-0.1");
+  workbook.setFormula("Sheet1", "A3", "=0.1+0.2-0.3");
   workbook.setFormula("Sheet1", "A4", "=IRR({-1,100000})");
   await workbook.recalculate({ mode: "full" });
   const defaults = workbook.readRange("Sheet1", "A3", "A4", { limit: 2 }).cells;

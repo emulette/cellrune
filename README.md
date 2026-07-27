@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.3 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.4 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.3
+cargo add cellrune@0.1.4
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.3"
+cellrune = "0.1.4"
 ```
 
 ## Features
@@ -170,12 +170,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.3 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.4 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.3"
-npm install "@cellrune/node@0.1.3"
+python -m pip install "cellrune==0.1.4"
+npm install "@cellrune/node@0.1.4"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -311,15 +311,37 @@ Excel's behavior and can be set to `Ieee754` and `ExtendedSearch` for what 0.1.2
 
 ## Verification
 
-The `conformance/` tree carries expectation matrices — every literal, every formula, and the value
-a recorded oracle saved for that formula — and `cargo test` reconstructs each matrix, calculates
-it, and compares the results against the oracle.
+The `conformance/` tree carries the binary workbooks Excel actually calculated, together with
+their hashes, host metadata, and reviewed expectations. They are audited explicitly during local
+development:
 
-The first matrix is the Apache POI `FormulaEvalTestData` corpus (Apache-2.0): 1,295 formula cases
-against the workbook's saved Microsoft Excel 2013 calculation cache. 1,290 match within a
-scale-relative `1e-8`; 5 are documented divergences where the 2013-era cache predates current
-Excel behavior. Divergences are enforced in both directions, so neither side of one can change
-without the test failing.
+```bash
+cargo run \
+  --package cellrune-integration-tests \
+  --bin check_excel_oracle \
+  --locked
+```
+
+This audit is deliberately separate from `cargo test`, CI, and publication. It covers 1,295
+formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
+matrix fixture, and 661 selected results from the CellRune-authored formula oracle. Every selected
+case is classified; missing or extra classifications fail locally. The older POI formula cache
+currently has 1,290 matches and 5 documented divergences, enforced in both directions.
+
+Two additional corpus tests are compiled but marked `#[ignore]` because their third-party inputs
+are not distributed in this repository. A developer who has supplied those inputs can run them
+explicitly:
+
+```bash
+WORKBOOK_FORMULA_CORPUS=/path/to/formulas.xlsx \
+  cargo test -p cellrune-integration-tests --test external_formula_corpus -- --ignored
+
+CELLRUNE_WORKBOOK_CORPUS=/path/to/workbook-or-directory \
+  cargo test -p cellrune-integration-tests --test external_workbook_corpus -- --ignored
+```
+
+`#[ignore]` keeps a test registered and compilable while excluding it from ordinary `cargo test`;
+cloning the repository does not provide either external corpus.
 
 ## License
 

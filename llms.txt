@@ -9,7 +9,7 @@
 This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
-as a bug in this file, not in the crate. The current public version is 0.1.3,
+as a bug in this file, not in the crate. The current public version is 0.1.4,
 uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
@@ -208,7 +208,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   every numeric cell value and numeric option (e.g. `TODAY()`/`NOW()` serials).
 - `SheetId`, `SheetName`, `SheetVisibility` (`Visible | Hidden | VeryHidden`),
   `DateSystem` (`Excel1900 | Excel1904`), `CalculationMode`,
-  `CalculationHints`, `WorkbookSource` / `WorkbookSourceKind`.
+  `CalculationHints`; calculation hints expose mode, calculation ID, host
+  recalculation flags, and the optional iterative-calculation declaration.
+  `CalculationHints::with_iterative_calculation(...)` sets that declaration.
+  `WorkbookSource` / `WorkbookSourceKind`.
 - `DefinedName`: `.name()`, `.scope()` (`DefinedNameScope::Workbook | Sheet(SheetId)`),
   `.formula() -> &FormulaText`, `.hidden()`.
 
@@ -404,7 +407,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. Version 0.1.3 contains 278 official Excel-facing names
+  `.is_official()`. Version 0.1.4 contains 278 official Excel-facing names
   (265 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
@@ -426,11 +429,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   serial makes that formula report `VolatileInputMissing`.
 - **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
   than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
-  corrects a sum or difference that cancels to near zero, so `=0.1+0.2-0.3` is
-  `0` and `=(0.1+0.2-0.3)=0` is `TRUE`; `Ieee754` leaves the residue. The
-  correction reaches the operator path, the array path, and the running totals
-  behind `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`,
-  `SUMPRODUCT`, and `NPV`, so those cannot disagree with each other.
+  applies Excel's narrow correction only when the exact decimal/rational trace
+  is zero and the binary residue is within `1e-15` of the cancelling operands'
+  relative scale. Thus `=0.1+0.2-0.3` is `0`, while
+  `=100.1-100-0.1` retains `-5.689893001203927e-15`, matching the committed
+  Excel saved cache. `Ieee754` leaves every residue. The correction reaches
+  the operator path, the array path, and the running totals behind `SUM`,
+  `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, `SUMPRODUCT`, and `NPV`,
+  so those cannot disagree with each other.
   `FinancialSolverSemantics`: `ExcelIterationBudget` (default) applies
   Microsoft's per-function budget — 20 iterations/`1e-7` for `IRR` and `RATE`,
   100/`1e-8` for `XIRR` — so inputs Excel abandons yield `#NUM!` here too;
@@ -503,6 +509,19 @@ calculate. Out of scope for the current version:
   calculation.
 - Iterative calculation and automatic host-time or random inputs (`TODAY()`
   and `NOW()` are supported only through explicit `CalculationOptions` inputs).
+
+## Development verification
+
+- `cargo test --workspace --all-features --locked` runs the ordinary regression
+  suite used by CI.
+- `cargo run --package cellrune-integration-tests --bin check_excel_oracle
+  --locked` audits the committed binary Excel-saved workbooks and reviewed
+  classifications. It is an explicit local development command, not a test,
+  CI check, metric threshold, or publication gate.
+- `external_formula_corpus` and `external_workbook_corpus` are compiled
+  `#[ignore]` tests. They are useful to a developer who separately supplies
+  `WORKBOOK_FORMULA_CORPUS` or `CELLRUNE_WORKBOOK_CORPUS`; the corpora are not
+  included in a clone.
 
 ## Runnable examples
 

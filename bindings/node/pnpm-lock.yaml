@@ -19,28 +19,28 @@ importers:
         version: 7.0.2
     optionalDependencies:
       '@cellrune/node-darwin-arm64':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/darwin-arm64
       '@cellrune/node-darwin-x64':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/darwin-x64
       '@cellrune/node-linux-arm64-gnu':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/linux-arm64-gnu
       '@cellrune/node-linux-arm64-musl':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/linux-arm64-musl
       '@cellrune/node-linux-x64-gnu':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/linux-x64-gnu
       '@cellrune/node-linux-x64-musl':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/linux-x64-musl
       '@cellrune/node-win32-arm64-msvc':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/win32-arm64-msvc
       '@cellrune/node-win32-x64-msvc':
-        specifier: 0.1.3
+        specifier: 0.1.4
         version: link:npm/win32-x64-msvc
 
   npm/darwin-arm64: {}
