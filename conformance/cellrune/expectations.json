@@ -1,14 +1,14 @@
 {
   "Aggregates!F10": {
     "classification": "not_implemented",
-    "excel_value": "0.90810074582876155",
+    "excel_value": "0.9081007458287615",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.DIST) for this oracle case."
   },
   "Aggregates!F100": {
     "classification": "match",
-    "excel_value": "0.66153888048931031",
+    "excel_value": "0.6615388804893103",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -21,7 +21,7 @@
   },
   "Aggregates!F102": {
     "classification": "match",
-    "excel_value": "0.89972743204555794",
+    "excel_value": "0.8997274320455579",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -59,13 +59,13 @@
   },
   "Aggregates!F108": {
     "classification": "match",
-    "excel_value": "0.47299999999999998",
+    "excel_value": "0.473",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Aggregates!F109": {
     "classification": "not_implemented",
-    "excel_value": "0.47599999999999998",
+    "excel_value": "0.476",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTRANK.EXC) for this oracle case."
@@ -79,7 +79,7 @@
   },
   "Aggregates!F110": {
     "classification": "match",
-    "excel_value": "0.47299999999999998",
+    "excel_value": "0.473",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -155,20 +155,20 @@
   },
   "Aggregates!F121": {
     "classification": "match",
-    "excel_value": "5.5596738324684952E-2",
+    "excel_value": "0.05559673832468495",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Aggregates!F122": {
     "classification": "not_implemented",
-    "excel_value": "-1.0388051692399125E-16",
+    "excel_value": "-0.00000000000000010388051692399125",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (SKEW) for this oracle case."
   },
   "Aggregates!F123": {
     "classification": "not_implemented",
-    "excel_value": "-4.4408920985006264E-17",
+    "excel_value": "-0.000000000000000044408920985006264",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.SKEW.P) for this oracle case."
@@ -187,7 +187,7 @@
   },
   "Aggregates!F126": {
     "classification": "match",
-    "excel_value": "0.41666666666666669",
+    "excel_value": "0.4166666666666667",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -199,7 +199,7 @@
   },
   "Aggregates!F128": {
     "classification": "match",
-    "excel_value": "57.662812973353979",
+    "excel_value": "57.66281297335398",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -211,7 +211,7 @@
   },
   "Aggregates!F13": {
     "classification": "not_implemented",
-    "excel_value": "0.38572756813238951",
+    "excel_value": "0.3857275681323895",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (BETAINV) for this oracle case."
@@ -225,41 +225,41 @@
   },
   "Aggregates!F131": {
     "classification": "match",
-    "excel_value": "57.662812973353979",
+    "excel_value": "57.66281297335398",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Aggregates!F132": {
     "classification": "not_implemented",
-    "excel_value": "57.662812973353979",
+    "excel_value": "57.66281297335398",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (STDEVPA) for this oracle case."
   },
   "Aggregates!F133": {
     "classification": "not_implemented",
-    "excel_value": "59.068141865235447",
+    "excel_value": "59.06814186523545",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (STEYX) for this oracle case."
   },
   "Aggregates!F134": {
     "classification": "not_implemented",
-    "excel_value": "0.95148366102743565",
+    "excel_value": "0.9514836610274356",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST) for this oracle case."
   },
   "Aggregates!F135": {
     "classification": "not_implemented",
-    "excel_value": "9.7032677945128765E-2",
+    "excel_value": "0.09703267794512876",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.2T) for this oracle case."
   },
   "Aggregates!F136": {
     "classification": "not_implemented",
-    "excel_value": "4.8516338972564382E-2",
+    "excel_value": "0.04851633897256438",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.RT) for this oracle case."
@@ -294,7 +294,7 @@
   },
   "Aggregates!F140": {
     "classification": "not_implemented",
-    "excel_value": "9.7032677945128765E-2",
+    "excel_value": "0.09703267794512876",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (TDIST) for this oracle case."
@@ -360,35 +360,35 @@
   },
   "Aggregates!F15": {
     "classification": "not_implemented",
-    "excel_value": "0.77794836480000018",
+    "excel_value": "0.7779483648000002",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST.RANGE) for this oracle case."
   },
   "Aggregates!F150": {
     "classification": "not_implemented",
-    "excel_value": "0.92958139006927698",
+    "excel_value": "0.929581390069277",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (WEIBULL) for this oracle case."
   },
   "Aggregates!F151": {
     "classification": "not_implemented",
-    "excel_value": "0.92958139006927698",
+    "excel_value": "0.929581390069277",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.WEIBULL.DIST) for this oracle case."
   },
   "Aggregates!F152": {
     "classification": "not_implemented",
-    "excel_value": "0.35272849305563669",
+    "excel_value": "0.3527284930556367",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.Z.TEST) for this oracle case."
   },
   "Aggregates!F153": {
     "classification": "not_implemented",
-    "excel_value": "0.35272849305563669",
+    "excel_value": "0.3527284930556367",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (ZTEST) for this oracle case."
@@ -567,7 +567,7 @@
   },
   "Aggregates!F19": {
     "classification": "not_implemented",
-    "excel_value": "7.8147279032511792",
+    "excel_value": "7.814727903251179",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (CHIINV) for this oracle case."
@@ -588,28 +588,28 @@
   },
   "Aggregates!F22": {
     "classification": "not_implemented",
-    "excel_value": "7.8147279032511774",
+    "excel_value": "7.814727903251177",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV) for this oracle case."
   },
   "Aggregates!F23": {
     "classification": "not_implemented",
-    "excel_value": "7.8147279032511792",
+    "excel_value": "7.814727903251179",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV.RT) for this oracle case."
   },
   "Aggregates!F24": {
     "classification": "not_implemented",
-    "excel_value": "1.3410806680592889E-108",
+    "excel_value": "0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000013410806680592889",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.TEST) for this oracle case."
   },
   "Aggregates!F25": {
     "classification": "not_implemented",
-    "excel_value": "1.3410806680592889E-108",
+    "excel_value": "0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000013410806680592889",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (CHITEST) for this oracle case."
@@ -637,7 +637,7 @@
   },
   "Aggregates!F29": {
     "classification": "match",
-    "excel_value": "0.99999999999999978",
+    "excel_value": "0.9999999999999998",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -747,21 +747,21 @@
   },
   "Aggregates!F46": {
     "classification": "not_implemented",
-    "excel_value": "2.434432E+17",
+    "excel_value": "243443200000000000",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (DPRODUCT) for this oracle case."
   },
   "Aggregates!F47": {
     "classification": "not_implemented",
-    "excel_value": "53.489355119604042",
+    "excel_value": "53.48935511960404",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (DSTDEV) for this oracle case."
   },
   "Aggregates!F48": {
     "classification": "not_implemented",
-    "excel_value": "50.430247635156519",
+    "excel_value": "50.43024763515652",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (DSTDEVP) for this oracle case."
@@ -795,13 +795,13 @@
   },
   "Aggregates!F52": {
     "classification": "match",
-    "excel_value": "0.39346934028736658",
+    "excel_value": "0.3934693402873666",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Aggregates!F53": {
     "classification": "match",
-    "excel_value": "0.39346934028736658",
+    "excel_value": "0.3934693402873666",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -821,21 +821,21 @@
   },
   "Aggregates!F56": {
     "classification": "not_implemented",
-    "excel_value": "4.0097493126739456",
+    "excel_value": "4.009749312673946",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV) for this oracle case."
   },
   "Aggregates!F57": {
     "classification": "not_implemented",
-    "excel_value": "4.0097493126739447",
+    "excel_value": "4.009749312673945",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV.RT) for this oracle case."
   },
   "Aggregates!F58": {
     "classification": "not_implemented",
-    "excel_value": "4.0987363455882598E-9",
+    "excel_value": "0.00000000409873634558826",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.F.TEST) for this oracle case."
@@ -855,21 +855,21 @@
   },
   "Aggregates!F60": {
     "classification": "not_implemented",
-    "excel_value": "4.0097493126739447",
+    "excel_value": "4.009749312673945",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (FINV) for this oracle case."
   },
   "Aggregates!F61": {
     "classification": "not_implemented",
-    "excel_value": "0.97295507452765662",
+    "excel_value": "0.9729550745276566",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (FISHER) for this oracle case."
   },
   "Aggregates!F62": {
     "classification": "not_implemented",
-    "excel_value": "0.71629787019902447",
+    "excel_value": "0.7162978701990245",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (FISHERINV) for this oracle case."
@@ -918,7 +918,7 @@
   },
   "Aggregates!F69": {
     "classification": "not_implemented",
-    "excel_value": "4.0987363455882598E-9",
+    "excel_value": "0.00000000409873634558826",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (FTEST) for this oracle case."
@@ -945,7 +945,7 @@
   },
   "Aggregates!F72": {
     "classification": "not_implemented",
-    "excel_value": "5.4233514987989846",
+    "excel_value": "5.423351498798985",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.INV) for this oracle case."
@@ -959,7 +959,7 @@
   },
   "Aggregates!F74": {
     "classification": "not_implemented",
-    "excel_value": "5.4233514987989846",
+    "excel_value": "5.423351498798985",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (GAMMAINV) for this oracle case."
@@ -992,7 +992,7 @@
   },
   "Aggregates!F79": {
     "classification": "match",
-    "excel_value": "55.590459304880333",
+    "excel_value": "55.59045930488033",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1011,7 +1011,7 @@
   },
   "Aggregates!F81": {
     "classification": "not_implemented",
-    "excel_value": "0.36326109391124861",
+    "excel_value": "0.3632610939112486",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (HYPGEOMDIST) for this oracle case."
@@ -1024,7 +1024,7 @@
   },
   "Aggregates!F83": {
     "classification": "not_implemented",
-    "excel_value": "-1.2000000000000011",
+    "excel_value": "-1.200000000000001",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (KURT) for this oracle case."
@@ -1097,7 +1097,7 @@
   },
   "Aggregates!F94": {
     "classification": "not_implemented",
-    "excel_value": "0.61771939840000012",
+    "excel_value": "0.6177193984000001",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.NEGBINOM.DIST) for this oracle case."
@@ -1111,7 +1111,7 @@
   },
   "Aggregates!F96": {
     "classification": "match",
-    "excel_value": "0.66153888048931031",
+    "excel_value": "0.6615388804893103",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1124,7 +1124,7 @@
   },
   "Aggregates!F98": {
     "classification": "match",
-    "excel_value": "0.77337264762313174",
+    "excel_value": "0.7733726476231317",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1219,7 +1219,7 @@
   },
   "Arithmetic!F111": {
     "classification": "match",
-    "excel_value": "3.1415926535897931",
+    "excel_value": "3.141592653589793",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1243,7 +1243,7 @@
   },
   "Arithmetic!F115": {
     "classification": "match",
-    "excel_value": "8.7266462599716477E-3",
+    "excel_value": "0.008726646259971648",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1274,7 +1274,7 @@
   },
   "Arithmetic!F12": {
     "classification": "match",
-    "excel_value": "0.52359877559829893",
+    "excel_value": "0.5235987755982989",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1286,13 +1286,13 @@
   },
   "Arithmetic!F121": {
     "classification": "match",
-    "excel_value": "0.88681888397007402",
+    "excel_value": "0.886818883970074",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F122": {
     "classification": "match",
-    "excel_value": "0.83695349993032631",
+    "excel_value": "0.8369534999303263",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1304,19 +1304,19 @@
   },
   "Arithmetic!F124": {
     "classification": "match",
-    "excel_value": "0.47942553860420301",
+    "excel_value": "0.479425538604203",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F125": {
     "classification": "match",
-    "excel_value": "0.52109530549374738",
+    "excel_value": "0.5210953054937474",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F126": {
     "classification": "match",
-    "excel_value": "0.70710678118654757",
+    "excel_value": "0.7071067811865476",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1388,13 +1388,13 @@
   },
   "Arithmetic!F137": {
     "classification": "match",
-    "excel_value": "0.54630248984379048",
+    "excel_value": "0.5463024898437905",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F138": {
     "classification": "match",
-    "excel_value": "0.46211715726000979",
+    "excel_value": "0.4621171572600098",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1448,7 +1448,7 @@
   },
   "Arithmetic!F144": {
     "classification": "match",
-    "excel_value": "-5.6898930012039273E-15",
+    "excel_value": "-0.000000000000005689893001203927",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1457,7 +1457,7 @@
   },
   "Arithmetic!F145": {
     "classification": "match",
-    "excel_value": "-4.6906922790412864E-15",
+    "excel_value": "0",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1466,7 +1466,7 @@
   },
   "Arithmetic!F146": {
     "classification": "match",
-    "excel_value": "0",
+    "excel_value": "-0.000000000000005689893001203927",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1475,7 +1475,7 @@
   },
   "Arithmetic!F147": {
     "classification": "match",
-    "excel_value": "0.10000000000000009",
+    "excel_value": "-0.000000000000005689893001203927",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1492,23 +1492,23 @@
     }
   },
   "Arithmetic!F149": {
-    "classification": "divergent",
-    "excel_value": "1",
-    "excel_type": "b",
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
     "excel_rich_error": false,
-    "cellrune_value": "0",
-    "cellrune_type": "b",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "comparator": {
+      "mode": "exact_bits"
+    }
   },
   "Arithmetic!F15": {
     "classification": "match",
-    "excel_value": "0.78539816339744828",
+    "excel_value": "0.7853981633974483",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F150": {
     "classification": "match",
-    "excel_value": "0",
+    "excel_value": "-0.000000000000004690692279041286",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1526,7 +1526,7 @@
   },
   "Arithmetic!F152": {
     "classification": "match",
-    "excel_value": "0",
+    "excel_value": "0.10000000000000009",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1534,61 +1534,106 @@
     }
   },
   "Arithmetic!F153": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "comparator": {
+      "mode": "exact_bits"
+    }
+  },
+  "Arithmetic!F154": {
+    "classification": "divergent",
+    "excel_value": "1",
+    "excel_type": "b",
+    "excel_rich_error": false,
+    "cellrune_value": "0",
+    "cellrune_type": "b",
+    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+  },
+  "Arithmetic!F155": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "comparator": {
+      "mode": "exact_bits"
+    }
+  },
+  "Arithmetic!F156": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "comparator": {
+      "mode": "exact_bits"
+    }
+  },
+  "Arithmetic!F157": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "comparator": {
+      "mode": "exact_bits"
+    }
+  },
+  "Arithmetic!F158": {
     "classification": "not_implemented",
     "excel_value": "z3333o",
     "excel_type": "str",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_expression for this oracle case."
   },
-  "Arithmetic!F154": {
+  "Arithmetic!F159": {
     "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
     "excel_rich_error": false
   },
-  "Arithmetic!F155": {
-    "classification": "match",
-    "excel_value": "1",
-    "excel_type": "b",
-    "excel_rich_error": false
-  },
-  "Arithmetic!F156": {
-    "classification": "match",
-    "excel_value": "0",
-    "excel_type": "n",
-    "excel_rich_error": false
-  },
-  "Arithmetic!F157": {
-    "classification": "match",
-    "excel_value": "0",
-    "excel_type": "n",
-    "excel_rich_error": false
-  },
-  "Arithmetic!F158": {
-    "classification": "match",
-    "excel_value": "1.0168432334563799",
-    "excel_type": "n",
-    "excel_rich_error": false
-  },
-  "Arithmetic!F159": {
-    "classification": "match",
-    "excel_value": "0",
-    "excel_type": "n",
-    "excel_rich_error": false
-  },
   "Arithmetic!F16": {
     "classification": "match",
-    "excel_value": "0.54930614433405489",
+    "excel_value": "0.5493061443340549",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F160": {
     "classification": "match",
+    "excel_value": "1",
+    "excel_type": "b",
+    "excel_rich_error": false
+  },
+  "Arithmetic!F161": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false
+  },
+  "Arithmetic!F162": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false
+  },
+  "Arithmetic!F163": {
+    "classification": "match",
+    "excel_value": "1.01684323345638",
+    "excel_type": "n",
+    "excel_rich_error": false
+  },
+  "Arithmetic!F164": {
+    "classification": "match",
+    "excel_value": "0",
+    "excel_type": "n",
+    "excel_rich_error": false
+  },
+  "Arithmetic!F165": {
+    "classification": "match",
     "excel_value": "3.2522776601683794",
     "excel_type": "n",
     "excel_rich_error": false
   },
-  "Arithmetic!F161": {
+  "Arithmetic!F166": {
     "classification": "match",
     "excel_value": "550",
     "excel_type": "n",
@@ -1616,14 +1661,14 @@
   },
   "Arithmetic!F20": {
     "classification": "not_implemented",
-    "excel_value": "0.58365597416666559",
+    "excel_value": "0.5836559741666656",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (BESSELK) for this oracle case."
   },
   "Arithmetic!F21": {
     "classification": "not_implemented",
-    "excel_value": "-0.93219376062623394",
+    "excel_value": "-0.9321937606262339",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (BESSELY) for this oracle case."
@@ -1722,7 +1767,7 @@
   },
   "Arithmetic!F37": {
     "classification": "match",
-    "excel_value": "0.87758256189037276",
+    "excel_value": "0.8775825618903728",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1740,13 +1785,13 @@
   },
   "Arithmetic!F40": {
     "classification": "match",
-    "excel_value": "2.1639534137386529",
+    "excel_value": "2.163953413738653",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Arithmetic!F41": {
     "classification": "match",
-    "excel_value": "2.0858296429334882",
+    "excel_value": "2.085829642933488",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1782,7 +1827,7 @@
   },
   "Arithmetic!F47": {
     "classification": "match",
-    "excel_value": "59.999999999999993",
+    "excel_value": "59.99999999999999",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -1812,7 +1857,7 @@
   },
   "Arithmetic!F51": {
     "classification": "match",
-    "excel_value": "2.0884875837625446E-45",
+    "excel_value": "0.0000000000000000000000000000000000000000000020884875837625446",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1823,7 +1868,7 @@
   },
   "Arithmetic!F52": {
     "classification": "match",
-    "excel_value": "2.0884875837625446E-45",
+    "excel_value": "0.0000000000000000000000000000000000000000000020884875837625446",
     "excel_type": "n",
     "excel_rich_error": false,
     "comparator": {
@@ -1926,7 +1971,7 @@
   },
   "Arithmetic!F67": {
     "classification": "not_implemented",
-    "excel_value": "0.92729521800161219",
+    "excel_value": "0.9272952180016122",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
@@ -2123,7 +2168,7 @@
   },
   "Arithmetic!F93": {
     "classification": "match",
-    "excel_value": "-0.69314718055994529",
+    "excel_value": "-0.6931471805599453",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -2141,7 +2186,7 @@
   },
   "Arithmetic!F96": {
     "classification": "not_implemented",
-    "excel_value": "8.3869216956904431",
+    "excel_value": "8.386921695690443",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (LOGINV) for this oracle case."
@@ -2155,7 +2200,7 @@
   },
   "Arithmetic!F98": {
     "classification": "not_implemented",
-    "excel_value": "8.3869216956904431",
+    "excel_value": "8.386921695690443",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.LOGNORM.INV) for this oracle case."
@@ -2417,7 +2462,7 @@
   },
   "ArraysDynamic!F221": {
     "classification": "not_implemented",
-    "excel_value": "154.13570030937419",
+    "excel_value": "154.1357003093742",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (GROWTH) for this oracle case."
@@ -2479,7 +2524,7 @@
   },
   "ArraysDynamic!F413": {
     "classification": "not_implemented",
-    "excel_value": "0.60000000000000009",
+    "excel_value": "0.6000000000000001",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
@@ -2973,7 +3018,7 @@
   },
   "Financial!F15": {
     "classification": "not_implemented",
-    "excel_value": "-917.99101493065655",
+    "excel_value": "-917.9910149306565",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (CUMIPMT) for this oracle case."
@@ -2987,7 +3032,7 @@
   },
   "Financial!F17": {
     "classification": "match",
-    "excel_value": "3009.1950000000002",
+    "excel_value": "3009.195",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -3000,7 +3045,7 @@
   },
   "Financial!F19": {
     "classification": "not_implemented",
-    "excel_value": "6.0000000000000053E-2",
+    "excel_value": "0.06000000000000005",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (DISC) for this oracle case."
@@ -3019,14 +3064,14 @@
   },
   "Financial!F22": {
     "classification": "not_implemented",
-    "excel_value": "4.4989036445262318",
+    "excel_value": "4.498903644526232",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (DURATION) for this oracle case."
   },
   "Financial!F23": {
     "classification": "match",
-    "excel_value": "6.1677811864497611E-2",
+    "excel_value": "0.06167781186449761",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -3051,7 +3096,7 @@
   },
   "Financial!F27": {
     "classification": "not_implemented",
-    "excel_value": "6.1855670103092786E-2",
+    "excel_value": "0.061855670103092786",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (INTRATE) for this oracle case."
@@ -3070,13 +3115,13 @@
   },
   "Financial!F30": {
     "classification": "match",
-    "excel_value": "-66.666666666666671",
+    "excel_value": "-66.66666666666667",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Financial!F31": {
     "classification": "not_implemented",
-    "excel_value": "4.4106898475747371",
+    "excel_value": "4.410689847574737",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (MDURATION) for this oracle case."
@@ -3089,7 +3134,7 @@
   },
   "Financial!F33": {
     "classification": "match",
-    "excel_value": "6.002100341773442E-2",
+    "excel_value": "0.06002100341773442",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -3101,20 +3146,20 @@
   },
   "Financial!F35": {
     "classification": "match",
-    "excel_value": "553.63777652181943",
+    "excel_value": "553.6377765218194",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Financial!F36": {
     "classification": "not_implemented",
-    "excel_value": "95.673855249014565",
+    "excel_value": "95.67385524901457",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (ODDFPRICE) for this oracle case."
   },
   "Financial!F37": {
     "classification": "not_implemented",
-    "excel_value": "6.160574566886326E-2",
+    "excel_value": "0.06160574566886326",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (ODDFYIELD) for this oracle case."
@@ -3128,7 +3173,7 @@
   },
   "Financial!F39": {
     "classification": "not_implemented",
-    "excel_value": "7.6504400859952082E-2",
+    "excel_value": "0.07650440085995208",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (ODDLYIELD) for this oracle case."
@@ -3180,20 +3225,20 @@
   },
   "Financial!F47": {
     "classification": "match",
-    "excel_value": "1.439478100091398E-2",
+    "excel_value": "0.01439478100091398",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Financial!F48": {
     "classification": "not_implemented",
-    "excel_value": "994.87179487179492",
+    "excel_value": "994.8717948717949",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (RECEIVED) for this oracle case."
   },
   "Financial!F49": {
     "classification": "match",
-    "excel_value": "7.1773462536293131E-2",
+    "excel_value": "0.07177346253629313",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -3218,21 +3263,21 @@
   },
   "Financial!F52": {
     "classification": "not_implemented",
-    "excel_value": "4.1387912461730354E-2",
+    "excel_value": "0.041387912461730354",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (TBILLEQ) for this oracle case."
   },
   "Financial!F53": {
     "classification": "not_implemented",
-    "excel_value": "97.988888888888894",
+    "excel_value": "97.9888888888889",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (TBILLPRICE) for this oracle case."
   },
   "Financial!F54": {
     "classification": "not_implemented",
-    "excel_value": "4.059082196414477E-2",
+    "excel_value": "0.04059082196414477",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (TBILLYIELD) for this oracle case."
@@ -3252,21 +3297,21 @@
   },
   "Financial!F57": {
     "classification": "not_implemented",
-    "excel_value": "979.02425722098951",
+    "excel_value": "979.0242572209895",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (XNPV) for this oracle case."
   },
   "Financial!F58": {
     "classification": "not_implemented",
-    "excel_value": "6.1776246409029394E-2",
+    "excel_value": "0.061776246409029394",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (YIELD) for this oracle case."
   },
   "Financial!F59": {
     "classification": "not_implemented",
-    "excel_value": "6.1855670103092786E-2",
+    "excel_value": "0.061855670103092786",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (YIELDDISC) for this oracle case."
@@ -3280,7 +3325,7 @@
   },
   "Financial!F60": {
     "classification": "not_implemented",
-    "excel_value": "8.9552238805970463E-2",
+    "excel_value": "0.08955223880597046",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (YIELDMAT) for this oracle case."
@@ -3293,13 +3338,13 @@
   },
   "Financial!F62": {
     "classification": "match",
-    "excel_value": "36665.990683710283",
+    "excel_value": "36665.99068371028",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "Financial!F63": {
     "classification": "divergent",
-    "excel_value": "-0.55350030213092549",
+    "excel_value": "-0.5535003021309255",
     "excel_type": "n",
     "excel_rich_error": false,
     "cellrune_value": "#N/A",
@@ -3314,7 +3359,7 @@
   },
   "Financial!F65": {
     "classification": "match",
-    "excel_value": "-0.62984378812833819",
+    "excel_value": "-0.6298437881283382",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -3368,7 +3413,7 @@
   },
   "Intersection!F13": {
     "classification": "match",
-    "excel_value": "263120.15000000002",
+    "excel_value": "263144.15",
     "excel_type": "n",
     "excel_rich_error": false
   },
@@ -4003,13 +4048,13 @@
   },
   "TextDate!F65": {
     "classification": "match",
-    "excel_value": "0.60812500000000003",
+    "excel_value": "0.608125",
     "excel_type": "n",
     "excel_rich_error": false
   },
   "TextDate!F66": {
     "classification": "not_implemented",
-    "excel_value": "0.60812500000000003",
+    "excel_value": "0.608125",
     "excel_type": "n",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (TIMEVALUE) for this oracle case."
@@ -4210,6 +4255,20 @@
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_expression for this oracle case."
   },
+  "Unsupported!F1013": {
+    "classification": "not_implemented",
+    "excel_value": "#VALUE!",
+    "excel_type": "e",
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+  },
+  "Unsupported!F1037": {
+    "classification": "not_implemented",
+    "excel_value": "#VALUE!",
+    "excel_type": "e",
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+  },
   "Unsupported!F581": {
     "classification": "not_implemented",
     "excel_value": "1550",
@@ -4307,5 +4366,33 @@
     "excel_type": "str",
     "excel_rich_error": false,
     "note": "CellRune reports calculation.unsupported_function (_XLFN.TRIMRANGE) for this oracle case."
+  },
+  "Unsupported!F917": {
+    "classification": "not_implemented",
+    "excel_value": "5740",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+  },
+  "Unsupported!F941": {
+    "classification": "not_implemented",
+    "excel_value": "650",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+  },
+  "Unsupported!F965": {
+    "classification": "not_implemented",
+    "excel_value": "111",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+  },
+  "Unsupported!F989": {
+    "classification": "not_implemented",
+    "excel_value": "1665",
+    "excel_type": "n",
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
   }
 }

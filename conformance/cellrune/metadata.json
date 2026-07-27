@@ -1,42 +1,42 @@
 {
-  "schema": "cellrune_excel_oracle_metadata_v1",
-  "workbook": "formula-oracle.xlsx",
-  "sha256": "3602c5ed052eea996d9974f3420370f5813899261e1fc83d1dd004b3553c2687",
-  "formula_cells": 885,
-  "date_system": "excel1900",
-  "iterative_calculation": false,
-  "case_selection": {
-    "mode": "listed_sheets_column",
-    "sheets": [
-      "Arithmetic",
-      "Aggregates",
-      "ArraysCSE",
-      "ArraysDynamic",
-      "Intersection",
-      "Financial",
-      "Lookup",
-      "TextDate",
-      "Errors",
-      "Unsupported"
-    ],
-    "column": 6
-  },
-  "source": {
-    "name": "CellRune formula oracle",
-    "license": "MIT OR Apache-2.0",
-    "url": null,
-    "revision": "11495ecae58daa7b03fb778845b5bff5c51ef3b1"
-  },
-  "generator": {
-    "name": "oracle/tools/build_excel_oracle.mjs",
-    "revision": "11495ecae58daa7b03fb778845b5bff5c51ef3b1"
-  },
-  "oracle": {
-    "application": "Microsoft Macintosh Excel",
-    "version": "AppVersion 16.0300",
-    "channel": null,
-    "os": "macOS",
-    "locale": null,
-    "saved_at": "2026-07-27T06:13:39Z"
-  }
+ "schema": "cellrune_excel_oracle_metadata_v1",
+ "workbook": "formula-oracle.xlsx",
+ "sha256": "c61419ccedff9a5f64b93525c9625de5278832e9ff5a2ae31bd2bfcdb0243b7a",
+ "formula_cells": 898,
+ "date_system": "excel1900",
+ "iterative_calculation": false,
+ "case_selection": {
+  "mode": "listed_sheets_column",
+  "sheets": [
+   "Arithmetic",
+   "Aggregates",
+   "ArraysCSE",
+   "ArraysDynamic",
+   "Intersection",
+   "Financial",
+   "Lookup",
+   "TextDate",
+   "Errors",
+   "Unsupported"
+  ],
+  "column": 6
+ },
+ "source": {
+  "name": "CellRune formula oracle",
+  "license": "MIT OR Apache-2.0",
+  "url": null,
+  "revision": "ea46d562dcf9f374134a684eb9ca2fa25c250ee2"
+ },
+ "generator": {
+  "name": "oracle/tools/build_excel_oracle.mjs",
+  "revision": "ea46d562dcf9f374134a684eb9ca2fa25c250ee2"
+ },
+ "oracle": {
+  "application": "Microsoft Macintosh Excel",
+  "version": "AppVersion 16.0300",
+  "channel": null,
+  "os": "macOS",
+  "locale": "English application UI on a Korean regional format (ko-KR): DOLLAR renders ₩, decimal separator '.', group separator ','",
+  "saved_at": "2026-07-27T13:29:32Z"
+ }
 }
