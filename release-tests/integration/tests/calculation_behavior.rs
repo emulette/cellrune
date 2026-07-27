@@ -1736,7 +1736,7 @@ fn implicit_intersection_uses_the_formula_cell_position() {
 }
 
 #[test]
-fn whole_column_arrays_share_one_extent_and_one_cumulative_budget() {
+fn whole_column_operators_share_one_extent_and_one_cumulative_budget() {
     let calculation_sheet = formula_sheet(
         1,
         "Calculation",
@@ -1746,6 +1746,8 @@ fn whole_column_arrays_share_one_extent_and_one_cumulative_budget() {
             (1, 3, "SUM(EmptyData!A:A*1)"),
             (1, 4, "SUM(-LongData!A:A)"),
             (1, 5, "SUM(LongData!A:A*INDEX(LongData!A:A,0))"),
+            (1, 6, "SUM(ABS(LongData!A:A))"),
+            (1, 7, "SUM(ABS(LongData!A:A)+1)"),
         ],
     );
     let mut long_data = Sheet::new(
@@ -1781,6 +1783,8 @@ fn whole_column_arrays_share_one_extent_and_one_cumulative_budget() {
     assert_number(&calculation, 3, 0.0, 0.0);
     assert_number(&calculation, 4, -6.0, 0.0);
     assert_number(&calculation, 5, 14.0, 0.0);
+    assert_number(&calculation, 6, 6.0, 0.0);
+    assert_number(&calculation, 7, 9.0, 0.0);
 
     for (max_array_cells, succeeds) in [(9, true), (8, false)] {
         let limits = CalculationLimits::default()
@@ -1798,6 +1802,8 @@ fn whole_column_arrays_share_one_extent_and_one_cumulative_budget() {
         assert_number(&limited, 2, 6.0, 0.0);
         assert_number(&limited, 3, 0.0, 0.0);
         assert_number(&limited, 4, -6.0, 0.0);
+        assert_number(&limited, 6, 6.0, 0.0);
+        assert_number(&limited, 7, 9.0, 0.0);
     }
 
     for (max_array_cells, succeeds) in [(6, true), (5, false)] {
@@ -1810,6 +1816,21 @@ fn whole_column_arrays_share_one_extent_and_one_cumulative_budget() {
             assert_number(&limited, 4, -6.0, 0.0);
         } else {
             assert_issue(&limited, 4, CalculationIssueCode::ResourceLimitExceeded);
+        }
+    }
+
+    for (max_array_cells, succeeds) in [(3, true), (2, false)] {
+        let limits = CalculationLimits::default()
+            .with_max_array_cells(max_array_cells)
+            .expect("nonzero array limit");
+        let limited =
+            calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+        if succeeds {
+            assert_number(&limited, 6, 6.0, 0.0);
+            assert_number(&limited, 7, 9.0, 0.0);
+        } else {
+            assert_issue(&limited, 6, CalculationIssueCode::ResourceLimitExceeded);
+            assert_issue(&limited, 7, CalculationIssueCode::ResourceLimitExceeded);
         }
     }
 }

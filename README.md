@@ -90,10 +90,14 @@ not require it.
 `INDEX` follows Excel's zero-index reference behavior: a zero row or column selects the complete
 corresponding column or row, and zero for both selects the complete input range. Scalar formulas
 apply legacy implicit intersection, while array formulas can materialize the selected rectangle.
-Array expressions that combine whole-column references use one common extent: the greatest used
-row among their inputs, with a one-row minimum for an otherwise empty sheet. Missing cells within
-that extent are blanks, and every intermediate and returned array is charged to the cumulative
-array-cell budget.
+Unary and binary array operators that combine whole-column references use one common extent: the
+greatest used row among their operands, with a one-row minimum for an otherwise empty sheet.
+Missing cells within that extent are blanks, and directly resolved source arrays plus operator
+outputs are charged to its cumulative array-cell budget. Function calls keep function-defined
+argument boundaries: each array argument is evaluated under its own bounded context, and a
+function's return does not establish a whole-column operator extent by itself. When another direct
+whole-column operand has established such an enclosing context, the returned array is charged to
+that context before the operator consumes it.
 
 Direct 3-D references are accepted by `SUM`, `AVERAGE`, `AVERAGEA`, `COUNT`, `COUNTA`, `MAX`,
 `MAXA`, `MIN`, `MINA`, `PRODUCT`, `STDEV.P`, `STDEV.S`, `VAR.P`, and `VAR.S` (including the

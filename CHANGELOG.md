@@ -27,9 +27,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   remain an `UnsupportedSheetRange` engine capability issue.
 - Incremental calculation stores 3-D dependencies as compact rectangle spans and counts each span
   once against the dependency-edge budget instead of expanding it into one edge per cell.
-- Whole-column array operands use a common greatest-used-row extent, with a one-row minimum for an
-  empty sheet and blanks for unpopulated cells. Source, intermediate, and returned arrays share one
-  cumulative array-cell budget.
+- Whole-column operands combined by unary or binary array operators use a common
+  greatest-used-row extent, with a one-row minimum for an empty sheet and blanks for unpopulated
+  cells. Directly resolved sources and operator outputs share one cumulative array-cell budget.
+  Function arguments retain independent bounded contexts, and a returned array joins an enclosing
+  cumulative context only when another direct whole-column operand established it.
 - Four existing Excel-saved 3-D cases and two whole-column-array cases were activated by changing
   only their reviewed classifications; the oracle workbook and saved Excel results were not
   regenerated.

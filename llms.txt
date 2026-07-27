@@ -463,11 +463,16 @@ than guessing a name from a different XLSX crate (`calamine`,
   `INDEX(reference, row, 0)` returns the selected complete row, and zero for
   both indexes returns the complete reference. Scalar formulas apply legacy
   implicit intersection; array contexts materialize the selected rectangle.
-- Array expressions containing whole-column references resolve one common
-  row extent from the greatest used row among all operands, with a one-row
-  minimum on an otherwise empty sheet. Unpopulated cells in that extent are
-  `Blank`; source, intermediate, and returned arrays are charged cumulatively
-  to `max_array_cells`.
+- Unary and binary array operators containing whole-column references resolve
+  one common row extent from the greatest used row among their operands, with
+  a one-row minimum on an otherwise empty sheet. Unpopulated cells in that
+  extent are `Blank`; directly resolved source arrays and operator outputs are
+  charged cumulatively to `max_array_cells`. Function calls retain
+  function-defined argument boundaries: each array argument has an
+  independent bounded evaluation context, and a function return does not
+  establish a whole-column operator extent by itself. If another direct
+  whole-column operand establishes an enclosing context, the returned array
+  is charged to that context before the operator consumes it.
 - Direct 3-D references are supported for `SUM`, `AVERAGE`, `AVERAGEA`,
   `COUNT`, `COUNTA`, `MAX`, `MAXA`, `MIN`, `MINA`, `PRODUCT`, `STDEV.P`,
   `STDEV.S`, `VAR.P`, and `VAR.S`, including catalogued legacy aliases.
