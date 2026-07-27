@@ -68,38 +68,125 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
 }
 
 #[test]
-fn three_d_sheet_range_references_are_reported_explicitly() {
+fn three_d_aggregates_resolve_in_tab_order_across_quoted_prefixes() {
     let workbook = three_sheet_workbook(
         &[
-            (1, 1, "SUM(Sheet1:Sheet3!B1)"),
-            (1, 2, "SUM('Sheet1:Sheet3'!B1)"),
-            (1, 3, "SUM(Sheet1:'Sheet3'!B1)"),
-            (1, 4, "IFERROR(SUM('Sheet1:Sheet3'!B1),42)"),
+            (1, 1, "SUM(Sheet1:Sheet3!Z1)"),
+            (1, 2, "SUM('Sheet1:Sheet3'!Z1)"),
+            (1, 3, "SUM(Sheet1:'Sheet3'!Z1)"),
+            (1, 4, "IFERROR(SUM('Sheet1:Sheet3'!Z1),42)"),
             (1, 5, "'Sheet2'!B1+1"),
         ],
         // A defined name that shadows the start sheet must not turn the 3-D
         // reference into an ordinary range over the named rect.
-        &[("Sheet1", "Sheet3!B1:B2")],
+        &[("Sheet1", "Sheet3!Z1:Z2")],
     );
-    let report = scan_formula_capabilities(&workbook);
-    for column in 1..=4 {
-        assert_capability_issue(
-            &report,
-            column,
-            CalculationIssueCode::UnsupportedSheetRange,
-            Some("Sheet1:Sheet3"),
-        );
-    }
+    assert!(scan_formula_capabilities(&workbook).is_supported());
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     for column in 1..=4 {
-        assert_issue(
-            &calculation,
-            column,
-            CalculationIssueCode::UnsupportedSheetRange,
-        );
+        assert_number(&calculation, column, 111.0, 0.0);
     }
     assert_number(&calculation, 5, 11.0, 0.0);
+}
+
+#[test]
+fn three_d_consumers_share_scanner_and_excel_error_policy() {
+    let workbook = three_sheet_workbook(
+        &[
+            (1, 1, "INDEX(Sheet1:Sheet3!Z1:Z2,1)"),
+            (1, 2, "VLOOKUP(10,Sheet1:Sheet3!Z1:AA2,2,FALSE)"),
+            (1, 3, "OFFSET(Sheet1:Sheet3!Z1,0,0)"),
+            (1, 4, "SUM(Sheet1:Sheet3!Z1+1)"),
+            (1, 5, "COUNTBLANK(Sheet1:Sheet3!Z1)"),
+            (1, 6, "IFERROR(INDEX(Sheet1:Sheet3!Z1:Z2,1),42)"),
+            (1, 7, "SUM(Missing:Sheet3!Z1)"),
+            (1, 8, "SUM(Sheet3:Sheet1!Z1)"),
+            (1, 9, "INDEX(Sheet1:Sheet1!Z1:Z2,1)"),
+            (1, 10, "OFFSET(Sheet1:Sheet1!Z1,0,0)"),
+            (1, 11, "SUM(Sheet1:Sheet1!Z1:Z2)"),
+            (1, 12, "Sheet1:Sheet1!Z1"),
+        ],
+        &[],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    assert_eq!(report.formula_count(), 12);
+    assert_eq!(report.supported_count(), 11);
+    assert_capability_issue(
+        &report,
+        5,
+        CalculationIssueCode::UnsupportedSheetRange,
+        Some("Sheet1:Sheet3"),
+    );
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (column, error) in [
+        (1, ExcelError::Value),
+        (2, ExcelError::Value),
+        (3, ExcelError::Reference),
+        (4, ExcelError::Value),
+        (7, ExcelError::Reference),
+        (9, ExcelError::Value),
+        (10, ExcelError::Reference),
+        (12, ExcelError::Value),
+    ] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(error))),
+            "column {column}",
+        );
+    }
+    assert_issue(&calculation, 5, CalculationIssueCode::UnsupportedSheetRange);
+    assert_number(&calculation, 6, 42.0, 0.0);
+    assert_number(&calculation, 8, 111.0, 0.0);
+    assert_number(&calculation, 11, 3.0, 0.0);
+}
+
+#[test]
+fn every_three_d_aggregate_matches_explicit_sheet_arguments() {
+    let workbook = three_sheet_workbook(
+        &[
+            (3, 1, "SUM(Sheet1:Sheet3!Z1:Z2)"),
+            (3, 2, "SUM(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (4, 1, "AVERAGE(Sheet1:Sheet3!Z1:Z2)"),
+            (4, 2, "AVERAGE(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (5, 1, "AVERAGEA(Sheet1:Sheet3!Z1:Z2)"),
+            (5, 2, "AVERAGEA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (6, 1, "COUNT(Sheet1:Sheet3!Z1:Z2)"),
+            (6, 2, "COUNT(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (7, 1, "COUNTA(Sheet1:Sheet3!Z1:Z2)"),
+            (7, 2, "COUNTA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (8, 1, "MAX(Sheet1:Sheet3!Z1:Z2)"),
+            (8, 2, "MAX(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (9, 1, "MAXA(Sheet1:Sheet3!Z1:Z2)"),
+            (9, 2, "MAXA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (10, 1, "MIN(Sheet1:Sheet3!Z1:Z2)"),
+            (10, 2, "MIN(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (11, 1, "MINA(Sheet1:Sheet3!Z1:Z2)"),
+            (11, 2, "MINA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (12, 1, "PRODUCT(Sheet1:Sheet3!Z1:Z2)"),
+            (12, 2, "PRODUCT(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (13, 1, "STDEV.P(Sheet1:Sheet3!Z1:Z2)"),
+            (13, 2, "STDEV.P(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (14, 1, "STDEV.S(Sheet1:Sheet3!Z1:Z2)"),
+            (14, 2, "STDEV.S(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (15, 1, "VAR.P(Sheet1:Sheet3!Z1:Z2)"),
+            (15, 2, "VAR.P(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (16, 1, "VAR.S(Sheet1:Sheet3!Z1:Z2)"),
+            (16, 2, "VAR.S(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+        ],
+        &[],
+    );
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for row in 3..=16 {
+        assert_eq!(
+            calculation.cell(calculation_cell_id(row, 1)),
+            calculation.cell(calculation_cell_id(row, 2)),
+            "row {row}",
+        );
+    }
 }
 
 #[test]
@@ -2496,14 +2583,43 @@ fn three_sheet_workbook(
     sheet1_formulas: &[(u32, u32, &str)],
     names: &[(&str, &str)],
 ) -> WorkbookSnapshot {
+    let mut first = formula_sheet(1, "Sheet1", sheet1_formulas);
+    insert_number(&mut first, "Z1", 1.0);
+    insert_number(&mut first, "Z2", 2.0);
     workbook_with_sheets_and_names(
         vec![
-            formula_sheet(1, "Sheet1", sheet1_formulas),
-            formula_sheet(2, "Sheet2", &[(1, 2, "10"), (2, 2, "20")]),
-            formula_sheet(3, "Sheet3", &[(1, 2, "100"), (2, 2, "200")]),
+            first,
+            numeric_sheet(2, "Sheet2", 10.0),
+            numeric_sheet(3, "Sheet3", 100.0),
         ],
         names,
     )
+}
+
+fn numeric_sheet(id: u32, name: &str, scale: f64) -> Sheet {
+    let mut sheet = Sheet::new(
+        SheetId::new(id).expect("valid sheet ID"),
+        SheetName::new(name).expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    for (address, value) in [
+        ("B1", scale),
+        ("B2", scale * 2.0),
+        ("Z1", scale),
+        ("Z2", scale * 2.0),
+    ] {
+        insert_number(&mut sheet, address, value);
+    }
+    sheet
+}
+
+fn insert_number(sheet: &mut Sheet, address: &str, value: f64) {
+    sheet
+        .insert_cell(
+            CellAddress::from_a1(address).expect("valid literal address"),
+            CellContent::Literal(CellValue::number(value).expect("finite literal")),
+        )
+        .expect("unique literal address");
 }
 
 fn workbook_with_formulas_and_names(

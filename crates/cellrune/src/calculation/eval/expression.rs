@@ -261,6 +261,11 @@ impl Engine<'_> {
     }
 
     fn eval_reference_with_trace(&self, context: EvalContext<'_>, expr: &Expr) -> ScalarEvaluation {
+        if let Ok(span) = self.resolve_rect_span_expr(context, expr)
+            && span.is_sheet_range()
+        {
+            return ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
+        }
         let Ok(rect) = self.resolve_rect_expr(context, expr) else {
             return ScalarEvaluation::untracked(self.eval_implicit_intersection(context, expr));
         };
@@ -303,7 +308,11 @@ impl Engine<'_> {
                 )))
             }
             Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
-                let rect = self.resolve_rect_expr(context, expr)?;
+                let span = self.resolve_rect_span_expr(context, expr)?;
+                if span.is_sheet_range() {
+                    return Err(ErrorKind::Value);
+                }
+                let rect = span.into_rect().map_err(|_| ErrorKind::Value)?;
                 self.array_from_rect_with_trace(rect)
             }
             Expr::Array(rows) => {

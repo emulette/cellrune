@@ -6,8 +6,12 @@ use super::super::criteria::{Criteria, WildcardStepBudget, parse_criteria};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
+use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::util::{collect_argument_values, excel_numeric_arguments, required_number};
+use super::util::{
+    collect_argument_values, excel_numeric_arguments, excel_numeric_arguments_with_policy,
+    required_number,
+};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -184,6 +188,15 @@ pub(super) fn numeric_arguments(
     excel_numeric_arguments(engine, context, args)
 }
 
+pub(super) fn numeric_arguments_with_policy(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    sheet_span_policy: SheetSpanPolicy,
+) -> Result<Vec<f64>, ErrorKind> {
+    excel_numeric_arguments_with_policy(engine, context, args, sheet_span_policy)
+}
+
 fn numeric_pairs(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -352,7 +365,12 @@ fn sample_variance(
     args: &[Expr],
     square_root: bool,
 ) -> Value {
-    let numbers = match numeric_arguments(engine, context, args) {
+    let numbers = match numeric_arguments_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::CollectAcrossSheets,
+    ) {
         Ok(numbers) if numbers.len() >= 2 => numbers,
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),

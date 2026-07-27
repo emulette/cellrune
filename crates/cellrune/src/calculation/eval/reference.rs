@@ -4,7 +4,7 @@ use crate::calculation::ast::{Expr, RefBody, Reference};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
 use crate::calculation::functions::normalize_name;
 use crate::calculation::parser::parse_formula_with_limits;
-use crate::calculation::runtime::Rect;
+use crate::calculation::runtime::{Rect, RectSpan, SheetSpan};
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
@@ -27,56 +27,88 @@ pub(super) fn is_reference_returning_function(name: &str) -> bool {
 }
 
 impl Engine<'_> {
-    pub fn resolve_reference(
+    pub(in crate::calculation) fn resolve_reference_span(
         &self,
         current_sheet: usize,
         reference: &Reference,
-    ) -> Result<Rect, ErrorKind> {
-        let sheet = match &reference.sheet {
+    ) -> Result<RectSpan, ErrorKind> {
+        let (start_sheet, end_sheet) = match &reference.sheet {
             // An external workbook is an unsupported capability, not a missing sheet. Returning
             // `Ref` here would let `IFERROR` hide it and would disagree with the capability scan.
             Some(prefix) if prefix.external_workbook_detail().is_some() => {
                 return Err(ErrorKind::Unsupported);
             }
-            Some(prefix) if prefix.end_name.is_some() => return Err(ErrorKind::Unsupported),
-            Some(prefix) => self
-                .workbook
-                .sheet_index_by_name(&prefix.name)
-                .ok_or(ErrorKind::Ref)?,
-            None => current_sheet,
+            Some(prefix) => {
+                let start = self
+                    .workbook
+                    .sheet_index_by_name(&prefix.name)
+                    .ok_or(ErrorKind::Ref)?;
+                let end = match &prefix.end_name {
+                    Some(name) => self
+                        .workbook
+                        .sheet_index_by_name(name)
+                        .ok_or(ErrorKind::Ref)?,
+                    None => start,
+                };
+                (start, end)
+            }
+            None => (current_sheet, current_sheet),
         };
-        let (row_start, col_start, row_end, col_end, whole_rows) = match &reference.body {
-            RefBody::Cell(cell) => (cell.row, cell.column, cell.row, cell.column, false),
-            RefBody::Area(start, end) => (
-                start.row.min(end.row),
-                start.column.min(end.column),
-                start.row.max(end.row),
-                start.column.max(end.column),
-                false,
-            ),
-            RefBody::Columns(start, end) => (
-                1,
-                start.column.min(end.column),
-                EXCEL_MAX_ROWS,
-                start.column.max(end.column),
-                true,
-            ),
-            RefBody::Rows(start, end) => (
-                start.row.min(end.row),
-                1,
-                start.row.max(end.row),
-                EXCEL_MAX_COLUMNS,
-                false,
-            ),
-        };
-        Ok(Rect {
-            sheet,
-            row_start,
-            col_start,
-            row_end,
-            col_end,
-            whole_rows,
-        })
+        let (row_start, col_start, row_end, col_end, whole_rows) =
+            reference_bounds(&reference.body);
+        let sheets = reference.sheet.as_ref().map_or_else(
+            || SheetSpan::single(start_sheet),
+            |prefix| {
+                if prefix.end_name.is_some() {
+                    SheetSpan::new(start_sheet, end_sheet)
+                } else {
+                    SheetSpan::single(start_sheet)
+                }
+            },
+        );
+        Ok(RectSpan::new(
+            sheets,
+            Rect {
+                sheet: start_sheet,
+                row_start,
+                col_start,
+                row_end,
+                col_end,
+                whole_rows,
+            },
+        ))
+    }
+
+    pub fn resolve_reference(
+        &self,
+        current_sheet: usize,
+        reference: &Reference,
+    ) -> Result<Rect, ErrorKind> {
+        let span = self.resolve_reference_span(current_sheet, reference)?;
+        if span.is_sheet_range() {
+            return Err(ErrorKind::Unsupported);
+        }
+        span.into_rect().map_err(|_| ErrorKind::Unsupported)
+    }
+
+    pub(in crate::calculation) fn resolve_rect_span_expr(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> Result<RectSpan, ErrorKind> {
+        match expr {
+            Expr::Paren(inner) => self.resolve_rect_span_expr(context, inner),
+            Expr::Ref(reference) => self.resolve_reference_span(context.sheet(), reference),
+            Expr::Range { .. } => {
+                let rect = self.resolve_rect_expr(context, expr)?;
+                Ok(RectSpan::new(SheetSpan::single(rect.sheet), rect))
+            }
+            Expr::Name(name) => self
+                .resolve_name_expr(context.sheet(), name)
+                .ok_or(ErrorKind::Name)
+                .and_then(|named| self.resolve_rect_span_expr(context, named)),
+            _ => Err(ErrorKind::Value),
+        }
     }
 
     pub fn resolve_rect_expr(
@@ -131,7 +163,11 @@ impl Engine<'_> {
         if args.len() < 2 || args.len() > 3 {
             return Err(ErrorKind::Value);
         }
-        let rect = self.resolve_rect_expr(context, &args[0])?;
+        let span = self.resolve_rect_span_expr(context, &args[0])?;
+        if span.is_sheet_range() {
+            return Err(ErrorKind::Value);
+        }
+        let rect = span.into_rect().map_err(|_| ErrorKind::Value)?;
         let first_index = to_number(&self.eval_scalar(context, &args[1]))?.trunc();
         let second_index = match args.get(2) {
             Some(Expr::Missing) | None => None,
@@ -212,7 +248,11 @@ impl Engine<'_> {
         if !normalized.eq_ignore_ascii_case("OFFSET") || args.len() < 3 || args.len() > 5 {
             return Err(ErrorKind::Value);
         }
-        let base = self.resolve_rect_expr(context, &args[0])?;
+        let span = self.resolve_rect_span_expr(context, &args[0])?;
+        if span.is_sheet_range() {
+            return Err(ErrorKind::Ref);
+        }
+        let base = span.into_rect().map_err(|_| ErrorKind::Ref)?;
         let rows = to_number(&self.eval_scalar(context, &args[1]))?.trunc() as i64;
         let columns = to_number(&self.eval_scalar(context, &args[2]))?.trunc() as i64;
         let height = match args.get(3) {
@@ -298,5 +338,32 @@ impl Engine<'_> {
             });
         }
         Err(ErrorKind::Value)
+    }
+}
+
+fn reference_bounds(body: &RefBody) -> (u32, u32, u32, u32, bool) {
+    match body {
+        RefBody::Cell(cell) => (cell.row, cell.column, cell.row, cell.column, false),
+        RefBody::Area(start, end) => (
+            start.row.min(end.row),
+            start.column.min(end.column),
+            start.row.max(end.row),
+            start.column.max(end.column),
+            false,
+        ),
+        RefBody::Columns(start, end) => (
+            1,
+            start.column.min(end.column),
+            EXCEL_MAX_ROWS,
+            start.column.max(end.column),
+            true,
+        ),
+        RefBody::Rows(start, end) => (
+            start.row.min(end.row),
+            1,
+            start.row.max(end.row),
+            EXCEL_MAX_COLUMNS,
+            false,
+        ),
     }
 }

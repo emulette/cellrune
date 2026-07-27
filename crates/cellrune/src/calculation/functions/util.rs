@@ -3,6 +3,8 @@ use super::super::ast::Expr;
 use super::super::decimal::{DecimalTrace, RationalTrace, is_excel_near_zero_cancellation};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
+use super::super::runtime::Rect;
+use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone)]
@@ -18,8 +20,23 @@ pub(super) fn collect_argument_values(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
+    collect_argument_values_with_policy(engine, context, args, SheetSpanPolicy::Unsupported)
+}
+
+pub(super) fn collect_argument_values_with_policy(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    sheet_span_policy: SheetSpanPolicy,
+) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut visited_cells = 0_u64;
-    collect_argument_values_with_counter(engine, context, args, &mut visited_cells)
+    collect_argument_values_with_counter_and_policy(
+        engine,
+        context,
+        args,
+        &mut visited_cells,
+        sheet_span_policy,
+    )
 }
 
 pub(super) fn collect_argument_values_with_counter(
@@ -28,36 +45,34 @@ pub(super) fn collect_argument_values_with_counter(
     args: &[Expr],
     visited_cells: &mut u64,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
+    collect_argument_values_with_counter_and_policy(
+        engine,
+        context,
+        args,
+        visited_cells,
+        SheetSpanPolicy::Unsupported,
+    )
+}
+
+pub(super) fn collect_argument_values_with_counter_and_policy(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    visited_cells: &mut u64,
+    sheet_span_policy: SheetSpanPolicy,
+) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut values = Vec::new();
     for arg in args {
-        if let Ok(rect) = engine.resolve_rect_expr(context, arg) {
-            let row_end = engine.clamped_row_end(&rect);
-            if row_end < rect.row_start {
-                continue;
-            }
-            let rows = u64::from(row_end - rect.row_start) + 1;
-            let cells = rows
-                .checked_mul(rect.width())
-                .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
-            *visited_cells = visited_cells
-                .checked_add(cells)
-                .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
-            engine.ensure_array_cells(*visited_cells)?;
-            for row in rect.row_start..=row_end {
-                for column in rect.col_start..=rect.col_end {
-                    let cell = (rect.sheet, row, column);
-                    let value = engine.cell_value(cell);
-                    let decimal_trace = match &value {
-                        Value::Number(_) => engine.numeric_decimal_trace(cell),
-                        _ => None,
-                    };
-                    values.push(ArgumentValue {
-                        value,
-                        decimal_trace,
-                        from_collection: true,
-                        from_single_cell_reference: rect.is_single_cell(),
-                    });
+        if let Ok(span) = engine.resolve_rect_span_expr(context, arg) {
+            if span.is_sheet_range() {
+                match sheet_span_policy {
+                    SheetSpanPolicy::CollectAcrossSheets => {}
+                    SheetSpanPolicy::ReturnExcelError(kind) => return Err(kind),
+                    SheetSpanPolicy::Unsupported => return Err(ErrorKind::Unsupported),
                 }
+            }
+            for rect in span.rects() {
+                collect_rect_values(engine, rect, visited_cells, &mut values)?;
             }
         } else {
             let evaluated = engine.eval_array_with_trace(context, arg)?;
@@ -82,6 +97,43 @@ pub(super) fn collect_argument_values_with_counter(
         }
     }
     Ok(values)
+}
+
+fn collect_rect_values(
+    engine: &Engine<'_>,
+    rect: Rect,
+    visited_cells: &mut u64,
+    values: &mut Vec<ArgumentValue>,
+) -> Result<(), ErrorKind> {
+    let row_end = engine.clamped_row_end(&rect);
+    if row_end < rect.row_start {
+        return Ok(());
+    }
+    let rows = u64::from(row_end - rect.row_start) + 1;
+    let cells = rows
+        .checked_mul(rect.width())
+        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+    *visited_cells = visited_cells
+        .checked_add(cells)
+        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+    engine.ensure_array_cells(*visited_cells)?;
+    for row in rect.row_start..=row_end {
+        for column in rect.col_start..=rect.col_end {
+            let cell = (rect.sheet, row, column);
+            let value = engine.cell_value(cell);
+            let decimal_trace = match &value {
+                Value::Number(_) => engine.numeric_decimal_trace(cell),
+                _ => None,
+            };
+            values.push(ArgumentValue {
+                value,
+                decimal_trace,
+                from_collection: true,
+                from_single_cell_reference: rect.is_single_cell(),
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn required_number(
@@ -207,12 +259,21 @@ pub(super) fn excel_numeric_arguments(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<f64>, ErrorKind> {
+    excel_numeric_arguments_with_policy(engine, context, args, SheetSpanPolicy::Unsupported)
+}
+
+pub(super) fn excel_numeric_arguments_with_policy(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    sheet_span_policy: SheetSpanPolicy,
+) -> Result<Vec<f64>, ErrorKind> {
     let mut numbers = Vec::new();
     for ArgumentValue {
         value,
         from_collection,
         ..
-    } in collect_argument_values(engine, context, args)?
+    } in collect_argument_values_with_policy(engine, context, args, sheet_span_policy)?
     {
         match value {
             Value::Number(number) => numbers.push(number),

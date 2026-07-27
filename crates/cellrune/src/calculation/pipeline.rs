@@ -6,6 +6,7 @@ use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::{is_supported_function, normalize_name};
 use super::lambda::{is_lambda_local, walk_lambda_scope};
+use super::sheet_span::{ARRAY_EXPRESSION_POLICY, SheetSpanPolicy, function_policy};
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssue, CalculationIssueCode,
@@ -192,6 +193,7 @@ fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Formula
                             engine,
                             sheet_index,
                             expr,
+                            ARRAY_EXPRESSION_POLICY,
                             &mut BTreeSet::new(),
                             &mut Vec::new(),
                             &mut issues,
@@ -527,6 +529,7 @@ fn inspect_expr(
     engine: &Engine<'_>,
     sheet: usize,
     expr: &Expr,
+    sheet_span_policy: SheetSpanPolicy,
     names: &mut BTreeSet<String>,
     local_names: &mut Vec<String>,
     issues: &mut Vec<CalculationIssue>,
@@ -539,13 +542,22 @@ fn inspect_expr(
                     Some(name.to_ascii_uppercase()),
                 ));
             }
+            let argument_policy = function_policy(&normalize_name(name));
             if walk_lambda_scope(name, args, local_names, |arg, scope| {
-                inspect_expr(engine, sheet, arg, names, scope, issues);
+                inspect_expr(engine, sheet, arg, argument_policy, names, scope, issues);
             }) {
                 return;
             }
             for arg in args {
-                inspect_expr(engine, sheet, arg, names, local_names, issues);
+                inspect_expr(
+                    engine,
+                    sheet,
+                    arg,
+                    argument_policy,
+                    names,
+                    local_names,
+                    issues,
+                );
             }
         }
         Expr::Name(name) => {
@@ -555,7 +567,15 @@ fn inspect_expr(
             let key = name.to_ascii_lowercase();
             if names.insert(key) {
                 match engine.resolve_name_expr(sheet, name) {
-                    Some(named) => inspect_expr(engine, sheet, named, names, local_names, issues),
+                    Some(named) => inspect_expr(
+                        engine,
+                        sheet,
+                        named,
+                        sheet_span_policy,
+                        names,
+                        local_names,
+                        issues,
+                    ),
                     None => issues.push(CalculationIssue::new(
                         CalculationIssueCode::UnsupportedName,
                         Some(name.clone()),
@@ -566,22 +586,79 @@ fn inspect_expr(
         Expr::Array(rows) => {
             for row in rows {
                 for element in row {
-                    inspect_expr(engine, sheet, element, names, local_names, issues);
+                    inspect_expr(
+                        engine,
+                        sheet,
+                        element,
+                        ARRAY_EXPRESSION_POLICY,
+                        names,
+                        local_names,
+                        issues,
+                    );
                 }
             }
         }
-        Expr::ImplicitIntersection(inner)
-        | Expr::Paren(inner)
-        | Expr::Unary { operand: inner, .. } => {
-            inspect_expr(engine, sheet, inner, names, local_names, issues);
+        Expr::ImplicitIntersection(inner) | Expr::Unary { operand: inner, .. } => {
+            inspect_expr(
+                engine,
+                sheet,
+                inner,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_names,
+                issues,
+            );
+        }
+        Expr::Paren(inner) => {
+            inspect_expr(
+                engine,
+                sheet,
+                inner,
+                sheet_span_policy,
+                names,
+                local_names,
+                issues,
+            );
         }
         Expr::Binary { left, right, .. } => {
-            inspect_expr(engine, sheet, left, names, local_names, issues);
-            inspect_expr(engine, sheet, right, names, local_names, issues);
+            inspect_expr(
+                engine,
+                sheet,
+                left,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_names,
+                issues,
+            );
+            inspect_expr(
+                engine,
+                sheet,
+                right,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_names,
+                issues,
+            );
         }
         Expr::Range { start, end } => {
-            inspect_expr(engine, sheet, start, names, local_names, issues);
-            inspect_expr(engine, sheet, end, names, local_names, issues);
+            inspect_expr(
+                engine,
+                sheet,
+                start,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_names,
+                issues,
+            );
+            inspect_expr(
+                engine,
+                sheet,
+                end,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_names,
+                issues,
+            );
         }
         Expr::Ref(reference) => {
             // One reference carries one diagnosis, and the workbook prefix is the outer one: a
@@ -600,6 +677,7 @@ fn inspect_expr(
                 .sheet
                 .as_ref()
                 .and_then(SheetPrefix::sheet_range_detail)
+                .filter(|_| matches!(sheet_span_policy, SheetSpanPolicy::Unsupported))
             {
                 issues.push(CalculationIssue::new(
                     CalculationIssueCode::UnsupportedSheetRange,

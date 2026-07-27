@@ -1,9 +1,10 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
+use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::statistical::numeric_arguments;
-use super::util::{collect_argument_values, required_number};
+use super::statistical::{numeric_arguments, numeric_arguments_with_policy};
+use super::util::{collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -83,7 +84,12 @@ fn aggregate_a(
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-    let values = match collect_argument_values(engine, context, args) {
+    let values = match collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::CollectAcrossSheets,
+    ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
@@ -153,7 +159,12 @@ fn population_variance(
     args: &[Expr],
     square_root: bool,
 ) -> Value {
-    let numbers = match numeric_arguments(engine, context, args) {
+    let numbers = match numeric_arguments_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::CollectAcrossSheets,
+    ) {
         Ok(numbers) if !numbers.is_empty() => numbers,
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),

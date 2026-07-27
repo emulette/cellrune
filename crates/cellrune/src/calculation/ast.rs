@@ -76,7 +76,7 @@ pub enum RefBody {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SheetPrefix {
     pub name: String,
-    /// End sheet of a 3-D sheet range (`Sheet1:Sheet3!A1`); calculation does not support these.
+    /// End sheet of a 3-D sheet range (`Sheet1:Sheet3!A1`).
     pub end_name: Option<String>,
     pub quoted: bool,
 }

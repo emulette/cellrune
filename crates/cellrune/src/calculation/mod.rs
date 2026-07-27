@@ -25,6 +25,7 @@ mod parser;
 mod pipeline;
 mod runtime;
 mod session;
+mod sheet_span;
 mod textfmt;
 mod value;
 

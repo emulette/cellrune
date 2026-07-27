@@ -49,16 +49,23 @@ impl Rect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Introduced for the 0.1.5 3-D resolver; 0.1.4 establishes the boundary.
 pub(super) struct SheetSpan {
     sheets: RangeInclusive<usize>,
+    explicit_range: bool,
 }
 
-#[allow(dead_code)]
 impl SheetSpan {
     pub(super) fn new(start: usize, end: usize) -> Self {
         Self {
             sheets: start.min(end)..=start.max(end),
+            explicit_range: true,
+        }
+    }
+
+    pub(super) fn single(sheet: usize) -> Self {
+        Self {
+            sheets: sheet..=sheet,
+            explicit_range: false,
         }
     }
 
@@ -66,19 +73,21 @@ impl SheetSpan {
         self.sheets.clone()
     }
 
-    fn is_single_sheet(&self) -> bool {
+    pub(super) fn is_single_sheet(&self) -> bool {
         self.sheets.start() == self.sheets.end()
+    }
+
+    fn is_explicit_range(&self) -> bool {
+        self.explicit_range
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Introduced for the 0.1.5 3-D resolver; 0.1.4 establishes the boundary.
 pub(super) struct RectSpan {
     sheets: SheetSpan,
     rect: Rect,
 }
 
-#[allow(dead_code)]
 impl RectSpan {
     pub(super) fn new(sheets: SheetSpan, rect: Rect) -> Self {
         Self { sheets, rect }
@@ -86,6 +95,10 @@ impl RectSpan {
 
     pub(super) fn rects(&self) -> impl Iterator<Item = Rect> + '_ {
         self.sheets.iter().map(|sheet| Rect { sheet, ..self.rect })
+    }
+
+    pub(super) fn is_sheet_range(&self) -> bool {
+        self.sheets.is_explicit_range()
     }
 
     pub(super) fn into_rect(self) -> Result<Rect, ErrorKind> {
@@ -155,7 +168,7 @@ mod tests {
 
     #[test]
     fn rect_span_narrows_only_when_it_has_one_sheet() {
-        let rect = RectSpan::new(SheetSpan::new(4, 4), sample_rect())
+        let rect = RectSpan::new(SheetSpan::single(4), sample_rect())
             .into_rect()
             .expect("single-sheet span");
         assert_eq!(rect.sheet, 4);
@@ -164,5 +177,13 @@ mod tests {
             RectSpan::new(SheetSpan::new(4, 5), sample_rect()).into_rect(),
             Err(ErrorKind::Ref)
         );
+    }
+
+    #[test]
+    fn rect_span_preserves_explicit_same_sheet_range_syntax() {
+        let span = RectSpan::new(SheetSpan::new(4, 4), sample_rect());
+
+        assert!(span.is_sheet_range());
+        assert_eq!(span.rects().count(), 1);
     }
 }

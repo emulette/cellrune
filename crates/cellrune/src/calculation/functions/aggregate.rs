@@ -4,8 +4,9 @@ use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
+use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::util::{ArgumentValue, ExcelSum, collect_argument_values, required_number};
+use super::util::{ArgumentValue, ExcelSum, collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -53,7 +54,12 @@ fn aggregate_numbers(
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-    let values = match collect_argument_values(engine, context, args) {
+    let values = match collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::CollectAcrossSheets,
+    ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
@@ -111,7 +117,12 @@ fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-    let values = match collect_argument_values(engine, context, args) {
+    let values = match collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::CollectAcrossSheets,
+    ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
@@ -138,7 +149,12 @@ fn count_nonblank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) 
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-    match collect_argument_values(engine, context, args) {
+    match collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::CollectAcrossSheets,
+    ) {
         Ok(values) => Value::Number(
             values
                 .iter()

@@ -2,6 +2,7 @@ use super::ast::Expr;
 use super::eval::{Engine, EvalContext};
 use super::operators::element_at;
 use super::runtime::Array;
+use super::sheet_span::{SheetSpanPolicy, function_policy};
 use super::value::{ErrorKind, Value};
 
 mod aggregate;
@@ -35,6 +36,9 @@ pub(super) fn call_function(
     args: &[Expr],
 ) -> Value {
     let normalized = normalize_name(name);
+    if let Some(kind) = direct_sheet_span_error(engine, context, &normalized, args) {
+        return Value::Error(kind);
+    }
     match function_group(&normalized) {
         Some(FunctionGroup::Legacy) => legacy::call_legacy(engine, context, &normalized, args),
         Some(FunctionGroup::Logical) => logical::call(engine, context, &normalized, args),
@@ -70,6 +74,33 @@ pub(super) fn call_function(
         }
         None => Value::Error(ErrorKind::Unsupported),
     }
+}
+
+fn direct_sheet_span_error(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    normalized_name: &str,
+    args: &[Expr],
+) -> Option<ErrorKind> {
+    let policy = function_policy(normalized_name);
+    if matches!(policy, SheetSpanPolicy::CollectAcrossSheets) {
+        return None;
+    }
+    let has_multi_sheet_argument = args.iter().any(|arg| {
+        engine
+            .resolve_rect_span_expr(context, arg)
+            .is_ok_and(|span| span.is_sheet_range())
+    });
+    if !has_multi_sheet_argument {
+        return None;
+    }
+    Some(match policy {
+        SheetSpanPolicy::ReturnExcelError(kind) => kind,
+        SheetSpanPolicy::Unsupported => ErrorKind::Unsupported,
+        SheetSpanPolicy::CollectAcrossSheets => {
+            unreachable!("collecting policies returned before argument inspection")
+        }
+    })
 }
 
 pub(super) fn call_function_array(
