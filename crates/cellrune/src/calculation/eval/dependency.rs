@@ -39,6 +39,7 @@ impl Engine<'_> {
                 EvalContext::for_cell(*cell),
                 expr,
                 &mut BTreeSet::new(),
+                &mut Vec::new(),
             )
         })
     }
@@ -96,40 +97,63 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
         names: &mut BTreeSet<String>,
+        local_names: &mut Vec<String>,
     ) -> bool {
         match expr {
             Expr::Call { name, args } => {
                 let normalized = normalize_name(name);
                 let dynamic = matches!(normalized.as_str(), "OFFSET" | "INDIRECT");
-                (dynamic && self.resolve_dynamic_rect(context, name, args).is_err())
-                    || args
-                        .iter()
-                        .any(|arg| self.expr_has_unresolved_dynamic_dependency(context, arg, names))
+                if dynamic && self.resolve_dynamic_rect(context, name, args).is_err() {
+                    return true;
+                }
+                let mut found = false;
+                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                    found |=
+                        self.expr_has_unresolved_dynamic_dependency(context, arg, names, scope);
+                }) {
+                    return found;
+                }
+                args.iter().any(|arg| {
+                    self.expr_has_unresolved_dynamic_dependency(context, arg, names, local_names)
+                })
             }
             Expr::Name(name) => {
+                if is_lambda_local(name, local_names) {
+                    return false;
+                }
                 let key = name.to_ascii_lowercase();
                 names.insert(key)
                     && self
                         .resolve_name_expr(context.sheet(), name)
                         .is_some_and(|named| {
-                            self.expr_has_unresolved_dynamic_dependency(context, named, names)
+                            self.expr_has_unresolved_dynamic_dependency(
+                                context,
+                                named,
+                                names,
+                                local_names,
+                            )
                         })
             }
             Expr::ImplicitIntersection(inner)
             | Expr::Paren(inner)
             | Expr::Unary { operand: inner, .. } => {
-                self.expr_has_unresolved_dynamic_dependency(context, inner, names)
+                self.expr_has_unresolved_dynamic_dependency(context, inner, names, local_names)
             }
             Expr::Binary { left, right, .. }
             | Expr::Range {
                 start: left,
                 end: right,
             } => {
-                self.expr_has_unresolved_dynamic_dependency(context, left, names)
-                    || self.expr_has_unresolved_dynamic_dependency(context, right, names)
+                self.expr_has_unresolved_dynamic_dependency(context, left, names, local_names)
+                    || self.expr_has_unresolved_dynamic_dependency(
+                        context,
+                        right,
+                        names,
+                        local_names,
+                    )
             }
             Expr::Array(rows) => rows.iter().flatten().any(|element| {
-                self.expr_has_unresolved_dynamic_dependency(context, element, names)
+                self.expr_has_unresolved_dynamic_dependency(context, element, names, local_names)
             }),
             Expr::Number(_)
             | Expr::Text(_)
