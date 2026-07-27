@@ -149,6 +149,8 @@ pub enum WorkbookChangeDto {
         full_calculation_on_load: Option<bool>,
         /// Optional force-full-calculation flag.
         force_full_calculation: Option<bool>,
+        /// Optional declared iterative-calculation flag.
+        iterative_calculation: Option<bool>,
     },
 }
 
@@ -575,4 +577,43 @@ pub struct WriteReportDto {
     pub removed_parts: Vec<String>,
     /// Write diagnostic count.
     pub diagnostic_count: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkbookChangeDto;
+
+    /// The DTOs carry `deny_unknown_fields`, so adding a field to a variant would be a breaking
+    /// change to the JSON boundary if a missing one were also rejected. It is not: serde reads an
+    /// absent `Option` as `None`. Interop is `publish = false` and reaches Python, Node.js, and
+    /// MCP as JSON, so this is what makes a field addition non-breaking for those consumers.
+    #[test]
+    fn an_absent_optional_field_is_read_as_none() {
+        let without_flag = r#"{
+            "kind": "set_calculation_hints",
+            "mode": "manual",
+            "calculation_id": null,
+            "full_calculation_on_load": null,
+            "force_full_calculation": null
+        }"#;
+        let parsed: WorkbookChangeDto = serde_json::from_str(without_flag)
+            .expect("a client that predates the field still parses");
+        assert_eq!(
+            parsed,
+            WorkbookChangeDto::SetCalculationHints {
+                mode: Some("manual".to_owned()),
+                calculation_id: None,
+                full_calculation_on_load: None,
+                force_full_calculation: None,
+                iterative_calculation: None,
+            }
+        );
+    }
+
+    #[test]
+    fn an_unknown_field_is_still_rejected() {
+        let misspelled = r#"{"kind": "set_calculation_hints", "iterativeCalculation": true}"#;
+        serde_json::from_str::<WorkbookChangeDto>(misspelled)
+            .expect_err("deny_unknown_fields must still catch a misspelled field");
+    }
 }

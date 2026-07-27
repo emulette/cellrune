@@ -351,12 +351,16 @@ fn convert_edit_batch(
                 calculation_id,
                 full_calculation_on_load,
                 force_full_calculation,
-            } => WorkbookChange::set_calculation_hints(CalculationHints::new(
-                mode.as_deref().map(parse_calculation_mode).transpose()?,
-                calculation_id,
-                full_calculation_on_load,
-                force_full_calculation,
-            )),
+                iterative_calculation,
+            } => WorkbookChange::set_calculation_hints(
+                CalculationHints::new(
+                    mode.as_deref().map(parse_calculation_mode).transpose()?,
+                    calculation_id,
+                    full_calculation_on_load,
+                    force_full_calculation,
+                )
+                .with_iterative_calculation(iterative_calculation),
+            ),
         };
         changes.push(converted);
     }

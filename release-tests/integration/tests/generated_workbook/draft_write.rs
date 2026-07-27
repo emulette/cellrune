@@ -438,6 +438,121 @@ fn document_draft_preserves_unknown_parts_and_patches_only_declared_semantics() 
 }
 
 #[test]
+fn document_draft_round_trips_an_iterative_calculation_declaration_and_replaces_it_on_request() {
+    let mut seed = WorkbookDraft::new();
+    let sheet_id = seed.workbook().sheets()[0].id();
+    seed.set_cell_value(
+        sheet_id,
+        CellAddress::from_a1("A1").expect("A1"),
+        CellValue::Number(FiniteNumber::new(2.0).expect("finite")),
+    )
+    .expect("seed A1");
+    let seed_calculation = calculate_workbook(seed.workbook(), CalculationOptions::default());
+    let seed_output = write_xlsx_draft_bytes(
+        &seed,
+        &seed_calculation,
+        RecalculationWriteOptions::default(),
+    )
+    .expect("seed output");
+
+    // A workbook authored elsewhere with iterative calculation switched on.
+    let workbook_part = String::from_utf8(
+        support::archive_parts(seed_output.bytes())
+            .remove("xl/workbook.xml")
+            .expect("seed workbook part"),
+    )
+    .expect("UTF-8 workbook part");
+    assert!(
+        !workbook_part.contains("<calcPr"),
+        "the canonical writer omits calcPr here, so the declaration is injected below: \
+         {workbook_part}"
+    );
+    let iterative_part = workbook_part.replace(
+        "</workbook>",
+        r#"<calcPr calcId="191029" iterate="1" iterateCount="7"/></workbook>"#,
+    );
+    let source_bytes = support::rewrite_archive(
+        seed_output.bytes(),
+        &std::collections::BTreeMap::from([("xl/workbook.xml".to_owned(), iterative_part)]),
+        &[],
+    );
+
+    let document =
+        open_xlsx_document_bytes(&source_bytes, cellrune::OpenOptions::default()).expect("open");
+    assert_eq!(
+        document
+            .workbook()
+            .calculation_hints()
+            .iterative_calculation(),
+        Some(true),
+        "the source declaration has to survive reading before the write can be judged"
+    );
+
+    // Editing a cell without touching the hints preserves the whole declaration, siblings
+    // included. This is the ordinary round trip.
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            sheet_id,
+            CellAddress::from_a1("A1").expect("A1"),
+            CellValue::Number(FiniteNumber::new(9.0).expect("finite")),
+        )
+        .expect("edit A1");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("document draft output");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), cellrune::OpenOptions::default()).expect("reopen");
+    assert_eq!(
+        reopened
+            .workbook()
+            .calculation_hints()
+            .iterative_calculation(),
+        Some(true)
+    );
+    let reopened_part = String::from_utf8(
+        support::archive_parts(output.bytes())
+            .remove("xl/workbook.xml")
+            .expect("output workbook part"),
+    )
+    .expect("UTF-8 workbook part");
+    assert!(
+        reopened_part.contains(r#"iterateCount="7""#),
+        "the sibling attribute travels with the declaration: {reopened_part}"
+    );
+
+    // `CalculationHints` is the complete calcPr declaration, so setting it replaces rather than
+    // merges: a value built without the flag clears it, and the builder carries it through. The
+    // write verification compares the reopened file against the draft's semantic model, so a
+    // writer that preserved the source declaration here would fail closed rather than disagree.
+    for (hints, expected) in [
+        (
+            CalculationHints::new(Some(CalculationMode::Manual), None, None, None),
+            None,
+        ),
+        (
+            CalculationHints::new(Some(CalculationMode::Manual), None, None, None)
+                .with_iterative_calculation(Some(true)),
+            Some(true),
+        ),
+    ] {
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .set_calculation_hints(hints)
+            .expect("calculation hints");
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let output =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect("document draft output");
+        let reopened = open_xlsx_document_bytes(output.bytes(), cellrune::OpenOptions::default())
+            .expect("reopen");
+        let written = reopened.workbook().calculation_hints();
+        assert_eq!(written.iterative_calculation(), expected);
+        assert_eq!(written.mode(), Some(CalculationMode::Manual));
+    }
+}
+
+#[test]
 fn document_draft_allocates_relationship_ids_without_clobbering_source_ids() {
     let seed = WorkbookDraft::new();
     let seed_calculation = calculate_workbook(seed.workbook(), CalculationOptions::default());

@@ -15,7 +15,12 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Committed Excel-saved binary oracle workbooks and an explicit local audit command replace the
   generated JSON conformance matrix. The audit is not part of CI or publication.
 - `CalculationHints` retains the optional XLSX iterative-calculation declaration across read and
-  write operations.
+  write operations, and it is carried by the interop DTO and the Python, Node.js, and MCP
+  boundaries alongside the calculation mode and the host recalculation flags. `CalculationHints`
+  describes the whole `calcPr` declaration, so applying one replaces the workbook's declaration
+  rather than merging into it: use `with_iterative_calculation` to carry the flag through an
+  edit that would otherwise clear it. CellRune still does not perform iterative calculation; the
+  declaration is preserved, not obeyed.
 
 ### Changed
 

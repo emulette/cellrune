@@ -131,12 +131,17 @@ function serializeWorkbookChange(change, index) {
         change.forceFullCalculation,
         `changes[${index}].forceFullCalculation`,
       );
+      requireOptionalBoolean(
+        change.iterativeCalculation,
+        `changes[${index}].iterativeCalculation`,
+      );
       return {
         kind: "set_calculation_hints",
         mode: change.mode ?? null,
         calculation_id: change.calculationId ?? null,
         full_calculation_on_load: change.fullCalculationOnLoad ?? null,
         force_full_calculation: change.forceFullCalculation ?? null,
+        iterative_calculation: change.iterativeCalculation ?? null,
       };
     default:
       throw inputError(`changes[${index}].kind is not recognized`);

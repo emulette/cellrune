@@ -194,6 +194,7 @@ export type WorkbookChange =
       readonly calculationId?: number | null;
       readonly fullCalculationOnLoad?: boolean | null;
       readonly forceFullCalculation?: boolean | null;
+      readonly iterativeCalculation?: boolean | null;
     };
 
 export interface EditReceipt {

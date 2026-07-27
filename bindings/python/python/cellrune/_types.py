@@ -202,6 +202,7 @@ class SetCalculationHintsChangeOptions(TypedDict, total=False):
     calculation_id: int | None
     full_calculation_on_load: bool | None
     force_full_calculation: bool | None
+    iterative_calculation: bool | None
 
 
 class SetCalculationHintsChange(SetCalculationHintsChangeOptions):
