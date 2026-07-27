@@ -4256,18 +4256,16 @@
     "note": "CellRune reports calculation.unsupported_expression for this oracle case."
   },
   "Unsupported!F1013": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+    "excel_rich_error": false
   },
   "Unsupported!F1037": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+    "excel_rich_error": false
   },
   "Unsupported!F581": {
     "classification": "not_implemented",
@@ -4368,31 +4366,27 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.TRIMRANGE) for this oracle case."
   },
   "Unsupported!F917": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5740",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "Unsupported!F941": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "650",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "Unsupported!F965": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "111",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+    "excel_rich_error": false
   },
   "Unsupported!F989": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1665",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_sheet_range (SpanStart:SpanEnd) for this oracle case."
+    "excel_rich_error": false
   }
 }

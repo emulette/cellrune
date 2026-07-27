@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.4 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.5 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.4
+cargo add cellrune@0.1.5
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.4"
+cellrune = "0.1.5"
 ```
 
 ## Features
@@ -29,6 +29,8 @@ cellrune = "0.1.4"
 - expands shared formulas while preserving absolute and relative references;
 - returns typed formula values and stable per-cell calculation issues in one result snapshot;
 - reports normalized per-workbook function demand and exposes the implemented function catalog;
+- evaluates audited 3-D aggregate references across workbook tab order, including hidden sheets and
+  reverse-written endpoints, without expanding the sheet span into dependency edges;
 - applies configurable limits to ZIP, XML, workbook, formula, dependency, text, and array work;
 - never executes macros, never follows external links, and never reads the host clock for
   `TODAY()` or `NOW()`;
@@ -88,6 +90,19 @@ not require it.
 `INDEX` follows Excel's zero-index reference behavior: a zero row or column selects the complete
 corresponding column or row, and zero for both selects the complete input range. Scalar formulas
 apply legacy implicit intersection, while array formulas can materialize the selected rectangle.
+Array expressions that combine whole-column references use one common extent: the greatest used
+row among their inputs, with a one-row minimum for an otherwise empty sheet. Missing cells within
+that extent are blanks, and every intermediate and returned array is charged to the cumulative
+array-cell budget.
+
+Direct 3-D references are accepted by `SUM`, `AVERAGE`, `AVERAGEA`, `COUNT`, `COUNTA`, `MAX`,
+`MAXA`, `MIN`, `MINA`, `PRODUCT`, `STDEV.P`, `STDEV.S`, `VAR.P`, and `VAR.S` (including the
+catalogued legacy aliases). The span follows workbook tab order, so hidden sheets participate and
+reversed endpoint spelling produces the same set. Excel-defined direct 3-D error contexts remain
+values: `INDEX` and `VLOOKUP` return `#VALUE!`, while `OFFSET` returns `#REF!`. Other direct 3-D
+consumers remain an explicit `UnsupportedSheetRange` capability issue. A bare 3-D reference or one
+composed through an array operator returns `#VALUE!`; it does not silently inherit an enclosing
+aggregate's collection policy. The static capability scan and evaluator share this policy.
 
 For repeated programmatic edits, use `WorkbookCalculationSession` instead of rebuilding stateless
 calculation state after every cell:
@@ -170,12 +185,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.4 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.5 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.4"
-npm install "@cellrune/node@0.1.4"
+python -m pip install "cellrune==0.1.5"
+npm install "@cellrune/node@0.1.5"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -300,7 +315,7 @@ The following are outside the current scope:
 
 - `.xls`, `.xlsb`, `.ods`, and CSV;
 - macro, add-in, external-workbook, query, or data-connection execution;
-- table structured references and 3-D references;
+- table structured references and 3-D references outside the audited direct-consumer policy above;
 - spill postfix references such as `A1#`, general `LAMBDA`, and data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 

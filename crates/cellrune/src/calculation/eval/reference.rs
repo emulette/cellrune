@@ -107,6 +107,7 @@ impl Engine<'_> {
                 .resolve_name_expr(context.sheet(), name)
                 .ok_or(ErrorKind::Name)
                 .and_then(|named| self.resolve_rect_span_expr(context, named)),
+            Expr::Call { .. } => self.resolve_rect_expr(context, expr).map(RectSpan::single),
             _ => Err(ErrorKind::Value),
         }
     }

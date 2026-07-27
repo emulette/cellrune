@@ -76,6 +76,7 @@ fn three_d_aggregates_resolve_in_tab_order_across_quoted_prefixes() {
             (1, 3, "SUM(Sheet1:'Sheet3'!Z1)"),
             (1, 4, "IFERROR(SUM('Sheet1:Sheet3'!Z1),42)"),
             (1, 5, "'Sheet2'!B1+1"),
+            (1, 6, "SUM(Sheet1:Sheet3!Z:Z)"),
         ],
         // A defined name that shadows the start sheet must not turn the 3-D
         // reference into an ordinary range over the named rect.
@@ -88,6 +89,7 @@ fn three_d_aggregates_resolve_in_tab_order_across_quoted_prefixes() {
         assert_number(&calculation, column, 111.0, 0.0);
     }
     assert_number(&calculation, 5, 11.0, 0.0);
+    assert_number(&calculation, 6, 333.0, 0.0);
 }
 
 #[test]
@@ -185,6 +187,100 @@ fn every_three_d_aggregate_matches_explicit_sheet_arguments() {
             calculation.cell(calculation_cell_id(row, 1)),
             calculation.cell(calculation_cell_id(row, 2)),
             "row {row}",
+        );
+    }
+}
+
+#[test]
+fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
+    let catalog = supported_function_catalog();
+    let mut first = Sheet::new(
+        SheetId::new(1).expect("valid sheet ID"),
+        SheetName::new("Sheet1").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    insert_number(&mut first, "Z1", 1.0);
+    for (index, entry) in catalog.iter().enumerate() {
+        let formula = format!("{}(Sheet1:Sheet3!Z1)", entry.name());
+        let address =
+            CellAddress::from_indices(index as u32 + 1, 1).expect("bounded catalog address");
+        first
+            .insert_cell(
+                address,
+                CellContent::Formula(FormulaCell::new(
+                    FormulaDialect::ExcelA1,
+                    FormulaText::from_xlsx(formula).expect("catalog name parses"),
+                    SavedResult::Missing,
+                    FormulaMetadata::Normal,
+                )),
+            )
+            .expect("unique catalog formula");
+    }
+    let workbook = workbook_with_sheets_and_names(
+        vec![
+            first,
+            numeric_sheet(2, "Sheet2", 10.0, SheetVisibility::Hidden),
+            numeric_sheet(3, "Sheet3", 100.0, SheetVisibility::Visible),
+        ],
+        &[],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default()
+            .with_today_serial(FiniteNumber::new(45_000.0).expect("finite date"))
+            .with_now_serial(FiniteNumber::new(45_000.5).expect("finite timestamp")),
+    );
+    assert_eq!(report.entries().len(), catalog.len());
+
+    for (entry, capability) in catalog.iter().zip(report.entries()) {
+        let accepts_sheet_span = matches!(
+            entry.canonical_name(),
+            "SUM"
+                | "AVERAGE"
+                | "AVERAGEA"
+                | "COUNT"
+                | "COUNTA"
+                | "MAX"
+                | "MAXA"
+                | "MIN"
+                | "MINA"
+                | "PRODUCT"
+                | "STDEV.P"
+                | "STDEV.S"
+                | "VAR.P"
+                | "VAR.S"
+                | "INDEX"
+                | "VLOOKUP"
+                | "OFFSET"
+        );
+        match capability.capability() {
+            FormulaCapability::Supported => assert!(
+                accepts_sheet_span,
+                "{} unexpectedly accepted a 3-D argument",
+                entry.name(),
+            ),
+            FormulaCapability::Unsupported(issues) => {
+                assert!(
+                    !accepts_sheet_span,
+                    "{} unexpectedly rejected its audited 3-D context: {issues:?}",
+                    entry.name(),
+                );
+                assert!(
+                    issues.iter().any(|issue| {
+                        issue.code() == CalculationIssueCode::UnsupportedSheetRange
+                    }),
+                    "{} lost the sheet-range diagnosis: {issues:?}",
+                    entry.name(),
+                );
+            }
+        }
+        let result = calculation.cell(capability.cell());
+        assert_eq!(
+            matches!(result, Some(CalculationCellResult::Value(_))),
+            accepts_sheet_span,
+            "{} scanner/kernel policy mismatch: {result:?}",
+            entry.name(),
         );
     }
 }
@@ -1932,6 +2028,35 @@ fn range_operator_accepts_reference_returning_expressions() {
 }
 
 #[test]
+fn aggregates_accept_offset_rectangles_with_omitted_dimensions() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "1"),
+        (1, 2, "2"),
+        (2, 1, "3"),
+        (2, 2, "4"),
+        (1, 3, "SUM(OFFSET(A1:B2,0,0,1,))"),
+        (2, 3, "SUM(OFFSET(A1:B2,0,0,,1))"),
+        (3, 3, "SUM(OFFSET(A1:B2,0,0,1))"),
+        (4, 3, "SUM(OFFSET(A1:B2,0,0))"),
+        (5, 3, "SUM(OFFSET(A1:B2,0,0,,))"),
+        (6, 3, "SUM(OFFSET(A1:B2,0,0,))"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (row, expected) in [
+        (1, 3.0),
+        (2, 4.0),
+        (3, 3.0),
+        (4, 10.0),
+        (5, 10.0),
+        (6, 10.0),
+    ] {
+        assert_number_at(&calculation, row, 3, expected, 0.0);
+    }
+}
+
+#[test]
 fn search_reports_positions_in_the_original_text_after_case_folding() {
     // Lowercasing "İ" (U+0130) yields two characters, so a position computed in
     // the folded text drifts from the caller's text unless it is mapped back.
@@ -2668,18 +2793,18 @@ fn three_sheet_workbook(
     workbook_with_sheets_and_names(
         vec![
             first,
-            numeric_sheet(2, "Sheet2", 10.0),
-            numeric_sheet(3, "Sheet3", 100.0),
+            numeric_sheet(2, "Sheet2", 10.0, SheetVisibility::Hidden),
+            numeric_sheet(3, "Sheet3", 100.0, SheetVisibility::Visible),
         ],
         names,
     )
 }
 
-fn numeric_sheet(id: u32, name: &str, scale: f64) -> Sheet {
+fn numeric_sheet(id: u32, name: &str, scale: f64, visibility: SheetVisibility) -> Sheet {
     let mut sheet = Sheet::new(
         SheetId::new(id).expect("valid sheet ID"),
         SheetName::new(name).expect("valid sheet name"),
-        SheetVisibility::Visible,
+        visibility,
     );
     for (address, value) in [
         ("B1", scale),

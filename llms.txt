@@ -9,7 +9,7 @@
 This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
-as a bug in this file, not in the crate. The current public version is 0.1.4,
+as a bug in this file, not in the crate. The current public version is 0.1.5,
 uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
@@ -407,7 +407,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. Version 0.1.4 contains 278 official Excel-facing names
+  `.is_official()`. Version 0.1.5 contains 278 official Excel-facing names
   (265 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
@@ -463,6 +463,23 @@ than guessing a name from a different XLSX crate (`calamine`,
   `INDEX(reference, row, 0)` returns the selected complete row, and zero for
   both indexes returns the complete reference. Scalar formulas apply legacy
   implicit intersection; array contexts materialize the selected rectangle.
+- Array expressions containing whole-column references resolve one common
+  row extent from the greatest used row among all operands, with a one-row
+  minimum on an otherwise empty sheet. Unpopulated cells in that extent are
+  `Blank`; source, intermediate, and returned arrays are charged cumulatively
+  to `max_array_cells`.
+- Direct 3-D references are supported for `SUM`, `AVERAGE`, `AVERAGEA`,
+  `COUNT`, `COUNTA`, `MAX`, `MAXA`, `MIN`, `MINA`, `PRODUCT`, `STDEV.P`,
+  `STDEV.S`, `VAR.P`, and `VAR.S`, including catalogued legacy aliases.
+  Workbook tab order defines the inclusive span, including hidden sheets;
+  reversing the written endpoints does not change the participating sheets.
+  Direct 3-D arguments to `INDEX` and `VLOOKUP` produce `#VALUE!`, and
+  `OFFSET` produces `#REF!`. Other direct consumers report
+  `UnsupportedSheetRange`. Bare 3-D references and 3-D references composed
+  through array operators produce `#VALUE!`; an enclosing aggregate does not
+  widen that nested context. The scanner and evaluator use the same policy.
+  Incremental dependency state stores each 3-D input as a compact rectangle
+  span and counts that span once against the dependency-edge budget.
 
 ### Diagnostics and provenance
 
@@ -504,7 +521,8 @@ calculate. Out of scope for the current version:
 
 - `.xls`, `.xlsb`, `.ods`, and CSV.
 - Macro, add-in, external-workbook, query, or data-connection execution.
-- Table structured references and 3-D references.
+- Table structured references and 3-D references outside the audited
+  direct-consumer policy described under Calculation.
 - Spill postfix references such as `A1#`, general `LAMBDA`, and data-table
   calculation.
 - Iterative calculation and automatic host-time or random inputs (`TODAY()`

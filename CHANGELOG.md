@@ -8,6 +8,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [0.1.5] - 2026-07-27
+
+### Added
+
+- Direct 3-D references for the audited aggregate family: `SUM`, `AVERAGE`, `AVERAGEA`, `COUNT`,
+  `COUNTA`, `MAX`, `MAXA`, `MIN`, `MINA`, `PRODUCT`, `STDEV.P`, `STDEV.S`, `VAR.P`, and `VAR.S`,
+  including the catalogued legacy aliases. Inclusive workbook tab order determines the span, so
+  hidden sheets participate and reverse-written endpoints are equivalent.
+- Integration coverage for the complete supported-function catalog, hidden sheets, reverse spans,
+  whole-column 3-D inputs, and a fuzz invariant that compares 3-D `SUM` with an explicit sheet
+  fold under the exact array-cell budget.
+
+### Changed
+
+- The capability scanner and evaluator now share one explicit direct-3-D-consumer policy.
+  `INDEX` and `VLOOKUP` return Excel's `#VALUE!`, `OFFSET` returns `#REF!`, and other consumers
+  remain an `UnsupportedSheetRange` engine capability issue.
+- Incremental calculation stores 3-D dependencies as compact rectangle spans and counts each span
+  once against the dependency-edge budget instead of expanding it into one edge per cell.
+- Whole-column array operands use a common greatest-used-row extent, with a one-row minimum for an
+  empty sheet and blanks for unpopulated cells. Source, intermediate, and returned arrays share one
+  cumulative array-cell budget.
+- Four existing Excel-saved 3-D cases and two whole-column-array cases were activated by changing
+  only their reviewed classifications; the oracle workbook and saved Excel results were not
+  regenerated.
+
+### Fixed
+
+- Edits to the first, middle, or last sheet of a 3-D dependency now dirty the dependent formula,
+  while edits outside the span do not.
+- Reference-returning functions such as multi-cell `OFFSET` remain usable as aggregate inputs
+  after the compact sheet-span representation is introduced.
+
 ## [0.1.4] - 2026-07-27
 
 ### Added
@@ -280,7 +313,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/emulette/cellrune/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/emulette/cellrune/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/emulette/cellrune/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/emulette/cellrune/compare/v0.1.1...v0.1.2
