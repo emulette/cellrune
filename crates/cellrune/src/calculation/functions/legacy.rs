@@ -3,12 +3,14 @@ use super::super::coerce::{to_logical, to_number, to_text};
 use super::super::criteria::{
     Criteria, CriteriaOp, CriteriaRhs, WildcardStepBudget, parse_criteria,
 };
+use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
+use super::util::ExcelSum;
 
 pub(super) fn call_legacy(
     engine: &Engine<'_>,
@@ -470,17 +472,20 @@ fn kernel_sumproduct(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
+    // Read with traces: the terms this sums are products of exact decimals, so they can cancel the
+    // same way a chain of `+` and `-` does. Discarding the traces here would leave `SUMPRODUCT`
+    // outside the arithmetic policy and disagreeing with `SUM` on identical data.
     let mut arrays = Vec::with_capacity(args.len());
     for arg in args {
-        match engine.eval_array(context, arg) {
-            Ok(array) => arrays.push(array),
+        match engine.eval_array_with_trace(context, arg) {
+            Ok(evaluated) => arrays.push(evaluated),
             Err(kind) => return Value::Error(kind),
         }
     }
-    let rows = arrays[0].rows;
-    let cols = arrays[0].cols;
-    for array in &arrays[1..] {
-        if array.rows != rows || array.cols != cols {
+    let rows = arrays[0].array.rows;
+    let cols = arrays[0].array.cols;
+    for evaluated in &arrays[1..] {
+        if evaluated.array.rows != rows || evaluated.array.cols != cols {
             return Value::Error(ErrorKind::Value);
         }
     }
@@ -490,22 +495,28 @@ fn kernel_sumproduct(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
     if let Err(kind) = engine.ensure_array_cells(cells) {
         return Value::Error(kind);
     }
-    let mut total = 0.0_f64;
+    let mut total = ExcelSum::new(engine);
     for row in 0..rows {
         for col in 0..cols {
             let mut product = 1.0_f64;
-            for array in &arrays {
-                let element = element_at(array, row, col);
-                match element {
+            let mut product_trace = Some(DecimalTrace::ONE);
+            for evaluated in &arrays {
+                let (number, trace) = match element_at(&evaluated.array, row, col) {
                     Value::Error(kind) => return Value::Error(*kind),
-                    Value::Number(number) => product *= number,
-                    Value::Logical(_) | Value::Text(_) | Value::Blank => product *= 0.0,
-                }
+                    Value::Number(number) => (*number, evaluated.decimal_at(row, col)),
+                    // Excel treats a non-numeric cell as zero rather than as an error, and zero is
+                    // exactly representable, so the term stays traceable.
+                    Value::Logical(_) | Value::Text(_) | Value::Blank => {
+                        (0.0, Some(DecimalTrace::ZERO))
+                    }
+                };
+                product *= number;
+                product_trace = product_trace.and_then(|running| running.multiply(trace?));
             }
-            total += product;
+            total.add_with_trace(product, product_trace);
         }
     }
-    Value::Number(total)
+    Value::Number(total.total())
 }
 
 fn kernel_index(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

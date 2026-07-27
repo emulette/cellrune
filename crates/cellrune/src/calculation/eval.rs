@@ -108,6 +108,14 @@ impl<'bindings> EvalContext<'bindings> {
     }
 }
 
+/// Which of a cell's competing sources `Engine::value_source` selected.
+enum ValueSource<'engine> {
+    Calculated(&'engine Value),
+    Literal(&'engine CellValue),
+    Blank,
+    Error(ErrorKind),
+}
+
 #[derive(Debug)]
 pub struct Engine<'workbook> {
     workbook: &'workbook WorkbookSnapshot,
@@ -130,53 +138,74 @@ pub struct Engine<'workbook> {
 }
 
 impl<'workbook> Engine<'workbook> {
-    pub fn cell_value(&self, cell: CellId) -> Value {
+    /// Resolves which of a cell's competing sources actually supplies its value.
+    ///
+    /// A cell can hold a literal and still read as something else — an array formula or a dynamic
+    /// spill materializes over it, a cycle or a blocked upstream replaces it with an error. Both
+    /// the value and its decimal trace are derived from this one answer, because a trace taken
+    /// from a literal that something else overrode would let a sum snap to zero on terms that
+    /// never cancelled.
+    fn value_source(&self, cell: CellId) -> ValueSource<'_> {
         if let Some(value) = self.results.get(&cell) {
-            return value.clone();
+            return ValueSource::Calculated(value);
         }
         if self.cycle_cells.contains(&cell) {
-            return Value::Error(ErrorKind::Ref);
+            return ValueSource::Error(ErrorKind::Ref);
         }
         if self.dependency_limit_exceeded {
-            return Value::Error(ErrorKind::ResourceLimit(
+            return ValueSource::Error(ErrorKind::ResourceLimit(
                 CalculationLimitKind::DependencyEdges,
             ));
         }
         if self.blocked_cells.contains(&cell) || self.parse_failures.contains_key(&cell) {
-            return Value::Error(ErrorKind::Unsupported);
+            return ValueSource::Error(ErrorKind::Unsupported);
         }
         if let Some(owner) = self.array_owner(cell) {
-            return self
-                .results
-                .get(&owner)
-                .cloned()
-                .unwrap_or(Value::Error(ErrorKind::Unsupported));
+            return self.results.get(&owner).map_or(
+                ValueSource::Error(ErrorKind::Unsupported),
+                ValueSource::Calculated,
+            );
         }
         let Some(sheet) = self.workbook.sheets().get(cell.0) else {
-            return Value::Error(ErrorKind::Ref);
+            return ValueSource::Error(ErrorKind::Ref);
         };
         let Some(source) = cell_at(sheet, cell.1, cell.2) else {
-            return Value::Blank;
+            return ValueSource::Blank;
         };
         match source.content() {
-            CellContent::Literal(value) => value_from_cell(value),
-            CellContent::Formula(_) => Value::Error(ErrorKind::Unsupported),
+            CellContent::Literal(value) => ValueSource::Literal(value),
+            CellContent::Formula(_) => ValueSource::Error(ErrorKind::Unsupported),
         }
     }
 
-    pub(super) fn numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
-        if let Some(trace) = self.numeric_decimal_traces.get(&cell) {
-            return Some(*trace);
+    pub fn cell_value(&self, cell: CellId) -> Value {
+        match self.value_source(cell) {
+            ValueSource::Calculated(value) => value.clone(),
+            ValueSource::Literal(value) => value_from_cell(value),
+            ValueSource::Blank => Value::Blank,
+            ValueSource::Error(kind) => Value::Error(kind),
         }
-        let source = self
-            .workbook
-            .sheets()
-            .get(cell.0)
-            .and_then(|sheet| cell_at(sheet, cell.1, cell.2))?;
-        let CellContent::Literal(CellValue::Number(number)) = source.content() else {
+    }
+
+    /// Exact decimal behind this cell's number, when the configured policy can act on one.
+    ///
+    /// Under `Ieee754` nothing consults the trace, so it is not computed: the literal path costs a
+    /// `f64::to_string` and an allocation per cell, which would otherwise be charged to every
+    /// range read on a policy that discards the result.
+    pub(super) fn numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
+        if !matches!(
+            self.arithmetic_semantics(),
+            crate::ArithmeticSemantics::ExcelNearZero
+        ) {
             return None;
-        };
-        DecimalTrace::from_number(number.get())
+        }
+        match self.value_source(cell) {
+            ValueSource::Calculated(_) => self.numeric_decimal_traces.get(&cell).copied(),
+            ValueSource::Literal(CellValue::Number(number)) => {
+                DecimalTrace::from_number(number.get())
+            }
+            ValueSource::Literal(_) | ValueSource::Blank | ValueSource::Error(_) => None,
+        }
     }
 
     pub(super) fn calculated_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {

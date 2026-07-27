@@ -145,7 +145,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `CalculationOptionsError`, `CalculationIssueCode`, `SessionErrorCode`,
   `CalculationDecisionReason`, `MaterializedResultOrigin`, `FormulaDialect`,
   `FormulaMetadata`, `WorkbookChange`, `XlsxDocumentKind`,
-  `RecalculationWritePolicy`, `PhoneticType`, and `PhoneticAlignment`). A
+  `RecalculationWritePolicy`, `ArithmeticSemantics`, `FinancialSolverSemantics`,
+  `PhoneticType`, and `PhoneticAlignment`). A
   `match` on one of these needs a wildcard arm even if every current variant
   is handled.
 - **Every stable machine code exposes `.as_str()`,** returning `&str` or
@@ -279,11 +280,27 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `DocumentPresentation`: `.revision()`, `.diagnostics()`,
   `.frozen_pane(SheetId)`, `.worksheet_phonetic_properties(SheetId)`,
   `.row_phonetic_visibility(SheetId, Row)`,
-  `.column_phonetic_visibility(SheetId)`, and
-  `.cell_phonetics(SheetId, CellAddress)`.
+  `.column_phonetic_visibility(SheetId)`,
+  `.cell_phonetics(SheetId, CellAddress)`, and
+  `.phonetic_cell_entries(SheetId) -> impl Iterator<Item = (CellAddress, CellPhonetics)>`.
+  The iterator yields only cells carrying at least one run, in row-major
+  address order, reporting the same visibility `cell_phonetics` reports for the
+  same address. A cell whose annotation holds only `phoneticPr` display
+  properties without `rPh` runs — common in Japanese workbooks — is skipped by
+  the iterator and stays reachable through `cell_phonetics`.
 - `CellPhonetics`: `.runs()`, `.properties()`,
   `.explicit_cell_visibility()`, `.explicit_row_visibility()`,
-  `.explicit_column_visibility()`, and `.effective_visibility()`.
+  `.explicit_column_visibility()`, `.effective_visibility()`, and
+  `.resolved_runs(&str) -> Result<Vec<ResolvedPhoneticRun>, ValidationError>`.
+- `ResolvedPhoneticRun`: `.base_bytes() -> Range<usize>`, `.base_slice()`,
+  `.text()`, `.run()`. `resolved_runs` translates each run's range from the
+  UTF-16 code units XLSX stores into the byte offsets Rust indexes with, and
+  rejects a range that splits a surrogate pair or runs past the base text with
+  the existing `ValidationError`. Presentation state does not hold cell text,
+  so the base text comes from the workbook snapshot: look the address up with
+  `WorkbookSnapshot::sheet_by_id(..).cell(address)` and match
+  `CellContent::Literal(CellValue::Text(..))`. The returned value keeps that
+  exact borrow, so a byte range cannot be paired with another cell's string.
 - `PhoneticTextRange::new(start_utf16, end_utf16)`, `.start_utf16()`,
   `.end_utf16()`; when a range is validated against its base text, a boundary
   cannot split a surrogate pair.
@@ -402,9 +419,24 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `calculate_workbook(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot` —
   stateless full recalculation and the correctness oracle; never mutates the
   source snapshot.
-- `CalculationOptions::default().with_today_serial(FiniteNumber).with_now_serial(FiniteNumber).with_limits(CalculationLimits)` —
+- `CalculationOptions::default().with_today_serial(FiniteNumber).with_now_serial(FiniteNumber).with_limits(CalculationLimits).with_arithmetic_semantics(ArithmeticSemantics).with_financial_solver_semantics(FinancialSolverSemantics)` —
   `TODAY()` and `NOW()` never read the host clock. Omitting the corresponding
   serial makes that formula report `VolatileInputMissing`.
+- **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
+  than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
+  corrects a sum or difference that cancels to near zero, so `=0.1+0.2-0.3` is
+  `0` and `=(0.1+0.2-0.3)=0` is `TRUE`; `Ieee754` leaves the residue. The
+  correction reaches the operator path, the array path, and the running totals
+  behind `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`,
+  `SUMPRODUCT`, and `NPV`, so those cannot disagree with each other.
+  `FinancialSolverSemantics`: `ExcelIterationBudget` (default) applies
+  Microsoft's per-function budget — 20 iterations/`1e-7` for `IRR` and `RATE`,
+  100/`1e-8` for `XIRR` — so inputs Excel abandons yield `#NUM!` here too;
+  `ExtendedSearch` searches longer, as 0.1.2 did. **Upgrading from 0.1.2
+  changes calculated numbers unless you select `ArithmeticSemantics::Ieee754`
+  and `FinancialSolverSemantics::ExtendedSearch`.** Both axes are also carried
+  by the interop DTO and the Python, Node.js, and MCP boundaries.
+  `docs/NUMERICS.md` records the policies and their oracles.
 - `CalculationLimits::default()` + 7 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
   budgets: formula tokens, AST nodes, AST nesting depth, dependency edges,
   array cells, calculated text bytes, and data-dependent function

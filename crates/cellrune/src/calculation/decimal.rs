@@ -1,8 +1,12 @@
 /// Exact base-10 value used to decide whether parsed numeric inputs really cancel.
 ///
-/// The calculated number remains an `f64`; this trace is only a decision oracle for addition and
-/// subtraction. Keeping the coefficient and power of ten separately avoids both a wider
-/// near-zero threshold and the false positives that an interval error bound would permit.
+/// The calculated number remains an `f64`; this trace is only a decision oracle for the sums and
+/// differences that can cancel — including the products a kernel such as `SUMPRODUCT` forms before
+/// summing them. Keeping the coefficient and power of ten separately avoids both a wider near-zero
+/// threshold and the false positives that an interval error bound would permit.
+///
+/// Every operation is checked and returns `None` on overflow, so a trace that cannot be represented
+/// exactly stops the chain instead of asserting a cancellation it did not prove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DecimalTrace {
     coefficient: i128,
@@ -97,14 +101,37 @@ impl DecimalTrace {
         )
     }
 
+    /// Multiplies two exact decimals, for kernels that form products before summing them.
+    ///
+    /// A product of two finite decimals is itself a finite decimal, so this stays exact: the
+    /// coefficients multiply and the powers of ten add.
+    pub(in crate::calculation) fn multiply(self, right: Self) -> Option<Self> {
+        Some(
+            Self {
+                coefficient: self.coefficient.checked_mul(right.coefficient)?,
+                exponent: self.exponent.checked_add(right.exponent)?,
+            }
+            .normalized(),
+        )
+    }
+
     pub(in crate::calculation) const fn is_zero(self) -> bool {
         self.coefficient == 0
     }
 
     fn combine(self, right: Self, subtract: bool) -> Option<Self> {
         let target_exponent = self.exponent.min(right.exponent);
-        let left = scale_coefficient(self.coefficient, self.exponent - target_exponent)?;
-        let mut right = scale_coefficient(right.coefficient, right.exponent - target_exponent)?;
+        // Both differences are non-negative by construction but still overflow `i32` when the
+        // operands sit at opposite ends of the exponent range, so they fail closed like every
+        // other step here rather than panicking on a literal such as `1E-2147483648`.
+        let left = scale_coefficient(
+            self.coefficient,
+            self.exponent.checked_sub(target_exponent)?,
+        )?;
+        let mut right = scale_coefficient(
+            right.coefficient,
+            right.exponent.checked_sub(target_exponent)?,
+        )?;
         if subtract {
             right = right.checked_neg()?;
         }
@@ -295,6 +322,30 @@ mod tests {
         assert_eq!(
             DecimalTrace::from_literal("-2.5").and_then(DecimalTrace::negate),
             DecimalTrace::from_literal("2.5")
+        );
+    }
+
+    #[test]
+    fn extreme_exponents_stop_tracing_instead_of_overflowing() {
+        let tiny = DecimalTrace::from_literal("1E-2147483648").expect("finite literal");
+        assert_eq!(tiny.add(DecimalTrace::ONE), None);
+        assert_eq!(DecimalTrace::ONE.subtract(tiny), None);
+        assert_eq!(tiny.multiply(tiny), None);
+    }
+
+    #[test]
+    fn products_of_exact_decimals_stay_exact() {
+        let product = DecimalTrace::from_literal("0.1")
+            .and_then(|left| left.multiply(DecimalTrace::from_literal("0.2")?))
+            .expect("product fits");
+        assert_eq!(
+            product,
+            DecimalTrace::from_literal("0.02").expect("literal")
+        );
+        assert!(
+            product
+                .subtract(DecimalTrace::from_literal("0.02").expect("literal"))
+                .is_some_and(DecimalTrace::is_zero)
         );
     }
 

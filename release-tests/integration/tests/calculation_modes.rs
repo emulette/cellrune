@@ -452,6 +452,15 @@ fn the_operator_path_and_the_aggregate_path_agree_within_each_mode() {
             "SUM(100.1,-100.0,-0.099999999999999)",
         ),
         ("1.0000000000000004 - 1.0", "SUM(1.0000000000000004,-1.0)"),
+        // `SUMPRODUCT` forms products before summing them, but the sum it forms is the same sum,
+        // so it has to reach the same answer. Reading its operands without their decimals leaves
+        // `=SUMPRODUCT({0.1,0.2,-0.3})=0` FALSE while `=SUM(0.1,0.2,-0.3)=0` is TRUE.
+        ("0.1 + 0.2 - 0.3", "SUMPRODUCT({0.1,0.2,-0.3})"),
+        ("0.7 + 0.1 - 0.8", "SUMPRODUCT({0.7,0.1,-0.8})"),
+        (
+            "100.1 - 100.0 - 0.099999999999999",
+            "SUMPRODUCT({100.1,-100.0,-0.099999999999999})",
+        ),
     ];
     for options in [excel_mode(), ieee_mode()] {
         for (operators, aggregate) in PAIRS {
@@ -538,6 +547,39 @@ fn conditional_and_ordinary_aggregates_agree_within_each_mode() {
             }
         }
     }
+}
+
+/// TIER 2 — `SUMPRODUCT` multiplies before it adds, and the products are still exact decimals.
+///
+/// The terms here cancel only after the multiplication: `0.1 x 3` and `-0.3 x 1` are exactly
+/// opposite, while their `f64` products are not. Tracing the sum but not the product would leave
+/// the kernel unable to see the cancellation it is supposed to correct.
+#[test]
+fn sumproduct_traces_the_products_it_sums() {
+    const PRODUCTS: &[&str] = &[
+        "SUMPRODUCT({0.1,-0.3},{3,1})",
+        "SUMPRODUCT({0.1,0.2,-0.4},{3,1.5,1.5})",
+    ];
+    let excel = numbers(PRODUCTS, excel_mode());
+    let ieee = numbers(PRODUCTS, ieee_mode());
+    let mut residues = 0;
+    for ((formula, excel), ieee) in PRODUCTS.iter().zip(excel).zip(ieee) {
+        assert_eq!(excel, Some(0.0), "{formula} did not snap an exact zero");
+        if ieee.unwrap_or_else(|| panic!("{formula} produced no IEEE number")) != 0.0 {
+            residues += 1;
+        }
+    }
+    assert!(
+        residues > 0,
+        "no product left an IEEE residue, so this test is not exercising the difference"
+    );
+
+    // A product sum that is genuinely nonzero must survive untouched in both modes.
+    let nearby = "SUMPRODUCT({0.1,-0.30000000000001},{3,1})";
+    let excel = numbers(&[nearby], excel_mode())[0].expect("Excel-mode nearby product");
+    let ieee = numbers(&[nearby], ieee_mode())[0].expect("IEEE nearby product");
+    assert_ne!(excel, 0.0, "a real product difference was snapped");
+    assert_eq!(excel.to_bits(), ieee.to_bits());
 }
 
 /// TIER 2 — the array path shares `apply_binary` with the scalar path and must share its policy.

@@ -1,10 +1,11 @@
 use cellrune::{
-    ApplyChangesError, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
-    CalculationExecutionMode, CalculationHints, CalculationIssueCode, CalculationLimits,
-    CalculationMode, CalculationOptions, CancellationToken, CellAddress, CellContent, CellValue,
-    DateSystem, DefinedName, DefinedNameScope, EditBatch, FiniteNumber, FormulaText, NumberFormat,
-    NumberFormatKind, RecalculationMode, SessionErrorCode, SessionLimits, SheetId, SheetName,
-    SheetVisibility, WorkbookCalculationSession, WorkbookChange, calculate_workbook,
+    ApplyChangesError, ArithmeticSemantics, CalculationCellId, CalculationCellResult,
+    CalculationDecisionReason, CalculationExecutionMode, CalculationHints, CalculationIssueCode,
+    CalculationLimits, CalculationMode, CalculationOptions, CancellationToken, CellAddress,
+    CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope, EditBatch,
+    FiniteNumber, FormulaText, NumberFormat, NumberFormatKind, RecalculationMode, SessionErrorCode,
+    SessionLimits, SheetId, SheetName, SheetVisibility, WorkbookCalculationSession, WorkbookChange,
+    calculate_workbook,
 };
 
 #[test]
@@ -292,6 +293,82 @@ fn index_reference_dependencies_remain_incrementally_safe() {
             Some(&CalculationCellResult::Value(number(expected)))
         );
     }
+}
+
+/// A spill member is not a formula cell, so its exact decimal has to be carried in the snapshot
+/// under its own address or an incremental pass cannot restore it.
+///
+/// `B1:B3` spills `0.1`, `0.2`, `-0.3`, and `D1` sums them to exactly zero before scaling by `E1`.
+/// Editing only `E1` leaves the spill clean, so its values are reseeded from the snapshot — and if
+/// their decimals are not reseeded with them the sum keeps its `5.55e-17` residue, which the scale
+/// then magnifies into a plainly nonzero answer that the full calculation never produced.
+#[test]
+fn spilled_decimal_traces_survive_an_incremental_recalculation() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let excel =
+        CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::ExcelNearZero);
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(0.1)),
+                WorkbookChange::set_cell_value(sheet_id, address("A2"), number(0.2)),
+                WorkbookChange::set_cell_value(sheet_id, address("A3"), number(-0.3)),
+                // A declared spill range: an undeclared one makes the whole workbook
+                // incremental-unsafe, which would take the path under test out of reach.
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("A1:A3+0"),
+                    Some(CellRange::new(address("B1"), address("B3")).expect("valid spill range")),
+                )
+                .expect("valid dynamic spill change"),
+                WorkbookChange::set_cell_value(sheet_id, address("E1"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("SUM(B1:B3)*E1")),
+            ]),
+        )
+        .expect("spill workbook");
+    session
+        .recalculate(RecalculationMode::Auto, excel, CancellationToken::new())
+        .expect("full calculation");
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed full calculation")
+            .cell(CalculationCellId::new(sheet_id, address("D1"))),
+        Some(&CalculationCellResult::Value(number(0.0))),
+        "the full calculation must snap the spilled sum"
+    );
+
+    // Dirty only the consumer, and only through a value edit so the pass stays incremental. The
+    // spill is untouched, so it is restored from the snapshot rather than recalculated.
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("E1"),
+                number(1_000_000.0),
+            )]),
+        )
+        .expect("consumer edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            excel,
+            CancellationToken::new(),
+        )
+        .expect("incremental recalculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed incremental calculation")
+            .cell(CalculationCellId::new(sheet_id, address("D1"))),
+        Some(&CalculationCellResult::Value(number(0.0))),
+        "the incremental pass disagreed with the full calculation"
+    );
 }
 
 #[test]

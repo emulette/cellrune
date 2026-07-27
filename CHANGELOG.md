@@ -24,9 +24,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
   rather than to what 0.1.2 did. `ArithmeticSemantics::ExcelNearZero` corrects a sum or difference
   that cancels to near zero, so `=0.1+0.2-0.3` is `0` and `=(0.1+0.2-0.3)=0` is `TRUE`; the
   correction applies to the operator path, to the array path, and to the policy-aware running
-  totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, and `NPV`, so
-  `=A1+A2+A3` and `=SUM(A1:A3)` cannot disagree. The arithmetic path carries an exact trace of
-  parsed decimal inputs through intermediate sums, and `NPV` extends it as an exact rational trace
+  totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, `SUMPRODUCT`, and `NPV`,
+  so `=A1+A2+A3`, `=SUM(A1:A3)` and `=SUMPRODUCT(A1:A3)` cannot disagree. The arithmetic path
+  carries an exact trace of parsed decimal inputs through intermediate sums, `SUMPRODUCT` carries it
+  through the products it forms, and `NPV` extends it as an exact rational trace
   through discounting, so `=100.1-100-0.1` becomes zero while
   `=100.1-100-0.099999999999999` remains nonzero. `FinancialSolverSemantics::ExcelIterationBudget`
   applies Microsoft's

@@ -1490,6 +1490,15 @@ fn implicit_intersection_uses_the_formula_cell_position() {
             (2, 9, "@A1:B3"),
             (2, 10, "@42"),
             (2, 11, "@Vector"),
+            // Parenthesised operands: Excel round-trips `_xlfn.SINGLE((A1:A3))` into this shape,
+            // so `@` has to look through parentheses and through a nested `@` before it decides
+            // what kind of operand it is intersecting. Dispatching on the unopened operand makes
+            // these silently return the first element instead of the intersecting row.
+            (2, 12, "@(A1:A3)"),
+            (2, 13, "_xlfn.SINGLE((A1:A3))"),
+            (2, 14, "@(@A1:A3)"),
+            (2, 15, "@((A1:A3))"),
+            (2, 16, "SUM(@(A1:A3))"),
         ],
         &[("Vector", "A1:A3")],
     );
@@ -1505,6 +1514,11 @@ fn implicit_intersection_uses_the_formula_cell_position() {
         (2, 7, 7.0),
         (2, 10, 42.0),
         (2, 11, 20.0),
+        (2, 12, 20.0),
+        (2, 13, 20.0),
+        (2, 14, 20.0),
+        (2, 15, 20.0),
+        (2, 16, 20.0),
     ] {
         assert_number_at(&calculation, row, column, expected, 0.0);
     }
@@ -2112,6 +2126,73 @@ fn single_cell_legacy_array_metadata_uses_array_root_evaluation() {
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     assert_number(&calculation, 1, 6.0, 0.0);
     assert_number(&calculation, 2, 9.0, 0.0);
+}
+
+/// A cell an array formula materializes over no longer holds the literal underneath it, and the
+/// near-zero policy must read its exact decimal from the same place it reads its value.
+///
+/// Here `B1` and `C1` carry literals that cancel exactly while the array puts `2` and `3` on top of
+/// them. Taking the decimals from the literals proves a cancellation that the summed values never
+/// performed, and `=SUM(B1:C1)` collapses from `5` to `0`.
+#[test]
+fn literals_under_an_array_formula_do_not_supply_the_near_zero_decision() {
+    let sheet_id = SheetId::new(1).expect("valid sheet ID");
+    let mut sheet = Sheet::new(
+        sheet_id,
+        SheetName::new("Sheet1").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    let anchor = CellAddress::from_a1("A1").expect("array anchor");
+    let end = CellAddress::from_a1("C1").expect("array end");
+    sheet
+        .insert_cell(
+            anchor,
+            CellContent::Formula(FormulaCell::new(
+                FormulaDialect::ExcelA1,
+                FormulaText::from_xlsx("SEQUENCE(1,3)").expect("valid array formula text"),
+                SavedResult::Missing,
+                FormulaMetadata::Array {
+                    range: CellRange::new(anchor, end).expect("valid array range"),
+                    always_calculate: false,
+                },
+            )),
+        )
+        .expect("unique array anchor");
+    for (address, literal) in [("B1", 0.1), ("C1", -0.1)] {
+        sheet
+            .insert_cell(
+                CellAddress::from_a1(address).expect("array follower address"),
+                CellContent::Literal(CellValue::number(literal).expect("finite stale literal")),
+            )
+            .expect("unique array follower");
+    }
+    sheet
+        .insert_cell(
+            CellAddress::from_a1("A2").expect("dependent formula address"),
+            CellContent::Formula(FormulaCell::new(
+                FormulaDialect::ExcelA1,
+                FormulaText::from_xlsx("SUM(B1:C1)").expect("valid dependent formula text"),
+                SavedResult::Missing,
+                FormulaMetadata::Normal,
+            )),
+        )
+        .expect("unique dependent formula");
+    let workbook = WorkbookSnapshot::new_with_metadata(
+        vec![sheet],
+        Vec::new(),
+        Vec::new(),
+        DateSystem::Excel1900,
+        CalculationHints::default(),
+        WorkbookSource::default(),
+        Provenance::new(
+            ProviderIdentity::new("calculation-test", "1").expect("valid test provider identity"),
+            None,
+        ),
+    )
+    .expect("valid calculation test workbook");
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number_at(&calculation, 2, 1, 5.0, 0.0);
 }
 
 #[test]

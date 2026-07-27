@@ -5,7 +5,9 @@ use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
 use crate::calculation::decimal::DecimalTrace;
 use crate::calculation::functions::{call_function, call_function_array};
 use crate::calculation::limits::CalculationLimitKind;
-use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
+use crate::calculation::operators::{
+    apply_binary, apply_unary, broadcast_index, broadcast_shape, element_at,
+};
 use crate::calculation::runtime::{Array, Rect};
 use crate::calculation::value::{ErrorKind, Value};
 
@@ -29,6 +31,15 @@ pub(in crate::calculation) struct ArrayEvaluation {
 }
 
 impl ArrayEvaluation {
+    /// Exact decimal of the element `element_at` reads at this broadcast position.
+    ///
+    /// Indexed through the same rule as the values, so a change to broadcasting cannot move the
+    /// values and the traces apart.
+    pub(in crate::calculation) fn decimal_at(&self, row: u32, column: u32) -> Option<DecimalTrace> {
+        let index = broadcast_index(self.array.rows, self.array.cols, row, column)?;
+        self.decimal_traces.get(index).copied().flatten()
+    }
+
     fn untracked(array: Array) -> Self {
         let decimal_traces = vec![None; array.data.len()];
         Self {
@@ -159,21 +170,9 @@ impl Engine<'_> {
             Expr::ErrorLit(kind) => ScalarEvaluation::untracked(Value::Error(*kind)),
             Expr::Missing => ScalarEvaluation::untracked(Value::Blank),
             Expr::Paren(inner) => self.eval_scalar_with_trace(context, inner),
-            Expr::ImplicitIntersection(inner) => match inner.as_ref() {
-                Expr::Name(name) if context.binding(name).is_some() => ScalarEvaluation::untracked(
-                    context
-                        .binding(name)
-                        .cloned()
-                        .expect("binding presence checked"),
-                ),
-                Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
-                    self.eval_reference_with_trace(context, inner)
-                }
-                Expr::Call { name, .. } if is_reference_returning_function(name) => {
-                    self.eval_reference_with_trace(context, inner)
-                }
-                _ => self.first_array_value_with_trace(context, inner),
-            },
+            Expr::ImplicitIntersection(inner) => {
+                self.eval_implicit_intersection_with_trace(context, inner)
+            }
             Expr::Array(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported)),
             Expr::Name(name) => match context.binding(name) {
                 Some(value) => ScalarEvaluation::untracked(value.clone()),
@@ -199,6 +198,37 @@ impl Engine<'_> {
                 self.options.limits().max_text_bytes(),
                 self.arithmetic_semantics(),
             ),
+        }
+    }
+
+    /// Resolves the operand of an `@` (implicit intersection) operator down to one scalar.
+    ///
+    /// The operand may be wrapped in parentheses or in another `@` — Excel round-trips
+    /// `_xlfn.SINGLE((A1:A5))` into exactly that shape — so those unwrap before the operand kind
+    /// decides the intersection. Dispatching without unwrapping first would silently treat
+    /// `=@(A1:A5)` as "the array's first element" instead of intersecting it.
+    fn eval_implicit_intersection_with_trace(
+        &self,
+        context: EvalContext<'_>,
+        operand: &Expr,
+    ) -> ScalarEvaluation {
+        match operand {
+            Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
+                self.eval_implicit_intersection_with_trace(context, inner)
+            }
+            Expr::Name(name) if context.binding(name).is_some() => ScalarEvaluation::untracked(
+                context
+                    .binding(name)
+                    .cloned()
+                    .expect("binding presence checked"),
+            ),
+            Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
+                self.eval_reference_with_trace(context, operand)
+            }
+            Expr::Call { name, .. } if is_reference_returning_function(name) => {
+                self.eval_reference_with_trace(context, operand)
+            }
+            _ => self.first_array_value_with_trace(context, operand),
         }
     }
 
@@ -255,25 +285,9 @@ impl Engine<'_> {
     ) -> Result<ArrayEvaluation, ErrorKind> {
         match expr {
             Expr::Paren(inner) => self.eval_array_with_trace(context, inner),
-            Expr::ImplicitIntersection(inner) => {
-                Ok(ArrayEvaluation::scalar(match inner.as_ref() {
-                    Expr::Name(name) if context.binding(name).is_some() => {
-                        ScalarEvaluation::untracked(
-                            context
-                                .binding(name)
-                                .cloned()
-                                .expect("binding presence checked"),
-                        )
-                    }
-                    Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
-                        self.eval_reference_with_trace(context, inner)
-                    }
-                    Expr::Call { name, .. } if is_reference_returning_function(name) => {
-                        self.eval_reference_with_trace(context, inner)
-                    }
-                    _ => self.first_array_value_with_trace(context, inner),
-                }))
-            }
+            Expr::ImplicitIntersection(inner) => Ok(ArrayEvaluation::scalar(
+                self.eval_implicit_intersection_with_trace(context, inner),
+            )),
             Expr::Name(name) if context.binding(name).is_some() => {
                 Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
                     context
@@ -293,23 +307,21 @@ impl Engine<'_> {
                 }
                 let cell_count = (rows.len() as u64) * (cols as u64);
                 self.ensure_array_cells(cell_count)?;
-                let evaluated: Vec<ScalarEvaluation> = rows
+                let (data, decimal_traces): (Vec<Value>, Vec<Option<DecimalTrace>>) = rows
                     .iter()
                     .flat_map(|row| {
                         row.iter()
                             .map(|value| self.eval_scalar_with_trace(context, value))
                     })
-                    .collect();
+                    .map(|evaluated| (evaluated.value, evaluated.decimal_trace))
+                    .unzip();
                 Ok(ArrayEvaluation {
                     array: Array {
                         rows: rows.len() as u32,
                         cols: cols as u32,
-                        data: evaluated.iter().map(|value| value.value.clone()).collect(),
+                        data,
                     },
-                    decimal_traces: evaluated
-                        .into_iter()
-                        .map(|value| value.decimal_trace)
-                        .collect(),
+                    decimal_traces,
                 })
             }
             Expr::Binary { op, left, right } => {
@@ -328,11 +340,11 @@ impl Engine<'_> {
                             *op,
                             ScalarEvaluation {
                                 value: element_at(&left.array, row, column).clone(),
-                                decimal_trace: array_decimal_at(&left, row, column),
+                                decimal_trace: left.decimal_at(row, column),
                             },
                             ScalarEvaluation {
                                 value: element_at(&right.array, row, column).clone(),
-                                decimal_trace: array_decimal_at(&right, row, column),
+                                decimal_trace: right.decimal_at(row, column),
                             },
                             self.options.limits().max_text_bytes(),
                             self.arithmetic_semantics(),
@@ -348,31 +360,26 @@ impl Engine<'_> {
             }
             Expr::Unary { op, operand } => {
                 let operand = self.eval_array_with_trace(context, operand)?;
-                let evaluated: Vec<ScalarEvaluation> = operand
+                let (rows, cols) = (operand.array.rows, operand.array.cols);
+                let (data, decimal_traces): (Vec<Value>, Vec<Option<DecimalTrace>>) = operand
                     .array
                     .data
                     .into_iter()
                     .zip(operand.decimal_traces)
                     .map(|(value, decimal_trace)| {
-                        evaluate_unary(
+                        let evaluated = evaluate_unary(
                             *op,
                             ScalarEvaluation {
                                 value,
                                 decimal_trace,
                             },
-                        )
+                        );
+                        (evaluated.value, evaluated.decimal_trace)
                     })
-                    .collect();
+                    .unzip();
                 Ok(ArrayEvaluation {
-                    array: Array {
-                        rows: operand.array.rows,
-                        cols: operand.array.cols,
-                        data: evaluated.iter().map(|value| value.value.clone()).collect(),
-                    },
-                    decimal_traces: evaluated
-                        .into_iter()
-                        .map(|value| value.decimal_trace)
-                        .collect(),
+                    array: Array { rows, cols, data },
+                    decimal_traces,
                 })
             }
             Expr::Call { name, args } => {
@@ -426,14 +433,4 @@ impl Engine<'_> {
             decimal_traces,
         })
     }
-}
-
-fn array_decimal_at(array: &ArrayEvaluation, row: u32, column: u32) -> Option<DecimalTrace> {
-    let source_row = if array.array.rows == 1 { 0 } else { row };
-    let source_column = if array.array.cols == 1 { 0 } else { column };
-    if source_row >= array.array.rows || source_column >= array.array.cols {
-        return None;
-    }
-    let index = source_row as usize * array.array.cols as usize + source_column as usize;
-    array.decimal_traces.get(index).copied().flatten()
 }

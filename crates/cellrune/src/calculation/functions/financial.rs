@@ -5,7 +5,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::calendar::date_from_serial;
 use super::util::{
-    collect_argument_values, collect_argument_values_with_counter, required_number,
+    ExcelSum, collect_argument_values, collect_argument_values_with_counter, required_number,
     required_number_with_trace,
 };
 
@@ -174,8 +174,10 @@ fn npv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let base_trace = rate_trace
         .and_then(|rate| DecimalTrace::ONE.add(rate))
         .and_then(RationalTrace::from_decimal);
-    let mut total = 0.0;
-    let mut exact_total = Some(RationalTrace::ZERO);
+    // The same accumulator the aggregates use, carrying rationals because discounting divides each
+    // cashflow before it is added. `NPV` therefore follows the arithmetic axis through one shared
+    // policy read rather than a private copy of the near-zero rule.
+    let mut total: ExcelSum<RationalTrace> = ExcelSum::new(engine);
     for (index, (cashflow, cashflow_trace)) in cashflows.into_iter().enumerate() {
         let Ok(period) = i32::try_from(index + 1) else {
             return Value::Error(ErrorKind::Num);
@@ -185,19 +187,9 @@ fn npv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         let discounted_trace = cashflow_trace
             .and_then(RationalTrace::from_decimal)
             .and_then(|cashflow| cashflow.divide(base_trace?.pow(rational_period?)?));
-        exact_total = exact_total.and_then(|total| total.add(discounted_trace?));
-        let next = total + discounted;
-        total = if matches!(
-            engine.arithmetic_semantics(),
-            super::super::ArithmeticSemantics::ExcelNearZero
-        ) && exact_total.is_some_and(RationalTrace::is_zero)
-        {
-            0.0
-        } else {
-            next
-        };
+        total.add_with_trace(discounted, discounted_trace);
     }
-    financial_value(total)
+    financial_value(total.total())
 }
 
 fn irr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

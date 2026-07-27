@@ -81,55 +81,41 @@ fn evaluate_arithmetic(op: BinaryOp, left: f64, right: f64) -> Value {
     }
 }
 
-#[cfg(test)]
-pub(super) fn lift_binary(
-    op: BinaryOp,
-    left: &Array,
-    right: &Array,
-    max_text_bytes: u64,
-    max_array_cells: u64,
-) -> Result<Array, ErrorKind> {
-    let (rows, cols) = broadcast_shape(left, right)?;
-    let cells = u64::from(rows)
-        .checked_mul(u64::from(cols))
-        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
-    if cells > max_array_cells {
-        return Err(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells));
-    }
-    let mut data = Vec::with_capacity(cells as usize);
-    for row in 0..rows {
-        for col in 0..cols {
-            data.push(apply_binary(
-                op,
-                element_at(left, row, col),
-                element_at(right, row, col),
-                max_text_bytes,
-            ));
-        }
-    }
-    Ok(Array { rows, cols, data })
-}
-
 pub(super) fn broadcast_shape(left: &Array, right: &Array) -> Result<(u32, u32), ErrorKind> {
     Ok((left.rows.max(right.rows), left.cols.max(right.cols)))
 }
 
-pub(super) fn element_at(array: &Array, row: u32, col: u32) -> &Value {
-    let source_row = if array.rows == 1 { 0 } else { row };
-    let source_col = if array.cols == 1 { 0 } else { col };
-    if source_row >= array.rows || source_col >= array.cols {
-        &NOT_AVAILABLE
-    } else {
-        array.at(source_row, source_col)
+/// Position an operand of the given shape contributes to `(row, col)` of a broadcast result.
+///
+/// A singleton dimension repeats along that axis; a position the operand does not reach at all is
+/// `None`, which the callers surface as `#N/A` (values) or as an untraced element (decimals).
+/// Both the value and the decimal-trace side of the array path index through this one rule, so
+/// broadcasting cannot change for one of them without changing for the other.
+pub(super) const fn broadcast_index(rows: u32, cols: u32, row: u32, col: u32) -> Option<usize> {
+    let source_row = if rows == 1 { 0 } else { row };
+    let source_col = if cols == 1 { 0 } else { col };
+    if source_row >= rows || source_col >= cols {
+        return None;
     }
+    Some(source_row as usize * cols as usize + source_col as usize)
+}
+
+pub(super) fn element_at(array: &Array, row: u32, col: u32) -> &Value {
+    broadcast_index(array.rows, array.cols, row, col)
+        .and_then(|index| array.data.get(index))
+        .unwrap_or(&NOT_AVAILABLE)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BinaryOp, element_at, lift_binary};
+    use super::{broadcast_shape, element_at};
     use crate::calculation::runtime::Array;
     use crate::calculation::value::{ErrorKind, Value};
 
+    /// These are the primitives the array-binary path in `eval::expression` indexes through, so a
+    /// change to broadcasting shows up here. The evaluation loop itself, and the array-cell budget
+    /// it enforces, are covered end to end by the release integration suite rather than by a second
+    /// copy of the loop kept alive for tests.
     #[test]
     fn binary_arrays_broadcast_vectors_and_pad_missing_dimensions() {
         let row = Array {
@@ -146,11 +132,11 @@ mod tests {
                 Value::Number(30.0),
             ],
         };
-        let broadcast =
-            lift_binary(BinaryOp::Add, &row, &column, 32_767, 1_000_000).expect("vector broadcast");
-        assert_eq!((broadcast.rows, broadcast.cols), (3, 3));
-        assert_eq!(broadcast.data[0], Value::Number(11.0));
-        assert_eq!(broadcast.data[8], Value::Number(33.0));
+        assert_eq!(broadcast_shape(&row, &column), Ok((3, 3)));
+        // A singleton dimension repeats: every row of the result reads the same row element.
+        assert_eq!(element_at(&row, 0, 0), &Value::Number(1.0));
+        assert_eq!(element_at(&row, 2, 0), &Value::Number(1.0));
+        assert_eq!(element_at(&column, 2, 2), &Value::Number(30.0));
 
         let two_by_two = Array {
             rows: 2,
@@ -162,13 +148,10 @@ mod tests {
                 Value::Number(4.0),
             ],
         };
-        let padded = lift_binary(BinaryOp::Add, &two_by_two, &row, 32_767, 1_000_000)
-            .expect("mismatched arrays produce a padded result");
-        assert_eq!((padded.rows, padded.cols), (2, 3));
-        assert_eq!(padded.data[0], Value::Number(2.0));
-        assert_eq!(padded.data[4], Value::Number(6.0));
-        assert_eq!(padded.data[2], Value::Error(ErrorKind::NA));
-        assert_eq!(padded.data[5], Value::Error(ErrorKind::NA));
+        // Mismatched extents pad rather than truncate, and the padding is `#N/A`.
+        assert_eq!(broadcast_shape(&two_by_two, &row), Ok((2, 3)));
+        assert_eq!(element_at(&two_by_two, 0, 2), &Value::Error(ErrorKind::NA));
+        assert_eq!(element_at(&two_by_two, 1, 2), &Value::Error(ErrorKind::NA));
         assert_eq!(element_at(&two_by_two, 3, 3), &Value::Error(ErrorKind::NA));
     }
 }

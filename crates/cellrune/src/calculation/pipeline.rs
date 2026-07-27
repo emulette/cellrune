@@ -340,7 +340,11 @@ fn snapshot_from_engine(
         }
     }
     let materialized_cells = build_materialization_view(workbook, engine, &cells);
-    let numeric_decimal_traces = cells
+    // Keyed off the materialized view, not `cells`: a legacy-array or dynamic-spill member is not
+    // a formula cell, so keying off `cells` would drop its trace here while `seed_previous_results`
+    // still restores its value — and an incremental recalculation would then answer differently
+    // from the full calculation of the same workbook.
+    let numeric_decimal_traces = materialized_cells
         .keys()
         .filter_map(|public_id| {
             let internal_id = public_to_internal(workbook, *public_id)?;

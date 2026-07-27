@@ -1,6 +1,6 @@
 use super::super::ArithmeticSemantics;
 use super::super::ast::Expr;
-use super::super::decimal::DecimalTrace;
+use super::super::decimal::{DecimalTrace, RationalTrace};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
@@ -108,30 +108,65 @@ pub(super) fn required_text(
     super::super::coerce::to_text(&engine.eval_scalar(context, expr))
 }
 
-/// Adds Excel numeric values using `+0.0` as the additive identity, under the engine's configured
-/// arithmetic policy.
+/// Exact running value an [`ExcelSum`] can carry beside its `f64` total.
 ///
-/// `Iterator::sum` for `f64` folds from `-0.0`, which is the true additive identity for floats
-/// because `-0.0 + x == x` holds even when `x` is `-0.0`. That makes an empty sum negative zero,
-/// while Excel reports `0` for a sum over no numbers. Spreadsheet kernels must therefore not use
-/// `Iterator::sum` directly.
-///
-/// A running total is also a chain of additions, so it accumulates exactly the residue the
-/// operator path corrects. Without the same correction here, one release would answer
-/// `=A1+A2+A3` and `=SUM(A1:A3)` differently, which is not a compatibility mode but a
-/// contradiction. The correction is applied at each step, against the term that produced it,
-/// matching what `a + b + c` does in the operator path.
-/// Policy-aware streaming accumulator shared by ordinary and conditional aggregates.
-///
-/// Besides the running `f64`, this carries the exact parsed-decimal sum when it fits in the bounded
-/// trace representation. A later term is snapped only when that exact sum is zero.
-pub(super) struct ExcelSum {
-    excel_near_zero: bool,
-    total: f64,
-    decimal_trace: Option<DecimalTrace>,
+/// Two representations implement it: parsed decimals, for kernels that add their inputs as spelled;
+/// and rationals, for kernels such as `NPV` that transform each input before adding it. Both fail
+/// closed — an operation that does not fit the bounded representation returns `None`, and the
+/// accumulator then stops claiming to know the exact total rather than guessing that it is zero.
+pub(super) trait ExactTrace: Copy {
+    const EXACT_ZERO: Self;
+
+    fn combined_with(self, right: Self) -> Option<Self>;
+
+    fn is_exact_zero(self) -> bool;
 }
 
-impl ExcelSum {
+impl ExactTrace for DecimalTrace {
+    const EXACT_ZERO: Self = Self::ZERO;
+
+    fn combined_with(self, right: Self) -> Option<Self> {
+        self.add(right)
+    }
+
+    fn is_exact_zero(self) -> bool {
+        self.is_zero()
+    }
+}
+
+impl ExactTrace for RationalTrace {
+    const EXACT_ZERO: Self = Self::ZERO;
+
+    fn combined_with(self, right: Self) -> Option<Self> {
+        self.add(right)
+    }
+
+    fn is_exact_zero(self) -> bool {
+        self.is_zero()
+    }
+}
+
+/// Policy-aware streaming total shared by every kernel that adds numbers up.
+///
+/// Two things make this the single place the sum is formed. First, `Iterator::sum` for `f64` folds
+/// from `-0.0`, which is the true additive identity for floats because `-0.0 + x == x` holds even
+/// when `x` is `-0.0`; that makes an empty sum negative zero, while Excel reports `0` for a sum over
+/// no numbers. Second, a running total is a chain of additions, so it accumulates exactly the
+/// residue the operator path corrects — without the same correction here, one release would answer
+/// `=A1+A2+A3` and `=SUM(A1:A3)` differently, which is not a compatibility mode but a
+/// contradiction.
+///
+/// The correction is applied at each step against the term that produced it, matching what
+/// `a + b + c` does in the operator path, and only when the exact total is zero. Ordinary and
+/// conditional aggregates, `SUMPRODUCT`, and `NPV` all read the policy through this one type, so
+/// none of them can drift from the others.
+pub(super) struct ExcelSum<Trace: ExactTrace = DecimalTrace> {
+    excel_near_zero: bool,
+    total: f64,
+    exact_total: Option<Trace>,
+}
+
+impl<Trace: ExactTrace> ExcelSum<Trace> {
     pub(super) fn new(engine: &Engine<'_>) -> Self {
         Self {
             excel_near_zero: matches!(
@@ -139,21 +174,21 @@ impl ExcelSum {
                 ArithmeticSemantics::ExcelNearZero
             ),
             total: 0.0,
-            decimal_trace: Some(DecimalTrace::ZERO),
+            exact_total: Some(Trace::EXACT_ZERO),
         }
     }
 
-    pub(super) fn add_with_trace(&mut self, value: f64, decimal_trace: Option<DecimalTrace>) {
+    pub(super) fn add_with_trace(&mut self, value: f64, trace: Option<Trace>) {
         let next = self.total + value;
         if !self.excel_near_zero {
             self.total = next;
             return;
         }
 
-        self.decimal_trace = self
-            .decimal_trace
-            .and_then(|total| total.add(decimal_trace?));
-        if self.decimal_trace.is_some_and(DecimalTrace::is_zero) {
+        self.exact_total = self
+            .exact_total
+            .and_then(|total| total.combined_with(trace?));
+        if self.exact_total.is_some_and(ExactTrace::is_exact_zero) {
             self.total = 0.0;
         } else {
             self.total = next;

@@ -306,8 +306,12 @@ The following are outside the current scope:
 
 CellRune does not claim complete Excel compatibility.
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
-records where calculated values are known to differ from Excel and why, including the iterative
-financial solvers, `DOLLAR` currency formatting, and IEEE-754 arithmetic near zero.
+records where calculated values are known to differ from Excel and why, including `DOLLAR`
+currency formatting and fifteen-digit display. It also records the two axes that are *selectable*
+rather than divergent: from 0.1.3, arithmetic that cancels to near zero and the iterative
+financial solvers both default to Excel's behavior, and
+`ArithmeticSemantics::Ieee754`/`FinancialSolverSemantics::ExtendedSearch` restore what releases up
+to 0.1.2 did.
 
 ## Verification
 

@@ -77,13 +77,16 @@ this is a calculation option, and the correction is the default.
 | `=0.1+0.2-0.3` | `0` | `5.551115123125783e-17` |
 | `=(0.5-0.4)-0.1` | `0` | `-2.7755575615628914e-17` |
 | `=SUM(0.1,0.2,-0.3)` | `0` | `5.551115123125783e-17` |
+| `=SUMPRODUCT({0.1,0.2,-0.3})` | `0` | `5.551115123125783e-17` |
 | `=100.1-100-0.1` | `0` | `-5.689893001203927e-15` |
 
 The correction is applied at each addition and subtraction, in the operator path and in the
-policy-aware running totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, and
-`NPV`. Alongside the `f64` result, scalar addition/subtraction trees and aggregate accumulators
-carry an exact trace of the parsed decimal inputs. `NPV` carries the same proof as an exact
-rational trace through discounting. A result is replaced with zero only when that trace is exactly
+policy-aware running totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`,
+`SUMPRODUCT`, and `NPV`. Alongside the `f64` result, scalar addition/subtraction trees and
+aggregate accumulators carry an exact trace of the parsed decimal inputs. `SUMPRODUCT` multiplies
+before it adds, and the product of two exact decimals is itself an exact decimal, so its terms stay
+traceable. `NPV` divides before it adds, and carries the same proof as an exact rational trace
+through discounting. A result is replaced with zero only when that trace is exactly
 zero; there is no widened near-zero interval that can swallow a neighboring real difference. That
 matters beyond the number itself:
 `=(0.1+0.2-0.3)=0` is `TRUE` under the default and `FALSE` under `Ieee754`, and the same choice
@@ -101,7 +104,11 @@ let options = CalculationOptions::default()
 The release suite checks this policy against an exact fixed-point decimal reference. Its committed
 generated cases include both `=100.1-100-0.1`, which must become zero, and
 `=100.1-100-0.099999999999999`, whose exact value is `1e-15` and must remain nonzero. Operator,
-array, ordinary aggregate, and conditional aggregate paths are also compared under both modes.
+array, ordinary aggregate, conditional aggregate, and `SUMPRODUCT` paths are also compared under
+both modes, including a `SUMPRODUCT` whose terms cancel only after the multiplication.
+
+Under `Ieee754` no path consults the exact trace, so none is computed: the policy that opts out of
+the correction does not pay for it.
 
 **Compare calculated numbers with a tolerance rather than for equality**, under either policy.
 
