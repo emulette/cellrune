@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use super::Engine;
 use crate::calculation::ast::Expr;
-use crate::calculation::functions::normalize_name;
-use crate::calculation::lambda::{canonical_parameter_name, definition as lambda_definition};
+use crate::calculation::lambda::{is_lambda_local, walk_lambda_scope};
 use crate::calculation::runtime::CellId;
 use crate::{DefinedName, DefinedNameScope};
 
@@ -101,23 +100,14 @@ fn name_references(expr: &Expr) -> Vec<String> {
 fn collect_name_references(expr: &Expr, local_names: &mut Vec<String>, names: &mut Vec<String>) {
     match expr {
         Expr::Name(name) => {
-            let local_key = canonical_parameter_name(name);
-            if !local_names.iter().rev().any(|local| local == &local_key) {
+            if !is_lambda_local(name, local_names) {
                 names.push(name.clone());
             }
         }
         Expr::Call { name, args } => {
-            if normalize_name(name) == "MAP"
-                && let Some((lambda_expr, array_exprs)) = args.split_last()
-                && let Some(lambda) = lambda_definition(lambda_expr)
-            {
-                for arg in array_exprs {
-                    collect_name_references(arg, local_names, names);
-                }
-                let previous_local_count = local_names.len();
-                local_names.extend(lambda.parameters().iter().cloned());
-                collect_name_references(lambda.body(), local_names, names);
-                local_names.truncate(previous_local_count);
+            if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                collect_name_references(arg, scope, names);
+            }) {
                 return;
             }
             for arg in args {

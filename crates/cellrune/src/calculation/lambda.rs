@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::ast::Expr;
+use super::functions::normalize_name;
 use super::value::Value;
 
 const MAX_LAMBDA_PARAMETERS: usize = 253;
@@ -83,6 +84,39 @@ pub(super) fn canonical_parameter_name(name: &str) -> String {
     parameter_base(name).to_ascii_lowercase()
 }
 
+pub(super) fn is_lambda_local(name: &str, scope: &[String]) -> bool {
+    let key = canonical_parameter_name(name);
+    scope.iter().rev().any(|local| local == &key)
+}
+
+pub(super) fn walk_lambda_scope<F>(
+    name: &str,
+    args: &[Expr],
+    scope: &mut Vec<String>,
+    mut walk: F,
+) -> bool
+where
+    F: FnMut(&Expr, &mut Vec<String>),
+{
+    if normalize_name(name) != "MAP" {
+        return false;
+    }
+    let Some((lambda_expr, array_exprs)) = args.split_last() else {
+        return false;
+    };
+    let Some(lambda) = definition(lambda_expr) else {
+        return false;
+    };
+    for arg in array_exprs {
+        walk(arg, scope);
+    }
+    let previous_local_count = scope.len();
+    scope.extend(lambda.parameters().iter().cloned());
+    walk(lambda.body(), scope);
+    scope.truncate(previous_local_count);
+    true
+}
+
 fn parameter_base(name: &str) -> &str {
     name.get(..6)
         .filter(|prefix| prefix.eq_ignore_ascii_case("_xlpm."))
@@ -95,4 +129,67 @@ fn is_lambda_function(name: &str) -> bool {
         .filter(|prefix| prefix.eq_ignore_ascii_case("_xlfn."))
         .map_or(name, |_| &name[6..]);
     base.eq_ignore_ascii_case("LAMBDA")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn map_expression() -> Expr {
+        Expr::Call {
+            name: "MAP".to_owned(),
+            args: vec![
+                Expr::Name("outside".to_owned()),
+                Expr::Call {
+                    name: "LAMBDA".to_owned(),
+                    args: vec![
+                        Expr::Name("_xlpm.Item".to_owned()),
+                        Expr::Name("item".to_owned()),
+                    ],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn lambda_scope_walks_arguments_before_the_scoped_body() {
+        let Expr::Call { name, args } = map_expression() else {
+            unreachable!("fixture is a call");
+        };
+        let mut scope = vec!["outer".to_owned()];
+        let mut observations = Vec::new();
+
+        assert!(walk_lambda_scope(
+            &name,
+            &args,
+            &mut scope,
+            |expr, active_scope| {
+                let Expr::Name(name) = expr else {
+                    panic!("fixture callback receives names");
+                };
+                observations.push((name.clone(), active_scope.clone()));
+            }
+        ));
+
+        assert_eq!(
+            observations,
+            vec![
+                ("outside".to_owned(), vec!["outer".to_owned()]),
+                (
+                    "item".to_owned(),
+                    vec!["outer".to_owned(), "item".to_owned()]
+                ),
+            ]
+        );
+        assert_eq!(scope, vec!["outer"]);
+    }
+
+    #[test]
+    fn lambda_local_matching_is_case_insensitive_and_prefix_agnostic() {
+        let scope = vec!["item".to_owned()];
+
+        assert!(is_lambda_local("ITEM", &scope));
+        assert!(is_lambda_local("_xlpm.Item", &scope));
+        assert!(!is_lambda_local("other", &scope));
+    }
 }

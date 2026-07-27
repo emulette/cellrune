@@ -957,6 +957,26 @@ fn volatile_dates_require_an_explicit_deterministic_input() {
 }
 
 #[test]
+fn volatile_dates_hidden_in_defined_names_keep_the_specific_issue() {
+    let workbook = workbook_with_formulas_and_names(
+        &[(1, 1, "NamedToday"), (1, 2, "NamedNow")],
+        &[("NamedToday", "TODAY()"), ("NamedNow", "NOW()")],
+    );
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let missing = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_issue(&missing, 1, CalculationIssueCode::VolatileInputMissing);
+    assert_issue(&missing, 2, CalculationIssueCode::VolatileInputMissing);
+
+    let options = CalculationOptions::default()
+        .with_today_serial(FiniteNumber::new(46_225.0).expect("deterministic date is finite"))
+        .with_now_serial(FiniteNumber::new(46_225.75).expect("deterministic time is finite"));
+    let calculated = calculate_workbook(&workbook, options);
+    assert_number(&calculated, 1, 46_225.0, 0.0);
+    assert_number(&calculated, 2, 46_225.75, 0.0);
+}
+
+#[test]
 fn calculation_limits_reject_zero_values() {
     assert_eq!(
         CalculationLimits::default().with_max_formula_tokens(0),

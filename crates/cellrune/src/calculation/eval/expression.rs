@@ -2,7 +2,7 @@ use super::reference::is_reference_returning_function;
 use super::{Engine, EvalContext};
 use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
-use crate::calculation::decimal::DecimalTrace;
+use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation};
 use crate::calculation::functions::{call_function, call_function_array};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{
@@ -69,9 +69,15 @@ fn evaluate_binary(
         BinaryOp::Subtract => left.subtract(right.decimal_trace?),
         _ => None,
     });
+    let near_zero_cancellation = match (&left.value, &right.value, &value) {
+        (Value::Number(left), Value::Number(right), Value::Number(result)) => {
+            is_excel_near_zero_cancellation(*left, *right, *result)
+        }
+        _ => false,
+    };
     if matches!(arithmetic, ArithmeticSemantics::ExcelNearZero)
         && decimal_trace.is_some_and(DecimalTrace::is_zero)
-        && matches!(value, Value::Number(_))
+        && near_zero_cancellation
     {
         value = Value::Number(0.0);
     }

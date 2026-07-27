@@ -220,3 +220,25 @@ impl CalculationLimitKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_limit_kind_round_trips_through_its_detail() {
+        let kinds = [
+            CalculationLimitKind::FormulaTokens,
+            CalculationLimitKind::FormulaAstNodes,
+            CalculationLimitKind::FormulaNestingDepth,
+            CalculationLimitKind::DependencyEdges,
+            CalculationLimitKind::ArrayCells,
+            CalculationLimitKind::TextBytes,
+            CalculationLimitKind::FunctionIterations,
+        ];
+
+        for kind in kinds {
+            assert_eq!(CalculationLimitKind::from_detail(kind.detail()), Some(kind));
+        }
+    }
+}

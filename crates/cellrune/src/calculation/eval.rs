@@ -23,7 +23,7 @@ mod orchestration;
 mod reference;
 
 use materialization::ArrayRegion;
-use reference::{cell_at, is_reference_returning_function};
+use reference::cell_at;
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledWorkbook {

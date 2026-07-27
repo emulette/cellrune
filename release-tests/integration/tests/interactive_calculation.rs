@@ -956,6 +956,116 @@ fn dynamic_spill_edits_use_conservative_full_fallback() {
 }
 
 #[test]
+fn dynamic_references_hidden_in_defined_names_reject_incremental_recalculation() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("SUM(DynamicCell)"),
+                ),
+                WorkbookChange::set_defined_name(defined_name("DynamicCell", "OFFSET(A1,0,0)")),
+            ]),
+        )
+        .expect("dynamic defined name setup");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(2.0),
+            )]),
+        )
+        .expect("dynamic input edit");
+
+    let error = session
+        .prepare_recalculation(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect_err("defined-name OFFSET must reject forced incremental calculation");
+    assert_eq!(error.code(), SessionErrorCode::IncrementalUnsafe);
+
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("auto full calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+    assert_calculations_equal(
+        session.calculation().expect("installed dynamic result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
+fn map_parameters_shadow_dynamic_defined_names_during_incremental_analysis() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("SUMPRODUCT(MAP(A1,LAMBDA(item,item+1)))"),
+                ),
+                WorkbookChange::set_defined_name(defined_name("item", "OFFSET(Z1,0,0)")),
+            ]),
+        )
+        .expect("shadowed defined name setup");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(2.0),
+            )]),
+        )
+        .expect("MAP input edit");
+
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("local lambda parameter must not resolve the dynamic workbook name");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_calculations_equal(
+        session.calculation().expect("installed incremental result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
 fn cross_sheet_dependencies_propagate_and_format_only_edits_do_not_recalculate() {
     let mut session = WorkbookCalculationSession::create();
     let first = SheetId::new(1).expect("constant sheet ID");

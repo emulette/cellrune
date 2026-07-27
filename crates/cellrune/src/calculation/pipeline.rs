@@ -5,7 +5,7 @@ use super::convert::cell_from_value;
 use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::{is_supported_function, normalize_name};
-use super::lambda::{canonical_parameter_name, definition as lambda_definition};
+use super::lambda::{is_lambda_local, walk_lambda_scope};
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssue, CalculationIssueCode,
@@ -318,9 +318,9 @@ fn snapshot_from_engine(
                         let missing_volatile_input =
                             engine.parsed_expr(internal_id).is_some_and(|expr| {
                                 (options.today_serial().is_none()
-                                    && contains_function(expr, "TODAY"))
+                                    && contains_function(engine, sheet_index, expr, "TODAY"))
                                     || (options.now_serial().is_none()
-                                        && contains_function(expr, "NOW"))
+                                        && contains_function(engine, sheet_index, expr, "NOW"))
                             });
                         let code = if missing_volatile_input {
                             CalculationIssueCode::VolatileInputMissing
@@ -455,31 +455,70 @@ fn resource_limit_issue(limit: CalculationLimitKind) -> CalculationIssue {
     )
 }
 
-fn contains_function(expr: &Expr, expected: &str) -> bool {
+fn contains_function(engine: &Engine<'_>, sheet: usize, expr: &Expr, expected: &str) -> bool {
+    expr_contains_function(
+        engine,
+        sheet,
+        expr,
+        expected,
+        &mut BTreeSet::new(),
+        &mut Vec::new(),
+    )
+}
+
+fn expr_contains_function(
+    engine: &Engine<'_>,
+    sheet: usize,
+    expr: &Expr,
+    expected: &str,
+    names: &mut BTreeSet<String>,
+    local_names: &mut Vec<String>,
+) -> bool {
     match expr {
         Expr::Call { name, args } => {
-            normalize_name(name).eq_ignore_ascii_case(expected)
-                || args.iter().any(|arg| contains_function(arg, expected))
+            if normalize_name(name).eq_ignore_ascii_case(expected) {
+                return true;
+            }
+            let mut found = false;
+            if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                found |= expr_contains_function(engine, sheet, arg, expected, names, scope);
+            }) {
+                return found;
+            }
+            args.iter()
+                .any(|arg| expr_contains_function(engine, sheet, arg, expected, names, local_names))
         }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
-        | Expr::Unary { operand: inner, .. } => contains_function(inner, expected),
+        | Expr::Unary { operand: inner, .. } => {
+            expr_contains_function(engine, sheet, inner, expected, names, local_names)
+        }
         Expr::Binary { left, right, .. } => {
-            contains_function(left, expected) || contains_function(right, expected)
+            expr_contains_function(engine, sheet, left, expected, names, local_names)
+                || expr_contains_function(engine, sheet, right, expected, names, local_names)
         }
         Expr::Range { start, end } => {
-            contains_function(start, expected) || contains_function(end, expected)
+            expr_contains_function(engine, sheet, start, expected, names, local_names)
+                || expr_contains_function(engine, sheet, end, expected, names, local_names)
         }
-        Expr::Array(rows) => rows
-            .iter()
-            .flatten()
-            .any(|element| contains_function(element, expected)),
+        Expr::Array(rows) => rows.iter().flatten().any(|element| {
+            expr_contains_function(engine, sheet, element, expected, names, local_names)
+        }),
+        Expr::Name(name) => {
+            if is_lambda_local(name, local_names) {
+                return false;
+            }
+            let key = name.to_ascii_lowercase();
+            names.insert(key)
+                && engine.resolve_name_expr(sheet, name).is_some_and(|named| {
+                    expr_contains_function(engine, sheet, named, expected, names, local_names)
+                })
+        }
         Expr::Number(_)
         | Expr::Text(_)
         | Expr::Logical(_)
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
-        | Expr::Name(_)
         | Expr::Missing => false,
     }
 }
@@ -500,17 +539,9 @@ fn inspect_expr(
                     Some(name.to_ascii_uppercase()),
                 ));
             }
-            if normalize_name(name) == "MAP"
-                && let Some((lambda_expr, array_exprs)) = args.split_last()
-                && let Some(lambda) = lambda_definition(lambda_expr)
-            {
-                for arg in array_exprs {
-                    inspect_expr(engine, sheet, arg, names, local_names, issues);
-                }
-                let previous_local_count = local_names.len();
-                local_names.extend(lambda.parameters().iter().cloned());
-                inspect_expr(engine, sheet, lambda.body(), names, local_names, issues);
-                local_names.truncate(previous_local_count);
+            if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                inspect_expr(engine, sheet, arg, names, scope, issues);
+            }) {
                 return;
             }
             for arg in args {
@@ -518,8 +549,7 @@ fn inspect_expr(
             }
         }
         Expr::Name(name) => {
-            let local_key = canonical_parameter_name(name);
-            if local_names.iter().rev().any(|local| local == &local_key) {
+            if is_lambda_local(name, local_names) {
                 return;
             }
             let key = name.to_ascii_lowercase();

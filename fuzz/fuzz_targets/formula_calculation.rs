@@ -18,7 +18,23 @@ fuzz_target!(|data: &[u8]| {
     let workbook = workbook_with_formula(formula);
     let _ = scan_formula_capabilities(&workbook);
     let _ = calculate_workbook(&workbook, CalculationOptions::default());
+
+    if let Some(formula) = nested_scope_formula(data) {
+        let workbook = workbook_with_formula(formula);
+        let _ = scan_formula_capabilities(&workbook);
+        let _ = calculate_workbook(&workbook, CalculationOptions::default());
+    }
 });
+
+fn nested_scope_formula(data: &[u8]) -> Option<FormulaText> {
+    let mut body = "seed".to_owned();
+    for (depth, byte) in data.iter().take(8).enumerate().rev() {
+        let parameter = if byte & 1 == 0 { "seed" } else { "item" };
+        let constant = byte % 10;
+        body = format!("MAP({{{constant},{depth}}},LAMBDA(_xlpm.{parameter},{parameter}+{body}))");
+    }
+    FormulaText::from_xlsx(body).ok()
+}
 
 fn workbook_with_formula(formula: FormulaText) -> WorkbookSnapshot {
     let sheet_id = SheetId::new(1).expect("constant sheet ID");

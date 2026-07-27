@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Engine, EvalContext, is_reference_returning_function};
+use super::{Engine, EvalContext};
 use crate::CellContent;
 use crate::calculation::ast::Expr;
 use crate::calculation::functions::normalize_name;
 use crate::calculation::graph::DependencyGraph;
-use crate::calculation::lambda::{canonical_parameter_name, definition as lambda_definition};
+use crate::calculation::lambda::{is_lambda_local, walk_lambda_scope};
 use crate::calculation::runtime::Rect;
 
 impl Engine<'_> {
@@ -55,10 +55,14 @@ impl Engine<'_> {
                         )
                 )
             })
-        }) || self
-            .asts
-            .values()
-            .any(expr_contains_dynamic_reference_function)
+        }) || self.asts.iter().any(|(cell, expr)| {
+            self.expr_contains_dynamic_reference_function(
+                EvalContext::for_cell(*cell),
+                expr,
+                &mut BTreeSet::new(),
+                &mut Vec::new(),
+            )
+        })
     }
 
     pub(super) fn dependency_rectangles(&self) -> BTreeMap<super::CellId, Vec<Rect>> {
@@ -248,8 +252,7 @@ impl Engine<'_> {
                 self.collect_dependency_rects(context, end, names, local_names, output);
             }
             Expr::Name(name) => {
-                let local_key = canonical_parameter_name(name);
-                if local_names.iter().rev().any(|local| local == &local_key) {
+                if is_lambda_local(name, local_names) {
                     return;
                 }
                 let key = name.to_ascii_lowercase();
@@ -299,23 +302,9 @@ impl Engine<'_> {
                 {
                     output.push(rect);
                 }
-                if normalized == "MAP"
-                    && let Some((lambda_expr, array_exprs)) = args.split_last()
-                    && let Some(lambda) = lambda_definition(lambda_expr)
-                {
-                    for arg in array_exprs {
-                        self.collect_dependency_rects(context, arg, names, local_names, output);
-                    }
-                    let previous_local_count = local_names.len();
-                    local_names.extend(lambda.parameters().iter().cloned());
-                    self.collect_dependency_rects(
-                        context,
-                        lambda.body(),
-                        names,
-                        local_names,
-                        output,
-                    );
-                    local_names.truncate(previous_local_count);
+                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                    self.collect_dependency_rects(context, arg, names, scope, output);
+                }) {
                     return;
                 }
                 for arg in args {
@@ -354,8 +343,7 @@ impl Engine<'_> {
                 self.collect_reference_selection_inputs(context, end, names, local_names, output);
             }
             Expr::Name(name) => {
-                let local_key = canonical_parameter_name(name);
-                if local_names.iter().rev().any(|local| local == &local_key) {
+                if is_lambda_local(name, local_names) {
                     return;
                 }
                 let key = name.to_ascii_lowercase();
@@ -371,7 +359,12 @@ impl Engine<'_> {
                     );
                 }
             }
-            Expr::Call { name, args } if is_reference_returning_function(name) => {
+            Expr::Call { name, args } => {
+                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                    self.collect_dependency_rects(context, arg, names, scope, output);
+                }) {
+                    return;
+                }
                 for arg in args {
                     self.collect_dependency_rects(context, arg, names, local_names, output);
                 }
@@ -381,43 +374,81 @@ impl Engine<'_> {
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
-            | Expr::Call { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::Array(_)
             | Expr::Missing => {}
         }
     }
-}
 
-fn expr_contains_dynamic_reference_function(expr: &Expr) -> bool {
-    match expr {
-        Expr::Call { name, args } => {
-            matches!(normalize_name(name).as_str(), "OFFSET" | "INDIRECT")
-                || args.iter().any(expr_contains_dynamic_reference_function)
+    fn expr_contains_dynamic_reference_function(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+        names: &mut BTreeSet<String>,
+        local_names: &mut Vec<String>,
+    ) -> bool {
+        match expr {
+            Expr::Call { name, args } => {
+                if matches!(normalize_name(name).as_str(), "OFFSET" | "INDIRECT") {
+                    return true;
+                }
+                let mut found = false;
+                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                    found |=
+                        self.expr_contains_dynamic_reference_function(context, arg, names, scope);
+                }) {
+                    return found;
+                }
+                args.iter().any(|arg| {
+                    self.expr_contains_dynamic_reference_function(context, arg, names, local_names)
+                })
+            }
+            Expr::Name(name) => {
+                if is_lambda_local(name, local_names) {
+                    return false;
+                }
+                let key = name.to_ascii_lowercase();
+                names.insert(key)
+                    && self
+                        .resolve_name_expr(context.sheet(), name)
+                        .is_some_and(|named| {
+                            self.expr_contains_dynamic_reference_function(
+                                context,
+                                named,
+                                names,
+                                local_names,
+                            )
+                        })
+            }
+            Expr::ImplicitIntersection(inner)
+            | Expr::Paren(inner)
+            | Expr::Unary { operand: inner, .. } => {
+                self.expr_contains_dynamic_reference_function(context, inner, names, local_names)
+            }
+            Expr::Binary { left, right, .. }
+            | Expr::Range {
+                start: left,
+                end: right,
+            } => {
+                self.expr_contains_dynamic_reference_function(context, left, names, local_names)
+                    || self.expr_contains_dynamic_reference_function(
+                        context,
+                        right,
+                        names,
+                        local_names,
+                    )
+            }
+            Expr::Array(rows) => rows.iter().flatten().any(|element| {
+                self.expr_contains_dynamic_reference_function(context, element, names, local_names)
+            }),
+            Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::ErrorLit(_)
+            | Expr::Ref(_)
+            | Expr::Missing => false,
         }
-        Expr::ImplicitIntersection(inner)
-        | Expr::Paren(inner)
-        | Expr::Unary { operand: inner, .. } => expr_contains_dynamic_reference_function(inner),
-        Expr::Binary { left, right, .. }
-        | Expr::Range {
-            start: left,
-            end: right,
-        } => {
-            expr_contains_dynamic_reference_function(left)
-                || expr_contains_dynamic_reference_function(right)
-        }
-        Expr::Array(rows) => rows
-            .iter()
-            .flatten()
-            .any(expr_contains_dynamic_reference_function),
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Logical(_)
-        | Expr::ErrorLit(_)
-        | Expr::Ref(_)
-        | Expr::Name(_)
-        | Expr::Missing => false,
     }
 }
 
@@ -428,3 +459,7 @@ fn rects_intersect(left: &Rect, right: &Rect) -> bool {
         && left.col_start <= right.col_end
         && right.col_start <= left.col_end
 }
+
+#[cfg(test)]
+#[path = "dependency_tests.rs"]
+mod tests;
