@@ -158,12 +158,22 @@ jobs:
     needs: release-ref
     uses: ./.github/workflows/ci.yml
 
+  # Every call grants the same permissions, including the two only the MCP scope uses.
+  # `bindings.yml` contains one job that requests `id-token: write` and `attestations: write`,
+  # and a called workflow is validated against the caller's grant before any `if:` is
+  # evaluated. Granting less here does not skip that job, it refuses to start the whole
+  # workflow — which is what splitting the former single `bindings` call into three scoped
+  # calls did, since only one of the three carried the permissions the single call had.
   python-artifacts:
     name: Python publication artifacts
     needs: release-ref
     uses: ./.github/workflows/bindings.yml
     with:
       scope: python
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
   node-artifacts:
     name: Node publication artifacts
@@ -171,6 +181,10 @@ jobs:
     uses: ./.github/workflows/bindings.yml
     with:
       scope: node
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
   mcp-artifacts:
     name: MCP publication artifacts
