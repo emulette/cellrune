@@ -7,7 +7,9 @@ use crate::{
 
 pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
     let mut hash = SemanticHash::new();
-    hash.u8(1);
+    // Schema byte 2: 0.1.6 folds merged ranges and the full table model per sheet.
+    // Bumping it deliberately invalidates every fingerprint persisted under schema 1.
+    hash.u8(2);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());
@@ -30,6 +32,33 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
                     hash.optional_string(formula.text().map(|text| text.as_str()));
                     hash.formula_metadata(formula.metadata());
                     hash.boolean(formula.recalculate_always());
+                }
+            }
+        }
+        hash.usize(sheet.merged_ranges().len());
+        for range in sheet.merged_ranges() {
+            hash.range(*range);
+        }
+        // The whole table model is folded, including fields such as display_name that do
+        // not feed calculation today: missing a fold shows up as a stale write, folding
+        // too much only costs one extra recalculation.
+        hash.usize(sheet.tables().len());
+        for table in sheet.tables() {
+            hash.string(table.name().as_str());
+            hash.string(table.display_name());
+            hash.range(table.range());
+            hash.u32(table.header_row_count());
+            hash.u32(table.totals_row_count());
+            hash.usize(table.columns().len());
+            for column in table.columns() {
+                hash.u32(column.id());
+                hash.string(column.name());
+                match column.totals_row_function() {
+                    None => hash.u8(0),
+                    Some(function) => {
+                        hash.u8(1);
+                        hash.string(function.as_str());
+                    }
                 }
             }
         }
@@ -274,9 +303,9 @@ impl SemanticHash {
 mod tests {
     use super::workbook_fingerprint;
     use crate::{
-        CalculationHints, CellAddress, CellContent, CellValue, DateSystem, Provenance,
-        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, WorkbookSnapshot,
-        WorkbookSource,
+        CalculationHints, CellAddress, CellContent, CellRange, CellValue, DateSystem, Provenance,
+        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableColumn,
+        TableName, TotalsRowFunction, WorkbookSnapshot, WorkbookSource,
     };
 
     #[test]
@@ -287,6 +316,140 @@ mod tests {
 
         assert_eq!(workbook_fingerprint(&first), workbook_fingerprint(&same));
         assert_ne!(workbook_fingerprint(&first), workbook_fingerprint(&changed));
+    }
+
+    #[test]
+    fn workbook_fingerprint_folds_merged_ranges() {
+        let base = workbook_with_extras(Vec::new(), Vec::new());
+        let merged = workbook_with_extras(vec![range("A1", "B2")], Vec::new());
+        let moved = workbook_with_extras(vec![range("A1", "B3")], Vec::new());
+
+        assert_ne!(workbook_fingerprint(&base), workbook_fingerprint(&merged));
+        assert_ne!(workbook_fingerprint(&merged), workbook_fingerprint(&moved));
+        assert_eq!(
+            workbook_fingerprint(&merged),
+            workbook_fingerprint(&workbook_with_extras(vec![range("A1", "B2")], Vec::new()))
+        );
+    }
+
+    type TableDefinition<'a> = (
+        &'a str,
+        &'a str,
+        CellRange,
+        u32,
+        u32,
+        Vec<(&'a str, u32, Option<TotalsRowFunction>)>,
+    );
+
+    #[test]
+    fn workbook_fingerprint_folds_every_table_field() {
+        let base = || -> TableDefinition<'static> {
+            (
+                "Sales",
+                "SalesDisplay",
+                range("A1", "B4"),
+                1_u32,
+                0_u32,
+                vec![("First", 1_u32, None), ("Second", 2, None)],
+            )
+        };
+        let build = |definition: TableDefinition<'_>| {
+            let (name, display_name, reference, header, totals, columns) = definition;
+            let columns = columns
+                .into_iter()
+                .map(|(name, id, function)| {
+                    TableColumn::new(id, name, function).expect("column")
+                })
+                .collect();
+            workbook_with_extras(
+                Vec::new(),
+                vec![
+                    Table::new(
+                        TableName::new(name).expect("name"),
+                        display_name,
+                        reference,
+                        header,
+                        totals,
+                        columns,
+                    )
+                    .expect("table"),
+                ],
+            )
+        };
+        let reference = workbook_fingerprint(&build(base()));
+
+        let mut changed = base();
+        changed.2 = range("A1", "B5");
+        assert_ne!(reference, workbook_fingerprint(&build(changed)), "@ref");
+
+        let mut changed = base();
+        changed.5[0].0 = "Renamed";
+        assert_ne!(reference, workbook_fingerprint(&build(changed)), "column name");
+
+        let mut changed = base();
+        changed.5.swap(0, 1);
+        changed.5[0].1 = 1;
+        changed.5[1].1 = 2;
+        assert_ne!(reference, workbook_fingerprint(&build(changed)), "column order");
+
+        let mut changed = base();
+        changed.5[1].2 = Some(TotalsRowFunction::Sum);
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "totalsRowFunction"
+        );
+
+        let mut changed = base();
+        changed.3 = 0;
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "header row count"
+        );
+
+        let mut changed = base();
+        changed.1 = "OtherDisplay";
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "display name is folded too - the whole model is folded"
+        );
+
+        assert_eq!(reference, workbook_fingerprint(&build(base())), "stable");
+    }
+
+    fn range(start: &str, end: &str) -> CellRange {
+        CellRange::new(
+            CellAddress::from_a1(start).expect("start"),
+            CellAddress::from_a1(end).expect("end"),
+        )
+        .expect("range")
+    }
+
+    fn workbook_with_extras(
+        merged_ranges: Vec<CellRange>,
+        tables: Vec<Table>,
+    ) -> WorkbookSnapshot {
+        let sheet_id = SheetId::new(1).expect("valid sheet ID");
+        let mut sheet = Sheet::new(
+            sheet_id,
+            SheetName::new("Sheet1").expect("valid sheet name"),
+            SheetVisibility::Visible,
+        );
+        sheet.set_merged_ranges(merged_ranges);
+        sheet.set_tables(tables);
+        WorkbookSnapshot::new(
+            vec![sheet],
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(
+                ProviderIdentity::new("identity-test", "1").expect("valid provider"),
+                None,
+            ),
+        )
+        .expect("valid workbook")
     }
 
     fn workbook_with_number(value: f64) -> WorkbookSnapshot {
