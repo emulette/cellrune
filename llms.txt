@@ -486,8 +486,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   `UnsupportedSheetRange`. Bare 3-D references and 3-D references composed
   through array operators produce `#VALUE!`; an enclosing aggregate does not
   widen that nested context. The scanner and evaluator use the same policy.
-  Incremental dependency state stores each 3-D input as a compact rectangle
-  span and counts that span once against the dependency-edge budget.
+  Incremental dependency state stores each 3-D input as one compact
+  rectangle span rather than one rectangle per sheet, so compiled size grows
+  with the number of references, not with the number of sheets spanned. The
+  span is expanded only while building graph edges, and
+  `max_dependency_edges` still counts the distinct edges produced.
 
 ### Diagnostics and provenance
 

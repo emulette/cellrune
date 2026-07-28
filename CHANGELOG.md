@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
-## [0.1.5] - 2026-07-27
+## [0.1.5] - 2026-07-28
 
 ### Added
 
@@ -25,8 +25,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 - The capability scanner and evaluator now share one explicit direct-3-D-consumer policy.
   `INDEX` and `VLOOKUP` return Excel's `#VALUE!`, `OFFSET` returns `#REF!`, and other consumers
   remain an `UnsupportedSheetRange` engine capability issue.
-- Incremental calculation stores 3-D dependencies as compact rectangle spans and counts each span
-  once against the dependency-edge budget instead of expanding it into one edge per cell.
+- Incremental calculation stores 3-D dependencies as one compact rectangle span per reference
+  instead of one rectangle per sheet, so compiled state grows with the number of references rather
+  than with the number of sheets in the span. The dependency-edge budget is unchanged: it still
+  counts the distinct edges a span actually produces.
 - Whole-column operands combined by unary or binary array operators use a common extent: the
   greatest populated row among the columns those operands reference, with a one-row minimum for an
   otherwise empty sheet and blanks for unpopulated cells. Directly resolved sources and operator
