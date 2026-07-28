@@ -9,7 +9,7 @@
 This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
-as a bug in this file, not in the crate. The current public version is 0.1.5,
+as a bug in this file, not in the crate. The current public version is 0.1.6,
 uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
@@ -159,6 +159,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - **Sheet and defined-name lookups are case-insensitive** but preserve and
   return the original spelling (`WorkbookSnapshot::sheet_by_name`,
   `DefinedName::name`).
+- **Table lookup uses OOXML `displayName`, not `name`.** `displayName` is the
+  workbook-global formula/UI name; `name` is the worksheet-local programmatic
+  object-model name. Both preserve spelling and compare case-insensitively.
 - **`CellAddress::from_a1` / `Sheet::cell_by_a1` accept only an unqualified
   A1 address** (`"A1"`, `"XFD1048576"`) — no sheet prefix, no `$` anchors.
   Those belong to formula-reference syntax, which this workbook-lookup helper
@@ -194,25 +197,27 @@ than guessing a name from a different XLSX crate (`calamine`,
 ### Workbook model — read-only, format-neutral
 
 - `WorkbookSnapshot`: `.sheets() -> &[Sheet]`, `.sheet_by_id(SheetId)`,
-  `.sheet_by_name(&str)`, `.table(&str) -> Option<&Table>` (workbook-global,
-  case-insensitive), `.defined_names()`, `.diagnostics()`,
+  `.sheet_by_name(&str)`, `.table(&str) -> Option<&Table>` (workbook-global
+  `displayName`, case-insensitive), `.defined_names()`, `.diagnostics()`,
   `.date_system()`, `.calculation_hints()`, `.source()`, `.provenance()`.
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
   `.merged_ranges() -> &[CellRange]` (sorted by top-left address),
   `.tables() -> &[Table]` (XLSX declaration order).
-- `Table`: `.name() -> &TableName` (the name structured references resolve
-  against; case-insensitive, spelling preserved), `.display_name()`,
+- `Table`: `.id() -> TableId` (non-zero, workbook-global stable ID),
+  `.name() -> &TableName` (worksheet-local programmatic name),
+  `.display_name() -> &TableName` (workbook-global formula/UI name),
   `.range()`, `.header_row_count()`, `.totals_row_count()`,
   `.columns() -> &[TableColumn]`.
 - `TableColumn`: `.id()` (stable XLSX identifier that survives renames),
   `.name()`, `.totals_row_function() -> Option<TotalsRowFunction>`.
 - `TotalsRowFunction` (`#[non_exhaustive]`): `Sum | Min | Max | Average |
   Count | CountNumbers | StdDev | Var | Custom`; `.as_str()` returns the
-  OOXML token. Invalid table definitions and workbook-wide duplicate table
-  names are reported as `xlsx.table.*` warning diagnostics and drop only
-  that table; merged-range problems likewise as `xlsx.merged_range.*`.
+  OOXML token. Invalid table definitions, duplicate IDs or display names,
+  worksheet-local duplicate programmatic names, and defined-name conflicts
+  are reported as `xlsx.table.*` warning diagnostics and drop only that
+  table; merged-range problems likewise as `xlsx.merged_range.*`.
 - `Cell`: `.address()`, `.content() -> &CellContent`, `.number_format()`.
 - `CellContent::Literal(CellValue) | Formula(FormulaCell)`.
 - `CellValue` (`#[non_exhaustive]`): `Blank | Number(FiniteNumber) | Text(String) | Logical(bool) | Error(ExcelError)`.
@@ -425,7 +430,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. Version 0.1.5 contains 278 official Excel-facing names
+  `.is_official()`. Version 0.1.6 contains 278 official Excel-facing names
   (265 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and

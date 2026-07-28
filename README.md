@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.5 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.6 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.5
+cargo add cellrune@0.1.6
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.5"
+cellrune = "0.1.6"
 ```
 
 ## Features
@@ -26,6 +26,8 @@ cellrune = "0.1.5"
   round-trip preservation;
 - preserves sheet order, sparse cells, formulas, saved results, defined names, and relevant
   number-format metadata;
+- exposes merged ranges and validated worksheet-owned Excel tables, including stable table IDs,
+  programmatic names, formula/UI display names, ranges, and column metadata;
 - expands shared formulas while preserving absolute and relative references;
 - returns typed formula values and stable per-cell calculation issues in one result snapshot;
 - reports normalized per-workbook function demand and exposes the implemented function catalog;
@@ -191,12 +193,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.5 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.6 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.5"
-npm install "@cellrune/node@0.1.5"
+python -m pip install "cellrune==0.1.6"
+npm install "@cellrune/node@0.1.6"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

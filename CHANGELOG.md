@@ -10,16 +10,18 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-28
+
 ### Added
 
 - Excel table (ListObject) reading. Worksheets discover their table parts through the worksheet
-  relationship graph, and each sheet exposes validated `Table` models - the structured-reference
-  name and the display name separately, the full range, header and totals row counts, and columns
-  in declaration order with the stable XLSX column identifier that survives renames.
-  `WorkbookSnapshot::table` resolves a table name workbook-globally and case-insensitively, and
-  duplicate table names are a structured validation error for snapshot builders. Invalid table
-  definitions become `xlsx.table.*` warning diagnostics and drop only that table; the read
-  succeeds.
+  relationship graph, and each sheet exposes validated `Table` models: the stable non-zero table
+  ID, worksheet-local programmatic `name`, workbook-global formula/UI `displayName`, full range,
+  header and totals row counts, and columns in declaration order with the stable XLSX column
+  identifier that survives renames. `WorkbookSnapshot::table` resolves `displayName`
+  case-insensitively. Snapshot builders reject duplicate IDs and display names workbook-wide,
+  duplicate programmatic names within a worksheet, and display-name conflicts with defined names.
+  Readers report those conflicts as `xlsx.table.*` warnings and drop only the later table.
 - Merged-range reading. Each sheet exposes `merged_ranges()` sorted by top-left address.
   Unparseable, reversed, and single-cell declarations become `xlsx.merged_range.*` warning
   diagnostics; overlapping declarations keep the earlier range in sorted order and drop the later
@@ -33,8 +35,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   (`[1]Sheet1!A1`, `[Book1.xlsx]Sheet1!A1`, `[1]!Name`) remain parse errors; the two are told
   apart by what follows the closing bracket, never by the bracket contents.
 - Interop, Python, Node, and MCP surfaces expose per-sheet `merged_ranges` and `tables`
-  summaries. Both new sheet-summary fields deserialize with honest empty defaults, so payloads
-  from producers that predate them keep working.
+  summaries, including the table ID and both OOXML names. Both new sheet-summary fields deserialize
+  with honest empty defaults, so payloads from producers that predate them keep working.
 
 ### Changed
 
@@ -47,6 +49,14 @@ inventories, and measurements belong in the linked documentation rather than in 
   never open their relationship part, so table-free workbooks see no behavior change.
 - Duplicate `<mergeCells>` elements in one worksheet now fail the read as structurally invalid,
   matching the existing duplicate-`sheetData` policy.
+
+### Fixed
+
+- Table parsing now requires and preserves CT_Table `id`, validates `tableColumns@count` against
+  the actual children, and charges every declared column even inside a duplicate invalid
+  `tableColumns` container.
+- `max_tables` is charged when each `<tablePart>` declaration is encountered, so declarations
+  with missing or unresolved relationship IDs can no longer bypass the workbook-wide parse budget.
 
 ## [0.1.5] - 2026-07-28
 
@@ -370,7 +380,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/emulette/cellrune/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/emulette/cellrune/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/emulette/cellrune/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/emulette/cellrune/compare/v0.1.2...v0.1.3
