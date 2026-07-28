@@ -81,11 +81,13 @@ pub(super) fn parse(
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 process_element(
-                    is_spreadsheet,
-                    &local_name,
-                    depth,
-                    true,
-                    &attributes,
+                    ElementEvent {
+                        is_spreadsheet,
+                        local_name: &local_name,
+                        depth,
+                        has_children: true,
+                        attributes: &attributes,
+                    },
                     limits,
                     &mut state,
                     &budget,
@@ -97,11 +99,13 @@ pub(super) fn parse(
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 process_element(
-                    is_spreadsheet,
-                    &local_name,
-                    depth,
-                    false,
-                    &attributes,
+                    ElementEvent {
+                        is_spreadsheet,
+                        local_name: &local_name,
+                        depth,
+                        has_children: false,
+                        attributes: &attributes,
+                    },
                     limits,
                     &mut state,
                     &budget,
@@ -162,16 +166,27 @@ pub(super) fn parse(
     }
 }
 
-fn process_element(
+struct ElementEvent<'a> {
     is_spreadsheet: bool,
-    local_name: &[u8],
+    local_name: &'a [u8],
     depth: u64,
     has_children: bool,
-    attributes: &XmlAttributes,
+    attributes: &'a XmlAttributes,
+}
+
+fn process_element(
+    event: ElementEvent<'_>,
     limits: ReadLimits,
     state: &mut TableParseState,
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
+    let ElementEvent {
+        is_spreadsheet,
+        local_name,
+        depth,
+        has_children,
+        attributes,
+    } = event;
     if depth == 1 {
         if state.saw_root {
             return Err(budget.error(XlsxErrorCode::InvalidXml));
