@@ -8,6 +8,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [Unreleased]
+
+### Added
+
+- Excel table (ListObject) reading. Worksheets discover their table parts through the worksheet
+  relationship graph, and each sheet exposes validated `Table` models - the structured-reference
+  name and the display name separately, the full range, header and totals row counts, and columns
+  in declaration order with the stable XLSX column identifier that survives renames.
+  `WorkbookSnapshot::table` resolves a table name workbook-globally and case-insensitively, and
+  duplicate table names are a structured validation error for snapshot builders. Invalid table
+  definitions become `xlsx.table.*` warning diagnostics and drop only that table; the read
+  succeeds.
+- Merged-range reading. Each sheet exposes `merged_ranges()` sorted by top-left address.
+  Unparseable, reversed, and single-cell declarations become `xlsx.merged_range.*` warning
+  diagnostics; overlapping declarations keep the earlier range in sorted order and drop the later
+  one with a diagnostic.
+- New read limits with dedicated error codes: `max_merged_ranges`, `max_tables`,
+  `max_table_columns`, and `max_table_name_bytes`. Exceeding a limit fails the read with
+  `TooManyMergedRanges`, `TooManyTables`, `TooManyTableColumns`, or `TableNameTooLarge`.
+- Structured references such as `Table1[Amount]` and `[@Amount]` are now recognized by the lexer
+  and classified as the new `calculation.unsupported_structured_reference` capability issue
+  instead of a misleading `calculation.parse_error`. External-workbook spellings
+  (`[1]Sheet1!A1`, `[Book1.xlsx]Sheet1!A1`, `[1]!Name`) remain parse errors; the two are told
+  apart by what follows the closing bracket, never by the bracket contents.
+- Interop, Python, Node, and MCP surfaces expose per-sheet `merged_ranges` and `tables`
+  summaries. Both new sheet-summary fields deserialize with honest empty defaults, so payloads
+  from producers that predate them keep working.
+
+### Changed
+
+- The workbook fingerprint schema byte moved from 1 to 2 and now folds merged ranges and the
+  complete table model, so table or merge differences can no longer allow a stale calculation to
+  be written into a package. Fingerprints persisted under the previous schema are intentionally
+  invalidated.
+- Opening a table-bearing worksheet's relationship part applies the same OPC structural
+  strictness the workbook-level relationships always had. Worksheets without `<tableParts>`
+  never open their relationship part, so table-free workbooks see no behavior change.
+- Duplicate `<mergeCells>` elements in one worksheet now fail the read as structurally invalid,
+  matching the existing duplicate-`sheetData` policy.
+
 ## [0.1.5] - 2026-07-28
 
 ### Added

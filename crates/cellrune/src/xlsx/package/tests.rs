@@ -341,6 +341,18 @@ fn read_limits_reject_zero_values() {
             name: "max_merged_ranges"
         })
     );
+    type LimitSetter = fn(ReadLimits, u64) -> Result<ReadLimits, ReadOptionsError>;
+    let table_setters: [(LimitSetter, &str); 3] = [
+        (ReadLimits::with_max_tables, "max_tables"),
+        (ReadLimits::with_max_table_columns, "max_table_columns"),
+        (ReadLimits::with_max_table_name_bytes, "max_table_name_bytes"),
+    ];
+    for (setter, name) in table_setters {
+        assert_eq!(
+            setter(ReadLimits::default(), 0),
+            Err(ReadOptionsError::ZeroLimit { name })
+        );
+    }
     let phonetic_setters = [
         ReadLimits::with_max_phonetic_runs_per_item,
         ReadLimits::with_max_total_phonetic_runs,

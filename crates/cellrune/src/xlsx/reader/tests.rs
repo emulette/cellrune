@@ -959,6 +959,41 @@ fn tables_survive_edit_write_reopen() {
 }
 
 #[test]
+fn preserved_write_keeps_table_and_merge_parts_byte_identical() {
+    let sheet = SHEET_WITH_TABLE.replace(
+        "<tableParts",
+        r#"<mergeCells count="1"><mergeCell ref="A2:B3"/></mergeCells><tableParts"#,
+    );
+    let source = build_table_archive(
+        &sheet,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_ONE),
+        ],
+    );
+    let document =
+        open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    let output = crate::write_preserved_xlsx_bytes(&document, crate::WriteOptions::default())
+        .expect("preserved write");
+    for part in [
+        "xl/tables/table1.xml",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+    ] {
+        assert_eq!(
+            archive_text(&source, part),
+            archive_text(&output, part),
+            "{part} must round-trip byte-identically"
+        );
+    }
+    let reopened =
+        open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopened output");
+    let first = reopened.workbook().sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    assert_eq!(first.merged_ranges().len(), 1);
+}
+
+#[test]
 fn table_name_defaults_to_display_name_and_unknown_totals_functions_drop_the_table() {
     let unnamed = TABLE_ONE.replace(r#" name="Sales""#, "");
     let archive = build_table_archive(

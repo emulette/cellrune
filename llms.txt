@@ -148,7 +148,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   `CalculationDecisionReason`, `MaterializedResultOrigin`, `FormulaDialect`,
   `FormulaMetadata`, `WorkbookChange`, `XlsxDocumentKind`,
   `RecalculationWritePolicy`, `ArithmeticSemantics`, `FinancialSolverSemantics`,
-  `PhoneticType`, and `PhoneticAlignment`). A
+  `PhoneticType`, `PhoneticAlignment`, and `TotalsRowFunction`). A
   `match` on one of these needs a wildcard arm even if every current variant
   is handled.
 - **Every stable machine code exposes `.as_str()`,** returning `&str` or
@@ -180,21 +180,39 @@ than guessing a name from a different XLSX crate (`calamine`,
   `XlsxDocument` under the `OpenOptions`/`ReadLimits` budget. The document
   retains no host path and exposes no ZIP or XML types.
 - `ReadOptions::default()` / `ReadOptions::new(ReadLimits)`, `.limits()`
-- `ReadLimits::default()` + 21 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
+- `ReadLimits::default()` + 25 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
   archive bytes, ZIP entry count, per-entry/total uncompressed bytes,
   compression ratio, XML depth/attributes, sheet count, cells per
-  sheet/total, shared string count/bytes/total bytes, defined names, and
-  formula bytes per-cell/total, plus phonetic runs, annotated references, and
-  phonetic text bytes.
+  sheet/total, shared string count/bytes/total bytes, defined names,
+  formula bytes per-cell/total, merged-range declarations, tables,
+  table columns, table name bytes, plus phonetic runs, annotated
+  references, and phonetic text bytes. Exceeding the merged-range or
+  table budgets fails the read with the dedicated `XlsxErrorCode`
+  variants `TooManyMergedRanges`, `TooManyTables`,
+  `TooManyTableColumns`, or `TableNameTooLarge`.
 
 ### Workbook model — read-only, format-neutral
 
 - `WorkbookSnapshot`: `.sheets() -> &[Sheet]`, `.sheet_by_id(SheetId)`,
-  `.sheet_by_name(&str)`, `.defined_names()`, `.diagnostics()`,
+  `.sheet_by_name(&str)`, `.table(&str) -> Option<&Table>` (workbook-global,
+  case-insensitive), `.defined_names()`, `.diagnostics()`,
   `.date_system()`, `.calculation_hints()`, `.source()`, `.provenance()`.
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
-  `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`.
+  `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
+  `.merged_ranges() -> &[CellRange]` (sorted by top-left address),
+  `.tables() -> &[Table]` (XLSX declaration order).
+- `Table`: `.name() -> &TableName` (the name structured references resolve
+  against; case-insensitive, spelling preserved), `.display_name()`,
+  `.range()`, `.header_row_count()`, `.totals_row_count()`,
+  `.columns() -> &[TableColumn]`.
+- `TableColumn`: `.id()` (stable XLSX identifier that survives renames),
+  `.name()`, `.totals_row_function() -> Option<TotalsRowFunction>`.
+- `TotalsRowFunction` (`#[non_exhaustive]`): `Sum | Min | Max | Average |
+  Count | CountNumbers | StdDev | Var | Custom`; `.as_str()` returns the
+  OOXML token. Invalid table definitions and workbook-wide duplicate table
+  names are reported as `xlsx.table.*` warning diagnostics and drop only
+  that table; merged-range problems likewise as `xlsx.merged_range.*`.
 - `Cell`: `.address()`, `.content() -> &CellContent`, `.number_format()`.
 - `CellContent::Literal(CellValue) | Formula(FormulaCell)`.
 - `CellValue` (`#[non_exhaustive]`): `Blank | Number(FiniteNumber) | Text(String) | Logical(bool) | Error(ExcelError)`.
@@ -491,6 +509,16 @@ than guessing a name from a different XLSX crate (`calamine`,
   with the number of references, not with the number of sheets spanned. The
   span is expanded only while building graph edges, and
   `max_dependency_edges` still counts the distinct edges produced.
+- Structured table references (`Table1[Amount]`, `[@Amount]`, `[#Data]`,
+  nested and escaped selector spellings) are recognized as one opaque
+  expression and classified as the
+  `CalculationIssueCode::UnsupportedStructuredReference` capability issue
+  (`calculation.unsupported_structured_reference`) with the original
+  spelling as detail — not resolved, and no longer a misleading
+  `calculation.parse_error`. External-workbook spellings such as
+  `[1]Sheet1!A1`, `[Book1.xlsx]Sheet1!A1`, and `[1]!Name` remain parse
+  errors; the distinction is made by what follows the closing bracket,
+  never by the bracket contents.
 
 ### Diagnostics and provenance
 
@@ -532,8 +560,11 @@ calculate. Out of scope for the current version:
 
 - `.xls`, `.xlsb`, `.ods`, and CSV.
 - Macro, add-in, external-workbook, query, or data-connection execution.
-- Table structured references and 3-D references outside the audited
-  direct-consumer policy described under Calculation.
+- Structured-reference resolution: table definitions are read and exposed,
+  and structured-reference formulas are recognized and honestly classified,
+  but not yet resolved to values. 3-D references outside the audited
+  direct-consumer policy described under Calculation are likewise reported,
+  not resolved.
 - Spill postfix references such as `A1#`, general `LAMBDA`, and data-table
   calculation.
 - Iterative calculation and automatic host-time or random inputs (`TODAY()`

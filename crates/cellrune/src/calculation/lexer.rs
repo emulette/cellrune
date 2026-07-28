@@ -128,6 +128,8 @@ fn is_ident_continue(character: char) -> bool {
     character.is_alphanumeric() || character == '_' || character == '.'
 }
 
+
+
 pub fn lex(input: &str, max_tokens: u64) -> Result<Vec<Token>, LexError> {
     let characters: Vec<char> = input.chars().collect();
     let mut tokens = Vec::new();
@@ -429,4 +431,81 @@ pub fn lex(input: &str, max_tokens: u64) -> Result<Vec<Token>, LexError> {
         }
     }
     Ok(tokens)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Token, lex};
+    use crate::calculation::error::{
+        ERROR_LEX_EXTERNAL_REFERENCE, ERROR_LEX_UNEXPECTED_CHARACTER,
+        ERROR_LEX_UNKNOWN_ERROR_LITERAL, ERROR_LEX_UNTERMINATED_SHEET_NAME,
+        ERROR_LEX_UNTERMINATED_STRING, ERROR_LEX_UNTERMINATED_STRUCTURED_REF,
+    };
+
+    const SHARED_MESSAGES: [&str; 6] = [
+        ERROR_LEX_UNEXPECTED_CHARACTER,
+        ERROR_LEX_UNTERMINATED_STRING,
+        ERROR_LEX_UNTERMINATED_SHEET_NAME,
+        ERROR_LEX_UNKNOWN_ERROR_LITERAL,
+        ERROR_LEX_UNTERMINATED_STRUCTURED_REF,
+        ERROR_LEX_EXTERNAL_REFERENCE,
+    ];
+
+    #[test]
+    fn structured_reference_spellings_lex_as_one_opaque_token() {
+        for spelling in [
+            "Table1[Amount]",
+            "[@Amount]",
+            "[#Data]",
+            "Table1[[#Headers],[Amount]]",
+            "Table1[[Col1]:[Col2]]",
+            "Table1['[odd']name]",
+            "[]",
+        ] {
+            let tokens = lex(spelling, 1_000).expect(spelling);
+            assert_eq!(
+                tokens,
+                vec![Token::StructuredRef(spelling.to_owned())],
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn external_workbook_spellings_stay_lex_errors() {
+        for spelling in ["[1]Sheet1!A1", "[Book1.xlsx]Sheet1!A1", "[1]!Name", "[x]'My Sheet'!A1"] {
+            let error = lex(spelling, 1_000).expect_err(spelling);
+            assert_eq!(error.message, ERROR_LEX_EXTERNAL_REFERENCE, "{spelling}");
+        }
+    }
+
+    #[test]
+    fn exhaustive_bracket_alphabet_sweep_never_panics_and_uses_shared_messages() {
+        // Every string up to length 6 over a bracket-heavy alphabet. This is the
+        // committed, deterministic form of the "fuzz must not panic on arbitrary
+        // bracket text" acceptance criterion; the formula_calculation fuzz target
+        // extends the same property to arbitrary UTF-8.
+        const ALPHABET: [char; 7] = ['[', ']', '\'', '!', 'a', '#', '@'];
+        let mut inputs = vec![String::new()];
+        for _ in 0..6 {
+            let mut next = Vec::with_capacity(inputs.len() * ALPHABET.len());
+            for input in &inputs {
+                for character in ALPHABET {
+                    let mut extended = input.clone();
+                    extended.push(character);
+                    next.push(extended);
+                }
+            }
+            for input in &next {
+                if let Err(error) = lex(input, 64) {
+                    assert!(
+                        SHARED_MESSAGES.contains(&error.message),
+                        "unshared lex message {:?} for {input:?}",
+                        error.message
+                    );
+                }
+            }
+            inputs = next;
+        }
+    }
 }
