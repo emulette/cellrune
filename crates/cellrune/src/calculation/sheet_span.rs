@@ -1,6 +1,6 @@
 use super::value::ErrorKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum SheetSpanPolicy {
     CollectAcrossSheets,
     ReturnExcelError(ErrorKind),

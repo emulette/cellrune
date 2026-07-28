@@ -48,6 +48,13 @@ inventories, and measurements belong in the linked documentation rather than in 
   expression never named changed the answer a full recalculation produced while leaving the
   incremental pass holding the previous one. `COUNT` and `AVERAGE` over whole-column products were
   affected; `SUM` was not, because the extra rows fold to zero.
+- A defined name that resolves to a 3-D reference is now classified the same way regardless of
+  operand order. The capability scan reached each name once per formula, so in
+  `SUM(Name)+COUNTBLANK(Name)` whichever operand the walk visited first decided the whole formula,
+  and that order reported an unsupported formula as supported.
+- A 3-D operand of the range operator now returns Excel's `#VALUE!`, matching both the capability
+  scan for that position and the existing answer for a range whose endpoints sit on different
+  sheets, instead of an engine-capability error the scan did not predict.
 
 ## [0.1.4] - 2026-07-27
 

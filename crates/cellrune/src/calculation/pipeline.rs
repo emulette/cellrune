@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::ast::{Expr, SheetPrefix};
 use super::convert::cell_from_value;
@@ -194,7 +194,7 @@ fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Formula
                             sheet_index,
                             expr,
                             ARRAY_EXPRESSION_POLICY,
-                            &mut BTreeSet::new(),
+                            &mut HashSet::new(),
                             &mut Vec::new(),
                             &mut issues,
                         ),
@@ -530,7 +530,11 @@ fn inspect_expr(
     sheet: usize,
     expr: &Expr,
     sheet_span_policy: SheetSpanPolicy,
-    names: &mut BTreeSet<String>,
+    // Keyed by policy as well as by name: the sheet-range diagnosis depends on the context a name
+    // is reached from, so `SUM(N)+COUNTBLANK(N)` must expand `N` under both policies. Keying by
+    // name alone let whichever operand came first decide the whole formula's classification.
+    // Re-expansion cannot duplicate issues because the caller sorts and dedups them per cell.
+    names: &mut HashSet<(String, SheetSpanPolicy)>,
     local_names: &mut Vec<String>,
     issues: &mut Vec<CalculationIssue>,
 ) {
@@ -565,7 +569,7 @@ fn inspect_expr(
                 return;
             }
             let key = name.to_ascii_lowercase();
-            if names.insert(key) {
+            if names.insert((key, sheet_span_policy)) {
                 match engine.resolve_name_expr(sheet, name) {
                     Some(named) => inspect_expr(
                         engine,

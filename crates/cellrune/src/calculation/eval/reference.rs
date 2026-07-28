@@ -174,6 +174,19 @@ impl Engine<'_> {
                 .and_then(|rect| self.implicit_intersection_rect(context, rect)),
             Expr::Ref(reference) => self.resolve_reference(context.sheet(), reference),
             Expr::Range { start, end } => {
+                // A sheet span is not a rectangle the range operator can join. Excel reports the
+                // same `#VALUE!` it gives a range whose endpoints sit on different sheets, and the
+                // capability scanner classifies this position with `ARRAY_EXPRESSION_POLICY`, so
+                // answering with the engine-capability `Unsupported` here would make the scanner
+                // and the evaluator disagree.
+                for operand in [start.as_ref(), end.as_ref()] {
+                    if self
+                        .resolve_rect_span_expr(context, operand)
+                        .is_ok_and(|span| span.is_sheet_range())
+                    {
+                        return Err(ErrorKind::Value);
+                    }
+                }
                 let start = self.resolve_rect_expr(context, start)?;
                 let end = self.resolve_rect_expr(context, end)?;
                 if start.sheet != end.sheet {

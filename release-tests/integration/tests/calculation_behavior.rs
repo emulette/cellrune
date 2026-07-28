@@ -1876,6 +1876,67 @@ fn whole_column_extent_ignores_columns_the_expression_does_not_reference() {
 }
 
 #[test]
+fn a_defined_three_d_name_is_classified_the_same_in_either_operand_order() {
+    // The sheet-range diagnosis depends on which function consumes the name, so the capability
+    // scan must reach the name under both policies rather than memoizing whichever operand the
+    // walk happened to visit first.
+    let workbook = three_sheet_workbook(
+        &[
+            (1, 1, "SUM(Span3D)+COUNTBLANK(Span3D)"),
+            (1, 2, "COUNTBLANK(Span3D)+SUM(Span3D)"),
+            (1, 3, "SUM(Span3D)"),
+        ],
+        &[("Span3D", "Sheet1:Sheet3!Z1")],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    assert_eq!(report.supported_count(), 1);
+    for column in 1..=2 {
+        assert_capability_issue(
+            &report,
+            column,
+            CalculationIssueCode::UnsupportedSheetRange,
+            Some("Sheet1:Sheet3"),
+        );
+    }
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=2 {
+        assert_issue(
+            &calculation,
+            column,
+            CalculationIssueCode::UnsupportedSheetRange,
+        );
+    }
+    assert_number(&calculation, 3, 111.0, 0.0);
+}
+
+#[test]
+fn the_range_operator_reports_a_three_d_operand_as_an_excel_value_error() {
+    // The scanner classifies range-operator positions with the array-expression policy, so the
+    // evaluator has to answer with Excel's `#VALUE!` rather than an engine-capability error.
+    let workbook = three_sheet_workbook(
+        &[
+            (1, 1, "SUM(Sheet1:Sheet3!Z1:Sheet1:Sheet3!Z2)"),
+            (1, 2, "SUM(Sheet2!Z1:Sheet1:Sheet3!Z2)"),
+            (1, 3, "SUM(Span3D:Z2)"),
+        ],
+        &[("Span3D", "Sheet1:Sheet3!Z1")],
+    );
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=3 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "column {column}",
+        );
+    }
+}
+
+#[test]
 fn cross_sheet_references_use_the_workbook_unicode_name_index() {
     let workbook = workbook_with_sheets_and_names(
         vec![
