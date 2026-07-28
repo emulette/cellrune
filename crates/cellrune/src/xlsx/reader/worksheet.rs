@@ -1,9 +1,11 @@
 use quick_xml::events::Event;
 
 use super::super::package::PartPath;
+use super::super::error::compatibility;
 use super::super::xml::{
-    XmlAttributes, XmlBudget, decode_cdata, decode_reference, decode_text, is_spreadsheet_element,
-    read_attributes, reader, require_spreadsheet_element,
+    DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, XmlAttributes, XmlBudget,
+    decode_cdata, decode_reference, decode_text, is_spreadsheet_element, read_attributes, reader,
+    require_spreadsheet_element,
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
@@ -32,6 +34,8 @@ const CELL: &[u8] = b"c";
 const PHONETIC_PROPERTIES: &[u8] = b"phoneticPr";
 const MERGE_CELLS: &[u8] = b"mergeCells";
 const MERGE_CELL: &[u8] = b"mergeCell";
+const TABLE_PARTS: &[u8] = b"tableParts";
+const TABLE_PART: &[u8] = b"tablePart";
 #[derive(Debug, Default)]
 struct WorksheetParseState {
     saw_root: bool,
@@ -52,6 +56,8 @@ struct WorksheetParseState {
     merge_cells_depth: Option<u64>,
     saw_merge_cells: bool,
     merged_ranges: MergedRangeCollector,
+    table_parts_depth: Option<u64>,
+    saw_table_parts: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -69,6 +75,7 @@ pub(super) struct WorksheetOutput<'a> {
     pub(super) presentation: &'a mut DocumentPresentation,
     pub(super) phonetic_budget: &'a mut PhoneticReadBudget,
     pub(super) diagnostics: &'a mut Vec<Diagnostic>,
+    pub(super) table_relationship_ids: &'a mut Vec<Box<str>>,
 }
 
 struct WorksheetStartContext<'budget, 'state> {
@@ -80,6 +87,7 @@ struct WorksheetStartContext<'budget, 'state> {
     sheet_id: SheetId,
     presentation: &'state mut DocumentPresentation,
     diagnostics: &'state mut Vec<Diagnostic>,
+    table_relationship_ids: &'state mut Vec<Box<str>>,
     font_count: u32,
 }
 
@@ -99,6 +107,7 @@ pub(super) fn parse(
         presentation,
         phonetic_budget,
         diagnostics,
+        table_relationship_ids,
     } = output;
     let sheet_id = sheet.id();
     let mut xml = reader(bytes);
@@ -132,6 +141,7 @@ pub(super) fn parse(
                         sheet_id,
                         presentation: &mut *presentation,
                         diagnostics: &mut *diagnostics,
+                        table_relationship_ids: &mut *table_relationship_ids,
                         font_count: resources.styles.font_count(),
                     },
                 )?;
@@ -220,6 +230,23 @@ pub(super) fn parse(
                         state.merged_ranges.record(
                             attributes.unqualified("ref"),
                             total_merged_ranges,
+                            sheet_id,
+                            diagnostics,
+                            &budget,
+                        )?;
+                    } else if depth == 2 && local_name == TABLE_PARTS {
+                        if state.saw_table_parts {
+                            return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
+                        }
+                        state.saw_table_parts = true;
+                    } else if state
+                        .table_parts_depth
+                        .is_some_and(|parent| depth == parent + 1)
+                        && local_name == TABLE_PART
+                    {
+                        record_table_part(
+                            &attributes,
+                            table_relationship_ids,
                             sheet_id,
                             diagnostics,
                             &budget,
@@ -313,6 +340,8 @@ pub(super) fn parse(
                     state.sheet_data_depth = None;
                 } else if state.merge_cells_depth == Some(depth) && local_name == MERGE_CELLS {
                     state.merge_cells_depth = None;
+                } else if state.table_parts_depth == Some(depth) && local_name == TABLE_PARTS {
+                    state.table_parts_depth = None;
                 } else if state.sheet_view_depth == Some(depth) && local_name == SHEET_VIEW {
                     state.sheet_view_depth = None;
                     state.default_view_active = false;
@@ -337,6 +366,7 @@ pub(super) fn parse(
         || state.row_depth.is_some()
         || state.sheet_data_depth.is_some()
         || state.merge_cells_depth.is_some()
+        || state.table_parts_depth.is_some()
         || state.sheet_view_depth.is_some()
         || state.sheet_views_depth.is_some()
         || state.columns_depth.is_some()
@@ -363,6 +393,7 @@ fn process_start(
         sheet_id,
         presentation,
         diagnostics,
+        table_relationship_ids,
         font_count,
     } = context;
     if depth == 1 {
@@ -434,6 +465,23 @@ fn process_start(
         state.merged_ranges.record(
             attributes.unqualified("ref"),
             total_merged_ranges,
+            sheet_id,
+            diagnostics,
+            budget,
+        )?;
+    } else if depth == 2 && local_name == TABLE_PARTS {
+        if state.saw_table_parts || state.table_parts_depth.replace(depth).is_some() {
+            return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
+        }
+        state.saw_table_parts = true;
+    } else if state
+        .table_parts_depth
+        .is_some_and(|parent| depth == parent + 1)
+        && local_name == TABLE_PART
+    {
+        record_table_part(
+            &attributes,
+            table_relationship_ids,
             sheet_id,
             diagnostics,
             budget,
@@ -670,6 +718,28 @@ fn process_pane(
         return Err(budget.error(XlsxErrorCode::InvalidFrozenPane));
     }
     presentation.source_frozen_pane(sheet_id, pane);
+    Ok(())
+}
+
+fn record_table_part(
+    attributes: &XmlAttributes,
+    table_relationship_ids: &mut Vec<Box<str>>,
+    sheet_id: SheetId,
+    diagnostics: &mut Vec<Diagnostic>,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    let relationship_id = attributes
+        .namespaced(DOCUMENT_RELATIONSHIPS_TRANSITIONAL, "id")
+        .or_else(|| attributes.namespaced(DOCUMENT_RELATIONSHIPS_STRICT, "id"));
+    let Some(relationship_id) = relationship_id else {
+        return super::table::push_invalid_diagnostic(
+            diagnostics,
+            compatibility::TABLE_MISSING_RELATIONSHIP_ID,
+            sheet_id,
+            budget,
+        );
+    };
+    table_relationship_ids.push(Box::from(relationship_id));
     Ok(())
 }
 

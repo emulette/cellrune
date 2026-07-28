@@ -687,6 +687,320 @@ fn duplicate_merge_cells_elements_fail_the_read() {
     assert_eq!(error.code(), XlsxErrorCode::InvalidWorksheet);
 }
 
+const SHEET_WITH_TABLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><v>3</v></c></row></sheetData>
+  <tableParts count="1"><tablePart r:id="rId7"/></tableParts>
+</worksheet>"#;
+
+const SHEET_ONE_TABLE_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+
+const TABLE_ONE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="SalesDisplay" ref="A1:C4" totalsRowCount="1">
+  <tableColumns count="3">
+    <tableColumn id="1" name="Region"/>
+    <tableColumn id="5" name="Amount" totalsRowFunction="sum"/>
+    <tableColumn id="3" name="Note" totalsRowFunction="none"/>
+  </tableColumns>
+</table>"#;
+
+fn table_content_types() -> String {
+    CONTENT_TYPES.replace(
+        "</Types>",
+        r#"<Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/><Override PartName="/xl/tables/table2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/></Types>"#,
+    )
+}
+
+fn build_table_archive(sheet_one: &str, extra_parts: &[(&str, &str)]) -> Vec<u8> {
+    let content_types = table_content_types();
+    let mut entries: Vec<(&str, &str)> = vec![
+        ("[Content_Types].xml", content_types.as_str()),
+        ("_rels/.rels", ROOT_RELATIONSHIPS),
+        ("xl/workbook.xml", WORKBOOK),
+        ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+        ("xl/styles.xml", STYLES),
+        ("xl/sharedStrings.xml", SHARED_STRINGS),
+        ("xl/worksheets/sheet1.xml", sheet_one),
+        ("xl/worksheets/sheet2.xml", SHEET_TWO),
+    ];
+    entries.extend_from_slice(extra_parts);
+    let mut output = Cursor::new(Vec::new());
+    {
+        let mut writer = ZipWriter::new(&mut output);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (name, contents) in entries {
+            writer
+                .start_file(name, options)
+                .expect("start fixture part");
+            writer
+                .write_all(contents.as_bytes())
+                .expect("write fixture part");
+        }
+        writer.finish().expect("finish fixture archive");
+    }
+    output.into_inner()
+}
+
+#[test]
+fn reads_table_metadata_through_worksheet_relationships() {
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_ONE),
+        ],
+    );
+    let snapshot =
+        read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table workbook");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    let table = &first.tables()[0];
+    assert_eq!(table.name().as_str(), "Sales");
+    assert_eq!(table.display_name(), "SalesDisplay");
+    assert_eq!(table.range().start().to_string(), "A1");
+    assert_eq!(table.range().end().to_string(), "C4");
+    assert_eq!(table.header_row_count(), 1);
+    assert_eq!(table.totals_row_count(), 1);
+    let columns: Vec<(u32, &str, Option<crate::TotalsRowFunction>)> = table
+        .columns()
+        .iter()
+        .map(|column| (column.id(), column.name(), column.totals_row_function()))
+        .collect();
+    assert_eq!(
+        columns,
+        vec![
+            (1, "Region", None),
+            (5, "Amount", Some(crate::TotalsRowFunction::Sum)),
+            (3, "Note", None),
+        ]
+    );
+    assert_eq!(
+        snapshot.table("sales").expect("global lookup").display_name(),
+        "SalesDisplay"
+    );
+    assert!(
+        snapshot.table("SalesDisplay").is_none(),
+        "display name is not a lookup key"
+    );
+    assert!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| !diagnostic.code().as_str().starts_with("xlsx.table")),
+        "a valid table must not produce diagnostics"
+    );
+}
+
+#[test]
+fn invalid_table_definitions_are_dropped_with_a_diagnostic() {
+    let mismatched = TABLE_ONE.replace(
+        r#"<tableColumn id="3" name="Note" totalsRowFunction="none"/>"#,
+        "",
+    );
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &mismatched),
+        ],
+    );
+    let snapshot =
+        read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read must succeed");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert!(first.tables().is_empty());
+    assert!(snapshot.table("Sales").is_none());
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn duplicate_table_names_drop_the_later_table() {
+    let sheet = SHEET_WITH_TABLE.replace(
+        r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
+        r#"<tableParts count="2"><tablePart r:id="rId7"/><tablePart r:id="rId8"/></tableParts>"#,
+    );
+    let rels = SHEET_ONE_TABLE_RELS.replace(
+        "</Relationships>",
+        r#"<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/></Relationships>"#,
+    );
+    let second_table = TABLE_ONE
+        .replace(r#"name="Sales""#, r#"name="SALES""#)
+        .replace(r#"displayName="SalesDisplay""#, r#"displayName="Other""#);
+    let archive = build_table_archive(
+        &sheet,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", &rels),
+            ("xl/tables/table1.xml", TABLE_ONE),
+            ("xl/tables/table2.xml", &second_table),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    assert_eq!(first.tables()[0].display_name(), "SalesDisplay");
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.duplicate_name")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn unresolved_table_relationship_is_dropped_with_a_diagnostic() {
+    let archive = build_table_archive(SHEET_WITH_TABLE, &[]);
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert!(first.tables().is_empty());
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn table_read_limits_fail_the_read_with_dedicated_codes() {
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_ONE),
+        ],
+    );
+    let columns_limit = ReadLimits::default()
+        .with_max_table_columns(2)
+        .expect("limit");
+    let error = read_xlsx(Cursor::new(archive.clone()), ReadOptions::new(columns_limit))
+        .expect_err("three columns must exceed a limit of two");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTableColumns);
+
+    let name_limit = ReadLimits::default()
+        .with_max_table_name_bytes(4)
+        .expect("limit");
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(name_limit))
+        .expect_err("'Sales' must exceed a four-byte name limit");
+    assert_eq!(error.code(), XlsxErrorCode::TableNameTooLarge);
+
+    let sheet = SHEET_WITH_TABLE.replace(
+        r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
+        r#"<tableParts count="2"><tablePart r:id="rId7"/><tablePart r:id="rId7"/></tableParts>"#,
+    );
+    let archive = build_table_archive(
+        &sheet,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_ONE),
+        ],
+    );
+    let tables_limit = ReadLimits::default().with_max_tables(1).expect("limit");
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(tables_limit))
+        .expect_err("two referenced parts must exceed a limit of one");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTables);
+}
+
+#[test]
+fn tables_survive_edit_write_reopen() {
+    let source = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_ONE),
+        ],
+    );
+    let document =
+        open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    let sheet_id = SheetId::new(1).expect("sheet");
+    let mut draft = WorkbookDraft::from_document(&document);
+    let semantic_revision = draft.semantic_revision();
+    draft
+        .set_cell_value(
+            sheet_id,
+            address("A1"),
+            CellValue::Number(crate::FiniteNumber::new(9.0).expect("finite")),
+        )
+        .expect("edit");
+    assert_eq!(draft.semantic_revision(), semantic_revision + 1);
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    let table = reopened.workbook().table("Sales").expect("table survives");
+    assert_eq!(table.display_name(), "SalesDisplay");
+    let first = reopened.workbook().sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    assert_eq!(
+        literal(first, "A1"),
+        &CellValue::Number(crate::FiniteNumber::new(9.0).expect("finite")),
+        "the edit itself must survive the rewrite"
+    );
+    let worksheet = archive_text(output.bytes(), "xl/worksheets/sheet1.xml");
+    assert!(worksheet.contains("<tableParts"), "{worksheet}");
+    let table_part = archive_text(output.bytes(), "xl/tables/table1.xml");
+    assert!(table_part.contains("displayName=\"SalesDisplay\""), "{table_part}");
+    let draft_table = draft.workbook().table("Sales").expect("draft keeps table");
+    assert_eq!(draft_table.columns().len(), 3);
+}
+
+#[test]
+fn table_name_defaults_to_display_name_and_unknown_totals_functions_drop_the_table() {
+    let unnamed = TABLE_ONE.replace(r#" name="Sales""#, "");
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &unnamed),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    assert_eq!(
+        snapshot
+            .table("SalesDisplay")
+            .expect("name defaults to displayName")
+            .name()
+            .as_str(),
+        "SalesDisplay"
+    );
+
+    let unknown_totals = TABLE_ONE.replace(
+        r#"totalsRowFunction="sum""#,
+        r#"totalsRowFunction="bogus""#,
+    );
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &unknown_totals),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    assert!(snapshot.table("Sales").is_none());
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn merged_ranges_survive_edit_write_reopen() {
     let sheet = SHEET_ONE.replace(

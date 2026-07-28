@@ -4,6 +4,7 @@ mod formula_cell;
 mod formula_reference;
 mod merge;
 mod metadata;
+mod table;
 mod phonetic;
 mod shared_strings;
 mod styles;
@@ -140,6 +141,8 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     let mut used_relationships = BTreeSet::new();
     let mut total_cells = 0_u64;
     let mut total_merged_ranges = 0_u64;
+    let mut total_tables = 0_u64;
+    let mut seen_table_names = BTreeSet::<Box<str>>::new();
     let mut total_formula_bytes = workbook
         .defined_names
         .iter()
@@ -162,6 +165,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         used_relationships.insert(metadata.relationship_id);
         let worksheet_bytes = package.read_part(&worksheet_part)?;
         let mut sheet = Sheet::new(metadata.id, metadata.name, metadata.visibility);
+        let mut table_relationship_ids = Vec::new();
         worksheet::parse(
             &worksheet_bytes,
             &worksheet_part,
@@ -180,8 +184,18 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 presentation: &mut presentation,
                 phonetic_budget: &mut phonetic_budget,
                 diagnostics: &mut diagnostics,
+                table_relationship_ids: &mut table_relationship_ids,
             },
         )?;
+        read_sheet_tables(SheetTableContext {
+            package: &mut package,
+            worksheet_part: &worksheet_part,
+            table_relationship_ids: &table_relationship_ids,
+            sheet: &mut sheet,
+            total_tables: &mut total_tables,
+            seen_table_names: &mut seen_table_names,
+            diagnostics: &mut diagnostics,
+        })?;
         sheets.push(sheet);
     }
     if used_relationships.len() != package.worksheet_count() {
@@ -216,6 +230,81 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         worksheet_parts,
         package_kind,
     })
+}
+
+struct SheetTableContext<'a, R: Read + Seek> {
+    package: &'a mut OpenedPackage<R>,
+    worksheet_part: &'a PartPath,
+    table_relationship_ids: &'a [Box<str>],
+    sheet: &'a mut Sheet,
+    total_tables: &'a mut u64,
+    seen_table_names: &'a mut BTreeSet<Box<str>>,
+    diagnostics: &'a mut Vec<Diagnostic>,
+}
+
+/// Resolves and parses the table parts one worksheet references through `<tableParts>`.
+///
+/// Every referenced part is charged against the workbook-wide table budget before it is
+/// read. A relationship id that resolves to no table relationship, an invalid table
+/// definition, and a workbook-wide duplicate table name each drop only that table with a
+/// warning diagnostic; the read itself keeps going.
+fn read_sheet_tables<R: Read + Seek>(
+    context: SheetTableContext<'_, R>,
+) -> Result<(), XlsxReadError> {
+    let SheetTableContext {
+        package,
+        worksheet_part,
+        table_relationship_ids,
+        sheet,
+        total_tables,
+        seen_table_names,
+        diagnostics,
+    } = context;
+    if table_relationship_ids.is_empty() {
+        return Ok(());
+    }
+    let limits = package.limits();
+    let table_parts = package.worksheet_table_parts(worksheet_part)?;
+    let budget = crate::xlsx::xml::XmlBudget::new(
+        limits,
+        worksheet_part.source_id(),
+        XlsxErrorCode::InvalidWorksheet,
+    );
+    let mut tables = Vec::new();
+    for relationship_id in table_relationship_ids {
+        *total_tables = total_tables.saturating_add(1);
+        if *total_tables > limits.max_tables() {
+            return Err(XlsxReadError::new(XlsxErrorCode::TooManyTables)
+                .at_source(worksheet_part.source_id()));
+        }
+        let Some(part) = table_parts.get(relationship_id) else {
+            table::push_invalid_diagnostic(
+                diagnostics,
+                compatibility::TABLE_UNRESOLVED_RELATIONSHIP,
+                sheet.id(),
+                &budget,
+            )?;
+            continue;
+        };
+        let bytes = package.read_part(part)?;
+        let Some(parsed) = table::parse(&bytes, part, limits, sheet.id(), diagnostics)? else {
+            continue;
+        };
+        if !seen_table_names.insert(Box::from(parsed.name().lookup_key())) {
+            table::push_table_diagnostic(
+                diagnostics,
+                compatibility::TABLE_DUPLICATE_NAME_CODE,
+                compatibility::TABLE_DUPLICATE_NAME_MESSAGE,
+                parsed.name().as_str(),
+                sheet.id(),
+                &budget,
+            )?;
+            continue;
+        }
+        tables.push(parsed);
+    }
+    sheet.set_tables(tables);
+    Ok(())
 }
 
 fn read_cell_metadata<R: Read + Seek>(

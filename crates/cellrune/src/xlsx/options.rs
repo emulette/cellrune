@@ -17,6 +17,9 @@ const MAX_DEFINED_NAMES: &str = "max_defined_names";
 const MAX_FORMULA_BYTES: &str = "max_formula_bytes";
 const MAX_TOTAL_FORMULA_BYTES: &str = "max_total_formula_bytes";
 const MAX_MERGED_RANGES: &str = "max_merged_ranges";
+const MAX_TABLES: &str = "max_tables";
+const MAX_TABLE_COLUMNS: &str = "max_table_columns";
+const MAX_TABLE_NAME_BYTES: &str = "max_table_name_bytes";
 const MAX_PHONETIC_RUNS_PER_ITEM: &str = "max_phonetic_runs_per_item";
 const MAX_TOTAL_PHONETIC_RUNS: &str = "max_total_phonetic_runs";
 const MAX_ANNOTATED_CELLS: &str = "max_annotated_cells";
@@ -43,6 +46,9 @@ pub struct ReadLimits {
     max_formula_bytes: u64,
     max_total_formula_bytes: u64,
     max_merged_ranges: u64,
+    max_tables: u64,
+    max_table_columns: u64,
+    max_table_name_bytes: u64,
     max_phonetic_runs_per_item: u64,
     max_total_phonetic_runs: u64,
     max_annotated_cells: u64,
@@ -143,6 +149,21 @@ impl ReadLimits {
     /// Returns the maximum merged-range declaration count across all worksheets.
     pub const fn max_merged_ranges(self) -> u64 {
         self.max_merged_ranges
+    }
+
+    /// Returns the maximum referenced table-part count across all worksheets.
+    pub const fn max_tables(self) -> u64 {
+        self.max_tables
+    }
+
+    /// Returns the maximum column count in one table definition.
+    pub const fn max_table_columns(self) -> u64 {
+        self.max_table_columns
+    }
+
+    /// Returns the maximum UTF-8 byte length of one table, display, or column name.
+    pub const fn max_table_name_bytes(self) -> u64 {
+        self.max_table_name_bytes
     }
 
     /// Returns the maximum phonetic run count in one string item.
@@ -349,6 +370,36 @@ impl ReadLimits {
         Ok(self)
     }
 
+    /// Replaces the workbook-wide referenced table-part limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_tables(mut self, value: u64) -> Result<Self, ReadOptionsError> {
+        self.max_tables = nonzero(MAX_TABLES, value)?;
+        Ok(self)
+    }
+
+    /// Replaces the per-table column-count limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_table_columns(mut self, value: u64) -> Result<Self, ReadOptionsError> {
+        self.max_table_columns = nonzero(MAX_TABLE_COLUMNS, value)?;
+        Ok(self)
+    }
+
+    /// Replaces the per-name table byte-length limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_table_name_bytes(mut self, value: u64) -> Result<Self, ReadOptionsError> {
+        self.max_table_name_bytes = nonzero(MAX_TABLE_NAME_BYTES, value)?;
+        Ok(self)
+    }
+
     /// Replaces the per-item phonetic run-count limit.
     ///
     /// # Errors
@@ -423,6 +474,9 @@ impl Default for ReadLimits {
             max_formula_bytes: 1024 * 1024,
             max_total_formula_bytes: 256 * 1024 * 1024,
             max_merged_ranges: 100_000,
+            max_tables: 10_000,
+            max_table_columns: 16_384,
+            max_table_name_bytes: 1_024,
             max_phonetic_runs_per_item: 32_768,
             max_total_phonetic_runs: 2_000_000,
             max_annotated_cells: 2_000_000,

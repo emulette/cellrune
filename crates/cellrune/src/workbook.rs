@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 
 use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
-    NumberFormat, Provenance, Row, ValidationError,
+    NumberFormat, Provenance, Row, Table, ValidationError,
 };
 
 /// A validated, non-zero workbook-local sheet identifier.
@@ -107,6 +107,7 @@ pub struct Sheet {
     max_row: Option<Row>,
     max_column: Option<Column>,
     merged_ranges: Vec<CellRange>,
+    tables: Vec<Table>,
 }
 
 impl Sheet {
@@ -122,6 +123,7 @@ impl Sheet {
             max_row: None,
             max_column: None,
             merged_ranges: Vec::new(),
+            tables: Vec::new(),
         }
     }
 
@@ -216,6 +218,18 @@ impl Sheet {
     /// the reader's merge parser is the only producer of that order.
     pub(crate) fn set_merged_ranges(&mut self, merged_ranges: Vec<CellRange>) {
         self.merged_ranges = merged_ranges;
+    }
+
+    /// Returns this sheet's tables in XLSX declaration order.
+    pub fn tables(&self) -> &[Table] {
+        &self.tables
+    }
+
+    /// Stores the validated tables for this sheet.
+    ///
+    /// Workbook-wide name uniqueness is enforced when the snapshot is constructed, not here.
+    pub(crate) fn set_tables(&mut self, tables: Vec<Table>) {
+        self.tables = tables;
     }
 
     /// Returns the smallest bounding rectangle containing all sparse cells.
@@ -421,6 +435,7 @@ pub struct WorkbookSnapshot {
     sheets: Vec<Sheet>,
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
+    table_name_index: BTreeMap<Box<str>, (usize, usize)>,
     defined_names: Vec<DefinedName>,
     defined_name_index: BTreeMap<DefinedNameScope, BTreeMap<Box<str>, usize>>,
     diagnostics: Vec<Diagnostic>,
@@ -447,6 +462,7 @@ impl WorkbookSnapshot {
             sheets: vec![sheet],
             sheet_id_index,
             sheet_name_index,
+            table_name_index: BTreeMap::new(),
             defined_names: Vec::new(),
             defined_name_index: BTreeMap::new(),
             diagnostics: Vec::new(),
@@ -511,6 +527,20 @@ impl WorkbookSnapshot {
                 });
             }
         }
+        let mut table_name_index = BTreeMap::<Box<str>, (usize, usize)>::new();
+        for (sheet_index, sheet) in sheets.iter().enumerate() {
+            for (table_index, table) in sheet.tables().iter().enumerate() {
+                let key = Box::<str>::from(table.name().lookup_key());
+                if table_name_index
+                    .insert(key, (sheet_index, table_index))
+                    .is_some()
+                {
+                    return Err(ValidationError::DuplicateTableName {
+                        name: table.name().as_str().to_owned(),
+                    });
+                }
+            }
+        }
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
         for (index, defined_name) in defined_names.iter().enumerate() {
             if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope()
@@ -534,6 +564,7 @@ impl WorkbookSnapshot {
             sheets,
             sheet_id_index,
             sheet_name_index,
+            table_name_index,
             defined_names,
             defined_name_index,
             diagnostics,
@@ -575,6 +606,15 @@ impl WorkbookSnapshot {
         self.sheet_id_index
             .get(&id)
             .map(|index| &self.sheets[*index])
+    }
+
+    /// Returns a table anywhere in the workbook using deterministic case-insensitive lookup.
+    ///
+    /// Table names are workbook-global in Excel even though each table is owned by its sheet.
+    pub fn table(&self, name: &str) -> Option<&Table> {
+        let key = case_insensitive_key(name);
+        let (sheet_index, table_index) = *self.table_name_index.get(key.as_str())?;
+        Some(&self.sheets[sheet_index].tables()[table_index])
     }
 
     /// Returns a sheet using deterministic case-insensitive lookup.

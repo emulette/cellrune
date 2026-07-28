@@ -64,6 +64,13 @@ pub(crate) mod compatibility {
     pub(crate) const MERGED_RANGE_OVERLAP_CODE: &str = "xlsx.merged_range.overlap";
     pub(crate) const MERGED_RANGE_OVERLAP_MESSAGE: &str =
         "merged range overlaps an earlier merged range and was dropped";
+    pub(crate) const TABLE_INVALID_CODE: &str = "xlsx.table.invalid";
+    pub(crate) const TABLE_INVALID_MESSAGE: &str = "table definition is invalid and was dropped";
+    pub(crate) const TABLE_DUPLICATE_NAME_CODE: &str = "xlsx.table.duplicate_name";
+    pub(crate) const TABLE_DUPLICATE_NAME_MESSAGE: &str =
+        "table name duplicates an earlier table and was dropped";
+    pub(crate) const TABLE_UNRESOLVED_RELATIONSHIP: &str = "unresolved table relationship id";
+    pub(crate) const TABLE_MISSING_RELATIONSHIP_ID: &str = "missing table relationship id";
 }
 
 /// Invalid caller-provided reader configuration.
@@ -199,6 +206,12 @@ pub enum XlsxErrorCode {
     InvalidFrozenPane,
     /// Merged-range declarations exceed the configured limit.
     TooManyMergedRanges,
+    /// Referenced table parts exceed the configured limit.
+    TooManyTables,
+    /// One table definition exceeds the configured column-count limit.
+    TooManyTableColumns,
+    /// A table, display, or column name exceeds the configured byte limit.
+    TableNameTooLarge,
 }
 
 impl XlsxErrorCode {
@@ -259,6 +272,9 @@ impl XlsxErrorCode {
             Self::TooManyAnnotatedCells => "xlsx.too_many_annotated_cells",
             Self::InvalidFrozenPane => "xlsx.invalid_frozen_pane",
             Self::TooManyMergedRanges => "xlsx.too_many_merged_ranges",
+            Self::TooManyTables => "xlsx.too_many_tables",
+            Self::TooManyTableColumns => "xlsx.too_many_table_columns",
+            Self::TableNameTooLarge => "xlsx.table_name_too_large",
         }
     }
 
@@ -334,6 +350,9 @@ impl XlsxErrorCode {
             Self::TooManyMergedRanges => {
                 "workbook merged-range count exceeds the configured limit"
             }
+            Self::TooManyTables => "workbook table count exceeds the configured limit",
+            Self::TooManyTableColumns => "table column count exceeds the configured limit",
+            Self::TableNameTooLarge => "table name exceeds the configured byte limit",
         }
     }
 }

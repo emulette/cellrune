@@ -19,6 +19,8 @@ const EXTERNAL_LINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink";
 const EXTERNAL_LINK_STRICT: &str =
     "http://purl.oclc.org/ooxml/officeDocument/relationships/externalLink";
+const TABLE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
+const TABLE_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/table";
 const VBA_PROJECT: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
 const CALC_CHAIN: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain";
@@ -46,6 +48,10 @@ pub(super) fn is_sheet_metadata(value: &str) -> bool {
 
 pub(super) fn is_external_link(value: &str) -> bool {
     matches!(value, EXTERNAL_LINK | EXTERNAL_LINK_STRICT)
+}
+
+pub(super) fn is_table(value: &str) -> bool {
+    matches!(value, TABLE | TABLE_STRICT)
 }
 
 pub(super) fn is_vba_project(value: &str) -> bool {

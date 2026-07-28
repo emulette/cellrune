@@ -88,6 +88,7 @@ mod draft;
 mod error;
 mod formula;
 mod presentation;
+mod table;
 mod workbook;
 mod xlsx;
 
@@ -125,6 +126,7 @@ pub use presentation::{
     ResolvedPhoneticRun,
 };
 pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
+pub use table::{Table, TableColumn, TableName, TotalsRowFunction};
 pub use workbook::{
     CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,
     WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,

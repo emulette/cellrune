@@ -32,6 +32,8 @@ const CONTENT_SHARED_STRINGS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml";
 const CONTENT_SHEET_METADATA: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml";
+const CONTENT_TABLE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WorkbookPackageKind {
@@ -42,6 +44,7 @@ pub(super) enum WorkbookPackageKind {
 pub(super) struct OpenedPackage<R: Read + Seek> {
     archive: ZipArchive<R>,
     entries: BTreeMap<PartPath, usize>,
+    content_types: ContentTypes,
     limits: ReadLimits,
     archive_bytes: u64,
     /// Uncompressed bytes actually produced so far, charged against
@@ -117,6 +120,61 @@ impl<R: Read + Seek> OpenedPackage<R> {
             self.limits,
             &mut self.uncompressed_spent,
         )
+    }
+
+    /// Resolves one worksheet's table relationships to their package parts.
+    ///
+    /// A worksheet without a relationship part has no tables; that is the common case and
+    /// returns an empty map. Relationship-level malformations (external targets, duplicate
+    /// targets, missing parts, wrong content type) are package-integrity failures, matching
+    /// how workbook-level support parts are treated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`XlsxReadError`] when the relationship part cannot be read or a table
+    /// relationship is structurally invalid.
+    pub(super) fn worksheet_table_parts(
+        &mut self,
+        worksheet_part: &PartPath,
+    ) -> Result<BTreeMap<Box<str>, PartPath>, XlsxReadError> {
+        let relationship_part = worksheet_part.relationship_part()?;
+        if !self.entries.contains_key(&relationship_part) {
+            return Ok(BTreeMap::new());
+        }
+        let bytes = read_required_part(
+            &mut self.archive,
+            &self.entries,
+            &relationship_part,
+            self.limits,
+            &mut self.uncompressed_spent,
+        )?;
+        let relationships = xml::parse_relationships(
+            &bytes,
+            &relationship_part,
+            Some(worksheet_part),
+            self.limits,
+        )?;
+        let mut parts = BTreeMap::new();
+        let mut unique = BTreeSet::new();
+        for relationship in relationships
+            .iter()
+            .filter(|relationship| relationship_type::is_table(&relationship.kind))
+        {
+            let RelationshipTarget::Internal(part) = &relationship.target else {
+                return Err(XlsxReadError::new(XlsxErrorCode::InvalidRelationships)
+                    .with_detail(detail::EXTERNAL_SUPPORT_PART)
+                    .at_source(relationship_part.source_id()));
+            };
+            if !unique.insert(part.clone()) {
+                return Err(XlsxReadError::new(XlsxErrorCode::InvalidRelationships)
+                    .with_detail(detail::DUPLICATE_WORKSHEET_TARGET)
+                    .at_source(relationship_part.source_id()));
+            }
+            ensure_part(&self.entries, part)?;
+            ensure_content_type(&self.content_types, part, CONTENT_TABLE)?;
+            parts.insert(relationship.id.clone(), part.clone());
+        }
+        Ok(parts)
     }
 
     pub(super) fn summary(&self) -> PackageSummary {
@@ -259,6 +317,7 @@ pub(super) fn open_package<R: Read + Seek>(
     Ok(OpenedPackage {
         archive,
         entries,
+        content_types,
         limits,
         archive_bytes,
         uncompressed_spent,

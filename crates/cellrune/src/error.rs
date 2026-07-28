@@ -57,6 +57,20 @@ const MESSAGE_FROZEN_ROWS_OUT_OF_RANGE: &str =
     "frozen row count cannot produce a valid top-left cell";
 const MESSAGE_FROZEN_COLUMNS_OUT_OF_RANGE: &str =
     "frozen column count cannot produce a valid top-left cell";
+const MESSAGE_TABLE_NAME_EMPTY: &str = "table name must not be empty";
+const MESSAGE_TABLE_NAME_TOO_LONG: &str = "table name exceeds 255 UTF-16 code units";
+const MESSAGE_TABLE_NAME_INVALID_CHARACTER: &str = "table name contains an invalid character";
+const MESSAGE_DUPLICATE_TABLE_NAME: &str =
+    "workbook contains a duplicate case-insensitive table name";
+const MESSAGE_TABLE_COLUMNS_EMPTY: &str = "table must declare at least one column";
+const MESSAGE_TABLE_COLUMN_COUNT_MISMATCH: &str =
+    "table column count does not match the table range width";
+const MESSAGE_TABLE_COLUMN_NAME_EMPTY: &str = "table column name must not be empty";
+const MESSAGE_DUPLICATE_TABLE_COLUMN_NAME: &str =
+    "table contains a duplicate case-insensitive column name";
+const MESSAGE_DUPLICATE_TABLE_COLUMN_ID: &str = "table contains a duplicate column identifier";
+const MESSAGE_TABLE_ROW_COUNTS_EXCEED_RANGE: &str =
+    "table header and totals rows exceed the table range height";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
@@ -157,6 +171,26 @@ pub enum ValidationErrorCode {
     CustomNumberFormatId,
     /// A custom number format code is empty.
     NumberFormatCodeEmpty,
+    /// A table name is empty.
+    TableNameEmpty,
+    /// A table name exceeds Excel's length limit.
+    TableNameTooLong,
+    /// A table name contains a forbidden character.
+    TableNameInvalidCharacter,
+    /// A workbook contains a duplicate case-insensitive table name.
+    DuplicateTableName,
+    /// A table declares no columns.
+    TableColumnsEmpty,
+    /// A table's column count disagrees with its range width.
+    TableColumnCountMismatch,
+    /// A table column name is empty.
+    TableColumnNameEmpty,
+    /// A table contains a duplicate case-insensitive column name.
+    DuplicateTableColumnName,
+    /// A table contains a duplicate column identifier.
+    DuplicateTableColumnId,
+    /// A table's header and totals rows exceed its range height.
+    TableRowCountsExceedRange,
 }
 
 impl ValidationErrorCode {
@@ -213,6 +247,16 @@ impl ValidationErrorCode {
             Self::BuiltInNumberFormatId => "validation.built_in_number_format_id",
             Self::CustomNumberFormatId => "validation.custom_number_format_id",
             Self::NumberFormatCodeEmpty => "validation.number_format_code_empty",
+            Self::TableNameEmpty => "validation.table_name_empty",
+            Self::TableNameTooLong => "validation.table_name_too_long",
+            Self::TableNameInvalidCharacter => "validation.table_name_invalid_character",
+            Self::DuplicateTableName => "validation.duplicate_table_name",
+            Self::TableColumnsEmpty => "validation.table_columns_empty",
+            Self::TableColumnCountMismatch => "validation.table_column_count_mismatch",
+            Self::TableColumnNameEmpty => "validation.table_column_name_empty",
+            Self::DuplicateTableColumnName => "validation.duplicate_table_column_name",
+            Self::DuplicateTableColumnId => "validation.duplicate_table_column_id",
+            Self::TableRowCountsExceedRange => "validation.table_row_counts_exceed_range",
         }
     }
 }
@@ -403,6 +447,53 @@ pub enum ValidationError {
     },
     /// A custom number format code is empty.
     NumberFormatCodeEmpty,
+    /// A table name is empty.
+    TableNameEmpty,
+    /// A table name is longer than Excel's 255 UTF-16 code-unit limit.
+    TableNameTooLong {
+        /// Length of the rejected name in UTF-16 code units.
+        utf16_len: usize,
+    },
+    /// A table name contains whitespace or a control character.
+    TableNameInvalidCharacter {
+        /// Forbidden character found in the table name.
+        character: char,
+    },
+    /// Two tables anywhere in the workbook use names that compare equal without case.
+    DuplicateTableName {
+        /// Repeated table name as supplied by the caller.
+        name: String,
+    },
+    /// A table declares no columns.
+    TableColumnsEmpty,
+    /// A table's declared column count disagrees with its range width.
+    TableColumnCountMismatch {
+        /// Number of declared columns.
+        columns: usize,
+        /// Width of the table range in columns.
+        width: u32,
+    },
+    /// A table column name is empty.
+    TableColumnNameEmpty,
+    /// Two columns in one table use names that compare equal without case.
+    DuplicateTableColumnName {
+        /// Repeated column name as supplied by the caller.
+        name: String,
+    },
+    /// Two columns in one table use the same identifier.
+    DuplicateTableColumnId {
+        /// Repeated column identifier.
+        id: u32,
+    },
+    /// A table's header and totals rows do not fit inside its range.
+    TableRowCountsExceedRange {
+        /// Declared header row count.
+        header_row_count: u32,
+        /// Declared totals row count.
+        totals_row_count: u32,
+        /// Height of the table range in rows.
+        height: u32,
+    },
 }
 
 impl ValidationError {
@@ -471,6 +562,24 @@ impl ValidationError {
             Self::BuiltInNumberFormatId { .. } => ValidationErrorCode::BuiltInNumberFormatId,
             Self::CustomNumberFormatId { .. } => ValidationErrorCode::CustomNumberFormatId,
             Self::NumberFormatCodeEmpty => ValidationErrorCode::NumberFormatCodeEmpty,
+            Self::TableNameEmpty => ValidationErrorCode::TableNameEmpty,
+            Self::TableNameTooLong { .. } => ValidationErrorCode::TableNameTooLong,
+            Self::TableNameInvalidCharacter { .. } => {
+                ValidationErrorCode::TableNameInvalidCharacter
+            }
+            Self::DuplicateTableName { .. } => ValidationErrorCode::DuplicateTableName,
+            Self::TableColumnsEmpty => ValidationErrorCode::TableColumnsEmpty,
+            Self::TableColumnCountMismatch { .. } => {
+                ValidationErrorCode::TableColumnCountMismatch
+            }
+            Self::TableColumnNameEmpty => ValidationErrorCode::TableColumnNameEmpty,
+            Self::DuplicateTableColumnName { .. } => {
+                ValidationErrorCode::DuplicateTableColumnName
+            }
+            Self::DuplicateTableColumnId { .. } => ValidationErrorCode::DuplicateTableColumnId,
+            Self::TableRowCountsExceedRange { .. } => {
+                ValidationErrorCode::TableRowCountsExceedRange
+            }
         }
     }
 }
@@ -610,6 +719,37 @@ impl fmt::Display for ValidationError {
                 write!(formatter, "{MESSAGE_NUMBER_FORMAT_CUSTOM_ID}: {value}")
             }
             Self::NumberFormatCodeEmpty => formatter.write_str(MESSAGE_NUMBER_FORMAT_CODE_EMPTY),
+            Self::TableNameEmpty => formatter.write_str(MESSAGE_TABLE_NAME_EMPTY),
+            Self::TableNameTooLong { utf16_len } => {
+                write!(formatter, "{MESSAGE_TABLE_NAME_TOO_LONG}: {utf16_len}")
+            }
+            Self::TableNameInvalidCharacter { character } => write!(
+                formatter,
+                "{MESSAGE_TABLE_NAME_INVALID_CHARACTER}: {character:?}"
+            ),
+            Self::DuplicateTableName { name } => {
+                write!(formatter, "{MESSAGE_DUPLICATE_TABLE_NAME}: {name}")
+            }
+            Self::TableColumnsEmpty => formatter.write_str(MESSAGE_TABLE_COLUMNS_EMPTY),
+            Self::TableColumnCountMismatch { columns, width } => write!(
+                formatter,
+                "{MESSAGE_TABLE_COLUMN_COUNT_MISMATCH}: {columns} columns, width {width}"
+            ),
+            Self::TableColumnNameEmpty => formatter.write_str(MESSAGE_TABLE_COLUMN_NAME_EMPTY),
+            Self::DuplicateTableColumnName { name } => {
+                write!(formatter, "{MESSAGE_DUPLICATE_TABLE_COLUMN_NAME}: {name}")
+            }
+            Self::DuplicateTableColumnId { id } => {
+                write!(formatter, "{MESSAGE_DUPLICATE_TABLE_COLUMN_ID}: {id}")
+            }
+            Self::TableRowCountsExceedRange {
+                header_row_count,
+                totals_row_count,
+                height,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_ROW_COUNTS_EXCEED_RANGE}: header {header_row_count}, totals {totals_row_count}, height {height}"
+            ),
         }
     }
 }
@@ -805,6 +945,46 @@ mod tests {
             (
                 ValidationErrorCode::NumberFormatCodeEmpty,
                 "validation.number_format_code_empty",
+            ),
+            (
+                ValidationErrorCode::TableNameEmpty,
+                "validation.table_name_empty",
+            ),
+            (
+                ValidationErrorCode::TableNameTooLong,
+                "validation.table_name_too_long",
+            ),
+            (
+                ValidationErrorCode::TableNameInvalidCharacter,
+                "validation.table_name_invalid_character",
+            ),
+            (
+                ValidationErrorCode::DuplicateTableName,
+                "validation.duplicate_table_name",
+            ),
+            (
+                ValidationErrorCode::TableColumnsEmpty,
+                "validation.table_columns_empty",
+            ),
+            (
+                ValidationErrorCode::TableColumnCountMismatch,
+                "validation.table_column_count_mismatch",
+            ),
+            (
+                ValidationErrorCode::TableColumnNameEmpty,
+                "validation.table_column_name_empty",
+            ),
+            (
+                ValidationErrorCode::DuplicateTableColumnName,
+                "validation.duplicate_table_column_name",
+            ),
+            (
+                ValidationErrorCode::DuplicateTableColumnId,
+                "validation.duplicate_table_column_id",
+            ),
+            (
+                ValidationErrorCode::TableRowCountsExceedRange,
+                "validation.table_row_counts_exceed_range",
             ),
         ];
         let mut seen_codes = BTreeSet::new();
