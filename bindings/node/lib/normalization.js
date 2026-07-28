@@ -92,6 +92,7 @@ function normalizeSummary(summary) {
       usedRange: sheet.usedRange ?? null,
       mergedRanges: sheet.mergedRanges,
       tables: sheet.tables.map((table) => ({
+        id: table.id,
         name: table.name,
         displayName: table.displayName,
         range: table.range,

@@ -66,9 +66,19 @@ pub(crate) mod compatibility {
         "merged range overlaps an earlier merged range and was dropped";
     pub(crate) const TABLE_INVALID_CODE: &str = "xlsx.table.invalid";
     pub(crate) const TABLE_INVALID_MESSAGE: &str = "table definition is invalid and was dropped";
-    pub(crate) const TABLE_DUPLICATE_NAME_CODE: &str = "xlsx.table.duplicate_name";
-    pub(crate) const TABLE_DUPLICATE_NAME_MESSAGE: &str =
-        "table name duplicates an earlier table and was dropped";
+    pub(crate) const TABLE_DUPLICATE_DISPLAY_NAME_CODE: &str = "xlsx.table.duplicate_display_name";
+    pub(crate) const TABLE_DUPLICATE_DISPLAY_NAME_MESSAGE: &str =
+        "table display name duplicates an earlier table and was dropped";
+    pub(crate) const TABLE_DUPLICATE_ID_CODE: &str = "xlsx.table.duplicate_id";
+    pub(crate) const TABLE_DUPLICATE_ID_MESSAGE: &str =
+        "table ID duplicates an earlier table and was dropped";
+    pub(crate) const TABLE_DUPLICATE_PROGRAMMATIC_NAME_CODE: &str =
+        "xlsx.table.duplicate_programmatic_name";
+    pub(crate) const TABLE_DUPLICATE_PROGRAMMATIC_NAME_MESSAGE: &str =
+        "programmatic table name duplicates an earlier table on the worksheet and was dropped";
+    pub(crate) const TABLE_DEFINED_NAME_CONFLICT_CODE: &str = "xlsx.table.display_name_conflict";
+    pub(crate) const TABLE_DEFINED_NAME_CONFLICT_MESSAGE: &str =
+        "table display name conflicts with a defined name and was dropped";
     pub(crate) const TABLE_UNRESOLVED_RELATIONSHIP: &str = "unresolved table relationship id";
     pub(crate) const TABLE_MISSING_RELATIONSHIP_ID: &str = "missing table relationship id";
 }
@@ -347,9 +357,7 @@ impl XlsxErrorCode {
             }
             Self::TooManyAnnotatedCells => "annotated cell count exceeds the configured limit",
             Self::InvalidFrozenPane => "frozen pane metadata is invalid",
-            Self::TooManyMergedRanges => {
-                "workbook merged-range count exceeds the configured limit"
-            }
+            Self::TooManyMergedRanges => "workbook merged-range count exceeds the configured limit",
             Self::TooManyTables => "workbook table count exceeds the configured limit",
             Self::TooManyTableColumns => "table column count exceeds the configured limit",
             Self::TableNameTooLarge => "table name exceeds the configured byte limit",

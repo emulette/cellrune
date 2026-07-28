@@ -44,8 +44,9 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
         // too much only costs one extra recalculation.
         hash.usize(sheet.tables().len());
         for table in sheet.tables() {
+            hash.u32(table.id().get());
             hash.string(table.name().as_str());
-            hash.string(table.display_name());
+            hash.string(table.display_name().as_str());
             hash.range(table.range());
             hash.u32(table.header_row_count());
             hash.u32(table.totals_row_count());
@@ -304,7 +305,7 @@ mod tests {
     use super::workbook_fingerprint;
     use crate::{
         CalculationHints, CellAddress, CellContent, CellRange, CellValue, DateSystem, Provenance,
-        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableColumn,
+        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableColumn, TableId,
         TableName, TotalsRowFunction, WorkbookSnapshot, WorkbookSource,
     };
 
@@ -339,6 +340,7 @@ mod tests {
         u32,
         u32,
         Vec<(&'a str, u32, Option<TotalsRowFunction>)>,
+        u32,
     );
 
     #[test]
@@ -351,22 +353,22 @@ mod tests {
                 1_u32,
                 0_u32,
                 vec![("First", 1_u32, None), ("Second", 2, None)],
+                7_u32,
             )
         };
         let build = |definition: TableDefinition<'_>| {
-            let (name, display_name, reference, header, totals, columns) = definition;
+            let (name, display_name, reference, header, totals, columns, id) = definition;
             let columns = columns
                 .into_iter()
-                .map(|(name, id, function)| {
-                    TableColumn::new(id, name, function).expect("column")
-                })
+                .map(|(name, id, function)| TableColumn::new(id, name, function).expect("column"))
                 .collect();
             workbook_with_extras(
                 Vec::new(),
                 vec![
                     Table::new(
+                        TableId::new(id).expect("table id"),
                         TableName::new(name).expect("name"),
-                        display_name,
+                        TableName::new(display_name).expect("display name"),
                         reference,
                         header,
                         totals,
@@ -379,18 +381,30 @@ mod tests {
         let reference = workbook_fingerprint(&build(base()));
 
         let mut changed = base();
+        changed.6 = 8;
+        assert_ne!(reference, workbook_fingerprint(&build(changed)), "table ID");
+
+        let mut changed = base();
         changed.2 = range("A1", "B5");
         assert_ne!(reference, workbook_fingerprint(&build(changed)), "@ref");
 
         let mut changed = base();
         changed.5[0].0 = "Renamed";
-        assert_ne!(reference, workbook_fingerprint(&build(changed)), "column name");
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "column name"
+        );
 
         let mut changed = base();
         changed.5.swap(0, 1);
         changed.5[0].1 = 1;
         changed.5[1].1 = 2;
-        assert_ne!(reference, workbook_fingerprint(&build(changed)), "column order");
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "column order"
+        );
 
         let mut changed = base();
         changed.5[1].2 = Some(TotalsRowFunction::Sum);
@@ -427,10 +441,7 @@ mod tests {
         .expect("range")
     }
 
-    fn workbook_with_extras(
-        merged_ranges: Vec<CellRange>,
-        tables: Vec<Table>,
-    ) -> WorkbookSnapshot {
+    fn workbook_with_extras(merged_ranges: Vec<CellRange>, tables: Vec<Table>) -> WorkbookSnapshot {
         let sheet_id = SheetId::new(1).expect("valid sheet ID");
         let mut sheet = Sheet::new(
             sheet_id,

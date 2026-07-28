@@ -19,8 +19,9 @@ use crate::{
 
 fn table_summary(table: &cellrune::Table) -> TableSummaryDto {
     TableSummaryDto {
+        id: table.id().get(),
         name: table.name().as_str().to_owned(),
-        display_name: table.display_name().to_owned(),
+        display_name: table.display_name().as_str().to_owned(),
         range: range_text(table.range().start(), table.range().end()),
         header_row_count: table.header_row_count(),
         totals_row_count: table.totals_row_count(),

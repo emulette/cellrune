@@ -716,11 +716,19 @@ fn table_content_types() -> String {
 }
 
 fn build_table_archive(sheet_one: &str, extra_parts: &[(&str, &str)]) -> Vec<u8> {
+    build_table_archive_with_workbook(WORKBOOK, sheet_one, extra_parts)
+}
+
+fn build_table_archive_with_workbook(
+    workbook: &str,
+    sheet_one: &str,
+    extra_parts: &[(&str, &str)],
+) -> Vec<u8> {
     let content_types = table_content_types();
     let mut entries: Vec<(&str, &str)> = vec![
         ("[Content_Types].xml", content_types.as_str()),
         ("_rels/.rels", ROOT_RELATIONSHIPS),
-        ("xl/workbook.xml", WORKBOOK),
+        ("xl/workbook.xml", workbook),
         ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
         ("xl/styles.xml", STYLES),
         ("xl/sharedStrings.xml", SHARED_STRINGS),
@@ -745,6 +753,29 @@ fn build_table_archive(sheet_one: &str, extra_parts: &[(&str, &str)]) -> Vec<u8>
     output.into_inner()
 }
 
+fn read_two_table_archive(second_table: &str) -> crate::WorkbookSnapshot {
+    let sheet = SHEET_WITH_TABLE.replace(
+        r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
+        r#"<tableParts count="2"><tablePart r:id="rId7"/><tablePart r:id="rId8"/></tableParts>"#,
+    );
+    let relationships = SHEET_ONE_TABLE_RELS.replace(
+        "</Relationships>",
+        r#"<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/></Relationships>"#,
+    );
+    let archive = build_table_archive(
+        &sheet,
+        &[
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                relationships.as_str(),
+            ),
+            ("xl/tables/table1.xml", TABLE_ONE),
+            ("xl/tables/table2.xml", second_table),
+        ],
+    );
+    read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read table archive")
+}
+
 #[test]
 fn reads_table_metadata_through_worksheet_relationships() {
     let archive = build_table_archive(
@@ -754,13 +785,13 @@ fn reads_table_metadata_through_worksheet_relationships() {
             ("xl/tables/table1.xml", TABLE_ONE),
         ],
     );
-    let snapshot =
-        read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table workbook");
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table workbook");
     let first = snapshot.sheet_by_name("First").expect("sheet");
     assert_eq!(first.tables().len(), 1);
     let table = &first.tables()[0];
+    assert_eq!(table.id().get(), 1);
     assert_eq!(table.name().as_str(), "Sales");
-    assert_eq!(table.display_name(), "SalesDisplay");
+    assert_eq!(table.display_name().as_str(), "SalesDisplay");
     assert_eq!(table.range().start().to_string(), "A1");
     assert_eq!(table.range().end().to_string(), "C4");
     assert_eq!(table.header_row_count(), 1);
@@ -779,12 +810,16 @@ fn reads_table_metadata_through_worksheet_relationships() {
         ]
     );
     assert_eq!(
-        snapshot.table("sales").expect("global lookup").display_name(),
+        snapshot
+            .table("salesdisplay")
+            .expect("global lookup")
+            .display_name()
+            .as_str(),
         "SalesDisplay"
     );
     assert!(
-        snapshot.table("SalesDisplay").is_none(),
-        "display name is not a lookup key"
+        snapshot.table("Sales").is_none(),
+        "programmatic name is not a workbook lookup key"
     );
     assert!(
         snapshot
@@ -824,38 +859,138 @@ fn invalid_table_definitions_are_dropped_with_a_diagnostic() {
 }
 
 #[test]
-fn duplicate_table_names_drop_the_later_table() {
-    let sheet = SHEET_WITH_TABLE.replace(
-        r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
-        r#"<tableParts count="2"><tablePart r:id="rId7"/><tablePart r:id="rId8"/></tableParts>"#,
-    );
-    let rels = SHEET_ONE_TABLE_RELS.replace(
-        "</Relationships>",
-        r#"<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/></Relationships>"#,
-    );
+fn duplicate_table_display_names_drop_the_later_table() {
     let second_table = TABLE_ONE
-        .replace(r#"name="Sales""#, r#"name="SALES""#)
-        .replace(r#"displayName="SalesDisplay""#, r#"displayName="Other""#);
-    let archive = build_table_archive(
-        &sheet,
-        &[
-            ("xl/worksheets/_rels/sheet1.xml.rels", &rels),
-            ("xl/tables/table1.xml", TABLE_ONE),
-            ("xl/tables/table2.xml", &second_table),
-        ],
-    );
-    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+        .replace(r#"id="1" name="Sales""#, r#"id="2" name="Other""#)
+        .replace(
+            r#"displayName="SalesDisplay""#,
+            r#"displayName="SALESDISPLAY""#,
+        );
+    let snapshot = read_two_table_archive(&second_table);
     let first = snapshot.sheet_by_name("First").expect("sheet");
     assert_eq!(first.tables().len(), 1);
-    assert_eq!(first.tables()[0].display_name(), "SalesDisplay");
+    assert_eq!(first.tables()[0].display_name().as_str(), "SalesDisplay");
     assert_eq!(
         snapshot
             .diagnostics()
             .iter()
-            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.duplicate_name")
+            .filter(|diagnostic| {
+                diagnostic.code().as_str() == "xlsx.table.duplicate_display_name"
+            })
             .count(),
         1
     );
+}
+
+#[test]
+fn duplicate_table_ids_and_programmatic_names_drop_the_later_table() {
+    let duplicate_id = TABLE_ONE
+        .replace(r#"name="Sales""#, r#"name="Other""#)
+        .replace(
+            r#"displayName="SalesDisplay""#,
+            r#"displayName="OtherDisplay""#,
+        );
+    let snapshot = read_two_table_archive(&duplicate_id);
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.duplicate_id")
+            .count(),
+        1
+    );
+
+    let duplicate_programmatic_name = TABLE_ONE
+        .replace(r#"id="1" name="Sales""#, r#"id="2" name="SALES""#)
+        .replace(
+            r#"displayName="SalesDisplay""#,
+            r#"displayName="OtherDisplay""#,
+        );
+    let snapshot = read_two_table_archive(&duplicate_programmatic_name);
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code().as_str() == "xlsx.table.duplicate_programmatic_name"
+            })
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn table_display_names_conflicting_with_defined_names_are_dropped() {
+    let workbook = WORKBOOK.replace(
+        "  <calcPr",
+        "  <definedNames><definedName name=\"SALESDISPLAY\">1</definedName></definedNames>\n  <calcPr",
+    );
+    let archive = build_table_archive_with_workbook(
+        &workbook,
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_ONE),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    assert!(
+        snapshot
+            .sheet_by_name("First")
+            .expect("sheet")
+            .tables()
+            .is_empty()
+    );
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code().as_str() == "xlsx.table.display_name_conflict"
+            })
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn required_table_id_and_declared_column_count_are_validated() {
+    let invalid_tables = [
+        TABLE_ONE.replace(r#" id="1""#, ""),
+        TABLE_ONE.replace(r#"id="1""#, r#"id="0""#),
+        TABLE_ONE.replace(r#"tableColumns count="3""#, "tableColumns"),
+        TABLE_ONE.replace(r#"tableColumns count="3""#, r#"tableColumns count="2""#),
+    ];
+    for invalid_table in invalid_tables {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read must succeed");
+        assert!(
+            snapshot
+                .sheet_by_name("First")
+                .expect("sheet")
+                .tables()
+                .is_empty()
+        );
+        assert_eq!(
+            snapshot
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+                .count(),
+            1
+        );
+    }
 }
 
 #[test]
@@ -886,8 +1021,11 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     let columns_limit = ReadLimits::default()
         .with_max_table_columns(2)
         .expect("limit");
-    let error = read_xlsx(Cursor::new(archive.clone()), ReadOptions::new(columns_limit))
-        .expect_err("three columns must exceed a limit of two");
+    let error = read_xlsx(
+        Cursor::new(archive.clone()),
+        ReadOptions::new(columns_limit),
+    )
+    .expect_err("three columns must exceed a limit of two");
     assert_eq!(error.code(), XlsxErrorCode::TooManyTableColumns);
 
     let name_limit = ReadLimits::default()
@@ -912,6 +1050,30 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(tables_limit))
         .expect_err("two referenced parts must exceed a limit of one");
     assert_eq!(error.code(), XlsxErrorCode::TooManyTables);
+
+    let missing_relationship_ids = SHEET_WITH_TABLE.replace(
+        r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
+        r#"<tableParts count="2"><tablePart/><tablePart/></tableParts>"#,
+    );
+    let archive = build_table_archive(&missing_relationship_ids, &[]);
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(tables_limit))
+        .expect_err("invalid declarations must still consume the table budget");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTables);
+
+    let duplicate_columns = TABLE_ONE.replace(
+        "</tableColumns>",
+        r#"</tableColumns><tableColumns count="3"><tableColumn id="8" name="A"/><tableColumn id="9" name="B"/><tableColumn id="10" name="C"/></tableColumns>"#,
+    );
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &duplicate_columns),
+        ],
+    );
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(columns_limit))
+        .expect_err("columns in duplicate containers must still consume the column budget");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTableColumns);
 }
 
 #[test]
@@ -941,8 +1103,11 @@ fn tables_survive_edit_write_reopen() {
         .expect("write");
     let reopened =
         open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
-    let table = reopened.workbook().table("Sales").expect("table survives");
-    assert_eq!(table.display_name(), "SalesDisplay");
+    let table = reopened
+        .workbook()
+        .table("SalesDisplay")
+        .expect("table survives");
+    assert_eq!(table.display_name().as_str(), "SalesDisplay");
     let first = reopened.workbook().sheet_by_name("First").expect("sheet");
     assert_eq!(first.tables().len(), 1);
     assert_eq!(
@@ -953,8 +1118,14 @@ fn tables_survive_edit_write_reopen() {
     let worksheet = archive_text(output.bytes(), "xl/worksheets/sheet1.xml");
     assert!(worksheet.contains("<tableParts"), "{worksheet}");
     let table_part = archive_text(output.bytes(), "xl/tables/table1.xml");
-    assert!(table_part.contains("displayName=\"SalesDisplay\""), "{table_part}");
-    let draft_table = draft.workbook().table("Sales").expect("draft keeps table");
+    assert!(
+        table_part.contains("displayName=\"SalesDisplay\""),
+        "{table_part}"
+    );
+    let draft_table = draft
+        .workbook()
+        .table("SalesDisplay")
+        .expect("draft keeps table");
     assert_eq!(draft_table.columns().len(), 3);
 }
 
@@ -1013,10 +1184,8 @@ fn table_name_defaults_to_display_name_and_unknown_totals_functions_drop_the_tab
         "SalesDisplay"
     );
 
-    let unknown_totals = TABLE_ONE.replace(
-        r#"totalsRowFunction="sum""#,
-        r#"totalsRowFunction="bogus""#,
-    );
+    let unknown_totals =
+        TABLE_ONE.replace(r#"totalsRowFunction="sum""#, r#"totalsRowFunction="bogus""#);
     let archive = build_table_archive(
         SHEET_WITH_TABLE,
         &[

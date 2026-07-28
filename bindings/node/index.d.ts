@@ -65,6 +65,7 @@ export interface TableColumn {
 }
 
 export interface TableSummary {
+  readonly id: number;
   readonly name: string;
   readonly displayName: string;
   readonly range: string;

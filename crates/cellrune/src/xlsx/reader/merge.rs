@@ -5,8 +5,7 @@ use super::super::error::compatibility;
 use super::super::xml::XmlBudget;
 use super::super::{XlsxErrorCode, XlsxReadError};
 use crate::{
-    CellAddress, CellRange, Diagnostic, DiagnosticCode, DiagnosticSeverity, SheetId,
-    SourceLocation,
+    CellAddress, CellRange, Diagnostic, DiagnosticCode, DiagnosticSeverity, SheetId, SourceLocation,
 };
 
 /// Collects `<mergeCell>` declarations for one worksheet and validates them on finish.

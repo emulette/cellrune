@@ -4,9 +4,23 @@ from cellrune import (
     CellValue,
     EditReceipt,
     RangePage,
+    TableSummary,
     Workbook,
     WorkbookChange,
 )
+
+table_summary: TableSummary = {
+    "id": 1,
+    "name": "SalesObject",
+    "display_name": "Sales",
+    "range": "A1:B3",
+    "header_row_count": 1,
+    "totals_row_count": 0,
+    "columns": [
+        {"id": 1, "name": "Region", "totals_row_function": None},
+        {"id": 2, "name": "Amount", "totals_row_function": "sum"},
+    ],
+}
 
 
 def check() -> None:

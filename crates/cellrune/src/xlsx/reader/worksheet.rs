@@ -1,7 +1,7 @@
 use quick_xml::events::Event;
 
-use super::super::package::PartPath;
 use super::super::error::compatibility;
+use super::super::package::PartPath;
 use super::super::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, XmlAttributes, XmlBudget,
     decode_cdata, decode_reference, decode_text, is_spreadsheet_element, read_attributes, reader,
@@ -72,6 +72,7 @@ pub(super) struct WorksheetOutput<'a> {
     pub(super) total_cells: &'a mut u64,
     pub(super) total_formula_bytes: &'a mut u64,
     pub(super) total_merged_ranges: &'a mut u64,
+    pub(super) total_tables: &'a mut u64,
     pub(super) presentation: &'a mut DocumentPresentation,
     pub(super) phonetic_budget: &'a mut PhoneticReadBudget,
     pub(super) diagnostics: &'a mut Vec<Diagnostic>,
@@ -83,6 +84,7 @@ struct WorksheetStartContext<'budget, 'state> {
     state: &'state mut WorksheetParseState,
     total_cells: &'state mut u64,
     total_merged_ranges: &'state mut u64,
+    total_tables: &'state mut u64,
     capture: PresentationCapture,
     sheet_id: SheetId,
     presentation: &'state mut DocumentPresentation,
@@ -104,6 +106,7 @@ pub(super) fn parse(
         total_cells,
         total_formula_bytes,
         total_merged_ranges,
+        total_tables,
         presentation,
         phonetic_budget,
         diagnostics,
@@ -137,6 +140,7 @@ pub(super) fn parse(
                         state: &mut state,
                         total_cells: &mut *total_cells,
                         total_merged_ranges: &mut *total_merged_ranges,
+                        total_tables: &mut *total_tables,
                         capture,
                         sheet_id,
                         presentation: &mut *presentation,
@@ -247,6 +251,7 @@ pub(super) fn parse(
                         record_table_part(
                             &attributes,
                             table_relationship_ids,
+                            total_tables,
                             sheet_id,
                             diagnostics,
                             &budget,
@@ -389,6 +394,7 @@ fn process_start(
         state,
         total_cells,
         total_merged_ranges,
+        total_tables,
         capture,
         sheet_id,
         presentation,
@@ -482,6 +488,7 @@ fn process_start(
         record_table_part(
             &attributes,
             table_relationship_ids,
+            total_tables,
             sheet_id,
             diagnostics,
             budget,
@@ -724,10 +731,15 @@ fn process_pane(
 fn record_table_part(
     attributes: &XmlAttributes,
     table_relationship_ids: &mut Vec<Box<str>>,
+    total_tables: &mut u64,
     sheet_id: SheetId,
     diagnostics: &mut Vec<Diagnostic>,
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
+    *total_tables = total_tables.saturating_add(1);
+    if *total_tables > budget.limits().max_tables() {
+        return Err(budget.error(XlsxErrorCode::TooManyTables));
+    }
     let relationship_id = attributes
         .namespaced(DOCUMENT_RELATIONSHIPS_TRANSITIONAL, "id")
         .or_else(|| attributes.namespaced(DOCUMENT_RELATIONSHIPS_STRICT, "id"));

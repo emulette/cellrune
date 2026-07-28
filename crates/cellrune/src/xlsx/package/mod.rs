@@ -32,8 +32,7 @@ const CONTENT_SHARED_STRINGS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml";
 const CONTENT_SHEET_METADATA: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml";
-const CONTENT_TABLE: &str =
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+const CONTENT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WorkbookPackageKind {

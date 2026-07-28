@@ -88,6 +88,7 @@ class TableColumn(TypedDict):
 
 
 class TableSummary(TypedDict):
+    id: int
     name: str
     display_name: str
     range: str

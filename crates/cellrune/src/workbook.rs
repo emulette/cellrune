@@ -435,7 +435,7 @@ pub struct WorkbookSnapshot {
     sheets: Vec<Sheet>,
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
-    table_name_index: BTreeMap<Box<str>, (usize, usize)>,
+    table_display_name_index: BTreeMap<Box<str>, (usize, usize)>,
     defined_names: Vec<DefinedName>,
     defined_name_index: BTreeMap<DefinedNameScope, BTreeMap<Box<str>, usize>>,
     diagnostics: Vec<Diagnostic>,
@@ -462,7 +462,7 @@ impl WorkbookSnapshot {
             sheets: vec![sheet],
             sheet_id_index,
             sheet_name_index,
-            table_name_index: BTreeMap::new(),
+            table_display_name_index: BTreeMap::new(),
             defined_names: Vec::new(),
             defined_name_index: BTreeMap::new(),
             diagnostics: Vec::new(),
@@ -501,8 +501,8 @@ impl WorkbookSnapshot {
     ///
     /// # Errors
     ///
-    /// Returns a [`ValidationError`] when sheet IDs, sheet names, or defined names violate
-    /// workbook-level uniqueness and scope constraints.
+    /// Returns a [`ValidationError`] when sheet IDs, sheet names, defined names, or table
+    /// identities violate workbook-level uniqueness and scope constraints.
     pub fn new_with_metadata(
         sheets: Vec<Sheet>,
         defined_names: Vec<DefinedName>,
@@ -527,21 +527,8 @@ impl WorkbookSnapshot {
                 });
             }
         }
-        let mut table_name_index = BTreeMap::<Box<str>, (usize, usize)>::new();
-        for (sheet_index, sheet) in sheets.iter().enumerate() {
-            for (table_index, table) in sheet.tables().iter().enumerate() {
-                let key = Box::<str>::from(table.name().lookup_key());
-                if table_name_index
-                    .insert(key, (sheet_index, table_index))
-                    .is_some()
-                {
-                    return Err(ValidationError::DuplicateTableName {
-                        name: table.name().as_str().to_owned(),
-                    });
-                }
-            }
-        }
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
+        let mut defined_name_keys = std::collections::BTreeSet::<Box<str>>::new();
         for (index, defined_name) in defined_names.iter().enumerate() {
             if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope()
                 && !sheet_id_index.contains_key(&sheet_id)
@@ -559,12 +546,45 @@ impl WorkbookSnapshot {
                     name: defined_name.name().to_owned(),
                 });
             }
+            defined_name_keys.insert(Box::from(defined_name.lookup_key()));
+        }
+        let mut table_ids = std::collections::BTreeSet::new();
+        let mut table_display_name_index = BTreeMap::<Box<str>, (usize, usize)>::new();
+        for (sheet_index, sheet) in sheets.iter().enumerate() {
+            let mut programmatic_names = std::collections::BTreeSet::<Box<str>>::new();
+            for (table_index, table) in sheet.tables().iter().enumerate() {
+                if !table_ids.insert(table.id()) {
+                    return Err(ValidationError::DuplicateTableId {
+                        id: table.id().get(),
+                    });
+                }
+                let display_key = Box::<str>::from(table.display_name().lookup_key());
+                if defined_name_keys.contains(display_key.as_ref()) {
+                    return Err(ValidationError::TableDisplayNameConflictsWithDefinedName {
+                        name: table.display_name().as_str().to_owned(),
+                    });
+                }
+                if table_display_name_index
+                    .insert(display_key, (sheet_index, table_index))
+                    .is_some()
+                {
+                    return Err(ValidationError::DuplicateTableDisplayName {
+                        name: table.display_name().as_str().to_owned(),
+                    });
+                }
+                let programmatic_key = Box::<str>::from(table.name().lookup_key());
+                if !programmatic_names.insert(programmatic_key) {
+                    return Err(ValidationError::DuplicateTableProgrammaticName {
+                        name: table.name().as_str().to_owned(),
+                    });
+                }
+            }
         }
         Ok(Self {
             sheets,
             sheet_id_index,
             sheet_name_index,
-            table_name_index,
+            table_display_name_index,
             defined_names,
             defined_name_index,
             diagnostics,
@@ -608,12 +628,13 @@ impl WorkbookSnapshot {
             .map(|index| &self.sheets[*index])
     }
 
-    /// Returns a table anywhere in the workbook using deterministic case-insensitive lookup.
+    /// Returns a table by its workbook-global formula/UI display name.
     ///
-    /// Table names are workbook-global in Excel even though each table is owned by its sheet.
+    /// OOXML `displayName` values are workbook-global and case-insensitive even though each table
+    /// is owned by its worksheet. The worksheet-local programmatic `name` is not a lookup key.
     pub fn table(&self, name: &str) -> Option<&Table> {
         let key = case_insensitive_key(name);
-        let (sheet_index, table_index) = *self.table_name_index.get(key.as_str())?;
+        let (sheet_index, table_index) = *self.table_display_name_index.get(key.as_str())?;
         Some(&self.sheets[sheet_index].tables()[table_index])
     }
 

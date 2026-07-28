@@ -151,6 +151,7 @@ export interface NativeTableColumn {
 }
 
 export interface NativeTableSummary {
+  id: number
   name: string
   displayName: string
   range: string

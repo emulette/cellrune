@@ -4,6 +4,7 @@ import {
   type CellValue,
   type EditReceipt,
   type RangePage,
+  type TableSummary,
   type WorkbookChange,
   Workbook,
 } from "@cellrune/node";
@@ -11,6 +12,20 @@ import type { Buffer } from "node:buffer";
 
 // @ts-expect-error CellRuneError instances are created by the binding.
 new CellRuneError("manual construction is unsupported");
+
+const tableSummary: TableSummary = {
+  id: 1,
+  name: "SalesObject",
+  displayName: "Sales",
+  range: "A1:B3",
+  headerRowCount: 1,
+  totalsRowCount: 0,
+  columns: [
+    { id: 1, name: "Region", totalsRowFunction: null },
+    { id: 2, name: "Amount", totalsRowFunction: "sum" },
+  ],
+};
+tableSummary.id.toFixed(0);
 
 async function check(): Promise<void> {
   const workbook: Workbook = Workbook.create();

@@ -1,11 +1,46 @@
+use std::num::NonZeroU32;
+
 use crate::{CellRange, ValidationError};
+
+/// A validated, non-zero workbook-local Excel table identifier.
+///
+/// OOXML requires table IDs to be unique across the workbook. The workbook snapshot enforces
+/// that cross-table invariant; this type enforces the non-zero scalar invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TableId(NonZeroU32);
+
+impl TableId {
+    /// Validates and constructs a table ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::TableIdZero`] when `value` is zero.
+    pub fn new(value: u32) -> Result<Self, ValidationError> {
+        NonZeroU32::new(value)
+            .map(Self)
+            .ok_or(ValidationError::TableIdZero)
+    }
+
+    /// Returns the workbook-local numeric ID.
+    pub const fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u32> for TableId {
+    type Error = ValidationError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
 
 /// A validated Excel table name with its original spelling preserved.
 ///
-/// Excel resolves table names case-insensitively, so `Table1` and `TABLE1` are the same
-/// table; the original spelling is retained for byte-accurate round trips. Validation is a
-/// deliberate superset of Excel's authoring rules: the reader must accept names real
-/// producers write, so only structurally broken names are rejected.
+/// Both OOXML `name` and `displayName` use the same character and length constraints. Their
+/// scopes differ: `displayName` is the workbook-global formula/UI name, while `name` is the
+/// worksheet-local programmatic object-model name. Excel compares both case-insensitively; the
+/// original spelling is retained for byte-accurate round trips.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TableName {
     original: Box<str>,
@@ -151,8 +186,9 @@ impl TableColumn {
 /// drift. Global name lookup lives on the workbook snapshot instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
+    id: TableId,
     name: TableName,
-    display_name: Box<str>,
+    display_name: TableName,
     range: CellRange,
     header_row_count: u32,
     totals_row_count: u32,
@@ -168,8 +204,9 @@ impl Table {
     /// does not match the range width, column names repeat case-insensitively, column
     /// identifiers repeat, or the header and totals rows do not fit inside the range.
     pub fn new(
+        id: TableId,
         name: TableName,
-        display_name: impl Into<String>,
+        display_name: TableName,
         range: CellRange,
         header_row_count: u32,
         totals_row_count: u32,
@@ -204,8 +241,9 @@ impl Table {
             });
         }
         Ok(Self {
+            id,
             name,
-            display_name: display_name.into().into_boxed_str(),
+            display_name,
             range,
             header_row_count,
             totals_row_count,
@@ -213,13 +251,18 @@ impl Table {
         })
     }
 
-    /// Returns the name structured references resolve against.
+    /// Returns the stable workbook-local OOXML table ID.
+    pub const fn id(&self) -> TableId {
+        self.id
+    }
+
+    /// Returns the worksheet-local programmatic object-model name (`@name`).
     pub const fn name(&self) -> &TableName {
         &self.name
     }
 
-    /// Returns the display name UIs show; it may differ from [`Table::name`].
-    pub fn display_name(&self) -> &str {
+    /// Returns the workbook-global formula and UI name (`@displayName`).
+    pub const fn display_name(&self) -> &TableName {
         &self.display_name
     }
 
@@ -250,10 +293,11 @@ fn case_insensitive_key(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Table, TableColumn, TableName, TotalsRowFunction};
+    use super::{Table, TableColumn, TableId, TableName, TotalsRowFunction};
     use crate::{
-        CalculationHints, CellAddress, CellRange, DateSystem, Provenance, ProviderIdentity, Sheet,
-        SheetId, SheetName, SheetVisibility, ValidationError, WorkbookSnapshot, WorkbookSource,
+        CalculationHints, CellAddress, CellRange, DateSystem, DefinedName, DefinedNameScope,
+        FormulaText, Provenance, ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility,
+        ValidationError, WorkbookSnapshot, WorkbookSource,
     };
 
     fn range(a1: &str, b1: &str) -> CellRange {
@@ -268,10 +312,11 @@ mod tests {
         TableColumn::new(id, name, None).expect("column")
     }
 
-    fn table(name: &str) -> Table {
+    fn table(id: u32, name: &str, display_name: &str) -> Table {
         Table::new(
+            TableId::new(id).expect("table id"),
             TableName::new(name).expect("name"),
-            name,
+            TableName::new(display_name).expect("display name"),
             range("A1", "B3"),
             1,
             0,
@@ -282,13 +327,12 @@ mod tests {
 
     #[test]
     fn table_name_is_case_insensitive_and_preserves_spelling() {
+        assert_eq!(TableId::new(0), Err(ValidationError::TableIdZero));
+        assert_eq!(TableId::new(7).expect("table id").get(), 7);
         let name = TableName::new("SalesTable").expect("name");
         assert_eq!(name.as_str(), "SalesTable");
         assert_eq!(name.lookup_key(), "salestable");
-        assert_eq!(
-            TableName::new(""),
-            Err(ValidationError::TableNameEmpty)
-        );
+        assert_eq!(TableName::new(""), Err(ValidationError::TableNameEmpty));
         assert_eq!(
             TableName::new("has space"),
             Err(ValidationError::TableNameInvalidCharacter { character: ' ' })
@@ -301,13 +345,22 @@ mod tests {
 
     #[test]
     fn table_validation_rejects_inconsistent_definitions() {
+        let id = || TableId::new(1).expect("id");
         let name = || TableName::new("T").expect("name");
         assert_eq!(
-            Table::new(name(), "T", range("A1", "B3"), 1, 0, Vec::new()),
+            Table::new(id(), name(), name(), range("A1", "B3"), 1, 0, Vec::new()),
             Err(ValidationError::TableColumnsEmpty)
         );
         assert_eq!(
-            Table::new(name(), "T", range("A1", "B3"), 1, 0, vec![column(1, "Only")]),
+            Table::new(
+                id(),
+                name(),
+                name(),
+                range("A1", "B3"),
+                1,
+                0,
+                vec![column(1, "Only")],
+            ),
             Err(ValidationError::TableColumnCountMismatch {
                 columns: 1,
                 width: 2,
@@ -315,8 +368,9 @@ mod tests {
         );
         assert_eq!(
             Table::new(
+                id(),
                 name(),
-                "T",
+                name(),
                 range("A1", "B3"),
                 1,
                 0,
@@ -328,8 +382,9 @@ mod tests {
         );
         assert_eq!(
             Table::new(
+                id(),
                 name(),
-                "T",
+                name(),
                 range("A1", "B3"),
                 1,
                 0,
@@ -339,8 +394,9 @@ mod tests {
         );
         assert_eq!(
             Table::new(
+                id(),
                 name(),
-                "T",
+                name(),
                 range("A1", "B1"),
                 1,
                 1,
@@ -359,20 +415,20 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_indexes_table_names_globally_and_rejects_duplicates() {
+    fn snapshot_indexes_display_names_and_enforces_table_identity_scopes() {
         let sheet_name = |value: &str| SheetName::new(value).expect("sheet name");
         let mut first = Sheet::new(
             SheetId::new(1).expect("id"),
             sheet_name("One"),
             SheetVisibility::Visible,
         );
-        first.set_tables(vec![table("Alpha")]);
+        first.set_tables(vec![table(1, "Local", "Alpha")]);
         let mut second = Sheet::new(
             SheetId::new(2).expect("id"),
             sheet_name("Two"),
             SheetVisibility::Visible,
         );
-        second.set_tables(vec![table("Beta")]);
+        second.set_tables(vec![table(2, "Local", "Beta")]);
         let snapshot = WorkbookSnapshot::new_with_metadata(
             vec![first.clone(), second],
             Vec::new(),
@@ -383,18 +439,33 @@ mod tests {
             Provenance::new(ProviderIdentity::new("test", "0").expect("provider"), None),
         )
         .expect("snapshot");
-        assert_eq!(snapshot.table("ALPHA").expect("alpha").name().as_str(), "Alpha");
-        assert_eq!(snapshot.table("beta").expect("beta").name().as_str(), "Beta");
+        assert_eq!(
+            snapshot
+                .table("ALPHA")
+                .expect("alpha")
+                .display_name()
+                .as_str(),
+            "Alpha"
+        );
+        assert_eq!(
+            snapshot
+                .table("beta")
+                .expect("beta")
+                .display_name()
+                .as_str(),
+            "Beta"
+        );
         assert!(snapshot.table("Gamma").is_none());
+        assert!(snapshot.table("Local").is_none());
 
         let mut duplicate = Sheet::new(
             SheetId::new(2).expect("id"),
             sheet_name("Two"),
             SheetVisibility::Visible,
         );
-        duplicate.set_tables(vec![table("ALPHA")]);
+        duplicate.set_tables(vec![table(3, "Other", "ALPHA")]);
         let error = WorkbookSnapshot::new_with_metadata(
-            vec![first, duplicate],
+            vec![first.clone(), duplicate],
             Vec::new(),
             Vec::new(),
             DateSystem::Excel1900,
@@ -402,11 +473,77 @@ mod tests {
             WorkbookSource::default(),
             Provenance::new(ProviderIdentity::new("test", "0").expect("provider"), None),
         )
-        .expect_err("duplicate table names must be rejected");
+        .expect_err("duplicate display names must be rejected");
         assert_eq!(
             error,
-            ValidationError::DuplicateTableName {
+            ValidationError::DuplicateTableDisplayName {
                 name: "ALPHA".to_owned(),
+            }
+        );
+
+        let mut duplicate_id = Sheet::new(
+            SheetId::new(2).expect("id"),
+            sheet_name("Two"),
+            SheetVisibility::Visible,
+        );
+        duplicate_id.set_tables(vec![table(1, "Other", "Beta")]);
+        let error = WorkbookSnapshot::new_with_metadata(
+            vec![first.clone(), duplicate_id],
+            Vec::new(),
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(ProviderIdentity::new("test", "0").expect("provider"), None),
+        )
+        .expect_err("duplicate table IDs must be rejected");
+        assert_eq!(error, ValidationError::DuplicateTableId { id: 1 });
+
+        first.set_tables(vec![table(1, "Local", "Alpha"), table(2, "LOCAL", "Beta")]);
+        let error = WorkbookSnapshot::new_with_metadata(
+            vec![first],
+            Vec::new(),
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(ProviderIdentity::new("test", "0").expect("provider"), None),
+        )
+        .expect_err("programmatic names must be unique within one sheet");
+        assert_eq!(
+            error,
+            ValidationError::DuplicateTableProgrammaticName {
+                name: "LOCAL".to_owned(),
+            }
+        );
+
+        let mut first = Sheet::new(
+            SheetId::new(1).expect("id"),
+            sheet_name("One"),
+            SheetVisibility::Visible,
+        );
+        first.set_tables(vec![table(1, "Local", "Alpha")]);
+        let defined_name = DefinedName::new(
+            "ALPHA",
+            DefinedNameScope::Workbook,
+            FormulaText::from_xlsx("1").expect("formula"),
+            false,
+        )
+        .expect("defined name");
+        let error = WorkbookSnapshot::new_with_metadata(
+            vec![first],
+            vec![defined_name],
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(ProviderIdentity::new("test", "0").expect("provider"), None),
+        )
+        .expect_err("table display names must not conflict with defined names");
+        assert_eq!(
+            error,
+            ValidationError::TableDisplayNameConflictsWithDefinedName {
+                name: "Alpha".to_owned(),
             }
         );
     }

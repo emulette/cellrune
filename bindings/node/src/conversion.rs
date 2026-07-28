@@ -53,6 +53,7 @@ pub struct NativeTableColumn {
 
 #[napi(object)]
 pub struct NativeTableSummary {
+    pub id: u32,
     pub name: String,
     pub display_name: String,
     pub range: String,
@@ -197,6 +198,7 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
                     .tables
                     .into_iter()
                     .map(|table| NativeTableSummary {
+                        id: table.id,
                         name: table.name,
                         display_name: table.display_name,
                         range: table.range,

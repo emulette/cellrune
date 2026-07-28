@@ -128,8 +128,6 @@ fn is_ident_continue(character: char) -> bool {
     character.is_alphanumeric() || character == '_' || character == '.'
 }
 
-
-
 pub fn lex(input: &str, max_tokens: u64) -> Result<Vec<Token>, LexError> {
     let characters: Vec<char> = input.chars().collect();
     let mut tokens = Vec::new();
@@ -473,7 +471,12 @@ mod tests {
 
     #[test]
     fn external_workbook_spellings_stay_lex_errors() {
-        for spelling in ["[1]Sheet1!A1", "[Book1.xlsx]Sheet1!A1", "[1]!Name", "[x]'My Sheet'!A1"] {
+        for spelling in [
+            "[1]Sheet1!A1",
+            "[Book1.xlsx]Sheet1!A1",
+            "[1]!Name",
+            "[x]'My Sheet'!A1",
+        ] {
             let error = lex(spelling, 1_000).expect_err(spelling);
             assert_eq!(error.message, ERROR_LEX_EXTERNAL_REFERENCE, "{spelling}");
         }

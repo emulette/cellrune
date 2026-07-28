@@ -4,10 +4,10 @@ mod formula_cell;
 mod formula_reference;
 mod merge;
 mod metadata;
-mod table;
 mod phonetic;
 mod shared_strings;
 mod styles;
+mod table;
 mod workbook_xml;
 mod worksheet;
 mod worksheet_cell;
@@ -30,7 +30,7 @@ use super::package::{OpenedPackage, PackageSummary, PartPath, WorkbookPackageKin
 use super::{ReadOptions, XlsxErrorCode, XlsxReadError};
 use crate::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DocumentPresentation, InputHash, Provenance,
-    ProviderIdentity, Sheet, SheetId, SourceLocation, WorkbookSnapshot, WorkbookSource,
+    ProviderIdentity, Sheet, SheetId, SourceLocation, TableId, WorkbookSnapshot, WorkbookSource,
     WorkbookSourceKind,
 };
 
@@ -142,7 +142,13 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     let mut total_cells = 0_u64;
     let mut total_merged_ranges = 0_u64;
     let mut total_tables = 0_u64;
-    let mut seen_table_names = BTreeSet::<Box<str>>::new();
+    let defined_name_keys = workbook
+        .defined_names
+        .iter()
+        .map(|name| Box::<str>::from(name.lookup_key()))
+        .collect::<BTreeSet<_>>();
+    let mut seen_table_ids = BTreeSet::<TableId>::new();
+    let mut seen_table_display_names = BTreeSet::<Box<str>>::new();
     let mut total_formula_bytes = workbook
         .defined_names
         .iter()
@@ -181,6 +187,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 total_cells: &mut total_cells,
                 total_formula_bytes: &mut total_formula_bytes,
                 total_merged_ranges: &mut total_merged_ranges,
+                total_tables: &mut total_tables,
                 presentation: &mut presentation,
                 phonetic_budget: &mut phonetic_budget,
                 diagnostics: &mut diagnostics,
@@ -192,8 +199,9 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             worksheet_part: &worksheet_part,
             table_relationship_ids: &table_relationship_ids,
             sheet: &mut sheet,
-            total_tables: &mut total_tables,
-            seen_table_names: &mut seen_table_names,
+            defined_name_keys: &defined_name_keys,
+            seen_table_ids: &mut seen_table_ids,
+            seen_table_display_names: &mut seen_table_display_names,
             diagnostics: &mut diagnostics,
         })?;
         sheets.push(sheet);
@@ -237,17 +245,18 @@ struct SheetTableContext<'a, R: Read + Seek> {
     worksheet_part: &'a PartPath,
     table_relationship_ids: &'a [Box<str>],
     sheet: &'a mut Sheet,
-    total_tables: &'a mut u64,
-    seen_table_names: &'a mut BTreeSet<Box<str>>,
+    defined_name_keys: &'a BTreeSet<Box<str>>,
+    seen_table_ids: &'a mut BTreeSet<TableId>,
+    seen_table_display_names: &'a mut BTreeSet<Box<str>>,
     diagnostics: &'a mut Vec<Diagnostic>,
 }
 
 /// Resolves and parses the table parts one worksheet references through `<tableParts>`.
 ///
-/// Every referenced part is charged against the workbook-wide table budget before it is
-/// read. A relationship id that resolves to no table relationship, an invalid table
-/// definition, and a workbook-wide duplicate table name each drop only that table with a
-/// warning diagnostic; the read itself keeps going.
+/// A relationship id that resolves to no table relationship, an invalid table definition,
+/// and a table that violates workbook identity constraints each drop only that table with a
+/// warning diagnostic; the read itself keeps going. The worksheet parser has already charged
+/// every `<tablePart>` declaration against the workbook-wide table budget.
 fn read_sheet_tables<R: Read + Seek>(
     context: SheetTableContext<'_, R>,
 ) -> Result<(), XlsxReadError> {
@@ -256,8 +265,9 @@ fn read_sheet_tables<R: Read + Seek>(
         worksheet_part,
         table_relationship_ids,
         sheet,
-        total_tables,
-        seen_table_names,
+        defined_name_keys,
+        seen_table_ids,
+        seen_table_display_names,
         diagnostics,
     } = context;
     if table_relationship_ids.is_empty() {
@@ -271,12 +281,8 @@ fn read_sheet_tables<R: Read + Seek>(
         XlsxErrorCode::InvalidWorksheet,
     );
     let mut tables = Vec::new();
+    let mut programmatic_names = BTreeSet::<Box<str>>::new();
     for relationship_id in table_relationship_ids {
-        *total_tables = total_tables.saturating_add(1);
-        if *total_tables > limits.max_tables() {
-            return Err(XlsxReadError::new(XlsxErrorCode::TooManyTables)
-                .at_source(worksheet_part.source_id()));
-        }
         let Some(part) = table_parts.get(relationship_id) else {
             table::push_invalid_diagnostic(
                 diagnostics,
@@ -290,17 +296,55 @@ fn read_sheet_tables<R: Read + Seek>(
         let Some(parsed) = table::parse(&bytes, part, limits, sheet.id(), diagnostics)? else {
             continue;
         };
-        if !seen_table_names.insert(Box::from(parsed.name().lookup_key())) {
+        if seen_table_ids.contains(&parsed.id()) {
             table::push_table_diagnostic(
                 diagnostics,
-                compatibility::TABLE_DUPLICATE_NAME_CODE,
-                compatibility::TABLE_DUPLICATE_NAME_MESSAGE,
+                compatibility::TABLE_DUPLICATE_ID_CODE,
+                compatibility::TABLE_DUPLICATE_ID_MESSAGE,
+                &parsed.id().get().to_string(),
+                sheet.id(),
+                &budget,
+            )?;
+            continue;
+        }
+        let display_key = parsed.display_name().lookup_key();
+        if defined_name_keys.contains(display_key) {
+            table::push_table_diagnostic(
+                diagnostics,
+                compatibility::TABLE_DEFINED_NAME_CONFLICT_CODE,
+                compatibility::TABLE_DEFINED_NAME_CONFLICT_MESSAGE,
+                parsed.display_name().as_str(),
+                sheet.id(),
+                &budget,
+            )?;
+            continue;
+        }
+        if seen_table_display_names.contains(display_key) {
+            table::push_table_diagnostic(
+                diagnostics,
+                compatibility::TABLE_DUPLICATE_DISPLAY_NAME_CODE,
+                compatibility::TABLE_DUPLICATE_DISPLAY_NAME_MESSAGE,
+                parsed.display_name().as_str(),
+                sheet.id(),
+                &budget,
+            )?;
+            continue;
+        }
+        let programmatic_key = parsed.name().lookup_key();
+        if programmatic_names.contains(programmatic_key) {
+            table::push_table_diagnostic(
+                diagnostics,
+                compatibility::TABLE_DUPLICATE_PROGRAMMATIC_NAME_CODE,
+                compatibility::TABLE_DUPLICATE_PROGRAMMATIC_NAME_MESSAGE,
                 parsed.name().as_str(),
                 sheet.id(),
                 &budget,
             )?;
             continue;
         }
+        seen_table_ids.insert(parsed.id());
+        seen_table_display_names.insert(Box::from(display_key));
+        programmatic_names.insert(Box::from(programmatic_key));
         tables.push(parsed);
     }
     sheet.set_tables(tables);

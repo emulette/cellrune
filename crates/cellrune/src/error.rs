@@ -57,11 +57,17 @@ const MESSAGE_FROZEN_ROWS_OUT_OF_RANGE: &str =
     "frozen row count cannot produce a valid top-left cell";
 const MESSAGE_FROZEN_COLUMNS_OUT_OF_RANGE: &str =
     "frozen column count cannot produce a valid top-left cell";
+const MESSAGE_TABLE_ID_ZERO: &str = "table ID must be greater than zero";
 const MESSAGE_TABLE_NAME_EMPTY: &str = "table name must not be empty";
 const MESSAGE_TABLE_NAME_TOO_LONG: &str = "table name exceeds 255 UTF-16 code units";
 const MESSAGE_TABLE_NAME_INVALID_CHARACTER: &str = "table name contains an invalid character";
-const MESSAGE_DUPLICATE_TABLE_NAME: &str =
-    "workbook contains a duplicate case-insensitive table name";
+const MESSAGE_DUPLICATE_TABLE_DISPLAY_NAME: &str =
+    "workbook contains a duplicate case-insensitive table display name";
+const MESSAGE_DUPLICATE_TABLE_ID: &str = "workbook contains a duplicate table ID";
+const MESSAGE_DUPLICATE_TABLE_PROGRAMMATIC_NAME: &str =
+    "worksheet contains a duplicate case-insensitive programmatic table name";
+const MESSAGE_TABLE_DISPLAY_NAME_CONFLICTS_WITH_DEFINED_NAME: &str =
+    "table display name conflicts with a workbook defined name";
 const MESSAGE_TABLE_COLUMNS_EMPTY: &str = "table must declare at least one column";
 const MESSAGE_TABLE_COLUMN_COUNT_MISMATCH: &str =
     "table column count does not match the table range width";
@@ -171,14 +177,22 @@ pub enum ValidationErrorCode {
     CustomNumberFormatId,
     /// A custom number format code is empty.
     NumberFormatCodeEmpty,
+    /// A table identifier is zero.
+    TableIdZero,
     /// A table name is empty.
     TableNameEmpty,
     /// A table name exceeds Excel's length limit.
     TableNameTooLong,
     /// A table name contains a forbidden character.
     TableNameInvalidCharacter,
-    /// A workbook contains a duplicate case-insensitive table name.
-    DuplicateTableName,
+    /// A workbook contains a duplicate case-insensitive table display name.
+    DuplicateTableDisplayName,
+    /// A workbook contains a duplicate table identifier.
+    DuplicateTableId,
+    /// One worksheet contains a duplicate programmatic table name.
+    DuplicateTableProgrammaticName,
+    /// A table display name conflicts with a defined name.
+    TableDisplayNameConflictsWithDefinedName,
     /// A table declares no columns.
     TableColumnsEmpty,
     /// A table's column count disagrees with its range width.
@@ -247,10 +261,16 @@ impl ValidationErrorCode {
             Self::BuiltInNumberFormatId => "validation.built_in_number_format_id",
             Self::CustomNumberFormatId => "validation.custom_number_format_id",
             Self::NumberFormatCodeEmpty => "validation.number_format_code_empty",
+            Self::TableIdZero => "validation.table_id_zero",
             Self::TableNameEmpty => "validation.table_name_empty",
             Self::TableNameTooLong => "validation.table_name_too_long",
             Self::TableNameInvalidCharacter => "validation.table_name_invalid_character",
-            Self::DuplicateTableName => "validation.duplicate_table_name",
+            Self::DuplicateTableDisplayName => "validation.duplicate_table_display_name",
+            Self::DuplicateTableId => "validation.duplicate_table_id",
+            Self::DuplicateTableProgrammaticName => "validation.duplicate_table_programmatic_name",
+            Self::TableDisplayNameConflictsWithDefinedName => {
+                "validation.table_display_name_conflicts_with_defined_name"
+            }
             Self::TableColumnsEmpty => "validation.table_columns_empty",
             Self::TableColumnCountMismatch => "validation.table_column_count_mismatch",
             Self::TableColumnNameEmpty => "validation.table_column_name_empty",
@@ -447,6 +467,8 @@ pub enum ValidationError {
     },
     /// A custom number format code is empty.
     NumberFormatCodeEmpty,
+    /// An OOXML table identifier is zero.
+    TableIdZero,
     /// A table name is empty.
     TableNameEmpty,
     /// A table name is longer than Excel's 255 UTF-16 code-unit limit.
@@ -459,9 +481,24 @@ pub enum ValidationError {
         /// Forbidden character found in the table name.
         character: char,
     },
-    /// Two tables anywhere in the workbook use names that compare equal without case.
-    DuplicateTableName {
-        /// Repeated table name as supplied by the caller.
+    /// Two tables anywhere in the workbook use display names that compare equal without case.
+    DuplicateTableDisplayName {
+        /// Repeated table display name as supplied by the caller.
+        name: String,
+    },
+    /// Two tables in the workbook use the same non-zero identifier.
+    DuplicateTableId {
+        /// Repeated table identifier.
+        id: u32,
+    },
+    /// Two tables on one worksheet use programmatic names that compare equal without case.
+    DuplicateTableProgrammaticName {
+        /// Repeated programmatic name as supplied by the caller.
+        name: String,
+    },
+    /// A table display name compares equal to a workbook defined name.
+    TableDisplayNameConflictsWithDefinedName {
+        /// Conflicting table display name as supplied by the caller.
         name: String,
     },
     /// A table declares no columns.
@@ -562,20 +599,26 @@ impl ValidationError {
             Self::BuiltInNumberFormatId { .. } => ValidationErrorCode::BuiltInNumberFormatId,
             Self::CustomNumberFormatId { .. } => ValidationErrorCode::CustomNumberFormatId,
             Self::NumberFormatCodeEmpty => ValidationErrorCode::NumberFormatCodeEmpty,
+            Self::TableIdZero => ValidationErrorCode::TableIdZero,
             Self::TableNameEmpty => ValidationErrorCode::TableNameEmpty,
             Self::TableNameTooLong { .. } => ValidationErrorCode::TableNameTooLong,
             Self::TableNameInvalidCharacter { .. } => {
                 ValidationErrorCode::TableNameInvalidCharacter
             }
-            Self::DuplicateTableName { .. } => ValidationErrorCode::DuplicateTableName,
+            Self::DuplicateTableDisplayName { .. } => {
+                ValidationErrorCode::DuplicateTableDisplayName
+            }
+            Self::DuplicateTableId { .. } => ValidationErrorCode::DuplicateTableId,
+            Self::DuplicateTableProgrammaticName { .. } => {
+                ValidationErrorCode::DuplicateTableProgrammaticName
+            }
+            Self::TableDisplayNameConflictsWithDefinedName { .. } => {
+                ValidationErrorCode::TableDisplayNameConflictsWithDefinedName
+            }
             Self::TableColumnsEmpty => ValidationErrorCode::TableColumnsEmpty,
-            Self::TableColumnCountMismatch { .. } => {
-                ValidationErrorCode::TableColumnCountMismatch
-            }
+            Self::TableColumnCountMismatch { .. } => ValidationErrorCode::TableColumnCountMismatch,
             Self::TableColumnNameEmpty => ValidationErrorCode::TableColumnNameEmpty,
-            Self::DuplicateTableColumnName { .. } => {
-                ValidationErrorCode::DuplicateTableColumnName
-            }
+            Self::DuplicateTableColumnName { .. } => ValidationErrorCode::DuplicateTableColumnName,
             Self::DuplicateTableColumnId { .. } => ValidationErrorCode::DuplicateTableColumnId,
             Self::TableRowCountsExceedRange { .. } => {
                 ValidationErrorCode::TableRowCountsExceedRange
@@ -719,6 +762,7 @@ impl fmt::Display for ValidationError {
                 write!(formatter, "{MESSAGE_NUMBER_FORMAT_CUSTOM_ID}: {value}")
             }
             Self::NumberFormatCodeEmpty => formatter.write_str(MESSAGE_NUMBER_FORMAT_CODE_EMPTY),
+            Self::TableIdZero => formatter.write_str(MESSAGE_TABLE_ID_ZERO),
             Self::TableNameEmpty => formatter.write_str(MESSAGE_TABLE_NAME_EMPTY),
             Self::TableNameTooLong { utf16_len } => {
                 write!(formatter, "{MESSAGE_TABLE_NAME_TOO_LONG}: {utf16_len}")
@@ -727,8 +771,23 @@ impl fmt::Display for ValidationError {
                 formatter,
                 "{MESSAGE_TABLE_NAME_INVALID_CHARACTER}: {character:?}"
             ),
-            Self::DuplicateTableName { name } => {
-                write!(formatter, "{MESSAGE_DUPLICATE_TABLE_NAME}: {name}")
+            Self::DuplicateTableDisplayName { name } => {
+                write!(formatter, "{MESSAGE_DUPLICATE_TABLE_DISPLAY_NAME}: {name}")
+            }
+            Self::DuplicateTableId { id } => {
+                write!(formatter, "{MESSAGE_DUPLICATE_TABLE_ID}: {id}")
+            }
+            Self::DuplicateTableProgrammaticName { name } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_DUPLICATE_TABLE_PROGRAMMATIC_NAME}: {name}"
+                )
+            }
+            Self::TableDisplayNameConflictsWithDefinedName { name } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_TABLE_DISPLAY_NAME_CONFLICTS_WITH_DEFINED_NAME}: {name}"
+                )
             }
             Self::TableColumnsEmpty => formatter.write_str(MESSAGE_TABLE_COLUMNS_EMPTY),
             Self::TableColumnCountMismatch { columns, width } => write!(
@@ -946,6 +1005,7 @@ mod tests {
                 ValidationErrorCode::NumberFormatCodeEmpty,
                 "validation.number_format_code_empty",
             ),
+            (ValidationErrorCode::TableIdZero, "validation.table_id_zero"),
             (
                 ValidationErrorCode::TableNameEmpty,
                 "validation.table_name_empty",
@@ -959,8 +1019,20 @@ mod tests {
                 "validation.table_name_invalid_character",
             ),
             (
-                ValidationErrorCode::DuplicateTableName,
-                "validation.duplicate_table_name",
+                ValidationErrorCode::DuplicateTableDisplayName,
+                "validation.duplicate_table_display_name",
+            ),
+            (
+                ValidationErrorCode::DuplicateTableId,
+                "validation.duplicate_table_id",
+            ),
+            (
+                ValidationErrorCode::DuplicateTableProgrammaticName,
+                "validation.duplicate_table_programmatic_name",
+            ),
+            (
+                ValidationErrorCode::TableDisplayNameConflictsWithDefinedName,
+                "validation.table_display_name_conflicts_with_defined_name",
             ),
             (
                 ValidationErrorCode::TableColumnsEmpty,

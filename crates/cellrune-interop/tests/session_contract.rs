@@ -476,6 +476,7 @@ fn summary_exposes_tables_and_merged_ranges() {
     assert_eq!(sheet.merged_ranges, vec!["A3:B4", "D5:E6"]);
     assert_eq!(sheet.tables.len(), 1);
     let table = &sheet.tables[0];
+    assert_eq!(table.id, 1);
     assert_eq!(table.name, "Sales");
     assert_eq!(table.display_name, "SalesDisplay");
     assert_eq!(table.range, "A1:B4");
@@ -485,7 +486,11 @@ fn summary_exposes_tables_and_merged_ranges() {
         table
             .columns
             .iter()
-            .map(|column| (column.id, column.name.as_str(), column.totals_row_function.as_deref()))
+            .map(|column| (
+                column.id,
+                column.name.as_str(),
+                column.totals_row_function.as_deref()
+            ))
             .collect::<Vec<_>>(),
         vec![(1, "Region", None), (5, "Amount", Some("sum"))]
     );

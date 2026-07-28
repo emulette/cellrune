@@ -431,9 +431,11 @@ pub struct TableColumnDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TableSummaryDto {
-    /// The name structured references resolve against (workbook-globally unique).
+    /// Stable non-zero OOXML table identifier, unique within the workbook.
+    pub id: u32,
+    /// Worksheet-local programmatic object-model name.
     pub name: String,
-    /// The display name UIs show; it may differ from `name`.
+    /// Workbook-global formula and UI name; it may differ from `name`.
     pub display_name: String,
     /// Full table range in A1 notation, including header and totals rows.
     pub range: String,

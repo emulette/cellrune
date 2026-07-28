@@ -2,11 +2,13 @@ use quick_xml::events::Event;
 
 use super::super::error::compatibility;
 use super::super::package::PartPath;
-use super::super::xml::{XmlAttributes, XmlBudget, is_spreadsheet_element, read_attributes, reader};
+use super::super::xml::{
+    XmlAttributes, XmlBudget, is_spreadsheet_element, read_attributes, reader,
+};
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use crate::{
     CellAddress, CellRange, Diagnostic, DiagnosticCode, DiagnosticSeverity, SheetId,
-    SourceLocation, Table, TableColumn, TableName, TotalsRowFunction,
+    SourceLocation, Table, TableColumn, TableId, TableName, TotalsRowFunction,
 };
 
 const TABLE: &[u8] = b"table";
@@ -15,11 +17,15 @@ const TABLE_COLUMN: &[u8] = b"tableColumn";
 
 mod reason {
     pub(super) const ROOT_NOT_TABLE: &str = "root element is not a table";
+    pub(super) const MISSING_TABLE_ID: &str = "missing or invalid table id";
     pub(super) const MISSING_DISPLAY_NAME: &str = "missing displayName attribute";
     pub(super) const MISSING_REF: &str = "missing ref attribute";
     pub(super) const INVALID_REF: &str = "invalid ref attribute";
     pub(super) const INVALID_ROW_COUNT: &str = "invalid header or totals row count";
     pub(super) const DUPLICATE_TABLE_COLUMNS: &str = "duplicate tableColumns element";
+    pub(super) const INVALID_TABLE_COLUMNS_COUNT: &str = "missing or invalid tableColumns count";
+    pub(super) const TABLE_COLUMNS_COUNT_MISMATCH: &str =
+        "tableColumns count does not match the number of tableColumn children";
     pub(super) const MISSING_COLUMN_ID: &str = "missing or invalid tableColumn id";
     pub(super) const MISSING_COLUMN_NAME: &str = "missing tableColumn name";
     pub(super) const INVALID_TOTALS_FUNCTION: &str = "unknown totalsRowFunction token";
@@ -28,6 +34,7 @@ mod reason {
 #[derive(Debug, Default)]
 struct TableParseState {
     saw_root: bool,
+    id: Option<TableId>,
     name: Option<Box<str>>,
     display_name: Option<Box<str>>,
     reference: Option<CellRange>,
@@ -35,6 +42,7 @@ struct TableParseState {
     totals_row_count: u32,
     columns: Vec<TableColumn>,
     column_count: u64,
+    declared_column_count: Option<u32>,
     table_columns_depth: Option<u64>,
     saw_table_columns: bool,
     invalid: Option<String>,
@@ -71,9 +79,9 @@ pub(super) fn parse(
     let mut state = TableParseState::default();
 
     loop {
-        let event = xml.read_event_into(&mut buffer).map_err(|error| {
-            budget.error(XlsxErrorCode::InvalidXml).with_cause(error)
-        })?;
+        let event = xml
+            .read_event_into(&mut buffer)
+            .map_err(|error| budget.error(XlsxErrorCode::InvalidXml).with_cause(error))?;
         match event {
             Event::Start(element) => {
                 let depth = budget.start()?;
@@ -129,10 +137,20 @@ pub(super) fn parse(
     }
     budget.finish(state.saw_root)?;
 
+    if state
+        .declared_column_count
+        .is_some_and(|count| u64::from(count) != state.column_count)
+    {
+        state.invalidate(reason::TABLE_COLUMNS_COUNT_MISMATCH);
+    }
     if let Some(reason) = state.invalid.take() {
         push_invalid_diagnostic(diagnostics, &reason, sheet_id, &budget)?;
         return Ok(None);
     }
+    let Some(id) = state.id else {
+        push_invalid_diagnostic(diagnostics, reason::MISSING_TABLE_ID, sheet_id, &budget)?;
+        return Ok(None);
+    };
     let Some(display_name) = state.display_name.take() else {
         push_invalid_diagnostic(diagnostics, reason::MISSING_DISPLAY_NAME, sheet_id, &budget)?;
         return Ok(None);
@@ -141,8 +159,18 @@ pub(super) fn parse(
         push_invalid_diagnostic(diagnostics, reason::MISSING_REF, sheet_id, &budget)?;
         return Ok(None);
     };
+    let display_name = match TableName::new(display_name.as_ref()) {
+        Ok(name) => name,
+        Err(error) => {
+            push_invalid_diagnostic(diagnostics, &error.to_string(), sheet_id, &budget)?;
+            return Ok(None);
+        }
+    };
     // OOXML defaults @name to @displayName when absent.
-    let raw_name = state.name.take().unwrap_or_else(|| display_name.clone());
+    let raw_name = state
+        .name
+        .take()
+        .unwrap_or_else(|| Box::from(display_name.as_str()));
     let name = match TableName::new(raw_name.as_ref()) {
         Ok(name) => name,
         Err(error) => {
@@ -151,8 +179,9 @@ pub(super) fn parse(
         }
     };
     match Table::new(
+        id,
         name,
-        display_name.as_ref(),
+        display_name,
         reference,
         state.header_row_count,
         state.totals_row_count,
@@ -205,9 +234,16 @@ fn process_element(
     if depth == 2 && local_name == TABLE_COLUMNS {
         if state.saw_table_columns {
             state.invalidate(reason::DUPLICATE_TABLE_COLUMNS);
-            return Ok(());
+        } else {
+            state.saw_table_columns = true;
+            match attributes
+                .unqualified("count")
+                .and_then(|value| value.parse::<u32>().ok())
+            {
+                Some(count) => state.declared_column_count = Some(count),
+                None => state.invalidate(reason::INVALID_TABLE_COLUMNS_COUNT),
+            }
         }
-        state.saw_table_columns = true;
         // A self-closing <tableColumns/> has no children, so it must not leave the depth
         // marker armed for unrelated elements that happen to sit at the same depth later.
         if has_children {
@@ -229,6 +265,14 @@ fn process_root_attributes(
     state: &mut TableParseState,
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
+    match attributes
+        .unqualified("id")
+        .and_then(|value| value.parse::<u32>().ok())
+        .and_then(|value| TableId::new(value).ok())
+    {
+        Some(id) => state.id = Some(id),
+        None => state.invalidate(reason::MISSING_TABLE_ID),
+    }
     if let Some(name) = attributes.unqualified("name") {
         check_name_bytes(name, limits, budget)?;
         state.name = Some(Box::from(name));
@@ -371,9 +415,8 @@ pub(super) fn push_table_diagnostic(
     sheet_id: SheetId,
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
-    let code = DiagnosticCode::new(code).map_err(|error| {
-        budget.error(XlsxErrorCode::InvalidXml).with_cause(error)
-    })?;
+    let code = DiagnosticCode::new(code)
+        .map_err(|error| budget.error(XlsxErrorCode::InvalidXml).with_cause(error))?;
     let diagnostic = Diagnostic::new(
         code,
         DiagnosticSeverity::Warning,

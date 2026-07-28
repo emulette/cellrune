@@ -29,6 +29,7 @@ pub(crate) fn workbook_summary<'py>(
         let tables = PyList::empty(py);
         for table in &sheet.tables {
             let table_item = PyDict::new(py);
+            table_item.set_item("id", table.id)?;
             table_item.set_item("name", &table.name)?;
             table_item.set_item("display_name", &table.display_name)?;
             table_item.set_item("range", &table.range)?;
@@ -39,10 +40,8 @@ pub(crate) fn workbook_summary<'py>(
                 let column_item = PyDict::new(py);
                 column_item.set_item("id", column.id)?;
                 column_item.set_item("name", &column.name)?;
-                column_item.set_item(
-                    "totals_row_function",
-                    column.totals_row_function.as_deref(),
-                )?;
+                column_item
+                    .set_item("totals_row_function", column.totals_row_function.as_deref())?;
                 columns.append(column_item)?;
             }
             table_item.set_item("columns", columns)?;

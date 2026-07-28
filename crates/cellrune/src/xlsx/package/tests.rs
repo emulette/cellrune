@@ -345,7 +345,10 @@ fn read_limits_reject_zero_values() {
     let table_setters: [(LimitSetter, &str); 3] = [
         (ReadLimits::with_max_tables, "max_tables"),
         (ReadLimits::with_max_table_columns, "max_table_columns"),
-        (ReadLimits::with_max_table_name_bytes, "max_table_name_bytes"),
+        (
+            ReadLimits::with_max_table_name_bytes,
+            "max_table_name_bytes",
+        ),
     ];
     for (setter, name) in table_setters {
         assert_eq!(
