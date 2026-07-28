@@ -406,3 +406,101 @@ fn unique_test_path() -> PathBuf {
         std::process::id()
     ))
 }
+
+#[test]
+fn summary_exposes_tables_and_merged_ranges() {
+    const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    const ROOT_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+    const WORKBOOK: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    const WORKBOOK_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    const SHEET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row></sheetData>
+  <mergeCells count="2"><mergeCell ref="D5:E6"/><mergeCell ref="A3:B4"/></mergeCells>
+  <tableParts count="1"><tablePart r:id="rId7"/></tableParts>
+</worksheet>"#;
+    const SHEET_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    const TABLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="SalesDisplay" ref="A1:B4" totalsRowCount="1">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Region"/>
+    <tableColumn id="5" name="Amount" totalsRowFunction="sum"/>
+  </tableColumns>
+</table>"#;
+
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut buffer);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, contents) in [
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELS),
+            ("xl/workbook.xml", WORKBOOK),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELS),
+            ("xl/worksheets/sheet1.xml", SHEET),
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_RELS),
+            ("xl/tables/table1.xml", TABLE),
+        ] {
+            use std::io::Write;
+            writer.start_file(name, options).expect("fixture part");
+            writer
+                .write_all(contents.as_bytes())
+                .expect("fixture bytes");
+        }
+        writer.finish().expect("fixture archive");
+    }
+
+    let session = WorkbookSession::open_bytes(buffer.get_ref()).expect("fixture must open");
+    let summary = session.summary();
+    let sheet = &summary.sheets[0];
+    assert_eq!(sheet.merged_ranges, vec!["A3:B4", "D5:E6"]);
+    assert_eq!(sheet.tables.len(), 1);
+    let table = &sheet.tables[0];
+    assert_eq!(table.name, "Sales");
+    assert_eq!(table.display_name, "SalesDisplay");
+    assert_eq!(table.range, "A1:B4");
+    assert_eq!(table.header_row_count, 1);
+    assert_eq!(table.totals_row_count, 1);
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| (column.id, column.name.as_str(), column.totals_row_function.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![(1, "Region", None), (5, "Amount", Some("sum"))]
+    );
+
+    // The serde(default) discipline: payloads from producers that predate these fields
+    // still deserialize, and the defaults are semantically honest empty lists.
+    let legacy = serde_json::json!({
+        "id": 1,
+        "name": "Data",
+        "visibility": "visible",
+        "cell_count": 0,
+        "used_range": null,
+    });
+    let deserialized: cellrune_interop::SheetSummaryDto =
+        serde_json::from_value(legacy).expect("legacy payload must deserialize");
+    assert!(deserialized.merged_ranges.is_empty());
+    assert!(deserialized.tables.is_empty());
+}

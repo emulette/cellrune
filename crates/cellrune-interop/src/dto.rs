@@ -415,6 +415,36 @@ pub struct CellReferenceDto {
     pub address: String,
 }
 
+/// One column of an Excel table, keyed by the stable XLSX column identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TableColumnDto {
+    /// Stable XLSX column identifier; survives column renames.
+    pub id: u32,
+    /// Column name.
+    pub name: String,
+    /// OOXML totals-row token (`sum`, `average`, ...), absent when the column declares none.
+    pub totals_row_function: Option<String>,
+}
+
+/// Summary of one Excel table owned by its worksheet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TableSummaryDto {
+    /// The name structured references resolve against (workbook-globally unique).
+    pub name: String,
+    /// The display name UIs show; it may differ from `name`.
+    pub display_name: String,
+    /// Full table range in A1 notation, including header and totals rows.
+    pub range: String,
+    /// Declared header row count.
+    pub header_row_count: u32,
+    /// Declared totals row count.
+    pub totals_row_count: u32,
+    /// Columns in XLSX declaration order.
+    pub columns: Vec<TableColumnDto>,
+}
+
 /// Summary of one worksheet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -429,6 +459,17 @@ pub struct SheetSummaryDto {
     pub cell_count: u64,
     /// Smallest used rectangle, when the sheet is non-empty.
     pub used_range: Option<String>,
+    /// Merged ranges in A1 notation, sorted by top-left address.
+    ///
+    /// `#[serde(default)]` is deliberate: an absent list means "no merges", which is
+    /// semantically honest, so payloads from older producers keep deserializing.
+    #[serde(default)]
+    pub merged_ranges: Vec<String>,
+    /// Tables owned by this sheet in XLSX declaration order.
+    ///
+    /// `#[serde(default)]` is deliberate for the same reason as `merged_ranges`.
+    #[serde(default)]
+    pub tables: Vec<TableSummaryDto>,
 }
 
 /// Bounded workbook metadata returned without cell contents.

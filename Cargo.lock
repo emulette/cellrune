@@ -230,6 +230,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

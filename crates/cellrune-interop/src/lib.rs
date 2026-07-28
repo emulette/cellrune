@@ -17,8 +17,8 @@ pub use dto::{
     CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, EditBatchDto, EditReceiptDto,
     FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
     FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto, RangeRequestDto,
-    RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, WorkbookChangeDto,
-    WorkbookSummaryDto, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableColumnDto, TableSummaryDto,
+    WorkbookChangeDto, WorkbookSummaryDto, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use service::{

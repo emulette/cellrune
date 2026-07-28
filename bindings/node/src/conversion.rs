@@ -45,12 +45,31 @@ pub struct NativeRangePage {
 }
 
 #[napi(object)]
+pub struct NativeTableColumn {
+    pub id: u32,
+    pub name: String,
+    pub totals_row_function: Option<String>,
+}
+
+#[napi(object)]
+pub struct NativeTableSummary {
+    pub name: String,
+    pub display_name: String,
+    pub range: String,
+    pub header_row_count: u32,
+    pub totals_row_count: u32,
+    pub columns: Vec<NativeTableColumn>,
+}
+
+#[napi(object)]
 pub struct NativeSheetSummary {
     pub id: u32,
     pub name: String,
     pub visibility: String,
     pub cell_count: f64,
     pub used_range: Option<String>,
+    pub merged_ranges: Vec<String>,
+    pub tables: Vec<NativeTableSummary>,
 }
 
 #[napi(object)]
@@ -173,6 +192,27 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
                 visibility: sheet.visibility,
                 cell_count: sheet.cell_count as f64,
                 used_range: sheet.used_range,
+                merged_ranges: sheet.merged_ranges,
+                tables: sheet
+                    .tables
+                    .into_iter()
+                    .map(|table| NativeTableSummary {
+                        name: table.name,
+                        display_name: table.display_name,
+                        range: table.range,
+                        header_row_count: table.header_row_count,
+                        totals_row_count: table.totals_row_count,
+                        columns: table
+                            .columns
+                            .into_iter()
+                            .map(|column| NativeTableColumn {
+                                id: column.id,
+                                name: column.name,
+                                totals_row_function: column.totals_row_function,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
             })
             .collect(),
     }

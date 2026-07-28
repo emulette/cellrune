@@ -25,6 +25,30 @@ pub(crate) fn workbook_summary<'py>(
         item.set_item("visibility", &sheet.visibility)?;
         item.set_item("cell_count", sheet.cell_count)?;
         item.set_item("used_range", sheet.used_range.as_deref())?;
+        item.set_item("merged_ranges", &sheet.merged_ranges)?;
+        let tables = PyList::empty(py);
+        for table in &sheet.tables {
+            let table_item = PyDict::new(py);
+            table_item.set_item("name", &table.name)?;
+            table_item.set_item("display_name", &table.display_name)?;
+            table_item.set_item("range", &table.range)?;
+            table_item.set_item("header_row_count", table.header_row_count)?;
+            table_item.set_item("totals_row_count", table.totals_row_count)?;
+            let columns = PyList::empty(py);
+            for column in &table.columns {
+                let column_item = PyDict::new(py);
+                column_item.set_item("id", column.id)?;
+                column_item.set_item("name", &column.name)?;
+                column_item.set_item(
+                    "totals_row_function",
+                    column.totals_row_function.as_deref(),
+                )?;
+                columns.append(column_item)?;
+            }
+            table_item.set_item("columns", columns)?;
+            tables.append(table_item)?;
+        }
+        item.set_item("tables", tables)?;
         sheets.append(item)?;
     }
     result.set_item("sheets", sheets)?;

@@ -14,8 +14,29 @@ use crate::{
     CalculationOptionsDto, CapabilityEntryDto, CapabilityPageDto, FunctionCatalogEntryDto,
     FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto,
     INTEROP_SCHEMA_VERSION, InteropError, RangePageDto, RangeRequestDto, SheetSummaryDto,
-    WorkbookSummaryDto,
+    TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
 };
+
+fn table_summary(table: &cellrune::Table) -> TableSummaryDto {
+    TableSummaryDto {
+        name: table.name().as_str().to_owned(),
+        display_name: table.display_name().to_owned(),
+        range: range_text(table.range().start(), table.range().end()),
+        header_row_count: table.header_row_count(),
+        totals_row_count: table.totals_row_count(),
+        columns: table
+            .columns()
+            .iter()
+            .map(|column| TableColumnDto {
+                id: column.id(),
+                name: column.name().to_owned(),
+                totals_row_function: column
+                    .totals_row_function()
+                    .map(|function| function.as_str().to_owned()),
+            })
+            .collect(),
+    }
+}
 
 /// Default number of cells returned by one range or capability page.
 pub const DEFAULT_PAGE_SIZE: u32 = 1_000;
@@ -48,6 +69,12 @@ impl WorkbookSession {
                     used_range: sheet
                         .used_range()
                         .map(|range| range_text(range.start(), range.end())),
+                    merged_ranges: sheet
+                        .merged_ranges()
+                        .iter()
+                        .map(|range| range_text(range.start(), range.end()))
+                        .collect(),
+                    tables: sheet.tables().iter().map(table_summary).collect(),
                 })
                 .collect(),
         }

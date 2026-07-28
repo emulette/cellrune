@@ -140,6 +140,23 @@ export interface NativeSheetSummary {
   visibility: string
   cellCount: number
   usedRange?: string
+  mergedRanges: Array<string>
+  tables: Array<NativeTableSummary>
+}
+
+export interface NativeTableColumn {
+  id: number
+  name: string
+  totalsRowFunction?: string
+}
+
+export interface NativeTableSummary {
+  name: string
+  displayName: string
+  range: string
+  headerRowCount: number
+  totalsRowCount: number
+  columns: Array<NativeTableColumn>
 }
 
 export interface NativeWorkbookSummary {

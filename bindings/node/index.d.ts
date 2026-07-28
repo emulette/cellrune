@@ -58,12 +58,29 @@ export interface RangePage {
   readonly cells: readonly Cell[];
 }
 
+export interface TableColumn {
+  readonly id: number;
+  readonly name: string;
+  readonly totalsRowFunction: string | null;
+}
+
+export interface TableSummary {
+  readonly name: string;
+  readonly displayName: string;
+  readonly range: string;
+  readonly headerRowCount: number;
+  readonly totalsRowCount: number;
+  readonly columns: readonly TableColumn[];
+}
+
 export interface SheetSummary {
   readonly id: number;
   readonly name: string;
   readonly visibility: "visible" | "hidden" | "very_hidden";
   readonly cellCount: number;
   readonly usedRange: string | null;
+  readonly mergedRanges: readonly string[];
+  readonly tables: readonly TableSummary[];
 }
 
 export interface WorkbookSummary {

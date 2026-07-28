@@ -81,12 +81,29 @@ class RangePage(TypedDict):
     cells: list[Cell]
 
 
+class TableColumn(TypedDict):
+    id: int
+    name: str
+    totals_row_function: str | None
+
+
+class TableSummary(TypedDict):
+    name: str
+    display_name: str
+    range: str
+    header_row_count: int
+    totals_row_count: int
+    columns: list[TableColumn]
+
+
 class SheetSummary(TypedDict):
     id: int
     name: str
     visibility: Literal["visible", "hidden", "very_hidden"]
     cell_count: int
     used_range: str | None
+    merged_ranges: list[str]
+    tables: list[TableSummary]
 
 
 class WorkbookSummary(TypedDict):

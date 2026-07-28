@@ -90,6 +90,19 @@ function normalizeSummary(summary) {
       visibility: sheet.visibility,
       cellCount: sheet.cellCount,
       usedRange: sheet.usedRange ?? null,
+      mergedRanges: sheet.mergedRanges,
+      tables: sheet.tables.map((table) => ({
+        name: table.name,
+        displayName: table.displayName,
+        range: table.range,
+        headerRowCount: table.headerRowCount,
+        totalsRowCount: table.totalsRowCount,
+        columns: table.columns.map((column) => ({
+          id: column.id,
+          name: column.name,
+          totalsRowFunction: column.totalsRowFunction ?? null,
+        })),
+      })),
     })),
   };
 }
