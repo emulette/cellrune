@@ -533,7 +533,7 @@ impl Engine<'_> {
             return span
                 .rects()
                 .filter(|rect| rect.whole_rows)
-                .map(|rect| ArrayExtent::new(self.clamped_row_end(&rect)))
+                .map(|rect| ArrayExtent::new(self.whole_column_row_end(&rect)))
                 .reduce(ArrayExtent::merged);
         }
         match expr {

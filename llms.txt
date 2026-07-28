@@ -464,10 +464,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   both indexes returns the complete reference. Scalar formulas apply legacy
   implicit intersection; array contexts materialize the selected rectangle.
 - Unary and binary array operators containing whole-column references resolve
-  one common row extent from the greatest used row among their operands, with
-  a one-row minimum on an otherwise empty sheet. Unpopulated cells in that
-  extent are `Blank`; directly resolved source arrays and operator outputs are
-  charged cumulatively to `max_array_cells`. Function calls retain
+  one common row extent from the greatest populated row among the columns
+  those operands reference, with a one-row minimum on an otherwise empty
+  sheet. Cells in other columns of the same sheet do not widen it, so the
+  value depends only on the cells the expression's dependency rectangles
+  cover and a full and an incremental recalculation agree. Unpopulated cells
+  in that extent are `Blank`; directly resolved source arrays and operator
+  outputs are charged cumulatively to `max_array_cells`. Function calls retain
   function-defined argument boundaries: each array argument has an
   independent bounded evaluation context, and a function return does not
   establish a whole-column operator extent by itself. If another direct

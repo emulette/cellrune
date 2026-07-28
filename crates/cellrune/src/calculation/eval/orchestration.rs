@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::materialization::collect_array_regions;
+use super::reference::collect_column_extents;
 use super::{CompiledWorkbook, Engine, EvalContext, public_to_internal};
 use crate::calculation::graph::{DependencyGraph, schedule};
 use crate::calculation::parser::parse_formula_with_limits;
@@ -33,6 +34,7 @@ impl<'workbook> Engine<'workbook> {
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
             array_regions: collect_array_regions(workbook),
+            column_extents: collect_column_extents(workbook),
             dynamic_spills: BTreeMap::new(),
             parse_failures: BTreeMap::new(),
             name_cycle_cells: BTreeSet::new(),
@@ -143,6 +145,7 @@ impl<'workbook> Engine<'workbook> {
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
             array_regions: collect_array_regions(workbook),
+            column_extents: collect_column_extents(workbook),
             dynamic_spills: BTreeMap::new(),
             parse_failures: compiled.parse_failures.clone(),
             name_cycle_cells: compiled.name_cycle_cells.clone(),

@@ -23,7 +23,7 @@ mod orchestration;
 mod reference;
 
 use materialization::ArrayRegion;
-use reference::cell_at;
+use reference::{ColumnExtents, cell_at};
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledWorkbook {
@@ -127,6 +127,7 @@ pub struct Engine<'workbook> {
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
+    column_extents: Vec<ColumnExtents>,
     dynamic_spills: BTreeMap<CellId, Rect>,
     parse_failures: BTreeMap<CellId, ParseError>,
     name_cycle_cells: BTreeSet<CellId>,

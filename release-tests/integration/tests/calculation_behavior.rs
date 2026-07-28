@@ -1836,6 +1836,46 @@ fn whole_column_operators_share_one_extent_and_one_cumulative_budget() {
 }
 
 #[test]
+fn whole_column_extent_ignores_columns_the_expression_does_not_reference() {
+    // The materialized height must come from the referenced columns alone. Taking it from the
+    // sheet-wide used range would make these values depend on cells no dependency rectangle
+    // covers, which is what splits full and incremental recalculation.
+    let calculation_sheet = formula_sheet(
+        1,
+        "Calculation",
+        &[
+            (1, 1, "COUNT(Data!A:A*Data!B:B)"),
+            (1, 2, "AVERAGE(Data!A:A*Data!B:B)"),
+            (1, 3, "SUM(Data!A:A*Data!B:B)"),
+        ],
+    );
+    let mut short_columns = Sheet::new(
+        SheetId::new(2).expect("valid sheet ID"),
+        SheetName::new("Data").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    for (address, value) in [
+        ("A1", 1.0),
+        ("A2", 2.0),
+        ("A3", 3.0),
+        ("B1", 10.0),
+        ("B2", 20.0),
+    ] {
+        insert_number(&mut short_columns, address, value);
+    }
+    let mut tall_unrelated_column = short_columns.clone();
+    insert_number(&mut tall_unrelated_column, "Z10", 999.0);
+
+    for data in [short_columns, tall_unrelated_column] {
+        let workbook = workbook_with_sheets_and_names(vec![calculation_sheet.clone(), data], &[]);
+        let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+        assert_number(&calculation, 1, 3.0, 0.0);
+        assert_number(&calculation, 2, 50.0 / 3.0, 1e-12);
+        assert_number(&calculation, 3, 50.0, 0.0);
+    }
+}
+
+#[test]
 fn cross_sheet_references_use_the_workbook_unicode_name_index() {
     let workbook = workbook_with_sheets_and_names(
         vec![

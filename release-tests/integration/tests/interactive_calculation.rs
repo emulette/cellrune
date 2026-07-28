@@ -385,6 +385,160 @@ fn three_d_dependencies_invalidate_incremental_consumers_across_the_span() {
     }
 }
 
+/// A whole-column array must not read cells outside its own columns.
+///
+/// The materialized height is what makes this an incremental-safety property rather than a
+/// cosmetic one: if it came from the sheet-wide used range, writing into any unreferenced column
+/// would change the correct answer while leaving every dependency rectangle untouched, so the
+/// incremental pass would keep a stale value that a full pass disagrees with.
+#[test]
+fn whole_column_arrays_agree_between_incremental_and_full_recalculation() {
+    let mut session = WorkbookCalculationSession::create();
+    let first = SheetId::new(1).expect("constant sheet ID");
+    let data = session
+        .apply_changes(
+            0,
+            EditBatch::new([WorkbookChange::add_sheet(
+                SheetName::new("Data").expect("valid sheet name"),
+            )]),
+        )
+        .expect("data sheet")
+        .created_sheet_ids()[0];
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([
+                WorkbookChange::set_cell_value(data, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_value(data, address("A2"), number(2.0)),
+                WorkbookChange::set_cell_value(data, address("A3"), number(3.0)),
+                WorkbookChange::set_cell_value(data, address("B1"), number(10.0)),
+                WorkbookChange::set_cell_value(data, address("B2"), number(20.0)),
+                WorkbookChange::set_cell_formula(
+                    first,
+                    address("D1"),
+                    formula("COUNT(Data!A:A*Data!B:B)"),
+                ),
+                WorkbookChange::set_cell_formula(
+                    first,
+                    address("D2"),
+                    formula("AVERAGE(Data!A:A*Data!B:B)"),
+                ),
+            ]),
+        )
+        .expect("whole-column workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    // `Z10` is outside every referenced column, so nothing may go dirty and nothing may change.
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                data,
+                address("Z10"),
+                number(999.0),
+            )]),
+        )
+        .expect("unreferenced column edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental recalculation");
+    assert_eq!(delta.evaluated_count(), 0);
+    let incremental = [
+        session
+            .calculation()
+            .expect("incremental")
+            .cell(CalculationCellId::new(first, address("D1"))),
+        session
+            .calculation()
+            .expect("incremental")
+            .cell(CalculationCellId::new(first, address("D2"))),
+    ]
+    .map(|result| result.cloned());
+
+    session
+        .recalculate(
+            RecalculationMode::Full,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("full recalculation");
+    let full = [
+        session
+            .calculation()
+            .expect("full")
+            .cell(CalculationCellId::new(first, address("D1"))),
+        session
+            .calculation()
+            .expect("full")
+            .cell(CalculationCellId::new(first, address("D2"))),
+    ]
+    .map(|result| result.cloned());
+
+    assert_eq!(incremental, full);
+    assert_eq!(
+        full[0],
+        Some(CalculationCellResult::Value(number(3.0))),
+        "the count must follow the referenced columns, not the sheet used range",
+    );
+
+    // The opposite direction: growth inside a referenced column is covered by that column's
+    // dependency rectangle, so it must dirty the consumer and widen the extent.
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                data,
+                address("A5"),
+                number(4.0),
+            )]),
+        )
+        .expect("referenced column edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental recalculation");
+    assert_eq!(delta.evaluated_count(), 2);
+    let grown = session
+        .calculation()
+        .expect("incremental")
+        .cell(CalculationCellId::new(first, address("D1")))
+        .cloned();
+
+    session
+        .recalculate(
+            RecalculationMode::Full,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("full recalculation");
+    assert_eq!(
+        grown,
+        session
+            .calculation()
+            .expect("full")
+            .cell(CalculationCellId::new(first, address("D1")))
+            .cloned(),
+    );
+    assert_eq!(
+        grown,
+        Some(CalculationCellResult::Value(number(5.0))),
+        "column A now reaches row 5, so both operands materialize five rows",
+    );
+}
+
 /// A spill member is not a formula cell, so its exact decimal has to be carried in the snapshot
 /// under its own address or an incremental pass cannot restore it.
 ///

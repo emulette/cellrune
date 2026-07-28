@@ -148,6 +148,28 @@ Excel carry serials produced under that calendar.
 
 The `1904` date system is handled separately and has no such adjustment.
 
+### Deliberate difference: the height of a whole-column array
+
+Excel treats `A:A` in an array expression as the full 1,048,576 rows. CellRune materializes a
+bounded height instead, so `=COUNT(A:A*B:B)` counts the populated extent rather than a million
+rows. Some clamp is unavoidable; which one is a real choice, and this is the one CellRune makes:
+
+**The extent is the greatest populated row among the columns the expression references** — not the
+sheet's overall used range. Two whole-column operands of different heights therefore share one
+height, the taller of the two, and the shorter one contributes blanks that arithmetic coerces to
+zero. That reproduces Excel for the cases the oracle fixes: `SUM(T:T*U:U)` at equal heights and
+`SUM(T:T*V:V)` at unequal heights both match the saved Excel results.
+
+Scoping the clamp to the referenced columns rather than to the whole sheet is what makes the result
+reproducible. A sheet-wide clamp would let a value written into a column the expression never names
+change its answer, while the formula's dependency rectangles — which cover only the named columns —
+stayed untouched. A full recalculation would then produce one answer and an incremental pass would
+keep another. Under the column-scoped rule the value is a function of the recorded dependencies
+alone, so the two passes agree by construction.
+
+Aggregates that walk a whole-column reference directly, such as `SUM(A:A)`, are unaffected either
+way: they skip blank cells, so a wider clamp cannot change their result.
+
 ### Measured agreement
 
 The explicit local audit currently records:

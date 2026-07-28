@@ -27,11 +27,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   remain an `UnsupportedSheetRange` engine capability issue.
 - Incremental calculation stores 3-D dependencies as compact rectangle spans and counts each span
   once against the dependency-edge budget instead of expanding it into one edge per cell.
-- Whole-column operands combined by unary or binary array operators use a common
-  greatest-used-row extent, with a one-row minimum for an empty sheet and blanks for unpopulated
-  cells. Directly resolved sources and operator outputs share one cumulative array-cell budget.
-  Function arguments retain independent bounded contexts, and a returned array joins an enclosing
-  cumulative context only when another direct whole-column operand established it.
+- Whole-column operands combined by unary or binary array operators use a common extent: the
+  greatest populated row among the columns those operands reference, with a one-row minimum for an
+  otherwise empty sheet and blanks for unpopulated cells. Directly resolved sources and operator
+  outputs share one cumulative array-cell budget. Function arguments retain independent bounded
+  contexts, and a returned array joins an enclosing cumulative context only when another direct
+  whole-column operand established it.
 - Four existing Excel-saved 3-D cases and two whole-column-array cases were activated by changing
   only their reviewed classifications; the oracle workbook and saved Excel results were not
   regenerated.
@@ -42,6 +43,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   while edits outside the span do not.
 - Reference-returning functions such as multi-cell `OFFSET` remain usable as aggregate inputs
   after the compact sheet-span representation is introduced.
+- A whole-column array expression no longer takes its height from the sheet-wide used range. That
+  made the value depend on cells outside every dependency rectangle, so writing into a column the
+  expression never named changed the answer a full recalculation produced while leaving the
+  incremental pass holding the previous one. `COUNT` and `AVERAGE` over whole-column products were
+  affected; `SUM` was not, because the extra rows fold to zero.
 
 ## [0.1.4] - 2026-07-27
 

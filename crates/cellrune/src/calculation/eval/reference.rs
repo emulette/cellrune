@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
+
 use super::{Engine, EvalContext};
-use crate::Sheet;
 use crate::calculation::ast::{Expr, RefBody, Reference};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
 use crate::calculation::functions::normalize_name;
@@ -7,6 +8,7 @@ use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::{Rect, RectSpan, SheetSpan};
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
+use crate::{Sheet, WorkbookSnapshot};
 
 pub(super) fn cell_at(sheet: &Sheet, row: u32, column: u32) -> Option<&crate::Cell> {
     let address = crate::CellAddress::from_indices(row, column).ok()?;
@@ -17,6 +19,54 @@ fn used_rows(sheet: &Sheet) -> u32 {
     sheet
         .used_range()
         .map_or(0, |range| range.end().row().get())
+}
+
+/// The greatest populated row of each populated column on one sheet.
+///
+/// A whole-column *array* operand clamps to the columns it actually names rather than to the
+/// sheet-wide used range. The sheet-wide range would make the materialized height depend on cells
+/// that no dependency rectangle covers, so an edit in an unreferenced column would change the
+/// correct answer without dirtying the formula and full and incremental recalculation would
+/// disagree. Clamping per column keeps the value a function of the recorded dependencies alone.
+#[derive(Debug, Clone, Default)]
+pub(in crate::calculation) struct ColumnExtents {
+    rows_by_column: BTreeMap<u32, u32>,
+}
+
+impl ColumnExtents {
+    fn record(&mut self, column: u32, row: u32) {
+        self.rows_by_column
+            .entry(column)
+            .and_modify(|current| *current = (*current).max(row))
+            .or_insert(row);
+    }
+
+    fn row_end_within(&self, col_start: u32, col_end: u32) -> u32 {
+        self.rows_by_column
+            .range(col_start..=col_end)
+            .map(|(_, row)| *row)
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+/// Indexes every sheet's populated rows by column, in workbook tab order.
+///
+/// This runs in the same construction pass that already walks every sparse cell to collect array
+/// regions, so it adds no traversal the engine did not already perform.
+pub(super) fn collect_column_extents(workbook: &WorkbookSnapshot) -> Vec<ColumnExtents> {
+    workbook
+        .sheets()
+        .iter()
+        .map(|sheet| {
+            let mut extents = ColumnExtents::default();
+            for cell in sheet.cells() {
+                let address = cell.address();
+                extents.record(address.column().get(), address.row().get());
+            }
+            extents
+        })
+        .collect()
 }
 
 pub(super) fn is_reference_returning_function(name: &str) -> bool {
@@ -308,6 +358,21 @@ impl Engine<'_> {
         } else {
             rect.row_end
         }
+    }
+
+    /// Clamps a whole-column rect to the greatest populated row inside its own columns.
+    ///
+    /// Whole-column array materialization uses this instead of [`Self::clamped_row_end`] so that
+    /// the resulting height, and therefore the value, depends only on the columns the expression
+    /// references. See [`ColumnExtents`].
+    pub(in crate::calculation) fn whole_column_row_end(&self, rect: &Rect) -> u32 {
+        if !rect.whole_rows {
+            return rect.row_end;
+        }
+        let used = self.column_extents.get(rect.sheet).map_or(0, |extents| {
+            extents.row_end_within(rect.col_start, rect.col_end)
+        });
+        rect.row_end.min(used)
     }
 
     pub(in crate::calculation) fn implicit_intersection_rect(
