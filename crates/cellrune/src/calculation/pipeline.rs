@@ -121,6 +121,7 @@ fn collect_function_calls(expr: &Expr, output: &mut Vec<String>) {
         | Expr::Logical(_)
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
+        | Expr::StructuredRef(_)
         | Expr::Name(_)
         | Expr::Missing => {}
     }
@@ -521,6 +522,7 @@ fn expr_contains_function(
         | Expr::Logical(_)
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
+        | Expr::StructuredRef(_)
         | Expr::Missing => false,
     }
 }
@@ -688,6 +690,12 @@ fn inspect_expr(
                     Some(detail),
                 ));
             }
+        }
+        Expr::StructuredRef(text) => {
+            issues.push(CalculationIssue::new(
+                CalculationIssueCode::UnsupportedStructuredReference,
+                Some(text.to_string()),
+            ));
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {}
     }

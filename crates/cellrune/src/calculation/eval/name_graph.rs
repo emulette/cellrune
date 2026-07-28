@@ -137,6 +137,7 @@ fn collect_name_references(expr: &Expr, local_names: &mut Vec<String>, names: &m
         | Expr::Logical(_)
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
+        | Expr::StructuredRef(_)
         | Expr::Missing => {}
     }
 }

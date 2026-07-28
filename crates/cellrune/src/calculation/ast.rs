@@ -148,6 +148,10 @@ pub enum Expr {
     Logical(bool),
     ErrorLit(ErrorKind),
     Ref(Reference),
+    /// One opaque structured table reference with its original spelling, such as
+    /// `Table1[Amount]` or `[@Amount]`. Recognized and classified but not resolved;
+    /// 0.1.10 replaces this node with a typed selector model.
+    StructuredRef(Box<str>),
     Range {
         start: Box<Expr>,
         end: Box<Expr>,
@@ -276,6 +280,7 @@ impl fmt::Display for Expr {
             Expr::Logical(false) => formatter.write_str("FALSE"),
             Expr::ErrorLit(kind) => formatter.write_str(kind.as_str()),
             Expr::Ref(reference) => reference.fmt(formatter),
+            Expr::StructuredRef(text) => formatter.write_str(text),
             Expr::Range { start, end } => write!(formatter, "{start}:{end}"),
             Expr::Name(name) => formatter.write_str(name),
             Expr::Call { name, args } => {

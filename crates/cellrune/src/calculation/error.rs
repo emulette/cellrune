@@ -4,6 +4,9 @@ pub(crate) const ERROR_LEX_UNEXPECTED_CHARACTER: &str = "unexpected character in
 pub(crate) const ERROR_LEX_UNTERMINATED_STRING: &str = "unterminated string literal";
 pub(crate) const ERROR_LEX_UNTERMINATED_SHEET_NAME: &str = "unterminated quoted sheet name";
 pub(crate) const ERROR_LEX_UNKNOWN_ERROR_LITERAL: &str = "unknown error literal";
+pub(crate) const ERROR_LEX_UNTERMINATED_STRUCTURED_REF: &str =
+    "unterminated structured reference brackets";
+pub(crate) const ERROR_LEX_EXTERNAL_REFERENCE: &str = "external workbook reference";
 pub(crate) const ERROR_PARSE_UNEXPECTED_TOKEN: &str = "unexpected token";
 pub(crate) const ERROR_PARSE_UNEXPECTED_END: &str = "unexpected end of formula";
 pub(crate) const ERROR_PARSE_INVALID_REFERENCE: &str = "invalid cell reference";
@@ -16,6 +19,8 @@ pub(super) const MESSAGE_UNSUPPORTED_NAME: &str = "formula uses an unsupported d
 pub(super) const MESSAGE_UNSUPPORTED_EXPRESSION: &str = "formula uses an unsupported expression";
 pub(super) const MESSAGE_UNSUPPORTED_SHEET_RANGE: &str =
     "formula uses an unsupported 3-D sheet-range reference";
+pub(super) const MESSAGE_UNSUPPORTED_STRUCTURED_REFERENCE: &str =
+    "formula uses an unsupported structured table reference";
 pub(super) const MESSAGE_RESOURCE_LIMIT_EXCEEDED: &str =
     "formula calculation exceeds a configured resource limit";
 pub(super) const MESSAGE_VOLATILE_INPUT_MISSING: &str =

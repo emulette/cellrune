@@ -152,6 +152,7 @@ impl Engine<'_> {
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
+            | Expr::StructuredRef(_)
             | Expr::Missing => false,
         }
     }
@@ -340,6 +341,7 @@ impl Engine<'_> {
             | Expr::Text(_)
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
+            | Expr::StructuredRef(_)
             | Expr::Missing => {}
         }
     }
@@ -395,6 +397,7 @@ impl Engine<'_> {
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::Array(_)
+            | Expr::StructuredRef(_)
             | Expr::Missing => {}
         }
     }
@@ -465,6 +468,7 @@ impl Engine<'_> {
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
+            | Expr::StructuredRef(_)
             | Expr::Missing => false,
         }
     }

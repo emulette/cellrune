@@ -108,6 +108,7 @@ fn validate_ast_limits(
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
             | Expr::Name(_)
+            | Expr::StructuredRef(_)
             | Expr::Missing => {}
         }
     }
@@ -321,6 +322,10 @@ impl Parser {
             Some(Token::ErrorLit(kind)) => {
                 self.cursor += 1;
                 Ok(Expr::ErrorLit(kind))
+            }
+            Some(Token::StructuredRef(text)) => {
+                self.cursor += 1;
+                Ok(Expr::StructuredRef(text.into_boxed_str()))
             }
             Some(Token::LParen) => {
                 self.cursor += 1;

@@ -43,7 +43,12 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     ]);
     let report = scan_formula_capabilities(&workbook);
 
-    assert_capability_issue_code(&report, 1, CalculationIssueCode::ParseError);
+    assert_capability_issue(
+        &report,
+        1,
+        CalculationIssueCode::UnsupportedStructuredReference,
+        Some("Table1[Amount]"),
+    );
     assert_capability_issue_code(&report, 2, CalculationIssueCode::ParseError);
     assert_capability_issue(
         &report,
@@ -62,9 +67,68 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     ));
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    assert_issue(&calculation, 1, CalculationIssueCode::ParseError);
+    assert_issue(
+        &calculation,
+        1,
+        CalculationIssueCode::UnsupportedStructuredReference,
+    );
     assert_issue(&calculation, 2, CalculationIssueCode::ParseError);
     assert_issue(&calculation, 3, CalculationIssueCode::UnsupportedFunction);
+}
+
+#[test]
+fn structured_references_classify_honestly_and_external_links_stay_parse_errors() {
+    // 0.1.6 boundary: the lexer consumes balanced brackets opaquely, so structured
+    // references are recognized (not resolved), while external-workbook spellings -
+    // told apart by the `!` after the closing bracket, never by the bracket contents -
+    // remain parse errors.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "Table1[Amount]"),
+        (1, 2, "SUM([@Amount])"),
+        (1, 3, "Table1[[#Headers],[Amount]]"),
+        (1, 4, "SUM(Table1[[Col1]:[Col2]])"),
+        (1, 5, "COUNTA(Table1[#Data])"),
+        (1, 6, "[1]Sheet1!A1"),
+        (1, 7, "[Book1.xlsx]Sheet1!A1"),
+        (1, 8, "[1]!Name"),
+        (1, 9, "SUM(Table1[Amount"),
+        (1, 10, "Table1['[odd']name]"),
+    ]);
+    let report = scan_formula_capabilities(&workbook);
+
+    for column in 1..=5 {
+        assert_capability_issue_code(
+            &report,
+            column,
+            CalculationIssueCode::UnsupportedStructuredReference,
+        );
+    }
+    for column in 6..=9 {
+        assert_capability_issue_code(&report, column, CalculationIssueCode::ParseError);
+    }
+    assert_capability_issue_code(
+        &report,
+        10,
+        CalculationIssueCode::UnsupportedStructuredReference,
+    );
+
+    // Calculate and scan must agree: the same cells are unavailable for the same reason.
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=5 {
+        assert_issue(
+            &calculation,
+            column,
+            CalculationIssueCode::UnsupportedStructuredReference,
+        );
+    }
+    for column in 6..=9 {
+        assert_issue(&calculation, column, CalculationIssueCode::ParseError);
+    }
+    assert_issue(
+        &calculation,
+        10,
+        CalculationIssueCode::UnsupportedStructuredReference,
+    );
 }
 
 #[test]
@@ -394,7 +458,7 @@ fn parse_error_details_locate_lex_failures_by_character_and_parse_failures_by_to
     // A lex failure happens before any token exists, so it can only be located by character
     // offset. Reporting it as a token index mislabels the position.
     let workbook = workbook_with_formulas(&[
-        (1, 1, "SUM(Table1[Amount])"),
+        (1, 1, "SUM(Table1?Amount)"),
         (1, 2, "\"unterminated"),
         (1, 3, "1+"),
         (1, 4, "SUM(1))"),

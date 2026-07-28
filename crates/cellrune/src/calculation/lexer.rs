@@ -1,5 +1,6 @@
 use super::CalculationLimitKind;
 use super::ast::NumberLiteral;
+use super::error::{ERROR_LEX_EXTERNAL_REFERENCE, ERROR_LEX_UNTERMINATED_STRUCTURED_REF};
 use super::value::ErrorKind;
 use super::{
     ERROR_LEX_UNEXPECTED_CHARACTER, ERROR_LEX_UNKNOWN_ERROR_LITERAL,
@@ -12,6 +13,9 @@ pub enum Token {
     Str(String),
     Ident(String),
     QuotedSheet(String),
+    /// One opaque structured table reference, original spelling preserved, such as
+    /// `Table1[Amount]` or `[@Amount]`. 0.1.10 replaces this with a typed selector model.
+    StructuredRef(String),
     ErrorLit(ErrorKind),
     Dollar,
     LParen,
@@ -43,6 +47,77 @@ pub struct LexError {
     pub position: usize,
     pub message: &'static str,
     pub limit: Option<CalculationLimitKind>,
+}
+
+/// Consumes one balanced bracket group starting at `open` (which must index a `[`) and
+/// returns the position just past the matching `]`.
+///
+/// Inside structured-reference brackets a single quote escapes the next character
+/// (`'[`, `']`, `'#`, `''`), so escaped brackets do not affect the balance.
+fn consume_balanced_brackets(characters: &[char], open: usize) -> Result<usize, LexError> {
+    let mut depth = 0_usize;
+    let mut cursor = open;
+    while cursor < characters.len() {
+        match characters[cursor] {
+            '\'' => {
+                if cursor + 1 >= characters.len() {
+                    break;
+                }
+                cursor += 2;
+            }
+            '[' => {
+                depth += 1;
+                cursor += 1;
+            }
+            ']' => {
+                depth = depth.saturating_sub(1);
+                cursor += 1;
+                if depth == 0 {
+                    return Ok(cursor);
+                }
+            }
+            _ => {
+                cursor += 1;
+            }
+        }
+    }
+    Err(LexError {
+        position: open,
+        message: ERROR_LEX_UNTERMINATED_STRUCTURED_REF,
+        limit: None,
+    })
+}
+
+/// Reports whether the text after a closing bracket continues as an external workbook
+/// link: `!` directly (`[1]!Name`), or a sheet name followed by `!` (`[1]Sheet1!A1`,
+/// `[Book1.xlsx]'My Sheet'!A1`).
+fn external_link_follows(characters: &[char], mut cursor: usize) -> bool {
+    match characters.get(cursor) {
+        Some('!') => true,
+        Some('\'') => {
+            cursor += 1;
+            while cursor < characters.len() {
+                if characters[cursor] == '\'' {
+                    if characters.get(cursor + 1) == Some(&'\'') {
+                        cursor += 2;
+                    } else {
+                        cursor += 1;
+                        break;
+                    }
+                } else {
+                    cursor += 1;
+                }
+            }
+            characters.get(cursor) == Some(&'!')
+        }
+        Some(&character) if is_ident_start(character) => {
+            while cursor < characters.len() && is_ident_continue(characters[cursor]) {
+                cursor += 1;
+            }
+            characters.get(cursor) == Some(&'!')
+        }
+        _ => false,
+    }
 }
 
 fn is_ident_start(character: char) -> bool {
@@ -301,14 +376,41 @@ pub fn lex(input: &str, max_tokens: u64) -> Result<Vec<Token>, LexError> {
                     index += 1;
                 }
             }
+            '[' => {
+                let close = consume_balanced_brackets(&characters, index)?;
+                // The leading-bracket spellings are ambiguous: `[1]Sheet1!A1` and
+                // `[Book1.xlsx]Sheet1!A1` open external-workbook references while
+                // `[@Amount]` and `[#Data]` are table-internal structured references.
+                // The bracket contents cannot tell them apart - `[Book1.xlsx]` looks like
+                // `[Amount]` - but what FOLLOWS the closing bracket can: an external link
+                // always continues with `!` or a sheet name followed by `!`, and a
+                // structured reference never does.
+                if external_link_follows(&characters, close) {
+                    return Err(LexError {
+                        position: index,
+                        message: ERROR_LEX_EXTERNAL_REFERENCE,
+                        limit: None,
+                    });
+                }
+                let text: String = characters[index..close].iter().collect();
+                tokens.push(Token::StructuredRef(text));
+                index = close;
+            }
             _ if is_ident_start(character) => {
                 let mut cursor = index + 1;
                 while cursor < characters.len() && is_ident_continue(characters[cursor]) {
                     cursor += 1;
                 }
-                let ident: String = characters[index..cursor].iter().collect();
-                tokens.push(Token::Ident(ident));
-                index = cursor;
+                if cursor < characters.len() && characters[cursor] == '[' {
+                    let close = consume_balanced_brackets(&characters, cursor)?;
+                    let text: String = characters[index..close].iter().collect();
+                    tokens.push(Token::StructuredRef(text));
+                    index = close;
+                } else {
+                    let ident: String = characters[index..cursor].iter().collect();
+                    tokens.push(Token::Ident(ident));
+                    index = cursor;
+                }
             }
             _ => {
                 return Err(LexError {

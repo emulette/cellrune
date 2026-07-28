@@ -201,6 +201,11 @@ impl Engine<'_> {
             Expr::Text(text) => ScalarEvaluation::untracked(Value::Text(text.clone())),
             Expr::Logical(logical) => ScalarEvaluation::untracked(Value::Logical(*logical)),
             Expr::ErrorLit(kind) => ScalarEvaluation::untracked(Value::Error(*kind)),
+            // Structured references are recognized but not resolved; the capability scan
+            // classifies the owning cell first, so this arm is the defensive fallback.
+            Expr::StructuredRef(_) => {
+                ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported))
+            }
             Expr::Missing => ScalarEvaluation::untracked(Value::Blank),
             Expr::Paren(inner) => self.eval_scalar_with_trace(context, inner),
             Expr::ImplicitIntersection(inner) => {
@@ -560,6 +565,7 @@ impl Engine<'_> {
             | Expr::Text(_)
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
+            | Expr::StructuredRef(_)
             | Expr::Missing
             | Expr::Ref(_)
             | Expr::Range { .. }

@@ -33,7 +33,7 @@ use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
     MESSAGE_PARSE_ERROR, MESSAGE_RESOURCE_LIMIT_EXCEEDED, MESSAGE_UNSUPPORTED_EXPRESSION,
     MESSAGE_UNSUPPORTED_FUNCTION, MESSAGE_UNSUPPORTED_NAME, MESSAGE_UNSUPPORTED_SHEET_RANGE,
-    MESSAGE_VOLATILE_INPUT_MISSING,
+    MESSAGE_UNSUPPORTED_STRUCTURED_REFERENCE, MESSAGE_VOLATILE_INPUT_MISSING,
 };
 
 pub(super) use crate::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
@@ -90,6 +90,9 @@ pub enum CalculationIssueCode {
     UnsupportedName,
     /// A reference spans a 3-D sheet range, for example `Sheet1:Sheet3!A1`.
     UnsupportedSheetRange,
+    /// A structured table reference, for example `Table1[Amount]`, is recognized but not
+    /// yet resolved.
+    UnsupportedStructuredReference,
     /// A parsed expression is not supported by the current engine.
     UnsupportedExpression,
     /// Formula parsing, dependency scheduling, or array evaluation exceeded a configured limit.
@@ -111,6 +114,7 @@ impl CalculationIssueCode {
             Self::UnsupportedFunction => "calculation.unsupported_function",
             Self::UnsupportedName => "calculation.unsupported_name",
             Self::UnsupportedSheetRange => "calculation.unsupported_sheet_range",
+            Self::UnsupportedStructuredReference => "calculation.unsupported_structured_reference",
             Self::UnsupportedExpression => "calculation.unsupported_expression",
             Self::ResourceLimitExceeded => "calculation.resource_limit_exceeded",
             Self::VolatileInputMissing => "calculation.volatile_input_missing",
@@ -126,6 +130,7 @@ impl CalculationIssueCode {
             Self::UnsupportedFunction => MESSAGE_UNSUPPORTED_FUNCTION,
             Self::UnsupportedName => MESSAGE_UNSUPPORTED_NAME,
             Self::UnsupportedSheetRange => MESSAGE_UNSUPPORTED_SHEET_RANGE,
+            Self::UnsupportedStructuredReference => MESSAGE_UNSUPPORTED_STRUCTURED_REFERENCE,
             Self::UnsupportedExpression => MESSAGE_UNSUPPORTED_EXPRESSION,
             Self::ResourceLimitExceeded => MESSAGE_RESOURCE_LIMIT_EXCEEDED,
             Self::VolatileInputMissing => MESSAGE_VOLATILE_INPUT_MISSING,
