@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import sys
 import threading
-import time
+from collections.abc import Callable
+from typing import TypeVar
 
 from cellrune import Workbook
+
+
+T = TypeVar("T")
+
+INTERPRETER_SWITCH_INTERVAL_SECONDS = 1.0
+WORKER_TIMEOUT_SECONDS = 2.0
 
 
 def main() -> None:
@@ -12,39 +20,60 @@ def main() -> None:
     for row in range(2, 25_001):
         workbook.set_formula("Sheet1", f"A{row}", f"=A{row - 1}+1")
 
-    stop = threading.Event()
-    progress = [0]
+    report = assert_allows_interpreter_progress(
+        workbook.calculate,
+        "native calculation retained the Python interpreter lock",
+    )
+    assert report["unavailable_count"] == 0
+
+    usage = assert_allows_interpreter_progress(
+        workbook.function_usage,
+        "function-usage scan retained the Python interpreter lock",
+    )
+    assert usage["formula_count"] == 24_999
+
+    page = assert_allows_interpreter_progress(
+        lambda: workbook.read_range("Sheet1", "A1", "A10000", limit=10_000),
+        "range read retained the Python interpreter lock",
+        attempts=20,
+    )
+    assert len(page["cells"]) == 10_000
+
+
+def assert_allows_interpreter_progress(
+    operation: Callable[[], T],
+    message: str,
+    *,
+    attempts: int = 1,
+) -> T:
+    ready = threading.Event()
+    requested = threading.Event()
+    progressed = threading.Event()
 
     def worker() -> None:
-        while not stop.is_set():
-            progress[0] += 1
+        ready.set()
+        requested.wait()
+        progressed.set()
 
+    previous_switch_interval = sys.getswitchinterval()
+    sys.setswitchinterval(INTERPRETER_SWITCH_INTERVAL_SECONDS)
     thread = threading.Thread(target=worker)
     thread.start()
     try:
-        deadline = time.monotonic() + 2.0
-        while progress[0] == 0 and time.monotonic() < deadline:
-            time.sleep(0.001)
-        before = progress[0]
-        report = workbook.calculate()
-        after = progress[0]
-        assert report["unavailable_count"] == 0
-        assert after > before, "native calculation retained the Python interpreter lock"
-
-        before = progress[0]
-        usage = workbook.function_usage()
-        after = progress[0]
-        assert usage["formula_count"] == 24_999
-        assert after > before, "function-usage scan retained the Python interpreter lock"
-
-        before = progress[0]
-        page = workbook.read_range("Sheet1", "A1", "A10000", limit=10_000)
-        after = progress[0]
-        assert len(page["cells"]) == 10_000
-        assert after > before, "range read retained the Python interpreter lock"
+        assert ready.wait(WORKER_TIMEOUT_SECONDS), "worker thread did not become ready"
+        requested.set()
+        result = operation()
+        for _ in range(1, attempts):
+            if progressed.is_set():
+                break
+            result = operation()
+        assert progressed.is_set(), message
+        return result
     finally:
-        stop.set()
-        thread.join()
+        requested.set()
+        sys.setswitchinterval(previous_switch_interval)
+        thread.join(WORKER_TIMEOUT_SECONDS)
+        assert not thread.is_alive(), "worker thread did not stop"
 
 
 if __name__ == "__main__":
