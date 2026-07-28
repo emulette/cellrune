@@ -2,6 +2,7 @@ mod cell_value;
 mod defined_name;
 mod formula_cell;
 mod formula_reference;
+mod merge;
 mod metadata;
 mod phonetic;
 mod shared_strings;
@@ -132,12 +133,13 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         &mut phonetic_budget,
     )?;
     let cell_metadata = read_cell_metadata(&mut package)?;
-    let diagnostics = compatibility_diagnostics(&package, &workbook_part)?;
+    let mut diagnostics = compatibility_diagnostics(&package, &workbook_part)?;
     let mut presentation = DocumentPresentation::default();
     let mut sheets = Vec::with_capacity(workbook.sheets.len());
     let mut worksheet_parts = BTreeMap::new();
     let mut used_relationships = BTreeSet::new();
     let mut total_cells = 0_u64;
+    let mut total_merged_ranges = 0_u64;
     let mut total_formula_bytes = workbook
         .defined_names
         .iter()
@@ -174,8 +176,10 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 sheet: &mut sheet,
                 total_cells: &mut total_cells,
                 total_formula_bytes: &mut total_formula_bytes,
+                total_merged_ranges: &mut total_merged_ranges,
                 presentation: &mut presentation,
                 phonetic_budget: &mut phonetic_budget,
+                diagnostics: &mut diagnostics,
             },
         )?;
         sheets.push(sheet);

@@ -8,6 +8,7 @@ use super::super::xml::{
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
 use super::formula_cell::SharedFormulaTable;
+use super::merge::MergedRangeCollector;
 use super::metadata::CellMetadata;
 use super::phonetic::{PhoneticReadBudget, parse_bool, parse_properties};
 use super::shared_strings::SharedStrings;
@@ -29,6 +30,8 @@ const SHEET_DATA: &[u8] = b"sheetData";
 const ROW: &[u8] = b"row";
 const CELL: &[u8] = b"c";
 const PHONETIC_PROPERTIES: &[u8] = b"phoneticPr";
+const MERGE_CELLS: &[u8] = b"mergeCells";
+const MERGE_CELL: &[u8] = b"mergeCell";
 #[derive(Debug, Default)]
 struct WorksheetParseState {
     saw_root: bool,
@@ -46,6 +49,9 @@ struct WorksheetParseState {
     current_cell: Option<CellBuilder>,
     sheet_cells: u64,
     shared_formulas: SharedFormulaTable,
+    merge_cells_depth: Option<u64>,
+    saw_merge_cells: bool,
+    merged_ranges: MergedRangeCollector,
 }
 
 #[derive(Clone, Copy)]
@@ -59,17 +65,21 @@ pub(super) struct WorksheetOutput<'a> {
     pub(super) sheet: &'a mut Sheet,
     pub(super) total_cells: &'a mut u64,
     pub(super) total_formula_bytes: &'a mut u64,
+    pub(super) total_merged_ranges: &'a mut u64,
     pub(super) presentation: &'a mut DocumentPresentation,
     pub(super) phonetic_budget: &'a mut PhoneticReadBudget,
+    pub(super) diagnostics: &'a mut Vec<Diagnostic>,
 }
 
 struct WorksheetStartContext<'budget, 'state> {
     budget: &'budget XmlBudget,
     state: &'state mut WorksheetParseState,
     total_cells: &'state mut u64,
+    total_merged_ranges: &'state mut u64,
     capture: PresentationCapture,
     sheet_id: SheetId,
     presentation: &'state mut DocumentPresentation,
+    diagnostics: &'state mut Vec<Diagnostic>,
     font_count: u32,
 }
 
@@ -85,8 +95,10 @@ pub(super) fn parse(
         sheet,
         total_cells,
         total_formula_bytes,
+        total_merged_ranges,
         presentation,
         phonetic_budget,
+        diagnostics,
     } = output;
     let sheet_id = sheet.id();
     let mut xml = reader(bytes);
@@ -115,9 +127,11 @@ pub(super) fn parse(
                         budget: &budget,
                         state: &mut state,
                         total_cells: &mut *total_cells,
+                        total_merged_ranges: &mut *total_merged_ranges,
                         capture,
                         sheet_id,
                         presentation: &mut *presentation,
+                        diagnostics: &mut *diagnostics,
                         font_count: resources.styles.font_count(),
                     },
                 )?;
@@ -193,6 +207,23 @@ pub(super) fn parse(
                             return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
                         }
                         state.saw_sheet_data = true;
+                    } else if depth == 2 && local_name == MERGE_CELLS {
+                        if state.saw_merge_cells {
+                            return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
+                        }
+                        state.saw_merge_cells = true;
+                    } else if state
+                        .merge_cells_depth
+                        .is_some_and(|parent| depth == parent + 1)
+                        && local_name == MERGE_CELL
+                    {
+                        state.merged_ranges.record(
+                            attributes.unqualified("ref"),
+                            total_merged_ranges,
+                            sheet_id,
+                            diagnostics,
+                            &budget,
+                        )?;
                     } else if state
                         .sheet_data_depth
                         .is_some_and(|parent| depth == parent + 1)
@@ -280,6 +311,8 @@ pub(super) fn parse(
                     state.row_number = None;
                 } else if state.sheet_data_depth == Some(depth) && local_name == SHEET_DATA {
                     state.sheet_data_depth = None;
+                } else if state.merge_cells_depth == Some(depth) && local_name == MERGE_CELLS {
+                    state.merge_cells_depth = None;
                 } else if state.sheet_view_depth == Some(depth) && local_name == SHEET_VIEW {
                     state.sheet_view_depth = None;
                     state.default_view_active = false;
@@ -303,12 +336,14 @@ pub(super) fn parse(
         || state.current_cell.is_some()
         || state.row_depth.is_some()
         || state.sheet_data_depth.is_some()
+        || state.merge_cells_depth.is_some()
         || state.sheet_view_depth.is_some()
         || state.sheet_views_depth.is_some()
         || state.columns_depth.is_some()
     {
         return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
     }
+    sheet.set_merged_ranges(state.merged_ranges.finish(sheet_id, diagnostics, &budget)?);
     Ok(())
 }
 
@@ -323,9 +358,11 @@ fn process_start(
         budget,
         state,
         total_cells,
+        total_merged_ranges,
         capture,
         sheet_id,
         presentation,
+        diagnostics,
         font_count,
     } = context;
     if depth == 1 {
@@ -384,6 +421,23 @@ fn process_start(
             return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
         }
         state.saw_sheet_data = true;
+    } else if depth == 2 && local_name == MERGE_CELLS {
+        if state.saw_merge_cells || state.merge_cells_depth.replace(depth).is_some() {
+            return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
+        }
+        state.saw_merge_cells = true;
+    } else if state
+        .merge_cells_depth
+        .is_some_and(|parent| depth == parent + 1)
+        && local_name == MERGE_CELL
+    {
+        state.merged_ranges.record(
+            attributes.unqualified("ref"),
+            total_merged_ranges,
+            sheet_id,
+            diagnostics,
+            budget,
+        )?;
     } else if state
         .sheet_data_depth
         .is_some_and(|sheet_data| depth == sheet_data + 1)

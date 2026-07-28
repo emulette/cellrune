@@ -106,6 +106,7 @@ pub struct Sheet {
     min_column: Option<Column>,
     max_row: Option<Row>,
     max_column: Option<Column>,
+    merged_ranges: Vec<CellRange>,
 }
 
 impl Sheet {
@@ -120,6 +121,7 @@ impl Sheet {
             min_column: None,
             max_row: None,
             max_column: None,
+            merged_ranges: Vec::new(),
         }
     }
 
@@ -198,6 +200,22 @@ impl Sheet {
     /// Returns whether the sheet stores no cells.
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
+    }
+
+    /// Returns merged ranges sorted by top-left address, then by bottom-right address.
+    ///
+    /// The reader stores only validated, pairwise non-overlapping, multi-cell ranges; entries
+    /// that fail those checks are reported as diagnostics and dropped.
+    pub fn merged_ranges(&self) -> &[CellRange] {
+        &self.merged_ranges
+    }
+
+    /// Stores the validated merged ranges for this sheet.
+    ///
+    /// Callers must pass ranges already sorted by `(start, end)` and pairwise non-overlapping;
+    /// the reader's merge parser is the only producer of that order.
+    pub(crate) fn set_merged_ranges(&mut self, merged_ranges: Vec<CellRange>) {
+        self.merged_ranges = merged_ranges;
     }
 
     /// Returns the smallest bounding rectangle containing all sparse cells.

@@ -544,7 +544,191 @@ fn document_writer_rejects_phonetic_edits_that_would_flatten_rich_text() {
     assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
 }
 
+#[test]
+fn reads_merged_ranges_sorted_by_top_left_address() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells count="3"><mergeCell ref="D5:E6"/><mergeCell ref="A10:C12"/><mergeCell ref="A2:B3"/></mergeCells></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let snapshot =
+        read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("merged workbook");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    let ranges: Vec<String> = first
+        .merged_ranges()
+        .iter()
+        .map(|range| format!("{}:{}", range.start(), range.end()))
+        .collect();
+    assert_eq!(ranges, vec!["A2:B3", "D5:E6", "A10:C12"]);
+    assert!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| !diagnostic.code().as_str().starts_with("xlsx.merged_range")),
+        "valid merges must not produce diagnostics"
+    );
+    let second = snapshot.sheet_by_name("Second").expect("sheet");
+    assert!(second.merged_ranges().is_empty());
+}
+
+#[test]
+fn merged_range_problems_become_diagnostics_and_are_dropped() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells><mergeCell ref="B2:A1"/><mergeCell ref="NOPE"/><mergeCell ref="C3:C3"/><mergeCell ref="D4"/><mergeCell ref="A1:B2"/><mergeCell ref="B2:C3"/></mergeCells></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let snapshot =
+        read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read must succeed");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    let ranges: Vec<String> = first
+        .merged_ranges()
+        .iter()
+        .map(|range| format!("{}:{}", range.start(), range.end()))
+        .collect();
+    assert_eq!(ranges, vec!["A1:B2"]);
+    let codes: Vec<&str> = snapshot
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code().as_str().starts_with("xlsx.merged_range"))
+        .map(|diagnostic| diagnostic.code().as_str())
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            "xlsx.merged_range.invalid",
+            "xlsx.merged_range.invalid",
+            "xlsx.merged_range.single_cell",
+            "xlsx.merged_range.single_cell",
+            "xlsx.merged_range.overlap",
+        ]
+    );
+}
+
+#[test]
+fn merged_range_sweep_keeps_row_disjoint_and_column_disjoint_ranges() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells><mergeCell ref="A1:A5"/><mergeCell ref="B1:B5"/><mergeCell ref="A3:B3"/><mergeCell ref="A6:B6"/><mergeCell ref="C1:D2"/></mergeCells></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    let ranges: Vec<String> = first
+        .merged_ranges()
+        .iter()
+        .map(|range| format!("{}:{}", range.start(), range.end()))
+        .collect();
+    assert_eq!(ranges, vec!["A1:A5", "B1:B5", "C1:D2", "A6:B6"]);
+    let overlap_count = snapshot
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.merged_range.overlap")
+        .count();
+    assert_eq!(overlap_count, 1, "only A3:B3 overlaps a kept range");
+}
+
+#[test]
+fn merged_range_budget_fails_the_read_with_a_dedicated_code() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells><mergeCell ref="A1:B2"/><mergeCell ref="NOPE"/><mergeCell ref="D1:E2"/></mergeCells></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let limits = ReadLimits::default()
+        .with_max_merged_ranges(2)
+        .expect("limit");
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(limits))
+        .expect_err("third declaration must exceed the budget");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyMergedRanges);
+}
+
+#[test]
+fn merged_range_budget_accumulates_across_worksheets_and_admits_the_exact_limit() {
+    let sheet_one = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells><mergeCell ref="A1:B2"/><mergeCell ref="D1:E2"/></mergeCells></worksheet>"#,
+    );
+    let sheet_two = SHEET_TWO.replace(
+        "</worksheet>",
+        r#"<mergeCells><mergeCell ref="A5:B6"/></mergeCells></worksheet>"#,
+    );
+    let archive = build_archive_with_sheets(&sheet_one, &sheet_two, SHARED_STRINGS);
+    let at_limit = ReadLimits::default()
+        .with_max_merged_ranges(3)
+        .expect("limit");
+    let snapshot = read_xlsx(Cursor::new(archive.clone()), ReadOptions::new(at_limit))
+        .expect("three declarations fit a limit of three");
+    assert_eq!(
+        snapshot
+            .sheet_by_name("Second")
+            .expect("sheet")
+            .merged_ranges()
+            .len(),
+        1
+    );
+    let below = ReadLimits::default()
+        .with_max_merged_ranges(2)
+        .expect("limit");
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(below))
+        .expect_err("the second sheet's declaration must exceed the workbook budget");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyMergedRanges);
+}
+
+#[test]
+fn duplicate_merge_cells_elements_fail_the_read() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells><mergeCell ref="A1:B2"/></mergeCells><mergeCells><mergeCell ref="D1:E2"/></mergeCells></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+        .expect_err("duplicate mergeCells elements are structurally invalid");
+    assert_eq!(error.code(), XlsxErrorCode::InvalidWorksheet);
+}
+
+#[test]
+fn merged_ranges_survive_edit_write_reopen() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<mergeCells count="2"><mergeCell ref="A2:B3"/><mergeCell ref="D5:D7"/></mergeCells></worksheet>"#,
+    );
+    let source = build_archive(&sheet, SHARED_STRINGS);
+    let document =
+        open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    let sheet_id = SheetId::new(1).expect("sheet");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            sheet_id,
+            address("G1"),
+            CellValue::Number(crate::FiniteNumber::new(7.0).expect("finite")),
+        )
+        .expect("edit");
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    let first = reopened
+        .workbook()
+        .sheet_by_name("First")
+        .expect("reopened sheet");
+    let ranges: Vec<String> = first
+        .merged_ranges()
+        .iter()
+        .map(|range| format!("{}:{}", range.start(), range.end()))
+        .collect();
+    assert_eq!(ranges, vec!["A2:B3", "D5:D7"]);
+    let worksheet = archive_text(output.bytes(), "xl/worksheets/sheet1.xml");
+    assert!(worksheet.contains("<mergeCells"), "{worksheet}");
+}
+
 fn build_archive(sheet_one: &str, shared_strings: &str) -> Vec<u8> {
+    build_archive_with_sheets(sheet_one, SHEET_TWO, shared_strings)
+}
+
+fn build_archive_with_sheets(sheet_one: &str, sheet_two: &str, shared_strings: &str) -> Vec<u8> {
     let entries = [
         ("[Content_Types].xml", CONTENT_TYPES),
         ("_rels/.rels", ROOT_RELATIONSHIPS),
@@ -553,7 +737,7 @@ fn build_archive(sheet_one: &str, shared_strings: &str) -> Vec<u8> {
         ("xl/styles.xml", STYLES),
         ("xl/sharedStrings.xml", shared_strings),
         ("xl/worksheets/sheet1.xml", sheet_one),
-        ("xl/worksheets/sheet2.xml", SHEET_TWO),
+        ("xl/worksheets/sheet2.xml", sheet_two),
     ];
     let mut output = Cursor::new(Vec::new());
     {

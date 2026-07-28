@@ -16,6 +16,7 @@ const MAX_TOTAL_SHARED_STRING_BYTES: &str = "max_total_shared_string_bytes";
 const MAX_DEFINED_NAMES: &str = "max_defined_names";
 const MAX_FORMULA_BYTES: &str = "max_formula_bytes";
 const MAX_TOTAL_FORMULA_BYTES: &str = "max_total_formula_bytes";
+const MAX_MERGED_RANGES: &str = "max_merged_ranges";
 const MAX_PHONETIC_RUNS_PER_ITEM: &str = "max_phonetic_runs_per_item";
 const MAX_TOTAL_PHONETIC_RUNS: &str = "max_total_phonetic_runs";
 const MAX_ANNOTATED_CELLS: &str = "max_annotated_cells";
@@ -41,6 +42,7 @@ pub struct ReadLimits {
     max_defined_names: u64,
     max_formula_bytes: u64,
     max_total_formula_bytes: u64,
+    max_merged_ranges: u64,
     max_phonetic_runs_per_item: u64,
     max_total_phonetic_runs: u64,
     max_annotated_cells: u64,
@@ -136,6 +138,11 @@ impl ReadLimits {
     /// Returns the maximum combined UTF-8 byte length of materialized formulas.
     pub const fn max_total_formula_bytes(self) -> u64 {
         self.max_total_formula_bytes
+    }
+
+    /// Returns the maximum merged-range declaration count across all worksheets.
+    pub const fn max_merged_ranges(self) -> u64 {
+        self.max_merged_ranges
     }
 
     /// Returns the maximum phonetic run count in one string item.
@@ -332,6 +339,16 @@ impl ReadLimits {
         Ok(self)
     }
 
+    /// Replaces the workbook-wide merged-range declaration limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_merged_ranges(mut self, value: u64) -> Result<Self, ReadOptionsError> {
+        self.max_merged_ranges = nonzero(MAX_MERGED_RANGES, value)?;
+        Ok(self)
+    }
+
     /// Replaces the per-item phonetic run-count limit.
     ///
     /// # Errors
@@ -405,6 +422,7 @@ impl Default for ReadLimits {
             max_defined_names: 100_000,
             max_formula_bytes: 1024 * 1024,
             max_total_formula_bytes: 256 * 1024 * 1024,
+            max_merged_ranges: 100_000,
             max_phonetic_runs_per_item: 32_768,
             max_total_phonetic_runs: 2_000_000,
             max_annotated_cells: 2_000_000,

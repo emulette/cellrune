@@ -54,6 +54,16 @@ pub(crate) mod compatibility {
     pub(crate) const PRESERVED_PANE_CODE: &str = "xlsx.pane.preserved";
     pub(crate) const PRESERVED_PANE_MESSAGE: &str =
         "worksheet pane state is preserved but not exposed as a frozen pane";
+    pub(crate) const MERGED_RANGE_INVALID_CODE: &str = "xlsx.merged_range.invalid";
+    pub(crate) const MERGED_RANGE_INVALID_MESSAGE: &str =
+        "merged range declaration is invalid and was dropped";
+    pub(crate) const MERGED_RANGE_MISSING_REF: &str = "missing ref attribute";
+    pub(crate) const MERGED_RANGE_SINGLE_CELL_CODE: &str = "xlsx.merged_range.single_cell";
+    pub(crate) const MERGED_RANGE_SINGLE_CELL_MESSAGE: &str =
+        "single-cell merged range carries no merge semantics and was dropped";
+    pub(crate) const MERGED_RANGE_OVERLAP_CODE: &str = "xlsx.merged_range.overlap";
+    pub(crate) const MERGED_RANGE_OVERLAP_MESSAGE: &str =
+        "merged range overlaps an earlier merged range and was dropped";
 }
 
 /// Invalid caller-provided reader configuration.
@@ -187,6 +197,8 @@ pub enum XlsxErrorCode {
     TooManyAnnotatedCells,
     /// Frozen-pane or sheet-view metadata is malformed.
     InvalidFrozenPane,
+    /// Merged-range declarations exceed the configured limit.
+    TooManyMergedRanges,
 }
 
 impl XlsxErrorCode {
@@ -246,6 +258,7 @@ impl XlsxErrorCode {
             Self::TotalPhoneticTextTooLarge => "xlsx.total_phonetic_text_too_large",
             Self::TooManyAnnotatedCells => "xlsx.too_many_annotated_cells",
             Self::InvalidFrozenPane => "xlsx.invalid_frozen_pane",
+            Self::TooManyMergedRanges => "xlsx.too_many_merged_ranges",
         }
     }
 
@@ -318,6 +331,9 @@ impl XlsxErrorCode {
             }
             Self::TooManyAnnotatedCells => "annotated cell count exceeds the configured limit",
             Self::InvalidFrozenPane => "frozen pane metadata is invalid",
+            Self::TooManyMergedRanges => {
+                "workbook merged-range count exceeds the configured limit"
+            }
         }
     }
 }
