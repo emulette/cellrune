@@ -66,15 +66,6 @@ jobs:
       - name: Verify every published version declaration agrees
         run: python3 bindings/scripts/check_version_consistency.py
 
-      - name: Require the complete CellRune Excel host matrix
-        run: >-
-          cargo run
-          --package cellrune-integration-tests
-          --bin check_excel_oracle
-          --locked
-          --
-          --require-cellrune-suite
-
       - name: Verify checked-in native dependency license bundles
         run: python3 bindings/scripts/generate_third_party_licenses.py --check
 

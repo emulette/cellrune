@@ -17,9 +17,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Explicit calculation limits for LET bindings, LAMBDA nesting, and cumulative LAMBDA/MAP
   invocations. Resource exhaustion remains a structured unavailable result and cannot be hidden by
   worksheet error-catching functions.
-- A stable Excel host-matrix contract for Excel Online and Mac Excel 2021: versioned suite,
-  manifest, raw observations, host provenance, formula-rewrite policy, rich-error decoding, and
-  fingerprint-guarded expectation migration.
+- Excel Online and Mac Excel 2021 saved-workbook expectations. Each workbook is recorded
+  independently, and an unavailable saved value is classified as `host_unsupported`.
 
 ### Changed
 
@@ -27,9 +26,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   bindings preserve decimal traces without changing the selected arithmetic mode:
   `ExcelNearZero` still applies Excel cancellation correction and `Ieee754` still returns the raw
   IEEE-754 result.
-- The Excel oracle generator now emits a deterministic stored ZIP, stable case keys, structured
-  exclusions, and a common source-workbook SHA. Cases unavailable in both required hosts remain in
-  the catalog but are inactive; CellRune-only gaps remain active for future patch releases.
+- The Excel oracle audit now runs in the standard Rust test suite without a separate CI or
+  release-only gate. Cases remain available for later patches even when neither recorded Excel
+  workbook provides a usable saved value.
 
 ### Fixed
 

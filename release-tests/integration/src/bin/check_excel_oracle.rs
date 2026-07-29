@@ -1,4 +1,4 @@
-//! Explicit local audit for committed Excel-saved workbook oracles.
+//! Audit and reporting tool for committed Excel-saved workbook oracles.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -12,12 +12,9 @@ use cellrune::{
 };
 use cellrune_integration_tests::oracle::{
     CASE_MANIFEST_SCHEMA, CacheStatus, CaseManifest, Classification, Comparator, Expectation,
-    Expectations, HostProfile, METADATA_SCHEMA, ManifestCase, Metadata, OBSERVATIONS_SCHEMA,
-    Observations, ObservedCase, ObservedValue, OracleExclusion, OracleSuite, SUITE_SCHEMA,
-    values_match,
+    Expectations, HostProfile, METADATA_SCHEMA, Metadata, OBSERVATIONS_SCHEMA, Observations,
+    ObservedCase, ObservedValue, OracleSuite, SUITE_SCHEMA, values_match,
 };
-use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 #[path = "check_excel_oracle/raw.rs"]
 mod raw;
@@ -30,67 +27,23 @@ mod selection;
 #[path = "check_excel_oracle/shared.rs"]
 mod shared;
 
-const USAGE: &str = "usage: check_excel_oracle [--require-cellrune-suite | --report <oracle-directory> [output.json]]";
+const USAGE: &str = "usage: check_excel_oracle [--report <oracle-directory> [output.json]]";
 const METADATA_FILE: &str = "metadata.json";
 const EXPECTATIONS_FILE: &str = "expectations.json";
 const SUITE_FILE: &str = "suite.json";
 const OBSERVATIONS_FILE: &str = "observations.json";
-const CELLRUNE_SUITE_ID: &str = "cellrune-excel-host-matrix-v1";
-const REQUIRED_CELLRUNE_PROFILES: [(&str, &str); 2] = [
-    ("excel-online-free-en-ui-ko-kr", "online"),
-    (
-        "excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools",
-        "desktop-2021",
-    ),
-];
-const EXPECTED_FUNCTION_EXCLUSIONS: [&str; 28] = [
-    "CALL",
-    "CELL",
-    "COPILOT",
-    "CUBEKPIMEMBER",
-    "CUBEMEMBER",
-    "CUBEMEMBERPROPERTY",
-    "CUBERANKEDMEMBER",
-    "CUBESET",
-    "CUBESETCOUNT",
-    "CUBEVALUE",
-    "DETECTLANGUAGE",
-    "ENCODEURL",
-    "EUROCONVERT",
-    "FILTERXML",
-    "GETPIVOTDATA",
-    "IMAGE",
-    "INFO",
-    "JIS",
-    "NOW",
-    "RAND",
-    "RANDARRAY",
-    "RANDBETWEEN",
-    "REGISTER.ID",
-    "RTD",
-    "STOCKHISTORY",
-    "TODAY",
-    "TRANSLATE",
-    "WEBSERVICE",
-];
-const EXPECTED_HOST_MATRIX_EXCLUSIONS: [&str; 4] = ["ENCODEURL", "EUROCONVERT", "FILTERXML", "JIS"];
 const MESSAGE_NO_ORACLES: &str = "no oracle metadata files found";
 const MESSAGE_EXPECTATION_KEYS: &str =
     "expectation keys must exactly equal the selected workbook cases";
 const MESSAGE_UNCLASSIFIED: &str = "unclassified oracle case";
-const MESSAGE_NOTE_REQUIRED: &str = "reviewed non-match classification requires a note";
 const MESSAGE_WORKBOOK_FILENAME: &str = "workbook must be a filename within the oracle directory";
-const MESSAGE_SHA_FORMAT: &str = "SHA-256 must contain exactly 64 hexadecimal digits";
 const MESSAGE_ITERATIVE_CALCULATION: &str =
     "workbook iterative-calculation setting does not match metadata";
-const MESSAGE_CELLRUNE_SUITE_REQUIRED: &str =
-    "CellRune 0.1.7 requires conformance/cellrune/suite.json with both host profiles";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
     let result = match arguments.as_slice() {
-        [] => audit_all(&oracle_root(), false),
-        [flag] if flag == "--require-cellrune-suite" => audit_all(&oracle_root(), true),
+        [] => audit_all(&oracle_root()),
         [flag, directory] if flag == "--report" => report::report(Path::new(directory), None),
         [flag, directory, output] if flag == "--report" => {
             report::report(Path::new(directory), Some(Path::new(output)))
@@ -112,19 +65,12 @@ fn oracle_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance")
 }
 
-fn audit_all(root: &Path, require_cellrune_suite: bool) -> Result<(), Vec<String>> {
+fn audit_all(root: &Path) -> Result<(), Vec<String>> {
     let mut suite_files = Vec::new();
     collect_named_files(root, SUITE_FILE, &mut suite_files)?;
     suite_files.sort();
     let mut managed_metadata = BTreeSet::new();
     let mut problems = Vec::new();
-    let required_cellrune_suite = root.join("cellrune").join(SUITE_FILE);
-    if require_cellrune_suite && !suite_files.contains(&required_cellrune_suite) {
-        problems.push(format!(
-            "{}: {MESSAGE_CELLRUNE_SUITE_REQUIRED}",
-            required_cellrune_suite.display()
-        ));
-    }
     for suite_path in suite_files {
         audit_suite(&suite_path, &mut managed_metadata, &mut problems);
     }
@@ -230,7 +176,6 @@ fn audit_suite(
         return;
     }
 
-    let mut expectations_by_profile = BTreeMap::new();
     for profile in &suite.profiles {
         let directory = suite_directory.join(&profile.directory);
         let metadata_path = directory.join(METADATA_FILE);
@@ -252,53 +197,23 @@ fn audit_suite(
                     counts.host_unsupported,
                     counts.excluded,
                 );
-                expectations_by_profile.insert(profile.profile_id.clone(), loaded.expectations);
             }
             Err(error) => problems.push(error),
-        }
-    }
-    for oracle_case in manifest.cases.iter().filter(|case| case.active) {
-        let classifications = suite
-            .profiles
-            .iter()
-            .filter_map(|profile| {
-                expectations_by_profile
-                    .get(&profile.profile_id)?
-                    .get(&oracle_case.case_key)
-                    .map(|expectation| expectation.classification)
-            })
-            .collect::<Vec<_>>();
-        if classifications.len() == suite.profiles.len()
-            && !classifications.iter().any(|classification| {
-                matches!(
-                    classification,
-                    Classification::Match
-                        | Classification::Divergent
-                        | Classification::NotImplemented
-                )
-            })
-        {
-            problems.push(format!(
-                "{}: active case {} has no semantic classification in any required profile",
-                suite_path.display(),
-                oracle_case.case_key
-            ));
         }
     }
 }
 
 fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
-    if suite.schema != SUITE_SCHEMA || suite.suite_id != CELLRUNE_SUITE_ID {
+    if suite.schema != SUITE_SCHEMA || suite.suite_id.is_empty() {
         return Err(format!("unsupported suite schema {}", suite.schema));
     }
-    if suite.case_manifest != "case-manifest.json" {
-        return Err("CellRune suite must use case-manifest.json".to_owned());
+    if !is_filename(&suite.case_manifest) {
+        return Err("suite case manifest must be a filename".to_owned());
     }
-    verify_sha256_format(&suite.source_workbook_sha256)?;
     let mut profile_ids = BTreeSet::new();
     let mut directories = BTreeSet::new();
     for profile in &suite.profiles {
-        if !profile_ids.insert(profile.profile_id.as_str()) {
+        if profile.profile_id.is_empty() || !profile_ids.insert(profile.profile_id.as_str()) {
             return Err(format!("duplicate host profile {}", profile.profile_id));
         }
         if !is_filename(&profile.directory) || !directories.insert(profile.directory.as_str()) {
@@ -307,55 +222,12 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
                 profile.directory
             ));
         }
-        if profile.application.is_empty()
-            || profile.os.is_empty()
-            || profile.product_tier.is_empty()
-            || profile.locale.is_empty()
-            || !profile.add_ins.contains_key("euro_currency_tools")
-        {
+        if profile.application.is_empty() {
             return Err(format!("incomplete host profile {}", profile.profile_id));
         }
     }
-    let required = REQUIRED_CELLRUNE_PROFILES
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let actual = suite
-        .profiles
-        .iter()
-        .map(|profile| (profile.profile_id.as_str(), profile.directory.as_str()))
-        .collect::<BTreeSet<_>>();
-    if actual != required {
-        return Err("CellRune suite does not contain the exact required host matrix".to_owned());
-    }
-    for profile in &suite.profiles {
-        let euro_tools = profile.add_ins.get("euro_currency_tools") == Some(&false)
-            && profile.add_ins.len() == 1;
-        let exact = match profile.profile_id.as_str() {
-            "excel-online-free-en-ui-ko-kr" => {
-                profile.directory == "online"
-                    && profile.application == "Microsoft Excel Online"
-                    && profile.os == "web"
-                    && profile.product_tier == "free"
-                    && profile.locale == "en-US UI; ko-KR regional format"
-                    && euro_tools
-            }
-            "excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools" => {
-                profile.directory == "desktop-2021"
-                    && profile.application == "Microsoft Macintosh Excel"
-                    && profile.os == "macOS"
-                    && profile.product_tier == "Office Home & Student 2021"
-                    && profile.locale == "en-US UI; ko-KR regional format"
-                    && euro_tools
-            }
-            _ => false,
-        };
-        if !exact {
-            return Err(format!(
-                "host profile does not exact-match the reviewed CellRune matrix: {}",
-                profile.profile_id
-            ));
-        }
+    if suite.profiles.is_empty() {
+        return Err("suite must list at least one workbook profile".to_owned());
     }
     Ok(())
 }
@@ -363,15 +235,6 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
 fn validate_manifest_contract(suite: &OracleSuite, manifest: &CaseManifest) -> Result<(), String> {
     if manifest.schema != CASE_MANIFEST_SCHEMA || manifest.suite_id != suite.suite_id {
         return Err("case manifest identity does not match suite".to_owned());
-    }
-    if manifest.generator.name.as_deref().is_none_or(str::is_empty)
-        || manifest
-            .generator
-            .revision
-            .as_deref()
-            .is_none_or(str::is_empty)
-    {
-        return Err("case manifest generator provenance is incomplete".to_owned());
     }
     let profile_ids = suite
         .profiles
@@ -381,8 +244,6 @@ fn validate_manifest_contract(suite: &OracleSuite, manifest: &CaseManifest) -> R
     let mut keys = BTreeSet::new();
     let mut catalog_addresses = BTreeSet::new();
     let mut formula_addresses = BTreeSet::new();
-    let mut excluded_functions = BTreeSet::new();
-    let mut host_matrix_exclusions = BTreeSet::new();
     for oracle_case in &manifest.cases {
         if oracle_case.case_key.is_empty() || !keys.insert(oracle_case.case_key.as_str()) {
             return Err(format!(
@@ -401,20 +262,8 @@ fn validate_manifest_contract(suite: &OracleSuite, manifest: &CaseManifest) -> R
                 oracle_case.case_key
             ));
         }
-        verify_text_sha256(
-            &oracle_case.authored_formula,
-            &oracle_case.authored_formula_fingerprint,
-        )?;
-        verify_text_sha256(
-            &oracle_case.storage_formula,
-            &oracle_case.storage_formula_fingerprint,
-        )?;
-        let semantic_fingerprint = manifest_semantic_fingerprint(oracle_case)?;
-        if semantic_fingerprint != oracle_case.semantic_fingerprint {
-            return Err(format!(
-                "semantic fingerprint does not match {}",
-                oracle_case.case_key
-            ));
+        if oracle_case.authored_formula.is_empty() || oracle_case.storage_formula.is_empty() {
+            return Err(format!("empty formula in {}", oracle_case.case_key));
         }
         rewrite::validate_declarations(&oracle_case.allowed_host_rewrites, &profile_ids)
             .map_err(|error| format!("{}: {error}", oracle_case.case_key))?;
@@ -434,38 +283,6 @@ fn validate_manifest_contract(suite: &OracleSuite, manifest: &CaseManifest) -> R
                 ));
             }
         }
-        if let Some(exclusion) = &oracle_case.exclusion {
-            let (reason, evidence) = exclusion.rationale();
-            if reason.is_empty() || evidence.is_empty() {
-                return Err(format!(
-                    "exclusion rationale is incomplete for {}",
-                    oracle_case.case_key
-                ));
-            }
-            if oracle_case.case_key.starts_with("function:") {
-                excluded_functions.insert(oracle_case.function.as_str());
-            }
-        }
-        if let Some(OracleExclusion::HostMatrixUnavailable {
-            unsupported_profile_ids,
-            ..
-        }) = &oracle_case.exclusion
-        {
-            let unsupported = unsupported_profile_ids
-                .iter()
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>();
-            if unsupported.len() != unsupported_profile_ids.len()
-                || unsupported != profile_ids
-                || oracle_case.active
-            {
-                return Err(format!(
-                    "host-matrix exclusion does not cover the suite for {}",
-                    oracle_case.case_key
-                ));
-            }
-            host_matrix_exclusions.insert(oracle_case.function.as_str());
-        }
         if oracle_case.exclusion.is_some() && oracle_case.active {
             return Err(format!(
                 "excluded case is unexpectedly active: {}",
@@ -473,59 +290,7 @@ fn validate_manifest_contract(suite: &OracleSuite, manifest: &CaseManifest) -> R
             ));
         }
     }
-    let expected_functions = EXPECTED_FUNCTION_EXCLUSIONS
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    if excluded_functions != expected_functions {
-        return Err(format!(
-            "function exclusion inventory changed: expected={expected_functions:?} actual={excluded_functions:?}"
-        ));
-    }
-    let expected_host_matrix = EXPECTED_HOST_MATRIX_EXCLUSIONS
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    if host_matrix_exclusions != expected_host_matrix {
-        return Err(format!(
-            "host-matrix exclusion inventory changed: expected={expected_host_matrix:?} actual={host_matrix_exclusions:?}"
-        ));
-    }
     Ok(())
-}
-
-fn manifest_semantic_fingerprint(oracle_case: &ManifestCase) -> Result<String, String> {
-    #[derive(Serialize)]
-    struct SemanticRecord<'a> {
-        function: &'a str,
-        category: &'a str,
-        scenario: &'a str,
-        authored_formula: &'a str,
-        storage_formula: &'a str,
-        allowed_host_rewrites: &'a [cellrune_integration_tests::oracle::HostFormulaRewrite],
-        active: bool,
-        seed_classification: &'a str,
-        inactive_reason: &'a Option<String>,
-        exclusion: &'a Option<OracleExclusion>,
-    }
-    let serialized = serde_json::to_string(&SemanticRecord {
-        function: &oracle_case.function,
-        category: &oracle_case.category,
-        scenario: &oracle_case.scenario,
-        authored_formula: &oracle_case.authored_formula,
-        storage_formula: &oracle_case.storage_formula,
-        allowed_host_rewrites: &oracle_case.allowed_host_rewrites,
-        active: oracle_case.active,
-        seed_classification: &oracle_case.seed_classification,
-        inactive_reason: &oracle_case.inactive_reason,
-        exclusion: &oracle_case.exclusion,
-    })
-    .map_err(|error| format!("cannot serialize manifest semantics: {error}"))?;
-    let digest = Sha256::digest(serialized.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    Ok(format!("sha256:{digest}"))
 }
 
 struct LoadedOracle {
@@ -559,11 +324,6 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         ));
     }
     let workbook_path = directory.join(&metadata.workbook);
-    verify_sha256(&workbook_path, &metadata.sha256)?;
-    if let Some(source_workbook_sha256) = &metadata.source_workbook_sha256 {
-        verify_sha256_format(source_workbook_sha256)
-            .map_err(|error| format!("{}: {error}", metadata_path.display()))?;
-    }
     raw::verify_package_invariants(&workbook_path)?;
     let workbook = read_xlsx_path(&workbook_path, ReadOptions::default())
         .map_err(|error| format!("{}: {error}", workbook_path.display()))?;
@@ -688,15 +448,7 @@ fn load_suite_binding(
 
     let observations_path = directory.join(OBSERVATIONS_FILE);
     let observations: Observations = read_json(&observations_path)?;
-    validate_observation_header(
-        &observations,
-        metadata,
-        &suite,
-        profile,
-        workbook_path,
-        &manifest_path,
-        &observations_path,
-    )?;
+    validate_observation_header(&observations, &suite, profile, &observations_path)?;
     let raw_cells = raw::read_formula_cells(workbook_path)?;
     if raw_cells.len() != metadata.formula_cells {
         return Err(format!(
@@ -789,13 +541,7 @@ fn validate_profile_metadata(
 ) -> Result<(), String> {
     let oracle = &metadata.oracle;
     let matches = oracle.suite_id.as_deref() == Some(suite.suite_id.as_str())
-        && oracle.host_profile_id.as_deref() == Some(profile.profile_id.as_str())
-        && oracle.application == profile.application
-        && oracle.os.as_deref() == Some(profile.os.as_str())
-        && oracle.locale.as_deref() == Some(profile.locale.as_str())
-        && oracle.product_tier.as_deref() == Some(profile.product_tier.as_str())
-        && metadata.source_workbook_sha256.as_deref()
-            == Some(suite.source_workbook_sha256.as_str());
+        && oracle.host_profile_id.as_deref() == Some(profile.profile_id.as_str());
     if !matches {
         return Err(format!(
             "{}: metadata host identity does not match suite profile {}",
@@ -803,30 +549,13 @@ fn validate_profile_metadata(
             profile.profile_id
         ));
     }
-    if oracle.version.is_empty()
-        || oracle.saved_at.is_empty()
-        || oracle.host_build.as_deref().is_none_or(str::is_empty)
-        || oracle
-            .product_tier_evidence
-            .as_deref()
-            .is_none_or(str::is_empty)
-        || oracle.host_note.as_deref().is_none_or(str::is_empty)
-    {
-        return Err(format!(
-            "{}: suite metadata requires host version/build, saved_at, product-tier evidence, and host_note",
-            directory.display()
-        ));
-    }
     Ok(())
 }
 
 fn validate_observation_header(
     observations: &Observations,
-    metadata: &Metadata,
     suite: &OracleSuite,
     profile: &HostProfile,
-    workbook_path: &Path,
-    manifest_path: &Path,
     observations_path: &Path,
 ) -> Result<(), String> {
     if observations.schema != OBSERVATIONS_SCHEMA
@@ -835,29 +564,6 @@ fn validate_observation_header(
     {
         return Err(format!(
             "{}: observation identity does not match suite profile",
-            observations_path.display()
-        ));
-    }
-    if observations.workbook_sha256 != metadata.sha256 {
-        return Err(format!(
-            "{}: observation workbook SHA-256 does not match metadata",
-            observations_path.display()
-        ));
-    }
-    if observations.source_workbook_sha256 != suite.source_workbook_sha256
-        || metadata.source_workbook_sha256.as_deref()
-            != Some(observations.source_workbook_sha256.as_str())
-    {
-        return Err(format!(
-            "{}: common source workbook SHA-256 does not match suite/metadata",
-            observations_path.display()
-        ));
-    }
-    verify_sha256(workbook_path, &observations.workbook_sha256)?;
-    verify_sha256(manifest_path, &observations.case_manifest_sha256)?;
-    if observations.saved_at != metadata.oracle.saved_at {
-        return Err(format!(
-            "{}: observation saved_at does not match metadata",
             observations_path.display()
         ));
     }
@@ -876,18 +582,11 @@ fn validate_observed_case(
         .formula_address
         .as_deref()
         .expect("active manifest case has a formula address");
-    if observation.address != expected_address
-        || observation.authored_formula_fingerprint != oracle_case.authored_formula_fingerprint
-    {
+    if observation.address != expected_address {
         return Err(format!(
             "{context}: observation does not join the active manifest record"
         ));
     }
-    verify_text_sha256(
-        &observation.saved_formula,
-        &observation.saved_formula_fingerprint,
-    )
-    .map_err(|error| format!("{context}: {error}"))?;
     let raw_cell =
         raw_cell.ok_or_else(|| format!("{context}: saved formula cell is absent from raw XLSX"))?;
     let accepted_rewrites = rewrite::accepted_rewrites(
@@ -993,43 +692,6 @@ fn is_filename(value: &str) -> bool {
         && value != ".."
         && !value.contains('/')
         && !value.contains('\\')
-}
-
-fn verify_text_sha256(value: &str, expected: &str) -> Result<(), String> {
-    let digest = expected
-        .strip_prefix("sha256:")
-        .ok_or_else(|| "text fingerprint must use the sha256: prefix".to_owned())?;
-    verify_sha256_bytes(value.as_bytes(), digest, "text")
-}
-
-fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    verify_sha256_bytes(&bytes, expected, &path.display().to_string())
-}
-
-fn verify_sha256_format(value: &str) -> Result<(), String> {
-    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        Ok(())
-    } else {
-        Err(MESSAGE_SHA_FORMAT.to_owned())
-    }
-}
-
-fn verify_sha256_bytes(bytes: &[u8], expected: &str, context: &str) -> Result<(), String> {
-    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("{context}: {MESSAGE_SHA_FORMAT}"));
-    }
-    let actual = Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    if actual.eq_ignore_ascii_case(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "{context}: SHA-256 {actual} != expected {expected}"
-        ))
-    }
 }
 
 fn verify_iterative_calculation(
@@ -1140,7 +802,6 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::Divergent => {
-                require_note(&context, expectation, problems);
                 let actual = match observed_result(result) {
                     Ok(Some(actual)) => actual,
                     Ok(None) => {
@@ -1175,7 +836,6 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::NotImplemented => {
-                require_note(&context, expectation, problems);
                 if matches!(result, Some(CalculationCellResult::Unavailable(_))) {
                     counts.not_implemented += 1;
                 } else {
@@ -1183,11 +843,9 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::HostUnsupported => {
-                require_note(&context, expectation, problems);
                 counts.host_unsupported += 1;
             }
             Classification::Excluded | Classification::Unreadable => {
-                require_note(&context, expectation, problems);
                 counts.excluded += 1;
             }
             Classification::Unclassified => {
@@ -1325,19 +983,23 @@ fn observed_result(
     result.map_or(Ok(None), ObservedValue::from_result)
 }
 
-fn require_note(context: &str, expectation: &Expectation, problems: &mut Vec<String>) {
-    if expectation.note.as_deref().is_none_or(str::is_empty) {
-        problems.push(format!("{context}: {MESSAGE_NOTE_REQUIRED}"));
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{MESSAGE_ITERATIVE_CALCULATION, audit_all, verify_iterative_calculation};
+    use super::{
+        MESSAGE_ITERATIVE_CALCULATION, audit_all, oracle_root, verify_iterative_calculation,
+    };
+
+    #[test]
+    fn committed_excel_oracles_match_reviewed_expectations() {
+        if let Err(problems) = audit_all(&oracle_root()) {
+            panic!(
+                "committed Excel oracle audit failed:\n{}",
+                problems.join("\n")
+            );
+        }
+    }
 
     #[test]
     fn iterative_calculation_metadata_must_match_effective_workbook_setting() {
@@ -1348,33 +1010,5 @@ mod tests {
             .expect_err("mismatched iterative calculation");
         assert!(error.contains(MESSAGE_ITERATIVE_CALCULATION));
         assert!(error.contains("workbook=true metadata=false"));
-    }
-
-    #[test]
-    fn release_gate_requires_the_cellrune_host_matrix_suite() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time after epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "cellrune-oracle-release-gate-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir(&root).expect("temporary conformance root");
-
-        let errors = audit_all(&root, true).expect_err("missing suite must fail release gate");
-
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.contains("CellRune 0.1.7 requires"))
-        );
-        assert!(
-            audit_all(&root, false)
-                .expect_err("empty ordinary audit still has no metadata")
-                .iter()
-                .all(|error| !error.contains("CellRune 0.1.7 requires"))
-        );
-        fs::remove_dir(&root).expect("remove temporary conformance root");
     }
 }

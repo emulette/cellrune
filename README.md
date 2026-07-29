@@ -335,8 +335,8 @@ Excel's behavior and can be set to `Ieee754` and `ExtendedSearch` for what 0.1.2
 ## Verification
 
 The `conformance/` tree carries the binary workbooks Excel actually calculated, together with
-their hashes, host metadata, and reviewed expectations. They are audited explicitly during local
-development:
+their host metadata and reviewed expectations. The standard `cargo test` suite audits them. To run
+only that audit:
 
 ```bash
 cargo run \
@@ -345,15 +345,11 @@ cargo run \
   --locked
 ```
 
-This audit is deliberately separate from `cargo test`. CI invokes the ordinary audit as its own
-step, while publication invokes the stricter suite gate. It covers 1,295 formula cells from Apache
-POI's `FormulaEvalTestData`, 266 materialized array results from its matrix fixture, and 672
-selected results from the currently committed CellRune-authored oracle.
-The planned 0.1.7 host-matrix replacement keeps 672 active stable cases across a normative Excel Online
-profile and a subsidiary Mac Excel 2021 profile, and is promoted only when both saved workbooks
-share one generated source SHA. Every selected case is classified; missing or extra
-classifications fail locally. The older POI formula cache currently has 1,290 matches and 5
-documented divergences, enforced in both directions.
+This is a normal regression test, not a separate CI step or release-only gate. It covers 1,295
+formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
+matrix fixture, and 672 selected results from the CellRune-authored oracle. Excel Online and Mac
+Excel 2021 are recorded independently; a missing host value is simply `host_unsupported`. The
+older POI formula cache currently has 1,290 matches and 5 documented divergences.
 
 Two additional corpus tests are compiled but marked `#[ignore]` because their third-party inputs
 are not distributed in this repository. A developer who has supplied those inputs can run them

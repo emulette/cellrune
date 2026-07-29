@@ -9,28 +9,25 @@ yet measured against that reference are listed separately.
 ## Reference oracle
 
 Compatibility statements are made against committed, named saved-cache baselines, not against
-"Excel" in general. The currently committed CellRune baseline is the legacy single-host baseline;
-0.1.7 prepares a versioned two-host suite in which Excel Online is normative and Mac Excel 2021 is
-the subsidiary oracle. The two-host compatibility claim becomes effective only when both saved
-workbooks from the same generated source SHA are committed together.
+"Excel" in general. CellRune records Excel Online and Mac Excel 2021 workbooks independently.
+Excel Online is the primary compatibility reference; Mac Excel 2021 is an additional reference.
 
 | Workbook source | Excel cache producer | Locale | Recorded |
 | --- | --- | --- | --- |
-| CellRune formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | not recorded; `1900` date system | 2026-07-27 |
+| CellRune 0.1.7 formula oracle | Microsoft Excel Online, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-29 |
+| CellRune 0.1.7 formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-29 |
 | Apache POI formula fixture | Microsoft Excel 2013, AppVersion `15.0300` | en-US currency formatting observed; `1900` date system | 2016-02-15 |
 | Apache POI matrix fixture | Microsoft Excel 2016, AppVersion `16.0300` | not recorded; `1900` date system | 2017-07-27 |
 
 Excel's own results travel inside every workbook it saves, as the cached `<v>` value of each
 formula cell. That makes any Excel-authored workbook both a test input and its own ground truth.
-The binary workbooks, hashes, host metadata, and reviewed classifications are committed under
+The saved workbooks, host metadata, and reviewed classifications are committed under
 `conformance/`.
 
-The pending 0.1.7 suite uses `excel-online-free-en-ui-ko-kr` as the normative profile and
-`excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools` as the subsidiary profile. A deterministic
-function remains active if either profile can calculate it. If neither can produce a semantic
-result, its stable case key, example formula, and exclusion evidence remain in the manifest while
-the executable formula is inactive. This separates host availability from CellRune implementation
-status and lets later 0.1.7 patch releases reuse the same oracle setup.
+The 0.1.7 suite records `excel-online-free-en-ui-ko-kr` and
+`excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`. A missing saved value is
+`host_unsupported` for that workbook. The case remains active even when every recorded workbook
+lacks a value, so later 0.1.7 patch releases can reuse the same setup.
 
 ## Verified
 
@@ -189,13 +186,14 @@ way: they skip blank cells, so a wider clamp cannot change their result.
 
 ### Measured agreement
 
-The explicit local audit currently records the committed legacy CellRune baseline:
+The 0.1.7 audit records:
 
 | Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 158 | 48 | 60 | 0 | 0 |
-| CellRune formula oracle | 672 | 395 | 11 | 238 | 26 | 2 |
+| CellRune formula oracle — Excel Online | 672 | 404 | 11 | 255 | 2 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 672 | 401 | 10 | 239 | 22 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
@@ -203,12 +201,10 @@ the Excel value and the current CellRune value with an explanatory note. The oth
 unsupported or non-comparable cases explicit rather than dropping them from the denominator.
 These counts are an audit inventory, not a composite score or release threshold.
 
-The 0.1.7 source workbook currently has 703 primary cases, 672 active cases, and 897 formula cells.
-An earlier Mac 16.111 development probe reported 401 matches, 10 divergences, 239 not implemented,
-and 22 host unsupported cases, but its source SHA predates the final stable curated keys and
-279-entry CellRune catalog label. The current source must therefore be saved again on both Mac and
-Excel Online. These work measurements are not substituted into the table above; publishing one
-side or reusing a different source SHA would make the host matrix incomplete.
+The 0.1.7 workbook has 703 primary cases, 672 active cases, and 897 formula cells. Excel Online
+and Mac Excel 2021 both saved the workbook without losing formulas. A host that stores no usable
+value for a case is recorded as `host_unsupported`; this includes both PIVOTBY probes in both
+workbooks. Missing host values do not require regenerating the workbook or block publication.
 
 ## Unverified
 

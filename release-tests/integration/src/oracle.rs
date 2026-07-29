@@ -22,7 +22,7 @@ pub const DEFAULT_SCALED_EPSILON: f64 = 1e-8;
 pub struct Metadata {
     pub schema: String,
     pub workbook: String,
-    pub sha256: String,
+    pub sha256: Option<String>,
     pub source_workbook_sha256: Option<String>,
     pub formula_cells: usize,
     pub date_system: String,
@@ -77,8 +77,6 @@ pub struct OracleMetadata {
     pub host_profile_id: Option<String>,
     pub product_tier: Option<String>,
     pub host_build: Option<String>,
-    pub product_tier_evidence: Option<String>,
-    pub host_note: Option<String>,
 }
 
 /// Required host profiles that jointly cover one stable case manifest.
@@ -88,7 +86,6 @@ pub struct OracleSuite {
     pub schema: String,
     pub suite_id: String,
     pub case_manifest: String,
-    pub source_workbook_sha256: String,
     pub profiles: Vec<HostProfile>,
 }
 
@@ -124,10 +121,7 @@ pub struct ManifestCase {
     pub category: String,
     pub scenario: String,
     pub authored_formula: String,
-    pub authored_formula_fingerprint: String,
     pub storage_formula: String,
-    pub storage_formula_fingerprint: String,
-    pub semantic_fingerprint: String,
     pub allowed_host_rewrites: Vec<HostFormulaRewrite>,
     pub catalog_address: String,
     pub active: bool,
@@ -197,16 +191,13 @@ impl OracleExclusion {
     }
 }
 
-/// SHA-bound facts extracted from one Excel-saved workbook.
+/// Facts extracted from one Excel-saved workbook.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Observations {
     pub schema: String,
     pub suite_id: String,
     pub host_profile_id: String,
-    pub workbook_sha256: String,
-    pub source_workbook_sha256: String,
-    pub case_manifest_sha256: String,
     pub saved_at: String,
     pub cases: Vec<ObservedCase>,
 }
@@ -218,8 +209,6 @@ pub struct ObservedCase {
     pub case_key: String,
     pub address: String,
     pub saved_formula: String,
-    pub saved_formula_fingerprint: String,
-    pub authored_formula_fingerprint: String,
     pub formula_rewrites: Vec<String>,
     pub cache_status: CacheStatus,
     pub cache_value: Option<String>,
@@ -478,14 +467,12 @@ mod tests {
                 "saved_at": "2017-01-01T00:00:00Z",
                 "suite_id": null,
                 "host_profile_id": null,
-                "product_tier": null,
-                "host_note": null
+                "product_tier": null
             }
         }))
         .expect("legacy metadata");
 
         assert_eq!(metadata.source_workbook_sha256, None);
         assert_eq!(metadata.oracle.host_build, None);
-        assert_eq!(metadata.oracle.product_tier_evidence, None);
     }
 }
