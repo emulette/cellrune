@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::materialization::collect_array_regions;
 use super::reference::collect_column_extents;
-use super::{CompiledWorkbook, Engine, EvalContext, public_to_internal};
+use super::{CompiledWorkbook, Engine, EvalContext, EvaluationBudget, public_to_internal};
 use crate::calculation::graph::{DependencyGraph, schedule};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::CellId;
@@ -208,6 +208,8 @@ impl<'workbook> Engine<'workbook> {
 
     fn evaluate_one(&mut self, cell: CellId) {
         let expr = self.asts.get(&cell).cloned();
+        let budget = EvaluationBudget::default();
+        let context = EvalContext::for_evaluation(cell, &budget);
         let array_range = self.legacy_array_range(cell);
         if let Some(range) = array_range {
             let result = match expr {
@@ -215,7 +217,7 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_array_with_trace(EvalContext::for_cell(cell), &expr),
+                Some(expr) => self.eval_array_with_trace(context, &expr),
                 None => Err(ErrorKind::Unsupported),
             };
             self.materialize_legacy_array(cell, range, result);
@@ -227,7 +229,7 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_array_with_trace(EvalContext::for_cell(cell), &expr),
+                Some(expr) => self.eval_array_with_trace(context, &expr),
                 None => Err(ErrorKind::Unsupported),
             };
             self.materialize_dynamic_array(cell, declared_range, result);
@@ -241,7 +243,7 @@ impl<'workbook> Engine<'workbook> {
                 Value::Error(ErrorKind::Unsupported)
             }
             Some(expr) => {
-                let evaluated = self.eval_scalar_with_trace(EvalContext::for_cell(cell), &expr);
+                let evaluated = self.eval_scalar_with_trace(context, &expr);
                 if let (Value::Number(_), Some(trace)) = (&evaluated.value, evaluated.decimal_trace)
                 {
                     self.numeric_decimal_traces.insert(cell, trace);

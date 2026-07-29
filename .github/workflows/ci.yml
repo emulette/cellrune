@@ -139,7 +139,7 @@ jobs:
           key: cargo-registry-${{ runner.os }}-1.92.0-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-1.92.0-
 
-      - name: Run core, integration, and MCP unit tests
+      - name: Run core, integration, and MCP tests
         run: >-
           cargo test
           --package cellrune
@@ -147,9 +147,6 @@ jobs:
           --package cellrune-mcp
           --all-features
           --locked
-
-      - name: Run MCP stdio protocol gate
-        run: cargo test --package cellrune-mcp --test stdio_workflow --locked
 
   # Not on pull requests, same reasoning as platform-tests. Kept on main and on the tag because the
   # packaged-consumer resolve is one of the failures that otherwise surfaces only during a release

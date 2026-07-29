@@ -5,7 +5,8 @@ use super::convert::cell_from_value;
 use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::{is_supported_function, normalize_name};
-use super::lambda::{is_lambda_local, walk_lambda_scope};
+use super::lambda::{definition, is_local_name, walk_local_scope};
+use super::scope::canonical_local_name;
 use super::sheet_span::{ARRAY_EXPRESSION_POLICY, SheetSpanPolicy, function_policy};
 use super::value::{ErrorKind, Value};
 use super::{
@@ -93,27 +94,42 @@ pub(super) fn scan_function_usage(
 }
 
 fn collect_function_calls(expr: &Expr, output: &mut Vec<String>) {
+    collect_function_calls_in_scope(expr, output, &mut Vec::new());
+}
+
+fn collect_function_calls_in_scope(
+    expr: &Expr,
+    output: &mut Vec<String>,
+    local_names: &mut Vec<String>,
+) {
     match expr {
         Expr::Call { name, args } => {
             output.push(normalize_name(name));
+            if walk_local_scope(name, args, local_names, |arg, scope| {
+                collect_function_calls_in_scope(arg, output, scope);
+            }) {
+                return;
+            }
             for arg in args {
-                collect_function_calls(arg, output);
+                collect_function_calls_in_scope(arg, output, local_names);
             }
         }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
-        | Expr::Unary { operand: inner, .. } => collect_function_calls(inner, output),
+        | Expr::Unary { operand: inner, .. } => {
+            collect_function_calls_in_scope(inner, output, local_names);
+        }
         Expr::Binary { left, right, .. }
         | Expr::Range {
             start: left,
             end: right,
         } => {
-            collect_function_calls(left, output);
-            collect_function_calls(right, output);
+            collect_function_calls_in_scope(left, output, local_names);
+            collect_function_calls_in_scope(right, output, local_names);
         }
         Expr::Array(rows) => {
             for item in rows.iter().flatten() {
-                collect_function_calls(item, output);
+                collect_function_calls_in_scope(item, output, local_names);
             }
         }
         Expr::Number(_)
@@ -196,7 +212,7 @@ fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Formula
                             expr,
                             ARRAY_EXPRESSION_POLICY,
                             &mut HashSet::new(),
-                            &mut Vec::new(),
+                            &mut CapabilityScope::default(),
                             &mut issues,
                         ),
                         None => issues.push(CalculationIssue::new(
@@ -483,7 +499,7 @@ fn expr_contains_function(
                 return true;
             }
             let mut found = false;
-            if walk_lambda_scope(name, args, local_names, |arg, scope| {
+            if walk_local_scope(name, args, local_names, |arg, scope| {
                 found |= expr_contains_function(engine, sheet, arg, expected, names, scope);
             }) {
                 return found;
@@ -508,7 +524,7 @@ fn expr_contains_function(
             expr_contains_function(engine, sheet, element, expected, names, local_names)
         }),
         Expr::Name(name) => {
-            if is_lambda_local(name, local_names) {
+            if is_local_name(name, local_names) {
                 return false;
             }
             let key = name.to_ascii_lowercase();
@@ -527,6 +543,39 @@ fn expr_contains_function(
     }
 }
 
+#[derive(Default)]
+struct CapabilityScope {
+    entries: Vec<(String, Option<Expr>)>,
+}
+
+impl CapabilityScope {
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.entries.truncate(len);
+    }
+
+    fn push_parameter(&mut self, name: String) {
+        self.entries.push((name, None));
+    }
+
+    fn push_expression(&mut self, name: &str, value: &Expr) {
+        self.entries
+            .push((canonical_local_name(name), Some(value.clone())));
+    }
+
+    fn lookup(&self, name: &str) -> Option<Option<Expr>> {
+        let key = canonical_local_name(name);
+        self.entries
+            .iter()
+            .rev()
+            .find(|(entry, _)| entry == &key)
+            .map(|(_, value)| value.clone())
+    }
+}
+
 fn inspect_expr(
     engine: &Engine<'_>,
     sheet: usize,
@@ -537,7 +586,7 @@ fn inspect_expr(
     // name alone let whichever operand came first decide the whole formula's classification.
     // Re-expansion cannot duplicate issues because the caller sorts and dedups them per cell.
     names: &mut HashSet<(String, SheetSpanPolicy)>,
-    local_names: &mut Vec<String>,
+    local_scope: &mut CapabilityScope,
     issues: &mut Vec<CalculationIssue>,
 ) {
     match expr {
@@ -548,10 +597,49 @@ fn inspect_expr(
                     Some(name.to_ascii_uppercase()),
                 ));
             }
-            let argument_policy = function_policy(&normalize_name(name));
-            if walk_lambda_scope(name, args, local_names, |arg, scope| {
-                inspect_expr(engine, sheet, arg, argument_policy, names, scope, issues);
-            }) {
+            let normalized = normalize_name(name);
+            if normalized == "LET" {
+                inspect_let(
+                    engine,
+                    sheet,
+                    args,
+                    sheet_span_policy,
+                    names,
+                    local_scope,
+                    issues,
+                );
+                return;
+            }
+            let argument_policy = function_policy(&normalized);
+            if normalized == "MAP"
+                && let Some((lambda_expr, array_exprs)) = args.split_last()
+                && let Some(lambda) = definition(lambda_expr)
+            {
+                for arg in array_exprs {
+                    inspect_expr(
+                        engine,
+                        sheet,
+                        arg,
+                        argument_policy,
+                        names,
+                        local_scope,
+                        issues,
+                    );
+                }
+                let previous_len = local_scope.len();
+                for parameter in lambda.parameters() {
+                    local_scope.push_parameter(parameter.clone());
+                }
+                inspect_expr(
+                    engine,
+                    sheet,
+                    lambda.body(),
+                    argument_policy,
+                    names,
+                    local_scope,
+                    issues,
+                );
+                local_scope.truncate(previous_len);
                 return;
             }
             for arg in args {
@@ -561,16 +649,27 @@ fn inspect_expr(
                     arg,
                     argument_policy,
                     names,
-                    local_names,
+                    local_scope,
                     issues,
                 );
             }
         }
         Expr::Name(name) => {
-            if is_lambda_local(name, local_names) {
+            if let Some(binding) = local_scope.lookup(name) {
+                if let Some(binding) = binding {
+                    inspect_expr(
+                        engine,
+                        sheet,
+                        &binding,
+                        sheet_span_policy,
+                        names,
+                        local_scope,
+                        issues,
+                    );
+                }
                 return;
             }
-            let key = name.to_ascii_lowercase();
+            let key = name.to_lowercase();
             if names.insert((key, sheet_span_policy)) {
                 match engine.resolve_name_expr(sheet, name) {
                     Some(named) => inspect_expr(
@@ -579,7 +678,7 @@ fn inspect_expr(
                         named,
                         sheet_span_policy,
                         names,
-                        local_names,
+                        local_scope,
                         issues,
                     ),
                     None => issues.push(CalculationIssue::new(
@@ -598,7 +697,7 @@ fn inspect_expr(
                         element,
                         ARRAY_EXPRESSION_POLICY,
                         names,
-                        local_names,
+                        local_scope,
                         issues,
                     );
                 }
@@ -611,7 +710,7 @@ fn inspect_expr(
                 inner,
                 ARRAY_EXPRESSION_POLICY,
                 names,
-                local_names,
+                local_scope,
                 issues,
             );
         }
@@ -622,7 +721,7 @@ fn inspect_expr(
                 inner,
                 sheet_span_policy,
                 names,
-                local_names,
+                local_scope,
                 issues,
             );
         }
@@ -633,7 +732,7 @@ fn inspect_expr(
                 left,
                 ARRAY_EXPRESSION_POLICY,
                 names,
-                local_names,
+                local_scope,
                 issues,
             );
             inspect_expr(
@@ -642,7 +741,7 @@ fn inspect_expr(
                 right,
                 ARRAY_EXPRESSION_POLICY,
                 names,
-                local_names,
+                local_scope,
                 issues,
             );
         }
@@ -653,7 +752,7 @@ fn inspect_expr(
                 start,
                 ARRAY_EXPRESSION_POLICY,
                 names,
-                local_names,
+                local_scope,
                 issues,
             );
             inspect_expr(
@@ -662,7 +761,7 @@ fn inspect_expr(
                 end,
                 ARRAY_EXPRESSION_POLICY,
                 names,
-                local_names,
+                local_scope,
                 issues,
             );
         }
@@ -699,4 +798,43 @@ fn inspect_expr(
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {}
     }
+}
+
+fn inspect_let(
+    engine: &Engine<'_>,
+    sheet: usize,
+    args: &[Expr],
+    result_policy: SheetSpanPolicy,
+    names: &mut HashSet<(String, SheetSpanPolicy)>,
+    local_scope: &mut CapabilityScope,
+    issues: &mut Vec<CalculationIssue>,
+) {
+    let previous_len = local_scope.len();
+    let Some((final_expr, pairs)) = args.split_last() else {
+        return;
+    };
+    for pair in pairs.chunks_exact(2) {
+        inspect_expr(
+            engine,
+            sheet,
+            &pair[1],
+            SheetSpanPolicy::CollectAcrossSheets,
+            names,
+            local_scope,
+            issues,
+        );
+        if let Expr::Name(name) = &pair[0] {
+            local_scope.push_expression(name, &pair[1]);
+        }
+    }
+    inspect_expr(
+        engine,
+        sheet,
+        final_expr,
+        result_policy,
+        names,
+        local_scope,
+        issues,
+    );
+    local_scope.truncate(previous_len);
 }

@@ -1,7 +1,8 @@
-# Excel-saved conformance workbooks
+# Excel conformance workbooks
 
-This tree keeps the binary workbooks that Excel actually calculated. They are inputs to an
-explicit local audit, not the default Rust test suite, CI, or a publication gate.
+This directory contains Excel-saved workbooks and the expected CellRune result for each selected
+formula. The audit runs as part of the standard `cargo test` suite. The command below runs the same
+audit by itself:
 
 ```bash
 cargo run \
@@ -10,19 +11,19 @@ cargo run \
   --locked
 ```
 
-The checker validates each workbook hash and metadata, including the effective XLSX iteration
-setting, derives the complete selected case set, compares the saved cache with
-`expectations.json`, calculates the workbook with CellRune, and enforces every reviewed
-classification in both directions. Case selection is capped at 100,000 results, and declared
-array ranges above that limit are rejected before expansion.
+The checker:
 
-## Layout and provenance
+- opens each workbook;
+- selects the configured formula cells;
+- compares Excel's saved value with `expectations.json`;
+- calculates the same workbook with CellRune;
+- verifies the recorded classification.
+
+## Layout
 
 ```text
 conformance/
   apache-poi/
-    LICENSE-APACHE-2.0
-    NOTICE
     formula-eval-test-data/
       workbook.xlsx
       metadata.json
@@ -32,70 +33,47 @@ conformance/
       metadata.json
       expectations.json
   cellrune/
-    formula-oracle.xlsx
-    metadata.json
-    expectations.json
+    suite.json
+    case-manifest.json
+    online/
+      formula-oracle.xlsx
+      metadata.json
+      observations.json
+      expectations.json
+    desktop-2021/
+      formula-oracle.xlsx
+      metadata.json
+      observations.json
+      expectations.json
 ```
 
-`apache-poi/` contains unmodified Apache POI fixtures under Apache-2.0. Each metadata file records
-the exact upstream revision and SHA-256. `cellrune/` contains a workbook authored by the CellRune
-project under the repository license and recalculated in Excel. The directory name identifies
-workbook authorship; it does not claim that CellRune produced the expected values.
+`suite.json` lists the available Excel workbooks. It does not require an exact host count or block
+a release when one is absent. `case-manifest.json` gives formulas stable names so expectations do
+not depend on row numbers.
 
-The two sources must remain separate. Their Excel versions, dates, locales, and licensing differ.
+## Classifications
 
-## Files
+- `match`: CellRune matches Excel.
+- `divergent`: CellRune intentionally differs and the current difference is recorded.
+- `not_implemented`: CellRune reports an unsupported feature.
+- `host_unsupported`: that Excel workbook has no usable value for the formula.
+- `excluded` or `unreadable`: the case cannot be compared.
 
-`metadata.json` uses `cellrune_excel_oracle_metadata_v1` and records:
+`host_unsupported` is a valid final observation even when every recorded Excel workbook lacks a
+value. It does not require regenerating the workbook or removing the formula.
 
-- workbook filename and SHA-256;
-- formula-cell count and selected primary-case rule;
-- source name, license, URL, and revision;
-- generator revision when CellRune authored the workbook;
-- Excel application, version, channel, OS, locale, saved time, date system, and iteration state.
+Finite numbers use the case's comparator; other values compare exactly. Non-match entries carry a
+short note explaining the current state.
 
-Unknown historical host fields remain `null`; they must not be guessed. Populate them when a
-workbook is regenerated on a known host.
+## Updating
 
-`expectations.json` is keyed as `Sheet!A1`. Every selected case is explicit; missing and extra
-keys fail the audit. Classifications are:
+1. Generate the workbook.
+2. Recalculate and save it in Excel.
+3. Run `verify_excel_oracle.mjs saved` with the profile's declared output directory
+   (`online/` or `desktop-2021/`). It stages `suite.json` and `case-manifest.json` in the parent.
+4. Run `check_excel_oracle --report` against that staged profile directory to generate
+   expectations. Suite-bound metadata is rejected when the parent suite contract is absent.
+5. Copy the complete staged suite tree into this directory.
+6. Run the audit command above.
 
-- `match` — CellRune must reproduce the saved Excel value;
-- `divergent` — CellRune must remain different and reproduce the recorded CellRune value;
-- `not_implemented` — CellRune must return a structured unavailable result;
-- `host_unsupported` — the saving Excel host could not evaluate a valid newer or host-specific
-  function, so its cache is an observation rather than a semantic oracle;
-- `excluded` — the workbook has no comparable saved value, with a required explanation;
-- `unreadable` — reserved for a reviewed source limitation;
-- `unclassified` — forbidden in committed data.
-
-Every non-match classification requires a note. Finite numbers default to a scale-relative
-`1e-8` comparison; other values compare exactly. A case can explicitly request `exact`,
-`exact_bits`, or an absolute-plus-relative tolerance. Cancellation and signed-zero probes use
-`exact_bits` so a unit-scaled tolerance cannot hide a near-zero mismatch. Report regeneration
-uses and preserves each case's existing comparator.
-
-Excel rich errors can store `#VALUE!` in `<v>` while `vm` points to the actual modern error such
-as `#SPILL!`. Such cases set `excel_rich_error: true`; the checker treats the typed expectation as
-authoritative and requires an error fallback in the workbook.
-
-When an implementation activates a case that is already present in the tracked workbook, do not
-regenerate the workbook. Change only that case's reviewed classification (normally
-`not_implemented` to `match`) and run the checker. Regeneration is required only when formulas,
-inputs, or Excel-saved cache values themselves change. This keeps the independent Excel
-observation stable while implementation progress changes.
-
-## Updating the CellRune workbook
-
-The tracked generator and pre-Excel validation tools live in the private planning repository
-because regeneration includes a manual Excel step. The public, reproducible boundary is:
-
-1. generate the pre-Excel workbook and verify its formula inventory;
-2. open it in the recorded Excel host, force recalculation, and save;
-3. verify that Excel did not remove or downgrade formulas;
-4. copy the saved workbook, metadata, and reviewed expectations into `conformance/cellrune/`;
-5. update the workbook SHA-256, host fields, formula count, and every changed classification;
-6. run the explicit checker above.
-
-Do not overwrite an older host baseline when the host lacked functions needed by the comparison.
-Add a separately identified baseline or update the metadata and expectations through review.
+No separate CI step or release-only oracle gate is required.

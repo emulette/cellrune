@@ -8,6 +8,9 @@ const MAX_DEPENDENCY_EDGES: &str = "max_dependency_edges";
 const MAX_ARRAY_CELLS: &str = "max_array_cells";
 const MAX_TEXT_BYTES: &str = "max_text_bytes";
 const MAX_FUNCTION_ITERATIONS: &str = "max_function_iterations";
+const MAX_LET_BINDINGS: &str = "max_let_bindings";
+const MAX_LAMBDA_DEPTH: &str = "max_lambda_depth";
+const MAX_LAMBDA_INVOCATIONS: &str = "max_lambda_invocations";
 const MESSAGE_ZERO_LIMIT: &str = "calculation limit must be greater than zero";
 
 /// Resource limits applied while formulas are parsed, scheduled, and evaluated.
@@ -20,6 +23,9 @@ pub struct CalculationLimits {
     max_array_cells: u64,
     max_text_bytes: u64,
     max_function_iterations: u64,
+    max_let_bindings: u64,
+    max_lambda_depth: u64,
+    max_lambda_invocations: u64,
 }
 
 impl CalculationLimits {
@@ -56,6 +62,21 @@ impl CalculationLimits {
     /// Returns the maximum data-dependent loop iterations of one function call.
     pub const fn max_function_iterations(self) -> u64 {
         self.max_function_iterations
+    }
+
+    /// Returns the maximum number of name/value pairs in one `LET` expression.
+    pub const fn max_let_bindings(self) -> u64 {
+        self.max_let_bindings
+    }
+
+    /// Returns the maximum simultaneously active lambda-body depth in one cell evaluation.
+    pub const fn max_lambda_depth(self) -> u64 {
+        self.max_lambda_depth
+    }
+
+    /// Returns the maximum cumulative lambda-body invocations in one cell evaluation.
+    pub const fn max_lambda_invocations(self) -> u64 {
+        self.max_lambda_invocations
     }
 
     /// Replaces the per-formula lexical token limit.
@@ -139,6 +160,39 @@ impl CalculationLimits {
         self.max_function_iterations = nonzero(MAX_FUNCTION_ITERATIONS, value)?;
         Ok(self)
     }
+
+    /// Replaces the name/value pair limit for one `LET` expression.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CalculationOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_let_bindings(mut self, value: u64) -> Result<Self, CalculationOptionsError> {
+        self.max_let_bindings = nonzero(MAX_LET_BINDINGS, value)?;
+        Ok(self)
+    }
+
+    /// Replaces the active lambda-body depth limit for one cell evaluation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CalculationOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_lambda_depth(mut self, value: u64) -> Result<Self, CalculationOptionsError> {
+        self.max_lambda_depth = nonzero(MAX_LAMBDA_DEPTH, value)?;
+        Ok(self)
+    }
+
+    /// Replaces the cumulative lambda-body invocation limit for one cell evaluation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CalculationOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_lambda_invocations(
+        mut self,
+        value: u64,
+    ) -> Result<Self, CalculationOptionsError> {
+        self.max_lambda_invocations = nonzero(MAX_LAMBDA_INVOCATIONS, value)?;
+        Ok(self)
+    }
 }
 
 impl Default for CalculationLimits {
@@ -151,6 +205,9 @@ impl Default for CalculationLimits {
             max_array_cells: 1_000_000,
             max_text_bytes: 32_767,
             max_function_iterations: 1_000_000,
+            max_let_bindings: 126,
+            max_lambda_depth: 256,
+            max_lambda_invocations: 1_000_000,
         }
     }
 }
@@ -192,6 +249,9 @@ pub(super) enum CalculationLimitKind {
     ArrayCells,
     TextBytes,
     FunctionIterations,
+    LetBindings,
+    LambdaDepth,
+    LambdaInvocations,
 }
 
 impl CalculationLimitKind {
@@ -204,6 +264,9 @@ impl CalculationLimitKind {
             Self::ArrayCells => MAX_ARRAY_CELLS,
             Self::TextBytes => MAX_TEXT_BYTES,
             Self::FunctionIterations => MAX_FUNCTION_ITERATIONS,
+            Self::LetBindings => MAX_LET_BINDINGS,
+            Self::LambdaDepth => MAX_LAMBDA_DEPTH,
+            Self::LambdaInvocations => MAX_LAMBDA_INVOCATIONS,
         }
     }
 
@@ -216,6 +279,9 @@ impl CalculationLimitKind {
             MAX_ARRAY_CELLS => Some(Self::ArrayCells),
             MAX_TEXT_BYTES => Some(Self::TextBytes),
             MAX_FUNCTION_ITERATIONS => Some(Self::FunctionIterations),
+            MAX_LET_BINDINGS => Some(Self::LetBindings),
+            MAX_LAMBDA_DEPTH => Some(Self::LambdaDepth),
+            MAX_LAMBDA_INVOCATIONS => Some(Self::LambdaInvocations),
             _ => None,
         }
     }
@@ -235,6 +301,9 @@ mod tests {
             CalculationLimitKind::ArrayCells,
             CalculationLimitKind::TextBytes,
             CalculationLimitKind::FunctionIterations,
+            CalculationLimitKind::LetBindings,
+            CalculationLimitKind::LambdaDepth,
+            CalculationLimitKind::LambdaInvocations,
         ];
 
         for kind in kinds {

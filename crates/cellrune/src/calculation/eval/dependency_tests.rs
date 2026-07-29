@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::{Engine, EvalContext};
+use super::{Engine, EvalContext, EvaluationBudget};
 use crate::calculation::runtime::{Rect, RectSpan};
 use crate::{
     CalculationLimits, CalculationOptions, CellAddress, CellRange, DefinedName, DefinedNameScope,
@@ -79,6 +79,100 @@ fn unresolved_dynamic_dependencies_honor_map_scope() {
     assert!(
         has_unresolved_dynamic_dependency(&engine, (0, 3, 2)),
         "an unshadowed reference to the same name still reports the dynamic dependency"
+    );
+}
+
+#[test]
+fn let_dependencies_follow_sequential_scope_and_shadow_defined_names() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    draft
+        .set_defined_name(
+            DefinedName::new(
+                "second",
+                DefinedNameScope::Workbook,
+                formula("INDIRECT(A1)"),
+                false,
+            )
+            .expect("valid defined name"),
+        )
+        .expect("defined name edit");
+    draft
+        .set_cell_formula(
+            sheet_id,
+            address("B1"),
+            formula("LET(first,A1,second,first,second+1)"),
+        )
+        .expect("sequential LET formula");
+    draft
+        .set_cell_formula(
+            sheet_id,
+            address("B2"),
+            formula("LET(first,second,second,A1,first)"),
+        )
+        .expect("forward LET formula");
+    let engine = Engine::analyze(draft.workbook(), CalculationOptions::default());
+
+    assert!(
+        !has_unresolved_dynamic_dependency(&engine, (0, 1, 2)),
+        "a completed LET binding must shadow the dynamic workbook name",
+    );
+    assert!(
+        has_unresolved_dynamic_dependency(&engine, (0, 2, 2)),
+        "a value expression must not see a binding declared later",
+    );
+    assert_eq!(
+        collect_reference_selection_inputs(&engine, (0, 1, 2)),
+        vec![rect(1, 1)],
+    );
+}
+
+#[test]
+fn let_scope_resolves_dynamic_and_resized_dependencies() {
+    let mut dynamic = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    dynamic
+        .set_cell_formula(sheet_id, address("A2"), formula("40+2"))
+        .expect("dynamic target formula");
+    dynamic
+        .set_cell_formula(
+            sheet_id,
+            address("B1"),
+            formula("LET(step,1,target,OFFSET(A1,step,0),target)"),
+        )
+        .expect("dynamic LET formula");
+    let engine = Engine::evaluate(dynamic.workbook(), CalculationOptions::default());
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 2)),
+        Some(&vec![(0, 2, 1)]),
+        "OFFSET must resolve LET bindings while collecting the second-pass graph",
+    );
+
+    let mut resized = WorkbookDraft::new();
+    for address_text in ["A1", "A2", "A3", "C1", "C2", "C3"] {
+        resized
+            .set_cell_formula(sheet_id, address(address_text), formula("1"))
+            .expect("range input formula");
+    }
+    resized
+        .set_cell_formula(
+            sheet_id,
+            address("B1"),
+            formula(r#"LET(values,A1,SUMIF(C1:C3,">0",values))"#),
+        )
+        .expect("resized LET formula");
+    let engine = Engine::evaluate(resized.workbook(), CalculationOptions::default());
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 2)),
+        Some(&vec![
+            (0, 1, 1),
+            (0, 1, 3),
+            (0, 2, 1),
+            (0, 2, 3),
+            (0, 3, 1),
+            (0, 3, 3),
+        ]),
+        "SUMIF must resize a reference-valued LET binding to the criteria shape",
     );
 }
 
@@ -173,8 +267,9 @@ fn three_d_dependencies_connect_intermediate_array_owners() {
 
 fn has_unresolved_dynamic_dependency(engine: &Engine<'_>, cell: (usize, u32, u32)) -> bool {
     let expr = engine.parsed_expr(cell).expect("parsed test formula");
+    let budget = EvaluationBudget::default();
     engine.expr_has_unresolved_dynamic_dependency(
-        EvalContext::for_cell(cell),
+        EvalContext::for_evaluation(cell, &budget),
         expr,
         &mut BTreeSet::new(),
         &mut Vec::new(),
@@ -184,8 +279,9 @@ fn has_unresolved_dynamic_dependency(engine: &Engine<'_>, cell: (usize, u32, u32
 fn collect_reference_selection_inputs(engine: &Engine<'_>, cell: (usize, u32, u32)) -> Vec<Rect> {
     let expr = engine.parsed_expr(cell).expect("parsed test formula");
     let mut output = Vec::new();
+    let budget = EvaluationBudget::default();
     engine.collect_reference_selection_inputs(
-        EvalContext::for_cell(cell),
+        EvalContext::for_evaluation(cell, &budget),
         expr,
         &mut BTreeSet::new(),
         &mut Vec::new(),

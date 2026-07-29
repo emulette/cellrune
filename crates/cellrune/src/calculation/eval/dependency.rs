@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Engine, EvalContext};
+use super::{Engine, EvalContext, EvaluationBudget};
 use crate::CellContent;
 use crate::calculation::ast::Expr;
-use crate::calculation::functions::normalize_name;
+use crate::calculation::functions::{normalize_name, with_let_scope};
 use crate::calculation::graph::DependencyGraph;
-use crate::calculation::lambda::{is_lambda_local, walk_lambda_scope};
+use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan};
 
 impl Engine<'_> {
@@ -35,8 +35,9 @@ impl Engine<'_> {
                 )
             })
         }) || self.asts.iter().any(|(cell, expr)| {
+            let budget = EvaluationBudget::default();
             self.expr_has_unresolved_dynamic_dependency(
-                EvalContext::for_cell(*cell),
+                EvalContext::for_evaluation(*cell, &budget),
                 expr,
                 &mut BTreeSet::new(),
                 &mut Vec::new(),
@@ -57,8 +58,9 @@ impl Engine<'_> {
                 )
             })
         }) || self.asts.iter().any(|(cell, expr)| {
+            let budget = EvaluationBudget::default();
             self.expr_contains_dynamic_reference_function(
-                EvalContext::for_cell(*cell),
+                EvalContext::for_evaluation(*cell, &budget),
                 expr,
                 &mut BTreeSet::new(),
                 &mut Vec::new(),
@@ -70,8 +72,9 @@ impl Engine<'_> {
         let mut result = BTreeMap::new();
         for (cell, expr) in &self.asts {
             let mut rects = Vec::new();
+            let budget = EvaluationBudget::default();
             self.collect_dependency_rects(
-                EvalContext::for_cell(*cell),
+                EvalContext::for_evaluation(*cell, &budget),
                 expr,
                 &mut BTreeSet::new(),
                 &mut Vec::new(),
@@ -94,12 +97,26 @@ impl Engine<'_> {
         match expr {
             Expr::Call { name, args } => {
                 let normalized = normalize_name(name);
+                if normalized == "LET" {
+                    let mut found = false;
+                    let result =
+                        with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
+                            found |= engine.expr_has_unresolved_dynamic_dependency(
+                                scoped,
+                                arg,
+                                names,
+                                local_names,
+                            );
+                            final_arg.then_some(())
+                        });
+                    return found || result.is_err();
+                }
                 let dynamic = matches!(normalized.as_str(), "OFFSET" | "INDIRECT");
                 if dynamic && self.resolve_dynamic_rect(context, name, args).is_err() {
                     return true;
                 }
                 let mut found = false;
-                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                if walk_local_scope(name, args, local_names, |arg, scope| {
                     found |=
                         self.expr_has_unresolved_dynamic_dependency(context, arg, names, scope);
                 }) {
@@ -110,10 +127,10 @@ impl Engine<'_> {
                 })
             }
             Expr::Name(name) => {
-                if is_lambda_local(name, local_names) {
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return false;
                 }
-                let key = name.to_ascii_lowercase();
+                let key = name.to_lowercase();
                 names.insert(key)
                     && self
                         .resolve_name_expr(context.sheet(), name)
@@ -187,8 +204,9 @@ impl Engine<'_> {
                 continue;
             }
             let mut rects = Vec::new();
+            let budget = EvaluationBudget::default();
             self.collect_dependency_rects(
-                EvalContext::for_cell(*cell),
+                EvalContext::for_evaluation(*cell, &budget),
                 expr,
                 &mut BTreeSet::new(),
                 &mut Vec::new(),
@@ -271,10 +289,10 @@ impl Engine<'_> {
                 self.collect_dependency_rects(context, end, names, local_names, output);
             }
             Expr::Name(name) => {
-                if is_lambda_local(name, local_names) {
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return;
                 }
-                let key = name.to_ascii_lowercase();
+                let key = name.to_lowercase();
                 if names.insert(key)
                     && let Some(named) = self.resolve_name_expr(context.sheet(), name)
                 {
@@ -305,6 +323,20 @@ impl Engine<'_> {
             }
             Expr::Call { name, args } => {
                 let normalized = normalize_name(name);
+                if normalized == "LET" {
+                    let _ =
+                        with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
+                            engine.collect_dependency_rects(
+                                scoped,
+                                arg,
+                                names,
+                                local_names,
+                                output,
+                            );
+                            final_arg.then_some(())
+                        });
+                    return;
+                }
                 if matches!(normalized.as_str(), "SUMIF" | "AVERAGEIF")
                     && args.len() == 3
                     && let (Ok(criteria_range), Ok(value_anchor)) = (
@@ -321,7 +353,7 @@ impl Engine<'_> {
                 {
                     output.push(RectSpan::single(rect));
                 }
-                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                if walk_local_scope(name, args, local_names, |arg, scope| {
                     self.collect_dependency_rects(context, arg, names, scope, output);
                 }) {
                     return;
@@ -363,10 +395,10 @@ impl Engine<'_> {
                 self.collect_reference_selection_inputs(context, end, names, local_names, output);
             }
             Expr::Name(name) => {
-                if is_lambda_local(name, local_names) {
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return;
                 }
-                let key = name.to_ascii_lowercase();
+                let key = name.to_lowercase();
                 if names.insert(key)
                     && let Some(named) = self.resolve_name_expr(context.sheet(), name)
                 {
@@ -380,7 +412,31 @@ impl Engine<'_> {
                 }
             }
             Expr::Call { name, args } => {
-                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                if normalize_name(name) == "LET" {
+                    let _ =
+                        with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
+                            if final_arg {
+                                engine.collect_reference_selection_inputs(
+                                    scoped,
+                                    arg,
+                                    names,
+                                    local_names,
+                                    output,
+                                );
+                            } else {
+                                engine.collect_dependency_rects(
+                                    scoped,
+                                    arg,
+                                    names,
+                                    local_names,
+                                    output,
+                                );
+                            }
+                            final_arg.then_some(())
+                        });
+                    return;
+                }
+                if walk_local_scope(name, args, local_names, |arg, scope| {
                     self.collect_dependency_rects(context, arg, names, scope, output);
                 }) {
                     return;
@@ -415,7 +471,7 @@ impl Engine<'_> {
                     return true;
                 }
                 let mut found = false;
-                if walk_lambda_scope(name, args, local_names, |arg, scope| {
+                if walk_local_scope(name, args, local_names, |arg, scope| {
                     found |=
                         self.expr_contains_dynamic_reference_function(context, arg, names, scope);
                 }) {
@@ -426,10 +482,10 @@ impl Engine<'_> {
                 })
             }
             Expr::Name(name) => {
-                if is_lambda_local(name, local_names) {
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return false;
                 }
-                let key = name.to_ascii_lowercase();
+                let key = name.to_lowercase();
                 names.insert(key)
                     && self
                         .resolve_name_expr(context.sheet(), name)

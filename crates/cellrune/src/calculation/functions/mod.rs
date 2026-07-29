@@ -2,6 +2,7 @@ use super::ast::Expr;
 use super::eval::{Engine, EvalContext};
 use super::operators::element_at;
 use super::runtime::Array;
+use super::scope::ArrayEvaluation;
 use super::sheet_span::{SheetSpanPolicy, function_policy};
 use super::value::{ErrorKind, Value};
 
@@ -28,6 +29,8 @@ mod text;
 mod text_additional;
 mod trigonometry;
 mod util;
+
+pub(super) use dynamic::{let_reference, let_scope_value, map_scalar_with_trace, with_let_scope};
 
 pub(super) fn call_function(
     engine: &Engine<'_>,
@@ -86,11 +89,14 @@ fn direct_sheet_span_error(
     if matches!(policy, SheetSpanPolicy::CollectAcrossSheets) {
         return None;
     }
-    let has_multi_sheet_argument = args.iter().any(|arg| {
-        engine
-            .resolve_rect_span_expr(context, arg)
-            .is_ok_and(|span| span.is_sheet_range())
-    });
+    let has_multi_sheet_argument = args
+        .iter()
+        .filter(|arg| !is_let_expression(arg))
+        .any(|arg| {
+            engine
+                .resolve_rect_span_expr(context, arg)
+                .is_ok_and(|span| span.is_sheet_range())
+        });
     if !has_multi_sheet_argument {
         return None;
     }
@@ -103,30 +109,43 @@ fn direct_sheet_span_error(
     })
 }
 
+fn is_let_expression(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => is_let_expression(inner),
+        Expr::Call { name, .. } => normalize_name(name) == "LET",
+        _ => false,
+    }
+}
+
 pub(super) fn call_function_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     name: &str,
     args: &[Expr],
-) -> Option<Result<Array, ErrorKind>> {
+) -> Option<Result<ArrayEvaluation, ErrorKind>> {
     let normalized = normalize_name(name);
     let specialized = match normalized.as_str() {
-        "MAP" => Some(dynamic::map_array(engine, context, args)),
+        "MAP" => Some(dynamic::map_array_with_trace(engine, context, args)),
         "CHOOSECOLS" | "CHOOSEROWS" | "DROP" | "FILTER" | "HSTACK" | "MMULT" | "SEQUENCE"
-        | "SORT" | "TAKE" | "TRANSPOSE" | "UNIQUE" | "VSTACK" => {
-            Some(array::call_array(engine, context, &normalized, args))
-        }
+        | "SORT" | "TAKE" | "TRANSPOSE" | "UNIQUE" | "VSTACK" => Some(
+            array::call_array(engine, context, &normalized, args).map(ArrayEvaluation::untracked),
+        ),
         "ERROR.TYPE" | "ISBLANK" | "ISERR" | "ISERROR" | "ISEVEN" | "ISLOGICAL" | "ISNA"
         | "ISNONTEXT" | "ISNUMBER" | "ISODD" | "ISTEXT" | "N" | "T" | "TYPE" => {
             information::call_array(engine, context, &normalized, args)
+                .map(|result| result.map(ArrayEvaluation::untracked))
         }
-        _ => legacy::call_legacy_array(engine, context, &normalized, args),
+        _ => legacy::call_legacy_array(engine, context, &normalized, args)
+            .map(|result| result.map(ArrayEvaluation::untracked)),
     };
     if specialized.is_some() {
         return specialized;
     }
     if ELEMENTWISE_ARRAY_FUNCTIONS.contains(&normalized.as_str()) {
-        return Some(call_elementwise_array(engine, context, &normalized, args));
+        return Some(
+            call_elementwise_array(engine, context, &normalized, args)
+                .map(ArrayEvaluation::untracked),
+        );
     }
     None
 }
@@ -454,7 +473,7 @@ const DATE_ADDITIONAL_FUNCTIONS: &[&str] = &[
     "TIME",
     "WEEKNUM",
 ];
-const DYNAMIC_FUNCTIONS: &[&str] = &["MAP"];
+const DYNAMIC_FUNCTIONS: &[&str] = &["LET", "MAP"];
 const ARRAY_FUNCTIONS: &[&str] = &[
     "CHOOSECOLS",
     "CHOOSEROWS",
@@ -599,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_278_unique_excel_facing_names() {
+    fn coverage_registry_has_279_unique_excel_facing_names() {
         let kernels: BTreeSet<&str> = FUNCTION_GROUPS
             .iter()
             .flat_map(|(_, names)| names.iter().copied())
@@ -608,7 +627,7 @@ mod tests {
             FUNCTION_GROUPS.iter().map(|(_, names)| names.len()).sum();
         assert_eq!(kernels.len(), registered_kernel_count);
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 266);
+        assert_eq!(kernels.len(), 267);
 
         let aliases: BTreeSet<&str> = LEGACY_ALIASES.iter().map(|(alias, _)| *alias).collect();
         assert_eq!(aliases.len(), LEGACY_ALIASES.len());
@@ -620,7 +639,7 @@ mod tests {
         );
 
         let official_kernels = kernels.len() - 1;
-        assert_eq!(official_kernels + aliases.len(), 278);
+        assert_eq!(official_kernels + aliases.len(), 279);
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());

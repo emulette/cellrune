@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.6 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.7 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.6
+cargo add cellrune@0.1.7
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.6"
+cellrune = "0.1.7"
 ```
 
 ## Features
@@ -193,12 +193,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.6 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.7 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.6"
-npm install "@cellrune/node@0.1.6"
+python -m pip install "cellrune==0.1.7"
+npm install "@cellrune/node@0.1.7"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -335,8 +335,8 @@ Excel's behavior and can be set to `Ieee754` and `ExtendedSearch` for what 0.1.2
 ## Verification
 
 The `conformance/` tree carries the binary workbooks Excel actually calculated, together with
-their hashes, host metadata, and reviewed expectations. They are audited explicitly during local
-development:
+their host metadata and reviewed expectations. The standard `cargo test` suite audits them. To run
+only that audit:
 
 ```bash
 cargo run \
@@ -345,11 +345,11 @@ cargo run \
   --locked
 ```
 
-This audit is deliberately separate from `cargo test`, CI, and publication. It covers 1,295
+This is a normal regression test, not a separate CI step or release-only gate. It covers 1,295
 formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
-matrix fixture, and 672 selected results from the CellRune-authored formula oracle. Every selected
-case is classified; missing or extra classifications fail locally. The older POI formula cache
-currently has 1,290 matches and 5 documented divergences, enforced in both directions.
+matrix fixture, and 672 selected results from the CellRune-authored oracle. Excel Online and Mac
+Excel 2021 are recorded independently; a missing host value is simply `host_unsupported`. The
+older POI formula cache currently has 1,290 matches and 5 documented divergences.
 
 Two additional corpus tests are compiled but marked `#[ignore]` because their third-party inputs
 are not distributed in this repository. A developer who has supplied those inputs can run them

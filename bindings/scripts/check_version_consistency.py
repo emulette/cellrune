@@ -45,8 +45,12 @@ PROSE_VERSION_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("README.md", r'pip install "cellrune==([^"]+)"', "pip install version"),
     ("README.md", r'npm install "@cellrune/node@([^"]+)"', "npm install version"),
     ("bindings/node/README.md", r"npm install @cellrune/node@([^\s`]+)", "npm install version"),
-    ("llms.txt", r"The current public version is ([0-9][^\s,]*)", "public version"),
-    ("llms.txt", r"Version ([0-9][^\s]*) contains", "catalog version"),
+    (
+        "llms.txt",
+        r"The version described by this file is\s+([0-9][^\s,]*)",
+        "reference version",
+    ),
+    ("llms.txt", r"The ([0-9][^\s]*) catalog contains", "catalog version"),
     (
         "THIRD_PARTY_LICENSES.md",
         r"for CellRune (\d+\.\d+\.\d+)\.",

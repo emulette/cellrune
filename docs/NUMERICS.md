@@ -9,18 +9,25 @@ yet measured against that reference are listed separately.
 ## Reference oracle
 
 Compatibility statements are made against committed, named saved-cache baselines, not against
-"Excel" in general.
+"Excel" in general. CellRune records Excel Online and Mac Excel 2021 workbooks independently.
+Excel Online is the primary compatibility reference; Mac Excel 2021 is an additional reference.
 
 | Workbook source | Excel cache producer | Locale | Recorded |
 | --- | --- | --- | --- |
-| CellRune formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | not recorded; `1900` date system | 2026-07-27 |
+| CellRune 0.1.7 formula oracle | Microsoft Excel Online, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-29 |
+| CellRune 0.1.7 formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-29 |
 | Apache POI formula fixture | Microsoft Excel 2013, AppVersion `15.0300` | en-US currency formatting observed; `1900` date system | 2016-02-15 |
 | Apache POI matrix fixture | Microsoft Excel 2016, AppVersion `16.0300` | not recorded; `1900` date system | 2017-07-27 |
 
 Excel's own results travel inside every workbook it saves, as the cached `<v>` value of each
 formula cell. That makes any Excel-authored workbook both a test input and its own ground truth.
-The binary workbooks, hashes, host metadata, and reviewed classifications are committed under
+The saved workbooks, host metadata, and reviewed classifications are committed under
 `conformance/`.
+
+The 0.1.7 suite records `excel-online-free-en-ui-ko-kr` and
+`excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`. A missing saved value is
+`host_unsupported` for that workbook. The case remains active even when every recorded workbook
+lacks a value, so later 0.1.7 patch releases can reuse the same setup.
 
 ## Verified
 
@@ -90,6 +97,13 @@ aggregate accumulators carry an exact trace of the parsed decimal inputs. `SUMPR
 before it adds, and the product of two exact decimals is itself an exact decimal, so its terms stay
 traceable. `NPV` divides before it adds, and carries the same proof as an exact rational trace
 through discounting.
+
+LET and MAP scope transport does not choose between `ExcelNearZero` and `Ieee754`. A scope entry
+preserves the value together with its optional decimal trace across scalar, array, calculated-cell,
+and cell/range-reference bindings; the arithmetic operator still consults the workbook's selected
+mode when it consumes that value. Consequently `LET(x,0.1+0.2,x-0.3)` is identical to its direct
+equivalent in each mode: zero under `ExcelNearZero`, and the raw IEEE-754 residue under `Ieee754`.
+The scope representation prevents trace loss; it does not impose Excel arithmetic semantics.
 
 A result is replaced with zero only when both of these conditions hold:
 
@@ -172,19 +186,25 @@ way: they skip blank cells, so a wider clamp cannot change their result.
 
 ### Measured agreement
 
-The explicit local audit currently records:
+The 0.1.7 audit records:
 
 | Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 158 | 48 | 60 | 0 | 0 |
-| CellRune formula oracle | 672 | 392 | 10 | 242 | 26 | 2 |
+| CellRune formula oracle — Excel Online | 672 | 404 | 11 | 255 | 2 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 672 | 401 | 10 | 239 | 22 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
 the Excel value and the current CellRune value with an explanatory note. The other states make
 unsupported or non-comparable cases explicit rather than dropping them from the denominator.
 These counts are an audit inventory, not a composite score or release threshold.
+
+The 0.1.7 workbook has 703 primary cases, 672 active cases, and 897 formula cells. Excel Online
+and Mac Excel 2021 both saved the workbook without losing formulas. A host that stores no usable
+value for a case is recorded as `host_unsupported`; this includes both PIVOTBY probes in both
+workbooks. Missing host values do not require regenerating the workbook or block publication.
 
 ## Unverified
 

@@ -1,0 +1,29 @@
+{
+  "schema": "cellrune_excel_oracle_suite_v1",
+  "suite_id": "cellrune-excel-host-matrix-v1",
+  "case_manifest": "case-manifest.json",
+  "profiles": [
+    {
+      "profile_id": "excel-online-free-en-ui-ko-kr",
+      "directory": "online",
+      "application": "Microsoft Excel Online",
+      "os": "web",
+      "product_tier": "free",
+      "locale": "en-US UI; ko-KR regional format",
+      "add_ins": {
+        "euro_currency_tools": false
+      }
+    },
+    {
+      "profile_id": "excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools",
+      "directory": "desktop-2021",
+      "application": "Microsoft Macintosh Excel",
+      "os": "macOS",
+      "product_tier": "Office Home & Student 2021",
+      "locale": "en-US UI; ko-KR regional format",
+      "add_ins": {
+        "euro_currency_tools": false
+      }
+    }
+  ]
+}

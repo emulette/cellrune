@@ -1,0 +1,45 @@
+{
+  "schema": "cellrune_excel_oracle_metadata_v1",
+  "workbook": "formula-oracle.xlsx",
+  "formula_cells": 897,
+  "date_system": "excel1900",
+  "iterative_calculation": false,
+  "case_selection": {
+    "mode": "listed_sheets_column",
+    "sheets": [
+      "Arithmetic",
+      "Aggregates",
+      "ArraysCSE",
+      "ArraysDynamic",
+      "Intersection",
+      "Financial",
+      "Lookup",
+      "TextDate",
+      "Errors",
+      "Unsupported"
+    ],
+    "column": 6
+  },
+  "source": {
+    "name": "CellRune deterministic Excel formula oracle",
+    "license": "Apache-2.0",
+    "url": "https://github.com/emulette/cellrune",
+    "revision": "0.1.7"
+  },
+  "generator": {
+    "name": "CellRune deterministic Excel oracle generator",
+    "revision": "0.1.7"
+  },
+  "oracle": {
+    "application": "Microsoft Excel Online",
+    "version": "AppVersion 16.0300",
+    "channel": null,
+    "os": "web",
+    "locale": "en-US UI; ko-KR regional format",
+    "saved_at": "2026-07-29T07:22:23Z",
+    "suite_id": "cellrune-excel-host-matrix-v1",
+    "host_profile_id": "excel-online-free-en-ui-ko-kr",
+    "product_tier": "free",
+    "host_build": "AppVersion 16.0300; rupBuild 30317"
+  }
+}

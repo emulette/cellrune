@@ -1,4 +1,4 @@
-//! Explicit local audit for committed Excel-saved workbook oracles.
+//! Audit and reporting tool for committed Excel-saved workbook oracles.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -7,38 +7,49 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CellContent, ReadOptions, SavedResult,
-    WorkbookSnapshot, calculate_workbook, read_xlsx_path,
+    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellValue, ReadOptions,
+    SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
 };
 use cellrune_integration_tests::oracle::{
-    Classification, Comparator, Expectation, Expectations, METADATA_SCHEMA, Metadata,
-    ObservedValue, values_match,
+    CASE_MANIFEST_SCHEMA, CacheStatus, CaseManifest, Classification, Comparator, Expectation,
+    Expectations, HostProfile, METADATA_SCHEMA, Metadata, OBSERVATIONS_SCHEMA, Observations,
+    ObservedCase, ObservedValue, OracleMetadata, OracleSuite, SUITE_SCHEMA, values_match,
 };
-use sha2::{Digest, Sha256};
 
+#[path = "check_excel_oracle/raw.rs"]
+mod raw;
 #[path = "check_excel_oracle/report.rs"]
 mod report;
+#[path = "check_excel_oracle/rewrite.rs"]
+mod rewrite;
 #[path = "check_excel_oracle/selection.rs"]
 mod selection;
+#[path = "check_excel_oracle/shared.rs"]
+mod shared;
 
-const USAGE: &str = "usage: check_excel_oracle [--report <oracle-directory>]";
+const USAGE: &str = "usage: check_excel_oracle [--report <oracle-directory> [output.json]]";
 const METADATA_FILE: &str = "metadata.json";
 const EXPECTATIONS_FILE: &str = "expectations.json";
+const SUITE_FILE: &str = "suite.json";
+const OBSERVATIONS_FILE: &str = "observations.json";
 const MESSAGE_NO_ORACLES: &str = "no oracle metadata files found";
 const MESSAGE_EXPECTATION_KEYS: &str =
     "expectation keys must exactly equal the selected workbook cases";
 const MESSAGE_UNCLASSIFIED: &str = "unclassified oracle case";
-const MESSAGE_NOTE_REQUIRED: &str = "reviewed non-match classification requires a note";
 const MESSAGE_WORKBOOK_FILENAME: &str = "workbook must be a filename within the oracle directory";
-const MESSAGE_SHA_FORMAT: &str = "SHA-256 must contain exactly 64 hexadecimal digits";
 const MESSAGE_ITERATIVE_CALCULATION: &str =
     "workbook iterative-calculation setting does not match metadata";
+const MESSAGE_SUITE_REQUIRED: &str =
+    "suite.json is required when metadata declares a suite or host-profile identity";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
     let result = match arguments.as_slice() {
         [] => audit_all(&oracle_root()),
-        [flag, directory] if flag == "--report" => report::report(Path::new(directory)),
+        [flag, directory] if flag == "--report" => report::report(Path::new(directory), None),
+        [flag, directory, output] if flag == "--report" => {
+            report::report(Path::new(directory), Some(Path::new(output)))
+        }
         _ => Err(vec![USAGE.to_owned()]),
     };
     match result {
@@ -57,14 +68,26 @@ fn oracle_root() -> PathBuf {
 }
 
 fn audit_all(root: &Path) -> Result<(), Vec<String>> {
+    let mut suite_files = Vec::new();
+    collect_named_files(root, SUITE_FILE, &mut suite_files)?;
+    suite_files.sort();
+    let mut managed_metadata = BTreeSet::new();
+    let mut problems = Vec::new();
+    for suite_path in suite_files {
+        audit_suite(&suite_path, &mut managed_metadata, &mut problems);
+    }
+
     let mut metadata_files = Vec::new();
     collect_metadata(root, &mut metadata_files)?;
     metadata_files.sort();
     if metadata_files.is_empty() {
-        return Err(vec![format!("{}: {MESSAGE_NO_ORACLES}", root.display())]);
+        problems.push(format!("{}: {MESSAGE_NO_ORACLES}", root.display()));
+        return Err(problems);
     }
-    let mut problems = Vec::new();
     for metadata_path in metadata_files {
+        if managed_metadata.contains(&metadata_path) {
+            continue;
+        }
         match load_oracle(
             metadata_path
                 .parent()
@@ -94,7 +117,11 @@ fn audit_all(root: &Path) -> Result<(), Vec<String>> {
     }
 }
 
-fn collect_metadata(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), Vec<String>> {
+fn collect_named_files(
+    directory: &Path,
+    file_name: &str,
+    output: &mut Vec<PathBuf>,
+) -> Result<(), Vec<String>> {
     let entries = fs::read_dir(directory)
         .map_err(|error| vec![format!("{}: {error}", directory.display())])?;
     for entry in entries {
@@ -102,9 +129,167 @@ fn collect_metadata(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), V
             .map_err(|error| vec![format!("{}: {error}", directory.display())])?
             .path();
         if path.is_dir() {
-            collect_metadata(&path, output)?;
-        } else if path.file_name().is_some_and(|name| name == METADATA_FILE) {
+            collect_named_files(&path, file_name, output)?;
+        } else if path.file_name().is_some_and(|name| name == file_name) {
             output.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_metadata(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), Vec<String>> {
+    collect_named_files(directory, METADATA_FILE, output)
+}
+
+fn audit_suite(
+    suite_path: &Path,
+    managed_metadata: &mut BTreeSet<PathBuf>,
+    problems: &mut Vec<String>,
+) {
+    let suite_directory = suite_path.parent().expect("suite path always has a parent");
+    let suite: OracleSuite = match read_json(suite_path) {
+        Ok(suite) => suite,
+        Err(error) => {
+            problems.push(error);
+            return;
+        }
+    };
+    if let Err(error) = validate_suite_contract(&suite) {
+        problems.push(format!("{}: {error}", suite_path.display()));
+        return;
+    }
+    if !is_filename(&suite.case_manifest) {
+        problems.push(format!(
+            "{}: case manifest must be a filename",
+            suite_path.display()
+        ));
+        return;
+    }
+    let manifest_path = suite_directory.join(&suite.case_manifest);
+    let manifest: CaseManifest = match read_json(&manifest_path) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            problems.push(error);
+            return;
+        }
+    };
+    if let Err(error) = validate_manifest_contract(&suite, &manifest) {
+        problems.push(format!("{}: {error}", manifest_path.display()));
+        return;
+    }
+
+    for profile in &suite.profiles {
+        let directory = suite_directory.join(&profile.directory);
+        let metadata_path = directory.join(METADATA_FILE);
+        managed_metadata.insert(metadata_path.clone());
+        if !metadata_path.is_file() {
+            problems.push(format!("{}: file is required", metadata_path.display()));
+            continue;
+        }
+        match load_oracle(&directory, true) {
+            Ok(loaded) => {
+                let counts = audit_loaded(&loaded, problems);
+                println!(
+                    "{}: cases={} match={} divergent={} not_implemented={} host_unsupported={} excluded={}",
+                    loaded.directory.display(),
+                    counts.total,
+                    counts.matched,
+                    counts.divergent,
+                    counts.not_implemented,
+                    counts.host_unsupported,
+                    counts.excluded,
+                );
+            }
+            Err(error) => problems.push(error),
+        }
+    }
+}
+
+fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
+    if suite.schema != SUITE_SCHEMA || suite.suite_id.is_empty() {
+        return Err(format!("unsupported suite schema {}", suite.schema));
+    }
+    if !is_filename(&suite.case_manifest) {
+        return Err("suite case manifest must be a filename".to_owned());
+    }
+    let mut profile_ids = BTreeSet::new();
+    let mut directories = BTreeSet::new();
+    for profile in &suite.profiles {
+        if profile.profile_id.is_empty() || !profile_ids.insert(profile.profile_id.as_str()) {
+            return Err(format!("duplicate host profile {}", profile.profile_id));
+        }
+        if !is_filename(&profile.directory) || !directories.insert(profile.directory.as_str()) {
+            return Err(format!(
+                "duplicate or invalid host profile directory {}",
+                profile.directory
+            ));
+        }
+        if profile.application.is_empty() {
+            return Err(format!("incomplete host profile {}", profile.profile_id));
+        }
+    }
+    if suite.profiles.is_empty() {
+        return Err("suite must list at least one workbook profile".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_manifest_contract(suite: &OracleSuite, manifest: &CaseManifest) -> Result<(), String> {
+    if manifest.schema != CASE_MANIFEST_SCHEMA || manifest.suite_id != suite.suite_id {
+        return Err("case manifest identity does not match suite".to_owned());
+    }
+    let profile_ids = suite
+        .profiles
+        .iter()
+        .map(|profile| profile.profile_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut keys = BTreeSet::new();
+    let mut catalog_addresses = BTreeSet::new();
+    let mut formula_addresses = BTreeSet::new();
+    for oracle_case in &manifest.cases {
+        if oracle_case.case_key.is_empty() || !keys.insert(oracle_case.case_key.as_str()) {
+            return Err(format!(
+                "duplicate or empty stable case key {}",
+                oracle_case.case_key
+            ));
+        }
+        if oracle_case.function.is_empty()
+            || oracle_case.category.is_empty()
+            || oracle_case.scenario.is_empty()
+            || oracle_case.seed_classification.is_empty()
+            || !catalog_addresses.insert(oracle_case.catalog_address.as_str())
+        {
+            return Err(format!(
+                "incomplete or duplicate manifest record {}",
+                oracle_case.case_key
+            ));
+        }
+        if oracle_case.authored_formula.is_empty() || oracle_case.storage_formula.is_empty() {
+            return Err(format!("empty formula in {}", oracle_case.case_key));
+        }
+        rewrite::validate_declarations(&oracle_case.allowed_host_rewrites, &profile_ids)
+            .map_err(|error| format!("{}: {error}", oracle_case.case_key))?;
+        match (oracle_case.active, oracle_case.formula_address.as_deref()) {
+            (true, Some(address))
+                if oracle_case.exclusion.is_none() && formula_addresses.insert(address) => {}
+            (false, None)
+                if oracle_case
+                    .inactive_reason
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty())
+                    && oracle_case.exclusion.is_some() => {}
+            _ => {
+                return Err(format!(
+                    "active/formula-address invariant failed for {}",
+                    oracle_case.case_key
+                ));
+            }
+        }
+        if oracle_case.exclusion.is_some() && oracle_case.active {
+            return Err(format!(
+                "excluded case is unexpectedly active: {}",
+                oracle_case.case_key
+            ));
         }
     }
     Ok(())
@@ -112,10 +297,10 @@ fn collect_metadata(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), V
 
 struct LoadedOracle {
     directory: PathBuf,
-    metadata: Metadata,
     expectations: Expectations,
     workbook: WorkbookSnapshot,
     selected: BTreeMap<String, CalculationCellId>,
+    observations: Option<BTreeMap<String, ObservedCase>>,
     calculation: cellrune::CalculationSnapshot,
 }
 
@@ -129,6 +314,7 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
             metadata.schema
         ));
     }
+    let suite_path = resolve_suite_path(directory, &metadata.oracle)?;
     if metadata.workbook.is_empty()
         || metadata.workbook == "."
         || metadata.workbook == ".."
@@ -141,7 +327,7 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         ));
     }
     let workbook_path = directory.join(&metadata.workbook);
-    verify_sha256(&workbook_path, &metadata.sha256)?;
+    raw::verify_package_invariants(&workbook_path)?;
     let workbook = read_xlsx_path(&workbook_path, ReadOptions::default())
         .map_err(|error| format!("{}: {error}", workbook_path.display()))?;
     let formula_cells = workbook
@@ -175,7 +361,21 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         metadata.iterative_calculation,
         workbook.calculation_hints().iterative_calculation(),
     )?;
-    let selected = selection::select_cases(&workbook, &metadata.case_selection)?;
+    let selected_by_address = selection::select_cases(&workbook, &metadata.case_selection)?;
+    let (selected, observations) = match suite_path {
+        Some(path) => {
+            let binding = load_suite_binding(
+                directory,
+                &path,
+                &metadata,
+                &workbook_path,
+                &workbook,
+                selected_by_address,
+            )?;
+            (binding.selected, Some(binding.observations))
+        }
+        None => (selected_by_address, None),
+    };
     let expectations_path = directory.join(EXPECTATIONS_FILE);
     let expectations = if expectations_path.exists() {
         read_json(&expectations_path)?
@@ -187,12 +387,314 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
     let calculation = calculate_workbook(&workbook, cellrune::CalculationOptions::default());
     Ok(LoadedOracle {
         directory: directory.to_path_buf(),
-        metadata,
         expectations,
         workbook,
         selected,
+        observations,
         calculation,
     })
+}
+
+fn resolve_suite_path(
+    directory: &Path,
+    oracle: &OracleMetadata,
+) -> Result<Option<PathBuf>, String> {
+    let suite_path = directory.parent().map(|parent| parent.join(SUITE_FILE));
+    if suite_path.as_ref().is_some_and(|path| path.is_file()) {
+        return Ok(suite_path);
+    }
+    if oracle.suite_id.is_some() || oracle.host_profile_id.is_some() {
+        return Err(format!(
+            "{}: {MESSAGE_SUITE_REQUIRED}",
+            directory.join(METADATA_FILE).display()
+        ));
+    }
+    Ok(None)
+}
+
+struct SuiteBinding {
+    selected: BTreeMap<String, CalculationCellId>,
+    observations: BTreeMap<String, ObservedCase>,
+}
+
+fn load_suite_binding(
+    directory: &Path,
+    suite_path: &Path,
+    metadata: &Metadata,
+    workbook_path: &Path,
+    workbook: &WorkbookSnapshot,
+    mut selected_by_address: BTreeMap<String, CalculationCellId>,
+) -> Result<SuiteBinding, String> {
+    let suite: OracleSuite = read_json(suite_path)?;
+    validate_suite_contract(&suite)
+        .map_err(|error| format!("{}: {error}", suite_path.display()))?;
+    let directory_name = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            format!(
+                "{}: oracle directory name is not UTF-8",
+                directory.display()
+            )
+        })?;
+    let profile = suite
+        .profiles
+        .iter()
+        .find(|profile| profile.directory == directory_name)
+        .ok_or_else(|| {
+            format!(
+                "{}: directory is not declared by suite {}",
+                directory.display(),
+                suite.suite_id
+            )
+        })?;
+    validate_profile_metadata(metadata, &suite, profile, directory)?;
+
+    let suite_directory = suite_path.parent().expect("suite path always has a parent");
+    if !is_filename(&suite.case_manifest) {
+        return Err(format!(
+            "{}: case manifest must be a filename",
+            suite_path.display()
+        ));
+    }
+    let manifest_path = suite_directory.join(&suite.case_manifest);
+    let manifest: CaseManifest = read_json(&manifest_path)?;
+    validate_manifest_contract(&suite, &manifest)
+        .map_err(|error| format!("{}: {error}", manifest_path.display()))?;
+
+    let observations_path = directory.join(OBSERVATIONS_FILE);
+    let observations: Observations = read_json(&observations_path)?;
+    validate_observation_header(&observations, &suite, profile, &observations_path)?;
+    let raw_cells = raw::read_formula_cells(workbook_path)?;
+    if raw_cells.len() != metadata.formula_cells {
+        return Err(format!(
+            "{}: raw formula cell count {} != metadata {}",
+            workbook_path.display(),
+            raw_cells.len(),
+            metadata.formula_cells
+        ));
+    }
+    for oracle_case in &manifest.cases {
+        verify_catalog_identity(
+            workbook,
+            &oracle_case.catalog_address,
+            &oracle_case.case_key,
+        )?;
+    }
+
+    let active_cases = manifest
+        .cases
+        .iter()
+        .filter(|oracle_case| oracle_case.active)
+        .map(|oracle_case| (oracle_case.case_key.as_str(), oracle_case))
+        .collect::<BTreeMap<_, _>>();
+    let mut observed_by_key = BTreeMap::new();
+    for observation in observations.cases {
+        if observed_by_key
+            .insert(observation.case_key.clone(), observation)
+            .is_some()
+        {
+            return Err(format!(
+                "{}: duplicate stable case observation",
+                observations_path.display()
+            ));
+        }
+    }
+    let active_keys = active_cases.keys().copied().collect::<BTreeSet<_>>();
+    let observed_keys = observed_by_key
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if observed_keys != active_keys {
+        return Err(format!(
+            "{}: observations do not exactly cover active manifest cases",
+            observations_path.display()
+        ));
+    }
+
+    let mut selected = BTreeMap::new();
+    for (case_key, oracle_case) in active_cases {
+        let formula_address = oracle_case
+            .formula_address
+            .as_deref()
+            .expect("validated active manifest case has a formula address");
+        let id = selected_by_address.remove(formula_address).ok_or_else(|| {
+            format!(
+                "{}: active manifest address is not selected: {formula_address}",
+                manifest_path.display()
+            )
+        })?;
+        let observation = observed_by_key
+            .get(case_key)
+            .expect("observations exactly cover active keys");
+        validate_observed_case(
+            observation,
+            oracle_case,
+            raw_cells.get(formula_address),
+            &observations_path,
+            &profile.profile_id,
+        )?;
+        selected.insert(case_key.to_owned(), id);
+    }
+    if !selected_by_address.is_empty() {
+        return Err(format!(
+            "{}: selected workbook formulas are absent from the active manifest: {:?}",
+            manifest_path.display(),
+            selected_by_address.keys().take(10).collect::<Vec<_>>()
+        ));
+    }
+    Ok(SuiteBinding {
+        selected,
+        observations: observed_by_key,
+    })
+}
+
+fn validate_profile_metadata(
+    metadata: &Metadata,
+    suite: &OracleSuite,
+    profile: &HostProfile,
+    directory: &Path,
+) -> Result<(), String> {
+    let oracle = &metadata.oracle;
+    let matches = oracle.suite_id.as_deref() == Some(suite.suite_id.as_str())
+        && oracle.host_profile_id.as_deref() == Some(profile.profile_id.as_str());
+    if !matches {
+        return Err(format!(
+            "{}: metadata host identity does not match suite profile {}",
+            directory.display(),
+            profile.profile_id
+        ));
+    }
+    Ok(())
+}
+
+fn validate_observation_header(
+    observations: &Observations,
+    suite: &OracleSuite,
+    profile: &HostProfile,
+    observations_path: &Path,
+) -> Result<(), String> {
+    if observations.schema != OBSERVATIONS_SCHEMA
+        || observations.suite_id != suite.suite_id
+        || observations.host_profile_id != profile.profile_id
+    {
+        return Err(format!(
+            "{}: observation identity does not match suite profile",
+            observations_path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_observed_case(
+    observation: &ObservedCase,
+    oracle_case: &cellrune_integration_tests::oracle::ManifestCase,
+    raw_cell: Option<&raw::RawFormulaCell>,
+    observations_path: &Path,
+    profile_id: &str,
+) -> Result<(), String> {
+    let context = format!("{}: {}", observations_path.display(), observation.case_key);
+    let expected_address = oracle_case
+        .formula_address
+        .as_deref()
+        .expect("active manifest case has a formula address");
+    if observation.address != expected_address {
+        return Err(format!(
+            "{context}: observation does not join the active manifest record"
+        ));
+    }
+    let raw_cell =
+        raw_cell.ok_or_else(|| format!("{context}: saved formula cell is absent from raw XLSX"))?;
+    let accepted_rewrites = rewrite::accepted_rewrites(
+        &oracle_case.storage_formula,
+        &raw_cell.formula,
+        &oracle_case.allowed_host_rewrites,
+        profile_id,
+    )
+    .map_err(|error| format!("{context}: {error}"))?;
+    if raw_cell.formula != observation.saved_formula
+        || raw_cell.value != observation.cache_value
+        || raw_cell.value_type != observation.cache_type
+        || raw_cell.vm_index != observation.rich_error.vm_index
+        || observation.formula_rewrites != accepted_rewrites
+    {
+        return Err(format!(
+            "{context}: observation does not exact-match raw XLSX formula/cache metadata"
+        ));
+    }
+    let expected_status = if raw_cell
+        .value
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        CacheStatus::Semantic
+    } else {
+        CacheStatus::MissingSemanticCache
+    };
+    if observation.cache_status != expected_status
+        || observation.cache_status == CacheStatus::Circular
+    {
+        return Err(format!(
+            "{context}: active-case cache status does not match the raw XLSX"
+        ));
+    }
+    let expected_rich = raw_cell.rich_error.is_some();
+    let expected_error = (raw_cell.value_type == "e")
+        .then(|| raw_cell.value.clone())
+        .flatten();
+    let raw_rich = raw_cell.rich_error.as_ref();
+    if observation.rich_error.present != expected_rich
+        || observation.rich_error.raw_error != expected_error
+        || observation.rich_error.record_index != raw_rich.map(|record| record.record_index)
+        || observation.rich_error.structure_index != raw_rich.map(|record| record.structure_index)
+        || observation.rich_error.error_type_code
+            != raw_rich.and_then(|record| record.error_type_code)
+        || observation.rich_error.resolved_error
+            != raw_rich.and_then(|record| record.resolved_error.clone())
+        || observation.rich_error.fallback_error
+            != raw_rich.and_then(|record| record.fallback_error.clone())
+    {
+        return Err(format!(
+            "{context}: rich-error observation does not match raw XLSX metadata"
+        ));
+    }
+    Ok(())
+}
+
+fn verify_catalog_identity(
+    workbook: &WorkbookSnapshot,
+    catalog_address: &str,
+    expected_key: &str,
+) -> Result<(), String> {
+    let (sheet_name, address) = split_qualified_address(catalog_address)?;
+    let sheet = workbook
+        .sheet_by_name(sheet_name)
+        .ok_or_else(|| format!("{catalog_address}: unknown catalog sheet"))?;
+    let address = CellAddress::from_a1(address)
+        .map_err(|error| format!("{catalog_address}: invalid catalog address: {error:?}"))?;
+    let actual = sheet.cell(address).and_then(|cell| match cell.content() {
+        CellContent::Literal(CellValue::Text(value)) => Some(value.as_str()),
+        _ => None,
+    });
+    if actual == Some(expected_key) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{catalog_address}: stable case key is {:?}, expected {expected_key}",
+            actual
+        ))
+    }
+}
+
+fn split_qualified_address(value: &str) -> Result<(&str, &str), String> {
+    let (sheet, address) = value
+        .rsplit_once('!')
+        .ok_or_else(|| format!("{value}: expected Sheet!A1 address"))?;
+    if sheet.is_empty() || address.is_empty() {
+        Err(format!("{value}: expected Sheet!A1 address"))
+    } else {
+        Ok((sheet, address))
+    }
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
@@ -200,23 +702,12 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
     serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))
 }
 
-fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
-    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("{}: {MESSAGE_SHA_FORMAT}", path.display()));
-    }
-    let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let actual = Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "{}: SHA-256 {actual} != metadata {expected}",
-            path.display()
-        ))
-    }
+fn is_filename(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains('/')
+        && !value.contains('\\')
 }
 
 fn verify_iterative_calculation(
@@ -267,7 +758,38 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
         let Some(id) = loaded.selected.get(key).copied() else {
             continue;
         };
-        audit_saved_cache(&context, loaded, id, expectation, problems);
+        if let Some(observation) = loaded
+            .observations
+            .as_ref()
+            .and_then(|observations| observations.get(key))
+        {
+            if observation.cache_status == CacheStatus::Circular {
+                problems.push(format!(
+                    "{context}: active manifest case cannot use a circular cache"
+                ));
+            } else if is_host_unsupported_observation(observation)
+                && expectation.classification != Classification::HostUnsupported
+            {
+                problems.push(format!(
+                    "{context}: missing cache or resolved rich #NAME? must be reviewed as host_unsupported"
+                ));
+            } else if !is_host_unsupported_observation(observation)
+                && expectation.classification == Classification::HostUnsupported
+            {
+                problems.push(format!(
+                    "{context}: host_unsupported is stale because this host now has a semantic result"
+                ));
+            }
+            if matches!(
+                expectation.classification,
+                Classification::Excluded | Classification::Unreadable
+            ) {
+                problems.push(format!(
+                    "{context}: active manifest case cannot be classified as excluded/unreadable"
+                ));
+            }
+        }
+        audit_saved_cache(&context, key, loaded, id, expectation, problems);
         let result = calculated_result(loaded, id);
         match expectation.classification {
             Classification::Match => {
@@ -296,7 +818,6 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::Divergent => {
-                require_note(&context, expectation, problems);
                 let actual = match observed_result(result) {
                     Ok(Some(actual)) => actual,
                     Ok(None) => {
@@ -331,7 +852,6 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::NotImplemented => {
-                require_note(&context, expectation, problems);
                 if matches!(result, Some(CalculationCellResult::Unavailable(_))) {
                     counts.not_implemented += 1;
                 } else {
@@ -339,11 +859,9 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::HostUnsupported => {
-                require_note(&context, expectation, problems);
                 counts.host_unsupported += 1;
             }
             Classification::Excluded | Classification::Unreadable => {
-                require_note(&context, expectation, problems);
                 counts.excluded += 1;
             }
             Classification::Unclassified => {
@@ -356,15 +874,30 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
 
 fn audit_saved_cache(
     context: &str,
+    key: &str,
     loaded: &LoadedOracle,
     id: CalculationCellId,
     expectation: &Expectation,
     problems: &mut Vec<String>,
 ) {
-    let source = source_value(&loaded.workbook, id);
+    let observation = loaded
+        .observations
+        .as_ref()
+        .and_then(|observations| observations.get(key));
+    if let Some(observation) = observation
+        && expectation.excel_rich_error != observation.rich_error.present
+    {
+        problems.push(format!(
+            "{context}: expectations rich-error flag does not match observations"
+        ));
+    }
+    let source = observation.map_or_else(
+        || source_value(&loaded.workbook, id),
+        |observation| Ok(observed_source_value(observation)),
+    );
     if matches!(
         expectation.classification,
-        Classification::Excluded | Classification::Unreadable
+        Classification::Excluded | Classification::Unreadable | Classification::HostUnsupported
     ) && source.as_ref().is_ok_and(Option::is_none)
     {
         return;
@@ -376,12 +909,6 @@ fn audit_saved_cache(
         problems.push(format!("{context}: saved cache is missing"));
         return;
     };
-    if expectation.excel_rich_error {
-        if source.value_type != "e" {
-            problems.push(format!("{context}: rich error fallback is not an error"));
-        }
-        return;
-    }
     let expected = ObservedValue::from_expectation(expectation);
     let comparator = if expected.value_type == "n" {
         Some(Comparator::ExactBits {})
@@ -421,6 +948,40 @@ fn source_value(
     }
 }
 
+fn observed_source_value(observation: &ObservedCase) -> Option<ObservedValue> {
+    if observation.cache_status != CacheStatus::Semantic {
+        return None;
+    }
+    if observation.rich_error.present {
+        return observation
+            .rich_error
+            .resolved_error
+            .as_ref()
+            .or(observation.rich_error.fallback_error.as_ref())
+            .or(observation.cache_value.as_ref())
+            .map(|value| ObservedValue {
+                value: value.clone(),
+                value_type: "e".to_owned(),
+            });
+    }
+    observation.cache_value.as_ref().map(|value| ObservedValue {
+        value: value.clone(),
+        value_type: observation.cache_type.clone(),
+    })
+}
+
+fn is_host_unsupported_observation(observation: &ObservedCase) -> bool {
+    match observation.cache_status {
+        CacheStatus::MissingSemanticCache => true,
+        CacheStatus::Circular => false,
+        CacheStatus::Semantic => {
+            observation.rich_error.present
+                && observed_source_value(observation)
+                    .is_some_and(|value| value.value_type == "e" && value.value == "#NAME?")
+        }
+    }
+}
+
 fn calculated_result(
     loaded: &LoadedOracle,
     id: CalculationCellId,
@@ -438,17 +999,26 @@ fn observed_result(
     result.map_or(Ok(None), ObservedValue::from_result)
 }
 
-fn require_note(context: &str, expectation: &Expectation, problems: &mut Vec<String>) {
-    if expectation.note.as_deref().is_none_or(str::is_empty) {
-        problems.push(format!("{context}: {MESSAGE_NOTE_REQUIRED}"));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{MESSAGE_ITERATIVE_CALCULATION, verify_iterative_calculation};
+    use cellrune_integration_tests::oracle::OracleMetadata;
+
+    use super::{
+        MESSAGE_ITERATIVE_CALCULATION, MESSAGE_SUITE_REQUIRED, audit_all, oracle_root,
+        resolve_suite_path, verify_iterative_calculation,
+    };
+
+    #[test]
+    fn committed_excel_oracles_match_reviewed_expectations() {
+        if let Err(problems) = audit_all(&oracle_root()) {
+            panic!(
+                "committed Excel oracle audit failed:\n{}",
+                problems.join("\n")
+            );
+        }
+    }
 
     #[test]
     fn iterative_calculation_metadata_must_match_effective_workbook_setting() {
@@ -459,5 +1029,35 @@ mod tests {
             .expect_err("mismatched iterative calculation");
         assert!(error.contains(MESSAGE_ITERATIVE_CALCULATION));
         assert!(error.contains("workbook=true metadata=false"));
+    }
+
+    #[test]
+    fn suite_identity_cannot_fall_back_to_address_keys() {
+        let oracle = OracleMetadata {
+            application: "Microsoft Excel Online".to_owned(),
+            version: "AppVersion 16.0300".to_owned(),
+            channel: None,
+            os: Some("web".to_owned()),
+            locale: Some("en-US".to_owned()),
+            saved_at: "2026-07-29T00:00:00Z".to_owned(),
+            suite_id: Some("cellrune-excel-host-matrix-v1".to_owned()),
+            host_profile_id: Some("excel-online".to_owned()),
+            product_tier: Some("free".to_owned()),
+            host_build: None,
+        };
+        let error = resolve_suite_path(Path::new("missing-suite/online"), &oracle)
+            .expect_err("suite-bound metadata must require its suite");
+        assert!(error.contains(MESSAGE_SUITE_REQUIRED));
+
+        let legacy = OracleMetadata {
+            suite_id: None,
+            host_profile_id: None,
+            ..oracle
+        };
+        assert_eq!(
+            resolve_suite_path(Path::new("legacy/oracle"), &legacy)
+                .expect("legacy metadata remains address-keyed"),
+            None
+        );
     }
 }

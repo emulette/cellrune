@@ -1,8 +1,8 @@
-use super::expression::ArrayEvaluation;
 use super::reference::cell_at;
 use super::{Engine, public_to_internal, value_from_calculation_result};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::runtime::{CellId, Rect};
+use crate::calculation::scope::ArrayEvaluation;
 use crate::calculation::value::{ErrorKind, Value};
 use crate::calculation::{CalculationSnapshot, MaterializedResultOrigin};
 use crate::{CellContent, FormulaMetadata, WorkbookSnapshot};

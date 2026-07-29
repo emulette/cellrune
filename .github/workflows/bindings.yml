@@ -179,6 +179,7 @@ jobs:
         run: python tests/typing_check.py
 
       - name: Check Python types
+        if: matrix.os == 'ubuntu-24.04' && matrix.python == '3.10'
         run: mypy --strict tests/typing_check.py
 
       - name: Upload verified wheel
@@ -262,16 +263,11 @@ jobs:
           retention-days: 7
 
   node:
-    name: Node.js ${{ matrix.node }} (${{ matrix.os }})
+    name: Node.js 22 (ubuntu-24.04)
     if: inputs.scope == '' || inputs.scope == 'all' || inputs.scope == 'node'
-    strategy:
-      fail-fast: false
-      # Compatibility smoke stays on the declared floor. Tag jobs below build and install every
-      # actual native artifact, so repeating 22/24/26 across three hosts adds no release product.
-      matrix:
-        os: [ubuntu-24.04]
-        node: [22]
-    runs-on: ${{ matrix.os }}
+    # Compatibility smoke stays on the declared floor. Tag jobs below build and install every
+    # actual native artifact, so repeating 22/24/26 across three hosts adds no release product.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
       run:
@@ -293,7 +289,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: "22"
           cache: pnpm
           cache-dependency-path: bindings/node/pnpm-lock.yaml
 

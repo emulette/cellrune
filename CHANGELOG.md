@@ -10,6 +10,38 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-29
+
+### Added
+
+- `LET` evaluation with left-to-right single evaluation, lexical shadowing, range and array
+  bindings, Excel storage-name normalization, and shared local-name validation. The official
+  Excel-facing function catalog now contains 279 names: 266 kernels and 13 aliases.
+- Explicit calculation limits for LET bindings, LAMBDA nesting, and cumulative LAMBDA/MAP
+  invocations. Resource exhaustion remains a structured unavailable result and cannot be hidden by
+  worksheet error-catching functions.
+- Excel Online and Mac Excel 2021 saved-workbook expectations. Each workbook is recorded
+  independently, and an unavailable saved value is classified as `host_unsupported`.
+
+### Changed
+
+- MAP and LET now share trace-aware scope values. Scalar, array, calculated-cell, and reference
+  bindings preserve decimal traces without changing the selected arithmetic mode:
+  `ExcelNearZero` still applies Excel cancellation correction and `Ieee754` still returns the raw
+  IEEE-754 result.
+- The Excel oracle audit now runs in the standard Rust test suite without a separate CI or
+  release-only gate. Cases remain available for later patches even when neither recorded Excel
+  workbook provides a usable saved value.
+
+### Fixed
+
+- Excel-saved formulas can no longer be replaced silently: only case-declared, token-aware spelling
+  rewrites are accepted, and strings, structured references, scoped parameters, and shared-formula
+  relative references are preserved.
+- Rich errors now resolve through `metadata.xml` and `richData` records, while empty PIVOTBY caches
+  are distinguished from the exact circular-reference fixture instead of being mislabeled as
+  circular.
+
 ## [0.1.6] - 2026-07-28
 
 ### Added
@@ -380,7 +412,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/emulette/cellrune/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/emulette/cellrune/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/emulette/cellrune/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/emulette/cellrune/compare/v0.1.3...v0.1.4
