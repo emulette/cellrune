@@ -2322,11 +2322,10 @@
     "excel_rich_error": false
   },
   "ArraysDynamic!F1037": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "110",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LET) for this oracle case."
+    "excel_rich_error": false
   },
   "ArraysDynamic!F1061": {
     "classification": "host_unsupported",
@@ -2488,11 +2487,10 @@
     "note": "The saved Excel for Mac AppVersion 16.0300 host returned #NAME? for this valid newer or host-specific function. This cache is a host observation, not a modern Excel semantic oracle."
   },
   "ArraysDynamic!F293": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "545.4545454545455",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LET) for this oracle case."
+    "excel_rich_error": false
   },
   "ArraysDynamic!F317": {
     "classification": "not_implemented",
@@ -4268,18 +4266,19 @@
     "excel_rich_error": false
   },
   "Unsupported!F581": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1550",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LET) for this oracle case."
+    "excel_rich_error": false
   },
   "Unsupported!F605": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "20",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LET) for this oracle case."
+    "cellrune_value": "#VALUE!",
+    "cellrune_type": "e",
+    "note": "CellRune evaluates this LET range-binding boundary to #VALUE! while the recorded Excel cache is 20; retain until the remaining reference coercion semantics are corrected."
   },
   "Unsupported!F629": {
     "classification": "host_unsupported",

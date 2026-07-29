@@ -52,6 +52,13 @@ jobs:
       - name: Run workspace tests
         run: cargo test --workspace --all-features --locked
 
+      - name: Audit committed Excel oracle baselines
+        run: >-
+          cargo run
+          --package cellrune-integration-tests
+          --bin check_excel_oracle
+          --locked
+
   msrv:
     name: Minimum supported Rust version, warnings denied
     runs-on: ubuntu-24.04

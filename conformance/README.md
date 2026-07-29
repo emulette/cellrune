@@ -1,7 +1,8 @@
 # Excel-saved conformance workbooks
 
 This tree keeps the binary workbooks that Excel actually calculated. They are inputs to an
-explicit local audit, not the default Rust test suite, CI, or a publication gate.
+explicit audit, not the default Rust test suite. CI invokes the ordinary audit as a separate step,
+and the release workflow adds the strict publication gate described below.
 
 ```bash
 cargo run \
@@ -9,6 +10,11 @@ cargo run \
   --bin check_excel_oracle \
   --locked
 ```
+
+The release workflow adds `--require-cellrune-suite`. That stricter mode rejects a tag until the
+CellRune `suite.json`, stable manifest, and both required Online/Mac profile directories are
+present and mutually SHA-bound; the ordinary command continues to audit the currently committed
+legacy baseline during the transition.
 
 The checker validates each workbook hash and metadata, including the effective XLSX iteration
 setting, derives the complete selected case set, compares the saved cache with
@@ -32,9 +38,21 @@ conformance/
       metadata.json
       expectations.json
   cellrune/
-    formula-oracle.xlsx
+    formula-oracle.xlsx              # legacy single-host baseline during transition
     metadata.json
     expectations.json
+    suite.json                       # 0.1.7 host-matrix suite, once promoted
+    case-manifest.json
+    online/
+      formula-oracle.xlsx
+      metadata.json
+      observations.json
+      expectations.json
+    desktop-2021/
+      formula-oracle.xlsx
+      metadata.json
+      observations.json
+      expectations.json
 ```
 
 `apache-poi/` contains unmodified Apache POI fixtures under Apache-2.0. Each metadata file records
@@ -54,11 +72,17 @@ The two sources must remain separate. Their Excel versions, dates, locales, and 
 - generator revision when CellRune authored the workbook;
 - Excel application, version, channel, OS, locale, saved time, date system, and iteration state.
 
+The 0.1.7 CellRune suite also records the suite/profile identity, common source-workbook SHA-256,
+host build, product tier, product-tier evidence, and operator note. `observations.json` binds every
+active stable case key to the saved formula, actual declared rewrite sequence, cache status, and
+raw/resolved rich-error metadata. `case-manifest.json` retains inactive cases with structured
+exclusion evidence so future patch releases can reactivate them without rebuilding the catalog.
+
 Unknown historical host fields remain `null`; they must not be guessed. Populate them when a
 workbook is regenerated on a known host.
 
-`expectations.json` is keyed as `Sheet!A1`. Every selected case is explicit; missing and extra
-keys fail the audit. Classifications are:
+Legacy `expectations.json` is keyed as `Sheet!A1`; the 0.1.7 suite uses stable manifest case keys.
+Every selected case is explicit; missing and extra keys fail the audit. Classifications are:
 
 - `match` — CellRune must reproduce the saved Excel value;
 - `divergent` — CellRune must remain different and reproduce the recorded CellRune value;
@@ -93,9 +117,12 @@ because regeneration includes a manual Excel step. The public, reproducible boun
 1. generate the pre-Excel workbook and verify its formula inventory;
 2. open it in the recorded Excel host, force recalculation, and save;
 3. verify that Excel did not remove or downgrade formulas;
-4. copy the saved workbook, metadata, and reviewed expectations into `conformance/cellrune/`;
-5. update the workbook SHA-256, host fields, formula count, and every changed classification;
-6. run the explicit checker above.
+4. generate SHA-bound observations and reviewed expectations for both required host profiles;
+5. copy `suite.json`, `case-manifest.json`, and both complete profile directories into
+   `conformance/cellrune/` as one atomic logical change;
+6. update the workbook SHA-256, host fields, formula count, and every changed classification;
+7. run the explicit checker above.
 
-Do not overwrite an older host baseline when the host lacked functions needed by the comparison.
-Add a separately identified baseline or update the metadata and expectations through review.
+Do not promote only one profile from a new source workbook. Excel Online is normative, Mac Excel
+2021 is subsidiary, and an active case must have a semantic oracle on at least one of them. A
+function unsupported by both profiles remains configured but inactive with structured evidence.

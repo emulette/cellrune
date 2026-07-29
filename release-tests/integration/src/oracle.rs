@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 
 /// Metadata schema accepted by the local oracle checker.
 pub const METADATA_SCHEMA: &str = "cellrune_excel_oracle_metadata_v1";
+/// Host-matrix suite schema accepted by the local oracle checker.
+pub const SUITE_SCHEMA: &str = "cellrune_excel_oracle_suite_v1";
+/// Stable case-manifest schema accepted by the local oracle checker.
+pub const CASE_MANIFEST_SCHEMA: &str = "cellrune_excel_oracle_cases_v1";
+/// Saved-host observation schema accepted by the local oracle checker.
+pub const OBSERVATIONS_SCHEMA: &str = "cellrune_excel_oracle_observations_v1";
 /// Default scale-relative tolerance for finite numeric results.
 pub const DEFAULT_SCALED_EPSILON: f64 = 1e-8;
 
@@ -17,6 +23,7 @@ pub struct Metadata {
     pub schema: String,
     pub workbook: String,
     pub sha256: String,
+    pub source_workbook_sha256: Option<String>,
     pub formula_cells: usize,
     pub date_system: String,
     pub iterative_calculation: bool,
@@ -66,6 +73,181 @@ pub struct OracleMetadata {
     pub os: Option<String>,
     pub locale: Option<String>,
     pub saved_at: String,
+    pub suite_id: Option<String>,
+    pub host_profile_id: Option<String>,
+    pub product_tier: Option<String>,
+    pub host_build: Option<String>,
+    pub product_tier_evidence: Option<String>,
+    pub host_note: Option<String>,
+}
+
+/// Required host profiles that jointly cover one stable case manifest.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OracleSuite {
+    pub schema: String,
+    pub suite_id: String,
+    pub case_manifest: String,
+    pub source_workbook_sha256: String,
+    pub profiles: Vec<HostProfile>,
+}
+
+/// One exact Excel product/locale/add-in profile.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostProfile {
+    pub profile_id: String,
+    pub directory: String,
+    pub application: String,
+    pub os: String,
+    pub product_tier: String,
+    pub locale: String,
+    pub add_ins: BTreeMap<String, bool>,
+}
+
+/// Stable identity and authored formula inventory for one suite.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaseManifest {
+    pub schema: String,
+    pub suite_id: String,
+    pub generator: GeneratorMetadata,
+    pub cases: Vec<ManifestCase>,
+}
+
+/// One active or inactive catalog/curated case.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestCase {
+    pub case_key: String,
+    pub function: String,
+    pub category: String,
+    pub scenario: String,
+    pub authored_formula: String,
+    pub authored_formula_fingerprint: String,
+    pub storage_formula: String,
+    pub storage_formula_fingerprint: String,
+    pub semantic_fingerprint: String,
+    pub allowed_host_rewrites: Vec<HostFormulaRewrite>,
+    pub catalog_address: String,
+    pub active: bool,
+    pub formula_address: Option<String>,
+    pub seed_classification: String,
+    pub inactive_reason: Option<String>,
+    pub exclusion: Option<OracleExclusion>,
+}
+
+/// One explicitly reviewed formula spelling change that a host may make.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostFormulaRewrite {
+    pub kind: String,
+    pub profile_ids: Vec<String>,
+}
+
+/// Why a catalog case does not participate in the active host matrix.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum OracleExclusion {
+    Volatile {
+        reason: String,
+        evidence: String,
+    },
+    NativeAutomation {
+        reason: String,
+        evidence: String,
+    },
+    ExternalService {
+        reason: String,
+        evidence: String,
+    },
+    ExternalConnection {
+        reason: String,
+        evidence: String,
+    },
+    HostDependent {
+        reason: String,
+        evidence: String,
+    },
+    FixtureUnavailable {
+        reason: String,
+        evidence: String,
+    },
+    HostMatrixUnavailable {
+        reason: String,
+        evidence: String,
+        unsupported_profile_ids: Vec<String>,
+    },
+}
+
+impl OracleExclusion {
+    /// Returns the reviewed rationale and evidence shared by every exclusion kind.
+    pub fn rationale(&self) -> (&str, &str) {
+        match self {
+            Self::Volatile { reason, evidence }
+            | Self::NativeAutomation { reason, evidence }
+            | Self::ExternalService { reason, evidence }
+            | Self::ExternalConnection { reason, evidence }
+            | Self::HostDependent { reason, evidence }
+            | Self::FixtureUnavailable { reason, evidence }
+            | Self::HostMatrixUnavailable {
+                reason, evidence, ..
+            } => (reason, evidence),
+        }
+    }
+}
+
+/// SHA-bound facts extracted from one Excel-saved workbook.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Observations {
+    pub schema: String,
+    pub suite_id: String,
+    pub host_profile_id: String,
+    pub workbook_sha256: String,
+    pub source_workbook_sha256: String,
+    pub case_manifest_sha256: String,
+    pub saved_at: String,
+    pub cases: Vec<ObservedCase>,
+}
+
+/// One saved formula/cache observation, joined by stable case key.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedCase {
+    pub case_key: String,
+    pub address: String,
+    pub saved_formula: String,
+    pub saved_formula_fingerprint: String,
+    pub authored_formula_fingerprint: String,
+    pub formula_rewrites: Vec<String>,
+    pub cache_status: CacheStatus,
+    pub cache_value: Option<String>,
+    pub cache_type: String,
+    pub rich_error: RichErrorObservation,
+}
+
+/// Whether the saved cell carries a host-computed value that can be compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheStatus {
+    Semantic,
+    MissingSemanticCache,
+    Circular,
+}
+
+/// Raw modern-error metadata retained alongside the legacy cache fallback.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RichErrorObservation {
+    pub present: bool,
+    pub raw_error: Option<String>,
+    pub vm_index: Option<u32>,
+    pub record_index: Option<u32>,
+    pub structure_index: Option<u32>,
+    pub error_type_code: Option<u32>,
+    pub resolved_error: Option<String>,
+    pub fallback_error: Option<String>,
 }
 
 /// Every reviewed case, keyed as `Sheet!A1`.
@@ -232,7 +414,7 @@ fn validate_tolerance(name: &str, value: f64) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Comparator, ObservedValue, values_match};
+    use super::{Comparator, Metadata, ObservedValue, values_match};
 
     fn number(value: &str) -> ObservedValue {
         ObservedValue {
@@ -268,5 +450,42 @@ mod tests {
             value_type: "str".to_owned(),
         };
         assert!(!values_match(&number("1"), &text, None).expect("valid comparison"));
+    }
+
+    #[test]
+    fn legacy_metadata_does_not_require_host_matrix_provenance() {
+        let metadata: Metadata = serde_json::from_value(serde_json::json!({
+            "schema": "cellrune_excel_oracle_metadata_v1",
+            "workbook": "workbook.xlsx",
+            "sha256": "a".repeat(64),
+            "formula_cells": 1,
+            "date_system": "excel1900",
+            "iterative_calculation": false,
+            "case_selection": {"mode": "all_formula_cells"},
+            "source": {
+                "name": "legacy",
+                "license": "Apache-2.0",
+                "url": null,
+                "revision": null
+            },
+            "generator": {"name": null, "revision": null},
+            "oracle": {
+                "application": "Microsoft Excel",
+                "version": "AppVersion 16",
+                "channel": null,
+                "os": null,
+                "locale": null,
+                "saved_at": "2017-01-01T00:00:00Z",
+                "suite_id": null,
+                "host_profile_id": null,
+                "product_tier": null,
+                "host_note": null
+            }
+        }))
+        .expect("legacy metadata");
+
+        assert_eq!(metadata.source_workbook_sha256, None);
+        assert_eq!(metadata.oracle.host_build, None);
+        assert_eq!(metadata.oracle.product_tier_evidence, None);
     }
 }

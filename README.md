@@ -345,11 +345,15 @@ cargo run \
   --locked
 ```
 
-This audit is deliberately separate from `cargo test`, CI, and publication. It covers 1,295
-formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
-matrix fixture, and 672 selected results from the CellRune-authored formula oracle. Every selected
-case is classified; missing or extra classifications fail locally. The older POI formula cache
-currently has 1,290 matches and 5 documented divergences, enforced in both directions.
+This audit is deliberately separate from `cargo test`. CI invokes the ordinary audit as its own
+step, while publication invokes the stricter suite gate. It covers 1,295 formula cells from Apache
+POI's `FormulaEvalTestData`, 266 materialized array results from its matrix fixture, and 672
+selected results from the currently committed CellRune-authored oracle.
+The planned 0.1.7 host-matrix replacement keeps 672 active stable cases across a normative Excel Online
+profile and a subsidiary Mac Excel 2021 profile, and is promoted only when both saved workbooks
+share one generated source SHA. Every selected case is classified; missing or extra
+classifications fail locally. The older POI formula cache currently has 1,290 matches and 5
+documented divergences, enforced in both directions.
 
 Two additional corpus tests are compiled but marked `#[ignore]` because their third-party inputs
 are not distributed in this repository. A developer who has supplied those inputs can run them

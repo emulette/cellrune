@@ -10,6 +10,36 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- `LET` evaluation with left-to-right single evaluation, lexical shadowing, range and array
+  bindings, Excel storage-name normalization, and shared local-name validation.
+- Explicit calculation limits for LET bindings, LAMBDA nesting, and cumulative LAMBDA/MAP
+  invocations. Resource exhaustion remains a structured unavailable result and cannot be hidden by
+  worksheet error-catching functions.
+- A stable Excel host-matrix contract for Excel Online and Mac Excel 2021: versioned suite,
+  manifest, raw observations, host provenance, formula-rewrite policy, rich-error decoding, and
+  fingerprint-guarded expectation migration.
+
+### Changed
+
+- MAP and LET now share trace-aware scope values. Scalar, array, calculated-cell, and reference
+  bindings preserve decimal traces without changing the selected arithmetic mode:
+  `ExcelNearZero` still applies Excel cancellation correction and `Ieee754` still returns the raw
+  IEEE-754 result.
+- The Excel oracle generator now emits a deterministic stored ZIP, stable case keys, structured
+  exclusions, and a common source-workbook SHA. Cases unavailable in both required hosts remain in
+  the catalog but are inactive; CellRune-only gaps remain active for future patch releases.
+
+### Fixed
+
+- Excel-saved formulas can no longer be replaced silently: only case-declared, token-aware spelling
+  rewrites are accepted, and strings, structured references, scoped parameters, and shared-formula
+  relative references are preserved.
+- Rich errors now resolve through `metadata.xml` and `richData` records, while empty PIVOTBY caches
+  are distinguished from the exact circular-reference fixture instead of being mislabeled as
+  circular.
+
 ## [0.1.6] - 2026-07-28
 
 ### Added

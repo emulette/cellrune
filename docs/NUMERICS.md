@@ -9,7 +9,10 @@ yet measured against that reference are listed separately.
 ## Reference oracle
 
 Compatibility statements are made against committed, named saved-cache baselines, not against
-"Excel" in general.
+"Excel" in general. The currently committed CellRune baseline is the legacy single-host baseline;
+0.1.7 prepares a versioned two-host suite in which Excel Online is normative and Mac Excel 2021 is
+the subsidiary oracle. The two-host compatibility claim becomes effective only when both saved
+workbooks from the same generated source SHA are committed together.
 
 | Workbook source | Excel cache producer | Locale | Recorded |
 | --- | --- | --- | --- |
@@ -21,6 +24,13 @@ Excel's own results travel inside every workbook it saves, as the cached `<v>` v
 formula cell. That makes any Excel-authored workbook both a test input and its own ground truth.
 The binary workbooks, hashes, host metadata, and reviewed classifications are committed under
 `conformance/`.
+
+The pending 0.1.7 suite uses `excel-online-free-en-ui-ko-kr` as the normative profile and
+`excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools` as the subsidiary profile. A deterministic
+function remains active if either profile can calculate it. If neither can produce a semantic
+result, its stable case key, example formula, and exclusion evidence remain in the manifest while
+the executable formula is inactive. This separates host availability from CellRune implementation
+status and lets later 0.1.7 patch releases reuse the same oracle setup.
 
 ## Verified
 
@@ -90,6 +100,13 @@ aggregate accumulators carry an exact trace of the parsed decimal inputs. `SUMPR
 before it adds, and the product of two exact decimals is itself an exact decimal, so its terms stay
 traceable. `NPV` divides before it adds, and carries the same proof as an exact rational trace
 through discounting.
+
+LET and MAP scope transport does not choose between `ExcelNearZero` and `Ieee754`. A scope entry
+preserves the value together with its optional decimal trace across scalar, array, calculated-cell,
+and cell/range-reference bindings; the arithmetic operator still consults the workbook's selected
+mode when it consumes that value. Consequently `LET(x,0.1+0.2,x-0.3)` is identical to its direct
+equivalent in each mode: zero under `ExcelNearZero`, and the raw IEEE-754 residue under `Ieee754`.
+The scope representation prevents trace loss; it does not impose Excel arithmetic semantics.
 
 A result is replaced with zero only when both of these conditions hold:
 
@@ -172,19 +189,26 @@ way: they skip blank cells, so a wider clamp cannot change their result.
 
 ### Measured agreement
 
-The explicit local audit currently records:
+The explicit local audit currently records the committed legacy CellRune baseline:
 
 | Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 158 | 48 | 60 | 0 | 0 |
-| CellRune formula oracle | 672 | 392 | 10 | 242 | 26 | 2 |
+| CellRune formula oracle | 672 | 395 | 11 | 238 | 26 | 2 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
 the Excel value and the current CellRune value with an explanatory note. The other states make
 unsupported or non-comparable cases explicit rather than dropping them from the denominator.
 These counts are an audit inventory, not a composite score or release threshold.
+
+The 0.1.7 source workbook currently has 703 primary cases, 672 active cases, and 897 formula cells.
+An earlier Mac 16.111 development probe reported 401 matches, 10 divergences, 239 not implemented,
+and 22 host unsupported cases, but its source SHA predates the final stable curated keys and
+279-entry CellRune catalog label. The current source must therefore be saved again on both Mac and
+Excel Online. These work measurements are not substituted into the table above; publishing one
+side or reusing a different source SHA would make the host matrix incomplete.
 
 ## Unverified
 

@@ -1,46 +1,58 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 
+use super::{calculated_result, load_oracle, observed_result, observed_source_value, source_value};
 use cellrune::CalculationCellResult;
 use cellrune_integration_tests::oracle::{
-    Classification, Expectation, Expectations, ObservedValue, values_match,
+    Classification, Expectation, ObservedValue, values_match,
 };
-use serde::Serialize;
 
-use super::{calculated_result, load_oracle, observed_result, source_value};
-
-#[derive(Debug, Serialize)]
-struct Report {
-    workbook: String,
-    cases: Expectations,
-}
-
-pub(super) fn report(directory: &Path) -> Result<(), Vec<String>> {
+pub(super) fn report(directory: &Path, output_path: Option<&Path>) -> Result<(), Vec<String>> {
     let loaded = load_oracle(directory, false).map_err(|error| vec![error])?;
+    let extra = loaded
+        .expectations
+        .keys()
+        .filter(|key| !loaded.selected.contains_key(*key))
+        .take(10)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !extra.is_empty() {
+        return Err(vec![format!(
+            "{}: existing expectations contain keys outside the selected manifest: {extra:?}",
+            directory.display()
+        )]);
+    }
     let mut cases = BTreeMap::new();
     for (key, id) in &loaded.selected {
         let existing = loaded.expectations.get(key);
-        let saved_source =
-            source_value(&loaded.workbook, *id).map_err(|error| vec![format!("{key}: {error}")])?;
-        let source = existing
-            .filter(|expectation| expectation.excel_rich_error && saved_source.is_some())
-            .map_or(saved_source, |expectation| {
-                Some(ObservedValue::from_expectation(expectation))
-            });
+        let observation = loaded
+            .observations
+            .as_ref()
+            .and_then(|observations| observations.get(key));
+        let saved_source = match observation {
+            Some(observation) => observed_source_value(observation),
+            None => source_value(&loaded.workbook, *id)
+                .map_err(|error| vec![format!("{key}: {error}")])?,
+        };
+        let source = saved_source;
+        let excel_rich_error =
+            observation.is_some_and(|observation| observation.rich_error.present);
         let result = calculated_result(&loaded, *id);
         cases.insert(
             key.clone(),
-            report_expectation(existing, source, result)
+            report_expectation(existing, source, result, excel_rich_error)
                 .map_err(|error| vec![format!("{key}: {error}")])?,
         );
     }
-    let report = Report {
-        workbook: loaded.metadata.workbook,
-        cases,
-    };
-    let output = serde_json::to_string_pretty(&report)
+    let output = serde_json::to_string_pretty(&cases)
         .map_err(|error| vec![format!("cannot serialize report: {error}")])?;
-    println!("{output}");
+    if let Some(path) = output_path {
+        fs::write(path, format!("{output}\n"))
+            .map_err(|error| vec![format!("{}: {error}", path.display())])?;
+    } else {
+        println!("{output}");
+    }
     Ok(())
 }
 
@@ -48,18 +60,33 @@ fn report_expectation(
     existing: Option<&Expectation>,
     source: Option<ObservedValue>,
     result: Option<&CalculationCellResult>,
+    excel_rich_error: bool,
 ) -> Result<Expectation, String> {
     let expected = source.clone().unwrap_or(ObservedValue {
         value: String::new(),
         value_type: "blank".to_owned(),
     });
     if let Some(existing) = existing
-        && matches!(
-            existing.classification,
-            Classification::HostUnsupported | Classification::Excluded | Classification::Unreadable
-        )
+        && existing.classification == Classification::HostUnsupported
+        && (source.is_none()
+            || (excel_rich_error
+                && source
+                    .as_ref()
+                    .is_some_and(|value| value.value_type == "e" && value.value == "#NAME?")))
     {
-        return Ok(existing.clone());
+        let mut reviewed = existing.clone();
+        reviewed.excel_value = expected.value;
+        reviewed.excel_type = expected.value_type;
+        reviewed.excel_rich_error = excel_rich_error;
+        reviewed.note = Some(match source {
+            None => "This required Excel host saved no semantic cache for the active oracle case."
+                .to_owned(),
+            Some(ref value) => format!(
+                "This required Excel host does not implement the formula surface and saved {}.",
+                value.value
+            ),
+        });
+        return Ok(reviewed);
     }
     let unavailable_note = result.and_then(|result| match result {
         CalculationCellResult::Unavailable(issue) => Some(match issue.detail() {
@@ -79,11 +106,29 @@ fn report_expectation(
     let (classification, cellrune_value, cellrune_type, note) =
         match (source, actual) {
             (None, _) => (
-                Classification::Excluded,
+                Classification::HostUnsupported,
                 None,
                 None,
-                Some("Saved workbook contains no comparable cache value.".to_owned()),
+                Some(
+                    "This host saved no semantic cache for the active oracle case."
+                        .to_owned(),
+                ),
             ),
+            (Some(expected), _)
+                if excel_rich_error
+                    && expected.value_type == "e"
+                    && expected.value == "#NAME?" =>
+            {
+                (
+                    Classification::HostUnsupported,
+                    None,
+                    None,
+                    Some(
+                        "This required Excel host does not implement the formula surface and saved #NAME?."
+                            .to_owned(),
+                    ),
+                )
+            }
             (Some(expected), Some(actual)) if values_match(&actual, &expected, comparator)? => {
                 (Classification::Match, None, None, None)
             }
@@ -110,7 +155,7 @@ fn report_expectation(
         classification,
         excel_value: expected.value,
         excel_type: expected.value_type,
-        excel_rich_error: existing.is_some_and(|value| value.excel_rich_error),
+        excel_rich_error,
         cellrune_value,
         cellrune_type,
         comparator,
@@ -142,6 +187,19 @@ mod tests {
         }
     }
 
+    fn host_unsupported() -> Expectation {
+        Expectation {
+            classification: Classification::HostUnsupported,
+            excel_value: "#NAME?".to_owned(),
+            excel_type: "e".to_owned(),
+            excel_rich_error: true,
+            cellrune_value: None,
+            cellrune_type: None,
+            comparator: None,
+            note: Some("Legacy host observation.".to_owned()),
+        }
+    }
+
     fn assert_strict_comparator_is_used(comparator: Comparator) {
         let existing = existing(comparator);
         let source = ObservedValue {
@@ -151,7 +209,7 @@ mod tests {
         let result = CalculationCellResult::Value(CellValue::Number(
             FiniteNumber::new(5.551_115_123_125_783e-17).expect("finite residue"),
         ));
-        let reported = report_expectation(Some(&existing), Some(source), Some(&result))
+        let reported = report_expectation(Some(&existing), Some(source), Some(&result), false)
             .expect("report expectation");
 
         assert_eq!(reported.classification, Classification::Divergent);
@@ -171,5 +229,72 @@ mod tests {
         ] {
             assert_strict_comparator_is_used(comparator);
         }
+    }
+
+    #[test]
+    fn semantic_cache_replaces_stale_host_unsupported_classification() {
+        let existing = host_unsupported();
+        let source = ObservedValue {
+            value: "2".to_owned(),
+            value_type: "n".to_owned(),
+        };
+        let result = CalculationCellResult::Value(CellValue::Number(
+            FiniteNumber::new(2.0).expect("finite expected value"),
+        ));
+
+        let reported = report_expectation(Some(&existing), Some(source), Some(&result), false)
+            .expect("report expectation");
+
+        assert_eq!(reported.classification, Classification::Match);
+        assert_eq!(reported.excel_value, "2");
+        assert_eq!(reported.excel_type, "n");
+        assert!(!reported.excel_rich_error);
+        assert_eq!(reported.note, None);
+    }
+
+    #[test]
+    fn missing_semantic_cache_is_host_unsupported() {
+        let result = CalculationCellResult::Value(CellValue::Number(
+            FiniteNumber::new(2.0).expect("finite result"),
+        ));
+
+        let reported =
+            report_expectation(None, None, Some(&result), false).expect("report expectation");
+
+        assert_eq!(reported.classification, Classification::HostUnsupported);
+        assert_eq!(reported.excel_type, "blank");
+        assert_eq!(
+            reported.note.as_deref(),
+            Some("This host saved no semantic cache for the active oracle case.")
+        );
+    }
+
+    #[test]
+    fn resolved_rich_name_error_is_host_unsupported() {
+        let source = ObservedValue {
+            value: "#NAME?".to_owned(),
+            value_type: "e".to_owned(),
+        };
+
+        let reported =
+            report_expectation(None, Some(source), None, true).expect("report expectation");
+
+        assert_eq!(reported.classification, Classification::HostUnsupported);
+        assert!(reported.excel_rich_error);
+    }
+
+    #[test]
+    fn stale_host_unsupported_does_not_survive_another_excel_error() {
+        let existing = host_unsupported();
+        let source = ObservedValue {
+            value: "#VALUE!".to_owned(),
+            value_type: "e".to_owned(),
+        };
+
+        let reported = report_expectation(Some(&existing), Some(source), None, true)
+            .expect("report expectation");
+
+        assert_eq!(reported.classification, Classification::NotImplemented);
+        assert_eq!(reported.excel_value, "#VALUE!");
     }
 }

@@ -2746,24 +2746,46 @@ fn let_and_map_preserve_decimal_traces_without_overriding_arithmetic_mode() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "0.1+0.2-0.3"),
         (1, 2, "LET(x,0.1+0.2,x-0.3)"),
-        (1, 3, "SUM(LET(items,{0.1+0.2,-0.3},items))"),
-        (1, 4, "SUMPRODUCT(MAP({0.1+0.2},LAMBDA(x,x-0.3)))"),
-        (1, 5, "MAP(0.1+0.2,LAMBDA(x,x-0.3))"),
+        (1, 3, "_xlfn.LET(_xlpm.x,0.1+0.2,_xlpm.x-0.3)"),
+        (1, 4, "SUM({0.1,0.2}+{0.2,0.1})-0.6"),
+        (1, 5, "SUM(LET(items,{0.1,0.2}+{0.2,0.1},items))-0.6"),
+        (1, 6, "SUMPRODUCT(MAP({0.1},LAMBDA(x,x+0.2-0.3)))"),
+        (
+            1,
+            7,
+            "SUM(_xlfn.MAP({0.1},_xlfn.LAMBDA(_xlpm.x,_xlpm.x+0.2-0.3)))",
+        ),
+        (2, 1, "0.1+0.2"),
+        (2, 2, "A2-0.3"),
+        (2, 3, "LET(x,A2,x-0.3)"),
+        (2, 4, "LET(source,A2:A2,source-0.3)"),
     ]);
 
     let excel = calculate_workbook(&workbook, CalculationOptions::default());
-    for column in 1..=5 {
-        assert_number(&excel, column, 0.0, 0.0);
-    }
+    assert_number(&excel, 1, 0.0, 0.0);
+    assert_equal_number_bits(&excel, 1, 2);
+    assert_equal_number_bits(&excel, 1, 3);
+    assert_equal_number_bits(&excel, 4, 5);
+    assert_equal_number_bits(&excel, 1, 6);
+    assert_equal_number_bits(&excel, 1, 7);
+    assert_number_at(&excel, 2, 2, 0.0, 0.0);
+    assert_equal_number_bits_at(&excel, 2, 2, 2, 3);
+    assert_equal_number_bits_at(&excel, 2, 2, 2, 4);
 
     let ieee = calculate_workbook(
         &workbook,
         CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
     );
     let residue = 0.1_f64 + 0.2_f64 - 0.3_f64;
-    for column in 1..=5 {
-        assert_number(&ieee, column, residue, f64::EPSILON);
-    }
+    assert_number(&ieee, 1, residue, f64::EPSILON);
+    assert_equal_number_bits(&ieee, 1, 2);
+    assert_equal_number_bits(&ieee, 1, 3);
+    assert_equal_number_bits(&ieee, 4, 5);
+    assert_equal_number_bits(&ieee, 1, 6);
+    assert_equal_number_bits(&ieee, 1, 7);
+    assert_number_at(&ieee, 2, 2, residue, f64::EPSILON);
+    assert_equal_number_bits_at(&ieee, 2, 2, 2, 3);
+    assert_equal_number_bits_at(&ieee, 2, 2, 2, 4);
 }
 
 #[test]
@@ -3146,6 +3168,54 @@ fn assert_number(
         (actual.get() - expected).abs() <= tolerance,
         "unexpected result in column {column}: expected {expected}, got {}",
         actual.get(),
+    );
+}
+
+fn assert_equal_number_bits(
+    calculation: &cellrune::CalculationSnapshot,
+    left_column: u32,
+    right_column: u32,
+) {
+    let value = |column: u32| {
+        let Some(CalculationCellResult::Value(CellValue::Number(actual))) =
+            calculation.cell(cell_id(column))
+        else {
+            panic!(
+                "expected numeric calculation result in column {column}, got {:?}",
+                calculation.cell(cell_id(column))
+            );
+        };
+        actual.get()
+    };
+    assert_eq!(
+        value(left_column).to_bits(),
+        value(right_column).to_bits(),
+        "columns {left_column} and {right_column} changed arithmetic semantics",
+    );
+}
+
+fn assert_equal_number_bits_at(
+    calculation: &cellrune::CalculationSnapshot,
+    left_row: u32,
+    left_column: u32,
+    right_row: u32,
+    right_column: u32,
+) {
+    let value = |row: u32, column: u32| {
+        let id = calculation_cell_id(row, column);
+        let Some(CalculationCellResult::Value(CellValue::Number(actual))) = calculation.cell(id)
+        else {
+            panic!(
+                "expected numeric calculation result at row {row}, column {column}, got {:?}",
+                calculation.cell(id)
+            );
+        };
+        actual.get()
+    };
+    assert_eq!(
+        value(left_row, left_column).to_bits(),
+        value(right_row, right_column).to_bits(),
+        "cells ({left_row},{left_column}) and ({right_row},{right_column}) changed arithmetic semantics",
     );
 }
 

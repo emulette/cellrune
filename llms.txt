@@ -430,8 +430,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. Version 0.1.6 contains 278 official Excel-facing names
-  (265 official kernels plus 13 aliases) and one non-official compatibility
+  `.is_official()`. The upcoming 0.1.7 source catalog contains 279 official Excel-facing names
+  (266 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
   `scan_function_usage_with_options(&WorkbookSnapshot, CalculationOptions)`
