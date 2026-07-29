@@ -13,7 +13,7 @@ use cellrune::{
 use cellrune_integration_tests::oracle::{
     CASE_MANIFEST_SCHEMA, CacheStatus, CaseManifest, Classification, Comparator, Expectation,
     Expectations, HostProfile, METADATA_SCHEMA, Metadata, OBSERVATIONS_SCHEMA, Observations,
-    ObservedCase, ObservedValue, OracleSuite, SUITE_SCHEMA, values_match,
+    ObservedCase, ObservedValue, OracleMetadata, OracleSuite, SUITE_SCHEMA, values_match,
 };
 
 #[path = "check_excel_oracle/raw.rs"]
@@ -39,6 +39,8 @@ const MESSAGE_UNCLASSIFIED: &str = "unclassified oracle case";
 const MESSAGE_WORKBOOK_FILENAME: &str = "workbook must be a filename within the oracle directory";
 const MESSAGE_ITERATIVE_CALCULATION: &str =
     "workbook iterative-calculation setting does not match metadata";
+const MESSAGE_SUITE_REQUIRED: &str =
+    "suite.json is required when metadata declares a suite or host-profile identity";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
@@ -312,6 +314,7 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
             metadata.schema
         ));
     }
+    let suite_path = resolve_suite_path(directory, &metadata.oracle)?;
     if metadata.workbook.is_empty()
         || metadata.workbook == "."
         || metadata.workbook == ".."
@@ -359,10 +362,6 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         workbook.calculation_hints().iterative_calculation(),
     )?;
     let selected_by_address = selection::select_cases(&workbook, &metadata.case_selection)?;
-    let suite_path = directory
-        .parent()
-        .map(|parent| parent.join(SUITE_FILE))
-        .filter(|path| path.is_file());
     let (selected, observations) = match suite_path {
         Some(path) => {
             let binding = load_suite_binding(
@@ -394,6 +393,23 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         observations,
         calculation,
     })
+}
+
+fn resolve_suite_path(
+    directory: &Path,
+    oracle: &OracleMetadata,
+) -> Result<Option<PathBuf>, String> {
+    let suite_path = directory.parent().map(|parent| parent.join(SUITE_FILE));
+    if suite_path.as_ref().is_some_and(|path| path.is_file()) {
+        return Ok(suite_path);
+    }
+    if oracle.suite_id.is_some() || oracle.host_profile_id.is_some() {
+        return Err(format!(
+            "{}: {MESSAGE_SUITE_REQUIRED}",
+            directory.join(METADATA_FILE).display()
+        ));
+    }
+    Ok(None)
 }
 
 struct SuiteBinding {
@@ -987,8 +1003,11 @@ fn observed_result(
 mod tests {
     use std::path::Path;
 
+    use cellrune_integration_tests::oracle::OracleMetadata;
+
     use super::{
-        MESSAGE_ITERATIVE_CALCULATION, audit_all, oracle_root, verify_iterative_calculation,
+        MESSAGE_ITERATIVE_CALCULATION, MESSAGE_SUITE_REQUIRED, audit_all, oracle_root,
+        resolve_suite_path, verify_iterative_calculation,
     };
 
     #[test]
@@ -1010,5 +1029,35 @@ mod tests {
             .expect_err("mismatched iterative calculation");
         assert!(error.contains(MESSAGE_ITERATIVE_CALCULATION));
         assert!(error.contains("workbook=true metadata=false"));
+    }
+
+    #[test]
+    fn suite_identity_cannot_fall_back_to_address_keys() {
+        let oracle = OracleMetadata {
+            application: "Microsoft Excel Online".to_owned(),
+            version: "AppVersion 16.0300".to_owned(),
+            channel: None,
+            os: Some("web".to_owned()),
+            locale: Some("en-US".to_owned()),
+            saved_at: "2026-07-29T00:00:00Z".to_owned(),
+            suite_id: Some("cellrune-excel-host-matrix-v1".to_owned()),
+            host_profile_id: Some("excel-online".to_owned()),
+            product_tier: Some("free".to_owned()),
+            host_build: None,
+        };
+        let error = resolve_suite_path(Path::new("missing-suite/online"), &oracle)
+            .expect_err("suite-bound metadata must require its suite");
+        assert!(error.contains(MESSAGE_SUITE_REQUIRED));
+
+        let legacy = OracleMetadata {
+            suite_id: None,
+            host_profile_id: None,
+            ..oracle
+        };
+        assert_eq!(
+            resolve_suite_path(Path::new("legacy/oracle"), &legacy)
+                .expect("legacy metadata remains address-keyed"),
+            None
+        );
     }
 }

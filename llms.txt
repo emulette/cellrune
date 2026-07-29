@@ -9,8 +9,8 @@
 This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
-as a bug in this file, not in the crate. The current public version is 0.1.6,
-uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+as a bug in this file, not in the crate. The version described by this file is
+0.1.7, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -430,7 +430,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The upcoming 0.1.7 source catalog contains 279 official Excel-facing names
+  `.is_official()`. The 0.1.7 catalog contains 279 official Excel-facing names
   (266 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
@@ -468,10 +468,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   and `FinancialSolverSemantics::ExtendedSearch`.** Both axes are also carried
   by the interop DTO and the Python, Node.js, and MCP boundaries.
   `docs/NUMERICS.md` records the policies and their oracles.
-- `CalculationLimits::default()` + 7 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
+- `CalculationLimits::default()` + 10 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
   budgets: formula tokens, AST nodes, AST nesting depth, dependency edges,
-  array cells, calculated text bytes, and data-dependent function
-  iterations.
+  array cells, calculated text bytes, data-dependent function iterations, LET
+  bindings, active LAMBDA depth, and cumulative LAMBDA/MAP invocations.
 - `CalculationSnapshot`: `.cell(CalculationCellId) -> Option<&CalculationCellResult>`,
   `.cells()`, `.materialized_cell(CalculationCellId)`,
   `.materialized_cells()`, `.len()`, `.is_empty()`, `.options()`,

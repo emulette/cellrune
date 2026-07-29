@@ -10,10 +10,13 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-29
+
 ### Added
 
 - `LET` evaluation with left-to-right single evaluation, lexical shadowing, range and array
-  bindings, Excel storage-name normalization, and shared local-name validation.
+  bindings, Excel storage-name normalization, and shared local-name validation. The official
+  Excel-facing function catalog now contains 279 names: 266 kernels and 13 aliases.
 - Explicit calculation limits for LET bindings, LAMBDA nesting, and cumulative LAMBDA/MAP
   invocations. Resource exhaustion remains a structured unavailable result and cannot be hidden by
   worksheet error-catching functions.
@@ -409,7 +412,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/emulette/cellrune/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/emulette/cellrune/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/emulette/cellrune/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/emulette/cellrune/compare/v0.1.3...v0.1.4

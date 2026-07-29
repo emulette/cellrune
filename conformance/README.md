@@ -69,9 +69,11 @@ short note explaining the current state.
 
 1. Generate the workbook.
 2. Recalculate and save it in Excel.
-3. Run `verify_excel_oracle.mjs saved` for the saved file.
-4. Run `check_excel_oracle --report` to generate expectations.
-5. Copy the workbook and JSON files into the matching directory.
+3. Run `verify_excel_oracle.mjs saved` with the profile's declared output directory
+   (`online/` or `desktop-2021/`). It stages `suite.json` and `case-manifest.json` in the parent.
+4. Run `check_excel_oracle --report` against that staged profile directory to generate
+   expectations. Suite-bound metadata is rejected when the parent suite contract is absent.
+5. Copy the complete staged suite tree into this directory.
 6. Run the audit command above.
 
 No separate CI step or release-only oracle gate is required.
