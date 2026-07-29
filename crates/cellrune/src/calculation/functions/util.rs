@@ -4,8 +4,10 @@ use super::super::decimal::{DecimalTrace, RationalTrace, is_excel_near_zero_canc
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
+use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::{let_scope_value, normalize_name};
 
 #[derive(Debug, Clone)]
 pub(super) struct ArgumentValue {
@@ -63,6 +65,17 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut values = Vec::new();
     for arg in args {
+        if let Some(let_args) = let_arguments(arg) {
+            let scoped = let_scope_value(engine, context, let_args);
+            collect_scope_values(
+                engine,
+                scoped,
+                visited_cells,
+                sheet_span_policy,
+                &mut values,
+            )?;
+            continue;
+        }
         if let Ok(span) = engine.resolve_rect_span_expr(context, arg) {
             if span.is_sheet_range() {
                 match sheet_span_policy {
@@ -97,6 +110,85 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
         }
     }
     Ok(values)
+}
+
+fn let_arguments(expr: &Expr) -> Option<&[Expr]> {
+    match expr {
+        Expr::Paren(inner) => let_arguments(inner),
+        Expr::Call { name, args } if normalize_name(name) == "LET" => Some(args),
+        _ => None,
+    }
+}
+
+fn collect_scope_values(
+    engine: &Engine<'_>,
+    scoped: ScopeValue,
+    visited_cells: &mut u64,
+    sheet_span_policy: SheetSpanPolicy,
+    values: &mut Vec<ArgumentValue>,
+) -> Result<(), ErrorKind> {
+    match scoped {
+        ScopeValue::Missing => {
+            charge_array_cells(engine, visited_cells, 1)?;
+            values.push(ArgumentValue {
+                value: Value::Blank,
+                decimal_trace: None,
+                from_collection: false,
+                from_single_cell_reference: false,
+            });
+        }
+        ScopeValue::Scalar(evaluated) => {
+            charge_array_cells(engine, visited_cells, 1)?;
+            values.push(ArgumentValue {
+                value: evaluated.value,
+                decimal_trace: evaluated.decimal_trace,
+                from_collection: false,
+                from_single_cell_reference: false,
+            });
+        }
+        ScopeValue::Array(evaluated) => {
+            charge_array_cells(engine, visited_cells, evaluated.array.data.len() as u64)?;
+            let from_collection = !evaluated.array.is_scalar();
+            values.extend(
+                evaluated
+                    .array
+                    .data
+                    .iter()
+                    .cloned()
+                    .zip(evaluated.decimal_traces.iter().copied())
+                    .map(|(value, decimal_trace)| ArgumentValue {
+                        value,
+                        decimal_trace,
+                        from_collection,
+                        from_single_cell_reference: false,
+                    }),
+            );
+        }
+        ScopeValue::Reference(span) => {
+            if span.is_sheet_range() {
+                match sheet_span_policy {
+                    SheetSpanPolicy::CollectAcrossSheets => {}
+                    SheetSpanPolicy::ReturnExcelError(kind) => return Err(kind),
+                    SheetSpanPolicy::Unsupported => return Err(ErrorKind::Unsupported),
+                }
+            }
+            for rect in span.rects() {
+                collect_rect_values(engine, rect, visited_cells, values)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn charge_array_cells(
+    engine: &Engine<'_>,
+    visited_cells: &mut u64,
+    cells: u64,
+) -> Result<(), ErrorKind> {
+    *visited_cells = visited_cells
+        .checked_add(cells)
+        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+    engine.ensure_array_cells(*visited_cells)
 }
 
 fn collect_rect_values(

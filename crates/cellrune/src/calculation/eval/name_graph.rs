@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::Engine;
 use crate::calculation::ast::Expr;
-use crate::calculation::lambda::{is_lambda_local, walk_lambda_scope};
+use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::CellId;
 use crate::{DefinedName, DefinedNameScope};
 
@@ -100,12 +100,12 @@ fn name_references(expr: &Expr) -> Vec<String> {
 fn collect_name_references(expr: &Expr, local_names: &mut Vec<String>, names: &mut Vec<String>) {
     match expr {
         Expr::Name(name) => {
-            if !is_lambda_local(name, local_names) {
+            if !is_local_name(name, local_names) {
                 names.push(name.clone());
             }
         }
         Expr::Call { name, args } => {
-            if walk_lambda_scope(name, args, local_names, |arg, scope| {
+            if walk_local_scope(name, args, local_names, |arg, scope| {
                 collect_name_references(arg, scope, names);
             }) {
                 return;

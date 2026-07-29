@@ -59,26 +59,55 @@ fn if_array(
         return Err(ErrorKind::Value);
     }
     let condition = engine.eval_array(context, &args[0])?;
-    let when_true = match args.get(1) {
-        Some(Expr::Missing) => Array::scalar(Value::Number(0.0)),
-        Some(expr) => engine.eval_array(context, expr)?,
-        None => return Err(ErrorKind::Value),
+    let mut needs_true = false;
+    let mut needs_false = false;
+    for value in &condition.data {
+        match to_logical(value) {
+            Ok(true) => needs_true = true,
+            Ok(false) => needs_false = true,
+            Err(_) => {}
+        }
+    }
+    let when_true = if needs_true {
+        Some(match args.get(1) {
+            Some(Expr::Missing) => Array::scalar(Value::Number(0.0)),
+            Some(expr) => engine.eval_array(context, expr)?,
+            None => return Err(ErrorKind::Value),
+        })
+    } else {
+        None
     };
-    let when_false = match args.get(2) {
-        Some(Expr::Missing) => Array::scalar(Value::Number(0.0)),
-        Some(expr) => engine.eval_array(context, expr)?,
-        None => Array::scalar(Value::Logical(false)),
+    let when_false = if needs_false {
+        Some(match args.get(2) {
+            Some(Expr::Missing) => Array::scalar(Value::Number(0.0)),
+            Some(expr) => engine.eval_array(context, expr)?,
+            None => Array::scalar(Value::Logical(false)),
+        })
+    } else {
+        None
     };
-    let condition_and_true = shape_array(&condition, &when_true)?;
-    let (rows, cols) = broadcast_shape(&condition_and_true, &when_false)?;
+    let mut shape = condition.clone();
+    for branch in [&when_true, &when_false].into_iter().flatten() {
+        shape = shape_array(&shape, branch)?;
+    }
+    let rows = shape.rows;
+    let cols = shape.cols;
     let cells = u64::from(rows) * u64::from(cols);
     engine.ensure_array_cells(cells)?;
-    let mut data = Vec::with_capacity(cells as usize);
+    let capacity = usize::try_from(cells)
+        .map_err(|_| ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+    let mut data = Vec::with_capacity(capacity);
     for row in 0..rows {
         for column in 0..cols {
             let selected = match to_logical(element_at(&condition, row, column)) {
-                Ok(true) => element_at(&when_true, row, column).clone(),
-                Ok(false) => element_at(&when_false, row, column).clone(),
+                Ok(true) => when_true
+                    .as_ref()
+                    .map(|branch| element_at(branch, row, column).clone())
+                    .unwrap_or(Value::Error(ErrorKind::Calc)),
+                Ok(false) => when_false
+                    .as_ref()
+                    .map(|branch| element_at(branch, row, column).clone())
+                    .unwrap_or(Value::Error(ErrorKind::Calc)),
                 Err(kind) => Value::Error(kind),
             };
             data.push(selected);

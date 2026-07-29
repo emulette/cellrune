@@ -1,12 +1,12 @@
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationHints, CalculationIssueCode,
-    CalculationLimits, CalculationOptions, CalculationOptionsError, CellAddress, CellContent,
-    CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope, ExcelError, FiniteNumber,
-    FormulaCapability, FormulaCell, FormulaDialect, FormulaMetadata, FormulaText,
-    MaterializedResultOrigin, Provenance, ProviderIdentity, SavedResult, Sheet, SheetId, SheetName,
-    SheetVisibility, WorkbookDraft, WorkbookSnapshot, WorkbookSource, calculate_workbook,
-    scan_formula_capabilities, scan_formula_capabilities_with_options, scan_function_usage,
-    supported_function_catalog,
+    ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationHints,
+    CalculationIssueCode, CalculationLimits, CalculationOptions, CalculationOptionsError,
+    CellAddress, CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope,
+    ExcelError, FiniteNumber, FormulaCapability, FormulaCell, FormulaDialect, FormulaMetadata,
+    FormulaText, MaterializedResultOrigin, Provenance, ProviderIdentity, SavedResult, Sheet,
+    SheetId, SheetName, SheetVisibility, WorkbookDraft, WorkbookSnapshot, WorkbookSource,
+    calculate_workbook, scan_formula_capabilities, scan_formula_capabilities_with_options,
+    scan_function_usage, supported_function_catalog,
 };
 
 #[test]
@@ -147,7 +147,6 @@ fn three_d_aggregates_resolve_in_tab_order_across_quoted_prefixes() {
         &[("Sheet1", "Sheet3!Z1:Z2")],
     );
     assert!(scan_formula_capabilities(&workbook).is_supported());
-
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     for column in 1..=4 {
         assert_number(&calculation, column, 111.0, 0.0);
@@ -244,7 +243,6 @@ fn every_three_d_aggregate_matches_explicit_sheet_arguments() {
         &[],
     );
     assert!(scan_formula_capabilities(&workbook).is_supported());
-
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     for row in 3..=16 {
         assert_eq!(
@@ -253,6 +251,55 @@ fn every_three_d_aggregate_matches_explicit_sheet_arguments() {
             "row {row}",
         );
     }
+}
+
+#[test]
+fn let_reference_bindings_inherit_the_consuming_three_d_policy() {
+    let workbook = three_sheet_workbook(
+        &[
+            (1, 1, "SUM(LET(data,Sheet1:Sheet3!Z1,data))"),
+            (1, 2, "LET(data,Sheet1:Sheet3!Z1,SUM(data))"),
+            (1, 3, "LET(data,Sheet1:Sheet3!Z1,data)"),
+        ],
+        &[],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    for column in 1..=2 {
+        assert!(
+            matches!(
+                report
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.cell() == cell_id(column))
+                    .expect("LET 3-D capability entry")
+                    .capability(),
+                FormulaCapability::Supported
+            ),
+            "column {column} must inherit SUM's collecting policy",
+        );
+    }
+    assert!(
+        matches!(
+            report
+                .entries()
+                .iter()
+                .find(|entry| entry.cell() == cell_id(3))
+                .expect("top-level LET capability entry")
+                .capability(),
+            FormulaCapability::Supported
+        ),
+        "a top-level LET must inherit the ordinary expression policy",
+    );
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 111.0, 0.0);
+    assert_number(&calculation, 2, 111.0, 0.0);
+    assert_eq!(
+        calculation.cell(cell_id(3)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Value
+        )))
+    );
 }
 
 #[test]
@@ -317,6 +364,7 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                 | "INDEX"
                 | "VLOOKUP"
                 | "OFFSET"
+                | "LET"
         );
         match capability.capability() {
             FormulaCapability::Supported => assert!(
@@ -670,6 +718,30 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
         cellrune::FunctionSupport::Unsupported
     );
 
+    let scoped_report = scan_function_usage(&workbook_with_formulas(&[
+        (1, 1, "LET(total,SUM(1,2),total)"),
+        (1, 2, "MAP({1},LAMBDA(item,item+1))"),
+    ]));
+    assert!(
+        scoped_report
+            .entries()
+            .iter()
+            .any(|entry| entry.name() == "LET")
+    );
+    assert!(
+        scoped_report
+            .entries()
+            .iter()
+            .any(|entry| entry.name() == "MAP")
+    );
+    assert!(
+        scoped_report
+            .entries()
+            .iter()
+            .all(|entry| entry.name() != "LAMBDA"),
+        "a MAP lambda literal is syntax owned by MAP, not an unsupported standalone call",
+    );
+
     let sample_workbook = workbook_with_formulas(
         &(1..=10)
             .map(|column| (1, column, "SUM(1,2)"))
@@ -690,8 +762,13 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        278
+        279
     );
+    let let_entry = catalog
+        .iter()
+        .find(|entry| entry.name() == "LET")
+        .expect("LET");
+    assert!(let_entry.returns_array());
     let percentile = catalog
         .iter()
         .find(|entry| entry.name() == "PERCENTILE")
@@ -1247,6 +1324,24 @@ fn calculation_limits_reject_zero_values() {
         CalculationLimits::default().with_max_function_iterations(0),
         Err(CalculationOptionsError::ZeroLimit {
             name: "max_function_iterations",
+        })
+    );
+    assert_eq!(
+        CalculationLimits::default().with_max_let_bindings(0),
+        Err(CalculationOptionsError::ZeroLimit {
+            name: "max_let_bindings",
+        })
+    );
+    assert_eq!(
+        CalculationLimits::default().with_max_lambda_depth(0),
+        Err(CalculationOptionsError::ZeroLimit {
+            name: "max_lambda_depth",
+        })
+    );
+    assert_eq!(
+        CalculationLimits::default().with_max_lambda_invocations(0),
+        Err(CalculationOptionsError::ZeroLimit {
+            name: "max_lambda_invocations",
         })
     );
 }
@@ -2576,6 +2671,207 @@ fn map_binds_lambda_parameters_with_array_and_iteration_limits() {
         CalculationOptions::default().with_limits(limits),
     );
     assert_issue(&limited, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn let_preserves_scalar_array_reference_and_lexical_scope_semantics() {
+    let workbook = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "1"),
+            (1, 2, "2"),
+            (1, 3, "LET(x,2,x*3)"),
+            (1, 4, "LET(source,A1:B1,SUM(source))"),
+            (1, 5, "SUM(LET(items,{1,2,3},items))"),
+            (1, 6, "LET(x,1,LET(x,2,x)+x)"),
+            (1, 7, "LET(Factor,3,Factor*2)"),
+            (1, 8, "_xlfn.LET(_xlpm.Total,4,_xlpm.total+1)"),
+            (1, 9, "LET(x,2,y,x+1,y*3)"),
+            (1, 10, "ISREF(LET(source,A1:B1,source))"),
+            (1, 11, "LET(x,y,y,2,x)"),
+        ],
+        &[("Factor", "10")],
+    );
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (column, expected) in [
+        (3, 6.0),
+        (4, 3.0),
+        (5, 6.0),
+        (6, 3.0),
+        (7, 6.0),
+        (8, 5.0),
+        (9, 9.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+    assert_eq!(
+        calculation.cell(cell_id(10)),
+        Some(&CalculationCellResult::Value(CellValue::Logical(true)))
+    );
+    assert_issue(&calculation, 11, CalculationIssueCode::UnsupportedName);
+}
+
+#[test]
+fn let_validates_names_duplicates_and_arity_before_evaluation() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "LET(x,1)"),
+        (1, 2, "LET(x,1,X,2,x)"),
+        (1, 3, "LET(R1C1,1,R1C1)"),
+        (1, 4, "LET(c,1,c)"),
+        (1, 5, "LET(A1,1,A1)"),
+        (1, 6, "LET(r,1,r)"),
+        (1, 7, "LET(valid,1,valid)"),
+        (1, 8, "LET(Δ,2,δ+1)"),
+        (1, 9, r"LET(\rate,3,\RATE+1)"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=6 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "unexpected invalid LET result in column {column}",
+        );
+    }
+    assert_number(&calculation, 7, 1.0, 0.0);
+    assert_number(&calculation, 8, 3.0, 0.0);
+    assert_number(&calculation, 9, 4.0, 0.0);
+}
+
+#[test]
+fn let_and_map_preserve_decimal_traces_without_overriding_arithmetic_mode() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "0.1+0.2-0.3"),
+        (1, 2, "LET(x,0.1+0.2,x-0.3)"),
+        (1, 3, "SUM(LET(items,{0.1+0.2,-0.3},items))"),
+        (1, 4, "SUMPRODUCT(MAP({0.1+0.2},LAMBDA(x,x-0.3)))"),
+        (1, 5, "MAP(0.1+0.2,LAMBDA(x,x-0.3))"),
+    ]);
+
+    let excel = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=5 {
+        assert_number(&excel, column, 0.0, 0.0);
+    }
+
+    let ieee = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
+    );
+    let residue = 0.1_f64 + 0.2_f64 - 0.3_f64;
+    for column in 1..=5 {
+        assert_number(&ieee, column, residue, f64::EPSILON);
+    }
+}
+
+#[test]
+fn let_and_lambda_limits_have_distinct_units_and_stable_details() {
+    assert_eq!(CalculationLimits::default().max_let_bindings(), 126);
+    assert_eq!(CalculationLimits::default().max_lambda_depth(), 256);
+    assert_eq!(
+        CalculationLimits::default().max_lambda_invocations(),
+        1_000_000
+    );
+
+    let let_limits = CalculationLimits::default()
+        .with_max_let_bindings(1)
+        .expect("positive LET binding limit");
+    let let_limited = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "LET(first,1,second,2,first+second)")]),
+        CalculationOptions::default().with_limits(let_limits),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = let_limited.cell(cell_id(1)) else {
+        panic!("LET binding limit must withhold the result");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_let_bindings"));
+
+    let invocation_limits = CalculationLimits::default()
+        .with_max_lambda_invocations(2)
+        .expect("positive lambda invocation limit");
+    let invocation_limited = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "SUMPRODUCT(MAP({1,2,3},LAMBDA(item,item)))")]),
+        CalculationOptions::default().with_limits(invocation_limits),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = invocation_limited.cell(cell_id(1))
+    else {
+        panic!("lambda invocation limit must withhold the result");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_lambda_invocations"));
+
+    let depth_limits = CalculationLimits::default()
+        .with_max_lambda_depth(1)
+        .expect("positive lambda depth limit");
+    let depth_limited = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "SUMPRODUCT(MAP({1},LAMBDA(x,SUMPRODUCT(MAP({1},LAMBDA(y,x+y))))))",
+        )]),
+        CalculationOptions::default().with_limits(depth_limits),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = depth_limited.cell(cell_id(1)) else {
+        panic!("lambda depth limit must withhold the result");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_lambda_depth"));
+
+    let let_only = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "LET(x,1,LET(y,2,x+y))")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_lambda_invocations(1)
+                .expect("positive lambda invocation limit"),
+        ),
+    );
+    assert_number(&let_only, 1, 3.0, 0.0);
+
+    let lazy_if = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "SUM(IF({TRUE},MAP({1},LAMBDA(x,x)),MAP({2},LAMBDA(x,x))))",
+        )]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_lambda_invocations(1)
+                .expect("positive lambda invocation limit"),
+        ),
+    );
+    assert_number(&lazy_if, 1, 1.0, 0.0);
+}
+
+#[test]
+fn let_binding_limit_covers_the_excel_boundary() {
+    fn formula(binding_count: usize) -> String {
+        let mut formula = String::from("LET(");
+        for index in 1..=binding_count {
+            if index > 1 {
+                formula.push(',');
+            }
+            formula.push_str(&format!("_n{index},{index}"));
+        }
+        formula.push_str(&format!(",_n{binding_count})"));
+        formula
+    }
+
+    let formulas = [formula(125), formula(126), formula(127)];
+    let workbook = workbook_with_formulas(&[
+        (1, 1, formulas[0].as_str()),
+        (1, 2, formulas[1].as_str()),
+        (1, 3, formulas[2].as_str()),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 125.0, 0.0);
+    assert_number(&calculation, 2, 126.0, 0.0);
+    let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(cell_id(3)) else {
+        panic!("127 LET bindings must exceed the default limit");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_let_bindings"));
 }
 
 #[test]

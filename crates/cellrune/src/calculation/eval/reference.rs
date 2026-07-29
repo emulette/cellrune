@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use super::{Engine, EvalContext};
 use crate::calculation::ast::{Expr, RefBody, Reference};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
-use crate::calculation::functions::normalize_name;
+use crate::calculation::functions::{let_reference, normalize_name};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::{Rect, RectSpan, SheetSpan};
+use crate::calculation::scope::ScopeValue;
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 use crate::{Sheet, WorkbookSnapshot};
@@ -153,10 +154,17 @@ impl Engine<'_> {
                 let rect = self.resolve_rect_expr(context, expr)?;
                 Ok(RectSpan::new(SheetSpan::single(rect.sheet), rect))
             }
-            Expr::Name(name) => self
-                .resolve_name_expr(context.sheet(), name)
-                .ok_or(ErrorKind::Name)
-                .and_then(|named| self.resolve_rect_span_expr(context, named)),
+            Expr::Name(name) => match context.binding(name) {
+                Some(ScopeValue::Reference(span)) => Ok(span.clone()),
+                Some(_) => Err(ErrorKind::Value),
+                None => self
+                    .resolve_name_expr(context.sheet(), name)
+                    .ok_or(ErrorKind::Name)
+                    .and_then(|named| self.resolve_rect_span_expr(context, named)),
+            },
+            Expr::Call { name, args } if normalize_name(name) == "LET" => {
+                let_reference(self, context, args)
+            }
             Expr::Call { .. } => self.resolve_rect_expr(context, expr).map(RectSpan::single),
             _ => Err(ErrorKind::Value),
         }
@@ -179,16 +187,13 @@ impl Engine<'_> {
                 // capability scanner classifies this position with `ARRAY_EXPRESSION_POLICY`, so
                 // answering with the engine-capability `Unsupported` here would make the scanner
                 // and the evaluator disagree.
-                for operand in [start.as_ref(), end.as_ref()] {
-                    if self
-                        .resolve_rect_span_expr(context, operand)
-                        .is_ok_and(|span| span.is_sheet_range())
-                    {
-                        return Err(ErrorKind::Value);
-                    }
+                let start_span = self.resolve_rect_span_expr(context, start)?;
+                let end_span = self.resolve_rect_span_expr(context, end)?;
+                if start_span.is_sheet_range() || end_span.is_sheet_range() {
+                    return Err(ErrorKind::Value);
                 }
-                let start = self.resolve_rect_expr(context, start)?;
-                let end = self.resolve_rect_expr(context, end)?;
+                let start = start_span.into_rect().map_err(|_| ErrorKind::Value)?;
+                let end = end_span.into_rect().map_err(|_| ErrorKind::Value)?;
                 if start.sheet != end.sheet {
                     // Excel yields #VALUE! for a range operator whose endpoints
                     // sit on different sheets.
@@ -207,10 +212,21 @@ impl Engine<'_> {
                         && (start.whole_rows || end.whole_rows),
                 })
             }
-            Expr::Name(name) => self
-                .resolve_name_expr(context.sheet(), name)
-                .ok_or(ErrorKind::Name)
-                .and_then(|named| self.resolve_rect_expr(context, named)),
+            Expr::Name(name) => match context.binding(name) {
+                Some(ScopeValue::Reference(span)) => {
+                    span.clone().into_rect().map_err(|_| ErrorKind::Value)
+                }
+                Some(_) => Err(ErrorKind::Value),
+                None => self
+                    .resolve_name_expr(context.sheet(), name)
+                    .ok_or(ErrorKind::Name)
+                    .and_then(|named| self.resolve_rect_expr(context, named)),
+            },
+            Expr::Call { name, args } if normalize_name(name) == "LET" => {
+                let_reference(self, context, args)?
+                    .into_rect()
+                    .map_err(|_| ErrorKind::Value)
+            }
             Expr::Call { name, args } if normalize_name(name) == "INDEX" => {
                 self.resolve_index_rect(context, args)
             }

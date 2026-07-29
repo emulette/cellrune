@@ -1,62 +1,19 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use super::reference::is_reference_returning_function;
 use super::{Engine, EvalContext};
 use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
 use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation};
-use crate::calculation::functions::{call_function, call_function_array};
-use crate::calculation::limits::CalculationLimitKind;
-use crate::calculation::operators::{
-    apply_binary, apply_unary, broadcast_index, broadcast_shape, element_at,
+use crate::calculation::functions::{
+    call_function, call_function_array, let_scope_value, map_scalar_with_trace, normalize_name,
 };
+use crate::calculation::limits::CalculationLimitKind;
+use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
 use crate::calculation::runtime::{Array, ArrayExtent, Rect};
+use crate::calculation::scope::{ArrayEvaluation, ScalarEvaluation, ScopeValue};
 use crate::calculation::value::{ErrorKind, Value};
-
-pub(super) struct ScalarEvaluation {
-    pub(super) value: Value,
-    pub(super) decimal_trace: Option<DecimalTrace>,
-}
-
-impl ScalarEvaluation {
-    const fn untracked(value: Value) -> Self {
-        Self {
-            value,
-            decimal_trace: None,
-        }
-    }
-}
-
-pub(in crate::calculation) struct ArrayEvaluation {
-    pub(in crate::calculation) array: Array,
-    pub(in crate::calculation) decimal_traces: Vec<Option<DecimalTrace>>,
-}
-
-impl ArrayEvaluation {
-    /// Exact decimal of the element `element_at` reads at this broadcast position.
-    ///
-    /// Indexed through the same rule as the values, so a change to broadcasting cannot move the
-    /// values and the traces apart.
-    pub(in crate::calculation) fn decimal_at(&self, row: u32, column: u32) -> Option<DecimalTrace> {
-        let index = broadcast_index(self.array.rows, self.array.cols, row, column)?;
-        self.decimal_traces.get(index).copied().flatten()
-    }
-
-    fn untracked(array: Array) -> Self {
-        let decimal_traces = vec![None; array.data.len()];
-        Self {
-            array,
-            decimal_traces,
-        }
-    }
-
-    fn scalar(evaluated: ScalarEvaluation) -> Self {
-        Self {
-            array: Array::scalar(evaluated.value),
-            decimal_traces: vec![evaluated.decimal_trace],
-        }
-    }
-}
 
 struct ArrayEvaluationContext {
     extent: Option<ArrayExtent>,
@@ -130,7 +87,103 @@ fn evaluate_unary(op: UnaryOp, operand: ScalarEvaluation) -> ScalarEvaluation {
     }
 }
 
+fn scope_error(kind: ErrorKind) -> ScopeValue {
+    ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)))
+}
+
+fn scope_from_array(evaluated: ArrayEvaluation) -> ScopeValue {
+    if evaluated.array.is_scalar() {
+        ScopeValue::Scalar(ScalarEvaluation {
+            value: evaluated.array.data[0].clone(),
+            decimal_trace: evaluated.decimal_traces[0],
+        })
+    } else {
+        ScopeValue::Array(Arc::new(evaluated))
+    }
+}
+
 impl Engine<'_> {
+    pub(in crate::calculation) fn eval_scope_value(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> ScopeValue {
+        match expr {
+            Expr::Missing => ScopeValue::Missing,
+            Expr::Paren(inner) => self.eval_scope_value(context, inner),
+            Expr::Name(name) => {
+                if let Some(value) = context.binding(name) {
+                    return value.clone();
+                }
+                match self.resolve_name_expr(context.sheet(), name) {
+                    Some(named) => self.eval_scope_value(context, named),
+                    None => scope_error(ErrorKind::Name),
+                }
+            }
+            Expr::Ref(_) | Expr::Range { .. } => self
+                .resolve_rect_span_expr(context, expr)
+                .map_or_else(scope_error, ScopeValue::Reference),
+            Expr::Call { name, args } if normalize_name(name) == "LET" => {
+                let_scope_value(self, context, args)
+            }
+            Expr::Call { name, .. } if is_reference_returning_function(name) => self
+                .resolve_rect_span_expr(context, expr)
+                .map_or_else(scope_error, ScopeValue::Reference),
+            _ => self
+                .eval_array_with_trace(context, expr)
+                .map_or_else(scope_error, scope_from_array),
+        }
+    }
+
+    pub(in crate::calculation) fn scalar_from_scope(
+        &self,
+        context: EvalContext<'_>,
+        scoped: &ScopeValue,
+    ) -> ScalarEvaluation {
+        match scoped {
+            ScopeValue::Missing => ScalarEvaluation::untracked(Value::Blank),
+            ScopeValue::Scalar(evaluated) => evaluated.clone(),
+            ScopeValue::Array(evaluated) => ScalarEvaluation {
+                value: evaluated
+                    .array
+                    .data
+                    .first()
+                    .cloned()
+                    .unwrap_or(Value::Error(ErrorKind::Value)),
+                decimal_trace: evaluated.decimal_traces.first().copied().flatten(),
+            },
+            ScopeValue::Reference(span) => {
+                self.eval_reference_span_with_trace(context, span.clone())
+            }
+        }
+    }
+
+    fn eval_reference_span_with_trace(
+        &self,
+        context: EvalContext<'_>,
+        span: crate::calculation::runtime::RectSpan,
+    ) -> ScalarEvaluation {
+        if span.is_sheet_range() {
+            return ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
+        }
+        let Ok(rect) = span.into_rect() else {
+            return ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
+        };
+        let Ok(rect) = self.implicit_intersection_rect(context, rect) else {
+            return ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
+        };
+        let cell = (rect.sheet, rect.row_start, rect.col_start);
+        let value = self.cell_value(cell);
+        let decimal_trace = match value {
+            Value::Number(_) => self.numeric_decimal_trace(cell),
+            _ => None,
+        };
+        ScalarEvaluation {
+            value,
+            decimal_trace,
+        }
+    }
+
     fn eval_implicit_intersection(&self, context: EvalContext<'_>, expr: &Expr) -> Value {
         match expr {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
@@ -188,7 +241,7 @@ impl Engine<'_> {
         Ok((number, decimal_trace))
     }
 
-    pub(super) fn eval_scalar_with_trace(
+    pub(in crate::calculation) fn eval_scalar_with_trace(
         &self,
         context: EvalContext<'_>,
         expr: &Expr,
@@ -213,7 +266,7 @@ impl Engine<'_> {
             }
             Expr::Array(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported)),
             Expr::Name(name) => match context.binding(name) {
-                Some(value) => ScalarEvaluation::untracked(value.clone()),
+                Some(value) => self.scalar_from_scope(context, value),
                 None => match self.resolve_name_expr(context.sheet(), name) {
                     Some(named) => self.eval_scalar_with_trace(context, named),
                     None => ScalarEvaluation::untracked(Value::Error(ErrorKind::Name)),
@@ -222,6 +275,13 @@ impl Engine<'_> {
             Expr::Ref(_) | Expr::Range { .. } => self.eval_reference_with_trace(context, expr),
             Expr::Call { name, .. } if is_reference_returning_function(name) => {
                 self.eval_reference_with_trace(context, expr)
+            }
+            Expr::Call { name, args } if normalize_name(name) == "LET" => {
+                let scoped = let_scope_value(self, context, args);
+                self.scalar_from_scope(context, &scoped)
+            }
+            Expr::Call { name, args } if normalize_name(name) == "MAP" => {
+                map_scalar_with_trace(self, context, args)
             }
             Expr::Call { name, args } => {
                 ScalarEvaluation::untracked(call_function(self, context, name, args))
@@ -254,11 +314,9 @@ impl Engine<'_> {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.eval_implicit_intersection_with_trace(context, inner)
             }
-            Expr::Name(name) if context.binding(name).is_some() => ScalarEvaluation::untracked(
-                context
-                    .binding(name)
-                    .cloned()
-                    .expect("binding presence checked"),
+            Expr::Name(name) if context.binding(name).is_some() => self.scalar_from_scope(
+                context,
+                context.binding(name).expect("binding presence checked"),
             ),
             Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
                 self.eval_reference_with_trace(context, operand)
@@ -342,15 +400,15 @@ impl Engine<'_> {
             Expr::ImplicitIntersection(inner) => Ok(ArrayEvaluation::scalar(
                 self.eval_implicit_intersection_with_trace(context, inner),
             )),
-            Expr::Name(name) if context.binding(name).is_some() => {
-                Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
-                    context
-                        .binding(name)
-                        .cloned()
-                        .expect("binding presence checked"),
-                )))
-            }
-            Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
+            Expr::Name(name) if context.binding(name).is_some() => self.array_from_scope(
+                context.binding(name).expect("binding presence checked"),
+                evaluation,
+            ),
+            Expr::Name(name) => match self.resolve_name_expr(context.sheet(), name) {
+                Some(named) => self.eval_array_with_trace_at_extent(context, named, evaluation),
+                None => Err(ErrorKind::Name),
+            },
+            Expr::Ref(_) | Expr::Range { .. } => {
                 let span = self.resolve_rect_span_expr(context, expr)?;
                 if span.is_sheet_range() {
                     return Err(ErrorKind::Value);
@@ -444,16 +502,20 @@ impl Engine<'_> {
                     decimal_traces,
                 })
             }
+            Expr::Call { name, args } if normalize_name(name) == "LET" => {
+                let scoped = let_scope_value(self, context, args);
+                self.array_from_scope(&scoped, evaluation)
+            }
             Expr::Call { name, args } => {
                 if let Some(result) = call_function_array(self, context, name, args) {
-                    let array = result?;
+                    let evaluated = result?;
                     if evaluation.extent.is_some() {
-                        let cells = u64::from(array.rows)
-                            .checked_mul(u64::from(array.cols))
+                        let cells = u64::from(evaluated.array.rows)
+                            .checked_mul(u64::from(evaluated.array.cols))
                             .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
                         evaluation.charge(self, cells)?;
                     }
-                    Ok(ArrayEvaluation::untracked(array))
+                    Ok(evaluated)
                 } else {
                     Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
                         call_function(self, context, name, args),
@@ -463,6 +525,27 @@ impl Engine<'_> {
             _ => Ok(ArrayEvaluation::scalar(
                 self.eval_scalar_with_trace(context, expr),
             )),
+        }
+    }
+
+    fn array_from_scope(
+        &self,
+        scoped: &ScopeValue,
+        evaluation: &mut ArrayEvaluationContext,
+    ) -> Result<ArrayEvaluation, ErrorKind> {
+        match scoped {
+            ScopeValue::Missing => Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
+                Value::Blank,
+            ))),
+            ScopeValue::Scalar(evaluated) => Ok(ArrayEvaluation::scalar(evaluated.clone())),
+            ScopeValue::Array(evaluated) => Ok(evaluated.as_ref().clone()),
+            ScopeValue::Reference(span) => {
+                if span.is_sheet_range() {
+                    return Err(ErrorKind::Value);
+                }
+                let rect = span.clone().into_rect().map_err(|_| ErrorKind::Value)?;
+                self.array_from_rect_with_trace(rect, evaluation)
+            }
         }
     }
 
@@ -534,13 +617,6 @@ impl Engine<'_> {
         expr: &Expr,
         names: &mut BTreeSet<String>,
     ) -> Option<ArrayExtent> {
-        if let Ok(span) = self.resolve_rect_span_expr(context, expr) {
-            return span
-                .rects()
-                .filter(|rect| rect.whole_rows)
-                .map(|rect| ArrayExtent::new(self.whole_column_row_end(&rect)))
-                .reduce(ArrayExtent::merged);
-        }
         match expr {
             Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
                 self.array_extent(context, inner, names)
@@ -553,7 +629,17 @@ impl Engine<'_> {
                 (Some(extent), None) | (None, Some(extent)) => Some(extent),
                 (None, None) => None,
             },
-            Expr::Name(name) if context.binding(name).is_none() => {
+            Expr::Ref(_) | Expr::Range { .. } => self
+                .resolve_rect_span_expr(context, expr)
+                .ok()
+                .and_then(|span| self.array_extent_from_span(&span)),
+            Expr::Name(name) if context.binding(name).is_some() => {
+                match context.binding(name).expect("binding presence checked") {
+                    ScopeValue::Reference(span) => self.array_extent_from_span(span),
+                    ScopeValue::Missing | ScopeValue::Scalar(_) | ScopeValue::Array(_) => None,
+                }
+            }
+            Expr::Name(name) => {
                 let key = name.to_ascii_lowercase();
                 if !names.insert(key) {
                     return None;
@@ -561,18 +647,29 @@ impl Engine<'_> {
                 self.resolve_name_expr(context.sheet(), name)
                     .and_then(|named| self.array_extent(context, named, names))
             }
+            Expr::Call { name, .. } if is_reference_returning_function(name) => self
+                .resolve_rect_span_expr(context, expr)
+                .ok()
+                .and_then(|span| self.array_extent_from_span(&span)),
             Expr::Number(_)
             | Expr::Text(_)
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
             | Expr::StructuredRef(_)
             | Expr::Missing
-            | Expr::Ref(_)
-            | Expr::Range { .. }
-            | Expr::Name(_)
             | Expr::ImplicitIntersection(_)
             | Expr::Array(_)
             | Expr::Call { .. } => None,
         }
+    }
+
+    fn array_extent_from_span(
+        &self,
+        span: &crate::calculation::runtime::RectSpan,
+    ) -> Option<ArrayExtent> {
+        span.rects()
+            .filter(|rect| rect.whole_rows)
+            .map(|rect| ArrayExtent::new(self.whole_column_row_end(&rect)))
+            .reduce(ArrayExtent::merged)
     }
 }

@@ -121,7 +121,7 @@ fn external_link_follows(characters: &[char], mut cursor: usize) -> bool {
 }
 
 fn is_ident_start(character: char) -> bool {
-    character.is_alphabetic() || character == '_'
+    character.is_alphabetic() || matches!(character, '_' | '\\')
 }
 
 fn is_ident_continue(character: char) -> bool {

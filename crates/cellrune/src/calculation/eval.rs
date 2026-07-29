@@ -1,13 +1,14 @@
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::ast::Expr;
 use super::convert::value_from_cell;
 use super::decimal::DecimalTrace;
 use super::graph::DependencyGraph;
-use super::lambda::{LambdaBinding, binding_value};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
 use super::runtime::{CellId, Rect, RectSpan};
+use super::scope::{ScopeEntry, ScopeValue, scope_value};
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
@@ -63,17 +64,66 @@ impl CompiledWorkbook {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct EvalContext<'bindings> {
-    cell: CellId,
-    bindings: &'bindings [LambdaBinding],
+#[derive(Debug, Default)]
+pub(super) struct EvaluationBudget {
+    lambda_depth: Cell<u64>,
+    lambda_invocations: Cell<u64>,
 }
 
-impl<'bindings> EvalContext<'bindings> {
-    pub(super) const fn for_cell(cell: CellId) -> Self {
+impl EvaluationBudget {
+    fn enter_lambda(&self, limits: CalculationLimits) -> Result<ActiveLambda<'_>, ErrorKind> {
+        let depth = self
+            .lambda_depth
+            .get()
+            .checked_add(1)
+            .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::LambdaDepth))?;
+        if depth > limits.max_lambda_depth() {
+            return Err(ErrorKind::ResourceLimit(CalculationLimitKind::LambdaDepth));
+        }
+        let invocations =
+            self.lambda_invocations
+                .get()
+                .checked_add(1)
+                .ok_or(ErrorKind::ResourceLimit(
+                    CalculationLimitKind::LambdaInvocations,
+                ))?;
+        if invocations > limits.max_lambda_invocations() {
+            return Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::LambdaInvocations,
+            ));
+        }
+        self.lambda_depth.set(depth);
+        self.lambda_invocations.set(invocations);
+        Ok(ActiveLambda { budget: self })
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ActiveLambda<'budget> {
+    budget: &'budget EvaluationBudget,
+}
+
+impl Drop for ActiveLambda<'_> {
+    fn drop(&mut self) {
+        self.budget
+            .lambda_depth
+            .set(self.budget.lambda_depth.get() - 1);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct EvalContext<'scope> {
+    cell: CellId,
+    bindings: &'scope [ScopeEntry],
+    budget: &'scope EvaluationBudget,
+}
+
+impl<'scope> EvalContext<'scope> {
+    pub(super) const fn for_evaluation(cell: CellId, budget: &'scope EvaluationBudget) -> Self {
         Self {
             cell,
             bindings: &[],
+            budget,
         }
     }
 
@@ -89,22 +139,33 @@ impl<'bindings> EvalContext<'bindings> {
         self.cell.2
     }
 
-    pub(super) fn binding(self, name: &str) -> Option<&'bindings Value> {
-        binding_value(self.bindings, name)
+    pub(super) fn binding(self, name: &str) -> Option<&'scope ScopeValue> {
+        scope_value(self.bindings, name)
     }
 
-    pub(super) const fn bindings(self) -> &'bindings [LambdaBinding] {
+    pub(super) const fn bindings(self) -> &'scope [ScopeEntry] {
         self.bindings
     }
 
     pub(super) const fn with_bindings<'next>(
         self,
-        bindings: &'next [LambdaBinding],
-    ) -> EvalContext<'next> {
+        bindings: &'next [ScopeEntry],
+    ) -> EvalContext<'next>
+    where
+        'scope: 'next,
+    {
         EvalContext {
             cell: self.cell,
             bindings,
+            budget: self.budget,
         }
+    }
+
+    pub(super) fn enter_lambda(
+        self,
+        limits: CalculationLimits,
+    ) -> Result<ActiveLambda<'scope>, ErrorKind> {
+        self.budget.enter_lambda(limits)
     }
 }
 
@@ -253,6 +314,10 @@ impl<'workbook> Engine<'workbook> {
 
     pub(super) const fn arithmetic_semantics(&self) -> crate::ArithmeticSemantics {
         self.options.arithmetic_semantics()
+    }
+
+    pub(super) const fn calculation_limits(&self) -> CalculationLimits {
+        self.options.limits()
     }
 
     pub(super) const fn financial_solver_semantics(&self) -> crate::FinancialSolverSemantics {

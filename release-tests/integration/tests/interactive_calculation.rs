@@ -1310,6 +1310,57 @@ fn map_parameters_shadow_dynamic_defined_names_during_incremental_analysis() {
 }
 
 #[test]
+fn let_bindings_preserve_incremental_dependencies_and_shadow_dynamic_names() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("A2"), number(2.0)),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("LET(item,SUM(A1:A2),item+1)"),
+                ),
+                WorkbookChange::set_defined_name(defined_name("item", "OFFSET(Z1,0,0)")),
+            ]),
+        )
+        .expect("shadowed LET setup");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A2"),
+                number(4.0),
+            )]),
+        )
+        .expect("LET dependency edit");
+
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("local LET binding must keep incremental calculation safe");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_calculations_equal(
+        session.calculation().expect("installed incremental result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
 fn cross_sheet_dependencies_propagate_and_format_only_edits_do_not_recalculate() {
     let mut session = WorkbookCalculationSession::create();
     let first = SheetId::new(1).expect("constant sheet ID");
