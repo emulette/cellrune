@@ -1,11 +1,11 @@
 use super::reference::cell_at;
 use super::{Engine, public_to_internal, value_from_calculation_result};
+use crate::CellContent;
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::runtime::{CellId, Rect};
 use crate::calculation::scope::ArrayEvaluation;
 use crate::calculation::value::{ErrorKind, Value};
 use crate::calculation::{CalculationSnapshot, MaterializedResultOrigin};
-use crate::{CellContent, FormulaMetadata, WorkbookSnapshot};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ArrayRegion {
@@ -19,8 +19,12 @@ impl Engine<'_> {
         &mut self,
         previous: &CalculationSnapshot,
         dirty: Option<&BTreeSet<CellId>>,
-    ) {
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
         for (public_id, result) in previous.cells() {
+            if cancelled() {
+                return Err(());
+            }
             let Some(internal_id) = public_to_internal(self.workbook, public_id) else {
                 continue;
             };
@@ -30,6 +34,9 @@ impl Engine<'_> {
             self.retained_results.insert(internal_id, result.clone());
         }
         for (public_id, materialized) in previous.materialized_cells() {
+            if cancelled() {
+                return Err(());
+            }
             let Some(internal_id) = public_to_internal(self.workbook, public_id) else {
                 continue;
             };
@@ -73,6 +80,7 @@ impl Engine<'_> {
                 });
             }
         }
+        Ok(())
     }
 
     pub(super) fn legacy_array_range(&self, cell: CellId) -> Option<Rect> {
@@ -118,7 +126,8 @@ impl Engine<'_> {
         anchor: CellId,
         range: Rect,
         result: Result<ArrayEvaluation, ErrorKind>,
-    ) {
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
         let declared_cells = range.height().checked_mul(range.width());
         let evaluated = match declared_cells
             .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))
@@ -128,12 +137,15 @@ impl Engine<'_> {
             Ok(evaluated) => evaluated,
             Err(kind) => {
                 self.results.insert(anchor, Value::Error(kind));
-                return;
+                return Ok(());
             }
         };
         let array = evaluated.array;
         for row in range.row_start..=range.row_end {
             for column in range.col_start..=range.col_end {
+                if cancelled() {
+                    return Err(());
+                }
                 let array_row = row - range.row_start;
                 let array_column = column - range.col_start;
                 let value = if array_row < array.rows && array_column < array.cols {
@@ -159,6 +171,7 @@ impl Engine<'_> {
                 }
             }
         }
+        Ok(())
     }
 
     pub(super) fn materialize_dynamic_array(
@@ -166,12 +179,13 @@ impl Engine<'_> {
         anchor: CellId,
         declared_range: Option<Rect>,
         result: Result<ArrayEvaluation, ErrorKind>,
-    ) {
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
         let evaluated = match result {
             Ok(evaluated) => evaluated,
             Err(kind) => {
                 self.results.insert(anchor, Value::Error(kind));
-                return;
+                return Ok(());
             }
         };
         let array = evaluated.array;
@@ -185,16 +199,19 @@ impl Engine<'_> {
         })
         .resized_from_anchor(u64::from(array.rows), u64::from(array.cols)) else {
             self.results.insert(anchor, Value::Error(ErrorKind::Spill));
-            return;
+            return Ok(());
         };
         if declared_range.is_some_and(|declared| declared != range)
-            || self.dynamic_spill_collides(anchor, range, declared_range)
+            || self.dynamic_spill_collides(anchor, range, declared_range, cancelled)?
         {
             self.results.insert(anchor, Value::Error(ErrorKind::Spill));
-            return;
+            return Ok(());
         }
         for row in range.row_start..=range.row_end {
             for column in range.col_start..=range.col_end {
+                if cancelled() {
+                    return Err(());
+                }
                 let value = array
                     .at(row - range.row_start, column - range.col_start)
                     .clone();
@@ -222,6 +239,7 @@ impl Engine<'_> {
                 provisional: true,
             });
         }
+        Ok(())
     }
 
     fn dynamic_spill_collides(
@@ -229,15 +247,19 @@ impl Engine<'_> {
         anchor: CellId,
         range: Rect,
         declared_range: Option<Rect>,
-    ) -> bool {
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<bool, ()> {
         for row in range.row_start..=range.row_end {
             for column in range.col_start..=range.col_end {
+                if cancelled() {
+                    return Err(());
+                }
                 let target = (range.sheet, row, column);
                 if target == anchor {
                     continue;
                 }
                 if self.results.contains_key(&target) {
-                    return true;
+                    return Ok(true);
                 }
                 let occupied = self
                     .workbook
@@ -247,20 +269,27 @@ impl Engine<'_> {
                 if occupied.is_some_and(|cell| {
                     declared_range.is_none() || matches!(cell.content(), CellContent::Formula(_))
                 }) {
-                    return true;
+                    return Ok(true);
                 }
             }
         }
-        if self
-            .dynamic_spills
-            .values()
-            .any(|existing| rects_intersect(existing, &range))
-        {
-            return true;
+        for existing in self.dynamic_spills.values() {
+            if cancelled() {
+                return Err(());
+            }
+            if rects_intersect(existing, &range) {
+                return Ok(true);
+            }
         }
-        self.array_regions
-            .iter()
-            .any(|region| region.anchor != anchor && rects_intersect(&region.rect, &range))
+        for region in &self.array_regions {
+            if cancelled() {
+                return Err(());
+            }
+            if region.anchor != anchor && rects_intersect(&region.rect, &range) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(in crate::calculation) fn dynamic_spill(&self, anchor: CellId) -> Option<Rect> {
@@ -287,44 +316,4 @@ fn rects_intersect(left: &Rect, right: &Rect) -> bool {
         && right.col_start <= left.col_end
 }
 
-pub(super) fn collect_array_regions(workbook: &WorkbookSnapshot) -> Vec<ArrayRegion> {
-    let mut regions = Vec::new();
-    for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
-        for cell in sheet.cells() {
-            let CellContent::Formula(formula) = cell.content() else {
-                continue;
-            };
-            let range = match formula.metadata() {
-                FormulaMetadata::Array { range, .. } => *range,
-                FormulaMetadata::DynamicArray {
-                    range: Some(range), ..
-                } => *range,
-                FormulaMetadata::Normal
-                | FormulaMetadata::Shared { .. }
-                | FormulaMetadata::DynamicArray { range: None, .. }
-                | FormulaMetadata::DataTable { .. } => continue,
-            };
-            if range.start() != cell.address() || (range.height() == 1 && range.width() == 1) {
-                continue;
-            }
-            regions.push(ArrayRegion {
-                anchor: (
-                    sheet_index,
-                    cell.address().row().get(),
-                    cell.address().column().get(),
-                ),
-                rect: Rect {
-                    sheet: sheet_index,
-                    row_start: range.start().row().get(),
-                    col_start: range.start().column().get(),
-                    row_end: range.end().row().get(),
-                    col_end: range.end().column().get(),
-                    whole_rows: false,
-                },
-                provisional: false,
-            });
-        }
-    }
-    regions
-}
 use std::collections::BTreeSet;

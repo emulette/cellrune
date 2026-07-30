@@ -14,7 +14,9 @@ use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
     CalculationOptions,
 };
-use crate::{CellContent, CellValue, FiniteNumber, WorkbookSnapshot};
+use crate::{
+    CellContent, CellValue, DefinedNameScope, FiniteNumber, FormulaMetadata, WorkbookSnapshot,
+};
 
 mod dependency;
 mod expression;
@@ -25,6 +27,134 @@ mod reference;
 
 use materialization::ArrayRegion;
 use reference::{ColumnExtents, cell_at};
+
+pub(super) fn clone_map_cancellable<K, V>(
+    source: &BTreeMap<K, V>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<K, V>, ()>
+where
+    K: Clone + Ord,
+    V: Clone,
+{
+    let mut cloned = BTreeMap::new();
+    for (key, value) in source {
+        if cancelled() {
+            return Err(());
+        }
+        cloned.insert(key.clone(), value.clone());
+    }
+    Ok(cloned)
+}
+
+pub(super) fn clone_vec_map_cancellable<K, V>(
+    source: &BTreeMap<K, Vec<V>>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<K, Vec<V>>, ()>
+where
+    K: Clone + Ord,
+    V: Clone,
+{
+    let mut cloned = BTreeMap::new();
+    for (key, values) in source {
+        if cancelled() {
+            return Err(());
+        }
+        let mut cloned_values = Vec::with_capacity(values.len());
+        for value in values {
+            if cancelled() {
+                return Err(());
+            }
+            cloned_values.push(value.clone());
+        }
+        cloned.insert(key.clone(), cloned_values);
+    }
+    Ok(cloned)
+}
+
+pub(super) fn clone_set_cancellable<T>(
+    source: &BTreeSet<T>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<T>, ()>
+where
+    T: Clone + Ord,
+{
+    let mut cloned = BTreeSet::new();
+    for value in source {
+        if cancelled() {
+            return Err(());
+        }
+        cloned.insert(value.clone());
+    }
+    Ok(cloned)
+}
+
+pub(super) fn clone_vec_cancellable<T>(
+    source: &[T],
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<T>, ()>
+where
+    T: Clone,
+{
+    let mut cloned = Vec::with_capacity(source.len());
+    for value in source {
+        if cancelled() {
+            return Err(());
+        }
+        cloned.push(value.clone());
+    }
+    Ok(cloned)
+}
+
+fn collect_workbook_layout(
+    workbook: &WorkbookSnapshot,
+    cancelled: &impl Fn() -> bool,
+) -> Result<(Vec<ArrayRegion>, Vec<ColumnExtents>), ()> {
+    let mut array_regions = Vec::new();
+    let mut column_extents = Vec::with_capacity(workbook.sheets().len());
+    for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
+        if cancelled() {
+            return Err(());
+        }
+        let mut extents = ColumnExtents::default();
+        for cell in sheet.cells() {
+            if cancelled() {
+                return Err(());
+            }
+            let address = cell.address();
+            extents.record(address.column().get(), address.row().get());
+            let CellContent::Formula(formula) = cell.content() else {
+                continue;
+            };
+            let range = match formula.metadata() {
+                FormulaMetadata::Array { range, .. } => *range,
+                FormulaMetadata::DynamicArray {
+                    range: Some(range), ..
+                } => *range,
+                FormulaMetadata::Normal
+                | FormulaMetadata::Shared { .. }
+                | FormulaMetadata::DynamicArray { range: None, .. }
+                | FormulaMetadata::DataTable { .. } => continue,
+            };
+            if range.start() != address || (range.height() == 1 && range.width() == 1) {
+                continue;
+            }
+            array_regions.push(ArrayRegion {
+                anchor: (sheet_index, address.row().get(), address.column().get()),
+                rect: Rect {
+                    sheet: sheet_index,
+                    row_start: range.start().row().get(),
+                    col_start: range.start().column().get(),
+                    row_end: range.end().row().get(),
+                    col_end: range.end().column().get(),
+                    whole_rows: false,
+                },
+                provisional: false,
+            });
+        }
+        column_extents.push(extents);
+    }
+    Ok((array_regions, column_extents))
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledWorkbook {
@@ -43,6 +173,26 @@ pub(super) struct CompiledWorkbook {
 }
 
 impl CompiledWorkbook {
+    pub(super) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        Ok(Self {
+            asts: clone_map_cancellable(&self.asts, cancelled)?,
+            defined_name_asts: clone_vec_cancellable(&self.defined_name_asts, cancelled)?,
+            dependencies: clone_vec_map_cancellable(&self.dependencies, cancelled)?,
+            dependency_rectangles: clone_vec_map_cancellable(
+                &self.dependency_rectangles,
+                cancelled,
+            )?,
+            parse_failures: clone_map_cancellable(&self.parse_failures, cancelled)?,
+            name_cycle_cells: clone_set_cancellable(&self.name_cycle_cells, cancelled)?,
+            name_limit_cells: clone_set_cancellable(&self.name_limit_cells, cancelled)?,
+            dependency_limit_exceeded: self.dependency_limit_exceeded,
+            cycle_cells: clone_set_cancellable(&self.cycle_cells, cancelled)?,
+            blocked_cells: clone_set_cancellable(&self.blocked_cells, cancelled)?,
+            limits: self.limits,
+            incremental_safe: self.incremental_safe,
+        })
+    }
+
     pub(super) fn dependencies(&self) -> &DependencyGraph {
         &self.dependencies
     }
@@ -68,6 +218,7 @@ impl CompiledWorkbook {
 pub(super) struct EvaluationBudget {
     lambda_depth: Cell<u64>,
     lambda_invocations: Cell<u64>,
+    function_iterations: Cell<u64>,
 }
 
 impl EvaluationBudget {
@@ -96,6 +247,27 @@ impl EvaluationBudget {
         self.lambda_invocations.set(invocations);
         Ok(ActiveLambda { budget: self })
     }
+
+    fn charge_function_iterations(
+        &self,
+        limits: CalculationLimits,
+        iterations: u64,
+    ) -> Result<(), ErrorKind> {
+        let total = self
+            .function_iterations
+            .get()
+            .checked_add(iterations)
+            .ok_or(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations,
+            ))?;
+        if total > limits.max_function_iterations() {
+            return Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations,
+            ));
+        }
+        self.function_iterations.set(total);
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -115,19 +287,23 @@ impl Drop for ActiveLambda<'_> {
 pub(super) struct EvalContext<'scope> {
     cell: CellId,
     bindings: &'scope [ScopeEntry],
+    defined_name_scope: Option<DefinedNameScope>,
     budget: &'scope EvaluationBudget,
     cancelled: &'scope dyn Fn() -> bool,
 }
 
+#[cfg(test)]
 fn never_cancelled() -> bool {
     false
 }
 
 impl<'scope> EvalContext<'scope> {
+    #[cfg(test)]
     pub(super) const fn for_evaluation(cell: CellId, budget: &'scope EvaluationBudget) -> Self {
         Self {
             cell,
             bindings: &[],
+            defined_name_scope: None,
             budget,
             cancelled: &never_cancelled,
         }
@@ -141,6 +317,7 @@ impl<'scope> EvalContext<'scope> {
         Self {
             cell,
             bindings: &[],
+            defined_name_scope: None,
             budget,
             cancelled,
         }
@@ -166,6 +343,10 @@ impl<'scope> EvalContext<'scope> {
         self.bindings
     }
 
+    pub(super) const fn defined_name_scope(self) -> Option<DefinedNameScope> {
+        self.defined_name_scope
+    }
+
     pub(super) const fn with_bindings<'next>(
         self,
         bindings: &'next [ScopeEntry],
@@ -176,8 +357,26 @@ impl<'scope> EvalContext<'scope> {
         EvalContext {
             cell: self.cell,
             bindings,
+            defined_name_scope: self.defined_name_scope,
             budget: self.budget,
             cancelled: self.cancelled,
+        }
+    }
+
+    pub(super) const fn without_bindings(self) -> Self {
+        Self {
+            bindings: &[],
+            ..self
+        }
+    }
+
+    pub(super) const fn with_defined_name_scope(
+        self,
+        defined_name_scope: Option<DefinedNameScope>,
+    ) -> Self {
+        Self {
+            defined_name_scope,
+            ..self
         }
     }
 
@@ -186,6 +385,14 @@ impl<'scope> EvalContext<'scope> {
         limits: CalculationLimits,
     ) -> Result<ActiveLambda<'scope>, ErrorKind> {
         self.budget.enter_lambda(limits)
+    }
+
+    pub(super) fn charge_function_iterations(
+        self,
+        limits: CalculationLimits,
+        iterations: u64,
+    ) -> Result<(), ErrorKind> {
+        self.budget.charge_function_iterations(limits, iterations)
     }
 
     pub(super) fn is_cancelled(self) -> bool {
@@ -385,6 +592,14 @@ impl<'workbook> Engine<'workbook> {
         }
     }
 
+    pub(super) fn charge_function_iterations(
+        &self,
+        context: EvalContext<'_>,
+        iterations: u64,
+    ) -> Result<(), ErrorKind> {
+        context.charge_function_iterations(self.options.limits(), iterations)
+    }
+
     pub(super) fn max_function_iterations(&self) -> u64 {
         self.options.limits().max_function_iterations()
     }
@@ -450,6 +665,34 @@ mod tests {
         assert!(engine.blocked_cells.is_empty());
     }
 
+    #[test]
+    fn workbook_layout_collection_polls_cancellation_between_sparse_cells() {
+        let workbook = generated_analysis_workbook();
+        let polls = Cell::new(0_u32);
+        let cancelled = || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            next >= 3
+        };
+
+        assert!(collect_workbook_layout(&workbook, &cancelled).is_err());
+        assert_eq!(polls.get(), 3);
+    }
+
+    #[test]
+    fn nested_vector_map_clone_polls_cancellation_between_values() {
+        let source = BTreeMap::from([("dependencies", vec![1_u32, 2, 3])]);
+        let polls = Cell::new(0_u32);
+        let cancelled = || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            next >= 3
+        };
+
+        assert!(clone_vec_map_cancellable(&source, &cancelled).is_err());
+        assert_eq!(polls.get(), 3);
+    }
+
     fn generated_analysis_workbook() -> WorkbookSnapshot {
         let mut sheet = Sheet::new(
             SheetId::new(1).expect("valid sheet ID"),
@@ -468,6 +711,12 @@ mod tests {
                 CellContent::Formula(formula),
             )
             .expect("unique formula cell");
+        sheet
+            .insert_cell(
+                CellAddress::from_a1("A2").expect("valid cell address"),
+                CellContent::Literal(CellValue::number(1.0).expect("finite number")),
+            )
+            .expect("unique literal cell");
 
         WorkbookSnapshot::new(
             vec![sheet],

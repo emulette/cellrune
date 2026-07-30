@@ -947,6 +947,145 @@ fn immediate_lambda_invocation_recalculates_incrementally_with_cell_dependencies
 }
 
 #[test]
+fn named_lambda_body_dependencies_schedule_and_recalculate_incrementally() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(2.0)),
+                WorkbookChange::set_defined_name(defined_name(
+                    "Reader",
+                    "LAMBDA(offset,C1+offset)",
+                )),
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("Reader(0)")),
+                WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("A1*2")),
+                WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("10+1")),
+            ]),
+        )
+        .expect("named lambda dependency workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial full calculation");
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed calculation")
+            .cell(CalculationCellId::new(sheet_id, address("B1"))),
+        Some(&CalculationCellResult::Value(number(4.0)))
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(4.0),
+            )]),
+        )
+        .expect("dependency edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DirtySubset);
+    assert_eq!(delta.dirty_count(), 2);
+    assert_eq!(delta.evaluated_count(), 2);
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed delta")
+            .cell(CalculationCellId::new(sheet_id, address("B1"))),
+        Some(&CalculationCellResult::Value(number(8.0)))
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed delta"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
+fn builtin_named_lambda_shadows_preserve_incremental_dependencies() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(2.0)),
+                WorkbookChange::set_defined_name(defined_name("MAP", "LAMBDA(value,callback,C1)")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("MAP(0,LAMBDA(x,x))"),
+                ),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B2"),
+                    formula("MAP(0,LAMBDA(x,x))+0"),
+                ),
+                WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("A1*2")),
+            ]),
+        )
+        .expect("builtin-shadowing named lambda dependency workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial full calculation");
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(4.0),
+            )]),
+        )
+        .expect("dependency edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        delta.reason(),
+        CalculationDecisionReason::IncrementalRequested
+    );
+    assert_eq!(delta.dirty_count(), 3);
+    assert_eq!(delta.evaluated_count(), 3);
+    for address_text in ["B1", "B2"] {
+        assert_eq!(
+            session
+                .calculation()
+                .expect("installed delta")
+                .cell(CalculationCellId::new(sheet_id, address(address_text))),
+            Some(&CalculationCellResult::Value(number(8.0)))
+        );
+    }
+    assert_calculations_equal(
+        session.calculation().expect("installed delta"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
 fn clean_runtime_issues_survive_incremental_reuse_and_match_full() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
@@ -1100,6 +1239,17 @@ fn stale_and_cancelled_jobs_never_replace_current_results() {
         .install(completed)
         .expect_err("stale result is not installed");
     assert_eq!(error.code(), SessionErrorCode::StaleResult);
+
+    let token = CancellationToken::new();
+    token.cancel();
+    let error = session
+        .prepare_recalculation(
+            RecalculationMode::Full,
+            CalculationOptions::default(),
+            token,
+        )
+        .expect_err("pre-cancelled preparation stops before cloning state");
+    assert_eq!(error.code(), SessionErrorCode::Cancelled);
 
     let token = CancellationToken::new();
     let prepared = session

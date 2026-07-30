@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
+use std::cell::Cell;
 
-use super::{Engine, EvalContext, EvaluationBudget};
+use super::{Engine, EvalContext, EvaluationBudget, VisitedDefinitions};
 use crate::calculation::runtime::{Rect, RectSpan};
 use crate::{
     CalculationLimits, CalculationOptions, CellAddress, CellRange, DefinedName, DefinedNameScope,
@@ -80,6 +80,54 @@ fn unresolved_dynamic_dependencies_honor_map_scope() {
         has_unresolved_dynamic_dependency(&engine, (0, 3, 2)),
         "an unshadowed reference to the same name still reports the dynamic dependency"
     );
+}
+
+#[test]
+fn unresolved_dynamic_dependency_analysis_polls_cancellation_during_recursion() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    draft
+        .set_cell_formula(
+            sheet_id,
+            address("A1"),
+            formula("SUM(LET(value,1,value+1))"),
+        )
+        .expect("formula");
+    let engine = Engine::analyze(draft.workbook(), CalculationOptions::default());
+    let polls = Cell::new(0_u32);
+    let cancelled = || {
+        let next = polls.get() + 1;
+        polls.set(next);
+        next >= 3
+    };
+
+    assert_eq!(
+        engine.has_unresolved_dynamic_dependencies(&cancelled),
+        Err(()),
+    );
+    assert!(polls.get() >= 3);
+}
+
+#[test]
+fn dependency_formula_index_polls_cancellation_between_sparse_cells() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    draft
+        .set_cell_formula(sheet_id, address("A1"), formula("1"))
+        .expect("first formula");
+    draft
+        .set_cell_formula(sheet_id, address("A2"), formula("A1+1"))
+        .expect("second formula");
+    let engine = Engine::analyze(draft.workbook(), CalculationOptions::default());
+    let polls = Cell::new(0_u32);
+    let cancelled = || {
+        let next = polls.get() + 1;
+        polls.set(next);
+        next >= 3
+    };
+
+    assert_eq!(engine.dependencies_cancellable(&cancelled), Err(()));
+    assert_eq!(polls.get(), 3);
 }
 
 #[test]
@@ -271,7 +319,7 @@ fn has_unresolved_dynamic_dependency(engine: &Engine<'_>, cell: (usize, u32, u32
     engine.expr_has_unresolved_dynamic_dependency(
         EvalContext::for_evaluation(cell, &budget),
         expr,
-        &mut BTreeSet::new(),
+        &mut VisitedDefinitions::default(),
         &mut Vec::new(),
     )
 }
@@ -283,7 +331,7 @@ fn collect_reference_selection_inputs(engine: &Engine<'_>, cell: (usize, u32, u3
     engine.collect_reference_selection_inputs(
         EvalContext::for_evaluation(cell, &budget),
         expr,
-        &mut BTreeSet::new(),
+        &mut VisitedDefinitions::default(),
         &mut Vec::new(),
         &mut output,
     );

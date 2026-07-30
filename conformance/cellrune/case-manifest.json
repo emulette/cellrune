@@ -5,7 +5,7 @@
   "generator": {
     "name": "CellRune deterministic Excel oracle generator",
     "revision": "oracle-harness-v2",
-    "harness_sha256": "cd97a17d00578a49c3622e7649c4861321d777a80f365694df3e4b62ead8b8f0"
+    "harness_sha256": "6bd9416b08809e429b20d447afec54f3a8bd79b467d8e3760ccc7f54e8a2b1be"
   },
   "case_count": 1527,
   "active_case_count": 1496,

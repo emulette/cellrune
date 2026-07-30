@@ -5,7 +5,8 @@ use super::convert::cell_from_value;
 use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::{is_supported_function, normalize_name};
-use super::lambda::{definition, is_local_name, walk_local_scope};
+use super::lambda::definition;
+use super::scope::DefinedLambdaId;
 use super::scope::canonical_local_name;
 use super::sheet_span::{ARRAY_EXPRESSION_POLICY, SheetSpanPolicy, function_policy};
 use super::value::{ErrorKind, Value};
@@ -15,7 +16,29 @@ use super::{
     FormulaCapabilityEntry, FormulaCapabilityReport, FunctionSupport, FunctionUsageEntry,
     FunctionUsageReport, MaterializedCalculationCell, MaterializedResultOrigin,
 };
-use crate::{CellAddress, CellContent, FormulaMetadata, WorkbookSnapshot};
+use crate::{CellAddress, CellContent, DefinedNameScope, FormulaMetadata, WorkbookSnapshot};
+
+#[derive(Clone, Copy)]
+struct NameScanContext {
+    sheet: usize,
+    defined_name_scope: Option<DefinedNameScope>,
+}
+
+impl NameScanContext {
+    const fn root(sheet: usize) -> Self {
+        Self {
+            sheet,
+            defined_name_scope: None,
+        }
+    }
+
+    const fn for_definition(self, defined_name_scope: DefinedNameScope) -> Self {
+        Self {
+            defined_name_scope: Some(defined_name_scope),
+            ..self
+        }
+    }
+}
 
 pub(super) fn scan_formula_capabilities(
     workbook: &WorkbookSnapshot,
@@ -59,7 +82,7 @@ pub(super) fn scan_function_usage(
             parsed_formula_count += 1;
             let public_id = CalculationCellId::new(sheet.id(), cell.address());
             let mut calls = Vec::new();
-            collect_function_calls(expr, &mut calls);
+            collect_function_calls(&engine, sheet_index, expr, &mut calls);
             let unique = calls.iter().cloned().collect::<BTreeSet<_>>();
             for name in calls {
                 usage.entry(name).or_default().call_count += 1;
@@ -93,55 +116,222 @@ pub(super) fn scan_function_usage(
     FunctionUsageReport::new(entries, formula_count, parsed_formula_count)
 }
 
-fn collect_function_calls(expr: &Expr, output: &mut Vec<String>) {
-    collect_function_calls_in_scope(expr, output, &mut Vec::new());
+fn collect_function_calls(
+    engine: &Engine<'_>,
+    sheet: usize,
+    expr: &Expr,
+    output: &mut Vec<String>,
+) {
+    collect_function_calls_in_scope(
+        engine,
+        NameScanContext::root(sheet),
+        expr,
+        output,
+        &mut CapabilityScope::default(),
+        &mut BTreeSet::new(),
+    );
 }
 
 fn collect_function_calls_in_scope(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
     expr: &Expr,
     output: &mut Vec<String>,
-    local_names: &mut Vec<String>,
+    local_scope: &mut CapabilityScope,
+    active_names: &mut BTreeSet<DefinedLambdaId>,
 ) {
     match expr {
         Expr::Call { name, args } => {
-            output.push(normalize_name(name));
-            if normalize_name(name) == "MAP"
-                && let Some(lambda_expr) = args.last()
-                && definition(lambda_expr).is_some()
-            {
-                output.push("LAMBDA".to_owned());
-            }
-            if walk_local_scope(name, args, local_names, |arg, scope| {
-                collect_function_calls_in_scope(arg, output, scope);
-            }) {
+            let normalized = normalize_name(name);
+            if local_scope.lookup(name).is_some() {
+                if !local_scope.call_is_definitely_non_callable(name) {
+                    for arg in args {
+                        collect_function_calls_in_scope(
+                            engine,
+                            sheet,
+                            arg,
+                            output,
+                            local_scope,
+                            active_names,
+                        );
+                    }
+                }
                 return;
             }
+            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) {
+                if let Some(lambda) = definition(named) {
+                    for arg in args {
+                        collect_function_calls_in_scope(
+                            engine,
+                            sheet,
+                            arg,
+                            output,
+                            local_scope,
+                            active_names,
+                        );
+                    }
+                    if active_names.insert(id.clone()) {
+                        output.push("LAMBDA".to_owned());
+                        let mut lambda_scope = CapabilityScope::default();
+                        for parameter in lambda.parameters() {
+                            lambda_scope.push_parameter(parameter.clone());
+                        }
+                        collect_function_calls_in_scope(
+                            engine,
+                            sheet.for_definition(id.scope()),
+                            lambda.body(),
+                            output,
+                            &mut lambda_scope,
+                            active_names,
+                        );
+                        active_names.remove(&id);
+                    }
+                }
+                return;
+            }
+            if normalized == "LET" {
+                output.push(normalized);
+                let previous_len = local_scope.len();
+                if let Some((final_expr, pairs)) = args.split_last() {
+                    for pair in pairs.chunks_exact(2) {
+                        collect_function_calls_in_scope(
+                            engine,
+                            sheet,
+                            &pair[1],
+                            output,
+                            local_scope,
+                            active_names,
+                        );
+                        if let Expr::Name(binding_name) = &pair[0] {
+                            local_scope.push_expression(binding_name, &pair[1]);
+                        }
+                    }
+                    collect_function_calls_in_scope(
+                        engine,
+                        sheet,
+                        final_expr,
+                        output,
+                        local_scope,
+                        active_names,
+                    );
+                }
+                local_scope.truncate(previous_len);
+                return;
+            }
+            if normalized == "LAMBDA" {
+                output.push(normalized);
+                if let Some(lambda) = definition(expr) {
+                    let previous_len = local_scope.len();
+                    for parameter in lambda.parameters() {
+                        local_scope.push_parameter(parameter.clone());
+                    }
+                    collect_function_calls_in_scope(
+                        engine,
+                        sheet,
+                        lambda.body(),
+                        output,
+                        local_scope,
+                        active_names,
+                    );
+                    local_scope.truncate(previous_len);
+                }
+                return;
+            }
+            output.push(normalized);
             for arg in args {
-                collect_function_calls_in_scope(arg, output, local_names);
+                collect_function_calls_in_scope(
+                    engine,
+                    sheet,
+                    arg,
+                    output,
+                    local_scope,
+                    active_names,
+                );
             }
         }
         Expr::Invoke { callee, args } => {
-            collect_function_calls_in_scope(callee, output, local_names);
+            collect_function_calls_in_scope(
+                engine,
+                sheet,
+                callee,
+                output,
+                local_scope,
+                active_names,
+            );
             for arg in args {
-                collect_function_calls_in_scope(arg, output, local_names);
+                collect_function_calls_in_scope(
+                    engine,
+                    sheet,
+                    arg,
+                    output,
+                    local_scope,
+                    active_names,
+                );
             }
         }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
-            collect_function_calls_in_scope(inner, output, local_names);
+            collect_function_calls_in_scope(
+                engine,
+                sheet,
+                inner,
+                output,
+                local_scope,
+                active_names,
+            );
         }
         Expr::Binary { left, right, .. }
         | Expr::Range {
             start: left,
             end: right,
         } => {
-            collect_function_calls_in_scope(left, output, local_names);
-            collect_function_calls_in_scope(right, output, local_names);
+            collect_function_calls_in_scope(engine, sheet, left, output, local_scope, active_names);
+            collect_function_calls_in_scope(
+                engine,
+                sheet,
+                right,
+                output,
+                local_scope,
+                active_names,
+            );
         }
         Expr::Array(rows) => {
             for item in rows.iter().flatten() {
-                collect_function_calls_in_scope(item, output, local_names);
+                collect_function_calls_in_scope(
+                    engine,
+                    sheet,
+                    item,
+                    output,
+                    local_scope,
+                    active_names,
+                );
+            }
+        }
+        Expr::Name(name) => {
+            if local_scope.lookup(name).is_some() {
+                return;
+            }
+            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) && active_names.insert(id.clone())
+            {
+                let mut defined_scope = CapabilityScope::default();
+                collect_function_calls_in_scope(
+                    engine,
+                    sheet.for_definition(id.scope()),
+                    named,
+                    output,
+                    &mut defined_scope,
+                    active_names,
+                );
+                active_names.remove(&id);
             }
         }
         Expr::Number(_)
@@ -150,15 +340,26 @@ fn collect_function_calls_in_scope(
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
         | Expr::StructuredRef(_)
-        | Expr::Name(_)
         | Expr::Missing => {}
     }
 }
 
 fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> FormulaCapabilityReport {
+    scan_with_engine_cancellable(workbook, engine, &|| false)
+        .expect("non-cancellable capability scan cannot be cancelled")
+}
+
+fn scan_with_engine_cancellable(
+    workbook: &WorkbookSnapshot,
+    engine: &Engine<'_>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<FormulaCapabilityReport, ()> {
     let mut entries = Vec::new();
     for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
         for cell in sheet.cells() {
+            if cancelled() {
+                return Err(());
+            }
             let CellContent::Formula(formula) = cell.content() else {
                 continue;
             };
@@ -220,7 +421,7 @@ fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Formula
                     None => match engine.parsed_expr(internal_id) {
                         Some(expr) => inspect_expr(
                             engine,
-                            sheet_index,
+                            NameScanContext::root(sheet_index),
                             expr,
                             ARRAY_EXPRESSION_POLICY,
                             &mut HashSet::new(),
@@ -246,7 +447,7 @@ fn scan_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Formula
             entries.push(FormulaCapabilityEntry::new(id, capability));
         }
     }
-    FormulaCapabilityReport::new(entries)
+    Ok(FormulaCapabilityReport::new(entries))
 }
 
 pub(super) fn calculate_workbook(
@@ -264,8 +465,8 @@ pub(super) fn calculate_and_compile(
 ) -> Result<(CalculationSnapshot, CompiledWorkbook, usize), ()> {
     let engine = Engine::evaluate_cancellable(workbook, options, &cancelled)?;
     let evaluated = engine.evaluated_cell_count();
-    let snapshot = snapshot_from_engine(workbook, options, &engine);
-    let compiled = engine.compiled();
+    let snapshot = snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?;
+    let compiled = engine.compiled(&cancelled)?;
     Ok((snapshot, compiled, evaluated))
 }
 
@@ -278,9 +479,9 @@ pub(super) fn calculate_from_compiled(
     cancelled: impl Fn() -> bool,
 ) -> Result<(CalculationSnapshot, usize), ()> {
     let engine =
-        Engine::evaluate_compiled(workbook, options, compiled, previous, dirty, cancelled)?;
+        Engine::evaluate_compiled(workbook, options, compiled, previous, dirty, &cancelled)?;
     let evaluated = engine.evaluated_cell_count();
-    let snapshot = snapshot_from_engine(workbook, options, &engine);
+    let snapshot = snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?;
     Ok((snapshot, evaluated))
 }
 
@@ -289,34 +490,43 @@ fn snapshot_from_engine(
     options: CalculationOptions,
     engine: &Engine<'_>,
 ) -> CalculationSnapshot {
-    let report = scan_with_engine(workbook, engine);
-    let unsupported: BTreeMap<CalculationCellId, CalculationIssue> = report
-        .entries()
-        .iter()
-        .filter_map(|entry| match entry.capability() {
-            FormulaCapability::Supported => None,
-            FormulaCapability::Unsupported(issues) => {
-                issues.first().cloned().map(|issue| (entry.cell(), issue))
-            }
-        })
-        .collect();
-    let direct_unavailable: BTreeSet<_> = workbook
-        .sheets()
-        .iter()
-        .enumerate()
-        .flat_map(|(sheet_index, sheet)| {
-            unsupported.keys().filter_map(move |cell| {
-                (cell.sheet_id() == sheet.id()).then_some((
-                    sheet_index,
-                    cell.address().row().get(),
-                    cell.address().column().get(),
-                ))
-            })
-        })
-        .collect();
+    snapshot_from_engine_cancellable(workbook, options, engine, &|| false)
+        .expect("non-cancellable snapshot construction cannot be cancelled")
+}
+
+fn snapshot_from_engine_cancellable(
+    workbook: &WorkbookSnapshot,
+    options: CalculationOptions,
+    engine: &Engine<'_>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<CalculationSnapshot, ()> {
+    let report = scan_with_engine_cancellable(workbook, engine, cancelled)?;
+    let mut unsupported = BTreeMap::new();
+    for entry in report.entries() {
+        if cancelled() {
+            return Err(());
+        }
+        if let FormulaCapability::Unsupported(issues) = entry.capability()
+            && let Some(issue) = issues.first()
+        {
+            unsupported.insert(entry.cell(), issue.clone());
+        }
+    }
+    let mut direct_unavailable = BTreeSet::new();
+    for cell in unsupported.keys() {
+        if cancelled() {
+            return Err(());
+        }
+        if let Some(cell) = public_to_internal(workbook, *cell) {
+            direct_unavailable.insert(cell);
+        }
+    }
     let mut cells = BTreeMap::new();
     for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
         for cell in sheet.cells() {
+            if cancelled() {
+                return Err(());
+            }
             let CellContent::Formula(_) = cell.content() else {
                 continue;
             };
@@ -370,48 +580,58 @@ fn snapshot_from_engine(
             cells.insert(public_id, result);
         }
     }
-    let materialized_cells = build_materialization_view(workbook, engine, &cells);
+    let materialized_cells =
+        build_materialization_view_cancellable(workbook, engine, &cells, cancelled)?;
     // Keyed off the materialized view, not `cells`: a legacy-array or dynamic-spill member is not
     // a formula cell, so keying off `cells` would drop its trace here while `seed_previous_results`
     // still restores its value — and an incremental recalculation would then answer differently
     // from the full calculation of the same workbook.
-    let numeric_decimal_traces = materialized_cells
-        .keys()
-        .filter_map(|public_id| {
-            let internal_id = public_to_internal(workbook, *public_id)?;
-            engine
-                .calculated_decimal_trace(internal_id)
-                .map(|trace| (*public_id, trace))
-        })
-        .collect();
-    CalculationSnapshot::new(
+    let mut numeric_decimal_traces = BTreeMap::new();
+    for public_id in materialized_cells.keys() {
+        if cancelled() {
+            return Err(());
+        }
+        let Some(internal_id) = public_to_internal(workbook, *public_id) else {
+            continue;
+        };
+        if let Some(trace) = engine.calculated_decimal_trace(internal_id) {
+            numeric_decimal_traces.insert(*public_id, trace);
+        }
+    }
+    CalculationSnapshot::new_cancellable(
         cells,
         materialized_cells,
         numeric_decimal_traces,
         workbook,
         options,
+        cancelled,
     )
 }
 
-fn build_materialization_view(
+fn build_materialization_view_cancellable(
     workbook: &WorkbookSnapshot,
     engine: &Engine<'_>,
     cells: &BTreeMap<CalculationCellId, CalculationCellResult>,
-) -> BTreeMap<CalculationCellId, MaterializedCalculationCell> {
-    let mut materialized = cells
-        .iter()
-        .map(|(cell, result)| {
-            (
-                *cell,
-                MaterializedCalculationCell::new(
-                    MaterializedResultOrigin::DirectFormula,
-                    result.clone(),
-                ),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<CalculationCellId, MaterializedCalculationCell>, ()> {
+    let mut materialized = BTreeMap::new();
+    for (cell, result) in cells {
+        if cancelled() {
+            return Err(());
+        }
+        materialized.insert(
+            *cell,
+            MaterializedCalculationCell::new(
+                MaterializedResultOrigin::DirectFormula,
+                result.clone(),
+            ),
+        );
+    }
     for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
         for cell in sheet.cells() {
+            if cancelled() {
+                return Err(());
+            }
             let CellContent::Formula(formula) = cell.content() else {
                 continue;
             };
@@ -454,6 +674,9 @@ fn build_materialization_view(
             };
             for row in range.start().row().get()..=range.end().row().get() {
                 for column in range.start().column().get()..=range.end().column().get() {
+                    if cancelled() {
+                        return Err(());
+                    }
                     let address = CellAddress::from_indices(row, column)
                         .expect("validated array range produces valid addresses");
                     let id = CalculationCellId::new(sheet.id(), address);
@@ -476,7 +699,7 @@ fn build_materialization_view(
             }
         }
     }
-    materialized
+    Ok(materialized)
 }
 
 fn resource_limit_issue(limit: CalculationLimitKind) -> CalculationIssue {
@@ -489,66 +712,182 @@ fn resource_limit_issue(limit: CalculationLimitKind) -> CalculationIssue {
 fn contains_function(engine: &Engine<'_>, sheet: usize, expr: &Expr, expected: &str) -> bool {
     expr_contains_function(
         engine,
-        sheet,
+        NameScanContext::root(sheet),
         expr,
         expected,
         &mut BTreeSet::new(),
-        &mut Vec::new(),
+        &mut CapabilityScope::default(),
     )
 }
 
 fn expr_contains_function(
     engine: &Engine<'_>,
-    sheet: usize,
+    sheet: NameScanContext,
     expr: &Expr,
     expected: &str,
-    names: &mut BTreeSet<String>,
-    local_names: &mut Vec<String>,
+    names: &mut BTreeSet<DefinedLambdaId>,
+    local_scope: &mut CapabilityScope,
 ) -> bool {
     match expr {
         Expr::Call { name, args } => {
+            if local_scope.lookup(name).is_some() {
+                if local_scope.call_is_definitely_non_callable(name) {
+                    return false;
+                }
+                return args.iter().any(|arg| {
+                    expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                });
+            }
+            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) {
+                let Some(lambda) = definition(named) else {
+                    return false;
+                };
+                let mut found = false;
+                if names.insert(id.clone()) {
+                    let mut lambda_scope = CapabilityScope::default();
+                    for parameter in lambda.parameters() {
+                        lambda_scope.push_parameter(parameter.clone());
+                    }
+                    found |= expr_contains_function(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        lambda.body(),
+                        expected,
+                        names,
+                        &mut lambda_scope,
+                    );
+                }
+                return found
+                    || args.iter().any(|arg| {
+                        expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                    });
+            }
             if normalize_name(name).eq_ignore_ascii_case(expected) {
                 return true;
             }
-            let mut found = false;
-            if walk_local_scope(name, args, local_names, |arg, scope| {
-                found |= expr_contains_function(engine, sheet, arg, expected, names, scope);
-            }) {
-                return found;
+            match normalize_name(name).as_str() {
+                "LET" => {
+                    let previous_len = local_scope.len();
+                    let mut found = false;
+                    if let Some((final_expr, pairs)) = args.split_last() {
+                        for pair in pairs.chunks_exact(2) {
+                            found |= expr_contains_function(
+                                engine,
+                                sheet,
+                                &pair[1],
+                                expected,
+                                names,
+                                local_scope,
+                            );
+                            if let Expr::Name(binding_name) = &pair[0] {
+                                local_scope.push_expression(binding_name, &pair[1]);
+                            }
+                        }
+                        found |= expr_contains_function(
+                            engine,
+                            sheet,
+                            final_expr,
+                            expected,
+                            names,
+                            local_scope,
+                        );
+                    }
+                    local_scope.truncate(previous_len);
+                    return found;
+                }
+                "LAMBDA" => {
+                    let Some(lambda) = definition(expr) else {
+                        return false;
+                    };
+                    let previous_len = local_scope.len();
+                    for parameter in lambda.parameters() {
+                        local_scope.push_parameter(parameter.clone());
+                    }
+                    let found = expr_contains_function(
+                        engine,
+                        sheet,
+                        lambda.body(),
+                        expected,
+                        names,
+                        local_scope,
+                    );
+                    local_scope.truncate(previous_len);
+                    return found;
+                }
+                "MAP" => {
+                    let Some((lambda_expr, array_exprs)) = args.split_last() else {
+                        return false;
+                    };
+                    let Some(lambda) = definition(lambda_expr) else {
+                        return false;
+                    };
+                    let mut found = array_exprs.iter().any(|arg| {
+                        expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                    });
+                    let previous_len = local_scope.len();
+                    for parameter in lambda.parameters() {
+                        local_scope.push_parameter(parameter.clone());
+                    }
+                    found |= expr_contains_function(
+                        engine,
+                        sheet,
+                        lambda.body(),
+                        expected,
+                        names,
+                        local_scope,
+                    );
+                    local_scope.truncate(previous_len);
+                    return found;
+                }
+                _ => {}
             }
             args.iter()
-                .any(|arg| expr_contains_function(engine, sheet, arg, expected, names, local_names))
+                .any(|arg| expr_contains_function(engine, sheet, arg, expected, names, local_scope))
         }
         Expr::Invoke { callee, args } => {
-            expr_contains_function(engine, sheet, callee, expected, names, local_names)
+            expr_contains_function(engine, sheet, callee, expected, names, local_scope)
                 || args.iter().any(|arg| {
-                    expr_contains_function(engine, sheet, arg, expected, names, local_names)
+                    expr_contains_function(engine, sheet, arg, expected, names, local_scope)
                 })
         }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
-            expr_contains_function(engine, sheet, inner, expected, names, local_names)
+            expr_contains_function(engine, sheet, inner, expected, names, local_scope)
         }
         Expr::Binary { left, right, .. } => {
-            expr_contains_function(engine, sheet, left, expected, names, local_names)
-                || expr_contains_function(engine, sheet, right, expected, names, local_names)
+            expr_contains_function(engine, sheet, left, expected, names, local_scope)
+                || expr_contains_function(engine, sheet, right, expected, names, local_scope)
         }
         Expr::Range { start, end } => {
-            expr_contains_function(engine, sheet, start, expected, names, local_names)
-                || expr_contains_function(engine, sheet, end, expected, names, local_names)
+            expr_contains_function(engine, sheet, start, expected, names, local_scope)
+                || expr_contains_function(engine, sheet, end, expected, names, local_scope)
         }
         Expr::Array(rows) => rows.iter().flatten().any(|element| {
-            expr_contains_function(engine, sheet, element, expected, names, local_names)
+            expr_contains_function(engine, sheet, element, expected, names, local_scope)
         }),
         Expr::Name(name) => {
-            if is_local_name(name, local_names) {
+            if local_scope.lookup(name).is_some() {
                 return false;
             }
-            let key = name.to_ascii_lowercase();
-            names.insert(key)
-                && engine.resolve_name_expr(sheet, name).is_some_and(|named| {
-                    expr_contains_function(engine, sheet, named, expected, names, local_names)
+            engine
+                .resolve_name_expr_with_id_for_scope(sheet.sheet, sheet.defined_name_scope, name)
+                .is_some_and(|(id, named)| {
+                    if !names.insert(id.clone()) {
+                        return false;
+                    }
+                    expr_contains_function(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        named,
+                        expected,
+                        names,
+                        &mut CapabilityScope::default(),
+                    )
                 })
         }
         Expr::Number(_)
@@ -592,38 +931,108 @@ impl CapabilityScope {
             .find(|(entry, _)| entry == &key)
             .map(|(_, value)| value.clone())
     }
+
+    fn call_is_definitely_non_callable(&self, name: &str) -> bool {
+        self.lookup(name)
+            .flatten()
+            .as_ref()
+            .is_some_and(expr_is_definitely_non_callable)
+    }
+}
+
+fn expr_is_definitely_non_callable(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => expr_is_definitely_non_callable(inner),
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Logical(_)
+        | Expr::ErrorLit(_)
+        | Expr::StructuredRef(_)
+        | Expr::Missing
+        | Expr::Ref(_)
+        | Expr::Range { .. }
+        | Expr::ImplicitIntersection(_)
+        | Expr::Array(_)
+        | Expr::Unary { .. }
+        | Expr::Binary { .. } => true,
+        Expr::Name(_) | Expr::Call { .. } | Expr::Invoke { .. } => false,
+    }
 }
 
 fn inspect_expr(
     engine: &Engine<'_>,
-    sheet: usize,
+    sheet: NameScanContext,
     expr: &Expr,
     sheet_span_policy: SheetSpanPolicy,
-    // Keyed by policy as well as by name: the sheet-range diagnosis depends on the context a name
+    // Keyed by policy as well as by stable defined-name identity: the sheet-range diagnosis
+    // depends on the context a name
     // is reached from, so `SUM(N)+COUNTBLANK(N)` must expand `N` under both policies. Keying by
     // name alone let whichever operand came first decide the whole formula's classification.
     // Re-expansion cannot duplicate issues because the caller sorts and dedups them per cell.
-    names: &mut HashSet<(String, SheetSpanPolicy)>,
+    names: &mut HashSet<(DefinedLambdaId, SheetSpanPolicy)>,
     local_scope: &mut CapabilityScope,
     issues: &mut Vec<CalculationIssue>,
 ) {
     match expr {
         Expr::Call { name, args } => {
-            let defined_callable = engine
-                .resolve_name_expr(sheet, name)
-                .is_some_and(|named| definition(named).is_some());
-            let defined_name = engine.resolve_name_expr(sheet, name).is_some();
-            if !is_supported_function(name)
-                && local_scope.lookup(name).is_none()
-                && !defined_callable
-                && !defined_name
-            {
+            let normalized = normalize_name(name);
+            if local_scope.lookup(name).is_some() {
+                if !local_scope.call_is_definitely_non_callable(name) {
+                    for arg in args {
+                        inspect_expr(
+                            engine,
+                            sheet,
+                            arg,
+                            ARRAY_EXPRESSION_POLICY,
+                            names,
+                            local_scope,
+                            issues,
+                        );
+                    }
+                }
+                return;
+            }
+            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) {
+                if let Some(lambda) = definition(named) {
+                    for arg in args {
+                        inspect_expr(
+                            engine,
+                            sheet,
+                            arg,
+                            ARRAY_EXPRESSION_POLICY,
+                            names,
+                            local_scope,
+                            issues,
+                        );
+                    }
+                    if names.insert((id.clone(), sheet_span_policy)) {
+                        let mut lambda_scope = CapabilityScope::default();
+                        for parameter in lambda.parameters() {
+                            lambda_scope.push_parameter(parameter.clone());
+                        }
+                        inspect_expr(
+                            engine,
+                            sheet.for_definition(id.scope()),
+                            lambda.body(),
+                            sheet_span_policy,
+                            names,
+                            &mut lambda_scope,
+                            issues,
+                        );
+                    }
+                }
+                return;
+            }
+            if !is_supported_function(name) {
                 issues.push(CalculationIssue::new(
                     CalculationIssueCode::UnsupportedFunction,
                     Some(name.to_ascii_uppercase()),
                 ));
             }
-            let normalized = normalize_name(name);
             if normalized == "LET" {
                 inspect_let(
                     engine,
@@ -739,23 +1148,29 @@ fn inspect_expr(
                 }
                 return;
             }
-            let key = name.to_lowercase();
-            if names.insert((key, sheet_span_policy)) {
-                match engine.resolve_name_expr(sheet, name) {
-                    Some(named) => inspect_expr(
-                        engine,
-                        sheet,
-                        named,
-                        sheet_span_policy,
-                        names,
-                        local_scope,
-                        issues,
-                    ),
-                    None => issues.push(CalculationIssue::new(
-                        CalculationIssueCode::UnsupportedName,
-                        Some(name.clone()),
-                    )),
+            match engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) {
+                Some((id, named)) => {
+                    if names.insert((id.clone(), sheet_span_policy)) {
+                        let mut defined_scope = CapabilityScope::default();
+                        inspect_expr(
+                            engine,
+                            sheet.for_definition(id.scope()),
+                            named,
+                            sheet_span_policy,
+                            names,
+                            &mut defined_scope,
+                            issues,
+                        );
+                    }
                 }
+                None => issues.push(CalculationIssue::new(
+                    CalculationIssueCode::UnsupportedName,
+                    Some(name.clone()),
+                )),
             }
         }
         Expr::Array(rows) => {
@@ -872,10 +1287,10 @@ fn inspect_expr(
 
 fn inspect_let(
     engine: &Engine<'_>,
-    sheet: usize,
+    sheet: NameScanContext,
     args: &[Expr],
     result_policy: SheetSpanPolicy,
-    names: &mut HashSet<(String, SheetSpanPolicy)>,
+    names: &mut HashSet<(DefinedLambdaId, SheetSpanPolicy)>,
     local_scope: &mut CapabilityScope,
     issues: &mut Vec<CalculationIssue>,
 ) {

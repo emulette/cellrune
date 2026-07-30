@@ -65,7 +65,7 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut values = Vec::new();
     for arg in args {
-        if let Some(let_args) = let_arguments(arg) {
+        if let Some(let_args) = let_arguments(engine, context, arg) {
             let scoped = let_scope_value(engine, context, let_args);
             collect_scope_values(
                 engine,
@@ -112,10 +112,22 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
     Ok(values)
 }
 
-fn let_arguments(expr: &Expr) -> Option<&[Expr]> {
+fn let_arguments<'expr>(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &'expr Expr,
+) -> Option<&'expr [Expr]> {
     match expr {
-        Expr::Paren(inner) => let_arguments(inner),
-        Expr::Call { name, args } if normalize_name(name) == "LET" => Some(args),
+        Expr::Paren(inner) => let_arguments(engine, context, inner),
+        Expr::Call { name, args }
+            if context.binding(name).is_none()
+                && engine
+                    .resolve_name_expr_with_id_in_context(context, name)
+                    .is_none()
+                && normalize_name(name) == "LET" =>
+        {
+            Some(args)
+        }
         _ => None,
     }
 }

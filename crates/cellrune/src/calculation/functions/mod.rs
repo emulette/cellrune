@@ -32,7 +32,7 @@ mod util;
 
 pub(super) use dynamic::{
     helper_array_with_trace, helper_scalar_with_trace, invoke_lambda, lambda_scope_value,
-    let_reference, let_scope_value, map_scalar_with_trace, with_let_scope,
+    let_reference, let_scope_value, map_scalar_with_trace, reduce_scope_value, with_let_scope,
 };
 
 pub(super) fn call_function(
@@ -94,10 +94,10 @@ pub(super) fn callable_call_scope(
     if let Some(value) = context.binding(name) {
         return Some(invoke_scope_value(engine, context, value.clone(), args));
     }
-    let named = engine.resolve_name_expr(context.sheet(), name)?;
+    let (id, named) = engine.resolve_name_expr_with_id_in_context(context, name)?;
     Some(match super::lambda::definition(named) {
         Some(_) => {
-            let closure = lambda_scope_value(context, &named_lambda_args(named), Some(name));
+            let closure = lambda_scope_value(context, &named_lambda_args(named), Some(id));
             invoke_scope_value(engine, context, closure, args)
         }
         None => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
@@ -270,7 +270,8 @@ fn call_elementwise_array(
         .checked_mul(u64::from(cols))
         .ok_or(ErrorKind::Num)?;
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(
+    engine.charge_function_iterations(
+        context,
         cells
             .checked_mul(args.len().max(1) as u64)
             .ok_or(ErrorKind::Num)?,

@@ -50,7 +50,7 @@ fn mmult(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Result
         .checked_mul(u64::from(left.cols))
         .ok_or(ErrorKind::Num)?;
     engine.ensure_array_cells(output_cells)?;
-    engine.ensure_function_iterations(operations)?;
+    engine.charge_function_iterations(context, operations)?;
 
     let left_numbers = strict_numbers(left.data)?;
     let right_numbers = strict_numbers(right.data)?;
@@ -125,7 +125,7 @@ fn sequence(
     let step = optional_number(engine, context, args.get(3), 1.0)?;
     let cells = u64::from(rows) * u64::from(columns);
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(cells)?;
+    engine.charge_function_iterations(context, cells)?;
 
     let mut data = Vec::with_capacity(cells as usize);
     for index in 0..cells {

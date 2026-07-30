@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, VecDeque};
 
-use super::eval::CompiledWorkbook;
+use super::eval::{CompiledWorkbook, clone_set_cancellable};
 use super::pipeline::{calculate_and_compile, calculate_from_compiled};
 use crate::{
     CalculationCellId, CalculationOptions, CalculationSnapshot, EditBatch, EditReceipt,
@@ -230,6 +230,10 @@ impl WorkbookCalculationSession {
         options: CalculationOptions,
         cancellation: CancellationToken,
     ) -> Result<PreparedCalculation, SessionError> {
+        let cancelled = || cancellation.is_cancelled();
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
         let current_revision = self.workbook().semantic_revision();
         let previous_revision = self
             .calculation
@@ -330,20 +334,40 @@ impl WorkbookCalculationSession {
         };
 
         let dirty = if execution_mode == CalculationExecutionMode::Full {
-            formula_cells(self.workbook())
+            formula_cells(self.workbook(), &cancelled)
         } else {
-            self.dirty.clone()
-        };
+            clone_set_cancellable(&self.dirty, &cancelled)
+        }
+        .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        let workbook = self
+            .workbook()
+            .clone_cancellable(&cancelled)
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        let compiled = self
+            .compiled
+            .as_ref()
+            .map(|compiled| compiled.clone_cancellable(&cancelled))
+            .transpose()
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        let previous = self
+            .calculation
+            .as_ref()
+            .map(|calculation| calculation.clone_cancellable(&cancelled))
+            .transpose()
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
         Ok(PreparedCalculation {
-            workbook: self.workbook().clone(),
+            workbook,
             expected_revision: current_revision,
             base_revision: previous_revision,
             options,
             execution_mode,
             reason,
             compile_required,
-            compiled: self.compiled.clone(),
-            previous: self.calculation.clone(),
+            compiled,
+            previous,
             dirty,
             cancellation,
             limits: self.limits,
@@ -361,6 +385,12 @@ impl WorkbookCalculationSession {
         completed: CompletedCalculation,
     ) -> Result<CalculationDelta, SessionError> {
         let delta = self.preview_install(&completed)?;
+        let history_delta = delta
+            .clone_cancellable(&|| completed.cancellation.is_cancelled())
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        if completed.cancellation.is_cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
         self.next_cursor = delta.cursor().checked_add(1).ok_or_else(|| {
             SessionError::new(
                 SessionErrorCode::DeltaLimitExceeded,
@@ -372,7 +402,7 @@ impl WorkbookCalculationSession {
         self.calculation_options = Some(completed.options);
         self.dirty.clear();
         self.requires_full_rebuild = false;
-        self.history.push_back(delta.clone());
+        self.history.push_back(history_delta);
         while self.history.len() > self.limits.max_retained_deltas {
             self.history.pop_front();
         }
@@ -410,7 +440,13 @@ impl WorkbookCalculationSession {
                 Some("delta cursor exhausted".to_owned()),
             )
         })?;
-        let mut delta = completed.delta.clone();
+        let mut delta = completed
+            .delta
+            .clone_cancellable(&|| completed.cancellation.is_cancelled())
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        if completed.cancellation.is_cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
         delta.cursor = self.next_cursor;
         Ok(delta)
     }
@@ -584,7 +620,10 @@ impl PreparedCalculation {
                     || self.cancellation.is_cancelled(),
                 )
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                (calculation, compiled.clone(), evaluated, 0)
+                let compiled = compiled
+                    .clone_cancellable(&|| self.cancellation.is_cancelled())
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+                (calculation, compiled, evaluated, 0)
             };
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
@@ -609,7 +648,11 @@ impl PreparedCalculation {
             evaluated_count,
             parsed_formula_count,
             self.limits.max_delta_cells,
+            &|| self.cancellation.is_cancelled(),
         )?;
+        if self.cancellation.is_cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
         Ok(CompletedCalculation {
             expected_revision: self.expected_revision,
             options: self.options,

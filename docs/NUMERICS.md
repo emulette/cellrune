@@ -14,8 +14,8 @@ Excel Online is the primary compatibility reference; Mac Excel 2021 is an additi
 
 | Workbook source | Excel cache producer | Locale | Recorded |
 | --- | --- | --- | --- |
-| CellRune 0.1.7 formula oracle | Microsoft Excel Online, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-29 |
-| CellRune 0.1.7 formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-29 |
+| CellRune 0.1.8 formula oracle | Microsoft Excel Online, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-30 |
+| CellRune 0.1.8 formula oracle | Microsoft Macintosh Excel, AppVersion `16.0300` | en-US UI; ko-KR regional format | 2026-07-30 |
 | Apache POI formula fixture | Microsoft Excel 2013, AppVersion `15.0300` | en-US currency formatting observed; `1900` date system | 2016-02-15 |
 | Apache POI matrix fixture | Microsoft Excel 2016, AppVersion `16.0300` | not recorded; `1900` date system | 2017-07-27 |
 
@@ -24,10 +24,10 @@ formula cell. That makes any Excel-authored workbook both a test input and its o
 The saved workbooks, host metadata, and reviewed classifications are committed under
 `conformance/`.
 
-The 0.1.7 suite records `excel-online-free-en-ui-ko-kr` and
+The 0.1.8 suite records `excel-online-free-en-ui-ko-kr` and
 `excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`. A missing saved value is
 `host_unsupported` for that workbook. The case remains active even when every recorded workbook
-lacks a value, so later 0.1.7 patch releases can reuse the same setup.
+lacks a value, so later releases can reuse the same setup.
 
 ## Verified
 
@@ -186,14 +186,14 @@ way: they skip blank cells, so a wider clamp cannot change their result.
 
 ### Measured agreement
 
-The 0.1.7 audit records:
+The 0.1.8 audit records:
 
 | Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 158 | 48 | 60 | 0 | 0 |
-| CellRune formula oracle — Excel Online | 672 | 404 | 11 | 255 | 2 | 0 |
-| CellRune formula oracle — Mac Excel 2021 | 672 | 401 | 10 | 239 | 22 | 0 |
+| CellRune formula oracle — Excel Online | 1,496 | 890 | 21 | 585 | 0 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 1,496 | 874 | 21 | 578 | 23 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
@@ -201,10 +201,12 @@ the Excel value and the current CellRune value with an explanatory note. The oth
 unsupported or non-comparable cases explicit rather than dropping them from the denominator.
 These counts are an audit inventory, not a composite score or release threshold.
 
-The 0.1.7 workbook has 703 primary cases, 672 active cases, and 897 formula cells. Excel Online
+The 0.1.8 workbook has 1,527 primary cases, 1,496 active cases, and 1,892 formula cells. Excel Online
 and Mac Excel 2021 both saved the workbook without losing formulas. A host that stores no usable
-value for a case is recorded as `host_unsupported`; this includes both PIVOTBY probes in both
-workbooks. Missing host values do not require regenerating the workbook or block publication.
+value for a case is recorded as `host_unsupported`. Both PIVOTBY probes instead retain semantic
+empty anchors and complete 5×4 results in both workbooks; they are currently `not_implemented` on
+the CellRune side. Missing host values do not require regenerating the workbook or block
+publication.
 
 ## Unverified
 

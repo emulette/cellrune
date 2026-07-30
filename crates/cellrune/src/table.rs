@@ -196,6 +196,25 @@ pub struct Table {
 }
 
 impl Table {
+    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut columns = Vec::with_capacity(self.columns.len());
+        for column in &self.columns {
+            if cancelled() {
+                return Err(());
+            }
+            columns.push(column.clone());
+        }
+        Ok(Self {
+            id: self.id,
+            name: self.name.clone(),
+            display_name: self.display_name.clone(),
+            range: self.range,
+            header_row_count: self.header_row_count,
+            totals_row_count: self.totals_row_count,
+            columns,
+        })
+    }
+
     /// Validates internal consistency and constructs a table.
     ///
     /// # Errors

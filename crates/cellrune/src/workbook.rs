@@ -6,6 +6,24 @@ use crate::{
     NumberFormat, Provenance, Row, Table, ValidationError,
 };
 
+fn clone_map_cancellable<K, V>(
+    source: &BTreeMap<K, V>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<K, V>, ()>
+where
+    K: Clone + Ord,
+    V: Clone,
+{
+    let mut cloned = BTreeMap::new();
+    for (key, value) in source {
+        if cancelled() {
+            return Err(());
+        }
+        cloned.insert(key.clone(), value.clone());
+    }
+    Ok(cloned)
+}
+
 /// A validated, non-zero workbook-local sheet identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SheetId(NonZeroU32);
@@ -111,6 +129,36 @@ pub struct Sheet {
 }
 
 impl Sheet {
+    fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let cells = clone_map_cancellable(&self.cells, cancelled)?;
+        let mut merged_ranges = Vec::with_capacity(self.merged_ranges.len());
+        for range in &self.merged_ranges {
+            if cancelled() {
+                return Err(());
+            }
+            merged_ranges.push(*range);
+        }
+        let mut tables = Vec::with_capacity(self.tables.len());
+        for table in &self.tables {
+            if cancelled() {
+                return Err(());
+            }
+            tables.push(table.clone_cancellable(cancelled)?);
+        }
+        Ok(Self {
+            id: self.id,
+            name: self.name.clone(),
+            visibility: self.visibility,
+            cells,
+            min_row: self.min_row,
+            min_column: self.min_column,
+            max_row: self.max_row,
+            max_column: self.max_column,
+            merged_ranges,
+            tables,
+        })
+    }
+
     /// Constructs an empty sparse sheet.
     pub fn new(id: SheetId, name: SheetName, visibility: SheetVisibility) -> Self {
         Self {
@@ -447,6 +495,57 @@ pub struct WorkbookSnapshot {
 }
 
 impl WorkbookSnapshot {
+    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut sheets = Vec::with_capacity(self.sheets.len());
+        for sheet in &self.sheets {
+            if cancelled() {
+                return Err(());
+            }
+            sheets.push(sheet.clone_cancellable(cancelled)?);
+        }
+        let mut defined_names = Vec::with_capacity(self.defined_names.len());
+        for name in &self.defined_names {
+            if cancelled() {
+                return Err(());
+            }
+            defined_names.push(name.clone());
+        }
+        let mut defined_name_index = BTreeMap::new();
+        for (scope, names) in &self.defined_name_index {
+            if cancelled() {
+                return Err(());
+            }
+            defined_name_index.insert(*scope, clone_map_cancellable(names, cancelled)?);
+        }
+        let mut diagnostics = Vec::with_capacity(self.diagnostics.len());
+        for diagnostic in &self.diagnostics {
+            if cancelled() {
+                return Err(());
+            }
+            diagnostics.push(diagnostic.clone());
+        }
+        if cancelled() {
+            return Err(());
+        }
+        Ok(Self {
+            sheets,
+            sheet_id_index: clone_map_cancellable(&self.sheet_id_index, cancelled)?,
+            sheet_name_index: clone_map_cancellable(&self.sheet_name_index, cancelled)?,
+            table_display_name_index: clone_map_cancellable(
+                &self.table_display_name_index,
+                cancelled,
+            )?,
+            defined_names,
+            defined_name_index,
+            diagnostics,
+            date_system: self.date_system,
+            calculation_hints: self.calculation_hints,
+            source: self.source,
+            provenance: self.provenance.clone(),
+            semantic_revision: self.semantic_revision,
+        })
+    }
+
     pub(crate) fn new_draft() -> Self {
         let sheet_id = SheetId(NonZeroU32::MIN);
         let sheet_name = SheetName {

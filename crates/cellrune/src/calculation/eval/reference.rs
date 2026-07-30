@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
 use super::{Engine, EvalContext};
+use crate::Sheet;
 use crate::calculation::ast::{Expr, RefBody, Reference};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
-use crate::calculation::functions::{let_reference, normalize_name};
+use crate::calculation::functions::{callable_call_scope, let_reference, normalize_name};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::{Rect, RectSpan, SheetSpan};
 use crate::calculation::scope::ScopeValue;
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
-use crate::{Sheet, WorkbookSnapshot};
 
 pub(super) fn cell_at(sheet: &Sheet, row: u32, column: u32) -> Option<&crate::Cell> {
     let address = crate::CellAddress::from_indices(row, column).ok()?;
@@ -35,7 +35,7 @@ pub(in crate::calculation) struct ColumnExtents {
 }
 
 impl ColumnExtents {
-    fn record(&mut self, column: u32, row: u32) {
+    pub(super) fn record(&mut self, column: u32, row: u32) {
         self.rows_by_column
             .entry(column)
             .and_modify(|current| *current = (*current).max(row))
@@ -49,25 +49,6 @@ impl ColumnExtents {
             .max()
             .unwrap_or(0)
     }
-}
-
-/// Indexes every sheet's populated rows by column, in workbook tab order.
-///
-/// This runs in the same construction pass that already walks every sparse cell to collect array
-/// regions, so it adds no traversal the engine did not already perform.
-pub(super) fn collect_column_extents(workbook: &WorkbookSnapshot) -> Vec<ColumnExtents> {
-    workbook
-        .sheets()
-        .iter()
-        .map(|sheet| {
-            let mut extents = ColumnExtents::default();
-            for cell in sheet.cells() {
-                let address = cell.address();
-                extents.record(address.column().get(), address.row().get());
-            }
-            extents
-        })
-        .collect()
 }
 
 pub(super) fn is_reference_returning_function(name: &str) -> bool {
@@ -158,14 +139,30 @@ impl Engine<'_> {
                 Some(ScopeValue::Reference(span)) => Ok(span.clone()),
                 Some(_) => Err(ErrorKind::Value),
                 None => self
-                    .resolve_name_expr(context.sheet(), name)
+                    .resolve_name_expr_with_id_in_context(context, name)
                     .ok_or(ErrorKind::Name)
-                    .and_then(|named| self.resolve_rect_span_expr(context, named)),
+                    .and_then(|(id, named)| {
+                        self.resolve_rect_span_expr(
+                            context
+                                .without_bindings()
+                                .with_defined_name_scope(Some(id.scope())),
+                            named,
+                        )
+                    }),
             },
-            Expr::Call { name, args } if normalize_name(name) == "LET" => {
-                let_reference(self, context, args)
+            Expr::Call { name, args } => {
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    return match scoped {
+                        ScopeValue::Reference(span) => Ok(span),
+                        _ => Err(ErrorKind::Value),
+                    };
+                }
+                if normalize_name(name) == "LET" {
+                    let_reference(self, context, args)
+                } else {
+                    self.resolve_rect_expr(context, expr).map(RectSpan::single)
+                }
             }
-            Expr::Call { .. } => self.resolve_rect_expr(context, expr).map(RectSpan::single),
             _ => Err(ErrorKind::Value),
         }
     }
@@ -218,19 +215,34 @@ impl Engine<'_> {
                 }
                 Some(_) => Err(ErrorKind::Value),
                 None => self
-                    .resolve_name_expr(context.sheet(), name)
+                    .resolve_name_expr_with_id_in_context(context, name)
                     .ok_or(ErrorKind::Name)
-                    .and_then(|named| self.resolve_rect_expr(context, named)),
+                    .and_then(|(id, named)| {
+                        self.resolve_rect_expr(
+                            context
+                                .without_bindings()
+                                .with_defined_name_scope(Some(id.scope())),
+                            named,
+                        )
+                    }),
             },
-            Expr::Call { name, args } if normalize_name(name) == "LET" => {
-                let_reference(self, context, args)?
-                    .into_rect()
-                    .map_err(|_| ErrorKind::Value)
+            Expr::Call { name, args } => {
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    return match scoped {
+                        ScopeValue::Reference(span) => {
+                            span.into_rect().map_err(|_| ErrorKind::Value)
+                        }
+                        _ => Err(ErrorKind::Value),
+                    };
+                }
+                match normalize_name(name).as_str() {
+                    "LET" => let_reference(self, context, args)?
+                        .into_rect()
+                        .map_err(|_| ErrorKind::Value),
+                    "INDEX" => self.resolve_index_rect(context, args),
+                    _ => self.resolve_dynamic_rect(context, name, args),
+                }
             }
-            Expr::Call { name, args } if normalize_name(name) == "INDEX" => {
-                self.resolve_index_rect(context, args)
-            }
-            Expr::Call { name, args } => self.resolve_dynamic_rect(context, name, args),
             _ => Err(ErrorKind::Value),
         }
     }

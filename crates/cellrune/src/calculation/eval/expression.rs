@@ -9,11 +9,12 @@ use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation}
 use crate::calculation::functions::{
     call_function, call_function_array, callable_call_scope, helper_scalar_with_trace,
     invoke_lambda, lambda_scope_value, let_scope_value, map_scalar_with_trace, normalize_name,
+    reduce_scope_value,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
 use crate::calculation::runtime::{Array, ArrayExtent, Rect};
-use crate::calculation::scope::{ArrayEvaluation, ScalarEvaluation, ScopeValue};
+use crate::calculation::scope::{ArrayEvaluation, DefinedLambdaId, ScalarEvaluation, ScopeValue};
 use crate::calculation::value::{ErrorKind, Value};
 
 struct ArrayEvaluationContext {
@@ -116,32 +117,38 @@ impl Engine<'_> {
                 if let Some(value) = context.binding(name) {
                     return value.clone();
                 }
-                match self.resolve_name_expr(context.sheet(), name) {
-                    Some(named) if crate::calculation::lambda::definition(named).is_some() => {
-                        lambda_scope_value(context, &named_lambda_args(named), Some(name))
+                match self.resolve_name_expr_with_id_in_context(context, name) {
+                    Some((id, named))
+                        if crate::calculation::lambda::definition(named).is_some() =>
+                    {
+                        lambda_scope_value(context, &named_lambda_args(named), Some(id))
                     }
-                    Some(named) => self.eval_scope_value(context, named),
+                    Some((id, named)) => self.eval_scope_value(
+                        context
+                            .without_bindings()
+                            .with_defined_name_scope(Some(id.scope())),
+                        named,
+                    ),
                     None => scope_error(ErrorKind::Name),
                 }
             }
             Expr::Ref(_) | Expr::Range { .. } => self
                 .resolve_rect_span_expr(context, expr)
                 .map_or_else(scope_error, ScopeValue::Reference),
-            Expr::Call { name, args } if normalize_name(name) == "LET" => {
-                let_scope_value(self, context, args)
-            }
-            Expr::Call { name, args } if normalize_name(name) == "LAMBDA" => {
-                lambda_scope_value(context, args, None)
-            }
-            Expr::Call { name, .. } if is_reference_returning_function(name) => self
-                .resolve_rect_span_expr(context, expr)
-                .map_or_else(scope_error, ScopeValue::Reference),
             Expr::Call { name, args } => {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
-                    scoped
-                } else {
-                    self.eval_array_with_trace(context, expr)
-                        .map_or_else(scope_error, scope_from_array)
+                    return scoped;
+                }
+                match normalize_name(name).as_str() {
+                    "LET" => let_scope_value(self, context, args),
+                    "LAMBDA" => lambda_scope_value(context, args, None),
+                    "REDUCE" => reduce_scope_value(self, context, args).unwrap_or_else(scope_error),
+                    _ if is_reference_returning_function(name) => self
+                        .resolve_rect_span_expr(context, expr)
+                        .map_or_else(scope_error, ScopeValue::Reference),
+                    _ => self
+                        .eval_array_with_trace(context, expr)
+                        .map_or_else(scope_error, scope_from_array),
                 }
             }
             Expr::Invoke { callee, args } => invoke_scope_value(self, context, callee, args),
@@ -171,8 +178,37 @@ impl Engine<'_> {
             ScopeValue::Reference(span) => {
                 self.eval_reference_span_with_trace(context, span.clone())
             }
-            ScopeValue::Callable(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc)),
+            ScopeValue::Callable(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)),
         }
+    }
+
+    pub(in crate::calculation) fn eval_final_scalar_with_trace(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> ScalarEvaluation {
+        if let Expr::Paren(inner) = expr {
+            return self.eval_final_scalar_with_trace(context, inner);
+        }
+        let may_return_callable = match expr {
+            Expr::Name(_) | Expr::Invoke { .. } => true,
+            Expr::Call { name, .. } => {
+                matches!(normalize_name(name).as_str(), "LAMBDA" | "LET" | "REDUCE")
+                    || self
+                        .resolve_defined_lambda_in_context(context, name)
+                        .is_some()
+            }
+            _ => false,
+        };
+        if may_return_callable {
+            return match self.eval_scope_value(context, expr) {
+                ScopeValue::Callable(_) => {
+                    ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc))
+                }
+                scoped => self.scalar_from_scope(context, &scoped),
+            };
+        }
+        self.eval_scalar_with_trace(context, expr)
     }
 
     fn eval_reference_span_with_trace(
@@ -218,16 +254,36 @@ impl Engine<'_> {
                 .map_or_else(Value::Error, |rect| {
                     self.cell_value((rect.sheet, rect.row_start, rect.col_start))
                 }),
-            Expr::Name(name) => match self.resolve_name_expr(context.sheet(), name) {
-                Some(named) => self.eval_implicit_intersection(context, named),
+            Expr::Name(name) => match self.resolve_name_expr_with_id_in_context(context, name) {
+                Some((id, named)) => self.eval_implicit_intersection(
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
+                ),
                 None => Value::Error(ErrorKind::Name),
             },
-            Expr::Call { name, .. } if is_reference_returning_function(name) => self
-                .resolve_rect_expr(context, expr)
-                .and_then(|rect| self.implicit_intersection_rect(context, rect))
-                .map_or_else(Value::Error, |rect| {
-                    self.cell_value((rect.sheet, rect.row_start, rect.col_start))
-                }),
+            Expr::Call { name, args } => {
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    return self.scalar_from_scope(context, &scoped).value;
+                }
+                if is_reference_returning_function(name) {
+                    return self
+                        .resolve_rect_expr(context, expr)
+                        .and_then(|rect| self.implicit_intersection_rect(context, rect))
+                        .map_or_else(Value::Error, |rect| {
+                            self.cell_value((rect.sheet, rect.row_start, rect.col_start))
+                        });
+                }
+                self.eval_array(context, expr)
+                    .map_or_else(Value::Error, |array| {
+                        array
+                            .data
+                            .into_iter()
+                            .next()
+                            .unwrap_or(Value::Error(ErrorKind::Value))
+                    })
+            }
             _ => self
                 .eval_array(context, expr)
                 .map_or_else(Value::Error, |array| {
@@ -284,41 +340,40 @@ impl Engine<'_> {
             Expr::Array(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported)),
             Expr::Name(name) => match context.binding(name) {
                 Some(value) => self.scalar_from_scope(context, value),
-                None => match self.resolve_name_expr(context.sheet(), name) {
-                    Some(named) => self.eval_scalar_with_trace(context, named),
+                None => match self.resolve_name_expr_with_id_in_context(context, name) {
+                    Some((id, named)) => self.eval_scalar_with_trace(
+                        context
+                            .without_bindings()
+                            .with_defined_name_scope(Some(id.scope())),
+                        named,
+                    ),
                     None => ScalarEvaluation::untracked(Value::Error(ErrorKind::Name)),
                 },
             },
             Expr::Ref(_) | Expr::Range { .. } => self.eval_reference_with_trace(context, expr),
-            Expr::Call { name, .. } if is_reference_returning_function(name) => {
-                self.eval_reference_with_trace(context, expr)
-            }
-            Expr::Call { name, args } if normalize_name(name) == "LET" => {
-                let scoped = let_scope_value(self, context, args);
-                self.scalar_from_scope(context, &scoped)
-            }
-            Expr::Call { name, args } if normalize_name(name) == "LAMBDA" => {
-                let scoped = lambda_scope_value(context, args, None);
-                match scoped {
-                    ScopeValue::Callable(_) => {
-                        ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc))
-                    }
-                    scoped => self.scalar_from_scope(context, &scoped),
-                }
-            }
-            Expr::Call { name, args } if normalize_name(name) == "MAP" => {
-                map_scalar_with_trace(self, context, args)
-            }
-            Expr::Call { name, args }
-                if matches!(
-                    normalize_name(name).as_str(),
-                    "BYCOL" | "BYROW" | "MAKEARRAY" | "REDUCE" | "SCAN"
-                ) =>
-            {
-                helper_scalar_with_trace(self, context, &normalize_name(name), args)
-            }
             Expr::Call { name, args } => {
-                ScalarEvaluation::untracked(call_function(self, context, name, args))
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    return self.scalar_from_scope(context, &scoped);
+                }
+                let normalized = normalize_name(name);
+                match normalized.as_str() {
+                    _ if is_reference_returning_function(name) => {
+                        self.eval_reference_with_trace(context, expr)
+                    }
+                    "LET" => {
+                        let scoped = let_scope_value(self, context, args);
+                        self.scalar_from_scope(context, &scoped)
+                    }
+                    "LAMBDA" => {
+                        let scoped = lambda_scope_value(context, args, None);
+                        self.scalar_from_scope(context, &scoped)
+                    }
+                    "MAP" => map_scalar_with_trace(self, context, args),
+                    "BYCOL" | "BYROW" | "MAKEARRAY" | "REDUCE" | "SCAN" => {
+                        helper_scalar_with_trace(self, context, &normalized, args)
+                    }
+                    _ => ScalarEvaluation::untracked(call_function(self, context, name, args)),
+                }
             }
             Expr::Invoke { callee, args } => {
                 self.scalar_from_scope(context, &invoke_scope_value(self, context, callee, args))
@@ -358,8 +413,15 @@ impl Engine<'_> {
             Expr::Ref(_) | Expr::Range { .. } | Expr::Name(_) => {
                 self.eval_reference_with_trace(context, operand)
             }
-            Expr::Call { name, .. } if is_reference_returning_function(name) => {
-                self.eval_reference_with_trace(context, operand)
+            Expr::Call { name, args } => {
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    return self.scalar_from_scope(context, &scoped);
+                }
+                if is_reference_returning_function(name) {
+                    self.eval_reference_with_trace(context, operand)
+                } else {
+                    self.first_array_value_with_trace(context, operand)
+                }
             }
             _ => self.first_array_value_with_trace(context, operand),
         }
@@ -441,8 +503,14 @@ impl Engine<'_> {
                 context.binding(name).expect("binding presence checked"),
                 evaluation,
             ),
-            Expr::Name(name) => match self.resolve_name_expr(context.sheet(), name) {
-                Some(named) => self.eval_array_with_trace_at_extent(context, named, evaluation),
+            Expr::Name(name) => match self.resolve_name_expr_with_id_in_context(context, name) {
+                Some((id, named)) => self.eval_array_with_trace_at_extent(
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
+                    evaluation,
+                ),
                 None => Err(ErrorKind::Name),
             },
             Expr::Ref(_) | Expr::Range { .. } => {
@@ -539,10 +607,6 @@ impl Engine<'_> {
                     decimal_traces,
                 })
             }
-            Expr::Call { name, args } if normalize_name(name) == "LET" => {
-                let scoped = let_scope_value(self, context, args);
-                self.array_from_scope(&scoped, evaluation)
-            }
             Expr::Invoke { callee, args } => {
                 let scoped = invoke_scope_value(self, context, callee, args);
                 let evaluated = self.array_from_scope(&scoped, evaluation)?;
@@ -564,6 +628,10 @@ impl Engine<'_> {
                         evaluation.charge(self, cells)?;
                     }
                     return Ok(evaluated);
+                }
+                if normalize_name(name) == "LET" {
+                    let scoped = let_scope_value(self, context, args);
+                    return self.array_from_scope(&scoped, evaluation);
                 }
                 if let Some(result) = call_function_array(self, context, name, args) {
                     let evaluated = result?;
@@ -605,9 +673,48 @@ impl Engine<'_> {
                 self.array_from_rect_with_trace(rect, evaluation)
             }
             ScopeValue::Callable(_) => Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
-                Value::Error(ErrorKind::Calc),
+                Value::Error(ErrorKind::Value),
             ))),
         }
+    }
+
+    pub(in crate::calculation) fn eval_final_array_with_trace(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> Result<ArrayEvaluation, ErrorKind> {
+        if let Expr::Paren(inner) = expr {
+            return self.eval_final_array_with_trace(context, inner);
+        }
+        let may_return_callable = match expr {
+            Expr::Invoke { .. } => true,
+            Expr::Name(name) => self
+                .resolve_defined_lambda_in_context(context, name)
+                .is_some(),
+            Expr::Call { name, .. } => {
+                matches!(normalize_name(name).as_str(), "LAMBDA" | "LET" | "REDUCE")
+                    || self
+                        .resolve_defined_lambda_in_context(context, name)
+                        .is_some()
+            }
+            _ => false,
+        };
+        if may_return_callable {
+            return match self.eval_scope_value(context, expr) {
+                ScopeValue::Callable(_) => Ok(ArrayEvaluation::scalar(
+                    ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc)),
+                )),
+                scoped => self.array_from_scope_value(&scoped),
+            };
+        }
+        self.eval_array_with_trace(context, expr)
+    }
+
+    pub(in crate::calculation) fn array_from_scope_value(
+        &self,
+        scoped: &ScopeValue,
+    ) -> Result<ArrayEvaluation, ErrorKind> {
+        self.array_from_scope(scoped, &mut ArrayEvaluationContext::new(None))
     }
 
     pub(in crate::calculation) fn array_from_rect(
@@ -676,7 +783,7 @@ impl Engine<'_> {
         &self,
         context: EvalContext<'_>,
         expr: &Expr,
-        names: &mut BTreeSet<String>,
+        names: &mut BTreeSet<DefinedLambdaId>,
     ) -> Option<ArrayExtent> {
         match expr {
             Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
@@ -704,17 +811,29 @@ impl Engine<'_> {
                 }
             }
             Expr::Name(name) => {
-                let key = name.to_ascii_lowercase();
-                if !names.insert(key) {
+                let (id, named) = self.resolve_name_expr_with_id_in_context(context, name)?;
+                if !names.insert(id.clone()) {
                     return None;
                 }
-                self.resolve_name_expr(context.sheet(), name)
-                    .and_then(|named| self.array_extent(context, named, names))
+                self.array_extent(
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
+                    names,
+                )
             }
-            Expr::Call { name, .. } if is_reference_returning_function(name) => self
-                .resolve_rect_span_expr(context, expr)
-                .ok()
-                .and_then(|span| self.array_extent_from_span(&span)),
+            Expr::Call { name, .. }
+                if context.binding(name).is_none()
+                    && self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .is_none()
+                    && is_reference_returning_function(name) =>
+            {
+                self.resolve_rect_span_expr(context, expr)
+                    .ok()
+                    .and_then(|span| self.array_extent_from_span(&span))
+            }
             Expr::Number(_)
             | Expr::Text(_)
             | Expr::Logical(_)

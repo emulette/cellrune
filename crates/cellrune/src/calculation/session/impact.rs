@@ -76,15 +76,20 @@ fn internal_to_public(workbook: &WorkbookSnapshot, cell: CellId) -> Option<Calcu
     Some(CalculationCellId::new(sheet.id(), address))
 }
 
-pub(super) fn formula_cells(workbook: &WorkbookSnapshot) -> BTreeSet<CalculationCellId> {
-    workbook
-        .sheets()
-        .iter()
-        .flat_map(|sheet| {
-            sheet.cells().filter_map(|cell| {
-                matches!(cell.content(), CellContent::Formula(_))
-                    .then_some(CalculationCellId::new(sheet.id(), cell.address()))
-            })
-        })
-        .collect()
+pub(super) fn formula_cells(
+    workbook: &WorkbookSnapshot,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<CalculationCellId>, ()> {
+    let mut formulas = BTreeSet::new();
+    for sheet in workbook.sheets() {
+        for cell in sheet.cells() {
+            if cancelled() {
+                return Err(());
+            }
+            if matches!(cell.content(), CellContent::Formula(_)) {
+                formulas.insert(CalculationCellId::new(sheet.id(), cell.address()));
+            }
+        }
+    }
+    Ok(formulas)
 }

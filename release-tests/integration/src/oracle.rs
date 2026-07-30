@@ -304,6 +304,7 @@ pub struct ObservedResultCell {
 pub enum CacheStatus {
     Semantic,
     MissingSemanticCache,
+    ImplicitBlank,
     Circular,
 }
 

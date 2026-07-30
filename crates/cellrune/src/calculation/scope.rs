@@ -4,6 +4,7 @@ use super::decimal::DecimalTrace;
 use super::operators::broadcast_index;
 use super::runtime::{Array, RectSpan};
 use super::value::{ErrorKind, Value};
+use crate::{DefinedName, DefinedNameScope};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ScalarEvaluation {
@@ -87,7 +88,27 @@ pub(super) struct LambdaClosure {
     pub(super) parameters: Vec<String>,
     pub(super) body: super::ast::Expr,
     pub(super) captured: Vec<ScopeEntry>,
-    pub(super) defined_name: Option<Box<str>>,
+    pub(super) lookup_scope: Option<DefinedNameScope>,
+    pub(super) defined_name: Option<DefinedLambdaId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) struct DefinedLambdaId {
+    scope: DefinedNameScope,
+    lookup_key: Box<str>,
+}
+
+impl DefinedLambdaId {
+    pub(super) fn from_defined_name(defined_name: &DefinedName) -> Self {
+        Self {
+            scope: defined_name.scope(),
+            lookup_key: defined_name.lookup_key().into(),
+        }
+    }
+
+    pub(super) const fn scope(&self) -> DefinedNameScope {
+        self.scope
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

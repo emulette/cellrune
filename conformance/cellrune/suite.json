@@ -4,12 +4,12 @@
   "feature_set_id": "cellrune-excel-function-pool-522-v1",
   "planned_release_range": {
     "first": "0.1.8",
-    "last": "0.1.20"
+    "last": "0.1.19"
   },
-  "state": "source",
+  "state": "frozen",
   "case_manifest": {
     "file": "case-manifest.json",
-    "sha256": "73a7cd7e23940cc7015a464e0fb495216816ce19253f2af1099269211abd4821"
+    "sha256": "c231aaf3d943ec8ecdf9eaaa6bd5d37d52c7bd9606f373c5453452a03d4f605e"
   },
   "case_selection": {
     "mode": "manifest_addresses"
@@ -22,7 +22,7 @@
   "generator": {
     "name": "CellRune deterministic Excel oracle generator",
     "revision": "oracle-harness-v2",
-    "harness_sha256": "cd97a17d00578a49c3622e7649c4861321d777a80f365694df3e4b62ead8b8f0"
+    "harness_sha256": "6bd9416b08809e429b20d447afec54f3a8bd79b467d8e3760ccc7f54e8a2b1be"
   },
   "profiles": [
     {
@@ -34,6 +34,22 @@
       "locale": "en-US UI; ko-KR regional format",
       "add_ins": {
         "euro_currency_tools": false
+      },
+      "artifacts": {
+        "workbook": {
+          "file": "formula-oracle.xlsx",
+          "sha256": "a576920db7f6ff0d04f75b7c2c568fb8798a74f2a586a83da8cebc07c89d0161",
+          "formula_cells": 1892,
+          "selected_cases": 1496
+        },
+        "metadata": {
+          "file": "metadata.json",
+          "sha256": "9de748b862d60f3abe98757bab415d70f3f3702158d2cca1aed7612c40d5cb3d"
+        },
+        "observations": {
+          "file": "observations.json",
+          "sha256": "489e66ec3b1a3efee12547ad11724419386f8de9d75bbd98668a99cfb9ee12df"
+        }
       }
     },
     {
@@ -45,6 +61,22 @@
       "locale": "en-US UI; ko-KR regional format",
       "add_ins": {
         "euro_currency_tools": false
+      },
+      "artifacts": {
+        "workbook": {
+          "file": "formula-oracle.xlsx",
+          "sha256": "9e923cb70d2c056a59f5fc2505f789ab8f2497e8f99a470da53b92a913f6b0b7",
+          "formula_cells": 1892,
+          "selected_cases": 1496
+        },
+        "metadata": {
+          "file": "metadata.json",
+          "sha256": "18cc73f3857a83df45b2cb08d37f3515a9e2abd3e5f24a5b57ce3dc685de4df4"
+        },
+        "observations": {
+          "file": "observations.json",
+          "sha256": "296ea71601b18788fde19b6e4363210475eb601368963f6ac1a5f7d2e6ad67eb"
+        }
       }
     }
   ]

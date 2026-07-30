@@ -164,11 +164,7 @@ fn split_cell_ident(ident: &str) -> Option<(String, Option<u32>)> {
 }
 
 fn is_lambda_name(name: &str) -> bool {
-    name.eq_ignore_ascii_case("LAMBDA")
-        || name
-            .strip_prefix("_xlfn.")
-            .or_else(|| name.strip_prefix("_XLFN."))
-            .is_some_and(|base| base.eq_ignore_ascii_case("LAMBDA"))
+    super::functions::normalize_name(name) == "LAMBDA"
 }
 
 impl Parser {
@@ -583,6 +579,10 @@ impl Parser {
             (Endpoint::Cell(start), Endpoint::Cell(end)) => Ok(RefBody::Area(start, end)),
             (Endpoint::Column(start), Endpoint::Column(end)) => Ok(RefBody::Columns(start, end)),
             (Endpoint::Row(start), Endpoint::Row(end)) => Ok(RefBody::Rows(start, end)),
+            (Endpoint::Cell(cell), _) => {
+                self.cursor = colon_cursor;
+                Ok(RefBody::Cell(cell))
+            }
             _ => Err(self.error(ERROR_PARSE_MISMATCHED_RANGE)),
         }
     }

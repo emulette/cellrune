@@ -58,6 +58,36 @@ pub struct CalculationDelta {
 }
 
 impl CalculationDelta {
+    pub(super) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut changed_cells = Vec::with_capacity(self.changed_cells.len());
+        for cell in &self.changed_cells {
+            if cancelled() {
+                return Err(());
+            }
+            changed_cells.push(cell.clone());
+        }
+        let mut removed_materialized_cells =
+            Vec::with_capacity(self.removed_materialized_cells.len());
+        for cell in &self.removed_materialized_cells {
+            if cancelled() {
+                return Err(());
+            }
+            removed_materialized_cells.push(*cell);
+        }
+        Ok(Self {
+            cursor: self.cursor,
+            base_revision: self.base_revision,
+            result_revision: self.result_revision,
+            mode: self.mode,
+            reason: self.reason,
+            dirty_count: self.dirty_count,
+            evaluated_count: self.evaluated_count,
+            parsed_formula_count: self.parsed_formula_count,
+            changed_cells,
+            removed_materialized_cells,
+        })
+    }
+
     /// Returns the monotonically increasing installed-delta cursor.
     pub const fn cursor(&self) -> u64 {
         self.cursor
@@ -158,13 +188,29 @@ pub(super) fn build_delta(
     evaluated_count: usize,
     parsed_formula_count: usize,
     max_delta_cells: usize,
+    cancelled: &impl Fn() -> bool,
 ) -> Result<CalculationDelta, SessionError> {
-    let previous_cells = previous
-        .map(|snapshot| snapshot.materialized_cells().collect::<BTreeMap<_, _>>())
-        .unwrap_or_default();
-    let current_cells = current.materialized_cells().collect::<BTreeMap<_, _>>();
+    let mut previous_cells = BTreeMap::new();
+    if let Some(previous) = previous {
+        for (cell, value) in previous.materialized_cells() {
+            if cancelled() {
+                return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+            }
+            previous_cells.insert(cell, value);
+        }
+    }
+    let mut current_cells = BTreeMap::new();
+    for (cell, value) in current.materialized_cells() {
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
+        current_cells.insert(cell, value);
+    }
     let mut changed_cells = Vec::new();
     for (cell, value) in &current_cells {
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
         if previous_cells
             .get(cell)
             .is_none_or(|previous| *previous != *value)
@@ -176,11 +222,15 @@ pub(super) fn build_delta(
             ));
         }
     }
-    let removed_materialized_cells = previous_cells
-        .keys()
-        .filter(|cell| !current_cells.contains_key(cell))
-        .copied()
-        .collect::<Vec<_>>();
+    let mut removed_materialized_cells = Vec::new();
+    for cell in previous_cells.keys() {
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
+        if !current_cells.contains_key(cell) {
+            removed_materialized_cells.push(*cell);
+        }
+    }
     let delta_cells = changed_cells
         .len()
         .saturating_add(removed_materialized_cells.len());

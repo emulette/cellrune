@@ -77,7 +77,7 @@ fn choose(
     };
     let cells = cell_count(rows, cols)?;
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(cells)?;
+    engine.charge_function_iterations(context, cells)?;
     let mut data = Vec::with_capacity(cells as usize);
     match axis {
         Axis::Rows => {
@@ -123,7 +123,7 @@ fn take_or_drop(
     let (column_start, cols) = slice_axis(engine, context, args.get(2), source.cols, operation)?;
     let cells = cell_count(rows, cols)?;
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(cells)?;
+    engine.charge_function_iterations(context, cells)?;
     let mut data = Vec::with_capacity(cells as usize);
     for row in row_start..row_start + rows {
         for column in column_start..column_start + cols {
@@ -204,7 +204,7 @@ fn filter(
     let inspected_cells = cell_count(source.rows, source.cols)?
         .checked_add(cell_count(include.rows, include.cols)?)
         .ok_or(ErrorKind::Num)?;
-    engine.ensure_function_iterations(inspected_cells)?;
+    engine.charge_function_iterations(context, inspected_cells)?;
     let selected = include
         .data
         .iter()
@@ -223,7 +223,7 @@ fn filter(
     };
     let cells = cell_count(rows, cols)?;
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(inspected_cells.checked_add(cells).ok_or(ErrorKind::Num)?)?;
+    engine.charge_function_iterations(context, cells)?;
     let mut data = Vec::with_capacity(cells as usize);
     match axis {
         Axis::Rows => {
@@ -282,7 +282,10 @@ fn stack(
     }
     let cells = cell_count(rows, cols)?;
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(input_cells.checked_add(cells).ok_or(ErrorKind::Num)?)?;
+    engine.charge_function_iterations(
+        context,
+        input_cells.checked_add(cells).ok_or(ErrorKind::Num)?,
+    )?;
     let mut data = Vec::with_capacity(cells as usize);
     match axis {
         Axis::Rows => {
@@ -331,7 +334,7 @@ fn sort(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Result<
         return Err(ErrorKind::Value);
     }
     let item_count = if by_column { source.cols } else { source.rows };
-    engine.ensure_function_iterations(u64::from(item_count).saturating_mul(64))?;
+    engine.charge_function_iterations(context, u64::from(item_count).saturating_mul(64))?;
     let mut indexes = (0..item_count).collect::<Vec<_>>();
     indexes.sort_by(|left, right| {
         let (left_value, right_value) = if by_column {
@@ -414,7 +417,7 @@ fn unique(
             count.checked_mul(u64::from(if by_column { source.rows } else { source.cols }))
         })
         .ok_or(ErrorKind::Num)?;
-    engine.ensure_function_iterations(comparisons)?;
+    engine.charge_function_iterations(context, comparisons)?;
     let mut selected = Vec::new();
     for candidate in 0..item_count {
         let occurrences = (0..item_count)

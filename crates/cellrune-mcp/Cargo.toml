@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 cap-std.workspace = true
-cellrune-interop = { path = "../cellrune-interop", version = "=0.1.7", features = ["capability-fs"] }
+cellrune-interop = { path = "../cellrune-interop", version = "=0.1.8", features = ["capability-fs"] }
 clap.workspace = true
 rmcp.workspace = true
 schemars.workspace = true

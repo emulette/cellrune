@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.7, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.8, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -430,8 +430,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.7 catalog contains 279 official Excel-facing names
-  (266 official kernels plus 13 aliases) and one non-official compatibility
+  `.is_official()`. The 0.1.8 catalog contains 286 official Excel-facing names
+  (273 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
   `scan_function_usage_with_options(&WorkbookSnapshot, CalculationOptions)`
@@ -472,6 +472,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   budgets: formula tokens, AST nodes, AST nesting depth, dependency edges,
   array cells, calculated text bytes, data-dependent function iterations, LET
   bindings, active LAMBDA depth, and cumulative LAMBDA/MAP invocations.
+- `LAMBDA` is a first-class scoped value. Literal, immediate, `LET`-bound,
+  workbook-defined, and sheet-local callables share one evaluator with lexical
+  capture and caller isolation. `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`,
+  `MAKEARRAY`, and `ISOMITTED` consume the same typed callable representation;
+  final callable results are `#CALC!`, while attempts to use a callable as a
+  scalar operand are `#VALUE!`.
 - `CalculationSnapshot`: `.cell(CalculationCellId) -> Option<&CalculationCellResult>`,
   `.cells()`, `.materialized_cell(CalculationCellId)`,
   `.materialized_cells()`, `.len()`, `.is_empty()`, `.options()`,
@@ -570,8 +576,7 @@ calculate. Out of scope for the current version:
   but not yet resolved to values. 3-D references outside the audited
   direct-consumer policy described under Calculation are likewise reported,
   not resolved.
-- Spill postfix references such as `A1#`, general `LAMBDA`, and data-table
-  calculation.
+- Spill postfix references such as `A1#` and data-table calculation.
 - Iterative calculation and automatic host-time or random inputs (`TODAY()`
   and `NOW()` are supported only through explicit `CalculationOptions` inputs).
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use cellrune::{
     ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationHints,
     CalculationIssueCode, CalculationLimits, CalculationOptions, CalculationOptionsError,
@@ -77,6 +79,130 @@ fn named_lambda_calls_and_finite_recursion_use_the_defined_name_registry() {
 }
 
 #[test]
+fn workbook_lambda_bodies_keep_their_defined_name_resolution_scope() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    for defined_name in [
+        DefinedName::new(
+            "Entry",
+            DefinedNameScope::Workbook,
+            FormulaText::from_xlsx("LAMBDA(n,Base(n))").expect("valid formula"),
+            false,
+        )
+        .expect("valid workbook lambda"),
+        DefinedName::new(
+            "Base",
+            DefinedNameScope::Workbook,
+            FormulaText::from_xlsx("LAMBDA(n,IF(n<=0,0,Base(n-1)+1))").expect("valid formula"),
+            false,
+        )
+        .expect("valid recursive workbook lambda"),
+        DefinedName::new(
+            "Base",
+            DefinedNameScope::Sheet(sheet_id),
+            FormulaText::from_xlsx("LAMBDA(n,NO_SUCH_FUNCTION())").expect("valid formula"),
+            false,
+        )
+        .expect("valid sheet-local shadow"),
+    ] {
+        draft
+            .set_defined_name(defined_name)
+            .expect("defined name edit");
+    }
+    draft
+        .set_cell_formula(
+            sheet_id,
+            CellAddress::from_a1("A1").expect("valid address"),
+            FormulaText::from_xlsx("Entry(3)").expect("valid formula"),
+        )
+        .expect("formula edit");
+
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let usage = scan_function_usage(draft.workbook());
+    assert!(
+        usage
+            .entries()
+            .iter()
+            .all(|entry| entry.name() != "NO_SUCH_FUNCTION")
+    );
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    assert_number(&calculation, 1, 3.0, 0.0);
+}
+
+#[test]
+fn workbook_value_names_keep_their_defined_name_resolution_scope() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    for (name, scope, formula) in [
+        ("EntryValue", DefinedNameScope::Workbook, "BaseValue+1"),
+        ("BaseValue", DefinedNameScope::Workbook, "1"),
+        (
+            "BaseValue",
+            DefinedNameScope::Sheet(sheet_id),
+            "NO_SUCH_FUNCTION()",
+        ),
+        (
+            "EntryReference",
+            DefinedNameScope::Workbook,
+            "BaseReference",
+        ),
+        (
+            "BaseReference",
+            DefinedNameScope::Workbook,
+            "Sheet1!$B$1:$B$2",
+        ),
+        (
+            "BaseReference",
+            DefinedNameScope::Sheet(sheet_id),
+            "Sheet1!$B$3:$B$4",
+        ),
+        ("EntryArray", DefinedNameScope::Workbook, "BaseArray"),
+        ("BaseArray", DefinedNameScope::Workbook, "{1,2}"),
+        ("BaseArray", DefinedNameScope::Sheet(sheet_id), "{9,9}"),
+    ] {
+        draft
+            .set_defined_name(
+                DefinedName::new(
+                    name,
+                    scope,
+                    FormulaText::from_xlsx(formula).expect("valid formula"),
+                    false,
+                )
+                .expect("valid defined name"),
+            )
+            .expect("defined name edit");
+    }
+    for (address, value) in [("B1", 2.0), ("B2", 3.0), ("B3", 40.0), ("B4", 50.0)] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid address"),
+                CellValue::number(value).expect("finite value"),
+            )
+            .expect("literal edit");
+    }
+    for (address, formula) in [
+        ("A1", "EntryValue"),
+        ("C1", "SUM(EntryReference)"),
+        ("D1", "SUM(EntryArray)"),
+    ] {
+        draft
+            .set_cell_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid address"),
+                FormulaText::from_xlsx(formula).expect("valid formula"),
+            )
+            .expect("formula edit");
+    }
+
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    assert_number(&calculation, 1, 2.0, 0.0);
+    assert_number(&calculation, 3, 5.0, 0.0);
+    assert_number(&calculation, 4, 3.0, 0.0);
+}
+
+#[test]
 fn lambda_calls_preserve_arrays_and_nested_callable_values() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(LET(f,LAMBDA(x,x+1),f({1,2})))"),
@@ -97,26 +223,130 @@ fn lambda_calls_preserve_arrays_and_nested_callable_values() {
 #[test]
 fn callable_bindings_shadow_builtins_without_falling_through() {
     let workbook = workbook_with_formulas_and_names(
-        &[(1, 1, "LET(SUM,2,SUM(1,2))"), (1, 2, "ScalarName(1)")],
-        &[("ScalarName", "2")],
+        &[
+            (1, 1, "LET(SUM,2,SUM(1,2))"),
+            (1, 2, "ScalarName(1)"),
+            (1, 3, "LoopCall(1)"),
+            (1, 4, "LET(f,2,f(Loop))"),
+        ],
+        &[
+            ("ScalarName", "2"),
+            ("LoopCall", "LoopCall"),
+            ("Loop", "Loop"),
+        ],
+    );
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=4 {
+        assert!(
+            matches!(
+                calculation.cell(cell_id(column)),
+                Some(CalculationCellResult::Value(CellValue::Error(
+                    ExcelError::Value
+                )))
+            ),
+            "{:?}",
+            calculation.cell(cell_id(column))
+        );
+    }
+    let usage = scan_function_usage(&workbook);
+    assert!(
+        usage
+            .entries()
+            .iter()
+            .all(|entry| !matches!(entry.name(), "SUM" | "SCALARNAME" | "LOOPCALL" | "LOOP")),
+        "{:?}",
+        usage.entries()
+    );
+}
+
+#[test]
+fn defined_call_targets_shadow_every_special_builtin_dispatch_path() {
+    let names = [
+        ("MAP", "LAMBDA(x,callback,41)"),
+        ("BYROW", "LAMBDA(x,42)"),
+        ("BYCOL", "LAMBDA(x,43)"),
+        ("REDUCE", "LAMBDA(x,44)"),
+        ("SCAN", "LAMBDA(x,45)"),
+        ("MAKEARRAY", "LAMBDA(x,46)"),
+        ("INDEX", "LAMBDA(x,47)"),
+        ("OFFSET", "LAMBDA(x,48)"),
+        ("INDIRECT", "LAMBDA(x,49)"),
+        ("TODAY", "LAMBDA(50)"),
+    ];
+    let formulas = [
+        "MAP(1,LAMBDA(x,x))",
+        "MAP(1,LAMBDA(x,x))+0",
+        "BYROW(1)",
+        "BYROW(1)+0",
+        "BYCOL(1)",
+        "BYCOL(1)+0",
+        "REDUCE(1)",
+        "REDUCE(1)+0",
+        "SCAN(1)",
+        "SCAN(1)+0",
+        "MAKEARRAY(1)",
+        "MAKEARRAY(1)+0",
+        "INDEX(1)",
+        "INDEX(1)+0",
+        "OFFSET(1)",
+        "OFFSET(1)+0",
+        "INDIRECT(1)",
+        "INDIRECT(1)+0",
+        "TODAY()",
+        "TODAY()+0",
+    ];
+    let formulas = formulas
+        .iter()
+        .enumerate()
+        .map(|(index, formula)| (1, index as u32 + 1, *formula))
+        .collect::<Vec<_>>();
+    let workbook = workbook_with_formulas_and_names(&formulas, &names);
+
+    let capabilities = scan_formula_capabilities(&workbook);
+    assert!(capabilities.is_supported(), "{:?}", capabilities.entries());
+    let usage = scan_function_usage(&workbook);
+    assert!(
+        usage.entries().iter().all(|entry| entry.name() == "LAMBDA"),
+        "{:?}",
+        usage.entries()
     );
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    assert!(matches!(
-        calculation.cell(cell_id(1)),
-        Some(CalculationCellResult::Value(CellValue::Error(
-            ExcelError::Value
-        )))
-    ));
-    assert!(
-        matches!(
-            calculation.cell(cell_id(2)),
-            Some(CalculationCellResult::Value(CellValue::Error(
-                ExcelError::Value
-            )))
-        ),
-        "{:?}",
-        calculation.cell(cell_id(2))
+    for (pair, expected) in (1_u32..=10).zip(41_u32..=50) {
+        let direct = pair * 2 - 1;
+        let composed = pair * 2;
+        assert_number(&calculation, direct, f64::from(expected), 0.0);
+        assert_number(&calculation, composed, f64::from(expected), 0.0);
+    }
+
+    let syntax_workbook = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "LET(1)"),
+            (1, 2, "SUM(LET(1))"),
+            (1, 3, "LAMBDA(1)"),
+            (1, 4, "SUM(LAMBDA(1))"),
+        ],
+        &[("LET", "LAMBDA(x,51)"), ("LAMBDA", "_xlfn.LAMBDA(x,52)")],
     );
+    let capabilities = scan_formula_capabilities(&syntax_workbook);
+    assert!(capabilities.is_supported(), "{:?}", capabilities.entries());
+    let syntax_calculation = calculate_workbook(&syntax_workbook, CalculationOptions::default());
+    for (column, expected) in [(1, 51.0), (2, 51.0), (3, 52.0), (4, 52.0)] {
+        assert_number(&syntax_calculation, column, expected, 0.0);
+    }
+}
+
+#[test]
+fn callable_range_endpoints_do_not_consume_cell_references_during_lookahead() {
+    let workbook = workbook_with_formulas_and_names(
+        &[(1, 1, "2"), (2, 1, "5"), (1, 2, "SUM(A1:MAP(0))")],
+        &[("MAP", "LAMBDA(value,A2)")],
+    );
+
+    let capabilities = scan_formula_capabilities(&workbook);
+    assert!(capabilities.is_supported(), "{:?}", capabilities.entries());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 2, 7.0, 0.0);
 }
 
 #[test]
@@ -134,6 +364,7 @@ fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
         (1, 10, "BYROW({1,2},LAMBDA(row,row))"),
         (1, 11, "MAP({1,2},LAMBDA(value,{value,value}))"),
         (1, 12, "MAKEARRAY(1,1,LAMBDA(row,column,{row,column}))"),
+        (1, 13, "_XlFn._xLwS.LaMbDa(x,x+1)(5)"),
     ]);
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     assert_number(&calculation, 1, 6.0, 0.0);
@@ -148,6 +379,7 @@ fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
     assert_number(&calculation, 7, 102.0, 0.0);
     assert_number(&calculation, 8, 5.0, 0.0);
     assert_number(&calculation, 9, 6.0, 0.0);
+    assert_number(&calculation, 13, 6.0, 0.0);
     for column in 10..=12 {
         assert_eq!(
             calculation.cell(cell_id(column)),
@@ -159,12 +391,206 @@ fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
 }
 
 #[test]
+fn lambda_callable_values_errors_and_reduce_seeding_match_excel_contracts() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "LAMBDA(value,42)(1/0)"),
+        (1, 2, "LAMBDA(value,)(1)"),
+        (1, 3, "LET(f,LAMBDA(v,v),f+1)"),
+        (1, 4, "LET(f,LAMBDA(v,v+1),SUM(MAP({1,2},f)))"),
+        (1, 5, "LET(f,LAMBDA(a,v,a+v),REDUCE(0,{1,2},f))"),
+        (1, 6, "REDUCE(,{2,3},LAMBDA(a,b,a*b))"),
+        (
+            1,
+            7,
+            "SUM(REDUCE(0,{1,2},LAMBDA(acc,value,VSTACK(acc,value))))",
+        ),
+        (1, 8, "_XlFn.LaMbDa(value,value+1)(5)"),
+        (1, 9, "MAP({0},LAMBDA(value,J1:K1))"),
+        (1, 10, "1"),
+        (1, 11, "2"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    assert_eq!(
+        calculation.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::DivisionByZero
+        )))
+    );
+    for column in [2, 3] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            )))
+        );
+    }
+    assert_number(&calculation, 4, 5.0, 0.0);
+    assert_number(&calculation, 5, 3.0, 0.0);
+    assert_number(&calculation, 6, 6.0, 0.0);
+    assert_number(&calculation, 7, 3.0, 0.0);
+    assert_number(&calculation, 8, 6.0, 0.0);
+    assert_eq!(
+        calculation.cell(cell_id(9)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Calculation
+        )))
+    );
+
+    let limits = CalculationLimits::default()
+        .with_max_function_iterations(1)
+        .expect("nonzero helper iteration limit");
+    let limited = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "BYCOL({1;2},LAMBDA(column,1))")]),
+        CalculationOptions::default().with_limits(limits),
+    );
+    assert_issue(&limited, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn helper_callbacks_preserve_engine_issues_and_cumulative_work_limits() {
+    let text_limits = CalculationLimits::default()
+        .with_max_text_bytes(3)
+        .expect("nonzero text limit");
+    let text_limited = calculate_workbook(
+        &workbook_with_formulas(&[
+            (
+                1,
+                1,
+                "IFERROR(MAP({1},LET(x,\"ab\"&\"cd\",LAMBDA(v,v))),42)",
+            ),
+            (1, 2, "IFERROR(MAP({1},LAMBDA(v,{v,\"ab\"&\"cd\"})),42)"),
+        ]),
+        CalculationOptions::default().with_limits(text_limits),
+    );
+    assert_issue(
+        &text_limited,
+        1,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+    assert_issue(
+        &text_limited,
+        2,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    let work_limits = CalculationLimits::default()
+        .with_max_function_iterations(20)
+        .expect("nonzero function-work limit");
+    let work_limited = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "IFERROR(REDUCE(0,{1,2,3,4},LAMBDA(a,v,VSTACK(a,v))),42)",
+        )]),
+        CalculationOptions::default().with_limits(work_limits),
+    );
+    assert_issue(
+        &work_limited,
+        1,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    let callable = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "REDUCE(0,{1},LAMBDA(a,v,LAMBDA(x,x)))")]),
+        CalculationOptions::default(),
+    );
+    assert_eq!(
+        callable.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Calculation
+        )))
+    );
+}
+
+#[test]
+fn named_lambdas_are_isolated_and_helpers_accept_typed_callables() {
+    let workbook = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "LET(secret,10,GetOuter(1))"),
+            (1, 2, "SUM(BYROW({1,2;3,4},SumRow))"),
+            (1, 3, "Broken(1)"),
+        ],
+        &[
+            ("GetOuter", "LAMBDA(x,secret+x)"),
+            ("SumRow", "LAMBDA(row,SUM(row))"),
+            ("Broken", "LAMBDA(x,NO_SUCH_FUNCTION(x))"),
+        ],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    assert_capability_issue(
+        &report,
+        1,
+        CalculationIssueCode::UnsupportedName,
+        Some("secret"),
+    );
+    assert_capability_issue(
+        &report,
+        3,
+        CalculationIssueCode::UnsupportedFunction,
+        Some("NO_SUCH_FUNCTION"),
+    );
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 2, 10.0, 0.0);
+}
+
+#[test]
+fn named_lambda_bodies_do_not_hide_ordinary_defined_name_cycles() {
+    let workbook = workbook_with_formulas_and_names(
+        &[(1, 1, "Broken(1)")],
+        &[("Broken", "LAMBDA(x,Loop)"), ("Loop", "Loop")],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    assert_capability_issue(&report, 1, CalculationIssueCode::UnsupportedName, None);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_issue(&calculation, 1, CalculationIssueCode::UnsupportedName);
+}
+
+#[test]
+fn builtin_named_lambda_shadows_do_not_hide_ordinary_name_cycles() {
+    let workbook = workbook_with_formulas_and_names(
+        &[(1, 1, "MAP(0,LAMBDA(x,x))")],
+        &[("MAP", "LAMBDA(x,callback,Loop)"), ("Loop", "Loop")],
+    );
+    let report = scan_formula_capabilities(&workbook);
+    assert_capability_issue(&report, 1, CalculationIssueCode::UnsupportedName, None);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_issue(&calculation, 1, CalculationIssueCode::UnsupportedName);
+}
+
+#[test]
+fn function_usage_counts_lambda_bodies_without_user_callable_names() {
+    let workbook = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "LET(f,LAMBDA(x,SUM(x)),f(1))"),
+            (1, 2, "RowTotal({1,2})"),
+        ],
+        &[("RowTotal", "LAMBDA(row,SUM(row))")],
+    );
+    let report = scan_function_usage(&workbook);
+    let names = report
+        .entries()
+        .iter()
+        .map(|entry| entry.name())
+        .collect::<BTreeSet<_>>();
+
+    assert!(names.contains("LET"));
+    assert!(names.contains("LAMBDA"));
+    assert!(names.contains("SUM"));
+    assert!(!names.contains("F"));
+    assert!(!names.contains("ROWTOTAL"));
+    assert!(report.is_fully_supported());
+}
+
+#[test]
 fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Table1[Amount])"),
         (1, 2, "A1#"),
         (1, 3, "LAMBDA(x,x+1)"),
         (1, 4, "SUMPRODUCT(MAP({1,2},LAMBDA(x,x+1)))"),
+        (1, 5, "MAP({1},_XlFn._xLwS.LaMbDa(x,NO_SUCH_FUNCTION()))"),
     ]);
     let report = scan_formula_capabilities(&workbook);
 
@@ -184,6 +610,12 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
             .capability(),
         FormulaCapability::Supported
     ));
+    assert_capability_issue(
+        &report,
+        5,
+        CalculationIssueCode::UnsupportedFunction,
+        Some("NO_SUCH_FUNCTION"),
+    );
     assert!(matches!(
         report
             .entries()
@@ -205,6 +637,7 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
         calculation.cell(cell_id(3)),
         Some(CalculationCellResult::Value(_))
     ));
+    assert_issue(&calculation, 5, CalculationIssueCode::UnsupportedFunction);
 }
 
 #[test]
@@ -1432,6 +1865,38 @@ fn volatile_dates_hidden_in_defined_names_keep_the_specific_issue() {
 }
 
 #[test]
+fn volatile_detection_respects_local_and_defined_callable_shadowing() {
+    let local_shadow =
+        workbook_with_formulas(&[(1, 1, "LET(TODAY,LAMBDA(INDIRECT(\"A1\",FALSE)),TODAY())")]);
+    let local_result = calculate_workbook(&local_shadow, CalculationOptions::default());
+    assert_issue(
+        &local_result,
+        1,
+        CalculationIssueCode::UnsupportedExpression,
+    );
+
+    let scalar_shadow = workbook_with_formulas(&[(1, 1, "LET(TODAY,2,TODAY(NOW()))")]);
+    let scalar_result = calculate_workbook(&scalar_shadow, CalculationOptions::default());
+    assert_eq!(
+        scalar_result.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Value
+        )))
+    );
+
+    let defined_shadow = workbook_with_formulas_and_names(
+        &[(1, 1, "MAP(1,LAMBDA(x,x))")],
+        &[("MAP", "LAMBDA(x,callback,TODAY())")],
+    );
+    let defined_result = calculate_workbook(&defined_shadow, CalculationOptions::default());
+    assert_issue(
+        &defined_result,
+        1,
+        CalculationIssueCode::VolatileInputMissing,
+    );
+}
+
+#[test]
 fn calculation_limits_reject_zero_values() {
     assert_eq!(
         CalculationLimits::default().with_max_formula_tokens(0),
@@ -1609,6 +2074,67 @@ fn defined_name_cycles_and_expansion_depth_are_bounded_before_evaluation() {
     let calculation = calculate_workbook(&chain, CalculationOptions::default().with_limits(limits));
     let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(cell_id(1)) else {
         panic!("defined name expansion limit must withhold the result");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+
+    let branching_chain = workbook_with_formulas_and_names(
+        &[(1, 1, "Deep+Shallow")],
+        &[
+            ("Deep", "Middle"),
+            ("Middle", "Tail"),
+            ("Shallow", "Tail"),
+            ("Tail", "1"),
+        ],
+    );
+    let branching_calculation = calculate_workbook(
+        &branching_chain,
+        CalculationOptions::default().with_limits(limits),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = branching_calculation.cell(cell_id(1))
+    else {
+        panic!("a shallow shared tail must not hide a deeper defined-name path");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+
+    let callable_chain = workbook_with_formulas_and_names(
+        &[(1, 1, "Reader(0)")],
+        &[
+            ("Reader", "LAMBDA(value,Alpha)"),
+            ("Alpha", "Beta"),
+            ("Beta", "Gamma"),
+            ("Gamma", "1"),
+        ],
+    );
+    let callable_calculation = calculate_workbook(
+        &callable_chain,
+        CalculationOptions::default().with_limits(limits),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = callable_calculation.cell(cell_id(1))
+    else {
+        panic!("named lambda body must not bypass defined-name expansion limits");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+
+    let branching_callable_chain = workbook_with_formulas_and_names(
+        &[(1, 1, "Deep(0)+Shallow(0)")],
+        &[
+            ("Deep", "LAMBDA(value,Middle(value))"),
+            ("Middle", "LAMBDA(value,Tail(value))"),
+            ("Shallow", "LAMBDA(value,Tail(value))"),
+            ("Tail", "LAMBDA(value,1)"),
+        ],
+    );
+    let branching_callable_calculation = calculate_workbook(
+        &branching_callable_chain,
+        CalculationOptions::default().with_limits(limits),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) =
+        branching_callable_calculation.cell(cell_id(1))
+    else {
+        panic!("a shallow callable tail must not hide a deeper callable path");
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));

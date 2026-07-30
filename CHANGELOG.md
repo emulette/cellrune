@@ -10,6 +10,41 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-30
+
+### Added
+
+- First-class `LAMBDA` values with lexical closures, immediate invocation, workbook and sheet-local
+  defined-name callables, bounded recursion, omitted-argument handling through `ISOMITTED`, and
+  case-insensitive `_xlfn.LAMBDA`/`_xlpm.` storage spellings.
+- The callable helper family `BYROW`, `BYCOL`, `REDUCE`, `SCAN`, and `MAKEARRAY`. `MAP`, the new
+  helpers, and direct invocation share one typed callable kernel, so closures may flow through
+  `LET` or a defined name without requiring a literal `LAMBDA(...)` at the call site.
+- Excel-oracle v2 host-matrix coverage with 1,527 stable cases, 1,496 active cases, and independent
+  Excel Online and Mac Excel 2021 observations.
+
+### Changed
+
+- Function-usage and capability scans expand named LAMBDA bodies, count their official built-ins,
+  and no longer report user callable names as unsupported worksheet functions.
+- Oracle validation now binds every observed array-result cell to the raw XLSX cache and verifies
+  the complete suite, manifest, metadata, observation, feature-set, profile, count, and SHA-256
+  provenance chain.
+
+### Fixed
+
+- Named LAMBDA bodies now participate in scheduling and dependency invalidation, so forward
+  dependencies calculate in order and incremental results stay identical to a full pass.
+- Named LAMBDAs no longer capture caller `LET` bindings. Ordinary defined names and callable bodies
+  are evaluated and inspected outside the caller's lexical frame.
+- Defined-name cycles and nesting limits can no longer hide behind a callable body and overflow the
+  evaluator stack.
+- LAMBDA argument errors propagate before body evaluation, a missing body is rejected, helper
+  scalar contracts reject multi-cell arrays and references, and callable coercion returns
+  `#VALUE!` while a callable left as the final worksheet result returns `#CALC!`.
+- `REDUCE` without an initial value now seeds from the first array item and supports array-valued
+  accumulators; BYROW and BYCOL charge work by input cells rather than only output dimensions.
+
 ## [0.1.7] - 2026-07-29
 
 ### Added
@@ -412,7 +447,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/emulette/cellrune/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/emulette/cellrune/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/emulette/cellrune/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/emulette/cellrune/compare/v0.1.4...v0.1.5

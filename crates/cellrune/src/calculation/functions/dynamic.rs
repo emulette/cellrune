@@ -8,7 +8,7 @@ use super::super::limits::CalculationLimitKind;
 use super::super::operators::element_at;
 use super::super::runtime::{Array, RectSpan};
 use super::super::scope::{
-    ArrayEvaluation, LambdaClosure, ScalarEvaluation, ScopeEntry, ScopeValue,
+    ArrayEvaluation, DefinedLambdaId, LambdaClosure, ScalarEvaluation, ScopeEntry, ScopeValue,
 };
 use super::super::value::{ErrorKind, Value};
 
@@ -49,7 +49,7 @@ fn is_omitted(context: EvalContext<'_>, args: &[Expr]) -> Value {
 pub(in crate::calculation) fn lambda_scope_value(
     context: EvalContext<'_>,
     args: &[Expr],
-    defined_name: Option<&str>,
+    defined_name: Option<DefinedLambdaId>,
 ) -> ScopeValue {
     let expression = Expr::Call {
         name: "LAMBDA".to_owned(),
@@ -61,8 +61,16 @@ pub(in crate::calculation) fn lambda_scope_value(
     ScopeValue::Callable(std::sync::Arc::new(LambdaClosure {
         parameters: definition.parameters().to_vec(),
         body: definition.body().clone(),
-        captured: context.bindings().to_vec(),
-        defined_name: defined_name.map(str::to_owned).map(Into::into),
+        captured: if defined_name.is_some() {
+            Vec::new()
+        } else {
+            context.bindings().to_vec()
+        },
+        lookup_scope: defined_name
+            .as_ref()
+            .map(DefinedLambdaId::scope)
+            .or(context.defined_name_scope()),
+        defined_name,
     }))
 }
 
@@ -83,12 +91,12 @@ pub(in crate::calculation) fn invoke_lambda(
             )));
         }
         let value = engine.eval_scope_value(context, arg);
-        if let Some(kind) = value.engine_issue() {
+        if let ScopeValue::Scalar(evaluated) = &value
+            && let Value::Error(kind) = evaluated.value
+        {
             return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
         }
-        if let ScopeValue::Scalar(evaluated) = &value
-            && let Some(kind) = evaluated.engine_issue()
-        {
+        if let Some(kind) = value.engine_issue() {
             return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
         }
         values.push(value);
@@ -104,6 +112,15 @@ pub(in crate::calculation) fn invoke_lambda_values(
 ) -> ScopeValue {
     if closure.parameters.len() != values.len() {
         return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+    }
+    if let Some(kind) = values.iter().find_map(|value| match value {
+        ScopeValue::Scalar(evaluated) => match evaluated.value {
+            Value::Error(kind) => Some(kind),
+            _ => None,
+        },
+        _ => None,
+    }) {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
     }
     let _active_lambda = match context.enter_lambda(engine.calculation_limits()) {
         Ok(active) => active,
@@ -123,7 +140,12 @@ pub(in crate::calculation) fn invoke_lambda_values(
             ErrorKind::ResourceLimit(CalculationLimitKind::LambdaInvocations),
         )));
     }
-    engine.eval_scope_value(context.with_bindings(&bindings), &closure.body)
+    engine.eval_scope_value(
+        context
+            .with_bindings(&bindings)
+            .with_defined_name_scope(closure.lookup_scope),
+        &closure.body,
+    )
 }
 
 pub(super) fn map_array_with_trace(
@@ -137,8 +159,8 @@ pub(super) fn map_array_with_trace(
     if array_exprs.is_empty() {
         return Err(ErrorKind::Value);
     }
-    let lambda = definition(lambda_expr).ok_or(ErrorKind::Value)?;
-    if lambda.parameters().len() != array_exprs.len() {
+    let closure = lambda_closure(engine, context, lambda_expr)?;
+    if closure.parameters.len() != array_exprs.len() {
         return Err(ErrorKind::Value);
     }
 
@@ -156,7 +178,7 @@ pub(super) fn map_array_with_trace(
     let (rows, cols) = common_shape(&shapes)?;
     let cells = u64::from(rows) * u64::from(cols);
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(cells)?;
+    engine.charge_function_iterations(context, cells)?;
 
     let capacity = usize::try_from(cells)
         .map_err(|_| ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
@@ -173,17 +195,7 @@ pub(super) fn map_array_with_trace(
                     })
                 })
                 .collect();
-            let scoped = invoke_lambda_values(
-                engine,
-                context,
-                &LambdaClosure {
-                    parameters: lambda.parameters().to_vec(),
-                    body: lambda.body().clone(),
-                    captured: context.bindings().to_vec(),
-                    defined_name: None,
-                },
-                values,
-            );
+            let scoped = invoke_lambda_values(engine, context, &closure, values);
             let evaluated = lambda_result_scalar(engine, context, &scoped)?;
             if let Some(kind) = evaluated.engine_issue() {
                 return Err(kind);
@@ -240,12 +252,9 @@ fn lambda_closure(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Result<LambdaClosure, ErrorKind> {
-    let Some(_) = definition(expr) else {
-        return Err(ErrorKind::Value);
-    };
     match engine.eval_scope_value(context, expr) {
         ScopeValue::Callable(closure) => Ok((*closure).clone()),
-        _ => Err(ErrorKind::Value),
+        value => Err(value.engine_issue().unwrap_or(ErrorKind::Value)),
     }
 }
 
@@ -258,12 +267,28 @@ fn lambda_result_scalar(
     context: EvalContext<'_>,
     result: &ScopeValue,
 ) -> Result<ScalarEvaluation, ErrorKind> {
+    if let Some(kind) = result.engine_issue() {
+        return Err(kind);
+    }
     if let ScopeValue::Array(evaluated) = result
         && evaluated.array.data.len() != 1
     {
         return Err(ErrorKind::Calc);
     }
-    Ok(engine.scalar_from_scope(context, result))
+    if let ScopeValue::Reference(span) = result {
+        let rect = span.clone().into_rect().map_err(|_| ErrorKind::Calc)?;
+        if !rect.is_single_cell() {
+            return Err(ErrorKind::Calc);
+        }
+    }
+    if matches!(result, ScopeValue::Callable(_)) {
+        return Err(ErrorKind::Calc);
+    }
+    let scalar = engine.scalar_from_scope(context, result);
+    if let Some(kind) = scalar.engine_issue() {
+        return Err(kind);
+    }
+    Ok(scalar)
 }
 
 fn byrow(
@@ -280,7 +305,10 @@ fn byrow(
         return Err(ErrorKind::Value);
     }
     engine.ensure_array_cells(u64::from(input.array.rows))?;
-    engine.ensure_function_iterations(u64::from(input.array.rows))?;
+    engine.charge_function_iterations(
+        context,
+        u64::from(input.array.rows) * u64::from(input.array.cols),
+    )?;
     let mut data = Vec::with_capacity(input.array.rows as usize);
     let mut decimal_traces = Vec::with_capacity(input.array.rows as usize);
     for row in 0..input.array.rows {
@@ -329,7 +357,10 @@ fn bycol(
         return Err(ErrorKind::Value);
     }
     engine.ensure_array_cells(u64::from(input.array.cols))?;
-    engine.ensure_function_iterations(u64::from(input.array.cols))?;
+    engine.charge_function_iterations(
+        context,
+        u64::from(input.array.rows) * u64::from(input.array.cols),
+    )?;
     let mut data = Vec::with_capacity(input.array.cols as usize);
     let mut decimal_traces = Vec::with_capacity(input.array.cols as usize);
     for col in 0..input.array.cols {
@@ -370,11 +401,13 @@ fn reduce(
     args: &[Expr],
     scan: bool,
 ) -> Result<ArrayEvaluation, ErrorKind> {
+    if !scan {
+        let accumulator = reduce_scope_value(engine, context, args)?;
+        return engine.array_from_scope_value(&accumulator);
+    }
     if args.len() != 3 {
         return Err(ErrorKind::Value);
     }
-    let mut accumulator = engine.eval_scope_value(context, &args[0]);
-    lambda_result_scalar(engine, context, &accumulator)?;
     let input = engine.eval_array_with_trace(context, &args[1])?;
     let closure = lambda_closure(engine, context, &args[2])?;
     if closure.parameters.len() != 2 {
@@ -382,10 +415,39 @@ fn reduce(
     }
     let cells = u64::from(input.array.rows) * u64::from(input.array.cols);
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(cells)?;
+    let omitted_initial = matches!(args[0], Expr::Missing);
+    let invocation_count = if omitted_initial {
+        cells.saturating_sub(1)
+    } else {
+        cells
+    };
+    engine.charge_function_iterations(context, invocation_count)?;
+    let mut start_index = 0_usize;
+    let mut accumulator = if omitted_initial {
+        let Some(value) = input.array.data.first() else {
+            return Err(ErrorKind::Calc);
+        };
+        start_index = 1;
+        ScopeValue::Scalar(ScalarEvaluation {
+            value: value.clone(),
+            decimal_trace: input.decimal_traces[0],
+        })
+    } else {
+        engine.eval_scope_value(context, &args[0])
+    };
+    if scan {
+        lambda_result_scalar(engine, context, &accumulator)?;
+    } else if let Some(kind) = accumulator.engine_issue() {
+        return Err(kind);
+    }
     let mut output = Vec::with_capacity(input.array.data.len());
     let mut decimal_traces = Vec::with_capacity(input.array.data.len());
-    for (index, value) in input.array.data.iter().enumerate() {
+    if scan && omitted_initial {
+        let scalar = lambda_result_scalar(engine, context, &accumulator)?;
+        output.push(scalar.value);
+        decimal_traces.push(scalar.decimal_trace);
+    }
+    for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
         accumulator = invoke_lambda_values(
             engine,
             context,
@@ -398,13 +460,15 @@ fn reduce(
                 }),
             ],
         );
-        let scalar = lambda_result_scalar(engine, context, &accumulator)?;
-        if let Some(kind) = scalar.engine_issue() {
-            return Err(kind);
-        }
         if scan {
+            let scalar = lambda_result_scalar(engine, context, &accumulator)?;
+            if let Some(kind) = scalar.engine_issue() {
+                return Err(kind);
+            }
             output.push(scalar.value.clone());
             decimal_traces.push(scalar.decimal_trace);
+        } else if let Some(kind) = accumulator.engine_issue() {
+            return Err(kind);
         }
     }
     if scan {
@@ -417,12 +481,66 @@ fn reduce(
             decimal_traces,
         })
     } else {
-        Ok(ArrayEvaluation::scalar(lambda_result_scalar(
+        engine.array_from_scope_value(&accumulator)
+    }
+}
+
+pub(in crate::calculation) fn reduce_scope_value(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<ScopeValue, ErrorKind> {
+    if args.len() != 3 {
+        return Err(ErrorKind::Value);
+    }
+    let input = engine.eval_array_with_trace(context, &args[1])?;
+    let closure = lambda_closure(engine, context, &args[2])?;
+    if closure.parameters.len() != 2 {
+        return Err(ErrorKind::Value);
+    }
+    let cells = u64::from(input.array.rows) * u64::from(input.array.cols);
+    engine.ensure_array_cells(cells)?;
+    let omitted_initial = matches!(args[0], Expr::Missing);
+    let invocation_count = if omitted_initial {
+        cells.saturating_sub(1)
+    } else {
+        cells
+    };
+    engine.charge_function_iterations(context, invocation_count)?;
+    let mut start_index = 0_usize;
+    let mut accumulator = if omitted_initial {
+        let Some(value) = input.array.data.first() else {
+            return Err(ErrorKind::Calc);
+        };
+        start_index = 1;
+        ScopeValue::Scalar(ScalarEvaluation {
+            value: value.clone(),
+            decimal_trace: input.decimal_traces[0],
+        })
+    } else {
+        engine.eval_scope_value(context, &args[0])
+    };
+    if let Some(kind) = accumulator.engine_issue() {
+        return Err(kind);
+    }
+    for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
+        accumulator = invoke_lambda_values(
             engine,
             context,
-            &accumulator,
-        )?))
+            &closure,
+            vec![
+                accumulator,
+                ScopeValue::Scalar(ScalarEvaluation {
+                    value: value.clone(),
+                    decimal_trace: input.decimal_traces[index],
+                }),
+            ],
+        );
+        if let Some(kind) = accumulator.engine_issue() {
+            return Err(kind);
+        }
     }
+    Ok(accumulator)
 }
 
 fn makearray(
@@ -442,7 +560,7 @@ fn makearray(
     let cols = u32::try_from(cols as u64).map_err(|_| ErrorKind::Value)?;
     let cells = u64::from(rows) * u64::from(cols);
     engine.ensure_array_cells(cells)?;
-    engine.ensure_function_iterations(cells)?;
+    engine.charge_function_iterations(context, cells)?;
     let closure = lambda_closure(engine, context, &args[2])?;
     if closure.parameters.len() != 2 {
         return Err(ErrorKind::Value);

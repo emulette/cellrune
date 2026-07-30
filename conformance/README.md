@@ -13,8 +13,10 @@ cargo run \
 
 The checker:
 
-- opens each workbook;
-- selects the configured formula cells;
+- verifies suite, manifest, workbook, metadata, observation, feature-set, profile, count, and
+  SHA-256 provenance;
+- exact-matches every formula anchor and observed array-result cell against the raw XLSX cache;
+- opens each workbook and selects the active manifest formula cells;
 - compares Excel's saved value with `expectations.json`;
 - calculates the same workbook with CellRune;
 - verifies the recorded classification.
@@ -47,9 +49,8 @@ conformance/
       expectations.json
 ```
 
-`suite.json` lists the available Excel workbooks. It does not require an exact host count or block
-a release when one is absent. `case-manifest.json` gives formulas stable names so expectations do
-not depend on row numbers.
+`suite.json` requires the two audited host profiles and binds them to one case manifest.
+`case-manifest.json` gives formulas stable names so expectations do not depend on row numbers.
 
 ## Classifications
 

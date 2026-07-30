@@ -14,7 +14,7 @@ dependency. You do not need to select a platform package yourself.
 ## Install
 
 ```console
-npm install @cellrune/node@0.1.7
+npm install @cellrune/node@0.1.8
 ```
 
 ## CommonJS

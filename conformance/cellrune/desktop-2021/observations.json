@@ -4,10 +4,10 @@
   "feature_set_id": "cellrune-excel-function-pool-522-v1",
   "host_profile_id": "excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools",
   "saved_at": "2026-07-30T04:46:46Z",
-  "workbook_sha256": "bdd13f52430ea4488092ce2644cfcec812a65adb3f61a1b5bd0db2e8689766e3",
+  "workbook_sha256": "9e923cb70d2c056a59f5fc2505f789ab8f2497e8f99a470da53b92a913f6b0b7",
   "source_workbook_sha256": "87690d792af82fec157ac4d4316ac1f4a62accb7ca3e5184f8624de43423934f",
-  "case_manifest_sha256": "73a7cd7e23940cc7015a464e0fb495216816ce19253f2af1099269211abd4821",
-  "harness_sha256": "cd97a17d00578a49c3622e7649c4861321d777a80f365694df3e4b62ead8b8f0",
+  "case_manifest_sha256": "c231aaf3d943ec8ecdf9eaaa6bd5d37d52c7bd9606f373c5453452a03d4f605e",
+  "harness_sha256": "6bd9416b08809e429b20d447afec54f3a8bd79b467d8e3760ccc7f54e8a2b1be",
   "case_count": 1496,
   "cases": [
     {

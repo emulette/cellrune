@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.7 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.8 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.7
+cargo add cellrune@0.1.8
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.7"
+cellrune = "0.1.8"
 ```
 
 ## Features
@@ -31,6 +31,9 @@ cellrune = "0.1.7"
 - expands shared formulas while preserving absolute and relative references;
 - returns typed formula values and stable per-cell calculation issues in one result snapshot;
 - reports normalized per-workbook function demand and exposes the implemented function catalog;
+- evaluates first-class and defined-name `LAMBDA` callables, including immediate invocation,
+  `ISOMITTED`, `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`, and `MAKEARRAY`, under explicit
+  recursion and iteration limits;
 - evaluates audited 3-D aggregate references across workbook tab order, including hidden sheets and
   reverse-written endpoints, without expanding the sheet span into dependency edges;
 - applies configurable limits to ZIP, XML, workbook, formula, dependency, text, and array work;
@@ -193,12 +196,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.7 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.8 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.7"
-npm install "@cellrune/node@0.1.7"
+python -m pip install "cellrune==0.1.8"
+npm install "@cellrune/node@0.1.8"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -324,7 +327,7 @@ The following are outside the current scope:
 - `.xls`, `.xlsb`, `.ods`, and CSV;
 - macro, add-in, external-workbook, query, or data-connection execution;
 - table structured references and 3-D references outside the audited direct-consumer policy above;
-- spill postfix references such as `A1#`, general `LAMBDA`, and data-table calculation; and
+- spill postfix references such as `A1#` and data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
@@ -347,7 +350,7 @@ cargo run \
 
 This is a normal regression test, not a separate CI step or release-only gate. It covers 1,295
 formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
-matrix fixture, and 672 selected results from the CellRune-authored oracle. Excel Online and Mac
+matrix fixture, and 1,496 selected results from the CellRune-authored oracle. Excel Online and Mac
 Excel 2021 are recorded independently; a missing host value is simply `host_unsupported`. The
 older POI formula cache currently has 1,290 matches and 5 documented divergences.
 

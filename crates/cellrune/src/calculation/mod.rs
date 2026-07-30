@@ -587,6 +587,25 @@ pub struct CalculationSnapshot {
 }
 
 impl CalculationSnapshot {
+    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        if cancelled() {
+            return Err(());
+        }
+        Ok(Self {
+            cells: eval::clone_map_cancellable(&self.cells, cancelled)?,
+            materialized_cells: eval::clone_map_cancellable(&self.materialized_cells, cancelled)?,
+            numeric_decimal_traces: eval::clone_map_cancellable(
+                &self.numeric_decimal_traces,
+                cancelled,
+            )?,
+            options: self.options,
+            provenance: self.provenance.clone(),
+            source_revision: self.source_revision,
+            source_fingerprint: self.source_fingerprint,
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn new(
         cells: BTreeMap<CalculationCellId, CalculationCellResult>,
         materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
@@ -594,19 +613,38 @@ impl CalculationSnapshot {
         source: &WorkbookSnapshot,
         options: CalculationOptions,
     ) -> Self {
+        Self::new_cancellable(
+            cells,
+            materialized_cells,
+            numeric_decimal_traces,
+            source,
+            options,
+            &|| false,
+        )
+        .expect("non-cancellable snapshot construction cannot be cancelled")
+    }
+
+    pub(crate) fn new_cancellable(
+        cells: BTreeMap<CalculationCellId, CalculationCellResult>,
+        materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
+        numeric_decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
+        source: &WorkbookSnapshot,
+        options: CalculationOptions,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
         let provenance = Provenance::new(
             ProviderIdentity::calculator(),
             source.provenance().input_hash(),
         );
-        Self {
+        Ok(Self {
             cells,
             materialized_cells,
             numeric_decimal_traces,
             options,
             provenance,
             source_revision: source.semantic_revision(),
-            source_fingerprint: identity::workbook_fingerprint(source),
-        }
+            source_fingerprint: identity::workbook_fingerprint_cancellable(source, cancelled)?,
+        })
     }
 
     /// Returns one calculated formula result.

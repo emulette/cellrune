@@ -215,6 +215,9 @@ pub(super) fn definition(expr: &Expr) -> Option<LambdaDefinition<'_>> {
         return None;
     }
     let (body, raw_parameters) = args.split_last()?;
+    if matches!(body, Expr::Missing) {
+        return None;
+    }
     let mut seen = BTreeSet::new();
     let mut parameters = Vec::with_capacity(raw_parameters.len());
     for parameter in raw_parameters {
@@ -231,11 +234,7 @@ pub(super) fn definition(expr: &Expr) -> Option<LambdaDefinition<'_>> {
 }
 
 fn is_lambda_function(name: &str) -> bool {
-    let base = name
-        .get(..6)
-        .filter(|prefix| prefix.eq_ignore_ascii_case("_xlfn."))
-        .map_or(name, |_| &name[6..]);
-    base.eq_ignore_ascii_case("LAMBDA")
+    normalize_name(name) == "LAMBDA"
 }
 
 #[cfg(test)]

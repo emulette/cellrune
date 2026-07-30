@@ -6,6 +6,14 @@ use crate::{
 };
 
 pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
+    workbook_fingerprint_cancellable(workbook, &|| false)
+        .expect("non-cancellable fingerprinting cannot be cancelled")
+}
+
+pub(crate) fn workbook_fingerprint_cancellable(
+    workbook: &WorkbookSnapshot,
+    cancelled: &impl Fn() -> bool,
+) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
     // Schema byte 2: 0.1.6 folds merged ranges and the full table model per sheet.
     // Bumping it deliberately invalidates every fingerprint persisted under schema 1.
@@ -14,11 +22,17 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());
     for sheet in workbook.sheets() {
+        if cancelled() {
+            return Err(());
+        }
         hash.u32(sheet.id().get());
         hash.string(sheet.name().as_str());
         hash.sheet_visibility(sheet.visibility());
         hash.usize(sheet.len());
         for cell in sheet.cells() {
+            if cancelled() {
+                return Err(());
+            }
             hash.u32(cell.address().row().get());
             hash.u32(cell.address().column().get());
             hash.number_format(cell.number_format());
@@ -37,6 +51,9 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
         }
         hash.usize(sheet.merged_ranges().len());
         for range in sheet.merged_ranges() {
+            if cancelled() {
+                return Err(());
+            }
             hash.range(*range);
         }
         // The whole table model is folded, including fields such as display_name that do
@@ -44,6 +61,9 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
         // too much only costs one extra recalculation.
         hash.usize(sheet.tables().len());
         for table in sheet.tables() {
+            if cancelled() {
+                return Err(());
+            }
             hash.u32(table.id().get());
             hash.string(table.name().as_str());
             hash.string(table.display_name().as_str());
@@ -52,6 +72,9 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
             hash.u32(table.totals_row_count());
             hash.usize(table.columns().len());
             for column in table.columns() {
+                if cancelled() {
+                    return Err(());
+                }
                 hash.u32(column.id());
                 hash.string(column.name());
                 match column.totals_row_function() {
@@ -66,6 +89,9 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
     }
     hash.usize(workbook.defined_names().len());
     for name in workbook.defined_names() {
+        if cancelled() {
+            return Err(());
+        }
         hash.string(name.name());
         match name.scope() {
             DefinedNameScope::Workbook => hash.u8(0),
@@ -77,7 +103,7 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
         hash.string(name.formula().as_str());
         hash.boolean(name.hidden());
     }
-    hash.finish()
+    Ok(hash.finish())
 }
 
 struct SemanticHash(Sha256);
@@ -302,7 +328,9 @@ impl SemanticHash {
 
 #[cfg(test)]
 mod tests {
-    use super::workbook_fingerprint;
+    use std::cell::Cell;
+
+    use super::{workbook_fingerprint, workbook_fingerprint_cancellable};
     use crate::{
         CalculationHints, CellAddress, CellContent, CellRange, CellValue, DateSystem, Provenance,
         ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableColumn, TableId,
@@ -317,6 +345,23 @@ mod tests {
 
         assert_eq!(workbook_fingerprint(&first), workbook_fingerprint(&same));
         assert_ne!(workbook_fingerprint(&first), workbook_fingerprint(&changed));
+    }
+
+    #[test]
+    fn workbook_fingerprint_polls_cancellation_between_sparse_cells() {
+        let workbook = workbook_with_number(1.0);
+        let polls = Cell::new(0_u32);
+        let cancelled = || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            next >= 2
+        };
+
+        assert_eq!(
+            workbook_fingerprint_cancellable(&workbook, &cancelled),
+            Err(())
+        );
+        assert_eq!(polls.get(), 2);
     }
 
     #[test]

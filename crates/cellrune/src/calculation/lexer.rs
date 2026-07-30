@@ -14,7 +14,7 @@ pub enum Token {
     Ident(String),
     QuotedSheet(String),
     /// One opaque structured table reference, original spelling preserved, such as
-    /// `Table1[Amount]` or `[@Amount]`. 0.1.10 replaces this with a typed selector model.
+    /// `Table1[Amount]` or `[@Amount]`. 0.1.9 replaces this with a typed selector model.
     StructuredRef(String),
     ErrorLit(ErrorKind),
     Dollar,

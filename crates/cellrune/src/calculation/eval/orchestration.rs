@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::materialization::collect_array_regions;
-use super::reference::collect_column_extents;
-use super::{CompiledWorkbook, Engine, EvalContext, EvaluationBudget, public_to_internal};
-use crate::calculation::graph::{DependencyGraph, schedule};
+use super::{
+    CompiledWorkbook, Engine, EvalContext, EvaluationBudget, clone_map_cancellable,
+    clone_set_cancellable, clone_vec_cancellable, clone_vec_map_cancellable,
+    collect_workbook_layout, public_to_internal,
+};
+use crate::calculation::graph::{DependencyGraph, schedule_cancellable};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::CellId;
 use crate::calculation::value::{ErrorKind, Value};
@@ -24,6 +26,7 @@ impl<'workbook> Engine<'workbook> {
         options: CalculationOptions,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
+        let (array_regions, column_extents) = collect_workbook_layout(workbook, cancelled)?;
         let mut engine = Self {
             workbook,
             options,
@@ -33,8 +36,8 @@ impl<'workbook> Engine<'workbook> {
             results: BTreeMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
-            array_regions: collect_array_regions(workbook),
-            column_extents: collect_column_extents(workbook),
+            array_regions,
+            column_extents,
             dynamic_spills: BTreeMap::new(),
             parse_failures: BTreeMap::new(),
             name_cycle_cells: BTreeSet::new(),
@@ -48,7 +51,7 @@ impl<'workbook> Engine<'workbook> {
         if cancelled() {
             return Err(());
         }
-        engine.classify_name_graphs();
+        engine.classify_name_graphs(cancelled)?;
         if cancelled() {
             return Err(());
         }
@@ -85,7 +88,7 @@ impl<'workbook> Engine<'workbook> {
             engine.dependencies = dependencies;
             return Ok(engine);
         }
-        let dependencies = if engine.has_unresolved_dynamic_dependencies() {
+        let dependencies = if engine.has_unresolved_dynamic_dependencies(cancelled)? {
             if !engine.evaluate_schedule_subset(&dependencies, None, cancelled) {
                 return Err(());
             }
@@ -110,21 +113,26 @@ impl<'workbook> Engine<'workbook> {
         Ok(engine)
     }
 
-    pub(in crate::calculation) fn compiled(&self) -> CompiledWorkbook {
-        CompiledWorkbook {
-            asts: self.asts.clone(),
-            defined_name_asts: self.defined_name_asts.clone(),
-            dependencies: self.dependencies.clone(),
-            dependency_rectangles: self.dependency_rectangles(),
-            parse_failures: self.parse_failures.clone(),
-            name_cycle_cells: self.name_cycle_cells.clone(),
-            name_limit_cells: self.name_limit_cells.clone(),
+    pub(in crate::calculation) fn compiled(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<CompiledWorkbook, ()> {
+        let dependency_rectangles = self.dependency_rectangles_cancellable(cancelled)?;
+        let incremental_safe = !self.has_unstable_incremental_dependencies(cancelled)?;
+        Ok(CompiledWorkbook {
+            asts: clone_map_cancellable(&self.asts, cancelled)?,
+            defined_name_asts: clone_vec_cancellable(&self.defined_name_asts, cancelled)?,
+            dependencies: clone_vec_map_cancellable(&self.dependencies, cancelled)?,
+            dependency_rectangles,
+            parse_failures: clone_map_cancellable(&self.parse_failures, cancelled)?,
+            name_cycle_cells: clone_set_cancellable(&self.name_cycle_cells, cancelled)?,
+            name_limit_cells: clone_set_cancellable(&self.name_limit_cells, cancelled)?,
             dependency_limit_exceeded: self.dependency_limit_exceeded,
-            cycle_cells: self.cycle_cells.clone(),
-            blocked_cells: self.blocked_cells.clone(),
+            cycle_cells: clone_set_cancellable(&self.cycle_cells, cancelled)?,
+            blocked_cells: clone_set_cancellable(&self.blocked_cells, cancelled)?,
             limits: self.options.limits(),
-            incremental_safe: !self.has_unstable_incremental_dependencies(),
-        }
+            incremental_safe,
+        })
     }
 
     pub(in crate::calculation) fn evaluate_compiled(
@@ -133,36 +141,46 @@ impl<'workbook> Engine<'workbook> {
         compiled: &CompiledWorkbook,
         previous: Option<&CalculationSnapshot>,
         dirty: Option<&BTreeSet<CalculationCellId>>,
-        cancelled: impl Fn() -> bool,
+        cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
+        let (array_regions, column_extents) = collect_workbook_layout(workbook, cancelled)?;
         let mut engine = Self {
             workbook,
             options,
-            asts: compiled.asts.clone(),
-            defined_name_asts: compiled.defined_name_asts.clone(),
-            dependencies: compiled.dependencies.clone(),
+            asts: clone_map_cancellable(&compiled.asts, cancelled)?,
+            defined_name_asts: clone_vec_cancellable(&compiled.defined_name_asts, cancelled)?,
+            dependencies: clone_vec_map_cancellable(&compiled.dependencies, cancelled)?,
             results: BTreeMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
-            array_regions: collect_array_regions(workbook),
-            column_extents: collect_column_extents(workbook),
+            array_regions,
+            column_extents,
             dynamic_spills: BTreeMap::new(),
-            parse_failures: compiled.parse_failures.clone(),
-            name_cycle_cells: compiled.name_cycle_cells.clone(),
-            name_limit_cells: compiled.name_limit_cells.clone(),
+            parse_failures: clone_map_cancellable(&compiled.parse_failures, cancelled)?,
+            name_cycle_cells: clone_set_cancellable(&compiled.name_cycle_cells, cancelled)?,
+            name_limit_cells: clone_set_cancellable(&compiled.name_limit_cells, cancelled)?,
             dependency_limit_exceeded: compiled.dependency_limit_exceeded,
-            cycle_cells: compiled.cycle_cells.clone(),
-            blocked_cells: compiled.blocked_cells.clone(),
+            cycle_cells: clone_set_cancellable(&compiled.cycle_cells, cancelled)?,
+            blocked_cells: clone_set_cancellable(&compiled.blocked_cells, cancelled)?,
             evaluated_cell_count: 0,
         };
-        let internal_dirty = dirty.map(|cells| {
-            cells
-                .iter()
-                .filter_map(|cell| public_to_internal(workbook, *cell))
-                .collect::<BTreeSet<_>>()
-        });
+        let internal_dirty = match dirty {
+            Some(cells) => {
+                let mut internal = BTreeSet::new();
+                for cell in cells {
+                    if cancelled() {
+                        return Err(());
+                    }
+                    if let Some(cell) = public_to_internal(workbook, *cell) {
+                        internal.insert(cell);
+                    }
+                }
+                Some(internal)
+            }
+            None => None,
+        };
         if let Some(previous) = previous {
-            engine.seed_previous_results(previous, internal_dirty.as_ref());
+            engine.seed_previous_results(previous, internal_dirty.as_ref(), cancelled)?;
         }
         if compiled.dependency_limit_exceeded {
             return Ok(engine);
@@ -170,7 +188,7 @@ impl<'workbook> Engine<'workbook> {
         if !engine.evaluate_schedule_subset(
             &compiled.dependencies,
             internal_dirty.as_ref(),
-            &cancelled,
+            cancelled,
         ) {
             return Err(());
         }
@@ -190,7 +208,9 @@ impl<'workbook> Engine<'workbook> {
             self.dynamic_spills.clear();
             self.array_regions.retain(|region| !region.provisional);
         }
-        let scheduled = schedule(dependencies);
+        let Ok(scheduled) = schedule_cancellable(dependencies, cancelled) else {
+            return false;
+        };
         self.cycle_cells = scheduled.cycle_cells;
         self.blocked_cells = scheduled.blocked_cells;
         for cell in scheduled.order {
@@ -201,12 +221,14 @@ impl<'workbook> Engine<'workbook> {
                 return false;
             }
             self.evaluated_cell_count += 1;
-            self.evaluate_one(cell, cancelled);
+            if self.evaluate_one(cell, cancelled).is_err() {
+                return false;
+            }
         }
         !cancelled()
     }
 
-    fn evaluate_one(&mut self, cell: CellId, cancelled: &impl Fn() -> bool) {
+    fn evaluate_one(&mut self, cell: CellId, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
         let expr = self.asts.get(&cell).cloned();
         let budget = EvaluationBudget::default();
         let context = EvalContext::for_cancellable(cell, &budget, cancelled);
@@ -217,11 +239,11 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_array_with_trace(context, &expr),
+                Some(expr) => self.eval_final_array_with_trace(context, &expr),
                 None => Err(ErrorKind::Unsupported),
             };
-            self.materialize_legacy_array(cell, range, result);
-            return;
+            self.materialize_legacy_array(cell, range, result, cancelled)?;
+            return Ok(());
         }
         if let Some(declared_range) = self.dynamic_array_range(cell) {
             let result = match expr {
@@ -229,11 +251,11 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_array_with_trace(context, &expr),
+                Some(expr) => self.eval_final_array_with_trace(context, &expr),
                 None => Err(ErrorKind::Unsupported),
             };
-            self.materialize_dynamic_array(cell, declared_range, result);
-            return;
+            self.materialize_dynamic_array(cell, declared_range, result, cancelled)?;
+            return Ok(());
         }
         let value = match expr {
             Some(_) if self.name_limit_cells.contains(&cell) => Value::Error(
@@ -243,7 +265,7 @@ impl<'workbook> Engine<'workbook> {
                 Value::Error(ErrorKind::Unsupported)
             }
             Some(expr) => {
-                let evaluated = self.eval_scalar_with_trace(context, &expr);
+                let evaluated = self.eval_final_scalar_with_trace(context, &expr);
                 if let (Value::Number(_), Some(trace)) = (&evaluated.value, evaluated.decimal_trace)
                 {
                     self.numeric_decimal_traces.insert(cell, trace);
@@ -258,6 +280,7 @@ impl<'workbook> Engine<'workbook> {
             None => Value::Error(ErrorKind::Unsupported),
         };
         self.results.insert(cell, value);
+        Ok(())
     }
 
     pub(in crate::calculation) const fn evaluated_cell_count(&self) -> usize {

@@ -150,7 +150,7 @@ pub enum Expr {
     Ref(Reference),
     /// One opaque structured table reference with its original spelling, such as
     /// `Table1[Amount]` or `[@Amount]`. Recognized and classified but not resolved;
-    /// 0.1.10 replaces this node with a typed selector model.
+    /// 0.1.9 replaces this node with a typed selector model.
     StructuredRef(Box<str>),
     Range {
         start: Box<Expr>,
