@@ -14734,7 +14734,7 @@
       "active": false,
       "formula_address": null,
       "seed_classification": "excluded",
-      "inactive_reason": "What-if data table. Must be created in Excel (Data ▸ What-If Analysis ▸ Data Table); see the runbook.",
+      "inactive_reason": "Native what-if data table is intentionally excluded because the deterministic generator cannot author its host-owned record; no manual Excel authoring is required.",
       "exclusion": {
         "kind": "fixture_unavailable",
         "reason": "A native what-if data table cannot be represented by an ordinary formula cell.",
