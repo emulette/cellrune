@@ -69,6 +69,7 @@ pub(super) enum ScopeValue {
     Scalar(ScalarEvaluation),
     Array(Arc<ArrayEvaluation>),
     Reference(RectSpan),
+    Callable(Arc<LambdaClosure>),
 }
 
 impl ScopeValue {
@@ -76,9 +77,17 @@ impl ScopeValue {
         match self {
             Self::Scalar(evaluated) => evaluated.engine_issue(),
             Self::Array(evaluated) => evaluated.engine_issue(),
-            Self::Missing | Self::Reference(_) => None,
+            Self::Missing | Self::Reference(_) | Self::Callable(_) => None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct LambdaClosure {
+    pub(super) parameters: Vec<String>,
+    pub(super) body: super::ast::Expr,
+    pub(super) captured: Vec<ScopeEntry>,
+    pub(super) defined_name: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

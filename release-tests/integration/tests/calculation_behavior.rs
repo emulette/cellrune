@@ -34,6 +34,92 @@ fn unsupported_functions_are_not_hidden_by_iferror() {
 }
 
 #[test]
+fn lambda_core_captures_lexical_bindings_and_rejects_callable_coercion() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "LET(a,2,f,LAMBDA(x,x+a),f(3))"),
+        (1, 2, "LET(a,2,f,LAMBDA(x,x+a),LET(a,10,f(3)))"),
+        (1, 3, "LAMBDA(x,x+1)"),
+        (1, 4, "LET(f,LAMBDA(x,x+1),f())"),
+        (1, 5, "LET(f,LAMBDA(x,x+1),f(3))"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 5.0, 0.0);
+    assert_number(&calculation, 2, 5.0, 0.0);
+    assert!(matches!(
+        calculation.cell(cell_id(3)),
+        Some(CalculationCellResult::Value(CellValue::Error(_)))
+    ));
+    assert!(matches!(
+        calculation.cell(cell_id(4)),
+        Some(CalculationCellResult::Value(CellValue::Error(_)))
+    ));
+    assert_number(&calculation, 5, 4.0, 0.0);
+}
+
+#[test]
+fn named_lambda_calls_and_finite_recursion_use_the_defined_name_registry() {
+    let workbook = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "AddOne(4)"),
+            (1, 2, "Factorial(5)"),
+            (1, 3, "Adder(2)"),
+        ],
+        &[
+            ("AddOne", "LAMBDA(x,x+1)"),
+            ("Factorial", "LAMBDA(n,IF(n<=1,1,n*Factorial(n-1)))"),
+            ("Adder", "LAMBDA(x,x+A1)"),
+        ],
+    );
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 5.0, 0.0);
+    assert_number(&calculation, 2, 120.0, 0.0);
+    assert_number(&calculation, 3, 7.0, 0.0);
+}
+
+#[test]
+fn lambda_calls_preserve_arrays_and_nested_callable_values() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "SUM(LET(f,LAMBDA(x,x+1),f({1,2})))"),
+        (
+            1,
+            2,
+            "LET(make,LAMBDA(a,LAMBDA(x,x+a)),apply,LAMBDA(f,f(3)),apply(make(2)))",
+        ),
+        (1, 3, "LET(apply,LAMBDA(f,f(3)),apply(LAMBDA(x,x+1)))"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 5.0, 0.0);
+    assert_number(&calculation, 2, 5.0, 0.0);
+    assert_number(&calculation, 3, 4.0, 0.0);
+}
+
+#[test]
+fn callable_bindings_shadow_builtins_without_falling_through() {
+    let workbook = workbook_with_formulas_and_names(
+        &[(1, 1, "LET(SUM,2,SUM(1,2))"), (1, 2, "ScalarName(1)")],
+        &[("ScalarName", "2")],
+    );
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert!(matches!(
+        calculation.cell(cell_id(1)),
+        Some(CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Value
+        )))
+    ));
+    assert!(
+        matches!(
+            calculation.cell(cell_id(2)),
+            Some(CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            )))
+        ),
+        "{:?}",
+        calculation.cell(cell_id(2))
+    );
+}
+
+#[test]
 fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Table1[Amount])"),
@@ -50,12 +136,15 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
         Some("Table1[Amount]"),
     );
     assert_capability_issue_code(&report, 2, CalculationIssueCode::ParseError);
-    assert_capability_issue(
-        &report,
-        3,
-        CalculationIssueCode::UnsupportedFunction,
-        Some("LAMBDA"),
-    );
+    assert!(matches!(
+        report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(3))
+            .expect("LAMBDA capability entry")
+            .capability(),
+        FormulaCapability::Supported
+    ));
     assert!(matches!(
         report
             .entries()
@@ -73,7 +162,10 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
         CalculationIssueCode::UnsupportedStructuredReference,
     );
     assert_issue(&calculation, 2, CalculationIssueCode::ParseError);
-    assert_issue(&calculation, 3, CalculationIssueCode::UnsupportedFunction);
+    assert!(matches!(
+        calculation.cell(cell_id(3)),
+        Some(CalculationCellResult::Value(_))
+    ));
 }
 
 #[test]
@@ -365,6 +457,7 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                 | "VLOOKUP"
                 | "OFFSET"
                 | "LET"
+                | "LAMBDA"
         );
         match capability.capability() {
             FormulaCapability::Supported => assert!(
@@ -738,8 +831,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
         scoped_report
             .entries()
             .iter()
-            .all(|entry| entry.name() != "LAMBDA"),
-        "a MAP lambda literal is syntax owned by MAP, not an unsupported standalone call",
+            .any(|entry| entry.name() == "LAMBDA")
     );
 
     let sample_workbook = workbook_with_formulas(
@@ -762,7 +854,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        279
+        280
     );
     let let_entry = catalog
         .iter()

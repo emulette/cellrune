@@ -30,7 +30,10 @@ mod text_additional;
 mod trigonometry;
 mod util;
 
-pub(super) use dynamic::{let_reference, let_scope_value, map_scalar_with_trace, with_let_scope};
+pub(super) use dynamic::{
+    invoke_lambda, lambda_scope_value, let_reference, let_scope_value, map_scalar_with_trace,
+    with_let_scope,
+};
 
 pub(super) fn call_function(
     engine: &Engine<'_>,
@@ -39,6 +42,9 @@ pub(super) fn call_function(
     args: &[Expr],
 ) -> Value {
     let normalized = normalize_name(name);
+    if let Some(value) = callable_call_scope(engine, context, name, args) {
+        return scope_value_to_scalar(engine, context, value);
+    }
     if let Some(kind) = direct_sheet_span_error(engine, context, &normalized, args) {
         return Value::Error(kind);
     }
@@ -76,6 +82,61 @@ pub(super) fn call_function(
             financial_additional::call(engine, context, &normalized, args)
         }
         None => Value::Error(ErrorKind::Unsupported),
+    }
+}
+
+pub(super) fn callable_call_scope(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    name: &str,
+    args: &[Expr],
+) -> Option<super::scope::ScopeValue> {
+    if let Some(value) = context.binding(name) {
+        return Some(invoke_scope_value(engine, context, value.clone(), args));
+    }
+    let named = engine.resolve_name_expr(context.sheet(), name)?;
+    Some(match super::lambda::definition(named) {
+        Some(_) => {
+            let closure = lambda_scope_value(context, &named_lambda_args(named), Some(name));
+            invoke_scope_value(engine, context, closure, args)
+        }
+        None => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
+            Value::Error(ErrorKind::Value),
+        )),
+    })
+}
+
+fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
+    let Expr::Call { args, .. } = expr else {
+        return Vec::new();
+    };
+    args.clone()
+}
+
+fn invoke_scope_value(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    value: super::scope::ScopeValue,
+    args: &[Expr],
+) -> super::scope::ScopeValue {
+    match value {
+        super::scope::ScopeValue::Callable(closure) => {
+            invoke_lambda(engine, context, &closure, args)
+        }
+        _ => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
+            Value::Error(ErrorKind::Value),
+        )),
+    }
+}
+
+fn scope_value_to_scalar(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    value: super::scope::ScopeValue,
+) -> Value {
+    match value {
+        super::scope::ScopeValue::Callable(_) => Value::Error(ErrorKind::Calc),
+        value => engine.scalar_from_scope(context, &value).value,
     }
 }
 
@@ -473,7 +534,7 @@ const DATE_ADDITIONAL_FUNCTIONS: &[&str] = &[
     "TIME",
     "WEEKNUM",
 ];
-const DYNAMIC_FUNCTIONS: &[&str] = &["LET", "MAP"];
+const DYNAMIC_FUNCTIONS: &[&str] = &["LAMBDA", "LET", "MAP"];
 const ARRAY_FUNCTIONS: &[&str] = &[
     "CHOOSECOLS",
     "CHOOSEROWS",
@@ -618,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_279_unique_excel_facing_names() {
+    fn coverage_registry_has_280_unique_excel_facing_names() {
         let kernels: BTreeSet<&str> = FUNCTION_GROUPS
             .iter()
             .flat_map(|(_, names)| names.iter().copied())
@@ -627,7 +688,7 @@ mod tests {
             FUNCTION_GROUPS.iter().map(|(_, names)| names.len()).sum();
         assert_eq!(kernels.len(), registered_kernel_count);
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 267);
+        assert_eq!(kernels.len(), 268);
 
         let aliases: BTreeSet<&str> = LEGACY_ALIASES.iter().map(|(alias, _)| *alias).collect();
         assert_eq!(aliases.len(), LEGACY_ALIASES.len());
@@ -639,7 +700,7 @@ mod tests {
         );
 
         let official_kernels = kernels.len() - 1;
-        assert_eq!(official_kernels + aliases.len(), 279);
+        assert_eq!(official_kernels + aliases.len(), 280);
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());

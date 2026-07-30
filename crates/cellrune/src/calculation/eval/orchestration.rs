@@ -201,15 +201,15 @@ impl<'workbook> Engine<'workbook> {
                 return false;
             }
             self.evaluated_cell_count += 1;
-            self.evaluate_one(cell);
+            self.evaluate_one(cell, cancelled);
         }
         !cancelled()
     }
 
-    fn evaluate_one(&mut self, cell: CellId) {
+    fn evaluate_one(&mut self, cell: CellId, cancelled: &impl Fn() -> bool) {
         let expr = self.asts.get(&cell).cloned();
         let budget = EvaluationBudget::default();
-        let context = EvalContext::for_evaluation(cell, &budget);
+        let context = EvalContext::for_cancellable(cell, &budget, cancelled);
         let array_range = self.legacy_array_range(cell);
         if let Some(range) = array_range {
             let result = match expr {

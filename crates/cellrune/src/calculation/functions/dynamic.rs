@@ -6,7 +6,9 @@ use super::super::lambda::{LocalNamePolicy, definition, validate_local_name};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::element_at;
 use super::super::runtime::{Array, RectSpan};
-use super::super::scope::{ArrayEvaluation, ScalarEvaluation, ScopeEntry, ScopeValue};
+use super::super::scope::{
+    ArrayEvaluation, LambdaClosure, ScalarEvaluation, ScopeEntry, ScopeValue,
+};
 use super::super::value::{ErrorKind, Value};
 
 pub(super) fn call(
@@ -23,6 +25,75 @@ pub(super) fn call(
         }
         _ => Value::Error(ErrorKind::Unsupported),
     }
+}
+
+pub(in crate::calculation) fn lambda_scope_value(
+    context: EvalContext<'_>,
+    args: &[Expr],
+    defined_name: Option<&str>,
+) -> ScopeValue {
+    let expression = Expr::Call {
+        name: "LAMBDA".to_owned(),
+        args: args.to_vec(),
+    };
+    let Some(definition) = definition(&expression) else {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+    };
+    ScopeValue::Callable(std::sync::Arc::new(LambdaClosure {
+        parameters: definition.parameters().to_vec(),
+        body: definition.body().clone(),
+        captured: context.bindings().to_vec(),
+        defined_name: defined_name.map(str::to_owned).map(Into::into),
+    }))
+}
+
+pub(in crate::calculation) fn invoke_lambda(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    closure: &LambdaClosure,
+    args: &[Expr],
+) -> ScopeValue {
+    if closure.parameters.len() != args.len() {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+    }
+    let mut values = Vec::with_capacity(args.len());
+    for arg in args {
+        if context.is_cancelled() {
+            return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(
+                ErrorKind::ResourceLimit(CalculationLimitKind::LambdaInvocations),
+            )));
+        }
+        let value = engine.eval_scope_value(context, arg);
+        if let Some(kind) = value.engine_issue() {
+            return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+        }
+        if let ScopeValue::Scalar(evaluated) = &value
+            && let Some(kind) = evaluated.engine_issue()
+        {
+            return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+        }
+        values.push(value);
+    }
+    let Ok(_active_lambda) = context.enter_lambda(engine.calculation_limits()) else {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(
+            ErrorKind::ResourceLimit(CalculationLimitKind::LambdaDepth),
+        )));
+    };
+    let mut bindings = closure.captured.clone();
+    bindings.extend(
+        closure
+            .parameters
+            .iter()
+            .cloned()
+            .zip(values)
+            .map(|(name, value)| ScopeEntry::new(name, value)),
+    );
+    if context.is_cancelled() {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(
+            ErrorKind::ResourceLimit(CalculationLimitKind::LambdaInvocations),
+        )));
+    }
+    engine.eval_scope_value(context.with_bindings(&bindings), &closure.body)
 }
 
 pub(super) fn map_array_with_trace(
@@ -137,7 +208,9 @@ pub(in crate::calculation) fn let_reference(
             Value::Error(kind) => Err(kind),
             _ => Err(ErrorKind::Value),
         },
-        ScopeValue::Missing | ScopeValue::Array(_) => Err(ErrorKind::Value),
+        ScopeValue::Missing | ScopeValue::Array(_) | ScopeValue::Callable(_) => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 

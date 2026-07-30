@@ -48,7 +48,8 @@ pub(super) fn report(directory: &Path, output_path: Option<&Path>) -> Result<(),
                 Classification::Match | Classification::Divergent
             )
         {
-            let matches_all = array_result_matches(&loaded.workbook, &loaded.calculation, observation);
+            let matches_all =
+                array_result_matches(&loaded.workbook, &loaded.calculation, observation);
             if !matches_all && expectation.classification == Classification::Match {
                 expectation.classification = Classification::Divergent;
                 if let Some(actual) = calculated_result(&loaded, *id)
@@ -104,7 +105,8 @@ fn array_result_matches(
             .materialized_cell(id)
             .map(cellrune::MaterializedCalculationCell::result)
             .or_else(|| calculation.cell(id));
-        let Some(actual) = actual.and_then(|value| observed_result(Some(value)).ok().flatten()) else {
+        let Some(actual) = actual.and_then(|value| observed_result(Some(value)).ok().flatten())
+        else {
             return false;
         };
         let expected = if cell.cache_status != CacheStatus::Semantic {

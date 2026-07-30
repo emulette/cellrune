@@ -105,6 +105,12 @@ fn collect_function_calls_in_scope(
     match expr {
         Expr::Call { name, args } => {
             output.push(normalize_name(name));
+            if normalize_name(name) == "MAP"
+                && let Some(lambda_expr) = args.last()
+                && definition(lambda_expr).is_some()
+            {
+                output.push("LAMBDA".to_owned());
+            }
             if walk_local_scope(name, args, local_names, |arg, scope| {
                 collect_function_calls_in_scope(arg, output, scope);
             }) {
@@ -591,7 +597,15 @@ fn inspect_expr(
 ) {
     match expr {
         Expr::Call { name, args } => {
-            if !is_supported_function(name) {
+            let defined_callable = engine
+                .resolve_name_expr(sheet, name)
+                .is_some_and(|named| definition(named).is_some());
+            let defined_name = engine.resolve_name_expr(sheet, name).is_some();
+            if !is_supported_function(name)
+                && local_scope.lookup(name).is_none()
+                && !defined_callable
+                && !defined_name
+            {
                 issues.push(CalculationIssue::new(
                     CalculationIssueCode::UnsupportedFunction,
                     Some(name.to_ascii_uppercase()),
@@ -608,6 +622,28 @@ fn inspect_expr(
                     local_scope,
                     issues,
                 );
+                return;
+            }
+            if normalized == "LAMBDA"
+                && let Some(lambda) = definition(expr)
+            {
+                let previous_len = local_scope.len();
+                for parameter in lambda.parameters() {
+                    local_scope.push_parameter(parameter.clone());
+                }
+                inspect_expr(
+                    engine,
+                    sheet,
+                    lambda.body(),
+                    sheet_span_policy,
+                    names,
+                    local_scope,
+                    issues,
+                );
+                local_scope.truncate(previous_len);
+                return;
+            }
+            if normalized == "LAMBDA" {
                 return;
             }
             let argument_policy = function_policy(&normalized);

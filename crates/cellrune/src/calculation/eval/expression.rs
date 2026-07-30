@@ -7,7 +7,8 @@ use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
 use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation};
 use crate::calculation::functions::{
-    call_function, call_function_array, let_scope_value, map_scalar_with_trace, normalize_name,
+    call_function, call_function_array, callable_call_scope, lambda_scope_value, let_scope_value,
+    map_scalar_with_trace, normalize_name,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
@@ -116,6 +117,9 @@ impl Engine<'_> {
                     return value.clone();
                 }
                 match self.resolve_name_expr(context.sheet(), name) {
+                    Some(named) if crate::calculation::lambda::definition(named).is_some() => {
+                        lambda_scope_value(context, &named_lambda_args(named), Some(name))
+                    }
                     Some(named) => self.eval_scope_value(context, named),
                     None => scope_error(ErrorKind::Name),
                 }
@@ -126,9 +130,20 @@ impl Engine<'_> {
             Expr::Call { name, args } if normalize_name(name) == "LET" => {
                 let_scope_value(self, context, args)
             }
+            Expr::Call { name, args } if normalize_name(name) == "LAMBDA" => {
+                lambda_scope_value(context, args, None)
+            }
             Expr::Call { name, .. } if is_reference_returning_function(name) => self
                 .resolve_rect_span_expr(context, expr)
                 .map_or_else(scope_error, ScopeValue::Reference),
+            Expr::Call { name, args } => {
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    scoped
+                } else {
+                    self.eval_array_with_trace(context, expr)
+                        .map_or_else(scope_error, scope_from_array)
+                }
+            }
             _ => self
                 .eval_array_with_trace(context, expr)
                 .map_or_else(scope_error, scope_from_array),
@@ -155,6 +170,7 @@ impl Engine<'_> {
             ScopeValue::Reference(span) => {
                 self.eval_reference_span_with_trace(context, span.clone())
             }
+            ScopeValue::Callable(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc)),
         }
     }
 
@@ -279,6 +295,15 @@ impl Engine<'_> {
             Expr::Call { name, args } if normalize_name(name) == "LET" => {
                 let scoped = let_scope_value(self, context, args);
                 self.scalar_from_scope(context, &scoped)
+            }
+            Expr::Call { name, args } if normalize_name(name) == "LAMBDA" => {
+                let scoped = lambda_scope_value(context, args, None);
+                match scoped {
+                    ScopeValue::Callable(_) => {
+                        ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc))
+                    }
+                    scoped => self.scalar_from_scope(context, &scoped),
+                }
             }
             Expr::Call { name, args } if normalize_name(name) == "MAP" => {
                 map_scalar_with_trace(self, context, args)
@@ -507,6 +532,16 @@ impl Engine<'_> {
                 self.array_from_scope(&scoped, evaluation)
             }
             Expr::Call { name, args } => {
+                if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                    let evaluated = self.array_from_scope(&scoped, evaluation)?;
+                    if evaluation.extent.is_some() {
+                        let cells = u64::from(evaluated.array.rows)
+                            .checked_mul(u64::from(evaluated.array.cols))
+                            .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+                        evaluation.charge(self, cells)?;
+                    }
+                    return Ok(evaluated);
+                }
                 if let Some(result) = call_function_array(self, context, name, args) {
                     let evaluated = result?;
                     if evaluation.extent.is_some() {
@@ -546,6 +581,9 @@ impl Engine<'_> {
                 let rect = span.clone().into_rect().map_err(|_| ErrorKind::Value)?;
                 self.array_from_rect_with_trace(rect, evaluation)
             }
+            ScopeValue::Callable(_) => Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
+                Value::Error(ErrorKind::Calc),
+            ))),
         }
     }
 
@@ -636,7 +674,10 @@ impl Engine<'_> {
             Expr::Name(name) if context.binding(name).is_some() => {
                 match context.binding(name).expect("binding presence checked") {
                     ScopeValue::Reference(span) => self.array_extent_from_span(span),
-                    ScopeValue::Missing | ScopeValue::Scalar(_) | ScopeValue::Array(_) => None,
+                    ScopeValue::Missing
+                    | ScopeValue::Scalar(_)
+                    | ScopeValue::Array(_)
+                    | ScopeValue::Callable(_) => None,
                 }
             }
             Expr::Name(name) => {
@@ -672,4 +713,11 @@ impl Engine<'_> {
             .map(|rect| ArrayExtent::new(self.whole_column_row_end(&rect)))
             .reduce(ArrayExtent::merged)
     }
+}
+
+fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
+    let Expr::Call { args, .. } = expr else {
+        return Vec::new();
+    };
+    args.clone()
 }

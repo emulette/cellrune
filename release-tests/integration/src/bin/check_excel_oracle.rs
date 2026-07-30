@@ -1,15 +1,15 @@
 //! Audit and reporting tool for committed Excel-saved workbook oracles.
 
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use sha2::{Digest, Sha256};
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellRange, CellValue, ReadOptions,
-    SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
+    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellRange, CellValue,
+    ReadOptions, SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
 };
 use cellrune_integration_tests::oracle::{
     CASE_MANIFEST_SCHEMA, CacheStatus, CaseManifest, Classification, Comparator, Expectation,
@@ -308,8 +308,7 @@ struct LoadedOracle {
 fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOracle, String> {
     let metadata_path = directory.join(METADATA_FILE);
     let metadata: Metadata = read_json(&metadata_path)?;
-    if metadata.schema != METADATA_SCHEMA
-        && metadata.schema != "cellrune_excel_oracle_metadata_v1"
+    if metadata.schema != METADATA_SCHEMA && metadata.schema != "cellrune_excel_oracle_metadata_v1"
     {
         return Err(format!(
             "{}: unsupported metadata schema {}",
@@ -336,7 +335,9 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         if actual_hash != expected_hash {
             return Err(format!(
                 "{}: workbook sha256 {} != metadata {}",
-                workbook_path.display(), actual_hash, expected_hash
+                workbook_path.display(),
+                actual_hash,
+                expected_hash
             ));
         }
     }
@@ -463,9 +464,7 @@ fn load_suite_binding(
     validate_profile_metadata(metadata, &suite, profile, directory)?;
 
     let suite_directory = suite_path.parent().expect("suite path always has a parent");
-    if !is_filename(&suite.case_manifest.file)
-        || suite.case_manifest.sha256.len() != 64
-    {
+    if !is_filename(&suite.case_manifest.file) || suite.case_manifest.sha256.len() != 64 {
         return Err(format!(
             "{}: case manifest must be a filename",
             suite_path.display()
@@ -477,7 +476,9 @@ fn load_suite_binding(
     if manifest_hash != suite.case_manifest.sha256 {
         return Err(format!(
             "{}: case manifest sha256 {} != suite {}",
-            manifest_path.display(), manifest_hash, suite.case_manifest.sha256
+            manifest_path.display(),
+            manifest_hash,
+            suite.case_manifest.sha256
         ));
     }
     validate_manifest_contract(&suite, &manifest)
@@ -932,11 +933,15 @@ fn audit_observed_result(
         .split_once(':')
         .map_or((range_text, range_text), |(start, end)| (start, end));
     let Ok(start) = CellAddress::from_a1(start_text) else {
-        problems.push(format!("{context}: array result has an invalid start address"));
+        problems.push(format!(
+            "{context}: array result has an invalid start address"
+        ));
         return;
     };
     let Ok(end) = CellAddress::from_a1(end_text) else {
-        problems.push(format!("{context}: array result has an invalid end address"));
+        problems.push(format!(
+            "{context}: array result has an invalid end address"
+        ));
         return;
     };
     let Ok(range) = CellRange::new(start, end) else {
@@ -952,12 +957,16 @@ fn audit_observed_result(
         || result.columns != range.width()
         || u64::try_from(result.cells.len()).ok() != Some(expected_cells)
     {
-        problems.push(format!("{context}: array result shape does not match its range"));
+        problems.push(format!(
+            "{context}: array result shape does not match its range"
+        ));
         return;
     }
     let anchor = CalculationCellId::new(sheet.id(), start);
     if anchor != anchor_id {
-        problems.push(format!("{context}: array result range does not start at its formula anchor"));
+        problems.push(format!(
+            "{context}: array result range does not start at its formula anchor"
+        ));
     }
     let mut addresses = BTreeSet::new();
     let mut mismatches = 0_usize;
@@ -967,19 +976,27 @@ fn audit_observed_result(
             continue;
         }
         let Some((cell_sheet, cell_address)) = cell.address.rsplit_once('!') else {
-            problems.push(format!("{context}: array result cell has an invalid address"));
+            problems.push(format!(
+                "{context}: array result cell has an invalid address"
+            ));
             continue;
         };
         if cell_sheet != sheet_name {
-            problems.push(format!("{context}: array result cell escapes its result sheet"));
+            problems.push(format!(
+                "{context}: array result cell escapes its result sheet"
+            ));
             continue;
         }
         let Ok(address) = CellAddress::from_a1(cell_address) else {
-            problems.push(format!("{context}: array result cell has an invalid address"));
+            problems.push(format!(
+                "{context}: array result cell has an invalid address"
+            ));
             continue;
         };
         if !range.contains(address) {
-            problems.push(format!("{context}: array result cell escapes its declared range"));
+            problems.push(format!(
+                "{context}: array result cell escapes its declared range"
+            ));
             continue;
         }
         let id = CalculationCellId::new(sheet.id(), address);
@@ -1023,7 +1040,11 @@ fn observed_result_cell_value(
         .or(cell.rich_error.fallback_error.as_ref())
         .or(cell.cache_value.as_ref())?
         .clone();
-    let value_type = if cell.rich_error.present { "e" } else { &cell.cache_type };
+    let value_type = if cell.rich_error.present {
+        "e"
+    } else {
+        &cell.cache_type
+    };
     Some(ObservedValue {
         value,
         value_type: value_type.to_owned(),

@@ -111,11 +111,16 @@ impl Drop for ActiveLambda<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub(super) struct EvalContext<'scope> {
     cell: CellId,
     bindings: &'scope [ScopeEntry],
     budget: &'scope EvaluationBudget,
+    cancelled: &'scope dyn Fn() -> bool,
+}
+
+fn never_cancelled() -> bool {
+    false
 }
 
 impl<'scope> EvalContext<'scope> {
@@ -124,6 +129,20 @@ impl<'scope> EvalContext<'scope> {
             cell,
             bindings: &[],
             budget,
+            cancelled: &never_cancelled,
+        }
+    }
+
+    pub(super) const fn for_cancellable(
+        cell: CellId,
+        budget: &'scope EvaluationBudget,
+        cancelled: &'scope dyn Fn() -> bool,
+    ) -> Self {
+        Self {
+            cell,
+            bindings: &[],
+            budget,
+            cancelled,
         }
     }
 
@@ -158,6 +177,7 @@ impl<'scope> EvalContext<'scope> {
             cell: self.cell,
             bindings,
             budget: self.budget,
+            cancelled: self.cancelled,
         }
     }
 
@@ -166,6 +186,10 @@ impl<'scope> EvalContext<'scope> {
         limits: CalculationLimits,
     ) -> Result<ActiveLambda<'scope>, ErrorKind> {
         self.budget.enter_lambda(limits)
+    }
+
+    pub(super) fn is_cancelled(self) -> bool {
+        (self.cancelled)()
     }
 }
 

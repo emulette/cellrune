@@ -176,6 +176,7 @@ fn collect_scope_values(
                 collect_rect_values(engine, rect, visited_cells, values)?;
             }
         }
+        ScopeValue::Callable(_) => return Err(ErrorKind::Value),
     }
     Ok(())
 }

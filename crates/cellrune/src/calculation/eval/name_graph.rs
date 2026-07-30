@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::Engine;
 use crate::calculation::ast::Expr;
+use crate::calculation::lambda::definition;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::CellId;
 use crate::{DefinedName, DefinedNameScope};
@@ -57,6 +58,11 @@ impl Engine<'_> {
             let Some(expr) = self.defined_name_asts[defined_name_index].as_ref() else {
                 continue;
             };
+            if definition(expr).is_some() {
+                // Callable recursion is resolved at invocation time through the immutable
+                // defined-name table. It is not the ordinary value-cycle graph.
+                continue;
+            }
             pending.extend(
                 name_references(expr)
                     .into_iter()

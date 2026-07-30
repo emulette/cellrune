@@ -70,12 +70,31 @@ where
 {
     match normalize_name(name).as_str() {
         "MAP" => walk_map_scope(args, scope, walk),
+        "LAMBDA" => walk_lambda_scope(args, scope, walk),
         "LET" => {
             walk_let_scope(args, scope, walk);
             true
         }
         _ => false,
     }
+}
+
+fn walk_lambda_scope<F>(args: &[Expr], scope: &mut Vec<String>, mut walk: F) -> bool
+where
+    F: FnMut(&Expr, &mut Vec<String>),
+{
+    let expression = Expr::Call {
+        name: "LAMBDA".to_owned(),
+        args: args.to_vec(),
+    };
+    let Some(lambda) = definition(&expression) else {
+        return false;
+    };
+    let previous_local_count = scope.len();
+    scope.extend(lambda.parameters().iter().cloned());
+    walk(lambda.body(), scope);
+    scope.truncate(previous_local_count);
+    true
 }
 
 fn walk_map_scope<F>(args: &[Expr], scope: &mut Vec<String>, mut walk: F) -> bool
