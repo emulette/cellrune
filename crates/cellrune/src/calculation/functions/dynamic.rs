@@ -184,7 +184,7 @@ pub(super) fn map_array_with_trace(
                 },
                 values,
             );
-            let evaluated = engine.scalar_from_scope(context, &scoped);
+            let evaluated = lambda_result_scalar(engine, context, &scoped)?;
             if let Some(kind) = evaluated.engine_issue() {
                 return Err(kind);
             }
@@ -253,6 +253,19 @@ fn scalar_scope(value: Value) -> ScopeValue {
     ScopeValue::Scalar(ScalarEvaluation::untracked(value))
 }
 
+fn lambda_result_scalar(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    result: &ScopeValue,
+) -> Result<ScalarEvaluation, ErrorKind> {
+    if let ScopeValue::Array(evaluated) = result
+        && evaluated.array.data.len() != 1
+    {
+        return Err(ErrorKind::Calc);
+    }
+    Ok(engine.scalar_from_scope(context, result))
+}
+
 fn byrow(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -285,7 +298,7 @@ fn byrow(
                 .collect(),
         }));
         let result = invoke_lambda_values(engine, context, &closure, vec![row_value]);
-        let scalar = engine.scalar_from_scope(context, &result);
+        let scalar = lambda_result_scalar(engine, context, &result)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
         }
@@ -334,7 +347,7 @@ fn bycol(
                 .collect(),
         }));
         let result = invoke_lambda_values(engine, context, &closure, vec![col_value]);
-        let scalar = engine.scalar_from_scope(context, &result);
+        let scalar = lambda_result_scalar(engine, context, &result)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
         }
@@ -361,6 +374,7 @@ fn reduce(
         return Err(ErrorKind::Value);
     }
     let mut accumulator = engine.eval_scope_value(context, &args[0]);
+    lambda_result_scalar(engine, context, &accumulator)?;
     let input = engine.eval_array_with_trace(context, &args[1])?;
     let closure = lambda_closure(engine, context, &args[2])?;
     if closure.parameters.len() != 2 {
@@ -384,7 +398,7 @@ fn reduce(
                 }),
             ],
         );
-        let scalar = engine.scalar_from_scope(context, &accumulator);
+        let scalar = lambda_result_scalar(engine, context, &accumulator)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
         }
@@ -403,9 +417,11 @@ fn reduce(
             decimal_traces,
         })
     } else {
-        Ok(ArrayEvaluation::scalar(
-            engine.scalar_from_scope(context, &accumulator),
-        ))
+        Ok(ArrayEvaluation::scalar(lambda_result_scalar(
+            engine,
+            context,
+            &accumulator,
+        )?))
     }
 }
 
@@ -444,7 +460,7 @@ fn makearray(
                     scalar_scope(Value::Number(f64::from(col))),
                 ],
             );
-            let scalar = engine.scalar_from_scope(context, &result);
+            let scalar = lambda_result_scalar(engine, context, &result)?;
             if let Some(kind) = scalar.engine_issue() {
                 return Err(kind);
             }

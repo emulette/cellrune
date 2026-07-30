@@ -131,6 +131,9 @@ fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
         (1, 7, "SUM(MAKEARRAY(2,3,LAMBDA(row,column,row*10+column)))"),
         (1, 8, "SUM(LAMBDA(value,value+1)({1,2}))"),
         (1, 9, "_xlfn.LAMBDA(_xlpm.value,_xlpm.value+1)(5)"),
+        (1, 10, "BYROW({1,2},LAMBDA(row,row))"),
+        (1, 11, "MAP({1,2},LAMBDA(value,{value,value}))"),
+        (1, 12, "MAKEARRAY(1,1,LAMBDA(row,column,{row,column}))"),
     ]);
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     assert_number(&calculation, 1, 6.0, 0.0);
@@ -145,6 +148,14 @@ fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
     assert_number(&calculation, 7, 102.0, 0.0);
     assert_number(&calculation, 8, 5.0, 0.0);
     assert_number(&calculation, 9, 6.0, 0.0);
+    for column in 10..=12 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Calculation
+            )))
+        );
+    }
 }
 
 #[test]
