@@ -1,24 +1,15 @@
 {
-  "schema": "cellrune_excel_oracle_metadata_v1",
+  "schema": "cellrune_excel_oracle_metadata_v2",
   "workbook": "formula-oracle.xlsx",
-  "formula_cells": 897,
+  "sha256": "a576920db7f6ff0d04f75b7c2c568fb8798a74f2a586a83da8cebc07c89d0161",
+  "source_workbook_sha256": "87690d792af82fec157ac4d4316ac1f4a62accb7ca3e5184f8624de43423934f",
+  "case_manifest_sha256": "73a7cd7e23940cc7015a464e0fb495216816ce19253f2af1099269211abd4821",
+  "formula_cells": 1892,
+  "selected_cases": 1496,
   "date_system": "excel1900",
   "iterative_calculation": false,
   "case_selection": {
-    "mode": "listed_sheets_column",
-    "sheets": [
-      "Arithmetic",
-      "Aggregates",
-      "ArraysCSE",
-      "ArraysDynamic",
-      "Intersection",
-      "Financial",
-      "Lookup",
-      "TextDate",
-      "Errors",
-      "Unsupported"
-    ],
-    "column": 6
+    "mode": "manifest_addresses"
   },
   "source": {
     "name": "CellRune deterministic Excel formula oracle",
@@ -28,7 +19,8 @@
   },
   "generator": {
     "name": "CellRune deterministic Excel oracle generator",
-    "revision": "0.1.7"
+    "revision": "oracle-harness-v2",
+    "harness_sha256": "cd97a17d00578a49c3622e7649c4861321d777a80f365694df3e4b62ead8b8f0"
   },
   "oracle": {
     "application": "Microsoft Excel Online",
@@ -36,8 +28,9 @@
     "channel": null,
     "os": "web",
     "locale": "en-US UI; ko-KR regional format",
-    "saved_at": "2026-07-29T07:22:23Z",
+    "saved_at": "2026-07-30T04:49:06Z",
     "suite_id": "cellrune-excel-host-matrix-v1",
+    "feature_set_id": "cellrune-excel-function-pool-522-v1",
     "host_profile_id": "excel-online-free-en-ui-ko-kr",
     "product_tier": "free",
     "host_build": "AppVersion 16.0300; rupBuild 30317"

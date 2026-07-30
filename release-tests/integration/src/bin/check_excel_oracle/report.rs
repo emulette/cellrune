@@ -3,9 +3,9 @@ use std::fs;
 use std::path::Path;
 
 use super::{calculated_result, load_oracle, observed_result, observed_source_value, source_value};
-use cellrune::CalculationCellResult;
+use cellrune::{CalculationCellId, CalculationCellResult, CellAddress};
 use cellrune_integration_tests::oracle::{
-    Classification, Expectation, ObservedValue, values_match,
+    CacheStatus, Classification, Expectation, ObservedCase, ObservedValue, values_match,
 };
 
 pub(super) fn report(directory: &Path, output_path: Option<&Path>) -> Result<(), Vec<String>> {
@@ -39,11 +39,36 @@ pub(super) fn report(directory: &Path, output_path: Option<&Path>) -> Result<(),
         let excel_rich_error =
             observation.is_some_and(|observation| observation.rich_error.present);
         let result = calculated_result(&loaded, *id);
-        cases.insert(
-            key.clone(),
-            report_expectation(existing, source, result, excel_rich_error)
-                .map_err(|error| vec![format!("{key}: {error}")])?,
-        );
+        let mut expectation = report_expectation(existing, source, result, excel_rich_error)
+            .map_err(|error| vec![format!("{key}: {error}")])?;
+        if let Some(observation) = observation
+            && observation.result.is_some()
+            && matches!(
+                expectation.classification,
+                Classification::Match | Classification::Divergent
+            )
+        {
+            let matches_all = array_result_matches(&loaded.workbook, &loaded.calculation, observation);
+            if !matches_all && expectation.classification == Classification::Match {
+                expectation.classification = Classification::Divergent;
+                if let Some(actual) = calculated_result(&loaded, *id)
+                    .and_then(|result| observed_result(Some(result)).ok().flatten())
+                {
+                    expectation.cellrune_value = Some(actual.value);
+                    expectation.cellrune_type = Some(actual.value_type);
+                }
+                expectation.note = Some(
+                    "CellRune produces a different array result for this oracle case; retain until the underlying calculation semantics are corrected."
+                        .to_owned(),
+                );
+            } else if matches_all && expectation.classification == Classification::Divergent {
+                expectation.classification = Classification::Match;
+                expectation.cellrune_value = None;
+                expectation.cellrune_type = None;
+                expectation.note = None;
+            }
+        }
+        cases.insert(key.clone(), expectation);
     }
     let output = serde_json::to_string_pretty(&cases)
         .map_err(|error| vec![format!("cannot serialize report: {error}")])?;
@@ -54,6 +79,57 @@ pub(super) fn report(directory: &Path, output_path: Option<&Path>) -> Result<(),
         println!("{output}");
     }
     Ok(())
+}
+
+fn array_result_matches(
+    workbook: &cellrune::WorkbookSnapshot,
+    calculation: &cellrune::CalculationSnapshot,
+    observation: &ObservedCase,
+) -> bool {
+    let Some(result) = observation.result.as_ref() else {
+        return true;
+    };
+    result.cells.iter().all(|cell| {
+        let Some((sheet_name, address_text)) = cell.address.rsplit_once('!') else {
+            return false;
+        };
+        let Some(sheet) = workbook.sheet_by_name(sheet_name) else {
+            return false;
+        };
+        let Ok(address) = CellAddress::from_a1(address_text) else {
+            return false;
+        };
+        let id = CalculationCellId::new(sheet.id(), address);
+        let actual = calculation
+            .materialized_cell(id)
+            .map(cellrune::MaterializedCalculationCell::result)
+            .or_else(|| calculation.cell(id));
+        let Some(actual) = actual.and_then(|value| observed_result(Some(value)).ok().flatten()) else {
+            return false;
+        };
+        let expected = if cell.cache_status != CacheStatus::Semantic {
+            return false;
+        } else {
+            let Some(value) = cell
+                .rich_error
+                .resolved_error
+                .as_ref()
+                .or(cell.rich_error.fallback_error.as_ref())
+                .or(cell.cache_value.as_ref())
+            else {
+                return false;
+            };
+            ObservedValue {
+                value: value.clone(),
+                value_type: if cell.rich_error.present {
+                    "e".to_owned()
+                } else {
+                    cell.cache_type.clone()
+                },
+            }
+        };
+        values_match(&actual, &expected, None).unwrap_or(false)
+    })
 }
 
 fn report_expectation(

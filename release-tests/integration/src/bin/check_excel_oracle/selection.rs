@@ -44,6 +44,7 @@ pub(super) fn select_cases(
                         .is_some_and(|ids| ids.contains(&sheet.id()))
                         && cell.address().column().get() == *column
                 }
+                CaseSelection::ManifestAddresses => true,
             };
             if include {
                 insert_case(

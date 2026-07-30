@@ -6,13 +6,13 @@ use cellrune::{CalculationCellResult, CellValue};
 use serde::{Deserialize, Serialize};
 
 /// Metadata schema accepted by the local oracle checker.
-pub const METADATA_SCHEMA: &str = "cellrune_excel_oracle_metadata_v1";
+pub const METADATA_SCHEMA: &str = "cellrune_excel_oracle_metadata_v2";
 /// Host-matrix suite schema accepted by the local oracle checker.
-pub const SUITE_SCHEMA: &str = "cellrune_excel_oracle_suite_v1";
+pub const SUITE_SCHEMA: &str = "cellrune_excel_oracle_suite_v2";
 /// Stable case-manifest schema accepted by the local oracle checker.
-pub const CASE_MANIFEST_SCHEMA: &str = "cellrune_excel_oracle_cases_v1";
+pub const CASE_MANIFEST_SCHEMA: &str = "cellrune_excel_oracle_cases_v2";
 /// Saved-host observation schema accepted by the local oracle checker.
-pub const OBSERVATIONS_SCHEMA: &str = "cellrune_excel_oracle_observations_v1";
+pub const OBSERVATIONS_SCHEMA: &str = "cellrune_excel_oracle_observations_v2";
 /// Default scale-relative tolerance for finite numeric results.
 pub const DEFAULT_SCALED_EPSILON: f64 = 1e-8;
 
@@ -24,7 +24,9 @@ pub struct Metadata {
     pub workbook: String,
     pub sha256: Option<String>,
     pub source_workbook_sha256: Option<String>,
+    pub case_manifest_sha256: Option<String>,
     pub formula_cells: usize,
+    pub selected_cases: Option<usize>,
     pub date_system: String,
     pub iterative_calculation: bool,
     pub case_selection: CaseSelection,
@@ -43,6 +45,8 @@ pub enum CaseSelection {
     AllFormulaResults,
     /// Formula cells in the named sheets and one one-based column.
     ListedSheetsColumn { sheets: Vec<String>, column: u32 },
+    /// Formula anchors are selected by the active case manifest addresses.
+    ManifestAddresses,
 }
 
 /// Workbook-content provenance.
@@ -61,6 +65,7 @@ pub struct SourceMetadata {
 pub struct GeneratorMetadata {
     pub name: Option<String>,
     pub revision: Option<String>,
+    pub harness_sha256: Option<String>,
 }
 
 /// Excel host that wrote the saved calculation cache.
@@ -74,6 +79,7 @@ pub struct OracleMetadata {
     pub locale: Option<String>,
     pub saved_at: String,
     pub suite_id: Option<String>,
+    pub feature_set_id: Option<String>,
     pub host_profile_id: Option<String>,
     pub product_tier: Option<String>,
     pub host_build: Option<String>,
@@ -85,8 +91,36 @@ pub struct OracleMetadata {
 pub struct OracleSuite {
     pub schema: String,
     pub suite_id: String,
-    pub case_manifest: String,
+    pub case_manifest: CaseManifestReference,
+    pub feature_set_id: Option<String>,
+    pub planned_release_range: Option<PlannedReleaseRange>,
+    pub state: Option<String>,
+    pub active_case_count: Option<usize>,
+    pub source_workbook: Option<SourceWorkbookMetadata>,
+    pub case_selection: Option<CaseSelection>,
+    pub generator: Option<GeneratorMetadata>,
     pub profiles: Vec<HostProfile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceWorkbookMetadata {
+    pub sha256: String,
+    pub formula_cells: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaseManifestReference {
+    pub file: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedReleaseRange {
+    pub first: String,
+    pub last: String,
 }
 
 /// One exact Excel product/locale/add-in profile.
@@ -100,6 +134,24 @@ pub struct HostProfile {
     pub product_tier: String,
     pub locale: String,
     pub add_ins: BTreeMap<String, bool>,
+    pub artifacts: Option<ProfileArtifacts>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileArtifacts {
+    pub workbook: ArtifactReference,
+    pub metadata: ArtifactReference,
+    pub observations: ArtifactReference,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactReference {
+    pub file: String,
+    pub sha256: String,
+    pub formula_cells: Option<usize>,
+    pub selected_cases: Option<usize>,
 }
 
 /// Stable identity and authored formula inventory for one suite.
@@ -109,6 +161,9 @@ pub struct CaseManifest {
     pub schema: String,
     pub suite_id: String,
     pub generator: GeneratorMetadata,
+    pub feature_set_id: Option<String>,
+    pub case_count: Option<usize>,
+    pub active_case_count: Option<usize>,
     pub cases: Vec<ManifestCase>,
 }
 
@@ -199,6 +254,12 @@ pub struct Observations {
     pub suite_id: String,
     pub host_profile_id: String,
     pub saved_at: String,
+    pub workbook_sha256: Option<String>,
+    pub source_workbook_sha256: Option<String>,
+    pub case_manifest_sha256: Option<String>,
+    pub harness_sha256: Option<String>,
+    pub feature_set_id: Option<String>,
+    pub case_count: Option<usize>,
     pub cases: Vec<ObservedCase>,
 }
 
@@ -210,6 +271,27 @@ pub struct ObservedCase {
     pub address: String,
     pub saved_formula: String,
     pub formula_rewrites: Vec<String>,
+    pub cache_status: CacheStatus,
+    pub cache_value: Option<String>,
+    pub cache_type: String,
+    pub rich_error: RichErrorObservation,
+    #[serde(default)]
+    pub result: Option<ObservedResult>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedResult {
+    pub range: String,
+    pub rows: u32,
+    pub columns: u32,
+    pub cells: Vec<ObservedResultCell>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedResultCell {
+    pub address: String,
     pub cache_status: CacheStatus,
     pub cache_value: Option<String>,
     pub cache_type: String,

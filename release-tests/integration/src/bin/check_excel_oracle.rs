@@ -5,9 +5,10 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use sha2::{Digest, Sha256};
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellValue, ReadOptions,
+    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellRange, CellValue, ReadOptions,
     SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
 };
 use cellrune_integration_tests::oracle::{
@@ -158,14 +159,14 @@ fn audit_suite(
         problems.push(format!("{}: {error}", suite_path.display()));
         return;
     }
-    if !is_filename(&suite.case_manifest) {
+    if !is_filename(&suite.case_manifest.file) {
         problems.push(format!(
             "{}: case manifest must be a filename",
             suite_path.display()
         ));
         return;
     }
-    let manifest_path = suite_directory.join(&suite.case_manifest);
+    let manifest_path = suite_directory.join(&suite.case_manifest.file);
     let manifest: CaseManifest = match read_json(&manifest_path) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -209,7 +210,7 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
     if suite.schema != SUITE_SCHEMA || suite.suite_id.is_empty() {
         return Err(format!("unsupported suite schema {}", suite.schema));
     }
-    if !is_filename(&suite.case_manifest) {
+    if !is_filename(&suite.case_manifest.file) || suite.case_manifest.sha256.len() != 64 {
         return Err("suite case manifest must be a filename".to_owned());
     }
     let mut profile_ids = BTreeSet::new();
@@ -228,8 +229,8 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
             return Err(format!("incomplete host profile {}", profile.profile_id));
         }
     }
-    if suite.profiles.is_empty() {
-        return Err("suite must list at least one workbook profile".to_owned());
+    if suite.profiles.len() != 2 {
+        return Err("v2 suite must list exactly two workbook profiles".to_owned());
     }
     Ok(())
 }
@@ -307,7 +308,9 @@ struct LoadedOracle {
 fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOracle, String> {
     let metadata_path = directory.join(METADATA_FILE);
     let metadata: Metadata = read_json(&metadata_path)?;
-    if metadata.schema != METADATA_SCHEMA {
+    if metadata.schema != METADATA_SCHEMA
+        && metadata.schema != "cellrune_excel_oracle_metadata_v1"
+    {
         return Err(format!(
             "{}: unsupported metadata schema {}",
             metadata_path.display(),
@@ -328,6 +331,15 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
     }
     let workbook_path = directory.join(&metadata.workbook);
     raw::verify_package_invariants(&workbook_path)?;
+    if let Some(expected_hash) = metadata.sha256.as_deref() {
+        let actual_hash = sha256_file(&workbook_path)?;
+        if actual_hash != expected_hash {
+            return Err(format!(
+                "{}: workbook sha256 {} != metadata {}",
+                workbook_path.display(), actual_hash, expected_hash
+            ));
+        }
+    }
     let workbook = read_xlsx_path(&workbook_path, ReadOptions::default())
         .map_err(|error| format!("{}: {error}", workbook_path.display()))?;
     let formula_cells = workbook
@@ -451,14 +463,23 @@ fn load_suite_binding(
     validate_profile_metadata(metadata, &suite, profile, directory)?;
 
     let suite_directory = suite_path.parent().expect("suite path always has a parent");
-    if !is_filename(&suite.case_manifest) {
+    if !is_filename(&suite.case_manifest.file)
+        || suite.case_manifest.sha256.len() != 64
+    {
         return Err(format!(
             "{}: case manifest must be a filename",
             suite_path.display()
         ));
     }
-    let manifest_path = suite_directory.join(&suite.case_manifest);
+    let manifest_path = suite_directory.join(&suite.case_manifest.file);
     let manifest: CaseManifest = read_json(&manifest_path)?;
+    let manifest_hash = sha256_file(&manifest_path)?;
+    if manifest_hash != suite.case_manifest.sha256 {
+        return Err(format!(
+            "{}: case manifest sha256 {} != suite {}",
+            manifest_path.display(), manifest_hash, suite.case_manifest.sha256
+        ));
+    }
     validate_manifest_contract(&suite, &manifest)
         .map_err(|error| format!("{}: {error}", manifest_path.display()))?;
 
@@ -488,6 +509,13 @@ fn load_suite_binding(
         .filter(|oracle_case| oracle_case.active)
         .map(|oracle_case| (oracle_case.case_key.as_str(), oracle_case))
         .collect::<BTreeMap<_, _>>();
+    if metadata.selected_cases != Some(active_cases.len()) {
+        return Err(format!(
+            "{}: selected_cases does not match active manifest count {}",
+            directory.display(),
+            active_cases.len()
+        ));
+    }
     let mut observed_by_key = BTreeMap::new();
     for observation in observations.cases {
         if observed_by_key
@@ -536,7 +564,11 @@ fn load_suite_binding(
         )?;
         selected.insert(case_key.to_owned(), id);
     }
-    if !selected_by_address.is_empty() {
+    if !matches!(
+        metadata.case_selection,
+        cellrune_integration_tests::oracle::CaseSelection::ManifestAddresses
+    ) && !selected_by_address.is_empty()
+    {
         return Err(format!(
             "{}: selected workbook formulas are absent from the active manifest: {:?}",
             manifest_path.display(),
@@ -622,11 +654,7 @@ fn validate_observed_case(
             "{context}: observation does not exact-match raw XLSX formula/cache metadata"
         ));
     }
-    let expected_status = if raw_cell
-        .value
-        .as_deref()
-        .is_some_and(|value| !value.is_empty())
-    {
+    let expected_status = if raw_cell.value.is_some() {
         CacheStatus::Semantic
     } else {
         CacheStatus::MissingSemanticCache
@@ -700,6 +728,12 @@ fn split_qualified_address(value: &str) -> Result<(&str, &str), String> {
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
     let text = fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
     serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let digest = Sha256::digest(bytes);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn is_filename(value: &str) -> bool {
@@ -790,6 +824,13 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
             }
         }
         audit_saved_cache(&context, key, loaded, id, expectation, problems);
+        if let Some(observation) = loaded
+            .observations
+            .as_ref()
+            .and_then(|observations| observations.get(key))
+        {
+            audit_observed_result(&context, loaded, id, observation, expectation, problems);
+        }
         let result = calculated_result(loaded, id);
         match expectation.classification {
             Classification::Match => {
@@ -870,6 +911,123 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
         }
     }
     counts
+}
+
+fn audit_observed_result(
+    context: &str,
+    loaded: &LoadedOracle,
+    anchor_id: CalculationCellId,
+    observation: &ObservedCase,
+    expectation: &Expectation,
+    problems: &mut Vec<String>,
+) {
+    let Some(result) = observation.result.as_ref() else {
+        return;
+    };
+    let Some((sheet_name, range_text)) = result.range.rsplit_once('!') else {
+        problems.push(format!("{context}: array result has an invalid range"));
+        return;
+    };
+    let (start_text, end_text) = range_text
+        .split_once(':')
+        .map_or((range_text, range_text), |(start, end)| (start, end));
+    let Ok(start) = CellAddress::from_a1(start_text) else {
+        problems.push(format!("{context}: array result has an invalid start address"));
+        return;
+    };
+    let Ok(end) = CellAddress::from_a1(end_text) else {
+        problems.push(format!("{context}: array result has an invalid end address"));
+        return;
+    };
+    let Ok(range) = CellRange::new(start, end) else {
+        problems.push(format!("{context}: array result range is not ordered"));
+        return;
+    };
+    let Some(sheet) = loaded.workbook.sheet_by_name(sheet_name) else {
+        problems.push(format!("{context}: array result names an unknown sheet"));
+        return;
+    };
+    let expected_cells = u64::from(range.height()) * u64::from(range.width());
+    if result.rows != range.height()
+        || result.columns != range.width()
+        || u64::try_from(result.cells.len()).ok() != Some(expected_cells)
+    {
+        problems.push(format!("{context}: array result shape does not match its range"));
+        return;
+    }
+    let anchor = CalculationCellId::new(sheet.id(), start);
+    if anchor != anchor_id {
+        problems.push(format!("{context}: array result range does not start at its formula anchor"));
+    }
+    let mut addresses = BTreeSet::new();
+    let mut mismatches = 0_usize;
+    for cell in &result.cells {
+        if !addresses.insert(cell.address.as_str()) {
+            problems.push(format!("{context}: array result contains a duplicate cell"));
+            continue;
+        }
+        let Some((cell_sheet, cell_address)) = cell.address.rsplit_once('!') else {
+            problems.push(format!("{context}: array result cell has an invalid address"));
+            continue;
+        };
+        if cell_sheet != sheet_name {
+            problems.push(format!("{context}: array result cell escapes its result sheet"));
+            continue;
+        }
+        let Ok(address) = CellAddress::from_a1(cell_address) else {
+            problems.push(format!("{context}: array result cell has an invalid address"));
+            continue;
+        };
+        if !range.contains(address) {
+            problems.push(format!("{context}: array result cell escapes its declared range"));
+            continue;
+        }
+        let id = CalculationCellId::new(sheet.id(), address);
+        let actual = loaded
+            .calculation
+            .materialized_cell(id)
+            .map(cellrune::MaterializedCalculationCell::result)
+            .or_else(|| loaded.calculation.cell(id));
+        let expected = observed_result_cell_value(cell);
+        let actual = actual.and_then(|value| observed_result(Some(value)).ok().flatten());
+        let matches = match (actual.as_ref(), expected.as_ref()) {
+            (Some(actual), Some(expected)) => values_match(actual, expected, None).unwrap_or(false),
+            (None, None) => true,
+            _ => false,
+        };
+        if !matches {
+            mismatches += 1;
+        }
+    }
+    match expectation.classification {
+        Classification::Match if mismatches > 0 => problems.push(format!(
+            "{context}: {mismatches} array result cells differ from Excel"
+        )),
+        Classification::Divergent if mismatches == 0 => problems.push(format!(
+            "{context}: divergent array result now matches Excel in every cell"
+        )),
+        _ => {}
+    }
+}
+
+fn observed_result_cell_value(
+    cell: &cellrune_integration_tests::oracle::ObservedResultCell,
+) -> Option<ObservedValue> {
+    if cell.cache_status != CacheStatus::Semantic {
+        return None;
+    }
+    let value = cell
+        .rich_error
+        .resolved_error
+        .as_ref()
+        .or(cell.rich_error.fallback_error.as_ref())
+        .or(cell.cache_value.as_ref())?
+        .clone();
+    let value_type = if cell.rich_error.present { "e" } else { &cell.cache_type };
+    Some(ObservedValue {
+        value,
+        value_type: value_type.to_owned(),
+    })
 }
 
 fn audit_saved_cache(
@@ -1041,6 +1199,7 @@ mod tests {
             locale: Some("en-US".to_owned()),
             saved_at: "2026-07-29T00:00:00Z".to_owned(),
             suite_id: Some("cellrune-excel-host-matrix-v1".to_owned()),
+            feature_set_id: None,
             host_profile_id: Some("excel-online".to_owned()),
             product_tier: Some("free".to_owned()),
             host_build: None,

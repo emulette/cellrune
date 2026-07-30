@@ -1,7 +1,29 @@
 {
-  "schema": "cellrune_excel_oracle_suite_v1",
+  "schema": "cellrune_excel_oracle_suite_v2",
   "suite_id": "cellrune-excel-host-matrix-v1",
-  "case_manifest": "case-manifest.json",
+  "feature_set_id": "cellrune-excel-function-pool-522-v1",
+  "planned_release_range": {
+    "first": "0.1.8",
+    "last": "0.1.20"
+  },
+  "state": "source",
+  "case_manifest": {
+    "file": "case-manifest.json",
+    "sha256": "73a7cd7e23940cc7015a464e0fb495216816ce19253f2af1099269211abd4821"
+  },
+  "case_selection": {
+    "mode": "manifest_addresses"
+  },
+  "active_case_count": 1496,
+  "source_workbook": {
+    "sha256": "87690d792af82fec157ac4d4316ac1f4a62accb7ca3e5184f8624de43423934f",
+    "formula_cells": 1892
+  },
+  "generator": {
+    "name": "CellRune deterministic Excel oracle generator",
+    "revision": "oracle-harness-v2",
+    "harness_sha256": "cd97a17d00578a49c3622e7649c4861321d777a80f365694df3e4b62ead8b8f0"
+  },
   "profiles": [
     {
       "profile_id": "excel-online-free-en-ui-ko-kr",
