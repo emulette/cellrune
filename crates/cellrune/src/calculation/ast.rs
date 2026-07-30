@@ -161,6 +161,10 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    Invoke {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
     ImplicitIntersection(Box<Expr>),
     Unary {
         op: UnaryOp,
@@ -286,6 +290,16 @@ impl fmt::Display for Expr {
             Expr::Call { name, args } => {
                 formatter.write_str(name)?;
                 formatter.write_str("(")?;
+                for (index, arg) in args.iter().enumerate() {
+                    if index > 0 {
+                        formatter.write_str(",")?;
+                    }
+                    arg.fmt(formatter)?;
+                }
+                formatter.write_str(")")
+            }
+            Expr::Invoke { callee, args } => {
+                write!(formatter, "{callee}(")?;
                 for (index, arg) in args.iter().enumerate() {
                     if index > 0 {
                         formatter.write_str(",")?;

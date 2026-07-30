@@ -120,6 +120,12 @@ fn collect_name_references(expr: &Expr, local_names: &mut Vec<String>, names: &m
                 collect_name_references(arg, local_names, names);
             }
         }
+        Expr::Invoke { callee, args } => {
+            collect_name_references(callee, local_names, names);
+            for arg in args {
+                collect_name_references(arg, local_names, names);
+            }
+        }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {

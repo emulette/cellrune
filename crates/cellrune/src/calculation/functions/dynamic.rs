@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
@@ -19,11 +20,29 @@ pub(super) fn call(
 ) -> Value {
     match name {
         "MAP" => map_scalar_with_trace(engine, context, args).value,
+        "ISOMITTED" => is_omitted(context, args),
+        "BYROW" | "BYCOL" | "REDUCE" | "SCAN" | "MAKEARRAY" => {
+            helper_scalar_with_trace(engine, context, name, args).value
+        }
         "LET" => {
             let scoped = let_scope_value(engine, context, args);
             engine.scalar_from_scope(context, &scoped).value
         }
         _ => Value::Error(ErrorKind::Unsupported),
+    }
+}
+
+fn is_omitted(context: EvalContext<'_>, args: &[Expr]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let Expr::Name(name) = &args[0] else {
+        return Value::Error(ErrorKind::Value);
+    };
+    match context.binding(name) {
+        Some(ScopeValue::Missing) => Value::Logical(true),
+        Some(_) => Value::Logical(false),
+        None => Value::Error(ErrorKind::Value),
     }
 }
 
@@ -74,10 +93,21 @@ pub(in crate::calculation) fn invoke_lambda(
         }
         values.push(value);
     }
-    let Ok(_active_lambda) = context.enter_lambda(engine.calculation_limits()) else {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(
-            ErrorKind::ResourceLimit(CalculationLimitKind::LambdaDepth),
-        )));
+    invoke_lambda_values(engine, context, closure, values)
+}
+
+pub(in crate::calculation) fn invoke_lambda_values(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    closure: &LambdaClosure,
+    values: Vec<ScopeValue>,
+) -> ScopeValue {
+    if closure.parameters.len() != values.len() {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+    }
+    let _active_lambda = match context.enter_lambda(engine.calculation_limits()) {
+        Ok(active) => active,
+        Err(kind) => return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind))),
     };
     let mut bindings = closure.captured.clone();
     bindings.extend(
@@ -128,35 +158,298 @@ pub(super) fn map_array_with_trace(
     engine.ensure_array_cells(cells)?;
     engine.ensure_function_iterations(cells)?;
 
-    let outer_binding_count = context.bindings().len();
-    let mut bindings = context.bindings().to_vec();
-    bindings.extend(
-        lambda
-            .parameters()
-            .iter()
-            .cloned()
-            .map(ScopeEntry::placeholder),
-    );
     let capacity = usize::try_from(cells)
         .map_err(|_| ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
     let mut data = Vec::with_capacity(capacity);
     let mut decimal_traces = Vec::with_capacity(capacity);
     for row in 0..rows {
         for col in 0..cols {
-            for (binding, evaluated) in bindings[outer_binding_count..].iter_mut().zip(&arrays) {
-                binding.set_value(ScopeValue::Scalar(ScalarEvaluation {
-                    value: element_at(&evaluated.array, row, col).clone(),
-                    decimal_trace: evaluated.decimal_at(row, col),
-                }));
-            }
-            let _active_lambda = context.enter_lambda(engine.calculation_limits())?;
-            let evaluated =
-                engine.eval_scalar_with_trace(context.with_bindings(&bindings), lambda.body());
+            let values = arrays
+                .iter()
+                .map(|evaluated| {
+                    ScopeValue::Scalar(ScalarEvaluation {
+                        value: element_at(&evaluated.array, row, col).clone(),
+                        decimal_trace: evaluated.decimal_at(row, col),
+                    })
+                })
+                .collect();
+            let scoped = invoke_lambda_values(
+                engine,
+                context,
+                &LambdaClosure {
+                    parameters: lambda.parameters().to_vec(),
+                    body: lambda.body().clone(),
+                    captured: context.bindings().to_vec(),
+                    defined_name: None,
+                },
+                values,
+            );
+            let evaluated = engine.scalar_from_scope(context, &scoped);
             if let Some(kind) = evaluated.engine_issue() {
                 return Err(kind);
             }
             data.push(evaluated.value);
             decimal_traces.push(evaluated.decimal_trace);
+        }
+    }
+    Ok(ArrayEvaluation {
+        array: Array { rows, cols, data },
+        decimal_traces,
+    })
+}
+
+pub(in crate::calculation) fn helper_array_with_trace(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    name: &str,
+    args: &[Expr],
+) -> Option<Result<ArrayEvaluation, ErrorKind>> {
+    match name {
+        "BYROW" => Some(byrow(engine, context, args)),
+        "BYCOL" => Some(bycol(engine, context, args)),
+        "REDUCE" => Some(reduce(engine, context, args, false)),
+        "SCAN" => Some(reduce(engine, context, args, true)),
+        "MAKEARRAY" => Some(makearray(engine, context, args)),
+        _ => None,
+    }
+}
+
+pub(in crate::calculation) fn helper_scalar_with_trace(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    name: &str,
+    args: &[Expr],
+) -> ScalarEvaluation {
+    match helper_array_with_trace(engine, context, name, args) {
+        Some(Ok(result)) => ScalarEvaluation {
+            value: result
+                .array
+                .data
+                .first()
+                .cloned()
+                .unwrap_or(Value::Error(ErrorKind::Value)),
+            decimal_trace: result.decimal_traces.first().copied().flatten(),
+        },
+        Some(Err(kind)) => ScalarEvaluation::untracked(Value::Error(kind)),
+        None => ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported)),
+    }
+}
+
+fn lambda_closure(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &Expr,
+) -> Result<LambdaClosure, ErrorKind> {
+    let Some(_) = definition(expr) else {
+        return Err(ErrorKind::Value);
+    };
+    match engine.eval_scope_value(context, expr) {
+        ScopeValue::Callable(closure) => Ok((*closure).clone()),
+        _ => Err(ErrorKind::Value),
+    }
+}
+
+fn scalar_scope(value: Value) -> ScopeValue {
+    ScopeValue::Scalar(ScalarEvaluation::untracked(value))
+}
+
+fn byrow(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<ArrayEvaluation, ErrorKind> {
+    if args.len() != 2 {
+        return Err(ErrorKind::Value);
+    }
+    let input = engine.eval_array_with_trace(context, &args[0])?;
+    let closure = lambda_closure(engine, context, &args[1])?;
+    if closure.parameters.len() != 1 {
+        return Err(ErrorKind::Value);
+    }
+    engine.ensure_array_cells(u64::from(input.array.rows))?;
+    engine.ensure_function_iterations(u64::from(input.array.rows))?;
+    let mut data = Vec::with_capacity(input.array.rows as usize);
+    let mut decimal_traces = Vec::with_capacity(input.array.rows as usize);
+    for row in 0..input.array.rows {
+        let row_data = (0..input.array.cols)
+            .map(|col| element_at(&input.array, row, col).clone())
+            .collect();
+        let row_value = ScopeValue::Array(Arc::new(ArrayEvaluation {
+            array: Array {
+                rows: 1,
+                cols: input.array.cols,
+                data: row_data,
+            },
+            decimal_traces: (0..input.array.cols)
+                .map(|col| input.decimal_at(row, col))
+                .collect(),
+        }));
+        let result = invoke_lambda_values(engine, context, &closure, vec![row_value]);
+        let scalar = engine.scalar_from_scope(context, &result);
+        if let Some(kind) = scalar.engine_issue() {
+            return Err(kind);
+        }
+        data.push(scalar.value);
+        decimal_traces.push(scalar.decimal_trace);
+    }
+    Ok(ArrayEvaluation {
+        array: Array {
+            rows: input.array.rows,
+            cols: 1,
+            data,
+        },
+        decimal_traces,
+    })
+}
+
+fn bycol(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<ArrayEvaluation, ErrorKind> {
+    if args.len() != 2 {
+        return Err(ErrorKind::Value);
+    }
+    let input = engine.eval_array_with_trace(context, &args[0])?;
+    let closure = lambda_closure(engine, context, &args[1])?;
+    if closure.parameters.len() != 1 {
+        return Err(ErrorKind::Value);
+    }
+    engine.ensure_array_cells(u64::from(input.array.cols))?;
+    engine.ensure_function_iterations(u64::from(input.array.cols))?;
+    let mut data = Vec::with_capacity(input.array.cols as usize);
+    let mut decimal_traces = Vec::with_capacity(input.array.cols as usize);
+    for col in 0..input.array.cols {
+        let col_data = (0..input.array.rows)
+            .map(|row| element_at(&input.array, row, col).clone())
+            .collect();
+        let col_value = ScopeValue::Array(Arc::new(ArrayEvaluation {
+            array: Array {
+                rows: input.array.rows,
+                cols: 1,
+                data: col_data,
+            },
+            decimal_traces: (0..input.array.rows)
+                .map(|row| input.decimal_at(row, col))
+                .collect(),
+        }));
+        let result = invoke_lambda_values(engine, context, &closure, vec![col_value]);
+        let scalar = engine.scalar_from_scope(context, &result);
+        if let Some(kind) = scalar.engine_issue() {
+            return Err(kind);
+        }
+        data.push(scalar.value);
+        decimal_traces.push(scalar.decimal_trace);
+    }
+    Ok(ArrayEvaluation {
+        array: Array {
+            rows: 1,
+            cols: input.array.cols,
+            data,
+        },
+        decimal_traces,
+    })
+}
+
+fn reduce(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    scan: bool,
+) -> Result<ArrayEvaluation, ErrorKind> {
+    if args.len() != 3 {
+        return Err(ErrorKind::Value);
+    }
+    let mut accumulator = engine.eval_scope_value(context, &args[0]);
+    let input = engine.eval_array_with_trace(context, &args[1])?;
+    let closure = lambda_closure(engine, context, &args[2])?;
+    if closure.parameters.len() != 2 {
+        return Err(ErrorKind::Value);
+    }
+    let cells = u64::from(input.array.rows) * u64::from(input.array.cols);
+    engine.ensure_array_cells(cells)?;
+    engine.ensure_function_iterations(cells)?;
+    let mut output = Vec::with_capacity(input.array.data.len());
+    let mut decimal_traces = Vec::with_capacity(input.array.data.len());
+    for (index, value) in input.array.data.iter().enumerate() {
+        accumulator = invoke_lambda_values(
+            engine,
+            context,
+            &closure,
+            vec![
+                accumulator,
+                ScopeValue::Scalar(ScalarEvaluation {
+                    value: value.clone(),
+                    decimal_trace: input.decimal_traces[index],
+                }),
+            ],
+        );
+        let scalar = engine.scalar_from_scope(context, &accumulator);
+        if let Some(kind) = scalar.engine_issue() {
+            return Err(kind);
+        }
+        if scan {
+            output.push(scalar.value.clone());
+            decimal_traces.push(scalar.decimal_trace);
+        }
+    }
+    if scan {
+        Ok(ArrayEvaluation {
+            array: Array {
+                rows: input.array.rows,
+                cols: input.array.cols,
+                data: output,
+            },
+            decimal_traces,
+        })
+    } else {
+        Ok(ArrayEvaluation::scalar(
+            engine.scalar_from_scope(context, &accumulator),
+        ))
+    }
+}
+
+fn makearray(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<ArrayEvaluation, ErrorKind> {
+    if args.len() != 3 {
+        return Err(ErrorKind::Value);
+    }
+    let rows = engine.eval_number_with_trace(context, &args[0])?.0;
+    let cols = engine.eval_number_with_trace(context, &args[1])?.0;
+    if rows < 1.0 || cols < 1.0 || rows.fract() != 0.0 || cols.fract() != 0.0 {
+        return Err(ErrorKind::Value);
+    }
+    let rows = u32::try_from(rows as u64).map_err(|_| ErrorKind::Value)?;
+    let cols = u32::try_from(cols as u64).map_err(|_| ErrorKind::Value)?;
+    let cells = u64::from(rows) * u64::from(cols);
+    engine.ensure_array_cells(cells)?;
+    engine.ensure_function_iterations(cells)?;
+    let closure = lambda_closure(engine, context, &args[2])?;
+    if closure.parameters.len() != 2 {
+        return Err(ErrorKind::Value);
+    }
+    let mut data = Vec::with_capacity(cells as usize);
+    let mut decimal_traces = Vec::with_capacity(cells as usize);
+    for row in 1..=rows {
+        for col in 1..=cols {
+            let result = invoke_lambda_values(
+                engine,
+                context,
+                &closure,
+                vec![
+                    scalar_scope(Value::Number(f64::from(row))),
+                    scalar_scope(Value::Number(f64::from(col))),
+                ],
+            );
+            let scalar = engine.scalar_from_scope(context, &result);
+            if let Some(kind) = scalar.engine_issue() {
+                return Err(kind);
+            }
+            data.push(scalar.value);
+            decimal_traces.push(scalar.decimal_trace);
         }
     }
     Ok(ArrayEvaluation {

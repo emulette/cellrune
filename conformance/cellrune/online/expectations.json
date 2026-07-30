@@ -466,25 +466,22 @@
     "excel_rich_error": false
   },
   "curated:arraysdynamic:c016": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "11",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BYROW) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c018": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LAMBDA) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c020": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LAMBDA) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c021": {
     "classification": "match",
@@ -979,27 +976,22 @@
     "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "curated:unsupported:c003": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "6",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 8: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c004": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "42",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 10: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c005": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "cellrune_value": "#SPILL!",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "curated:unsupported:c006": {
     "classification": "not_implemented",
@@ -1997,18 +1989,16 @@
     "excel_rich_error": false
   },
   "function:bycol": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "150",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BYCOL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:byrow": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "11",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BYROW) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ceiling": {
     "classification": "match",
@@ -5346,11 +5336,10 @@
     "excel_rich_error": false
   },
   "function:isomitted": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.parse_error (token 16: unexpected token) for this oracle case."
+    "excel_rich_error": true
   },
   "function:isoweeknum": {
     "classification": "match",
@@ -5434,11 +5423,10 @@
     "note": "CellRune reports calculation.unsupported_function (KURT) for this oracle case."
   },
   "function:lambda": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "26",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 10: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "function:large": {
     "classification": "match",
@@ -5764,11 +5752,10 @@
     "excel_rich_error": false
   },
   "function:makearray": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "101",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LAMBDA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:map": {
     "classification": "match",
@@ -7313,11 +7300,10 @@
     "note": "CellRune reports calculation.unsupported_function (RECEIVED) for this oracle case."
   },
   "function:reduce": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "150",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LAMBDA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:regexextract": {
     "classification": "not_implemented",
@@ -7599,11 +7585,10 @@
     "excel_rich_error": false
   },
   "function:scan": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.LAMBDA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:search": {
     "classification": "match",

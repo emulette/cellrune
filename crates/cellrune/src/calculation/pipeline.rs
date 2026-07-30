@@ -120,6 +120,12 @@ fn collect_function_calls_in_scope(
                 collect_function_calls_in_scope(arg, output, local_names);
             }
         }
+        Expr::Invoke { callee, args } => {
+            collect_function_calls_in_scope(callee, output, local_names);
+            for arg in args {
+                collect_function_calls_in_scope(arg, output, local_names);
+            }
+        }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
@@ -513,6 +519,12 @@ fn expr_contains_function(
             args.iter()
                 .any(|arg| expr_contains_function(engine, sheet, arg, expected, names, local_names))
         }
+        Expr::Invoke { callee, args } => {
+            expr_contains_function(engine, sheet, callee, expected, names, local_names)
+                || args.iter().any(|arg| {
+                    expr_contains_function(engine, sheet, arg, expected, names, local_names)
+                })
+        }
         Expr::ImplicitIntersection(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
@@ -684,6 +696,28 @@ fn inspect_expr(
                     sheet,
                     arg,
                     argument_policy,
+                    names,
+                    local_scope,
+                    issues,
+                );
+            }
+        }
+        Expr::Invoke { callee, args } => {
+            inspect_expr(
+                engine,
+                sheet,
+                callee,
+                sheet_span_policy,
+                names,
+                local_scope,
+                issues,
+            );
+            for arg in args {
+                inspect_expr(
+                    engine,
+                    sheet,
+                    arg,
+                    sheet_span_policy,
                     names,
                     local_scope,
                     issues,

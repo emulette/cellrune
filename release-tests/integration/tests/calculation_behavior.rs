@@ -120,6 +120,34 @@ fn callable_bindings_shadow_builtins_without_falling_through() {
 }
 
 #[test]
+fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "LAMBDA(x,x+1)(5)"),
+        (1, 2, "LAMBDA(x,y,ISOMITTED(y))(1,)"),
+        (1, 3, "SUM(BYROW({1,2;3,4},LAMBDA(row,SUM(row))))"),
+        (1, 4, "SUM(BYCOL({1,2;3,4},LAMBDA(col,SUM(col))))"),
+        (1, 5, "REDUCE(0,{1,2,3},LAMBDA(acc,value,acc+value))"),
+        (1, 6, "SUM(SCAN(0,{1,2,3},LAMBDA(acc,value,acc+value)))"),
+        (1, 7, "SUM(MAKEARRAY(2,3,LAMBDA(row,column,row*10+column)))"),
+        (1, 8, "SUM(LAMBDA(value,value+1)({1,2}))"),
+        (1, 9, "_xlfn.LAMBDA(_xlpm.value,_xlpm.value+1)(5)"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 6.0, 0.0);
+    assert_eq!(
+        calculation.cell(cell_id(2)),
+        Some(&CalculationCellResult::Value(CellValue::Logical(true)))
+    );
+    assert_number(&calculation, 3, 10.0, 0.0);
+    assert_number(&calculation, 4, 10.0, 0.0);
+    assert_number(&calculation, 5, 6.0, 0.0);
+    assert_number(&calculation, 6, 10.0, 0.0);
+    assert_number(&calculation, 7, 102.0, 0.0);
+    assert_number(&calculation, 8, 5.0, 0.0);
+    assert_number(&calculation, 9, 6.0, 0.0);
+}
+
+#[test]
 fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Table1[Amount])"),
@@ -854,7 +882,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        280
+        286
     );
     let let_entry = catalog
         .iter()

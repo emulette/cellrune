@@ -31,8 +31,8 @@ mod trigonometry;
 mod util;
 
 pub(super) use dynamic::{
-    invoke_lambda, lambda_scope_value, let_reference, let_scope_value, map_scalar_with_trace,
-    with_let_scope,
+    helper_array_with_trace, helper_scalar_with_trace, invoke_lambda, lambda_scope_value,
+    let_reference, let_scope_value, map_scalar_with_trace, with_let_scope,
 };
 
 pub(super) fn call_function(
@@ -185,6 +185,9 @@ pub(super) fn call_function_array(
     args: &[Expr],
 ) -> Option<Result<ArrayEvaluation, ErrorKind>> {
     let normalized = normalize_name(name);
+    if let Some(result) = helper_array_with_trace(engine, context, &normalized, args) {
+        return Some(result);
+    }
     let specialized = match normalized.as_str() {
         "MAP" => Some(dynamic::map_array_with_trace(engine, context, args)),
         "CHOOSECOLS" | "CHOOSEROWS" | "DROP" | "FILTER" | "HSTACK" | "MMULT" | "SEQUENCE"
@@ -534,7 +537,17 @@ const DATE_ADDITIONAL_FUNCTIONS: &[&str] = &[
     "TIME",
     "WEEKNUM",
 ];
-const DYNAMIC_FUNCTIONS: &[&str] = &["LAMBDA", "LET", "MAP"];
+const DYNAMIC_FUNCTIONS: &[&str] = &[
+    "BYCOL",
+    "BYROW",
+    "ISOMITTED",
+    "LAMBDA",
+    "LET",
+    "MAKEARRAY",
+    "MAP",
+    "REDUCE",
+    "SCAN",
+];
 const ARRAY_FUNCTIONS: &[&str] = &[
     "CHOOSECOLS",
     "CHOOSEROWS",
@@ -679,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_280_unique_excel_facing_names() {
+    fn coverage_registry_has_286_unique_excel_facing_names() {
         let kernels: BTreeSet<&str> = FUNCTION_GROUPS
             .iter()
             .flat_map(|(_, names)| names.iter().copied())
@@ -688,7 +701,7 @@ mod tests {
             FUNCTION_GROUPS.iter().map(|(_, names)| names.len()).sum();
         assert_eq!(kernels.len(), registered_kernel_count);
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 268);
+        assert_eq!(kernels.len(), 274);
 
         let aliases: BTreeSet<&str> = LEGACY_ALIASES.iter().map(|(alias, _)| *alias).collect();
         assert_eq!(aliases.len(), LEGACY_ALIASES.len());
@@ -700,7 +713,7 @@ mod tests {
         );
 
         let official_kernels = kernels.len() - 1;
-        assert_eq!(official_kernels + aliases.len(), 280);
+        assert_eq!(official_kernels + aliases.len(), 286);
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());

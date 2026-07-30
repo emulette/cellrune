@@ -126,6 +126,17 @@ impl Engine<'_> {
                     self.expr_has_unresolved_dynamic_dependency(context, arg, names, local_names)
                 })
             }
+            Expr::Invoke { callee, args } => {
+                self.expr_has_unresolved_dynamic_dependency(context, callee, names, local_names)
+                    || args.iter().any(|arg| {
+                        self.expr_has_unresolved_dynamic_dependency(
+                            context,
+                            arg,
+                            names,
+                            local_names,
+                        )
+                    })
+            }
             Expr::Name(name) => {
                 if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return false;
@@ -362,6 +373,12 @@ impl Engine<'_> {
                     self.collect_dependency_rects(context, arg, names, local_names, output);
                 }
             }
+            Expr::Invoke { callee, args } => {
+                self.collect_dependency_rects(context, callee, names, local_names, output);
+                for arg in args {
+                    self.collect_dependency_rects(context, arg, names, local_names, output);
+                }
+            }
             Expr::Array(rows) => {
                 for row in rows {
                     for element in row {
@@ -445,6 +462,24 @@ impl Engine<'_> {
                     self.collect_dependency_rects(context, arg, names, local_names, output);
                 }
             }
+            Expr::Invoke { callee, args } => {
+                self.collect_reference_selection_inputs(
+                    context,
+                    callee,
+                    names,
+                    local_names,
+                    output,
+                );
+                for arg in args {
+                    self.collect_reference_selection_inputs(
+                        context,
+                        arg,
+                        names,
+                        local_names,
+                        output,
+                    );
+                }
+            }
             Expr::Number(_)
             | Expr::Text(_)
             | Expr::Logical(_)
@@ -480,6 +515,17 @@ impl Engine<'_> {
                 args.iter().any(|arg| {
                     self.expr_contains_dynamic_reference_function(context, arg, names, local_names)
                 })
+            }
+            Expr::Invoke { callee, args } => {
+                self.expr_contains_dynamic_reference_function(context, callee, names, local_names)
+                    || args.iter().any(|arg| {
+                        self.expr_contains_dynamic_reference_function(
+                            context,
+                            arg,
+                            names,
+                            local_names,
+                        )
+                    })
             }
             Expr::Name(name) => {
                 if context.binding(name).is_some() || is_local_name(name, local_names) {

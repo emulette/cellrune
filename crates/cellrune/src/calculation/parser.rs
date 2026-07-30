@@ -86,6 +86,10 @@ fn validate_ast_limits(
             Expr::Call { args, .. } => {
                 pending.extend(args.iter().map(|arg| (arg, depth + 1)));
             }
+            Expr::Invoke { callee, args } => {
+                pending.push((callee, depth + 1));
+                pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+            }
             Expr::ImplicitIntersection(operand)
             | Expr::Unary { operand, .. }
             | Expr::Paren(operand) => {
@@ -157,6 +161,14 @@ fn split_cell_ident(ident: &str) -> Option<(String, Option<u32>)> {
         return None;
     }
     Some((letters, Some(row)))
+}
+
+fn is_lambda_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("LAMBDA")
+        || name
+            .strip_prefix("_xlfn.")
+            .or_else(|| name.strip_prefix("_XLFN."))
+            .is_some_and(|base| base.eq_ignore_ascii_case("LAMBDA"))
 }
 
 impl Parser {
@@ -234,6 +246,18 @@ impl Parser {
                 left = Expr::Unary {
                     op: UnaryOp::Percent,
                     operand: Box::new(left),
+                };
+                continue;
+            }
+            if self.peek() == Some(&Token::LParen) && 90 >= min_bp {
+                if !matches!(&left, Expr::Call { name, .. } if is_lambda_name(name)) {
+                    break;
+                }
+                self.cursor += 1;
+                let args = self.parse_call_args()?;
+                left = Expr::Invoke {
+                    callee: Box::new(left),
+                    args,
                 };
                 continue;
             }

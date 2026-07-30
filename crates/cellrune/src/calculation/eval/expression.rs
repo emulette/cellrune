@@ -7,8 +7,8 @@ use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
 use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation};
 use crate::calculation::functions::{
-    call_function, call_function_array, callable_call_scope, lambda_scope_value, let_scope_value,
-    map_scalar_with_trace, normalize_name,
+    call_function, call_function_array, callable_call_scope, helper_scalar_with_trace,
+    invoke_lambda, lambda_scope_value, let_scope_value, map_scalar_with_trace, normalize_name,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
@@ -144,6 +144,7 @@ impl Engine<'_> {
                         .map_or_else(scope_error, scope_from_array)
                 }
             }
+            Expr::Invoke { callee, args } => invoke_scope_value(self, context, callee, args),
             _ => self
                 .eval_array_with_trace(context, expr)
                 .map_or_else(scope_error, scope_from_array),
@@ -308,8 +309,19 @@ impl Engine<'_> {
             Expr::Call { name, args } if normalize_name(name) == "MAP" => {
                 map_scalar_with_trace(self, context, args)
             }
+            Expr::Call { name, args }
+                if matches!(
+                    normalize_name(name).as_str(),
+                    "BYCOL" | "BYROW" | "MAKEARRAY" | "REDUCE" | "SCAN"
+                ) =>
+            {
+                helper_scalar_with_trace(self, context, &normalize_name(name), args)
+            }
             Expr::Call { name, args } => {
                 ScalarEvaluation::untracked(call_function(self, context, name, args))
+            }
+            Expr::Invoke { callee, args } => {
+                self.scalar_from_scope(context, &invoke_scope_value(self, context, callee, args))
             }
             Expr::Unary { op, operand } => {
                 evaluate_unary(*op, self.eval_scalar_with_trace(context, operand))
@@ -531,6 +543,17 @@ impl Engine<'_> {
                 let scoped = let_scope_value(self, context, args);
                 self.array_from_scope(&scoped, evaluation)
             }
+            Expr::Invoke { callee, args } => {
+                let scoped = invoke_scope_value(self, context, callee, args);
+                let evaluated = self.array_from_scope(&scoped, evaluation)?;
+                if evaluation.extent.is_some() {
+                    let cells = u64::from(evaluated.array.rows)
+                        .checked_mul(u64::from(evaluated.array.cols))
+                        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
+                    evaluation.charge(self, cells)?;
+                }
+                Ok(evaluated)
+            }
             Expr::Call { name, args } => {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     let evaluated = self.array_from_scope(&scoped, evaluation)?;
@@ -700,7 +723,8 @@ impl Engine<'_> {
             | Expr::Missing
             | Expr::ImplicitIntersection(_)
             | Expr::Array(_)
-            | Expr::Call { .. } => None,
+            | Expr::Call { .. }
+            | Expr::Invoke { .. } => None,
         }
     }
 
@@ -720,4 +744,19 @@ fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
         return Vec::new();
     };
     args.clone()
+}
+
+fn invoke_scope_value(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    callee: &Expr,
+    args: &[Expr],
+) -> ScopeValue {
+    match engine.eval_scope_value(context, callee) {
+        ScopeValue::Callable(closure) => invoke_lambda(engine, context, &closure, args),
+        ScopeValue::Scalar(evaluated) if matches!(evaluated.value, Value::Error(_)) => {
+            ScopeValue::Scalar(evaluated)
+        }
+        _ => ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value))),
+    }
 }

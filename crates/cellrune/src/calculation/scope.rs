@@ -104,20 +104,12 @@ impl ScopeEntry {
         }
     }
 
-    pub(super) fn placeholder(name: String) -> Self {
-        Self::new(name, ScopeValue::Missing)
-    }
-
     fn matches(&self, name: &str) -> bool {
         self.name.as_ref() == canonical_local_name(name)
     }
 
     fn value(&self) -> &ScopeValue {
         self.value.as_ref()
-    }
-
-    pub(super) fn set_value(&mut self, value: ScopeValue) {
-        self.value = Arc::new(value);
     }
 }
 
