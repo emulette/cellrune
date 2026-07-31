@@ -28,9 +28,9 @@ use cellrune::{
     DiagnosticSeverity, FormulaCapability, FormulaCapabilityReport, FormulaCell, FunctionSupport,
     NumberFormatKind, Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode,
     RecalculationWriteOptions, SavedResult, SavedResultIssue, SessionError, SharedFormulaRole,
-    Sheet, SheetId, SheetVisibility, ValidationError, WorkbookSnapshot, WorkbookSource,
-    WorkbookSourceKind, XlsxDocument, XlsxReadError, XlsxWriteError, calculate_workbook,
-    read_xlsx_bytes, scan_formula_capabilities, write_recalculated_xlsx_bytes,
+    Sheet, SheetId, SheetVisibility, TableColumn, TableColumnId, ValidationError, WorkbookSnapshot,
+    WorkbookSource, WorkbookSourceKind, XlsxDocument, XlsxReadError, XlsxWriteError,
+    calculate_workbook, read_xlsx_bytes, scan_formula_capabilities, write_recalculated_xlsx_bytes,
 };
 
 /// Captures a payload binding's exact type. The intermediate `let pinned = payload(…);` at every
@@ -189,6 +189,14 @@ fn frozen_workbook_source_kind(kind: WorkbookSourceKind) {
     }
 }
 
+fn frozen_table_column_scalar_api() {
+    let id: u32 = 1;
+    let column = TableColumn::new(id, "Borrowed", None).expect("valid borrowed name");
+    let _owned = TableColumn::new(id, String::from("Owned"), None).expect("valid owned name");
+    let _: u32 = column.id();
+    let _: TableColumnId = column.column_id();
+}
+
 #[allow(clippy::type_complexity)]
 const _FROZEN_NEW_WITH_METADATA: fn(
     Vec<Sheet>,
@@ -241,4 +249,5 @@ fn the_frozen_enums_are_exhaustively_matched() {
     frozen_diagnostic_severity(DiagnosticSeverity::Info);
     frozen_shared_formula_role(SharedFormulaRole::Anchor);
     frozen_workbook_source_kind(WorkbookSourceKind::Unknown);
+    frozen_table_column_scalar_api();
 }

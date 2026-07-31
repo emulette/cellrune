@@ -198,8 +198,12 @@ than guessing a name from a different XLSX crate (`calamine`,
 
 - `WorkbookSnapshot`: `.sheets() -> &[Sheet]`, `.sheet_by_id(SheetId)`,
   `.sheet_by_name(&str)`, `.table(&str) -> Option<&Table>` (workbook-global
-  `displayName`, case-insensitive), `.defined_names()`, `.diagnostics()`,
-  `.date_system()`, `.calculation_hints()`, `.source()`, `.provenance()`.
+  `displayName`, case-insensitive), `.table_by_id(TableId)`,
+  `.table_column_by_id(TableId, TableColumnId)`,
+  `.table_column(TableId, &str)` (case-insensitive column name),
+  `.containing_table(SheetId, CellAddress)` (unique containing table),
+  `.defined_names()`, `.diagnostics()`, `.date_system()`,
+  `.calculation_hints()`, `.source()`, `.provenance()`.
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
@@ -210,14 +214,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.display_name() -> &TableName` (workbook-global formula/UI name),
   `.range()`, `.header_row_count()`, `.totals_row_count()`,
   `.columns() -> &[TableColumn]`.
-- `TableColumn`: `.id()` (stable XLSX identifier that survives renames),
+- `TableColumn`: `.id() -> u32` (the original scalar API),
+  `.column_id() -> TableColumnId` (typed non-zero stable identity),
   `.name()`, `.totals_row_function() -> Option<TotalsRowFunction>`.
 - `TotalsRowFunction` (`#[non_exhaustive]`): `Sum | Min | Max | Average |
   Count | CountNumbers | StdDev | Var | Custom`; `.as_str()` returns the
   OOXML token. Invalid table definitions, duplicate IDs or display names,
   worksheet-local duplicate programmatic names, and defined-name conflicts
   are reported as `xlsx.table.*` warning diagnostics and drop only that
-  table; merged-range problems likewise as `xlsx.merged_range.*`.
+  table. A later table whose range overlaps an already accepted table is
+  likewise dropped with `xlsx.table.overlap`; merged-range problems use
+  `xlsx.merged_range.*`.
 - `Cell`: `.address()`, `.content() -> &CellContent`, `.number_format()`.
 - `CellContent::Literal(CellValue) | Formula(FormulaCell)`.
 - `CellValue` (`#[non_exhaustive]`): `Blank | Number(FiniteNumber) | Text(String) | Logical(bool) | Error(ExcelError)`.

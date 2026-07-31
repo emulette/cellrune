@@ -126,7 +126,7 @@ pub use presentation::{
     ResolvedPhoneticRun,
 };
 pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
-pub use table::{Table, TableColumn, TableId, TableName, TotalsRowFunction};
+pub use table::{Table, TableColumn, TableColumnId, TableId, TableName, TotalsRowFunction};
 pub use workbook::{
     CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,
     WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,

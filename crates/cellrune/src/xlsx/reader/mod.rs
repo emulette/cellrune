@@ -28,6 +28,7 @@ use self::styles::Styles;
 use super::error::{compatibility, detail};
 use super::package::{OpenedPackage, PackageSummary, PartPath, WorkbookPackageKind, open_package};
 use super::{ReadOptions, XlsxErrorCode, XlsxReadError};
+use crate::workbook::TableRangeIndex;
 use crate::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DocumentPresentation, InputHash, Provenance,
     ProviderIdentity, Sheet, SheetId, SourceLocation, TableId, WorkbookSnapshot, WorkbookSource,
@@ -280,8 +281,7 @@ fn read_sheet_tables<R: Read + Seek>(
         worksheet_part.source_id(),
         XlsxErrorCode::InvalidWorksheet,
     );
-    let mut tables = Vec::new();
-    let mut programmatic_names = BTreeSet::<Box<str>>::new();
+    let mut parsed_tables = Vec::new();
     for relationship_id in table_relationship_ids {
         let Some(part) = table_parts.get(relationship_id) else {
             table::push_invalid_diagnostic(
@@ -296,6 +296,12 @@ fn read_sheet_tables<R: Read + Seek>(
         let Some(parsed) = table::parse(&bytes, part, limits, sheet.id(), diagnostics)? else {
             continue;
         };
+        parsed_tables.push(parsed);
+    }
+    let mut tables = Vec::new();
+    let mut accepted_ranges = TableRangeIndex::default();
+    let mut programmatic_names = BTreeSet::<Box<str>>::new();
+    for parsed in parsed_tables {
         if seen_table_ids.contains(&parsed.id()) {
             table::push_table_diagnostic(
                 diagnostics,
@@ -342,6 +348,18 @@ fn read_sheet_tables<R: Read + Seek>(
             )?;
             continue;
         }
+        if accepted_ranges.intersects(parsed.range()) {
+            table::push_table_diagnostic(
+                diagnostics,
+                compatibility::TABLE_OVERLAP_CODE,
+                compatibility::TABLE_OVERLAP_MESSAGE,
+                parsed.display_name().as_str(),
+                sheet.id(),
+                &budget,
+            )?;
+            continue;
+        }
+        accepted_ranges.insert(parsed.range(), ());
         seen_table_ids.insert(parsed.id());
         seen_table_display_names.insert(Box::from(display_key));
         programmatic_names.insert(Box::from(programmatic_key));

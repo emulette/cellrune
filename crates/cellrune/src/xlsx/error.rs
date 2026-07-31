@@ -79,6 +79,9 @@ pub(crate) mod compatibility {
     pub(crate) const TABLE_DEFINED_NAME_CONFLICT_CODE: &str = "xlsx.table.display_name_conflict";
     pub(crate) const TABLE_DEFINED_NAME_CONFLICT_MESSAGE: &str =
         "table display name conflicts with a defined name and was dropped";
+    pub(crate) const TABLE_OVERLAP_CODE: &str = "xlsx.table.overlap";
+    pub(crate) const TABLE_OVERLAP_MESSAGE: &str =
+        "table range overlaps another table and was dropped";
     pub(crate) const TABLE_UNRESOLVED_RELATIONSHIP: &str = "unresolved table relationship id";
     pub(crate) const TABLE_MISSING_RELATIONSHIP_ID: &str = "missing table relationship id";
 }

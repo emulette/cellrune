@@ -1,9 +1,14 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
+mod table_index;
+
+pub(crate) use table_index::TableRangeIndex;
+use table_index::{TableColumnLocation, TableIndex, TableLocation};
+
 use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
-    NumberFormat, Provenance, Row, Table, ValidationError,
+    NumberFormat, Provenance, Row, Table, TableColumn, TableColumnId, TableId, ValidationError,
 };
 
 fn clone_map_cancellable<K, V>(
@@ -483,7 +488,7 @@ pub struct WorkbookSnapshot {
     sheets: Vec<Sheet>,
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
-    table_display_name_index: BTreeMap<Box<str>, (usize, usize)>,
+    table_index: TableIndex,
     defined_names: Vec<DefinedName>,
     defined_name_index: BTreeMap<DefinedNameScope, BTreeMap<Box<str>, usize>>,
     diagnostics: Vec<Diagnostic>,
@@ -531,10 +536,7 @@ impl WorkbookSnapshot {
             sheets,
             sheet_id_index: clone_map_cancellable(&self.sheet_id_index, cancelled)?,
             sheet_name_index: clone_map_cancellable(&self.sheet_name_index, cancelled)?,
-            table_display_name_index: clone_map_cancellable(
-                &self.table_display_name_index,
-                cancelled,
-            )?,
+            table_index: self.table_index.clone_cancellable(cancelled)?,
             defined_names,
             defined_name_index,
             diagnostics,
@@ -561,7 +563,7 @@ impl WorkbookSnapshot {
             sheets: vec![sheet],
             sheet_id_index,
             sheet_name_index,
-            table_display_name_index: BTreeMap::new(),
+            table_index: TableIndex::default(),
             defined_names: Vec::new(),
             defined_name_index: BTreeMap::new(),
             diagnostics: Vec::new(),
@@ -647,43 +649,12 @@ impl WorkbookSnapshot {
             }
             defined_name_keys.insert(Box::from(defined_name.lookup_key()));
         }
-        let mut table_ids = std::collections::BTreeSet::new();
-        let mut table_display_name_index = BTreeMap::<Box<str>, (usize, usize)>::new();
-        for (sheet_index, sheet) in sheets.iter().enumerate() {
-            let mut programmatic_names = std::collections::BTreeSet::<Box<str>>::new();
-            for (table_index, table) in sheet.tables().iter().enumerate() {
-                if !table_ids.insert(table.id()) {
-                    return Err(ValidationError::DuplicateTableId {
-                        id: table.id().get(),
-                    });
-                }
-                let display_key = Box::<str>::from(table.display_name().lookup_key());
-                if defined_name_keys.contains(display_key.as_ref()) {
-                    return Err(ValidationError::TableDisplayNameConflictsWithDefinedName {
-                        name: table.display_name().as_str().to_owned(),
-                    });
-                }
-                if table_display_name_index
-                    .insert(display_key, (sheet_index, table_index))
-                    .is_some()
-                {
-                    return Err(ValidationError::DuplicateTableDisplayName {
-                        name: table.display_name().as_str().to_owned(),
-                    });
-                }
-                let programmatic_key = Box::<str>::from(table.name().lookup_key());
-                if !programmatic_names.insert(programmatic_key) {
-                    return Err(ValidationError::DuplicateTableProgrammaticName {
-                        name: table.name().as_str().to_owned(),
-                    });
-                }
-            }
-        }
+        let table_index = TableIndex::new(&sheets, &defined_name_keys)?;
         Ok(Self {
             sheets,
             sheet_id_index,
             sheet_name_index,
-            table_display_name_index,
+            table_index,
             defined_names,
             defined_name_index,
             diagnostics,
@@ -732,9 +703,74 @@ impl WorkbookSnapshot {
     /// OOXML `displayName` values are workbook-global and case-insensitive even though each table
     /// is owned by its worksheet. The worksheet-local programmatic `name` is not a lookup key.
     pub fn table(&self, name: &str) -> Option<&Table> {
-        let key = case_insensitive_key(name);
-        let (sheet_index, table_index) = *self.table_display_name_index.get(key.as_str())?;
-        Some(&self.sheets[sheet_index].tables()[table_index])
+        let location = self.table_location(name)?;
+        Some(&self.sheets[location.sheet_index].tables()[location.table_index])
+    }
+
+    /// Returns a table by its stable workbook-local identifier.
+    pub fn table_by_id(&self, id: TableId) -> Option<&Table> {
+        let location = self.table_location_by_id(id)?;
+        Some(&self.sheets[location.sheet_index].tables()[location.table_index])
+    }
+
+    /// Returns a table column by the stable identities of its table and column.
+    pub fn table_column_by_id(
+        &self,
+        table_id: TableId,
+        column_id: TableColumnId,
+    ) -> Option<&TableColumn> {
+        let location = self.table_column_location_by_id(table_id, column_id)?;
+        Some(
+            &self.sheets[location.table.sheet_index].tables()[location.table.table_index].columns()
+                [location.column_index],
+        )
+    }
+
+    /// Returns a table column by stable table ID and case-insensitive column name.
+    pub fn table_column(&self, table_id: TableId, name: &str) -> Option<&TableColumn> {
+        let location = self.table_column_location(table_id, name)?;
+        Some(
+            &self.sheets[location.table.sheet_index].tables()[location.table.table_index].columns()
+                [location.column_index],
+        )
+    }
+
+    /// Returns the table whose full range contains one worksheet address.
+    pub fn containing_table(&self, sheet_id: SheetId, address: CellAddress) -> Option<&Table> {
+        let location = self.containing_table_location(sheet_id, address)?;
+        Some(&self.sheets[location.sheet_index].tables()[location.table_index])
+    }
+
+    pub(crate) fn table_location(&self, name: &str) -> Option<TableLocation> {
+        self.table_index.by_display_name(name)
+    }
+
+    pub(crate) fn table_location_by_id(&self, table_id: TableId) -> Option<TableLocation> {
+        self.table_index.by_id(table_id)
+    }
+
+    pub(crate) fn table_column_location_by_id(
+        &self,
+        table_id: TableId,
+        column_id: TableColumnId,
+    ) -> Option<TableColumnLocation> {
+        self.table_index.column_by_id(table_id, column_id)
+    }
+
+    pub(crate) fn table_column_location(
+        &self,
+        table_id: TableId,
+        name: &str,
+    ) -> Option<TableColumnLocation> {
+        self.table_index.column_by_name(table_id, name)
+    }
+
+    pub(crate) fn containing_table_location(
+        &self,
+        sheet_id: SheetId,
+        address: CellAddress,
+    ) -> Option<TableLocation> {
+        self.table_index.containing(sheet_id, address)
     }
 
     /// Returns a sheet using deterministic case-insensitive lookup.

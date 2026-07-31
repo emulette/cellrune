@@ -711,7 +711,7 @@ const TABLE_ONE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 fn table_content_types() -> String {
     CONTENT_TYPES.replace(
         "</Types>",
-        r#"<Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/><Override PartName="/xl/tables/table2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/></Types>"#,
+        r#"<Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/><Override PartName="/xl/tables/table2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/><Override PartName="/xl/tables/table3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/></Types>"#,
     )
 }
 
@@ -771,6 +771,30 @@ fn read_two_table_archive(second_table: &str) -> crate::WorkbookSnapshot {
             ),
             ("xl/tables/table1.xml", TABLE_ONE),
             ("xl/tables/table2.xml", second_table),
+        ],
+    );
+    read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read table archive")
+}
+
+fn read_three_table_archive(second_table: &str, third_table: &str) -> crate::WorkbookSnapshot {
+    let sheet = SHEET_WITH_TABLE.replace(
+        r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
+        r#"<tableParts count="3"><tablePart r:id="rId7"/><tablePart r:id="rId8"/><tablePart r:id="rId9"/></tableParts>"#,
+    );
+    let relationships = SHEET_ONE_TABLE_RELS.replace(
+        "</Relationships>",
+        r#"<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table3.xml"/></Relationships>"#,
+    );
+    let archive = build_table_archive(
+        &sheet,
+        &[
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                relationships.as_str(),
+            ),
+            ("xl/tables/table1.xml", TABLE_ONE),
+            ("xl/tables/table2.xml", second_table),
+            ("xl/tables/table3.xml", third_table),
         ],
     );
     read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read table archive")
@@ -924,6 +948,63 @@ fn duplicate_table_ids_and_programmatic_names_drop_the_later_table() {
 }
 
 #[test]
+fn overlapping_table_ranges_drop_one_table_with_a_diagnostic() {
+    let overlapping = TABLE_ONE
+        .replace(r#"id="1" name="Sales""#, r#"id="2" name="Other""#)
+        .replace(
+            r#"displayName="SalesDisplay""#,
+            r#"displayName="OtherDisplay""#,
+        );
+    let snapshot = read_two_table_archive(&overlapping);
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 1);
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.overlap")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn overlapping_table_does_not_reserve_identity_from_a_later_valid_table() {
+    let overlapping = TABLE_ONE
+        .replace(r#"id="1" name="Sales""#, r#"id="2" name="Other""#)
+        .replace(
+            r#"displayName="SalesDisplay""#,
+            r#"displayName="OtherDisplay""#,
+        );
+    let later_valid = overlapping.replace(r#"ref="A1:C4""#, r#"ref="E1:G4""#);
+    let snapshot = read_three_table_archive(&overlapping, &later_valid);
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    assert_eq!(first.tables().len(), 2);
+    assert_eq!(first.tables()[0].id().get(), 1);
+    assert_eq!(first.tables()[1].id().get(), 2);
+    assert_eq!(first.tables()[1].range().start().to_string(), "E1");
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.overlap")
+            .count(),
+        1
+    );
+    assert!(
+        snapshot.diagnostics().iter().all(|diagnostic| {
+            !matches!(
+                diagnostic.code().as_str(),
+                "xlsx.table.duplicate_id"
+                    | "xlsx.table.duplicate_display_name"
+                    | "xlsx.table.duplicate_programmatic_name"
+            )
+        }),
+        "the discarded table must not reserve its identities"
+    );
+}
+
+#[test]
 fn table_display_names_conflicting_with_defined_names_are_dropped() {
     let workbook = WORKBOOK.replace(
         "  <calcPr",
@@ -958,10 +1039,11 @@ fn table_display_names_conflicting_with_defined_names_are_dropped() {
 }
 
 #[test]
-fn required_table_id_and_declared_column_count_are_validated() {
+fn required_table_and_column_ids_and_declared_column_count_are_validated() {
     let invalid_tables = [
         TABLE_ONE.replace(r#" id="1""#, ""),
         TABLE_ONE.replace(r#"id="1""#, r#"id="0""#),
+        TABLE_ONE.replace(r#"<tableColumn id="1""#, r#"<tableColumn id="0""#),
         TABLE_ONE.replace(r#"tableColumns count="3""#, "tableColumns"),
         TABLE_ONE.replace(r#"tableColumns count="3""#, r#"tableColumns count="2""#),
     ];

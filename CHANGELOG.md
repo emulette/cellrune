@@ -10,6 +10,18 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- Typed non-zero `TableColumnId` values, immutable lookup indexes for tables and columns, and
+  containing-table lookup by worksheet address. The original scalar `TableColumn::id()` and
+  positional constructor signatures remain compatible; the constructor now rejects a zero
+  column ID instead of accepting an invalid OOXML identity.
+
+### Fixed
+
+- XLSX reads now diagnose and drop a later table whose range overlaps an already accepted table
+  instead of allowing an ambiguous workbook snapshot.
+
 ## [0.1.8] - 2026-07-30
 
 ### Added

@@ -35,6 +35,40 @@ impl TryFrom<u32> for TableId {
     }
 }
 
+/// A validated, non-zero identifier for one column within an Excel table.
+///
+/// OOXML column IDs are stable across column renames and must be unique within their owning
+/// table. The [`Table`] constructor enforces that per-table uniqueness; this type enforces the
+/// non-zero scalar invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TableColumnId(NonZeroU32);
+
+impl TableColumnId {
+    /// Validates and constructs a table column ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::TableColumnIdZero`] when `value` is zero.
+    pub fn new(value: u32) -> Result<Self, ValidationError> {
+        NonZeroU32::new(value)
+            .map(Self)
+            .ok_or(ValidationError::TableColumnIdZero)
+    }
+
+    /// Returns the table-local numeric ID.
+    pub const fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u32> for TableColumnId {
+    type Error = ValidationError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
 /// A validated Excel table name with its original spelling preserved.
 ///
 /// Both OOXML `name` and `displayName` use the same character and length constraints. Their
@@ -136,7 +170,7 @@ impl TotalsRowFunction {
 /// across edits hold the identifier rather than the name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableColumn {
-    id: u32,
+    id: TableColumnId,
     name: Box<str>,
     totals_row_function: Option<TotalsRowFunction>,
 }
@@ -146,12 +180,14 @@ impl TableColumn {
     ///
     /// # Errors
     ///
-    /// Returns [`ValidationError::TableColumnNameEmpty`] when the column name is empty.
+    /// Returns [`ValidationError::TableColumnIdZero`] when `id` is zero or
+    /// [`ValidationError::TableColumnNameEmpty`] when the column name is empty.
     pub fn new(
         id: u32,
         name: impl Into<String>,
         totals_row_function: Option<TotalsRowFunction>,
     ) -> Result<Self, ValidationError> {
+        let id = TableColumnId::new(id)?;
         let name = name.into();
         if name.is_empty() {
             return Err(ValidationError::TableColumnNameEmpty);
@@ -165,6 +201,13 @@ impl TableColumn {
 
     /// Returns the stable XLSX column identifier.
     pub const fn id(&self) -> u32 {
+        self.id.get()
+    }
+
+    /// Returns the typed stable XLSX column identifier.
+    ///
+    /// [`Self::id`] remains available as the original scalar API.
+    pub const fn column_id(&self) -> TableColumnId {
         self.id
     }
 
@@ -312,7 +355,9 @@ fn case_insensitive_key(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Table, TableColumn, TableId, TableName, TotalsRowFunction};
+    use std::cell::Cell;
+
+    use super::{Table, TableColumn, TableColumnId, TableId, TableName, TotalsRowFunction};
     use crate::{
         CalculationHints, CellAddress, CellRange, DateSystem, DefinedName, DefinedNameScope,
         FormulaText, Provenance, ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility,
@@ -348,6 +393,11 @@ mod tests {
     fn table_name_is_case_insensitive_and_preserves_spelling() {
         assert_eq!(TableId::new(0), Err(ValidationError::TableIdZero));
         assert_eq!(TableId::new(7).expect("table id").get(), 7);
+        assert_eq!(
+            TableColumnId::new(0),
+            Err(ValidationError::TableColumnIdZero)
+        );
+        assert_eq!(TableColumnId::new(9).expect("column id").get(), 9);
         let name = TableName::new("SalesTable").expect("name");
         assert_eq!(name.as_str(), "SalesTable");
         assert_eq!(name.lookup_key(), "salestable");
@@ -431,6 +481,10 @@ mod tests {
             TableColumn::new(1, "", Some(TotalsRowFunction::Sum)),
             Err(ValidationError::TableColumnNameEmpty)
         );
+        assert_eq!(
+            TableColumn::new(0, "First", None),
+            Err(ValidationError::TableColumnIdZero)
+        );
     }
 
     #[test]
@@ -466,6 +520,80 @@ mod tests {
                 .as_str(),
             "Alpha"
         );
+        let alpha_id = TableId::new(1).expect("table id");
+        let first_column_id = TableColumnId::new(1).expect("column id");
+        assert_eq!(
+            snapshot
+                .table_by_id(alpha_id)
+                .expect("table by stable id")
+                .display_name()
+                .as_str(),
+            "Alpha"
+        );
+        assert_eq!(
+            snapshot
+                .table_column_by_id(alpha_id, first_column_id)
+                .expect("column by stable id")
+                .name(),
+            "First"
+        );
+        assert_eq!(
+            snapshot
+                .table_column(alpha_id, "fIRSt")
+                .expect("column by case-insensitive name")
+                .column_id(),
+            first_column_id
+        );
+        assert_eq!(
+            snapshot
+                .containing_table(
+                    SheetId::new(1).expect("sheet id"),
+                    CellAddress::from_a1("B2").expect("address"),
+                )
+                .expect("containing table")
+                .id(),
+            alpha_id
+        );
+        assert!(
+            snapshot
+                .containing_table(
+                    SheetId::new(1).expect("sheet id"),
+                    CellAddress::from_a1("C2").expect("address"),
+                )
+                .is_none()
+        );
+        assert!(
+            snapshot
+                .table_by_id(TableId::new(999).expect("missing table id"))
+                .is_none()
+        );
+        assert!(
+            snapshot
+                .table_column_by_id(
+                    alpha_id,
+                    TableColumnId::new(999).expect("missing column id"),
+                )
+                .is_none()
+        );
+        assert!(snapshot.table_column(alpha_id, "Missing").is_none());
+        let beta_id = TableId::new(2).expect("table id");
+        assert_eq!(
+            snapshot
+                .table_column_by_id(beta_id, first_column_id)
+                .expect("same column id belongs to the second table")
+                .name(),
+            "First"
+        );
+        assert_eq!(
+            snapshot
+                .containing_table(
+                    SheetId::new(2).expect("sheet id"),
+                    CellAddress::from_a1("B2").expect("address"),
+                )
+                .expect("same geometry is indexed per sheet")
+                .id(),
+            beta_id
+        );
         assert_eq!(
             snapshot
                 .table("beta")
@@ -476,6 +604,35 @@ mod tests {
         );
         assert!(snapshot.table("Gamma").is_none());
         assert!(snapshot.table("Local").is_none());
+        let cloned = snapshot.clone();
+        assert_eq!(
+            cloned
+                .table_column_by_id(alpha_id, first_column_id)
+                .expect("cloned snapshot keeps the stable index")
+                .name(),
+            "First"
+        );
+        assert_eq!(
+            cloned
+                .containing_table(
+                    SheetId::new(2).expect("sheet id"),
+                    CellAddress::from_a1("B2").expect("address"),
+                )
+                .expect("cloned snapshot keeps the spatial index")
+                .id(),
+            beta_id
+        );
+        let clone_polls = Cell::new(0_u32);
+        let cancelled = || {
+            let next = clone_polls.get() + 1;
+            clone_polls.set(next);
+            next >= 14
+        };
+        assert!(
+            snapshot.clone_cancellable(&cancelled).is_err(),
+            "snapshot clone must propagate cancellation from the table index"
+        );
+        assert_eq!(clone_polls.get(), 14);
 
         let mut duplicate = Sheet::new(
             SheetId::new(2).expect("id"),
@@ -563,6 +720,34 @@ mod tests {
             error,
             ValidationError::TableDisplayNameConflictsWithDefinedName {
                 name: "Alpha".to_owned(),
+            }
+        );
+
+        let mut overlapping = Sheet::new(
+            SheetId::new(1).expect("id"),
+            sheet_name("One"),
+            SheetVisibility::Visible,
+        );
+        overlapping.set_tables(vec![
+            table(1, "FirstTable", "FirstDisplay"),
+            table(2, "SecondTable", "SecondDisplay"),
+        ]);
+        let error = WorkbookSnapshot::new_with_metadata(
+            vec![overlapping],
+            Vec::new(),
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(ProviderIdentity::new("test", "0").expect("provider"), None),
+        )
+        .expect_err("overlapping tables make containing-table resolution ambiguous");
+        assert_eq!(
+            error,
+            ValidationError::OverlappingTables {
+                sheet_id: 1,
+                first_table_id: 1,
+                second_table_id: 2,
             }
         );
     }
