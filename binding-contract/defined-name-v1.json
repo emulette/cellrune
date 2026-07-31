@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "sheets": ["Middle", "Sheet3"],
+  "defined_names": [
+    {
+      "name": "Target",
+      "scope_sheet": null,
+      "formula": "=Sheet1!A1",
+      "hidden": false
+    },
+    {
+      "name": "Target",
+      "scope_sheet": "Sheet1",
+      "formula": "=Sheet1!B2",
+      "hidden": false
+    },
+    {
+      "name": "WorkbookAlias",
+      "scope_sheet": null,
+      "formula": "=Target",
+      "hidden": false
+    },
+    {
+      "name": "LocalAlias",
+      "scope_sheet": "Sheet1",
+      "formula": "=Target",
+      "hidden": false
+    },
+    {
+      "name": "QualifiedLocal",
+      "scope_sheet": null,
+      "formula": "=Sheet1!Target",
+      "hidden": false
+    },
+    {
+      "name": "ExplicitSingleSpan",
+      "scope_sheet": null,
+      "formula": "=Middle:Middle!D4",
+      "hidden": false
+    },
+    {
+      "name": "Areas",
+      "scope_sheet": null,
+      "formula": "=(Sheet1!A1,Sheet3!B2,Sheet1:Sheet3!C3,Sheet1!A1)",
+      "hidden": false
+    },
+    {
+      "name": "Dynamic",
+      "scope_sheet": null,
+      "formula": "=OFFSET(Sheet1!A1,1,0)",
+      "hidden": false
+    },
+    {
+      "name": "IndirectDynamic",
+      "scope_sheet": null,
+      "formula": "=INDIRECT(\"Sheet1!A1\")",
+      "hidden": false
+    },
+    {
+      "name": "SpillDynamic",
+      "scope_sheet": null,
+      "formula": "=Sheet1!A1#",
+      "hidden": false
+    },
+    {
+      "name": "MixedDynamic",
+      "scope_sheet": null,
+      "formula": "=(OFFSET(Sheet1!A1,1,0),INDIRECT(\"Sheet1!B1\"))",
+      "hidden": false
+    },
+    {
+      "name": "ConstantValue",
+      "scope_sheet": null,
+      "formula": "=1+2",
+      "hidden": false
+    },
+    {
+      "name": "ExternalValue",
+      "scope_sheet": null,
+      "formula": "=[Book.xlsx]Data!A1",
+      "hidden": false
+    },
+    {
+      "name": "ExternalName",
+      "scope_sheet": null,
+      "formula": "=[1]!RemoteName",
+      "hidden": false
+    },
+    {
+      "name": "ExternalTable",
+      "scope_sheet": null,
+      "formula": "=[2]!RemoteTable[Amount]",
+      "hidden": false
+    },
+    {
+      "name": "InvalidValue",
+      "scope_sheet": null,
+      "formula": "=SUM(",
+      "hidden": false
+    },
+    {
+      "name": "CallableValue",
+      "scope_sheet": null,
+      "formula": "=LAMBDA(value,value+1)",
+      "hidden": false
+    }
+  ]
+}

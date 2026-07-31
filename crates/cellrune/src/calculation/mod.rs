@@ -12,6 +12,7 @@ mod coerce;
 mod convert;
 mod criteria;
 mod decimal;
+mod defined_name_analysis;
 mod error;
 mod eval;
 mod functions;
@@ -23,6 +24,7 @@ mod limits;
 mod operators;
 mod parser;
 mod pipeline;
+mod reference_resolution;
 mod runtime;
 mod scope;
 mod session;
@@ -40,6 +42,14 @@ use error::{
 };
 
 pub(super) use crate::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
+pub use defined_name_analysis::{
+    DefinedNameAnalysis, DefinedNameAnalysisError, DefinedNameAnalysisErrorKind,
+    DefinedNameAnalysisLimitKind, DefinedNameAnalysisOptions, DefinedNameAnalysisOptionsError,
+    DefinedNameDynamicKind, DefinedNameExternalReference, DefinedNameExternalTargetKind,
+    DefinedNameInvalidReason, DefinedNameReferenceArea, DefinedNameSheetSpan,
+    DefinedNameUnsupportedReason, analyze_defined_name, analyze_defined_name_cancellable,
+    analyze_defined_name_with_options,
+};
 use limits::CalculationLimitKind;
 pub use limits::{CalculationLimits, CalculationOptionsError};
 pub use session::{

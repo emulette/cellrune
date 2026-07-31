@@ -1,7 +1,8 @@
 use cellrune_interop::{
     CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto, CalculationResultDto,
-    CellDto, CellReferenceDto, CellValueDto, EditReceiptDto, FunctionUsageReportDto, RangePageDto,
-    WorkbookSummaryDto, WriteReportDto,
+    CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
+    DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
+    EditReceiptDto, FunctionUsageReportDto, RangePageDto, WorkbookSummaryDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -169,6 +170,130 @@ pub(crate) fn range_page<'py>(
         cells.append(cell_dict(py, cell)?)?;
     }
     result.set_item("cells", cells)?;
+    Ok(result)
+}
+
+pub(crate) fn defined_name_inspection<'py>(
+    py: Python<'py>,
+    value: &DefinedNameInspectionDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("schema_version", value.schema_version)?;
+    result.set_item("result", defined_name_result(py, &value.result)?)?;
+    Ok(result)
+}
+
+fn defined_name_result<'py>(
+    py: Python<'py>,
+    value: &DefinedNameInspectionResultDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    match value {
+        DefinedNameInspectionResultDto::Rectangular {
+            sheet_id,
+            sheet_name,
+            range,
+        } => {
+            result.set_item("kind", "rectangular")?;
+            result.set_item("sheet_id", sheet_id)?;
+            result.set_item("sheet_name", sheet_name)?;
+            result.set_item("range", range)?;
+        }
+        DefinedNameInspectionResultDto::ThreeDimensional { sheet_span, range } => {
+            result.set_item("kind", "three_dimensional")?;
+            result.set_item("sheet_span", defined_name_sheet_span(py, sheet_span)?)?;
+            result.set_item("range", range)?;
+        }
+        DefinedNameInspectionResultDto::NonRectangular { areas } => {
+            result.set_item("kind", "non_rectangular")?;
+            let converted = PyList::empty(py);
+            for area in areas {
+                converted.append(defined_name_area(py, area)?)?;
+            }
+            result.set_item("areas", converted)?;
+        }
+        DefinedNameInspectionResultDto::EmptyReference => {
+            result.set_item("kind", "empty_reference")?;
+        }
+        DefinedNameInspectionResultDto::DynamicFormula {
+            dynamic_kind,
+            formula,
+        } => {
+            result.set_item("kind", "dynamic_formula")?;
+            result.set_item("dynamic_kind", dynamic_kind.as_str())?;
+            result.set_item("formula", formula)?;
+        }
+        DefinedNameInspectionResultDto::Constant { formula } => {
+            result.set_item("kind", "constant")?;
+            result.set_item("formula", formula)?;
+        }
+        DefinedNameInspectionResultDto::ExternalReference {
+            locator,
+            workbook,
+            sheet,
+            sheet_end,
+            target_kind,
+            target_text,
+        } => {
+            result.set_item("kind", "external_reference")?;
+            result.set_item("locator", locator.as_deref())?;
+            result.set_item("workbook", workbook)?;
+            result.set_item("sheet", sheet.as_deref())?;
+            result.set_item("sheet_end", sheet_end.as_deref())?;
+            result.set_item("target_kind", target_kind.as_str())?;
+            result.set_item("target_text", target_text)?;
+        }
+        DefinedNameInspectionResultDto::Invalid { reason, detail } => {
+            result.set_item("kind", "invalid")?;
+            result.set_item("reason", reason.as_str())?;
+            result.set_item("detail", detail.as_deref())?;
+        }
+        DefinedNameInspectionResultDto::Unsupported { reason, detail } => {
+            result.set_item("kind", "unsupported")?;
+            result.set_item("reason", reason.as_str())?;
+            result.set_item("detail", detail.as_deref())?;
+        }
+        DefinedNameInspectionResultDto::NotFound => {
+            result.set_item("kind", "not_found")?;
+        }
+    }
+    Ok(result)
+}
+
+fn defined_name_area<'py>(
+    py: Python<'py>,
+    value: &DefinedNameReferenceAreaDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    match value {
+        DefinedNameReferenceAreaDto::Rectangular {
+            sheet_id,
+            sheet_name,
+            range,
+        } => {
+            result.set_item("kind", "rectangular")?;
+            result.set_item("sheet_id", sheet_id)?;
+            result.set_item("sheet_name", sheet_name)?;
+            result.set_item("range", range)?;
+        }
+        DefinedNameReferenceAreaDto::ThreeDimensional { sheet_span, range } => {
+            result.set_item("kind", "three_dimensional")?;
+            result.set_item("sheet_span", defined_name_sheet_span(py, sheet_span)?)?;
+            result.set_item("range", range)?;
+        }
+    }
+    Ok(result)
+}
+
+fn defined_name_sheet_span<'py>(
+    py: Python<'py>,
+    value: &DefinedNameSheetSpanDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("start_sheet_id", value.start_sheet_id)?;
+    result.set_item("start_sheet_name", &value.start_sheet_name)?;
+    result.set_item("end_sheet_id", value.end_sheet_id)?;
+    result.set_item("end_sheet_name", &value.end_sheet_name)?;
     Ok(result)
 }
 

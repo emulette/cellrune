@@ -5,6 +5,7 @@ export declare class NativeWorkbook {
   close(): void
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
   functionUsage(): NativeFunctionUsageReport
   calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationReport>
   recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationDelta>
@@ -93,6 +94,45 @@ export interface NativeCellValue {
   textValue?: string
   logicalValue?: boolean
   errorValue?: string
+}
+
+export interface NativeDefinedNameInspection {
+  schemaVersion: number
+  result: NativeDefinedNameInspectionResult
+}
+
+export interface NativeDefinedNameInspectionResult {
+  kind: string
+  sheetId?: number
+  sheetName?: string
+  range?: string
+  sheetSpan?: NativeDefinedNameSheetSpan
+  areas?: Array<NativeDefinedNameReferenceArea>
+  dynamicKind?: string
+  formula?: string
+  locator?: string
+  workbook?: string
+  sheet?: string
+  sheetEnd?: string
+  targetKind?: string
+  targetText?: string
+  reason?: string
+  detail?: string
+}
+
+export interface NativeDefinedNameReferenceArea {
+  kind: string
+  sheetId?: number
+  sheetName?: string
+  range: string
+  sheetSpan?: NativeDefinedNameSheetSpan
+}
+
+export interface NativeDefinedNameSheetSpan {
+  startSheetId: number
+  startSheetName: string
+  endSheetId: number
+  endSheetName: string
 }
 
 export interface NativeEditReceipt {

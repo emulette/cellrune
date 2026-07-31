@@ -2,14 +2,17 @@ use std::collections::BTreeMap;
 
 use super::{Engine, EvalContext};
 use crate::Sheet;
-use crate::calculation::ast::{
-    Expr, RefBody, Reference, StructuredColumns, StructuredItem, StructuredReference,
-};
+use crate::calculation::ast::{Expr, Reference, StructuredReference};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
 use crate::calculation::functions::{callable_call_scope, let_reference, normalize_name};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::parse_formula_with_limits;
-use crate::calculation::runtime::{Rect, RectSpan, ReferenceValue, SheetSpan};
+use crate::calculation::reference_resolution::{
+    intersect_reference_values, intersection_reference_work, range_reference_rect,
+    resolve_reference_span, resolve_structured_reference, structured_table_coordinates,
+    union_reference_values,
+};
+use crate::calculation::runtime::{Rect, RectSpan, ReferenceValue};
 use crate::calculation::scope::ScopeValue;
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
@@ -60,51 +63,7 @@ impl Engine<'_> {
         current_sheet: usize,
         reference: &Reference,
     ) -> Result<RectSpan, ErrorKind> {
-        let (start_sheet, end_sheet) = match &reference.sheet {
-            // An external workbook is an unsupported capability, not a missing sheet. Returning
-            // `Ref` here would let `IFERROR` hide it and would disagree with the capability scan.
-            Some(prefix) if prefix.external_workbook_detail().is_some() => {
-                return Err(ErrorKind::Unsupported);
-            }
-            Some(prefix) => {
-                let start = self
-                    .workbook
-                    .sheet_index_by_name(&prefix.name)
-                    .ok_or(ErrorKind::Ref)?;
-                let end = match &prefix.end_name {
-                    Some(name) => self
-                        .workbook
-                        .sheet_index_by_name(name)
-                        .ok_or(ErrorKind::Ref)?,
-                    None => start,
-                };
-                (start, end)
-            }
-            None => (current_sheet, current_sheet),
-        };
-        let (row_start, col_start, row_end, col_end, whole_rows) =
-            reference_bounds(&reference.body);
-        let sheets = reference.sheet.as_ref().map_or_else(
-            || SheetSpan::single(start_sheet),
-            |prefix| {
-                if prefix.end_name.is_some() {
-                    SheetSpan::new(start_sheet, end_sheet)
-                } else {
-                    SheetSpan::single(start_sheet)
-                }
-            },
-        );
-        Ok(RectSpan::new(
-            sheets,
-            Rect {
-                sheet: start_sheet,
-                row_start,
-                col_start,
-                row_end,
-                col_end,
-                whole_rows,
-            },
-        ))
+        resolve_reference_span(self.workbook, current_sheet, reference)
     }
 
     pub fn resolve_reference(
@@ -154,22 +113,11 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         reference: &StructuredReference,
     ) -> Result<(usize, usize), ErrorKind> {
-        let address = crate::CellAddress::from_indices(context.row(), context.column())
-            .map_err(|_| ErrorKind::Ref)?;
-        let location = match &reference.table {
-            Some(name) => self.workbook.table_location(name).ok_or(ErrorKind::Name)?,
-            None => {
-                let sheet = self
-                    .workbook
-                    .sheets()
-                    .get(context.sheet())
-                    .ok_or(ErrorKind::Ref)?;
-                self.workbook
-                    .containing_table_location(sheet.id(), address)
-                    .ok_or(ErrorKind::Value)?
-            }
-        };
-        Ok((location.sheet_index, location.table_index))
+        structured_table_coordinates(
+            self.workbook,
+            (context.sheet(), context.row(), context.column()),
+            reference,
+        )
     }
 
     fn resolve_structured_reference(
@@ -177,101 +125,11 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         reference: &StructuredReference,
     ) -> Result<ReferenceValue, ErrorKind> {
-        let (sheet_index, table_index) = self.structured_table_coordinates(context, reference)?;
-        let table = &self.workbook.sheets()[sheet_index].tables()[table_index];
-        let range = table.range();
-        let table_row_start = range.start().row().get();
-        let table_row_end = range.end().row().get();
-        let table_col_start = range.start().column().get();
-        let table_col_end = range.end().column().get();
-        let header_end = table_row_start
-            .checked_add(table.header_row_count())
-            .and_then(|row| row.checked_sub(1))
-            .ok_or(ErrorKind::Ref)?;
-        let data_row_start = table_row_start
-            .checked_add(table.header_row_count())
-            .ok_or(ErrorKind::Ref)?;
-        let data_row_end = table_row_end
-            .checked_sub(table.totals_row_count())
-            .ok_or(ErrorKind::Ref)?;
-        let has_headers = table.header_row_count() > 0;
-        let has_totals = table.totals_row_count() > 0 && table.totals_row_shown();
-        let column_index = |name: &str| {
-            self.workbook
-                .table_column_location(table.id(), name)
-                .map(|column| column.column_index)
-                .ok_or(ErrorKind::Ref)
-        };
-        let (col_start, col_end) = match &reference.columns {
-            None => (table_col_start, table_col_end),
-            Some(StructuredColumns::Single(name)) => {
-                let index = column_index(name)?;
-                let column = table_col_start
-                    .checked_add(u32::try_from(index).map_err(|_| ErrorKind::Ref)?)
-                    .ok_or(ErrorKind::Ref)?;
-                (column, column)
-            }
-            Some(StructuredColumns::Range { start, end }) => {
-                let start = column_index(start)?;
-                let end = column_index(end)?;
-                let start = table_col_start
-                    .checked_add(u32::try_from(start).map_err(|_| ErrorKind::Ref)?)
-                    .ok_or(ErrorKind::Ref)?;
-                let end = table_col_start
-                    .checked_add(u32::try_from(end).map_err(|_| ErrorKind::Ref)?)
-                    .ok_or(ErrorKind::Ref)?;
-                (start.min(end), start.max(end))
-            }
-        };
-
-        let default_item = if reference.table.is_some() {
-            StructuredItem::Data
-        } else {
-            StructuredItem::ThisRow
-        };
-        let mut row_start = None::<u32>;
-        let mut row_end = None::<u32>;
-        let items = if reference.items.is_empty() {
-            std::slice::from_ref(&default_item)
-        } else {
-            reference.items.as_slice()
-        };
-        for item in items {
-            let band = match item {
-                StructuredItem::All => Some((table_row_start, table_row_end)),
-                StructuredItem::Headers if !has_headers => return Err(ErrorKind::Ref),
-                StructuredItem::Headers => Some((table_row_start, header_end)),
-                StructuredItem::Data if data_row_start > data_row_end => None,
-                StructuredItem::Data => Some((data_row_start, data_row_end)),
-                StructuredItem::Totals if !has_totals => None,
-                StructuredItem::Totals => {
-                    Some((table_row_end - table.totals_row_count() + 1, table_row_end))
-                }
-                StructuredItem::ThisRow
-                    if context.sheet() != sheet_index
-                        || context.row() < data_row_start
-                        || context.row() > data_row_end =>
-                {
-                    return Err(ErrorKind::Value);
-                }
-                StructuredItem::ThisRow => Some((context.row(), context.row())),
-            };
-            if let Some((start, end)) = band {
-                row_start = Some(row_start.map_or(start, |current| current.min(start)));
-                row_end = Some(row_end.map_or(end, |current| current.max(end)));
-            }
-        }
-        let (Some(row_start), Some(row_end)) = (row_start, row_end) else {
-            return Ok(ReferenceValue::Empty);
-        };
-        Ok(ReferenceValue::from_rect(Rect {
-            sheet: sheet_index,
-            row_start,
-            col_start,
-            row_end,
-            col_end,
-            whole_rows: false,
-        }))
+        resolve_structured_reference(
+            self.workbook,
+            (context.sheet(), context.row(), context.column()),
+            reference,
+        )
     }
 
     pub(in crate::calculation) fn resolve_reference_value_expr(
@@ -293,76 +151,26 @@ impl Engine<'_> {
             Expr::ReferenceUnion { left, right } => {
                 let left = self.resolve_reference_value_expr(context, left)?;
                 let right = self.resolve_reference_value_expr(context, right)?;
-                if matches!(&left, ReferenceValue::Empty) || matches!(&right, ReferenceValue::Empty)
-                {
-                    return Err(ErrorKind::Ref);
-                }
-                let mut areas =
-                    Vec::with_capacity(left.area_count().saturating_add(right.area_count()));
-                areas.extend_from_slice(left.areas());
-                areas.extend_from_slice(right.areas());
-                ReferenceValue::from_areas(areas)
+                union_reference_values(&left, &right)?
             }
             Expr::ReferenceIntersection { left, right } => {
                 let left = self.resolve_reference_value_expr(context, left)?;
                 let right = self.resolve_reference_value_expr(context, right)?;
-                if matches!(&left, ReferenceValue::Empty) || matches!(&right, ReferenceValue::Empty)
-                {
-                    return Err(ErrorKind::Ref);
-                }
-                if left.has_sheet_span() || right.has_sheet_span() {
-                    return Err(ErrorKind::Value);
-                }
-                let left_sheet = left
-                    .areas()
-                    .first()
-                    .and_then(|area| area.rects().next())
-                    .map(|rect| rect.sheet);
-                let right_sheet = right
-                    .areas()
-                    .first()
-                    .and_then(|area| area.rects().next())
-                    .map(|rect| rect.sheet);
-                if left_sheet != right_sheet {
-                    return Err(ErrorKind::Value);
-                }
-                let comparisons = u64::try_from(left.area_count())
-                    .ok()
-                    .and_then(|left| {
-                        u64::try_from(right.area_count())
-                            .ok()
-                            .and_then(|right| left.checked_mul(right))
-                    })
-                    .ok_or(ErrorKind::ResourceLimit(
-                        CalculationLimitKind::FunctionIterations,
-                    ))?;
+                let comparisons = intersection_reference_work(&left, &right)?;
                 self.ensure_function_iterations(comparisons)?;
                 if context.charges_reference_work() {
                     self.charge_function_iterations(context, comparisons)?;
                 }
                 let max_areas = self.options.limits().max_reference_areas();
-                let mut areas = Vec::new();
-                for left in left.areas() {
-                    for right in right.areas() {
-                        if context.is_cancelled() {
-                            return Err(ErrorKind::ResourceLimit(
-                                CalculationLimitKind::FunctionIterations,
-                            ));
-                        }
-                        if let Some(area) = left.intersection(right) {
-                            areas.push(area);
-                            if u64::try_from(areas.len()).map_or(true, |count| count > max_areas) {
-                                return Err(ErrorKind::ResourceLimit(
-                                    CalculationLimitKind::ReferenceAreas,
-                                ));
-                            }
-                        }
+                intersect_reference_values(&left, &right, max_areas, || {
+                    if context.is_cancelled() {
+                        Err(ErrorKind::ResourceLimit(
+                            CalculationLimitKind::FunctionIterations,
+                        ))
+                    } else {
+                        Ok(())
                     }
-                }
-                if areas.is_empty() {
-                    return Err(ErrorKind::Null);
-                }
-                ReferenceValue::from_areas(areas)
+                })?
             }
             Expr::Range { .. } => ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?),
             Expr::Name(name) => match context.binding(name) {
@@ -472,29 +280,9 @@ impl Engine<'_> {
                 // capability scanner classifies this position with `ARRAY_EXPRESSION_POLICY`, so
                 // answering with the engine-capability `Unsupported` here would make the scanner
                 // and the evaluator disagree.
-                let start = self
-                    .resolve_reference_value_expr(context, start)?
-                    .bounding_rect()?;
-                let end = self
-                    .resolve_reference_value_expr(context, end)?
-                    .bounding_rect()?;
-                if start.sheet != end.sheet {
-                    // Excel yields #VALUE! for a range operator whose endpoints
-                    // sit on different sheets.
-                    return Err(ErrorKind::Value);
-                }
-                let row_start = start.row_start.min(end.row_start);
-                let row_end = start.row_end.max(end.row_end);
-                Ok(Rect {
-                    sheet: start.sheet,
-                    row_start,
-                    col_start: start.col_start.min(end.col_start),
-                    row_end,
-                    col_end: start.col_end.max(end.col_end),
-                    whole_rows: row_start == 1
-                        && row_end == EXCEL_MAX_ROWS
-                        && (start.whole_rows || end.whole_rows),
-                })
+                let start = self.resolve_reference_value_expr(context, start)?;
+                let end = self.resolve_reference_value_expr(context, end)?;
+                range_reference_rect(&start, &end)
             }
             Expr::Name(name) => match context.binding(name) {
                 Some(ScopeValue::Reference(reference)) => reference.clone().into_single_rect(),
@@ -734,32 +522,5 @@ impl Engine<'_> {
             });
         }
         Err(ErrorKind::Value)
-    }
-}
-
-fn reference_bounds(body: &RefBody) -> (u32, u32, u32, u32, bool) {
-    match body {
-        RefBody::Cell(cell) => (cell.row, cell.column, cell.row, cell.column, false),
-        RefBody::Area(start, end) => (
-            start.row.min(end.row),
-            start.column.min(end.column),
-            start.row.max(end.row),
-            start.column.max(end.column),
-            false,
-        ),
-        RefBody::Columns(start, end) => (
-            1,
-            start.column.min(end.column),
-            EXCEL_MAX_ROWS,
-            start.column.max(end.column),
-            true,
-        ),
-        RefBody::Rows(start, end) => (
-            start.row.min(end.row),
-            1,
-            start.row.max(end.row),
-            EXCEL_MAX_COLUMNS,
-            false,
-        ),
     }
 }

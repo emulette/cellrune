@@ -58,6 +58,85 @@ export interface RangePage {
   readonly cells: readonly Cell[];
 }
 
+export interface DefinedNameSheetSpan {
+  readonly startSheetId: number;
+  readonly startSheetName: string;
+  readonly endSheetId: number;
+  readonly endSheetName: string;
+}
+
+export type DefinedNameReferenceArea =
+  | {
+      readonly kind: "rectangular";
+      readonly sheetId: number;
+      readonly sheetName: string;
+      readonly range: string;
+    }
+  | {
+      readonly kind: "threeDimensional";
+      readonly sheetSpan: DefinedNameSheetSpan;
+      readonly range: string;
+    };
+
+export type DefinedNameInspectionResult =
+  | {
+      readonly kind: "rectangular";
+      readonly sheetId: number;
+      readonly sheetName: string;
+      readonly range: string;
+    }
+  | {
+      readonly kind: "threeDimensional";
+      readonly sheetSpan: DefinedNameSheetSpan;
+      readonly range: string;
+    }
+  | {
+      readonly kind: "nonRectangular";
+      readonly areas: readonly DefinedNameReferenceArea[];
+    }
+  | { readonly kind: "emptyReference" }
+  | {
+      readonly kind: "dynamicFormula";
+      readonly dynamicKind: "offset" | "indirect" | "spill" | "mixed";
+      readonly formula: string;
+    }
+  | { readonly kind: "constant"; readonly formula: string }
+  | {
+      readonly kind: "externalReference";
+      readonly locator: string | null;
+      readonly workbook: string;
+      readonly sheet: string | null;
+      readonly sheetEnd: string | null;
+      readonly targetKind:
+        | "reference"
+        | "defined_name"
+        | "structured_reference";
+      readonly targetText: string;
+    }
+  | {
+      readonly kind: "invalid";
+      readonly reason:
+        | "parse_error"
+        | "circular_reference"
+        | "unresolved_name"
+        | "invalid_reference";
+      readonly detail: string | null;
+    }
+  | {
+      readonly kind: "unsupported";
+      readonly reason:
+        | "non_reference_expression"
+        | "context_dependent"
+        | "unsupported_expression";
+      readonly detail: string | null;
+    }
+  | { readonly kind: "notFound" };
+
+export interface DefinedNameInspection {
+  readonly schemaVersion: number;
+  readonly result: DefinedNameInspectionResult;
+}
+
 export interface TableColumn {
   readonly id: number;
   readonly name: string;
@@ -309,6 +388,10 @@ export class Workbook {
     end: string,
     options?: { readonly offset?: number; readonly limit?: number },
   ): RangePage;
+  inspectDefinedName(
+    name: string,
+    options?: { readonly currentSheet?: string },
+  ): DefinedNameInspection;
   functionUsage(): FunctionUsageReport;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;
   recalculate(options?: RecalculationOptions): Promise<CalculationDelta>;

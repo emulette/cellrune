@@ -2,6 +2,7 @@ import {
   CellRuneError,
   type CalculationDelta,
   type CellValue,
+  type DefinedNameInspection,
   type EditReceipt,
   type RangePage,
   type TableSummary,
@@ -56,6 +57,19 @@ async function check(): Promise<void> {
   delta.resultRevision === receipt.resultRevision;
   workbook.changesSince(0n);
   const page: RangePage = workbook.readRange("Sheet1", "A1", "B1");
+  const inspection: DefinedNameInspection = workbook.inspectDefinedName(
+    "InputArea",
+    { currentSheet: "Sheet1" },
+  );
+  if (inspection.result.kind === "rectangular") {
+    inspection.result.sheetName.toUpperCase();
+    inspection.result.range.toUpperCase();
+  }
+  if (inspection.result.kind === "externalReference") {
+    inspection.result.locator?.toUpperCase();
+    inspection.result.workbook.toUpperCase();
+    inspection.result.targetText.toUpperCase();
+  }
   const value: CellValue = page.cells[0].sourceValue;
   if (value.kind === "number") {
     value.value.toFixed(2);

@@ -211,14 +211,14 @@ impl ReferenceArea {
         matches!(self, Self::SheetSpan(_))
     }
 
-    fn sheet_bounds(&self) -> (usize, usize) {
+    pub(super) fn sheet_bounds(&self) -> (usize, usize) {
         match self {
             Self::Rect(rect) => (rect.sheet, rect.sheet),
             Self::SheetSpan(span) => (*span.sheets.sheets.start(), *span.sheets.sheets.end()),
         }
     }
 
-    fn template_rect(&self) -> Rect {
+    pub(super) fn template_rect(&self) -> Rect {
         match self {
             Self::Rect(rect) => *rect,
             Self::SheetSpan(span) => span.rect,

@@ -5,7 +5,9 @@ use crate::calculation::ast::Expr;
 use crate::calculation::functions::normalize_name;
 use crate::calculation::lambda::definition;
 use crate::calculation::runtime::CellId;
-use crate::calculation::scope::{DefinedLambdaId, canonical_local_name};
+use crate::calculation::scope::{
+    DefinedLambdaId, canonical_local_name, resolve_defined_name_scoped,
+};
 use crate::{DefinedName, DefinedNameScope};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,19 +191,12 @@ impl Engine<'_> {
         lookup_scope: Option<DefinedNameScope>,
         name: &str,
     ) -> Option<(usize, &DefinedName)> {
-        if lookup_scope == Some(DefinedNameScope::Workbook) {
-            return self.workbook.defined_name(DefinedNameScope::Workbook, name);
-        }
-        if let Some(DefinedNameScope::Sheet(sheet_id)) = lookup_scope {
-            return self
-                .workbook
-                .defined_name(DefinedNameScope::Sheet(sheet_id), name)
-                .or_else(|| self.workbook.defined_name(DefinedNameScope::Workbook, name));
-        }
-        let sheet_id = self.workbook.sheets().get(sheet)?.id();
-        self.workbook
-            .defined_name(DefinedNameScope::Sheet(sheet_id), name)
-            .or_else(|| self.workbook.defined_name(DefinedNameScope::Workbook, name))
+        resolve_defined_name_scoped(
+            self.workbook,
+            self.workbook.sheets().get(sheet).map(|sheet| sheet.id()),
+            lookup_scope,
+            name,
+        )
     }
 }
 

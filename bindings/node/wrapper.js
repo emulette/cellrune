@@ -13,6 +13,7 @@ const {
   normalizeCalculationDelta,
   normalizeCalculationDeltaPage,
   normalizeCalculationReport,
+  normalizeDefinedNameInspection,
   normalizeEditReceipt,
   normalizeFunctionUsage,
   normalizeRangePage,
@@ -25,6 +26,7 @@ const {
   requireOptionalBoolean,
   requireOptionalFinite,
   requireOptionalString,
+  requireOptionKeys,
   requireOptions,
   requireString,
   requireU64BigInt,
@@ -84,6 +86,21 @@ class Workbook {
     return normalizeRangePage(
       withSyncErrors(() =>
         this.#session().readRange(sheet, start, end, offset, limit),
+      ),
+    );
+  }
+
+  inspectDefinedName(name, options = {}) {
+    requireString(name, "name");
+    requireOptions(options);
+    requireOptionKeys(options, ["currentSheet"]);
+    requireOptionalString(options.currentSheet, "currentSheet");
+    return normalizeDefinedNameInspection(
+      withSyncErrors(() =>
+        this.#session().inspectDefinedName(
+          name,
+          options.currentSheet ?? null,
+        ),
       ),
     );
   }

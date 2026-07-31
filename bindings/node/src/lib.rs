@@ -1,4 +1,5 @@
 mod conversion;
+mod defined_name;
 mod error;
 mod task;
 mod workbook;

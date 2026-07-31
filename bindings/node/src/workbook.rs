@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationOptionsDto, EditBatchDto, FinancialSolverSemanticsDto,
-    InteropError, RangeRequestDto, RecalculationModeDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
+    FinancialSolverSemanticsDto, InteropError, RangeRequestDto, RecalculationModeDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
@@ -13,6 +13,7 @@ use crate::conversion::{
     NativeCalculationDeltaPage, NativeEditReceipt, NativeFunctionUsageReport, NativeRangePage,
     NativeWorkbookSummary,
 };
+use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
 use crate::task::{BytesTask, CalculateTask, RecalculateTask, SavePathTask};
 
@@ -58,6 +59,21 @@ impl NativeWorkbook {
                 limit,
             })
             .map(crate::conversion::range_page)
+            .map_err(napi_error)
+    }
+
+    #[napi]
+    pub fn inspect_defined_name(
+        &self,
+        name: String,
+        current_sheet: Option<String>,
+    ) -> napi::Result<NativeDefinedNameInspection> {
+        self.lock()?
+            .inspect_defined_name(&DefinedNameInspectionRequestDto {
+                name,
+                current_sheet,
+            })
+            .map(crate::defined_name::defined_name_inspection)
             .map_err(napi_error)
     }
 

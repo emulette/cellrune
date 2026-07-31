@@ -84,7 +84,7 @@ impl Default for SessionLimits {
     }
 }
 
-/// Thread-safe cooperative cancellation signal for one prepared calculation.
+/// Thread-safe cooperative cancellation signal for one bounded operation.
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
@@ -96,7 +96,7 @@ impl CancellationToken {
         Self::default()
     }
 
-    /// Requests cancellation. Already installed results are not modified.
+    /// Requests cancellation. Already completed or installed results are not modified.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
     }

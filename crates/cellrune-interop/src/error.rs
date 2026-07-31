@@ -1,7 +1,10 @@
 use std::error::Error;
 use std::fmt;
 
-use cellrune::{ApplyChangesError, SessionError, ValidationError, XlsxReadError, XlsxWriteError};
+use cellrune::{
+    ApplyChangesError, DefinedNameAnalysisError, DefinedNameAnalysisErrorKind, SessionError,
+    ValidationError, XlsxReadError, XlsxWriteError,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +34,8 @@ const MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID: &str =
 const MESSAGE_NUMBER_INVALID: &str =
     "number must be an integer or floating-point value; booleans are not accepted";
 const MESSAGE_ARCHIVE_LIMIT_INVALID: &str = "archive byte limit must be greater than zero";
+const MESSAGE_DEFINED_NAME_SHEET_IDENTITY: &str =
+    "defined-name analysis returned an unknown sheet identity";
 
 /// Broad error boundary used by all language bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -241,6 +246,13 @@ impl InteropError {
         )
     }
 
+    pub(crate) fn defined_name_sheet_identity() -> Self {
+        Self::state(
+            "interop.defined_name.sheet_identity_invalid",
+            MESSAGE_DEFINED_NAME_SHEET_IDENTITY,
+        )
+    }
+
     fn new(
         kind: InteropErrorKind,
         code: impl Into<String>,
@@ -338,6 +350,28 @@ impl From<ApplyChangesError> for InteropError {
             ApplyChangesError::Session(error) => error.into(),
             ApplyChangesError::Validation(error) => error.into(),
         }
+    }
+}
+
+impl From<DefinedNameAnalysisError> for InteropError {
+    fn from(error: DefinedNameAnalysisError) -> Self {
+        let code = error.kind().as_str();
+        let kind = match error.kind() {
+            DefinedNameAnalysisErrorKind::UnknownCurrentSheet => InteropErrorKind::Input,
+            DefinedNameAnalysisErrorKind::ResourceLimit
+            | DefinedNameAnalysisErrorKind::Cancelled => InteropErrorKind::State,
+            _ => InteropErrorKind::State,
+        };
+        Self::new(
+            kind,
+            code,
+            error.message(),
+            ErrorDetails {
+                source_code: Some(code.to_owned()),
+                detail: error.detail().map(str::to_owned),
+                ..ErrorDetails::default()
+            },
+        )
     }
 }
 

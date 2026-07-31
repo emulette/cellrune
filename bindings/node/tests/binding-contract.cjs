@@ -8,6 +8,18 @@ const { CellRuneError, Workbook } = require("..");
 async function main() {
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
+  const definedNameCorpusPath = path.join(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "binding-contract",
+    "defined-name-v1.json",
+  );
+  const definedNameCorpus = JSON.parse(
+    fs.readFileSync(definedNameCorpusPath, "utf8"),
+  );
+  assert.equal(definedNameCorpus.schema_version, 1);
   const workbook = Workbook.create();
   for (const operation of corpus.operations) {
     if (operation.kind === "set_number") {
@@ -67,9 +79,138 @@ async function main() {
         "interop.calculation.financial_solver_semantics_invalid",
   );
 
+  for (const sheetName of definedNameCorpus.sheets) {
+    workbook.addSheet(sheetName);
+  }
+  workbook.applyChanges(
+    workbook.summary().semanticRevision,
+    definedNameCorpus.defined_names.map((item) => ({
+      kind: "setDefinedName",
+      name: item.name,
+      scopeSheet: item.scope_sheet,
+      formula: item.formula,
+      hidden: item.hidden,
+    })),
+  );
+  assert.deepEqual(
+    workbook.inspectDefinedName("WorkbookAlias", { currentSheet: "Sheet1" })
+      .result,
+    {
+      kind: "rectangular",
+      sheetId: 1,
+      sheetName: "Sheet1",
+      range: "A1:A1",
+    },
+  );
+  assert.deepEqual(
+    workbook.inspectDefinedName("LocalAlias", { currentSheet: "Sheet1" }).result,
+    {
+      kind: "rectangular",
+      sheetId: 1,
+      sheetName: "Sheet1",
+      range: "B2:B2",
+    },
+  );
+  assert.deepEqual(workbook.inspectDefinedName("QualifiedLocal").result, {
+    kind: "rectangular",
+    sheetId: 1,
+    sheetName: "Sheet1",
+    range: "B2:B2",
+  });
+  assert.deepEqual(workbook.inspectDefinedName("ExplicitSingleSpan").result, {
+    kind: "threeDimensional",
+    sheetSpan: {
+      startSheetId: 2,
+      startSheetName: "Middle",
+      endSheetId: 2,
+      endSheetName: "Middle",
+    },
+    range: "D4:D4",
+  });
+  assert.deepEqual(workbook.inspectDefinedName("Dynamic").result, {
+    kind: "dynamicFormula",
+    dynamicKind: "offset",
+    formula: "=OFFSET(Sheet1!A1,1,0)",
+  });
+  assert.equal(
+    workbook.inspectDefinedName("IndirectDynamic").result.dynamicKind,
+    "indirect",
+  );
+  assert.equal(
+    workbook.inspectDefinedName("SpillDynamic").result.dynamicKind,
+    "spill",
+  );
+  assert.equal(
+    workbook.inspectDefinedName("MixedDynamic").result.dynamicKind,
+    "mixed",
+  );
+  const areas = workbook.inspectDefinedName("Areas").result;
+  assert.equal(areas.kind, "nonRectangular");
+  assert.deepEqual(
+    areas.areas.map((area) => area.kind),
+    ["rectangular", "rectangular", "threeDimensional", "rectangular"],
+  );
+  assert.deepEqual(areas.areas[2].sheetSpan, {
+    startSheetId: 1,
+    startSheetName: "Sheet1",
+    endSheetId: 3,
+    endSheetName: "Sheet3",
+  });
+  assert.equal(
+    workbook.inspectDefinedName("ConstantValue").result.kind,
+    "constant",
+  );
+  assert.deepEqual(workbook.inspectDefinedName("ExternalValue").result, {
+    kind: "externalReference",
+    locator: null,
+    workbook: "Book.xlsx",
+    sheet: "Data",
+    sheetEnd: null,
+    targetKind: "reference",
+    targetText: "A1",
+  });
+  assert.equal(
+    workbook.inspectDefinedName("InvalidValue").result.reason,
+    "parse_error",
+  );
+  assert.equal(
+    workbook.inspectDefinedName("CallableValue").result.reason,
+    "non_reference_expression",
+  );
+  assert.deepEqual(workbook.inspectDefinedName("Missing").result, {
+    kind: "notFound",
+  });
+  assert.throws(
+    () =>
+      workbook.inspectDefinedName("Areas", { currentSheet: "missing" }),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "interop.sheet.not_found",
+  );
+  assert.throws(
+    () => workbook.inspectDefinedName("Areas", { current_sheet: "Sheet1" }),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "interop.input.invalid" &&
+      error.details.detail === "options.current_sheet is not supported",
+  );
+
+  await workbook.recalculate({ mode: "full" });
   const bytes = await workbook.toBytes();
   const reopened = await Workbook.fromBytes(bytes);
   assert.equal(reopened.summary().documentKind, "xlsx");
+  assert.equal(
+    reopened.inspectDefinedName("Dynamic").result.kind,
+    "dynamicFormula",
+  );
+  assert.deepEqual(
+    reopened.inspectDefinedName("ExplicitSingleSpan").result,
+    workbook.inspectDefinedName("ExplicitSingleSpan").result,
+  );
+  assert.deepEqual(
+    reopened.inspectDefinedName("ExternalValue").result,
+    workbook.inspectDefinedName("ExternalValue").result,
+  );
   assert.throws(
     () => reopened.setNumber("Sheet1", corpus.invalid_address, 1),
     (error) =>

@@ -8,6 +8,9 @@ from typing import Literal, cast
 from cellrune import CellRuneError, Workbook
 
 CORPUS_PATH = pathlib.Path(__file__).parents[3] / "binding-contract" / "v1.json"
+DEFINED_NAME_CORPUS_PATH = (
+    pathlib.Path(__file__).parents[3] / "binding-contract" / "defined-name-v1.json"
+)
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 
@@ -69,6 +72,10 @@ def recalculate_with_invalid_solver_semantics(
 
 def main() -> None:
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+    defined_name_corpus = json.loads(
+        DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")
+    )
+    assert defined_name_corpus["schema_version"] == 1
     with Workbook.create() as workbook:
         for operation in corpus["operations"]:
             kind = operation["kind"]
@@ -172,10 +179,124 @@ def main() -> None:
         assert legacy_solver["value"]["kind"] == "number"
         assert abs(legacy_solver["value"]["value"] - 99_999.0) < 1e-5
 
+        for sheet_name in defined_name_corpus["sheets"]:
+            workbook.add_sheet(sheet_name)
+        workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [
+                {
+                    "kind": "set_defined_name",
+                    "name": item["name"],
+                    "scope_sheet": item["scope_sheet"],
+                    "formula": item["formula"],
+                    "hidden": item["hidden"],
+                }
+                for item in defined_name_corpus["defined_names"]
+            ],
+        )
+        assert workbook.inspect_defined_name("WorkbookAlias", current_sheet="Sheet1")[
+            "result"
+        ] == {
+            "kind": "rectangular",
+            "sheet_id": 1,
+            "sheet_name": "Sheet1",
+            "range": "A1:A1",
+        }
+        assert workbook.inspect_defined_name("LocalAlias", current_sheet="Sheet1")[
+            "result"
+        ] == {
+            "kind": "rectangular",
+            "sheet_id": 1,
+            "sheet_name": "Sheet1",
+            "range": "B2:B2",
+        }
+        assert workbook.inspect_defined_name("QualifiedLocal")["result"] == {
+            "kind": "rectangular",
+            "sheet_id": 1,
+            "sheet_name": "Sheet1",
+            "range": "B2:B2",
+        }
+        assert workbook.inspect_defined_name("ExplicitSingleSpan")["result"] == {
+            "kind": "three_dimensional",
+            "sheet_span": {
+                "start_sheet_id": 2,
+                "start_sheet_name": "Middle",
+                "end_sheet_id": 2,
+                "end_sheet_name": "Middle",
+            },
+            "range": "D4:D4",
+        }
+        assert workbook.inspect_defined_name("Dynamic")["result"] == {
+            "kind": "dynamic_formula",
+            "dynamic_kind": "offset",
+            "formula": "=OFFSET(Sheet1!A1,1,0)",
+        }
+        assert (
+            workbook.inspect_defined_name("IndirectDynamic")["result"]["dynamic_kind"]
+            == "indirect"
+        )
+        assert (
+            workbook.inspect_defined_name("SpillDynamic")["result"]["dynamic_kind"]
+            == "spill"
+        )
+        assert (
+            workbook.inspect_defined_name("MixedDynamic")["result"]["dynamic_kind"]
+            == "mixed"
+        )
+        areas = workbook.inspect_defined_name("Areas")["result"]
+        assert areas["kind"] == "non_rectangular"
+        assert [area["kind"] for area in areas["areas"]] == [
+            "rectangular",
+            "rectangular",
+            "three_dimensional",
+            "rectangular",
+        ]
+        assert areas["areas"][2]["sheet_span"] == {
+            "start_sheet_id": 1,
+            "start_sheet_name": "Sheet1",
+            "end_sheet_id": 3,
+            "end_sheet_name": "Sheet3",
+        }
+        assert workbook.inspect_defined_name("ConstantValue")["result"]["kind"] == "constant"
+        assert workbook.inspect_defined_name("ExternalValue")["result"] == {
+            "kind": "external_reference",
+            "locator": None,
+            "workbook": "Book.xlsx",
+            "sheet": "Data",
+            "sheet_end": None,
+            "target_kind": "reference",
+            "target_text": "A1",
+        }
+        assert workbook.inspect_defined_name("InvalidValue")["result"]["reason"] == "parse_error"
+        assert (
+            workbook.inspect_defined_name("CallableValue")["result"]["reason"]
+            == "non_reference_expression"
+        )
+        assert workbook.inspect_defined_name("Missing")["result"] == {"kind": "not_found"}
+        assert_error(
+            "interop.sheet.not_found",
+            lambda: workbook.inspect_defined_name(
+                "Areas", current_sheet="missing"
+            ),
+        )
+
+        workbook.recalculate(mode="full")
         output = workbook.to_bytes()
 
     reopened = Workbook.from_bytes(output)
     assert reopened.summary()["document_kind"] == "xlsx"
+    assert reopened.inspect_defined_name("Dynamic")["result"]["kind"] == "dynamic_formula"
+    assert reopened.inspect_defined_name("ExplicitSingleSpan")["result"] == {
+        "kind": "three_dimensional",
+        "sheet_span": {
+            "start_sheet_id": 2,
+            "start_sheet_name": "Middle",
+            "end_sheet_id": 2,
+            "end_sheet_name": "Middle",
+        },
+        "range": "D4:D4",
+    }
+    assert reopened.inspect_defined_name("ExternalValue")["result"]["target_text"] == "A1"
 
     try:
         reopened.set_number("Sheet1", corpus["invalid_address"], 1.0)

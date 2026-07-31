@@ -403,6 +403,232 @@ pub struct RangePageDto {
     pub cells: Vec<CellDto>,
 }
 
+/// Request for one workbook or sheet-local defined-name inspection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefinedNameInspectionRequestDto {
+    /// Case-insensitive defined-name spelling.
+    pub name: String,
+    /// Optional case-insensitive current sheet used for local-name lookup and unqualified geometry.
+    pub current_sheet: Option<String>,
+}
+
+/// Stable workbook-order identity of a continuous 3-D sheet span.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefinedNameSheetSpanDto {
+    /// Stable identifier of the first sheet in workbook order.
+    pub start_sheet_id: u32,
+    /// Resolved name of the first sheet.
+    pub start_sheet_name: String,
+    /// Stable identifier of the final sheet in workbook order.
+    pub end_sheet_id: u32,
+    /// Resolved name of the final sheet.
+    pub end_sheet_name: String,
+}
+
+/// One ordered area in a non-rectangular defined-name result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DefinedNameReferenceAreaDto {
+    /// One rectangle on one worksheet.
+    Rectangular {
+        /// Stable workbook-local sheet identifier.
+        sheet_id: u32,
+        /// Resolved sheet name.
+        sheet_name: String,
+        /// Resolved unqualified A1 rectangle.
+        range: String,
+    },
+    /// One rectangle repeated across a continuous worksheet span.
+    ThreeDimensional {
+        /// Stable workbook-order sheet span.
+        sheet_span: DefinedNameSheetSpanDto,
+        /// Resolved unqualified A1 rectangle shared by each sheet.
+        range: String,
+    },
+}
+
+/// Dynamic reference construct represented by interop schema version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefinedNameDynamicKindDto {
+    /// The terminal reference expression is `OFFSET`.
+    Offset,
+    /// The terminal reference expression is `INDIRECT`.
+    Indirect,
+    /// The terminal reference expression is a spill reference.
+    Spill,
+    /// Multiple dynamic reference constructs contribute to the result.
+    Mixed,
+}
+
+impl DefinedNameDynamicKindDto {
+    /// Returns the stable transport spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Offset => "offset",
+            Self::Indirect => "indirect",
+            Self::Spill => "spill",
+            Self::Mixed => "mixed",
+        }
+    }
+}
+
+/// External target category represented by interop schema version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefinedNameExternalTargetKindDto {
+    /// A cell, area, whole-row, or whole-column reference.
+    Reference,
+    /// An external defined name.
+    DefinedName,
+    /// An external structured table reference.
+    StructuredReference,
+}
+
+impl DefinedNameExternalTargetKindDto {
+    /// Returns the stable transport spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reference => "reference",
+            Self::DefinedName => "defined_name",
+            Self::StructuredReference => "structured_reference",
+        }
+    }
+}
+
+/// Defined-name invalidity represented by interop schema version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefinedNameInvalidReasonDto {
+    /// The selected or reachable formula does not parse.
+    ParseError,
+    /// A non-callable value-name chain contains a cycle.
+    CircularReference,
+    /// A reachable name is absent from its applicable scope chain.
+    UnresolvedName,
+    /// A static reference names an absent sheet, table, column, or invalid range.
+    InvalidReference,
+}
+
+impl DefinedNameInvalidReasonDto {
+    /// Returns the stable transport spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ParseError => "parse_error",
+            Self::CircularReference => "circular_reference",
+            Self::UnresolvedName => "unresolved_name",
+            Self::InvalidReference => "invalid_reference",
+        }
+    }
+}
+
+/// Unsupported defined-name category represented by interop schema version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefinedNameUnsupportedReasonDto {
+    /// The formula is a callable or general non-reference expression.
+    NonReferenceExpression,
+    /// The result needs a current cell, calculated value, or other runtime state.
+    ContextDependent,
+    /// The typed AST is valid but outside the current inspection resolver.
+    UnsupportedExpression,
+}
+
+impl DefinedNameUnsupportedReasonDto {
+    /// Returns the stable transport spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NonReferenceExpression => "non_reference_expression",
+            Self::ContextDependent => "context_dependent",
+            Self::UnsupportedExpression => "unsupported_expression",
+        }
+    }
+}
+
+/// Typed result of inspecting one defined name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DefinedNameInspectionResultDto {
+    /// The name resolves to one rectangle on one worksheet.
+    Rectangular {
+        /// Stable workbook-local sheet identifier.
+        sheet_id: u32,
+        /// Resolved sheet name.
+        sheet_name: String,
+        /// Resolved unqualified A1 rectangle.
+        range: String,
+    },
+    /// The name resolves to one rectangle across a continuous worksheet span.
+    ThreeDimensional {
+        /// Stable workbook-order sheet span.
+        sheet_span: DefinedNameSheetSpanDto,
+        /// Resolved unqualified A1 rectangle shared by each sheet.
+        range: String,
+    },
+    /// The name resolves to multiple ordered areas.
+    NonRectangular {
+        /// Areas in source order with duplicates and 3-D identity preserved.
+        areas: Vec<DefinedNameReferenceAreaDto>,
+    },
+    /// The name resolves to a valid reference containing no cells.
+    EmptyReference,
+    /// The terminal reference shape depends on calculation state.
+    DynamicFormula {
+        /// `offset`, `indirect`, `spill`, or `mixed`.
+        dynamic_kind: DefinedNameDynamicKindDto,
+        /// Terminal definition formula with a leading equals sign.
+        formula: String,
+    },
+    /// The terminal definition is dependency-free constant syntax.
+    Constant {
+        /// Terminal definition formula with a leading equals sign.
+        formula: String,
+    },
+    /// The typed syntax addresses another workbook.
+    ExternalReference {
+        /// Optional path or URI prefix before the bracketed workbook token.
+        locator: Option<String>,
+        /// External workbook token without surrounding brackets or locator.
+        workbook: String,
+        /// Optional first external sheet token.
+        sheet: Option<String>,
+        /// Optional final external sheet token of a 3-D prefix.
+        sheet_end: Option<String>,
+        /// `reference`, `defined_name`, or `structured_reference`.
+        target_kind: DefinedNameExternalTargetKindDto,
+        /// Canonical external target without its workbook or sheet prefix.
+        target_text: String,
+    },
+    /// The root or one reachable value-name definition is invalid.
+    Invalid {
+        /// Stable semantic invalidity code.
+        reason: DefinedNameInvalidReasonDto,
+        /// Optional source-specific detail.
+        detail: Option<String>,
+    },
+    /// The valid formula cannot be represented as static reference geometry.
+    Unsupported {
+        /// Stable unsupported reason.
+        reason: DefinedNameUnsupportedReasonDto,
+        /// Optional source-specific detail.
+        detail: Option<String>,
+    },
+    /// No root name exists in the selected lookup chain.
+    NotFound,
+}
+
+/// Versioned response for one defined-name inspection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefinedNameInspectionDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Typed semantic inspection result.
+    pub result: DefinedNameInspectionResultDto,
+}
+
 /// Stable workbook-local cell reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -624,7 +850,7 @@ pub struct WriteReportDto {
 
 #[cfg(test)]
 mod tests {
-    use super::WorkbookChangeDto;
+    use super::{DefinedNameInspectionResultDto, WorkbookChangeDto};
 
     /// The DTOs carry `deny_unknown_fields`, so adding a field to a variant would be a breaking
     /// change to the JSON boundary if a missing one were also rejected. It is not: serde reads an
@@ -658,5 +884,14 @@ mod tests {
         let misspelled = r#"{"kind": "set_calculation_hints", "iterativeCalculation": true}"#;
         serde_json::from_str::<WorkbookChangeDto>(misspelled)
             .expect_err("deny_unknown_fields must still catch a misspelled field");
+    }
+
+    #[test]
+    fn empty_defined_name_reference_has_a_stable_tagged_shape() {
+        assert_eq!(
+            serde_json::to_value(DefinedNameInspectionResultDto::EmptyReference)
+                .expect("empty reference serializes"),
+            serde_json::json!({"kind": "empty_reference"})
+        );
     }
 }

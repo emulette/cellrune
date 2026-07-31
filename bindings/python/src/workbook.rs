@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationOptionsDto, EditBatchDto, FinancialSolverSemanticsDto,
-    InteropError, RangeRequestDto, RecalculationModeDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
+    FinancialSolverSemanticsDto, InteropError, RangeRequestDto, RecalculationModeDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -93,6 +93,24 @@ impl Workbook {
         });
         let page = result.map_err(|error| into_py_error(py, error))?;
         conversion::range_page(py, &page)
+    }
+
+    #[pyo3(signature = (name, *, current_sheet=None))]
+    pub fn inspect_defined_name<'py>(
+        &self,
+        py: Python<'py>,
+        name: String,
+        current_sheet: Option<String>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let result = py.detach(move || {
+            self.lock_interop()?
+                .inspect_defined_name(&DefinedNameInspectionRequestDto {
+                    name,
+                    current_sheet,
+                })
+        });
+        let report = result.map_err(|error| into_py_error(py, error))?;
+        conversion::defined_name_inspection(py, &report)
     }
 
     pub fn function_usage<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {

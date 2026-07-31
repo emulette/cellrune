@@ -4,7 +4,24 @@ use super::decimal::DecimalTrace;
 use super::operators::broadcast_index;
 use super::runtime::{Array, ReferenceValue};
 use super::value::{ErrorKind, Value};
-use crate::{DefinedName, DefinedNameScope};
+use crate::{DefinedName, DefinedNameScope, SheetId, WorkbookSnapshot};
+
+pub(super) fn resolve_defined_name_scoped<'a>(
+    workbook: &'a WorkbookSnapshot,
+    ambient_sheet: Option<SheetId>,
+    lookup_scope: Option<DefinedNameScope>,
+    name: &str,
+) -> Option<(usize, &'a DefinedName)> {
+    match lookup_scope {
+        Some(DefinedNameScope::Workbook) => workbook.defined_name(DefinedNameScope::Workbook, name),
+        Some(DefinedNameScope::Sheet(sheet_id)) => workbook
+            .defined_name(DefinedNameScope::Sheet(sheet_id), name)
+            .or_else(|| workbook.defined_name(DefinedNameScope::Workbook, name)),
+        None => ambient_sheet
+            .and_then(|sheet_id| workbook.defined_name(DefinedNameScope::Sheet(sheet_id), name))
+            .or_else(|| workbook.defined_name(DefinedNameScope::Workbook, name)),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ScalarEvaluation {

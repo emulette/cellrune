@@ -23,15 +23,18 @@ use std::marker::PhantomData;
 
 use cellrune::{
     ApplyChangesError, CalculationCellResult, CalculationExecutionMode, CalculationHints,
-    CalculationIssue, CalculationMode, CalculationOptions, CalculationSnapshot, CellAddress,
-    CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope, Diagnostic,
-    DiagnosticSeverity, FormulaCapability, FormulaCapabilityReport, FormulaCell, FunctionSupport,
-    NumberFormatKind, Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode,
-    RecalculationWriteOptions, SavedResult, SavedResultIssue, SessionError, SharedFormulaRole,
-    Sheet, SheetId, SheetVisibility, Table, TableColumn, TableColumnId, TableId, TableName,
-    ValidationError, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind, XlsxDocument,
-    XlsxReadError, XlsxWriteError, calculate_workbook, read_xlsx_bytes, scan_formula_capabilities,
-    write_recalculated_xlsx_bytes,
+    CalculationIssue, CalculationMode, CalculationOptions, CalculationSnapshot, CancellationToken,
+    CellAddress, CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameAnalysis,
+    DefinedNameAnalysisError, DefinedNameAnalysisOptions, DefinedNameExternalReference,
+    DefinedNameExternalTargetKind, DefinedNameScope, Diagnostic, DiagnosticSeverity,
+    FormulaCapability, FormulaCapabilityReport, FormulaCell, FunctionSupport, NumberFormatKind,
+    Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode, RecalculationWriteOptions,
+    SavedResult, SavedResultIssue, SessionError, SharedFormulaRole, Sheet, SheetId,
+    SheetVisibility, Table, TableColumn, TableColumnId, TableId, TableName, ValidationError,
+    WorkbookSnapshot, WorkbookSource, WorkbookSourceKind, XlsxDocument, XlsxReadError,
+    XlsxWriteError, analyze_defined_name, analyze_defined_name_cancellable,
+    analyze_defined_name_with_options, calculate_workbook, read_xlsx_bytes,
+    scan_formula_capabilities, write_recalculated_xlsx_bytes,
 };
 
 /// Captures a payload binding's exact type. The intermediate `let pinned = payload(…);` at every
@@ -84,6 +87,15 @@ fn frozen_defined_name_scope(scope: &DefinedNameScope) {
             let _: PhantomData<SheetId> = pinned;
         }
     }
+}
+
+fn frozen_defined_name_external_reference_api(detail: &DefinedNameExternalReference) {
+    let _: Option<&str> = detail.locator();
+    let _: &str = detail.workbook();
+    let _: Option<&str> = detail.sheet();
+    let _: Option<&str> = detail.sheet_end();
+    let _: DefinedNameExternalTargetKind = detail.target();
+    let _: &str = detail.target_text();
 }
 
 fn frozen_saved_result(result: &SavedResult) {
@@ -230,6 +242,36 @@ const _FROZEN_SCAN_FORMULA_CAPABILITIES: fn(&WorkbookSnapshot) -> FormulaCapabil
     scan_formula_capabilities;
 
 #[allow(clippy::type_complexity)]
+const _FROZEN_ANALYZE_DEFINED_NAME: fn(
+    &WorkbookSnapshot,
+    &str,
+    Option<SheetId>,
+) -> Result<DefinedNameAnalysis, DefinedNameAnalysisError> = analyze_defined_name;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_ANALYZE_DEFINED_NAME_WITH_OPTIONS: fn(
+    &WorkbookSnapshot,
+    &str,
+    Option<SheetId>,
+    DefinedNameAnalysisOptions,
+) -> Result<
+    DefinedNameAnalysis,
+    DefinedNameAnalysisError,
+> = analyze_defined_name_with_options;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_ANALYZE_DEFINED_NAME_CANCELLABLE: fn(
+    &WorkbookSnapshot,
+    &str,
+    Option<SheetId>,
+    DefinedNameAnalysisOptions,
+    &CancellationToken,
+) -> Result<
+    DefinedNameAnalysis,
+    DefinedNameAnalysisError,
+> = analyze_defined_name_cancellable;
+
+#[allow(clippy::type_complexity)]
 const _FROZEN_WRITE_RECALCULATED_XLSX_BYTES: fn(
     &XlsxDocument,
     &CalculationSnapshot,
@@ -248,6 +290,7 @@ fn the_frozen_enums_are_exhaustively_matched() {
     frozen_calculation_mode(CalculationMode::AutomaticExceptDataTables);
     frozen_calculation_mode(CalculationMode::Manual);
     frozen_defined_name_scope(&DefinedNameScope::Workbook);
+    let _: fn(&DefinedNameExternalReference) = frozen_defined_name_external_reference_api;
     frozen_saved_result(&SavedResult::Missing);
     frozen_recalculation_mode(RecalculationMode::Auto);
     frozen_calculation_execution_mode(CalculationExecutionMode::Full);

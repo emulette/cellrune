@@ -7,6 +7,44 @@ const {
   requireProtocolString,
 } = require("./validation.js");
 
+const INTEROP_SCHEMA_VERSION = 1;
+const DYNAMIC_KINDS = new Set(["offset", "indirect", "spill", "mixed"]);
+const EXTERNAL_TARGET_KINDS = new Set([
+  "reference",
+  "defined_name",
+  "structured_reference",
+]);
+const INVALID_REASONS = new Set([
+  "parse_error",
+  "circular_reference",
+  "unresolved_name",
+  "invalid_reference",
+]);
+const UNSUPPORTED_REASONS = new Set([
+  "non_reference_expression",
+  "context_dependent",
+  "unsupported_expression",
+]);
+
+function requireProtocolVersion(value, name) {
+  if (value !== INTEROP_SCHEMA_VERSION) {
+    throw protocolError(`${name} schema version is unsupported`);
+  }
+}
+
+function requireOptionalProtocolString(value, name) {
+  if (value !== undefined && value !== null) {
+    requireProtocolString(value, name);
+  }
+}
+
+function requireProtocolEnum(value, values, name) {
+  requireProtocolString(value, name);
+  if (!values.has(value)) {
+    throw protocolError(`${name} is unknown`);
+  }
+}
+
 function normalizeValue(value) {
   requireObject(value, "cell value");
   switch (value.kind) {
@@ -72,6 +110,151 @@ function normalizeRangePage(page) {
       sourceValueState: cell.sourceValueState,
       calculated: normalizeResult(cell.calculated),
     })),
+  };
+}
+
+function normalizeDefinedNameInspection(report) {
+  requireObject(report, "defined name inspection");
+  requireProtocolVersion(report.schemaVersion, "defined name inspection");
+  return {
+    schemaVersion: report.schemaVersion,
+    result: normalizeDefinedNameResult(report.result),
+  };
+}
+
+function normalizeDefinedNameResult(result) {
+  requireObject(result, "defined name inspection result");
+  switch (result.kind) {
+    case "rectangular":
+      requireProtocolFinite(result.sheetId, "defined name sheet ID");
+      requireProtocolString(result.sheetName, "defined name sheet name");
+      requireProtocolString(result.range, "defined name range");
+      return {
+        kind: "rectangular",
+        sheetId: result.sheetId,
+        sheetName: result.sheetName,
+        range: result.range,
+      };
+    case "three_dimensional":
+      requireProtocolString(result.range, "defined name range");
+      return {
+        kind: "threeDimensional",
+        sheetSpan: normalizeDefinedNameSheetSpan(result.sheetSpan),
+        range: result.range,
+      };
+    case "non_rectangular":
+      if (!Array.isArray(result.areas)) {
+        throw protocolError("native defined name areas are missing");
+      }
+      return {
+        kind: "nonRectangular",
+        areas: result.areas.map(normalizeDefinedNameArea),
+      };
+    case "empty_reference":
+      return { kind: "emptyReference" };
+    case "dynamic_formula":
+      requireProtocolEnum(
+        result.dynamicKind,
+        DYNAMIC_KINDS,
+        "defined name dynamic kind",
+      );
+      requireProtocolString(result.formula, "defined name formula");
+      return {
+        kind: "dynamicFormula",
+        dynamicKind: result.dynamicKind,
+        formula: result.formula,
+      };
+    case "constant":
+      requireProtocolString(result.formula, "defined name formula");
+      return { kind: "constant", formula: result.formula };
+    case "external_reference":
+      requireOptionalProtocolString(result.locator, "external locator");
+      requireProtocolString(result.workbook, "external workbook");
+      requireOptionalProtocolString(result.sheet, "external sheet");
+      requireOptionalProtocolString(result.sheetEnd, "external final sheet");
+      requireProtocolEnum(
+        result.targetKind,
+        EXTERNAL_TARGET_KINDS,
+        "external target kind",
+      );
+      requireProtocolString(result.targetText, "external target text");
+      return {
+        kind: "externalReference",
+        locator: result.locator ?? null,
+        workbook: result.workbook,
+        sheet: result.sheet ?? null,
+        sheetEnd: result.sheetEnd ?? null,
+        targetKind: result.targetKind,
+        targetText: result.targetText,
+      };
+    case "invalid":
+      requireProtocolEnum(
+        result.reason,
+        INVALID_REASONS,
+        "defined name invalid reason",
+      );
+      requireOptionalProtocolString(result.detail, "defined name invalid detail");
+      return {
+        kind: "invalid",
+        reason: result.reason,
+        detail: result.detail ?? null,
+      };
+    case "unsupported":
+      requireProtocolEnum(
+        result.reason,
+        UNSUPPORTED_REASONS,
+        "defined name unsupported reason",
+      );
+      requireOptionalProtocolString(
+        result.detail,
+        "defined name unsupported detail",
+      );
+      return {
+        kind: "unsupported",
+        reason: result.reason,
+        detail: result.detail ?? null,
+      };
+    case "not_found":
+      return { kind: "notFound" };
+    default:
+      throw protocolError("native defined name result kind is unknown");
+  }
+}
+
+function normalizeDefinedNameArea(area) {
+  requireObject(area, "defined name reference area");
+  requireProtocolString(area.range, "defined name area range");
+  if (area.kind === "rectangular") {
+    requireProtocolFinite(area.sheetId, "defined name area sheet ID");
+    requireProtocolString(area.sheetName, "defined name area sheet name");
+    return {
+      kind: "rectangular",
+      sheetId: area.sheetId,
+      sheetName: area.sheetName,
+      range: area.range,
+    };
+  }
+  if (area.kind === "three_dimensional") {
+    return {
+      kind: "threeDimensional",
+      sheetSpan: normalizeDefinedNameSheetSpan(area.sheetSpan),
+      range: area.range,
+    };
+  }
+  throw protocolError("native defined name area kind is unknown");
+}
+
+function normalizeDefinedNameSheetSpan(span) {
+  requireObject(span, "defined name sheet span");
+  requireProtocolFinite(span.startSheetId, "defined name start sheet ID");
+  requireProtocolString(span.startSheetName, "defined name start sheet name");
+  requireProtocolFinite(span.endSheetId, "defined name end sheet ID");
+  requireProtocolString(span.endSheetName, "defined name end sheet name");
+  return {
+    startSheetId: span.startSheetId,
+    startSheetName: span.startSheetName,
+    endSheetId: span.endSheetId,
+    endSheetName: span.endSheetName,
   };
 }
 
@@ -218,6 +401,7 @@ module.exports = {
   normalizeCalculationDelta,
   normalizeCalculationDeltaPage,
   normalizeCalculationReport,
+  normalizeDefinedNameInspection,
   normalizeEditReceipt,
   normalizeFunctionUsage,
   normalizeRangePage,

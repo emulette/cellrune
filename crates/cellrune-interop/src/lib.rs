@@ -14,7 +14,10 @@ mod service;
 pub use dto::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationOptionsDto, CalculationReportDto, CalculationResultDto, CapabilityEntryDto,
-    CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, EditBatchDto, EditReceiptDto,
+    CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, DefinedNameDynamicKindDto,
+    DefinedNameExternalTargetKindDto, DefinedNameInspectionDto, DefinedNameInspectionRequestDto,
+    DefinedNameInspectionResultDto, DefinedNameInvalidReasonDto, DefinedNameReferenceAreaDto,
+    DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, EditBatchDto, EditReceiptDto,
     FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
     FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto, RangeRequestDto,
     RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableColumnDto, TableSummaryDto,

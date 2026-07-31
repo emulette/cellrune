@@ -81,6 +81,113 @@ class RangePage(TypedDict):
     cells: list[Cell]
 
 
+class DefinedNameSheetSpan(TypedDict):
+    start_sheet_id: int
+    start_sheet_name: str
+    end_sheet_id: int
+    end_sheet_name: str
+
+
+class DefinedNameRectangularArea(TypedDict):
+    kind: Literal["rectangular"]
+    sheet_id: int
+    sheet_name: str
+    range: str
+
+
+class DefinedNameThreeDimensionalArea(TypedDict):
+    kind: Literal["three_dimensional"]
+    sheet_span: DefinedNameSheetSpan
+    range: str
+
+
+DefinedNameReferenceArea = (
+    DefinedNameRectangularArea | DefinedNameThreeDimensionalArea
+)
+
+
+class DefinedNameRectangularResult(TypedDict):
+    kind: Literal["rectangular"]
+    sheet_id: int
+    sheet_name: str
+    range: str
+
+
+class DefinedNameThreeDimensionalResult(TypedDict):
+    kind: Literal["three_dimensional"]
+    sheet_span: DefinedNameSheetSpan
+    range: str
+
+
+class DefinedNameNonRectangularResult(TypedDict):
+    kind: Literal["non_rectangular"]
+    areas: list[DefinedNameReferenceArea]
+
+
+class DefinedNameEmptyReferenceResult(TypedDict):
+    kind: Literal["empty_reference"]
+
+
+class DefinedNameDynamicFormulaResult(TypedDict):
+    kind: Literal["dynamic_formula"]
+    dynamic_kind: Literal["offset", "indirect", "spill", "mixed"]
+    formula: str
+
+
+class DefinedNameConstantResult(TypedDict):
+    kind: Literal["constant"]
+    formula: str
+
+
+class DefinedNameExternalReferenceResult(TypedDict):
+    kind: Literal["external_reference"]
+    locator: str | None
+    workbook: str
+    sheet: str | None
+    sheet_end: str | None
+    target_kind: Literal["reference", "defined_name", "structured_reference"]
+    target_text: str
+
+
+class DefinedNameInvalidResult(TypedDict):
+    kind: Literal["invalid"]
+    reason: Literal[
+        "parse_error", "circular_reference", "unresolved_name", "invalid_reference"
+    ]
+    detail: str | None
+
+
+class DefinedNameUnsupportedResult(TypedDict):
+    kind: Literal["unsupported"]
+    reason: Literal[
+        "non_reference_expression", "context_dependent", "unsupported_expression"
+    ]
+    detail: str | None
+
+
+class DefinedNameNotFoundResult(TypedDict):
+    kind: Literal["not_found"]
+
+
+DefinedNameInspectionResult = (
+    DefinedNameRectangularResult
+    | DefinedNameThreeDimensionalResult
+    | DefinedNameNonRectangularResult
+    | DefinedNameEmptyReferenceResult
+    | DefinedNameDynamicFormulaResult
+    | DefinedNameConstantResult
+    | DefinedNameExternalReferenceResult
+    | DefinedNameInvalidResult
+    | DefinedNameUnsupportedResult
+    | DefinedNameNotFoundResult
+)
+
+
+class DefinedNameInspection(TypedDict):
+    schema_version: int
+    result: DefinedNameInspectionResult
+
+
 class TableColumn(TypedDict):
     id: int
     name: str

@@ -2,6 +2,7 @@ from cellrune import (
     CalculationDelta,
     CellRuneError,
     CellValue,
+    DefinedNameInspection,
     EditReceipt,
     RangePage,
     TableSummary,
@@ -57,6 +58,18 @@ def check() -> None:
     assert delta["result_revision"] == receipt["result_revision"]
     workbook.changes_since(0)
     page: RangePage = workbook.read_range("Sheet1", "A1", "B1")
+    inspection: DefinedNameInspection = workbook.inspect_defined_name(
+        "InputArea", current_sheet="Sheet1"
+    )
+    inspected = inspection["result"]
+    if inspected["kind"] == "rectangular":
+        inspected["sheet_name"].upper()
+        inspected["range"].upper()
+    if inspected["kind"] == "external_reference":
+        if inspected["locator"] is not None:
+            inspected["locator"].upper()
+        inspected["workbook"].upper()
+        inspected["target_text"].upper()
     value: CellValue = page["cells"][0]["source_value"]
     if value["kind"] == "number":
         value["value"].is_integer()

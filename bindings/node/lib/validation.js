@@ -76,6 +76,14 @@ function requireOptions(value) {
   }
 }
 
+function requireOptionKeys(value, allowedKeys) {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.includes(key)) {
+      throw inputError(`options.${key} is not supported`);
+    }
+  }
+}
+
 module.exports = {
   requireFinite,
   requireNonNegativeInteger,
@@ -83,6 +91,7 @@ module.exports = {
   requireOptionalBoolean,
   requireOptionalFinite,
   requireOptionalString,
+  requireOptionKeys,
   requireOptions,
   requireProtocolFinite,
   requireProtocolString,

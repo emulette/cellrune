@@ -6,6 +6,7 @@ from ._types import (
     CalculationDelta,
     CalculationDeltaPage,
     CalculationReport,
+    DefinedNameInspection,
     EditReceipt,
     ErrorDetails,
     FunctionUsageReport,
@@ -49,6 +50,12 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> RangePage: ...
+    def inspect_defined_name(
+        self,
+        name: str,
+        *,
+        current_sheet: str | None = None,
+    ) -> DefinedNameInspection: ...
     def function_usage(self) -> FunctionUsageReport: ...
     def calculate(
         self,
