@@ -32,9 +32,9 @@ pub(super) fn call(
                 args: args.to_vec(),
             };
             match engine.resolve_rect_expr(context, &expression) {
-                Ok(rect) if rect.is_single_cell() => {
-                    engine.cell_value((rect.sheet, rect.row_start, rect.col_start))
-                }
+                Ok(rect) if rect.is_single_cell() => engine
+                    .read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
+                    .unwrap_or_else(Value::Error),
                 Ok(_) => Value::Error(ErrorKind::Unsupported),
                 Err(kind) => Value::Error(kind),
             }
@@ -378,34 +378,41 @@ fn xlookup(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Valu
         } else {
             length as u32 - step - 1
         };
-        let candidate = if vertical {
-            engine.cell_value((
+        let candidate_cell = if vertical {
+            (
                 lookup_rect.sheet,
                 lookup_rect.row_start + offset,
                 lookup_rect.col_start,
-            ))
+            )
         } else {
-            engine.cell_value((
+            (
                 lookup_rect.sheet,
                 lookup_rect.row_start,
                 lookup_rect.col_start + offset,
-            ))
+            )
+        };
+        let candidate = match engine.read_reference_cell(context, candidate_cell) {
+            Ok(value) => value,
+            Err(kind) => return Value::Error(kind),
         };
         match compare(&candidate, &lookup) {
             Ok(Ordering::Equal) => {
-                return if vertical {
-                    engine.cell_value((
+                let result_cell = if vertical {
+                    (
                         return_rect.sheet,
                         return_rect.row_start + offset,
                         return_rect.col_start,
-                    ))
+                    )
                 } else {
-                    engine.cell_value((
+                    (
                         return_rect.sheet,
                         return_rect.row_start,
                         return_rect.col_start + offset,
-                    ))
+                    )
                 };
+                return engine
+                    .read_reference_cell(context, result_cell)
+                    .unwrap_or_else(Value::Error);
             }
             Ok(Ordering::Less | Ordering::Greater) => {}
             Err(kind) => return Value::Error(kind),
@@ -454,7 +461,7 @@ fn table_lookup(
             Err(kind) => return Value::Error(kind),
         },
     };
-    match find_lookup_offset(engine, &lookup, rect, horizontal, approximate) {
+    match find_lookup_offset(engine, context, &lookup, rect, horizontal, approximate) {
         Ok(offset) => {
             let row = if horizontal {
                 rect.row_start + result_index as u32 - 1
@@ -466,7 +473,9 @@ fn table_lookup(
             } else {
                 rect.col_start + result_index as u32 - 1
             };
-            engine.cell_value((rect.sheet, row, column))
+            engine
+                .read_reference_cell(context, (rect.sheet, row, column))
+                .unwrap_or_else(Value::Error)
         }
         Err(kind) => Value::Error(kind),
     }
@@ -474,6 +483,7 @@ fn table_lookup(
 
 fn find_lookup_offset(
     engine: &Engine<'_>,
+    context: EvalContext<'_>,
     lookup: &Value,
     rect: Rect,
     horizontal: bool,
@@ -489,7 +499,7 @@ fn find_lookup_offset(
     engine.ensure_array_cells(length)?;
 
     for offset in 0..length as u32 {
-        let value = lookup_axis_value(engine, rect, horizontal, offset);
+        let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
         if compare(&value, lookup)? == Ordering::Equal {
             return Ok(offset);
         }
@@ -500,7 +510,7 @@ fn find_lookup_offset(
 
     let mut candidate = None;
     for offset in 0..length as u32 {
-        let value = lookup_axis_value(engine, rect, horizontal, offset);
+        let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
         match compare(&value, lookup)? {
             Ordering::Equal => unreachable!("exact matches returned in the first pass"),
             Ordering::Less => candidate = Some(offset),
@@ -510,12 +520,19 @@ fn find_lookup_offset(
     candidate.ok_or(ErrorKind::NA)
 }
 
-fn lookup_axis_value(engine: &Engine<'_>, rect: Rect, horizontal: bool, offset: u32) -> Value {
-    if horizontal {
-        engine.cell_value((rect.sheet, rect.row_start, rect.col_start + offset))
+fn lookup_axis_value(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    rect: Rect,
+    horizontal: bool,
+    offset: u32,
+) -> Result<Value, ErrorKind> {
+    let cell = if horizontal {
+        (rect.sheet, rect.row_start, rect.col_start + offset)
     } else {
-        engine.cell_value((rect.sheet, rect.row_start + offset, rect.col_start))
-    }
+        (rect.sheet, rect.row_start + offset, rect.col_start)
+    };
+    engine.read_reference_cell(context, cell)
 }
 
 fn choose(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

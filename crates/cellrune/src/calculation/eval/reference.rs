@@ -2,11 +2,14 @@ use std::collections::BTreeMap;
 
 use super::{Engine, EvalContext};
 use crate::Sheet;
-use crate::calculation::ast::{Expr, RefBody, Reference};
+use crate::calculation::ast::{
+    Expr, RefBody, Reference, StructuredColumns, StructuredItem, StructuredReference,
+};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
 use crate::calculation::functions::{callable_call_scope, let_reference, normalize_name};
+use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::parse_formula_with_limits;
-use crate::calculation::runtime::{Rect, RectSpan, SheetSpan};
+use crate::calculation::runtime::{Rect, RectSpan, ReferenceValue, SheetSpan};
 use crate::calculation::scope::ScopeValue;
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
@@ -49,13 +52,6 @@ impl ColumnExtents {
             .max()
             .unwrap_or(0)
     }
-}
-
-pub(super) fn is_reference_returning_function(name: &str) -> bool {
-    matches!(
-        normalize_name(name).as_str(),
-        "INDEX" | "INDIRECT" | "OFFSET"
-    )
 }
 
 impl Engine<'_> {
@@ -123,48 +119,291 @@ impl Engine<'_> {
         span.into_rect().map_err(|_| ErrorKind::Unsupported)
     }
 
-    pub(in crate::calculation) fn resolve_rect_span_expr(
+    fn validate_reference_value(
+        &self,
+        reference: ReferenceValue,
+    ) -> Result<ReferenceValue, ErrorKind> {
+        let area_count = u64::try_from(reference.area_count())
+            .map_err(|_| ErrorKind::ResourceLimit(CalculationLimitKind::ReferenceAreas))?;
+        if area_count > self.options.limits().max_reference_areas() {
+            return Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::ReferenceAreas,
+            ));
+        }
+        let mut sheet = None;
+        for area in reference.areas() {
+            match area {
+                crate::calculation::runtime::ReferenceArea::Rect(rect) => match sheet {
+                    Some(current) if current != rect.sheet => return Err(ErrorKind::Value),
+                    Some(_) => {}
+                    None => sheet = Some(rect.sheet),
+                },
+                crate::calculation::runtime::ReferenceArea::SheetSpan(_)
+                    if reference.area_count() > 1 =>
+                {
+                    return Err(ErrorKind::Value);
+                }
+                crate::calculation::runtime::ReferenceArea::SheetSpan(_) => {}
+            }
+        }
+        Ok(reference)
+    }
+
+    fn resolve_structured_reference(
+        &self,
+        context: EvalContext<'_>,
+        reference: &StructuredReference,
+    ) -> Result<ReferenceValue, ErrorKind> {
+        let address = crate::CellAddress::from_indices(context.row(), context.column())
+            .map_err(|_| ErrorKind::Ref)?;
+        let location = match &reference.table {
+            Some(name) => self.workbook.table_location(name).ok_or(ErrorKind::Name)?,
+            None => {
+                let sheet = self
+                    .workbook
+                    .sheets()
+                    .get(context.sheet())
+                    .ok_or(ErrorKind::Ref)?;
+                self.workbook
+                    .containing_table_location(sheet.id(), address)
+                    .ok_or(ErrorKind::Value)?
+            }
+        };
+        let table = &self.workbook.sheets()[location.sheet_index].tables()[location.table_index];
+        let range = table.range();
+        let table_row_start = range.start().row().get();
+        let table_row_end = range.end().row().get();
+        let table_col_start = range.start().column().get();
+        let table_col_end = range.end().column().get();
+        let header_end = table_row_start
+            .checked_add(table.header_row_count())
+            .and_then(|row| row.checked_sub(1))
+            .ok_or(ErrorKind::Ref)?;
+        let data_row_start = table_row_start
+            .checked_add(table.header_row_count())
+            .ok_or(ErrorKind::Ref)?;
+        let data_row_end = table_row_end
+            .checked_sub(table.totals_row_count())
+            .ok_or(ErrorKind::Ref)?;
+        let has_headers = table.header_row_count() > 0;
+        let has_totals = table.totals_row_count() > 0 && table.totals_row_shown();
+        let column_index = |name: &str| {
+            self.workbook
+                .table_column_location(table.id(), name)
+                .map(|column| column.column_index)
+                .ok_or(ErrorKind::Ref)
+        };
+        let (col_start, col_end) = match &reference.columns {
+            None => (table_col_start, table_col_end),
+            Some(StructuredColumns::Single(name)) => {
+                let index = column_index(name)?;
+                let column = table_col_start
+                    .checked_add(u32::try_from(index).map_err(|_| ErrorKind::Ref)?)
+                    .ok_or(ErrorKind::Ref)?;
+                (column, column)
+            }
+            Some(StructuredColumns::Range { start, end }) => {
+                let start = column_index(start)?;
+                let end = column_index(end)?;
+                let start = table_col_start
+                    .checked_add(u32::try_from(start).map_err(|_| ErrorKind::Ref)?)
+                    .ok_or(ErrorKind::Ref)?;
+                let end = table_col_start
+                    .checked_add(u32::try_from(end).map_err(|_| ErrorKind::Ref)?)
+                    .ok_or(ErrorKind::Ref)?;
+                (start.min(end), start.max(end))
+            }
+        };
+
+        let default_item = if reference.table.is_some() {
+            StructuredItem::Data
+        } else {
+            StructuredItem::ThisRow
+        };
+        let mut row_start = None::<u32>;
+        let mut row_end = None::<u32>;
+        let items = if reference.items.is_empty() {
+            std::slice::from_ref(&default_item)
+        } else {
+            reference.items.as_slice()
+        };
+        for item in items {
+            let band = match item {
+                StructuredItem::All => Some((table_row_start, table_row_end)),
+                StructuredItem::Headers if !has_headers => return Err(ErrorKind::Ref),
+                StructuredItem::Headers => Some((table_row_start, header_end)),
+                StructuredItem::Data if data_row_start > data_row_end => None,
+                StructuredItem::Data => Some((data_row_start, data_row_end)),
+                StructuredItem::Totals if !has_totals => None,
+                StructuredItem::Totals => {
+                    Some((table_row_end - table.totals_row_count() + 1, table_row_end))
+                }
+                StructuredItem::ThisRow
+                    if context.sheet() != location.sheet_index
+                        || context.row() < data_row_start
+                        || context.row() > data_row_end =>
+                {
+                    return Err(ErrorKind::Value);
+                }
+                StructuredItem::ThisRow => Some((context.row(), context.row())),
+            };
+            if let Some((start, end)) = band {
+                row_start = Some(row_start.map_or(start, |current| current.min(start)));
+                row_end = Some(row_end.map_or(end, |current| current.max(end)));
+            }
+        }
+        let (Some(row_start), Some(row_end)) = (row_start, row_end) else {
+            return Ok(ReferenceValue::Empty);
+        };
+        Ok(ReferenceValue::from_rect(Rect {
+            sheet: location.sheet_index,
+            row_start,
+            col_start,
+            row_end,
+            col_end,
+            whole_rows: false,
+        }))
+    }
+
+    pub(in crate::calculation) fn resolve_reference_value_expr(
         &self,
         context: EvalContext<'_>,
         expr: &Expr,
-    ) -> Result<RectSpan, ErrorKind> {
-        match expr {
-            Expr::Paren(inner) => self.resolve_rect_span_expr(context, inner),
-            Expr::Ref(reference) => self.resolve_reference_span(context.sheet(), reference),
-            Expr::Range { .. } => {
-                let rect = self.resolve_rect_expr(context, expr)?;
-                Ok(RectSpan::new(SheetSpan::single(rect.sheet), rect))
+    ) -> Result<ReferenceValue, ErrorKind> {
+        let reference = match expr {
+            Expr::Paren(inner) => return self.resolve_reference_value_expr(context, inner),
+            Expr::Ref(reference) => {
+                ReferenceValue::from_span(self.resolve_reference_span(context.sheet(), reference)?)
             }
+            Expr::StructuredRef(reference) => {
+                self.resolve_structured_reference(context, reference)?
+            }
+            Expr::ReferenceUnion { left, right } => {
+                let left = self.resolve_reference_value_expr(context, left)?;
+                let right = self.resolve_reference_value_expr(context, right)?;
+                if matches!(&left, ReferenceValue::Empty) || matches!(&right, ReferenceValue::Empty)
+                {
+                    return Err(ErrorKind::Ref);
+                }
+                let mut areas =
+                    Vec::with_capacity(left.area_count().saturating_add(right.area_count()));
+                areas.extend_from_slice(left.areas());
+                areas.extend_from_slice(right.areas());
+                ReferenceValue::from_areas(areas)
+            }
+            Expr::ReferenceIntersection { left, right } => {
+                let left = self.resolve_reference_value_expr(context, left)?;
+                let right = self.resolve_reference_value_expr(context, right)?;
+                if matches!(&left, ReferenceValue::Empty) || matches!(&right, ReferenceValue::Empty)
+                {
+                    return Err(ErrorKind::Ref);
+                }
+                if left.has_sheet_span() || right.has_sheet_span() {
+                    return Err(ErrorKind::Value);
+                }
+                let left_sheet = left
+                    .areas()
+                    .first()
+                    .and_then(|area| area.rects().next())
+                    .map(|rect| rect.sheet);
+                let right_sheet = right
+                    .areas()
+                    .first()
+                    .and_then(|area| area.rects().next())
+                    .map(|rect| rect.sheet);
+                if left_sheet != right_sheet {
+                    return Err(ErrorKind::Value);
+                }
+                let comparisons = u64::try_from(left.area_count())
+                    .ok()
+                    .and_then(|left| {
+                        u64::try_from(right.area_count())
+                            .ok()
+                            .and_then(|right| left.checked_mul(right))
+                    })
+                    .ok_or(ErrorKind::ResourceLimit(
+                        CalculationLimitKind::FunctionIterations,
+                    ))?;
+                self.ensure_function_iterations(comparisons)?;
+                if context.charges_reference_work() {
+                    self.charge_function_iterations(context, comparisons)?;
+                }
+                let max_areas = self.options.limits().max_reference_areas();
+                let mut areas = Vec::new();
+                for left in left.areas() {
+                    for right in right.areas() {
+                        if context.is_cancelled() {
+                            return Err(ErrorKind::ResourceLimit(
+                                CalculationLimitKind::FunctionIterations,
+                            ));
+                        }
+                        if let Some(area) = left.intersection(right) {
+                            areas.push(area);
+                            if u64::try_from(areas.len()).map_or(true, |count| count > max_areas) {
+                                return Err(ErrorKind::ResourceLimit(
+                                    CalculationLimitKind::ReferenceAreas,
+                                ));
+                            }
+                        }
+                    }
+                }
+                if areas.is_empty() {
+                    return Err(ErrorKind::Null);
+                }
+                ReferenceValue::from_areas(areas)
+            }
+            Expr::Range { .. } => ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?),
             Expr::Name(name) => match context.binding(name) {
-                Some(ScopeValue::Reference(span)) => Ok(span.clone()),
-                Some(_) => Err(ErrorKind::Value),
+                Some(ScopeValue::Reference(reference)) => reference.clone(),
+                Some(_) => return Err(ErrorKind::Value),
                 None => self
                     .resolve_name_expr_with_id_in_context(context, name)
                     .ok_or(ErrorKind::Name)
                     .and_then(|(id, named)| {
-                        self.resolve_rect_span_expr(
+                        self.resolve_reference_value_expr(
                             context
                                 .without_bindings()
                                 .with_defined_name_scope(Some(id.scope())),
                             named,
                         )
-                    }),
+                    })?,
             },
             Expr::Call { name, args } => {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
-                    return match scoped {
-                        ScopeValue::Reference(span) => Ok(span),
-                        _ => Err(ErrorKind::Value),
-                    };
-                }
-                if normalize_name(name) == "LET" {
-                    let_reference(self, context, args)
+                    match scoped {
+                        ScopeValue::Reference(reference) => reference,
+                        _ => return Err(ErrorKind::Value),
+                    }
+                } else if normalize_name(name) == "LET" {
+                    let_reference(self, context, args)?
                 } else {
-                    self.resolve_rect_expr(context, expr).map(RectSpan::single)
+                    ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?)
                 }
             }
-            _ => Err(ErrorKind::Value),
-        }
+            Expr::ErrorLit(kind) => return Err(*kind),
+            Expr::SpillRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
+            | Expr::ImplicitIntersection(_)
+            | Expr::Invoke { .. }
+            | Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::Unary { .. }
+            | Expr::Binary { .. }
+            | Expr::Array(_)
+            | Expr::Missing => return Err(ErrorKind::Value),
+        };
+        self.validate_reference_value(reference)
+    }
+
+    pub(in crate::calculation) fn resolve_rect_span_expr(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> Result<RectSpan, ErrorKind> {
+        self.resolve_reference_value_expr(context, expr)?
+            .single_area_span()
     }
 
     pub fn resolve_rect_expr(
@@ -178,19 +417,23 @@ impl Engine<'_> {
                 .resolve_rect_expr(context, inner)
                 .and_then(|rect| self.implicit_intersection_rect(context, rect)),
             Expr::Ref(reference) => self.resolve_reference(context.sheet(), reference),
+            Expr::StructuredRef(_)
+            | Expr::ReferenceUnion { .. }
+            | Expr::ReferenceIntersection { .. } => self
+                .resolve_reference_value_expr(context, expr)?
+                .into_single_rect(),
             Expr::Range { start, end } => {
                 // A sheet span is not a rectangle the range operator can join. Excel reports the
                 // same `#VALUE!` it gives a range whose endpoints sit on different sheets, and the
                 // capability scanner classifies this position with `ARRAY_EXPRESSION_POLICY`, so
                 // answering with the engine-capability `Unsupported` here would make the scanner
                 // and the evaluator disagree.
-                let start_span = self.resolve_rect_span_expr(context, start)?;
-                let end_span = self.resolve_rect_span_expr(context, end)?;
-                if start_span.is_sheet_range() || end_span.is_sheet_range() {
-                    return Err(ErrorKind::Value);
-                }
-                let start = start_span.into_rect().map_err(|_| ErrorKind::Value)?;
-                let end = end_span.into_rect().map_err(|_| ErrorKind::Value)?;
+                let start = self
+                    .resolve_reference_value_expr(context, start)?
+                    .bounding_rect()?;
+                let end = self
+                    .resolve_reference_value_expr(context, end)?
+                    .bounding_rect()?;
                 if start.sheet != end.sheet {
                     // Excel yields #VALUE! for a range operator whose endpoints
                     // sit on different sheets.
@@ -210,9 +453,7 @@ impl Engine<'_> {
                 })
             }
             Expr::Name(name) => match context.binding(name) {
-                Some(ScopeValue::Reference(span)) => {
-                    span.clone().into_rect().map_err(|_| ErrorKind::Value)
-                }
+                Some(ScopeValue::Reference(reference)) => reference.clone().into_single_rect(),
                 Some(_) => Err(ErrorKind::Value),
                 None => self
                     .resolve_name_expr_with_id_in_context(context, name)
@@ -229,16 +470,12 @@ impl Engine<'_> {
             Expr::Call { name, args } => {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     return match scoped {
-                        ScopeValue::Reference(span) => {
-                            span.into_rect().map_err(|_| ErrorKind::Value)
-                        }
+                        ScopeValue::Reference(reference) => reference.into_single_rect(),
                         _ => Err(ErrorKind::Value),
                     };
                 }
                 match normalize_name(name).as_str() {
-                    "LET" => let_reference(self, context, args)?
-                        .into_rect()
-                        .map_err(|_| ErrorKind::Value),
+                    "LET" => let_reference(self, context, args)?.into_single_rect(),
                     "INDEX" => self.resolve_index_rect(context, args),
                     _ => self.resolve_dynamic_rect(context, name, args),
                 }
@@ -252,10 +489,18 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         args: &[Expr],
     ) -> Result<Rect, ErrorKind> {
-        if args.len() < 2 || args.len() > 3 {
+        if args.len() < 2 || args.len() > 4 {
             return Err(ErrorKind::Value);
         }
-        let span = self.resolve_rect_span_expr(context, &args[0])?;
+        let reference = self.resolve_reference_value_expr(context, &args[0])?;
+        let area_index = match args.get(3) {
+            Some(Expr::Missing) | None => 1.0,
+            Some(expr) => to_number(&self.eval_scalar(context, expr))?.trunc(),
+        };
+        if !area_index.is_finite() || area_index < 1.0 {
+            return Err(ErrorKind::Value);
+        }
+        let span = reference.area_span(area_index as usize)?;
         if span.is_sheet_range() {
             return Err(ErrorKind::Value);
         }

@@ -6,7 +6,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::lambda::{LocalNamePolicy, definition, validate_local_name};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::element_at;
-use super::super::runtime::{Array, RectSpan};
+use super::super::runtime::{Array, ReferenceValue};
 use super::super::scope::{
     ArrayEvaluation, DefinedLambdaId, LambdaClosure, ScalarEvaluation, ScopeEntry, ScopeValue,
 };
@@ -275,8 +275,11 @@ fn lambda_result_scalar(
     {
         return Err(ErrorKind::Calc);
     }
-    if let ScopeValue::Reference(span) = result {
-        let rect = span.clone().into_rect().map_err(|_| ErrorKind::Calc)?;
+    if let ScopeValue::Reference(reference) = result {
+        let rect = reference
+            .clone()
+            .into_single_rect()
+            .map_err(|_| ErrorKind::Calc)?;
         if !rect.is_single_cell() {
             return Err(ErrorKind::Calc);
         }
@@ -403,7 +406,7 @@ fn reduce(
 ) -> Result<ArrayEvaluation, ErrorKind> {
     if !scan {
         let accumulator = reduce_scope_value(engine, context, args)?;
-        return engine.array_from_scope_value(&accumulator);
+        return engine.array_from_scope_value(context, &accumulator);
     }
     if args.len() != 3 {
         return Err(ErrorKind::Value);
@@ -481,7 +484,7 @@ fn reduce(
             decimal_traces,
         })
     } else {
-        engine.array_from_scope_value(&accumulator)
+        engine.array_from_scope_value(context, &accumulator)
     }
 }
 
@@ -628,9 +631,9 @@ pub(in crate::calculation) fn let_reference(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     args: &[Expr],
-) -> Result<RectSpan, ErrorKind> {
+) -> Result<ReferenceValue, ErrorKind> {
     match let_scope_value(engine, context, args) {
-        ScopeValue::Reference(span) => Ok(span),
+        ScopeValue::Reference(reference) => Ok(reference),
         ScopeValue::Scalar(evaluated) => match evaluated.value {
             Value::Error(kind) => Err(kind),
             _ => Err(ErrorKind::Value),

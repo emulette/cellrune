@@ -418,10 +418,14 @@ fn conditional_extreme(
         for column in 0..value_range.width() as u32 {
             let mut matched = true;
             for (rect, criterion) in &criteria {
-                match criterion.matches(
-                    &engine.cell_value((rect.sheet, rect.row_start + row, rect.col_start + column)),
-                    &mut wildcard_budget,
+                let value = match engine.read_reference_cell(
+                    context,
+                    (rect.sheet, rect.row_start + row, rect.col_start + column),
                 ) {
+                    Ok(value) => value,
+                    Err(kind) => return Value::Error(kind),
+                };
+                match criterion.matches(&value, &mut wildcard_budget) {
                     Ok(true) => {}
                     Ok(false) => {
                         matched = false;
@@ -433,11 +437,18 @@ fn conditional_extreme(
             if !matched {
                 continue;
             }
-            if let Value::Number(number) = engine.cell_value((
-                value_range.sheet,
-                value_range.row_start + row,
-                value_range.col_start + column,
-            )) {
+            let value = match engine.read_reference_cell(
+                context,
+                (
+                    value_range.sheet,
+                    value_range.row_start + row,
+                    value_range.col_start + column,
+                ),
+            ) {
+                Ok(value) => value,
+                Err(kind) => return Value::Error(kind),
+            };
+            if let Value::Number(number) = value {
                 result = Some(result.map_or(number, |current| {
                     if minimum {
                         current.min(number)

@@ -190,17 +190,18 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
             }
             for row in rect.row_start..=row_end {
                 for column in rect.col_start..=rect.col_end {
-                    match engine.cell_value((rect.sheet, row, column)) {
-                        Value::Error(kind) => return Value::Error(kind),
-                        Value::Number(number) => {
+                    match engine.read_reference_cell(context, (rect.sheet, row, column)) {
+                        Err(kind) => return Value::Error(kind),
+                        Ok(Value::Error(kind)) => return Value::Error(kind),
+                        Ok(Value::Number(number)) => {
                             participants += 1;
                             all_true &= number != 0.0;
                         }
-                        Value::Logical(logical) => {
+                        Ok(Value::Logical(logical)) => {
                             participants += 1;
                             all_true &= logical;
                         }
-                        Value::Text(_) | Value::Blank => {}
+                        Ok(Value::Text(_) | Value::Blank) => {}
                     }
                 }
             }
@@ -350,6 +351,7 @@ fn split_pairs(
 
 fn count_matches(
     engine: &Engine<'_>,
+    context: EvalContext<'_>,
     rects: &[Rect],
     criteria: &[Criteria],
     wildcard_budget: &mut WildcardStepBudget,
@@ -376,11 +378,14 @@ fn count_matches(
         for relative_col in 0..width {
             let mut matched = true;
             for (rect, criterion) in rects.iter().zip(criteria.iter()) {
-                let value = engine.cell_value((
-                    rect.sheet,
-                    rect.row_start + relative_row as u32,
-                    rect.col_start + relative_col as u32,
-                ));
+                let value = engine.read_reference_cell(
+                    context,
+                    (
+                        rect.sheet,
+                        rect.row_start + relative_row as u32,
+                        rect.col_start + relative_col as u32,
+                    ),
+                )?;
                 if !criterion.matches(&value, wildcard_budget)? {
                     matched = false;
                     break;
@@ -417,7 +422,13 @@ fn kernel_countifs(
         }
     }
     let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
-    match count_matches(engine, &pairs.rects, &criteria, &mut wildcard_budget) {
+    match count_matches(
+        engine,
+        context,
+        &pairs.rects,
+        &criteria,
+        &mut wildcard_budget,
+    ) {
         Ok(count) => Value::Number(count),
         Err(kind) => Value::Error(kind),
     }
@@ -488,7 +499,13 @@ fn countifs_broadcast(
                 data.push(Value::Error(kind));
                 continue;
             }
-            match count_matches(engine, &pairs.rects, &criteria, &mut wildcard_budget) {
+            match count_matches(
+                engine,
+                context,
+                &pairs.rects,
+                &criteria,
+                &mut wildcard_budget,
+            ) {
                 Ok(count) => data.push(Value::Number(count)),
                 Err(kind) => data.push(Value::Error(kind)),
             }
@@ -552,9 +569,10 @@ fn kernel_index(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     engine
         .resolve_index_rect(context, args)
         .and_then(|rect| engine.implicit_intersection_rect(context, rect))
-        .map_or_else(Value::Error, |rect| {
-            engine.cell_value((rect.sheet, rect.row_start, rect.col_start))
+        .and_then(|rect| {
+            engine.read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
         })
+        .unwrap_or_else(Value::Error)
 }
 
 fn index_array(
@@ -631,7 +649,10 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         } else {
             (rect.row_start, rect.col_start + offset as u32)
         };
-        let value = engine.cell_value((rect.sheet, row, column));
+        let value = match engine.read_reference_cell(context, (rect.sheet, row, column)) {
+            Ok(value) => value,
+            Err(kind) => return Value::Error(kind),
+        };
         match criterion.matches(&value, &mut wildcard_budget) {
             Ok(true) => return Value::Number((offset + 1) as f64),
             Ok(false) => {}

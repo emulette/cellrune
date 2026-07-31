@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::decimal::DecimalTrace;
 use super::operators::broadcast_index;
-use super::runtime::{Array, RectSpan};
+use super::runtime::{Array, ReferenceValue};
 use super::value::{ErrorKind, Value};
 use crate::{DefinedName, DefinedNameScope};
 
@@ -69,7 +69,7 @@ pub(super) enum ScopeValue {
     Missing,
     Scalar(ScalarEvaluation),
     Array(Arc<ArrayEvaluation>),
-    Reference(RectSpan),
+    Reference(ReferenceValue),
     Callable(Arc<LambdaClosure>),
 }
 

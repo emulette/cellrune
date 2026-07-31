@@ -225,6 +225,40 @@ fn let_scope_resolves_dynamic_and_resized_dependencies() {
 }
 
 #[test]
+fn multi_area_dependencies_keep_dynamic_reference_selection_inputs() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    for (cell, value) in [("A1", "1"), ("A2", "2"), ("C1", "3"), ("D1", "1")] {
+        draft
+            .set_cell_formula(sheet_id, address(cell), formula(value))
+            .expect("input formula");
+    }
+    draft
+        .set_cell_formula(
+            sheet_id,
+            address("F1"),
+            formula("SUM((OFFSET(A1,D1,0),C1))"),
+        )
+        .expect("dynamic union formula");
+    draft
+        .set_cell_formula(sheet_id, address("G1"), formula("SUM(OFFSET(A1,D1,0) A2)"))
+        .expect("dynamic intersection formula");
+
+    let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
+    let expected = vec![(0, 1, 1), (0, 1, 3), (0, 1, 4), (0, 2, 1)];
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 6)),
+        Some(&expected),
+        "the union keeps its final cells and OFFSET selector inputs",
+    );
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 7)),
+        Some(&vec![(0, 1, 1), (0, 1, 4), (0, 2, 1)]),
+        "the intersection keeps its final cell and OFFSET selector inputs",
+    );
+}
+
+#[test]
 fn three_d_dependencies_stay_compact_and_cover_every_formula_sheet() {
     let mut draft = WorkbookDraft::new();
     let first = SheetId::new(1).expect("default sheet ID");

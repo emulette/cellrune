@@ -507,28 +507,28 @@
     "excel_value": "15",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ANCHORARRAY) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
   },
   "curated:arraysdynamic:c025": {
     "classification": "not_implemented",
     "excel_value": "5",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ANCHORARRAY) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
   },
   "curated:arraysdynamic:c026": {
     "classification": "not_implemented",
     "excel_value": "3",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ANCHORARRAY) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
   },
   "curated:arraysdynamic:c027": {
     "classification": "not_implemented",
     "excel_value": "1",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ANCHORARRAY) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
   },
   "curated:arraysdynamic:c028": {
     "classification": "match",
@@ -733,18 +733,16 @@
     "excel_rich_error": false
   },
   "curated:intersection:c006": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 7: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:intersection:c007": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "60",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 8: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:intersection:c008": {
     "classification": "match",
@@ -765,11 +763,10 @@
     "excel_rich_error": false
   },
   "curated:intersection:c011": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 7: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:lookup:c001": {
     "classification": "divergent",
@@ -843,18 +840,16 @@
     "note": "CellRune reports calculation.unsupported_expression for this oracle case."
   },
   "curated:lookup:c013": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[Amount]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:lookup:c014": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[Amount]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:textdate:c001": {
     "classification": "divergent",
@@ -1001,39 +996,34 @@
     "note": "CellRune reports calculation.blocked_by_upstream for this oracle case."
   },
   "curated:unsupported:c007": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[Amount]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c008": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[Amount]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c009": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[Amount]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c010": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "8610",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[Amount]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c011": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2177",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_structured_reference (DataTable[[Amount]:[Quantity]]) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c012": {
     "classification": "not_implemented",
@@ -1338,11 +1328,10 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.ARABIC) for this oracle case."
   },
   "function:areas": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.parse_error (token 14: unexpected token) for this oracle case."
+    "excel_rich_error": false
   },
   "function:arraytotext": {
     "classification": "not_implemented",

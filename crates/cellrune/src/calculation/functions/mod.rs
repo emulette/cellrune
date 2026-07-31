@@ -12,6 +12,7 @@ mod calendar;
 mod combinatorics;
 mod date;
 mod date_additional;
+mod descriptor;
 mod dynamic;
 mod engineering;
 mod financial;
@@ -47,6 +48,9 @@ pub(super) fn call_function(
     }
     if let Some(kind) = direct_sheet_span_error(engine, context, &normalized, args) {
         return Value::Error(kind);
+    }
+    if let Some(descriptor) = descriptor::descriptor(&normalized) {
+        return descriptor::dispatch(descriptor, engine, context, args);
     }
     match function_group(&normalized) {
         Some(FunctionGroup::Legacy) => legacy::call_legacy(engine, context, &normalized, args),
@@ -106,6 +110,12 @@ pub(super) fn callable_call_scope(
     })
 }
 
+pub(super) fn uses_reference_metadata_only(normalized_name: &str) -> bool {
+    descriptor::descriptor(normalized_name)
+        .is_some_and(descriptor::FunctionDescriptor::reference_metadata_only)
+        || normalized_name == "ISREF"
+}
+
 fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
     let Expr::Call { args, .. } = expr else {
         return Vec::new();
@@ -146,7 +156,20 @@ fn direct_sheet_span_error(
     normalized_name: &str,
     args: &[Expr],
 ) -> Option<ErrorKind> {
-    let policy = function_policy(normalized_name);
+    if normalized_name == "ISREF" {
+        return None;
+    }
+    if descriptor::descriptor(normalized_name).is_some_and(|descriptor| {
+        matches!(
+            descriptor.sheet_span_policy(),
+            SheetSpanPolicy::CollectAcrossSheets
+        )
+    }) {
+        return None;
+    }
+    let policy = descriptor::descriptor(normalized_name)
+        .map(descriptor::FunctionDescriptor::sheet_span_policy)
+        .unwrap_or_else(|| function_policy(normalized_name));
     if matches!(policy, SheetSpanPolicy::CollectAcrossSheets) {
         return None;
     }
@@ -155,8 +178,8 @@ fn direct_sheet_span_error(
         .filter(|arg| !is_let_expression(arg))
         .any(|arg| {
             engine
-                .resolve_rect_span_expr(context, arg)
-                .is_ok_and(|span| span.is_sheet_range())
+                .resolve_reference_value_expr(context.without_reference_work_charge(), arg)
+                .is_ok_and(|reference| reference.has_sheet_span())
         });
     if !has_multi_sheet_argument {
         return None;
@@ -216,7 +239,19 @@ pub(super) fn call_function_array(
 
 pub(super) fn is_supported_function(name: &str) -> bool {
     let normalized = normalize_name(name);
-    function_group(&normalized).is_some()
+    descriptor::descriptor(&normalized).is_some() || function_group(&normalized).is_some()
+}
+
+pub(super) fn is_reference_returning_function(name: &str) -> bool {
+    let normalized = normalize_name(name);
+    descriptor::descriptor(&normalized)
+        .is_some_and(descriptor::FunctionDescriptor::returns_reference)
+        || matches!(normalized.as_str(), "INDEX" | "INDIRECT" | "OFFSET")
+}
+
+pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy> {
+    let normalized = normalize_name(name);
+    descriptor::descriptor(&normalized).map(descriptor::FunctionDescriptor::sheet_span_policy)
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
@@ -232,6 +267,15 @@ pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
                 name != "__XLUDF.DUMMYFUNCTION",
             )
         })
+        .chain(descriptor::descriptors().iter().copied().map(|descriptor| {
+            super::FunctionCatalogEntry::new(
+                descriptor.canonical_name().to_owned(),
+                descriptor.canonical_name().to_owned(),
+                false,
+                descriptor.returns_array(),
+                descriptor.is_official(),
+            )
+        }))
         .chain(LEGACY_ALIASES.iter().map(|(alias, canonical)| {
             super::FunctionCatalogEntry::new(
                 (*alias).to_owned(),
@@ -693,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_286_unique_excel_facing_names() {
+    fn coverage_registry_has_287_unique_excel_facing_names() {
         let kernels: BTreeSet<&str> = FUNCTION_GROUPS
             .iter()
             .flat_map(|(_, names)| names.iter().copied())
@@ -714,14 +758,28 @@ mod tests {
         );
 
         let official_kernels = kernels.len() - 1;
-        assert_eq!(official_kernels + aliases.len(), 286);
+        assert_eq!(
+            official_kernels + aliases.len() + super::descriptor::descriptors().len(),
+            287
+        );
+        assert!(function_group("AREAS").is_none());
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), kernels.len() + aliases.len());
+        assert_eq!(
+            catalog.len(),
+            kernels.len() + aliases.len() + super::descriptor::descriptors().len()
+        );
         assert!(
             catalog
                 .windows(2)
                 .all(|pair| pair[0].name() < pair[1].name())
+        );
+        assert_eq!(
+            catalog
+                .iter()
+                .filter(|entry| entry.name() == "AREAS")
+                .count(),
+            1
         );
     }
 }

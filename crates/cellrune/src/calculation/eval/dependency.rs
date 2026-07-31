@@ -449,6 +449,24 @@ impl Engine<'_> {
                     output.push(span);
                 }
             }
+            Expr::StructuredRef(_) => {
+                if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
+                    output.extend(reference.areas().iter().map(|area| area.as_span()));
+                }
+            }
+            Expr::ReferenceUnion { .. } | Expr::ReferenceIntersection { .. } => {
+                if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
+                    output.extend(reference.areas().iter().map(|area| area.as_span()));
+                }
+                let mut selection_names = VisitedDefinitions::default();
+                self.collect_reference_selection_inputs(
+                    context,
+                    expr,
+                    &mut selection_names,
+                    local_names,
+                    output,
+                );
+            }
             Expr::Range { start, end } => {
                 if let Ok(rect) = self.resolve_rect_expr(context, expr) {
                     output.push(RectSpan::single(rect));
@@ -492,9 +510,7 @@ impl Engine<'_> {
             Expr::Paren(inner) | Expr::SpillRef(inner) | Expr::Unary { operand: inner, .. } => {
                 self.collect_dependency_rects(context, inner, visited, local_names, output);
             }
-            Expr::Binary { left, right, .. }
-            | Expr::ReferenceUnion { left, right }
-            | Expr::ReferenceIntersection { left, right } => {
+            Expr::Binary { left, right, .. } => {
                 self.collect_dependency_rects(context, left, visited, local_names, output);
                 self.collect_dependency_rects(context, right, visited, local_names, output);
             }
@@ -542,6 +558,19 @@ impl Engine<'_> {
                     return;
                 }
                 let normalized = normalize_name(name);
+                if crate::calculation::functions::uses_reference_metadata_only(&normalized) {
+                    let mut selection_names = VisitedDefinitions::default();
+                    for arg in args {
+                        self.collect_reference_selection_inputs(
+                            context,
+                            arg,
+                            &mut selection_names,
+                            local_names,
+                            output,
+                        );
+                    }
+                    return;
+                }
                 if normalized == "LET" {
                     let _ =
                         with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
@@ -604,7 +633,6 @@ impl Engine<'_> {
             | Expr::Text(_)
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
-            | Expr::StructuredRef(_)
             | Expr::ExternalReference(_)
             | Expr::QualifiedName { .. }
             | Expr::Missing => {}

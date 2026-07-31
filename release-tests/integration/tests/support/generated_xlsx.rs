@@ -115,6 +115,90 @@ pub fn generated_formula_fixture(formulas: &[&str]) -> Vec<u8> {
     )
 }
 
+pub fn generated_table_reference_fixture() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    let worksheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Region</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Amount</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>Echo</t></is></c>
+      <c r="H1"><f>SUM(Sales[Amount])</f></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>North</t></is></c>
+      <c r="B2"><v>10</v></c>
+      <c r="C2"><f>[@Amount]</f></c>
+      <c r="H2"><f>AREAS((A1:A2,C1:C2,A1:A2))</f></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>South</t></is></c>
+      <c r="B3"><v>20</v></c>
+      <c r="C3"><f>[@Amount]</f></c>
+      <c r="H3"><f>AREAS(A1:C3 A2:B4)</f></c>
+    </row>
+    <row r="4">
+      <c r="A4" t="inlineStr"><is><t>West</t></is></c>
+      <c r="B4"><v>30</v></c>
+      <c r="C4"><f>[@Amount]</f></c>
+      <c r="H4"><f>SUM(Sales[[#Data],[#Totals],[Amount]])</f></c>
+    </row>
+    <row r="5">
+      <c r="A5" t="inlineStr"><is><t>Total</t></is></c>
+      <c r="B5"><v>60</v></c>
+      <c r="H5"><f>AREAS(Sales[#Totals])</f></c>
+    </row>
+  </sheetData>
+  <tableParts count="1"><tablePart r:id="rId1"/></tableParts>
+</worksheet>"#;
+    let worksheet_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="Sales" displayName="Sales" ref="A1:C5"
+       headerRowCount="1" totalsRowCount="1" totalsRowShown="1">
+  <autoFilter ref="A1:C4"/>
+  <tableColumns count="3">
+    <tableColumn id="1" name="Region"/>
+    <tableColumn id="2" name="Amount"/>
+    <tableColumn id="3" name="Echo"/>
+  </tableColumns>
+</table>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", worksheet),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                worksheet_relationships,
+            ),
+            ("xl/tables/table1.xml", table),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }

@@ -2,17 +2,18 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
 
 use cellrune::{
-    CalculationOptions, CellContent, OpenOptions, ReadLimits, ReadOptions, SheetId,
-    WorkbookSourceKind, WriteLimits, WriteOptions, XlsxDocumentKind, XlsxErrorCode,
-    XlsxWriteErrorCode, calculate_workbook, open_xlsx_document, open_xlsx_document_bytes,
-    open_xlsx_document_path, read_xlsx_bytes, write_preserved_xlsx_bytes,
+    CalculationCellId, CalculationCellResult, CalculationOptions, CellAddress, CellContent,
+    CellValue, OpenOptions, ReadLimits, ReadOptions, SheetId, WorkbookSourceKind, WriteLimits,
+    WriteOptions, XlsxDocumentKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
+    open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx_bytes,
+    scan_formula_capabilities, write_preserved_xlsx_bytes,
 };
 use sha2::{Digest, Sha256};
 use zip::read::ZipArchive;
 
 use crate::support::generated_xlsx::{
-    ProducerProfile, TemporaryWorkbook, generated_formula_fixture, generated_workbook,
-    generated_workbook_with_comment,
+    ProducerProfile, TemporaryWorkbook, generated_formula_fixture,
+    generated_table_reference_fixture, generated_workbook, generated_workbook_with_comment,
 };
 
 #[test]
@@ -43,6 +44,55 @@ fn typed_reference_formula_fixture_survives_preserved_write_and_reopen() {
             panic!("expected formula at {address}");
         };
         assert_eq!(formula.text().expect("formula text").as_str(), *expected);
+    }
+}
+
+#[test]
+fn generated_table_references_calculate_before_and_after_preserved_reopen() {
+    let bytes = generated_table_reference_fixture();
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table document");
+    assert!(scan_formula_capabilities(document.workbook()).is_supported());
+    assert_table_reference_results(document.workbook());
+
+    let output = write_preserved_xlsx_bytes(&document, WriteOptions::default())
+        .expect("preserved table-reference output");
+    let reopened =
+        read_xlsx_bytes(&output, ReadOptions::default()).expect("reopened table-reference output");
+    assert_eq!(
+        reopened.table("sales").expect("reopened table").range(),
+        document
+            .workbook()
+            .table("Sales")
+            .expect("source table")
+            .range()
+    );
+    assert!(scan_formula_capabilities(&reopened).is_supported());
+    assert_table_reference_results(&reopened);
+}
+
+fn assert_table_reference_results(workbook: &cellrune::WorkbookSnapshot) {
+    let sheet = workbook.sheet_by_name("Data").expect("Data sheet");
+    let calculation = calculate_workbook(workbook, CalculationOptions::default());
+    for (address, expected) in [
+        ("C2", 10.0),
+        ("C3", 20.0),
+        ("C4", 30.0),
+        ("H1", 60.0),
+        ("H2", 3.0),
+        ("H3", 1.0),
+        ("H4", 120.0),
+        ("H5", 1.0),
+    ] {
+        let id = CalculationCellId::new(
+            sheet.id(),
+            CellAddress::from_a1(address).expect("result address"),
+        );
+        let Some(CalculationCellResult::Value(CellValue::Number(actual))) = calculation.cell(id)
+        else {
+            panic!("numeric table-reference result expected at {address}");
+        };
+        assert_eq!(actual.get(), expected, "{address}");
     }
 }
 

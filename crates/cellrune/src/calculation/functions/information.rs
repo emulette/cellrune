@@ -18,7 +18,14 @@ pub(super) fn call(
     }
     if name == "ISREF" {
         return if args.len() == 1 {
-            Value::Logical(engine.resolve_rect_expr(context, &args[0]).is_ok())
+            match engine.resolve_reference_value_expr(context, &args[0]) {
+                Ok(reference) => Value::Logical(
+                    !matches!(&reference, super::super::runtime::ReferenceValue::Empty)
+                        && !reference.has_sheet_span(),
+                ),
+                Err(kind) if kind.is_engine_issue() => Value::Error(kind),
+                Err(_) => Value::Logical(false),
+            }
         } else {
             Value::Error(ErrorKind::Value)
         };
@@ -28,7 +35,9 @@ pub(super) fn call(
     }
     let value = if name == "T" {
         match engine.resolve_rect_expr(context, &args[0]) {
-            Ok(rect) => engine.cell_value((rect.sheet, rect.row_start, rect.col_start)),
+            Ok(rect) => engine
+                .read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
+                .unwrap_or_else(Value::Error),
             Err(_) => engine.eval_scalar(context, &args[0]),
         }
     } else {

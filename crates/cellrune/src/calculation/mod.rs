@@ -87,8 +87,10 @@ pub enum CalculationIssueCode {
     UnsupportedName,
     /// A reference spans a 3-D sheet range, for example `Sheet1:Sheet3!A1`.
     UnsupportedSheetRange,
-    /// A structured table reference, for example `Table1[Amount]`, is recognized but not
-    /// yet resolved.
+    /// A structured table reference reached a context without resolvable table geometry.
+    ///
+    /// This legacy classification remains stable for serialized reports. Supported structured
+    /// references now calculate normally or produce the corresponding Excel error.
     UnsupportedStructuredReference,
     /// A parsed expression is not supported by the current engine.
     UnsupportedExpression,

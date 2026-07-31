@@ -6,6 +6,7 @@ const MAX_FORMULA_SOURCE_BYTES: &str = "max_formula_source_bytes";
 const MAX_FORMULA_AST_NODES: &str = "max_formula_ast_nodes";
 const MAX_FORMULA_NESTING_DEPTH: &str = "max_formula_nesting_depth";
 const MAX_DEPENDENCY_EDGES: &str = "max_dependency_edges";
+const MAX_REFERENCE_AREAS: &str = "max_reference_areas";
 const MAX_ARRAY_CELLS: &str = "max_array_cells";
 const MAX_TEXT_BYTES: &str = "max_text_bytes";
 const MAX_FUNCTION_ITERATIONS: &str = "max_function_iterations";
@@ -23,6 +24,7 @@ pub struct CalculationLimits {
     max_formula_ast_nodes: u64,
     max_formula_nesting_depth: u64,
     max_dependency_edges: u64,
+    max_reference_areas: u64,
     max_array_cells: u64,
     max_text_bytes: u64,
     max_function_iterations: u64,
@@ -60,7 +62,13 @@ impl CalculationLimits {
         self.max_dependency_edges
     }
 
-    /// Returns the maximum number of cells materialized or traversed by one array operation.
+    /// Returns the maximum number of identity-preserving areas in one resolved reference.
+    pub const fn max_reference_areas(self) -> u64 {
+        self.max_reference_areas
+    }
+
+    /// Returns the maximum cells materialized by one array operation or cumulatively traversed
+    /// through references during one cell evaluation.
     pub const fn max_array_cells(self) -> u64 {
         self.max_array_cells
     }
@@ -155,7 +163,17 @@ impl CalculationLimits {
         Ok(self)
     }
 
-    /// Replaces the per-operation array-cell limit.
+    /// Replaces the per-reference area limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CalculationOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_reference_areas(mut self, value: u64) -> Result<Self, CalculationOptionsError> {
+        self.max_reference_areas = nonzero(MAX_REFERENCE_AREAS, value)?;
+        Ok(self)
+    }
+
+    /// Replaces the per-operation array-cell and per-cell cumulative reference traversal limit.
     ///
     /// # Errors
     ///
@@ -230,6 +248,7 @@ impl Default for CalculationLimits {
             max_formula_ast_nodes: 8_192,
             max_formula_nesting_depth: 256,
             max_dependency_edges: 10_000_000,
+            max_reference_areas: 8_192,
             max_array_cells: 1_000_000,
             max_text_bytes: 32_767,
             max_function_iterations: 1_000_000,
@@ -275,6 +294,7 @@ pub(super) enum CalculationLimitKind {
     FormulaAstNodes,
     FormulaNestingDepth,
     DependencyEdges,
+    ReferenceAreas,
     ArrayCells,
     TextBytes,
     FunctionIterations,
@@ -291,6 +311,7 @@ impl CalculationLimitKind {
             Self::FormulaAstNodes => MAX_FORMULA_AST_NODES,
             Self::FormulaNestingDepth => MAX_FORMULA_NESTING_DEPTH,
             Self::DependencyEdges => MAX_DEPENDENCY_EDGES,
+            Self::ReferenceAreas => MAX_REFERENCE_AREAS,
             Self::ArrayCells => MAX_ARRAY_CELLS,
             Self::TextBytes => MAX_TEXT_BYTES,
             Self::FunctionIterations => MAX_FUNCTION_ITERATIONS,
@@ -307,6 +328,7 @@ impl CalculationLimitKind {
             MAX_FORMULA_AST_NODES => Some(Self::FormulaAstNodes),
             MAX_FORMULA_NESTING_DEPTH => Some(Self::FormulaNestingDepth),
             MAX_DEPENDENCY_EDGES => Some(Self::DependencyEdges),
+            MAX_REFERENCE_AREAS => Some(Self::ReferenceAreas),
             MAX_ARRAY_CELLS => Some(Self::ArrayCells),
             MAX_TEXT_BYTES => Some(Self::TextBytes),
             MAX_FUNCTION_ITERATIONS => Some(Self::FunctionIterations),
@@ -330,6 +352,7 @@ mod tests {
             CalculationLimitKind::FormulaAstNodes,
             CalculationLimitKind::FormulaNestingDepth,
             CalculationLimitKind::DependencyEdges,
+            CalculationLimitKind::ReferenceAreas,
             CalculationLimitKind::ArrayCells,
             CalculationLimitKind::TextBytes,
             CalculationLimitKind::FunctionIterations,

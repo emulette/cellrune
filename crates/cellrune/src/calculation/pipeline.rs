@@ -4,7 +4,7 @@ use super::ast::{Expr, SheetPrefix};
 use super::convert::cell_from_value;
 use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
-use super::functions::{is_supported_function, normalize_name};
+use super::functions::{descriptor_sheet_span_policy, is_supported_function, normalize_name};
 use super::lambda::definition;
 use super::scope::DefinedLambdaId;
 use super::scope::canonical_local_name;
@@ -428,7 +428,7 @@ fn scan_with_engine_cancellable(
                             engine,
                             NameScanContext::root(sheet_index),
                             expr,
-                            ARRAY_EXPRESSION_POLICY,
+                            CapabilityInspectionPolicy::new(ARRAY_EXPRESSION_POLICY, false),
                             &mut HashSet::new(),
                             &mut CapabilityScope::default(),
                             &mut issues,
@@ -974,17 +974,36 @@ fn expr_is_definitely_non_callable(expr: &Expr) -> bool {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CapabilityInspectionPolicy {
+    sheet_span: SheetSpanPolicy,
+    suppress_missing_names: bool,
+}
+
+impl CapabilityInspectionPolicy {
+    const fn new(sheet_span: SheetSpanPolicy, suppress_missing_names: bool) -> Self {
+        Self {
+            sheet_span,
+            suppress_missing_names,
+        }
+    }
+
+    const fn with_sheet_span(self, sheet_span: SheetSpanPolicy) -> Self {
+        Self { sheet_span, ..self }
+    }
+}
+
 fn inspect_expr(
     engine: &Engine<'_>,
     sheet: NameScanContext,
     expr: &Expr,
-    sheet_span_policy: SheetSpanPolicy,
+    policy: CapabilityInspectionPolicy,
     // Keyed by policy as well as by stable defined-name identity: the sheet-range diagnosis
     // depends on the context a name
     // is reached from, so `SUM(N)+COUNTBLANK(N)` must expand `N` under both policies. Keying by
     // name alone let whichever operand came first decide the whole formula's classification.
     // Re-expansion cannot duplicate issues because the caller sorts and dedups them per cell.
-    names: &mut HashSet<(DefinedLambdaId, SheetSpanPolicy)>,
+    names: &mut HashSet<(DefinedLambdaId, CapabilityInspectionPolicy)>,
     local_scope: &mut CapabilityScope,
     issues: &mut Vec<CalculationIssue>,
 ) {
@@ -998,7 +1017,7 @@ fn inspect_expr(
                             engine,
                             sheet,
                             arg,
-                            ARRAY_EXPRESSION_POLICY,
+                            policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                             names,
                             local_scope,
                             issues,
@@ -1018,13 +1037,13 @@ fn inspect_expr(
                             engine,
                             sheet,
                             arg,
-                            ARRAY_EXPRESSION_POLICY,
+                            policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                             names,
                             local_scope,
                             issues,
                         );
                     }
-                    if names.insert((id.clone(), sheet_span_policy)) {
+                    if names.insert((id.clone(), policy)) {
                         let mut lambda_scope = CapabilityScope::default();
                         for parameter in lambda.parameters() {
                             lambda_scope.push_parameter(parameter.clone());
@@ -1033,7 +1052,7 @@ fn inspect_expr(
                             engine,
                             sheet.for_definition(id.scope()),
                             lambda.body(),
-                            sheet_span_policy,
+                            policy,
                             names,
                             &mut lambda_scope,
                             issues,
@@ -1049,15 +1068,7 @@ fn inspect_expr(
                 ));
             }
             if normalized == "LET" {
-                inspect_let(
-                    engine,
-                    sheet,
-                    args,
-                    sheet_span_policy,
-                    names,
-                    local_scope,
-                    issues,
-                );
+                inspect_let(engine, sheet, args, policy, names, local_scope, issues);
                 return;
             }
             if normalized == "LAMBDA"
@@ -1071,7 +1082,7 @@ fn inspect_expr(
                     engine,
                     sheet,
                     lambda.body(),
-                    sheet_span_policy,
+                    policy,
                     names,
                     local_scope,
                     issues,
@@ -1082,7 +1093,16 @@ fn inspect_expr(
             if normalized == "LAMBDA" {
                 return;
             }
-            let argument_policy = function_policy(&normalized);
+            let argument_policy = if normalized == "ISREF" {
+                SheetSpanPolicy::ReturnExcelError(ErrorKind::Value)
+            } else {
+                descriptor_sheet_span_policy(&normalized)
+                    .unwrap_or_else(|| function_policy(&normalized))
+            };
+            let argument_policy = CapabilityInspectionPolicy::new(
+                argument_policy,
+                policy.suppress_missing_names || normalized == "ISREF",
+            );
             if normalized == "MAP"
                 && let Some((lambda_expr, array_exprs)) = args.split_last()
                 && let Some(lambda) = definition(lambda_expr)
@@ -1127,39 +1147,15 @@ fn inspect_expr(
             }
         }
         Expr::Invoke { callee, args } => {
-            inspect_expr(
-                engine,
-                sheet,
-                callee,
-                sheet_span_policy,
-                names,
-                local_scope,
-                issues,
-            );
+            inspect_expr(engine, sheet, callee, policy, names, local_scope, issues);
             for arg in args {
-                inspect_expr(
-                    engine,
-                    sheet,
-                    arg,
-                    sheet_span_policy,
-                    names,
-                    local_scope,
-                    issues,
-                );
+                inspect_expr(engine, sheet, arg, policy, names, local_scope, issues);
             }
         }
         Expr::Name(name) => {
             if let Some(binding) = local_scope.lookup(name) {
                 if let Some(binding) = binding {
-                    inspect_expr(
-                        engine,
-                        sheet,
-                        &binding,
-                        sheet_span_policy,
-                        names,
-                        local_scope,
-                        issues,
-                    );
+                    inspect_expr(engine, sheet, &binding, policy, names, local_scope, issues);
                 }
                 return;
             }
@@ -1169,19 +1165,20 @@ fn inspect_expr(
                 name,
             ) {
                 Some((id, named)) => {
-                    if names.insert((id.clone(), sheet_span_policy)) {
+                    if names.insert((id.clone(), policy)) {
                         let mut defined_scope = CapabilityScope::default();
                         inspect_expr(
                             engine,
                             sheet.for_definition(id.scope()),
                             named,
-                            sheet_span_policy,
+                            policy,
                             names,
                             &mut defined_scope,
                             issues,
                         );
                     }
                 }
+                None if policy.suppress_missing_names => {}
                 None => issues.push(CalculationIssue::new(
                     CalculationIssueCode::UnsupportedName,
                     Some(name.clone()),
@@ -1195,7 +1192,7 @@ fn inspect_expr(
                         engine,
                         sheet,
                         element,
-                        ARRAY_EXPRESSION_POLICY,
+                        policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                         names,
                         local_scope,
                         issues,
@@ -1212,7 +1209,7 @@ fn inspect_expr(
                 engine,
                 sheet,
                 inner,
-                ARRAY_EXPRESSION_POLICY,
+                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                 names,
                 local_scope,
                 issues,
@@ -1223,53 +1220,25 @@ fn inspect_expr(
                 engine,
                 sheet,
                 inner,
-                ARRAY_EXPRESSION_POLICY,
+                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                 names,
                 local_scope,
                 issues,
             );
         }
         Expr::Paren(inner) => {
-            inspect_expr(
-                engine,
-                sheet,
-                inner,
-                sheet_span_policy,
-                names,
-                local_scope,
-                issues,
-            );
+            inspect_expr(engine, sheet, inner, policy, names, local_scope, issues);
         }
         Expr::ReferenceUnion { left, right } | Expr::ReferenceIntersection { left, right } => {
-            issues.push(CalculationIssue::new(
-                CalculationIssueCode::UnsupportedExpression,
-                Some(expr.to_string()),
-            ));
-            inspect_expr(
-                engine,
-                sheet,
-                left,
-                ARRAY_EXPRESSION_POLICY,
-                names,
-                local_scope,
-                issues,
-            );
-            inspect_expr(
-                engine,
-                sheet,
-                right,
-                ARRAY_EXPRESSION_POLICY,
-                names,
-                local_scope,
-                issues,
-            );
+            inspect_expr(engine, sheet, left, policy, names, local_scope, issues);
+            inspect_expr(engine, sheet, right, policy, names, local_scope, issues);
         }
         Expr::Binary { left, right, .. } => {
             inspect_expr(
                 engine,
                 sheet,
                 left,
-                ARRAY_EXPRESSION_POLICY,
+                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                 names,
                 local_scope,
                 issues,
@@ -1278,7 +1247,7 @@ fn inspect_expr(
                 engine,
                 sheet,
                 right,
-                ARRAY_EXPRESSION_POLICY,
+                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                 names,
                 local_scope,
                 issues,
@@ -1289,7 +1258,7 @@ fn inspect_expr(
                 engine,
                 sheet,
                 start,
-                ARRAY_EXPRESSION_POLICY,
+                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                 names,
                 local_scope,
                 issues,
@@ -1298,7 +1267,7 @@ fn inspect_expr(
                 engine,
                 sheet,
                 end,
-                ARRAY_EXPRESSION_POLICY,
+                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
                 names,
                 local_scope,
                 issues,
@@ -1321,7 +1290,7 @@ fn inspect_expr(
                 .sheet
                 .as_ref()
                 .and_then(SheetPrefix::sheet_range_detail)
-                .filter(|_| matches!(sheet_span_policy, SheetSpanPolicy::Unsupported))
+                .filter(|_| matches!(policy.sheet_span, SheetSpanPolicy::Unsupported))
             {
                 issues.push(CalculationIssue::new(
                     CalculationIssueCode::UnsupportedSheetRange,
@@ -1329,12 +1298,7 @@ fn inspect_expr(
                 ));
             }
         }
-        Expr::StructuredRef(text) => {
-            issues.push(CalculationIssue::new(
-                CalculationIssueCode::UnsupportedStructuredReference,
-                Some(text.to_string()),
-            ));
-        }
+        Expr::StructuredRef(_) => {}
         Expr::ExternalReference(reference) => {
             let mut detail = reference.workbook.to_string();
             if let Some(sheet) = &reference.sheet {
@@ -1363,8 +1327,8 @@ fn inspect_let(
     engine: &Engine<'_>,
     sheet: NameScanContext,
     args: &[Expr],
-    result_policy: SheetSpanPolicy,
-    names: &mut HashSet<(DefinedLambdaId, SheetSpanPolicy)>,
+    result_policy: CapabilityInspectionPolicy,
+    names: &mut HashSet<(DefinedLambdaId, CapabilityInspectionPolicy)>,
     local_scope: &mut CapabilityScope,
     issues: &mut Vec<CalculationIssue>,
 ) {
@@ -1377,7 +1341,7 @@ fn inspect_let(
             engine,
             sheet,
             &pair[1],
-            SheetSpanPolicy::CollectAcrossSheets,
+            result_policy.with_sheet_span(SheetSpanPolicy::CollectAcrossSheets),
             names,
             local_scope,
             issues,

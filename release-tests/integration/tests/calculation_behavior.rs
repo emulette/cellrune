@@ -584,7 +584,7 @@ fn function_usage_counts_lambda_bodies_without_user_callable_names() {
 }
 
 #[test]
-fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
+fn unresolved_structured_references_are_excel_errors_while_spills_remain_unsupported() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Table1[Amount])"),
         (1, 2, "A1#"),
@@ -594,12 +594,15 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     ]);
     let report = scan_formula_capabilities(&workbook);
 
-    assert_capability_issue(
-        &report,
-        1,
-        CalculationIssueCode::UnsupportedStructuredReference,
-        Some("Table1[Amount]"),
-    );
+    assert!(matches!(
+        report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(1))
+            .expect("structured-reference capability entry")
+            .capability(),
+        FormulaCapability::Supported
+    ));
     assert_capability_issue_code(&report, 2, CalculationIssueCode::UnsupportedExpression);
     assert!(matches!(
         report
@@ -627,11 +630,10 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
     ));
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    assert_issue(
-        &calculation,
-        1,
-        CalculationIssueCode::UnsupportedStructuredReference,
-    );
+    assert!(matches!(
+        calculation.cell(cell_id(1)),
+        Some(CalculationCellResult::Value(CellValue::Error(_)))
+    ));
     assert_issue(&calculation, 2, CalculationIssueCode::UnsupportedExpression);
     assert!(matches!(
         calculation.cell(cell_id(3)),
@@ -642,8 +644,9 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
 
 #[test]
 fn structured_and_external_references_are_typed_before_resolution() {
-    // Structured and external workbook references have distinct typed syntax nodes. Resolution
-    // remains unsupported at this checkpoint, while malformed brackets remain parse failures.
+    // Structured and external workbook references have distinct typed syntax nodes. Structured
+    // references resolve to Excel errors when their table context is absent, while external
+    // workbooks remain an unsupported capability and malformed brackets remain parse failures.
     let workbook = workbook_with_formulas(&[
         (1, 1, "Table1[Amount]"),
         (1, 2, "SUM([@Amount])"),
@@ -659,30 +662,37 @@ fn structured_and_external_references_are_typed_before_resolution() {
     let report = scan_formula_capabilities(&workbook);
 
     for column in 1..=5 {
-        assert_capability_issue_code(
-            &report,
-            column,
-            CalculationIssueCode::UnsupportedStructuredReference,
-        );
+        assert!(matches!(
+            report
+                .entries()
+                .iter()
+                .find(|entry| entry.cell() == cell_id(column))
+                .expect("structured-reference capability entry")
+                .capability(),
+            FormulaCapability::Supported
+        ));
     }
     for column in 6..=8 {
         assert_capability_issue_code(&report, column, CalculationIssueCode::UnsupportedExpression);
     }
     assert_capability_issue_code(&report, 9, CalculationIssueCode::ParseError);
-    assert_capability_issue_code(
-        &report,
-        10,
-        CalculationIssueCode::UnsupportedStructuredReference,
-    );
+    assert!(matches!(
+        report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(10))
+            .expect("escaped structured-reference capability entry")
+            .capability(),
+        FormulaCapability::Supported
+    ));
 
     // Calculate and scan must agree: the same cells are unavailable for the same reason.
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     for column in 1..=5 {
-        assert_issue(
-            &calculation,
-            column,
-            CalculationIssueCode::UnsupportedStructuredReference,
-        );
+        assert!(matches!(
+            calculation.cell(cell_id(column)),
+            Some(CalculationCellResult::Value(CellValue::Error(_)))
+        ));
     }
     for column in 6..=8 {
         assert_issue(
@@ -692,11 +702,10 @@ fn structured_and_external_references_are_typed_before_resolution() {
         );
     }
     assert_issue(&calculation, 9, CalculationIssueCode::ParseError);
-    assert_issue(
-        &calculation,
-        10,
-        CalculationIssueCode::UnsupportedStructuredReference,
-    );
+    assert!(matches!(
+        calculation.cell(cell_id(10)),
+        Some(CalculationCellResult::Value(CellValue::Error(_)))
+    ));
 }
 
 #[test]
@@ -913,7 +922,7 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
     assert_eq!(report.entries().len(), catalog.len());
 
     for (entry, capability) in catalog.iter().zip(report.entries()) {
-        let accepts_sheet_span = matches!(
+        let calculates_sheet_span_argument = matches!(
             entry.canonical_name(),
             "SUM"
                 | "AVERAGE"
@@ -934,16 +943,18 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                 | "OFFSET"
                 | "LET"
                 | "LAMBDA"
+                | "AREAS"
+                | "ISREF"
         );
         match capability.capability() {
             FormulaCapability::Supported => assert!(
-                accepts_sheet_span,
+                calculates_sheet_span_argument,
                 "{} unexpectedly accepted a 3-D argument",
                 entry.name(),
             ),
             FormulaCapability::Unsupported(issues) => {
                 assert!(
-                    !accepts_sheet_span,
+                    !calculates_sheet_span_argument,
                     "{} unexpectedly rejected its audited 3-D context: {issues:?}",
                     entry.name(),
                 );
@@ -959,7 +970,7 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
         let result = calculation.cell(capability.cell());
         assert_eq!(
             matches!(result, Some(CalculationCellResult::Value(_))),
-            accepts_sheet_span,
+            calculates_sheet_span_argument,
             "{} scanner/kernel policy mismatch: {result:?}",
             entry.name(),
         );
@@ -1119,13 +1130,18 @@ fn typed_reference_grammar_is_classified_without_parse_failures() {
     ]);
     let report = scan_formula_capabilities(&workbook);
 
-    assert_capability_issue(
-        &report,
-        1,
-        CalculationIssueCode::UnsupportedStructuredReference,
-        Some("Table1[Amount]"),
-    );
-    for column in [2, 3, 5, 6] {
+    for column in [1, 5, 6] {
+        assert!(matches!(
+            report
+                .entries()
+                .iter()
+                .find(|entry| entry.cell() == cell_id(column))
+                .expect("supported typed-reference entry")
+                .capability(),
+            FormulaCapability::Supported
+        ));
+    }
+    for column in [2, 3] {
         let entry = report
             .entries()
             .iter()
@@ -1377,7 +1393,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        286
+        287
     );
     let let_entry = catalog
         .iter()
@@ -1965,6 +1981,12 @@ fn calculation_limits_reject_zero_values() {
         CalculationLimits::default().with_max_dependency_edges(0),
         Err(CalculationOptionsError::ZeroLimit {
             name: "max_dependency_edges",
+        })
+    );
+    assert_eq!(
+        CalculationLimits::default().with_max_reference_areas(0),
+        Err(CalculationOptionsError::ZeroLimit {
+            name: "max_reference_areas",
         })
     );
     assert_eq!(

@@ -1,3 +1,4 @@
+use std::iter::Once;
 use std::ops::RangeInclusive;
 
 use super::value::ErrorKind;
@@ -126,8 +127,11 @@ impl RectSpan {
         Self::new(SheetSpan::single(rect.sheet), rect)
     }
 
-    pub(super) fn rects(&self) -> impl Iterator<Item = Rect> + '_ {
-        self.sheets.iter().map(|sheet| Rect { sheet, ..self.rect })
+    pub(super) fn rects(&self) -> RectSpanRects {
+        RectSpanRects {
+            sheets: self.sheets.iter(),
+            rect: self.rect,
+        }
     }
 
     pub(super) fn is_sheet_range(&self) -> bool {
@@ -155,6 +159,260 @@ impl RectSpan {
             sheet: *self.sheets.sheets.start(),
             ..self.rect
         })
+    }
+}
+
+pub(super) struct RectSpanRects {
+    sheets: RangeInclusive<usize>,
+    rect: Rect,
+}
+
+impl Iterator for RectSpanRects {
+    type Item = Rect;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.sheets.next().map(|sheet| Rect { sheet, ..self.rect })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ReferenceArea {
+    Rect(Rect),
+    SheetSpan(RectSpan),
+}
+
+impl ReferenceArea {
+    pub(super) fn from_span(span: RectSpan) -> Self {
+        if span.is_sheet_range() {
+            Self::SheetSpan(span)
+        } else {
+            Self::Rect(
+                span.into_rect()
+                    .expect("a non-range sheet span always contains exactly one sheet"),
+            )
+        }
+    }
+
+    pub(super) fn rects(&self) -> ReferenceAreaRects {
+        match self {
+            Self::Rect(rect) => ReferenceAreaRects::Rect(std::iter::once(*rect)),
+            Self::SheetSpan(span) => ReferenceAreaRects::SheetSpan(span.rects()),
+        }
+    }
+
+    pub(super) fn as_span(&self) -> RectSpan {
+        match self {
+            Self::Rect(rect) => RectSpan::single(*rect),
+            Self::SheetSpan(span) => span.clone(),
+        }
+    }
+
+    pub(super) fn is_sheet_span(&self) -> bool {
+        matches!(self, Self::SheetSpan(_))
+    }
+
+    fn sheet_bounds(&self) -> (usize, usize) {
+        match self {
+            Self::Rect(rect) => (rect.sheet, rect.sheet),
+            Self::SheetSpan(span) => (*span.sheets.sheets.start(), *span.sheets.sheets.end()),
+        }
+    }
+
+    fn template_rect(&self) -> Rect {
+        match self {
+            Self::Rect(rect) => *rect,
+            Self::SheetSpan(span) => span.rect,
+        }
+    }
+
+    pub(super) fn intersection(&self, other: &Self) -> Option<Self> {
+        let (left_sheet_start, left_sheet_end) = self.sheet_bounds();
+        let (right_sheet_start, right_sheet_end) = other.sheet_bounds();
+        let sheet_start = left_sheet_start.max(right_sheet_start);
+        let sheet_end = left_sheet_end.min(right_sheet_end);
+        if sheet_start > sheet_end {
+            return None;
+        }
+        let left = self.template_rect();
+        let right = other.template_rect();
+        let row_start = left.row_start.max(right.row_start);
+        let row_end = left.row_end.min(right.row_end);
+        let col_start = left.col_start.max(right.col_start);
+        let col_end = left.col_end.min(right.col_end);
+        if row_start > row_end || col_start > col_end {
+            return None;
+        }
+        let rect = Rect {
+            sheet: sheet_start,
+            row_start,
+            col_start,
+            row_end,
+            col_end,
+            whole_rows: row_start == 1
+                && row_end == EXCEL_MAX_ROWS
+                && left.whole_rows
+                && right.whole_rows,
+        };
+        if matches!(self, Self::SheetSpan(_)) && matches!(other, Self::SheetSpan(_)) {
+            Some(Self::SheetSpan(RectSpan::new(
+                SheetSpan::new(sheet_start, sheet_end),
+                rect,
+            )))
+        } else {
+            Some(Self::Rect(rect))
+        }
+    }
+}
+
+pub(super) enum ReferenceAreaRects {
+    Rect(Once<Rect>),
+    SheetSpan(RectSpanRects),
+}
+
+impl Iterator for ReferenceAreaRects {
+    type Item = Rect;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Rect(rect) => rect.next(),
+            Self::SheetSpan(span) => span.next(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct NonEmptyReferenceAreas(Box<[ReferenceArea]>);
+
+impl NonEmptyReferenceAreas {
+    fn new(areas: Vec<ReferenceArea>) -> Option<Self> {
+        (!areas.is_empty()).then(|| Self(areas.into_boxed_slice()))
+    }
+
+    fn as_slice(&self) -> &[ReferenceArea] {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ReferenceValue {
+    Empty,
+    Areas(NonEmptyReferenceAreas),
+}
+
+impl ReferenceValue {
+    pub(super) fn from_rect(rect: Rect) -> Self {
+        Self::from_area(ReferenceArea::Rect(rect))
+    }
+
+    pub(super) fn from_span(span: RectSpan) -> Self {
+        Self::from_area(ReferenceArea::from_span(span))
+    }
+
+    pub(super) fn from_area(area: ReferenceArea) -> Self {
+        Self::Areas(
+            NonEmptyReferenceAreas::new(vec![area])
+                .expect("a one-element reference area collection is non-empty"),
+        )
+    }
+
+    pub(super) fn from_areas(areas: Vec<ReferenceArea>) -> Self {
+        NonEmptyReferenceAreas::new(areas).map_or(Self::Empty, Self::Areas)
+    }
+
+    pub(super) fn areas(&self) -> &[ReferenceArea] {
+        match self {
+            Self::Empty => &[],
+            Self::Areas(areas) => areas.as_slice(),
+        }
+    }
+
+    pub(super) fn area_count(&self) -> usize {
+        self.areas().len()
+    }
+
+    pub(super) fn has_sheet_span(&self) -> bool {
+        self.areas().iter().any(ReferenceArea::is_sheet_span)
+    }
+
+    pub(super) fn rects(&self) -> impl Iterator<Item = Rect> + '_ {
+        self.areas().iter().flat_map(ReferenceArea::rects)
+    }
+
+    pub(super) fn single_rect(&self) -> Result<Rect, ErrorKind> {
+        match self {
+            Self::Empty => Err(ErrorKind::Ref),
+            Self::Areas(areas) => match areas.as_slice() {
+                [ReferenceArea::Rect(rect)] => Ok(*rect),
+                _ => Err(ErrorKind::Value),
+            },
+        }
+    }
+
+    pub(super) fn into_single_rect(self) -> Result<Rect, ErrorKind> {
+        match self {
+            Self::Areas(areas) => {
+                let mut areas = Vec::from(areas.0);
+                if areas.len() != 1 {
+                    return Err(ErrorKind::Value);
+                }
+                match areas.pop().expect("length checked") {
+                    ReferenceArea::Rect(rect) => Ok(rect),
+                    ReferenceArea::SheetSpan(_) => Err(ErrorKind::Value),
+                }
+            }
+            Self::Empty => Err(ErrorKind::Ref),
+        }
+    }
+
+    pub(super) fn single_area_span(&self) -> Result<RectSpan, ErrorKind> {
+        let area = match self {
+            Self::Empty => return Err(ErrorKind::Ref),
+            Self::Areas(areas) => match areas.as_slice() {
+                [area] => area,
+                _ => return Err(ErrorKind::Value),
+            },
+        };
+        match area {
+            ReferenceArea::Rect(rect) => Ok(RectSpan::single(*rect)),
+            ReferenceArea::SheetSpan(span) => Ok(span.clone()),
+        }
+    }
+
+    pub(super) fn area_span(&self, one_based_index: usize) -> Result<RectSpan, ErrorKind> {
+        if one_based_index == 0 {
+            return Err(ErrorKind::Value);
+        }
+        self.areas()
+            .get(one_based_index - 1)
+            .map(ReferenceArea::as_span)
+            .ok_or(ErrorKind::Ref)
+    }
+
+    pub(super) fn bounding_rect(&self) -> Result<Rect, ErrorKind> {
+        let mut areas = self.areas().iter();
+        let Some(ReferenceArea::Rect(first)) = areas.next() else {
+            return Err(match self {
+                Self::Empty => ErrorKind::Ref,
+                Self::Areas(_) => ErrorKind::Value,
+            });
+        };
+        let mut result = *first;
+        for area in areas {
+            let ReferenceArea::Rect(rect) = area else {
+                return Err(ErrorKind::Value);
+            };
+            if rect.sheet != result.sheet {
+                return Err(ErrorKind::Value);
+            }
+            result.row_start = result.row_start.min(rect.row_start);
+            result.col_start = result.col_start.min(rect.col_start);
+            result.row_end = result.row_end.max(rect.row_end);
+            result.col_end = result.col_end.max(rect.col_end);
+            result.whole_rows = result.row_start == 1
+                && result.row_end == EXCEL_MAX_ROWS
+                && (result.whole_rows || rect.whole_rows);
+        }
+        Ok(result)
     }
 }
 
@@ -231,5 +489,59 @@ mod tests {
 
         assert!(span.is_sheet_range());
         assert_eq!(span.rects().count(), 1);
+    }
+
+    #[test]
+    fn reference_value_distinguishes_empty_and_preserves_area_identity() {
+        let rect = sample_rect();
+        let repeated =
+            ReferenceValue::from_areas(vec![ReferenceArea::Rect(rect), ReferenceArea::Rect(rect)]);
+
+        assert_eq!(
+            ReferenceValue::from_areas(Vec::new()),
+            ReferenceValue::Empty
+        );
+        assert_eq!(ReferenceValue::Empty.single_rect(), Err(ErrorKind::Ref));
+        assert_eq!(repeated.area_count(), 2);
+        assert_eq!(repeated.rects().collect::<Vec<_>>(), vec![rect, rect]);
+        assert_eq!(repeated.single_rect(), Err(ErrorKind::Value));
+    }
+
+    #[test]
+    fn reference_value_narrows_only_one_plain_rectangle() {
+        let rect = sample_rect();
+        assert_eq!(ReferenceValue::from_rect(rect).single_rect(), Ok(rect));
+        assert_eq!(
+            ReferenceValue::from_span(RectSpan::new(SheetSpan::new(4, 4), rect)).single_rect(),
+            Err(ErrorKind::Value)
+        );
+    }
+
+    #[test]
+    fn reference_value_bounds_ordered_same_sheet_areas_without_merging_identity() {
+        let first = sample_rect();
+        let second = Rect {
+            row_start: 1,
+            col_start: 2,
+            row_end: 6,
+            col_end: 7,
+            ..first
+        };
+        let reference = ReferenceValue::from_areas(vec![
+            ReferenceArea::Rect(first),
+            ReferenceArea::Rect(second),
+        ]);
+
+        assert_eq!(reference.area_count(), 2);
+        assert_eq!(
+            reference.bounding_rect(),
+            Ok(Rect {
+                row_start: 1,
+                col_start: 2,
+                row_end: 6,
+                col_end: 7,
+                ..first
+            })
+        );
     }
 }

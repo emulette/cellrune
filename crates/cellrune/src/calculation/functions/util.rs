@@ -69,6 +69,7 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
             let scoped = let_scope_value(engine, context, let_args);
             collect_scope_values(
                 engine,
+                context,
                 scoped,
                 visited_cells,
                 sheet_span_policy,
@@ -76,16 +77,19 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
             )?;
             continue;
         }
-        if let Ok(span) = engine.resolve_rect_span_expr(context, arg) {
-            if span.is_sheet_range() {
+        if let Ok(reference) = engine.resolve_reference_value_expr(context, arg) {
+            if matches!(&reference, super::super::runtime::ReferenceValue::Empty) {
+                return Err(ErrorKind::Ref);
+            }
+            if reference.has_sheet_span() {
                 match sheet_span_policy {
                     SheetSpanPolicy::CollectAcrossSheets => {}
                     SheetSpanPolicy::ReturnExcelError(kind) => return Err(kind),
                     SheetSpanPolicy::Unsupported => return Err(ErrorKind::Unsupported),
                 }
             }
-            for rect in span.rects() {
-                collect_rect_values(engine, rect, visited_cells, &mut values)?;
+            for rect in reference.rects() {
+                collect_rect_values(engine, context, rect, visited_cells, &mut values)?;
             }
         } else {
             let evaluated = engine.eval_array_with_trace(context, arg)?;
@@ -134,6 +138,7 @@ fn let_arguments<'expr>(
 
 fn collect_scope_values(
     engine: &Engine<'_>,
+    context: EvalContext<'_>,
     scoped: ScopeValue,
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
@@ -176,16 +181,19 @@ fn collect_scope_values(
                     }),
             );
         }
-        ScopeValue::Reference(span) => {
-            if span.is_sheet_range() {
+        ScopeValue::Reference(reference) => {
+            if matches!(&reference, super::super::runtime::ReferenceValue::Empty) {
+                return Err(ErrorKind::Ref);
+            }
+            if reference.has_sheet_span() {
                 match sheet_span_policy {
                     SheetSpanPolicy::CollectAcrossSheets => {}
                     SheetSpanPolicy::ReturnExcelError(kind) => return Err(kind),
                     SheetSpanPolicy::Unsupported => return Err(ErrorKind::Unsupported),
                 }
             }
-            for rect in span.rects() {
-                collect_rect_values(engine, rect, visited_cells, values)?;
+            for rect in reference.rects() {
+                collect_rect_values(engine, context, rect, visited_cells, values)?;
             }
         }
         ScopeValue::Callable(_) => return Err(ErrorKind::Value),
@@ -206,6 +214,7 @@ fn charge_array_cells(
 
 fn collect_rect_values(
     engine: &Engine<'_>,
+    context: EvalContext<'_>,
     rect: Rect,
     visited_cells: &mut u64,
     values: &mut Vec<ArgumentValue>,
@@ -225,7 +234,7 @@ fn collect_rect_values(
     for row in rect.row_start..=row_end {
         for column in rect.col_start..=rect.col_end {
             let cell = (rect.sheet, row, column);
-            let value = engine.cell_value(cell);
+            let value = engine.read_reference_cell(context, cell)?;
             let decimal_trace = match &value {
                 Value::Number(_) => engine.numeric_decimal_trace(cell),
                 _ => None,

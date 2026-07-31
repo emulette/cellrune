@@ -173,13 +173,18 @@ fn count_blank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         Ok(rect) => rect,
         Err(kind) => return Value::Error(kind),
     };
-    if let Err(kind) = engine.ensure_array_cells(rect.height() * rect.width()) {
+    let cells = rect.height() * rect.width();
+    if let Err(kind) = engine.ensure_array_cells(cells) {
         return Value::Error(kind);
     }
     let mut count = 0_u64;
     for row in rect.row_start..=rect.row_end {
         for column in rect.col_start..=rect.col_end {
-            if engine.cell_value((rect.sheet, row, column)).is_blank_like() {
+            let value = match engine.read_reference_cell(context, (rect.sheet, row, column)) {
+                Ok(value) => value,
+                Err(kind) => return Value::Error(kind),
+            };
+            if value.is_blank_like() {
                 count += 1;
             }
         }
@@ -245,14 +250,18 @@ fn conditional_aggregate(
         for col_offset in 0..parsed.value_range.width() as u32 {
             let mut matched = true;
             for (range, criterion) in &parsed.criteria {
-                match criterion.matches(
-                    &engine.cell_value((
+                let value = match engine.read_reference_cell(
+                    context,
+                    (
                         range.sheet,
                         range.row_start + row_offset,
                         range.col_start + col_offset,
-                    )),
-                    &mut wildcard_budget,
+                    ),
                 ) {
+                    Ok(value) => value,
+                    Err(kind) => return Value::Error(kind),
+                };
+                match criterion.matches(&value, &mut wildcard_budget) {
                     Ok(true) => {}
                     Ok(false) => {
                         matched = false;
@@ -269,13 +278,14 @@ fn conditional_aggregate(
                 parsed.value_range.row_start + row_offset,
                 parsed.value_range.col_start + col_offset,
             );
-            match engine.cell_value(cell) {
-                Value::Number(number) => {
+            match engine.read_reference_cell(context, cell) {
+                Err(kind) => return Value::Error(kind),
+                Ok(Value::Number(number)) => {
                     total.add_with_trace(number, engine.numeric_decimal_trace(cell));
                     count += 1;
                 }
-                Value::Error(kind) => return Value::Error(kind),
-                Value::Blank | Value::Text(_) | Value::Logical(_) => {}
+                Ok(Value::Error(kind)) => return Value::Error(kind),
+                Ok(Value::Blank | Value::Text(_) | Value::Logical(_)) => {}
             }
         }
     }
