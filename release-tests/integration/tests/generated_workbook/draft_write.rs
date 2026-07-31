@@ -119,6 +119,13 @@ fn dynamic_spills_are_calculated_written_and_reopened_with_metadata() {
             Some(range),
         )
         .expect("dynamic formula");
+    draft
+        .set_cell_formula(
+            sheet_id,
+            CellAddress::from_a1("D1").expect("spill consumer"),
+            FormulaText::from_xlsx("SUM(A1#)").expect("spill reference"),
+        )
+        .expect("spill consumer formula");
 
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
     for (address, expected) in [("A1", 1.0), ("B1", 2.0), ("A2", 3.0), ("B2", 4.0)] {
@@ -133,6 +140,15 @@ fn dynamic_spills_are_calculated_written_and_reopened_with_metadata() {
             ))
         );
     }
+    assert_eq!(
+        calculation.cell(CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1("D1").expect("spill consumer"),
+        )),
+        Some(&CalculationCellResult::Value(
+            CellValue::number(10.0).expect("finite spill sum")
+        )),
+    );
 
     let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
         .expect("write dynamic workbook");
@@ -166,6 +182,15 @@ fn dynamic_spills_are_calculated_written_and_reopened_with_metadata() {
     );
 
     let recalculation = calculate_workbook(reopened.workbook(), CalculationOptions::default());
+    assert_eq!(
+        recalculation.cell(CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1("D1").expect("reopened spill consumer"),
+        )),
+        Some(&CalculationCellResult::Value(
+            CellValue::number(10.0).expect("finite reopened spill sum")
+        )),
+    );
     let recalculated = write_recalculated_xlsx_bytes(
         &reopened,
         &recalculation,

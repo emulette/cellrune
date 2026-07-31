@@ -1201,10 +1201,6 @@ fn inspect_expr(
             }
         }
         Expr::SpillRef(inner) => {
-            issues.push(CalculationIssue::new(
-                CalculationIssueCode::UnsupportedExpression,
-                Some(expr.to_string()),
-            ));
             inspect_expr(
                 engine,
                 sheet,

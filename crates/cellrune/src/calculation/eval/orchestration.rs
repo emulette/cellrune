@@ -27,9 +27,11 @@ impl<'workbook> Engine<'workbook> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
         let (array_regions, column_extents) = collect_workbook_layout(workbook, cancelled)?;
+        let table_topologies = super::dependency::workbook_table_topologies(workbook, cancelled)?;
         let mut engine = Self {
             workbook,
             options,
+            table_topologies,
             asts: BTreeMap::new(),
             defined_name_asts: Vec::new(),
             dependencies: BTreeMap::new(),
@@ -117,13 +119,15 @@ impl<'workbook> Engine<'workbook> {
         &self,
         cancelled: &impl Fn() -> bool,
     ) -> Result<CompiledWorkbook, ()> {
-        let dependency_rectangles = self.dependency_rectangles_cancellable(cancelled)?;
+        let dependency_targets = self.dependency_targets_cancellable(cancelled)?;
+        let table_topologies = super::dependency::table_topologies(&dependency_targets, cancelled)?;
         let incremental_safe = !self.has_unstable_incremental_dependencies(cancelled)?;
         Ok(CompiledWorkbook {
             asts: clone_map_cancellable(&self.asts, cancelled)?,
             defined_name_asts: clone_vec_cancellable(&self.defined_name_asts, cancelled)?,
             dependencies: clone_vec_map_cancellable(&self.dependencies, cancelled)?,
-            dependency_rectangles,
+            dependency_targets,
+            table_topologies,
             parse_failures: clone_map_cancellable(&self.parse_failures, cancelled)?,
             name_cycle_cells: clone_set_cancellable(&self.name_cycle_cells, cancelled)?,
             name_limit_cells: clone_set_cancellable(&self.name_limit_cells, cancelled)?,
@@ -144,9 +148,11 @@ impl<'workbook> Engine<'workbook> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
         let (array_regions, column_extents) = collect_workbook_layout(workbook, cancelled)?;
+        let table_topologies = super::dependency::workbook_table_topologies(workbook, cancelled)?;
         let mut engine = Self {
             workbook,
             options,
+            table_topologies,
             asts: clone_map_cancellable(&compiled.asts, cancelled)?,
             defined_name_asts: clone_vec_cancellable(&compiled.defined_name_asts, cancelled)?,
             dependencies: clone_vec_map_cancellable(&compiled.dependencies, cancelled)?,

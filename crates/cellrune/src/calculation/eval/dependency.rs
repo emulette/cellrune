@@ -1,13 +1,211 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+
+use sha2::{Digest, Sha256};
 
 use super::{Engine, EvalContext, EvaluationBudget};
 use crate::CellContent;
-use crate::calculation::ast::Expr;
+use crate::calculation::ast::{Expr, StructuredReference};
 use crate::calculation::functions::{normalize_name, with_let_scope};
 use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan};
 use crate::calculation::scope::{DefinedLambdaId, ScopeValue};
+use crate::{SheetId, Table, TableId, WorkbookSnapshot};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TableTopologyRevision([u8; 32]);
+
+impl TableTopologyRevision {
+    fn from_table(
+        sheet_index: usize,
+        sheet_id: SheetId,
+        table: &Table,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
+        let range = table.range();
+        let mut digest = Sha256::new();
+        digest.update(b"cellrune.table-topology.v1");
+        digest.update((sheet_index as u64).to_le_bytes());
+        digest.update(sheet_id.get().to_le_bytes());
+        digest.update(table.id().get().to_le_bytes());
+        digest.update(range.start().row().get().to_le_bytes());
+        digest.update(range.start().column().get().to_le_bytes());
+        digest.update(range.end().row().get().to_le_bytes());
+        digest.update(range.end().column().get().to_le_bytes());
+        digest.update(table.header_row_count().to_le_bytes());
+        digest.update(table.totals_row_count().to_le_bytes());
+        digest.update([u8::from(table.totals_row_shown())]);
+        update_topology_text(&mut digest, table.name().as_str());
+        update_topology_text(&mut digest, table.display_name().as_str());
+        digest.update((table.columns().len() as u64).to_le_bytes());
+        for column in table.columns() {
+            if cancelled() {
+                return Err(());
+            }
+            digest.update(column.column_id().get().to_le_bytes());
+            update_topology_text(&mut digest, column.name());
+        }
+        Ok(Self(digest.finalize().into()))
+    }
+}
+
+fn update_topology_text(digest: &mut Sha256, text: &str) {
+    digest.update((text.len() as u64).to_le_bytes());
+    digest.update(text.as_bytes());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::calculation) struct TableDependency {
+    table_id: TableId,
+    topology: TableTopologyRevision,
+}
+
+impl TableDependency {
+    pub(super) const fn table_id(self) -> TableId {
+        self.table_id
+    }
+
+    pub(super) const fn topology(self) -> TableTopologyRevision {
+        self.topology
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::calculation) enum DependencyTarget {
+    Cell(super::CellId),
+    Area(RectSpan),
+    TableIdentity(TableDependency),
+    SpillAnchor(super::CellId),
+}
+
+impl DependencyTarget {
+    fn from_span(span: RectSpan) -> Self {
+        if let Ok(rect) = span.clone().into_rect()
+            && rect.is_single_cell()
+        {
+            return Self::Cell((rect.sheet, rect.row_start, rect.col_start));
+        }
+        Self::Area(span)
+    }
+
+    #[cfg(test)]
+    pub(super) fn span(&self) -> Option<RectSpan> {
+        match self {
+            Self::Cell((sheet, row, column)) | Self::SpillAnchor((sheet, row, column)) => {
+                Some(RectSpan::single(Rect {
+                    sheet: *sheet,
+                    row_start: *row,
+                    col_start: *column,
+                    row_end: *row,
+                    col_end: *column,
+                    whole_rows: false,
+                }))
+            }
+            Self::Area(span) => Some(span.clone()),
+            Self::TableIdentity(_) => None,
+        }
+    }
+}
+
+fn compare_targets(left: &DependencyTarget, right: &DependencyTarget) -> Ordering {
+    let rank = |target: &DependencyTarget| match target {
+        DependencyTarget::Cell(_) => 0_u8,
+        DependencyTarget::Area(_) => 1,
+        DependencyTarget::TableIdentity(_) => 2,
+        DependencyTarget::SpillAnchor(_) => 3,
+    };
+    rank(left)
+        .cmp(&rank(right))
+        .then_with(|| match (left, right) {
+            (DependencyTarget::Cell(left), DependencyTarget::Cell(right))
+            | (DependencyTarget::SpillAnchor(left), DependencyTarget::SpillAnchor(right)) => {
+                left.cmp(right)
+            }
+            (DependencyTarget::Area(left), DependencyTarget::Area(right)) => {
+                left.sort_key().cmp(&right.sort_key())
+            }
+            (DependencyTarget::TableIdentity(left), DependencyTarget::TableIdentity(right)) => {
+                (left.table_id, left.topology.0).cmp(&(right.table_id, right.topology.0))
+            }
+            _ => Ordering::Equal,
+        })
+}
+
+#[cfg(test)]
+pub(super) fn table_dependency_by_id(
+    workbook: &WorkbookSnapshot,
+    table_id: TableId,
+) -> Option<TableDependency> {
+    table_dependency_by_id_cancellable(workbook, table_id, &|| false)
+        .expect("non-cancellable table topology hashing cannot be cancelled")
+}
+
+pub(super) fn table_dependency_by_id_cancellable(
+    workbook: &WorkbookSnapshot,
+    table_id: TableId,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Option<TableDependency>, ()> {
+    if cancelled() {
+        return Err(());
+    }
+    let Some(location) = workbook.table_location_by_id(table_id) else {
+        return Ok(None);
+    };
+    let Some(sheet) = workbook.sheets().get(location.sheet_index) else {
+        return Ok(None);
+    };
+    let Some(table) = sheet.tables().get(location.table_index) else {
+        return Ok(None);
+    };
+    Ok(Some(TableDependency {
+        table_id,
+        topology: TableTopologyRevision::from_table(
+            location.sheet_index,
+            sheet.id(),
+            table,
+            cancelled,
+        )?,
+    }))
+}
+
+pub(super) fn workbook_table_topologies(
+    workbook: &WorkbookSnapshot,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<TableId, TableTopologyRevision>, ()> {
+    let mut topologies = BTreeMap::new();
+    for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
+        if cancelled() {
+            return Err(());
+        }
+        for table in sheet.tables() {
+            if cancelled() {
+                return Err(());
+            }
+            topologies.insert(
+                table.id(),
+                TableTopologyRevision::from_table(sheet_index, sheet.id(), table, cancelled)?,
+            );
+        }
+    }
+    Ok(topologies)
+}
+
+pub(super) fn table_topologies(
+    targets: &BTreeMap<super::CellId, Vec<DependencyTarget>>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<TableId, TableTopologyRevision>, ()> {
+    let mut topologies = BTreeMap::new();
+    for target in targets.values().flatten() {
+        if cancelled() {
+            return Err(());
+        }
+        if let DependencyTarget::TableIdentity(table) = target {
+            topologies.insert(table.table_id(), table.topology());
+        }
+    }
+    Ok(topologies)
+}
 
 #[derive(Default)]
 struct VisitedDefinitions {
@@ -115,34 +313,42 @@ impl Engine<'_> {
 
     #[cfg(test)]
     pub(super) fn dependency_rectangles(&self) -> BTreeMap<super::CellId, Vec<RectSpan>> {
-        self.dependency_rectangles_cancellable(&|| false)
+        self.dependency_targets_cancellable(&|| false)
             .expect("non-cancellable dependency collection cannot be cancelled")
+            .into_iter()
+            .map(|(cell, targets)| {
+                (
+                    cell,
+                    targets.iter().filter_map(DependencyTarget::span).collect(),
+                )
+            })
+            .collect()
     }
 
-    pub(super) fn dependency_rectangles_cancellable(
+    pub(super) fn dependency_targets_cancellable(
         &self,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<BTreeMap<super::CellId, Vec<RectSpan>>, ()> {
+    ) -> Result<BTreeMap<super::CellId, Vec<DependencyTarget>>, ()> {
         let mut result = BTreeMap::new();
         for (cell, parsed) in &self.asts {
             if cancelled() {
                 return Err(());
             }
-            let mut rects = Vec::new();
+            let mut targets = Vec::new();
             let budget = EvaluationBudget::default();
-            self.collect_dependency_rects(
+            self.collect_dependency_targets(
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
                 parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
-                &mut rects,
+                &mut targets,
             );
             if cancelled() {
                 return Err(());
             }
-            rects.sort_by_key(RectSpan::sort_key);
-            rects.dedup();
-            result.insert(*cell, rects);
+            targets.sort_by(compare_targets);
+            targets.dedup();
+            result.insert(*cell, targets);
         }
         Ok(result)
     }
@@ -339,52 +545,71 @@ impl Engine<'_> {
                 }
                 continue;
             }
-            let mut rects = Vec::new();
+            let mut targets = Vec::new();
             let budget = EvaluationBudget::default();
-            self.collect_dependency_rects(
+            self.collect_dependency_targets(
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
                 parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
-                &mut rects,
+                &mut targets,
             );
             if cancelled() {
                 return Err(());
             }
             let mut cell_dependencies = Vec::new();
-            for span in rects {
-                for rect in span.rects() {
-                    if cancelled() {
-                        return Err(());
-                    }
-                    if rect.is_single_cell() {
-                        if formula_cells[rect.sheet].contains(&(rect.row_start, rect.col_start)) {
-                            cell_dependencies.push((rect.sheet, rect.row_start, rect.col_start));
+            for target in targets {
+                match target {
+                    DependencyTarget::Cell(cell) | DependencyTarget::SpillAnchor(cell) => {
+                        if formula_cells[cell.0].contains(&(cell.1, cell.2)) {
+                            cell_dependencies.push(cell);
                         }
-                        if let Some(owner) = self.cancellable_array_owner(
-                            (rect.sheet, rect.row_start, rect.col_start),
-                            cancelled,
-                        )? {
+                        if let Some(owner) = self.cancellable_array_owner(cell, cancelled)? {
                             cell_dependencies.push(owner);
                         }
-                        continue;
                     }
-                    for (row, column) in formula_cells[rect.sheet]
-                        .range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
-                    {
-                        if cancelled() {
-                            return Err(());
-                        }
-                        if *column >= rect.col_start && *column <= rect.col_end {
-                            cell_dependencies.push((rect.sheet, *row, *column));
-                        }
-                    }
-                    for region in &self.array_regions {
-                        if cancelled() {
-                            return Err(());
-                        }
-                        if rects_intersect(&rect, &region.rect) {
-                            cell_dependencies.push(region.anchor);
+                    DependencyTarget::TableIdentity(_) => {}
+                    DependencyTarget::Area(span) => {
+                        for rect in span.rects() {
+                            if cancelled() {
+                                return Err(());
+                            }
+                            if rect.is_single_cell() {
+                                if formula_cells[rect.sheet]
+                                    .contains(&(rect.row_start, rect.col_start))
+                                {
+                                    cell_dependencies.push((
+                                        rect.sheet,
+                                        rect.row_start,
+                                        rect.col_start,
+                                    ));
+                                }
+                                if let Some(owner) = self.cancellable_array_owner(
+                                    (rect.sheet, rect.row_start, rect.col_start),
+                                    cancelled,
+                                )? {
+                                    cell_dependencies.push(owner);
+                                }
+                                continue;
+                            }
+                            for (row, column) in formula_cells[rect.sheet]
+                                .range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
+                            {
+                                if cancelled() {
+                                    return Err(());
+                                }
+                                if *column >= rect.col_start && *column <= rect.col_end {
+                                    cell_dependencies.push((rect.sheet, *row, *column));
+                                }
+                            }
+                            for region in &self.array_regions {
+                                if cancelled() {
+                                    return Err(());
+                                }
+                                if rects_intersect(&rect, &region.rect) {
+                                    cell_dependencies.push(region.anchor);
+                                }
+                            }
                         }
                     }
                 }
@@ -432,13 +657,32 @@ impl Engine<'_> {
         Ok(None)
     }
 
-    fn collect_dependency_rects(
+    fn structured_table_dependency(
+        &self,
+        context: EvalContext<'_>,
+        reference: &StructuredReference,
+    ) -> Option<TableDependency> {
+        let (sheet_index, table_index) =
+            self.structured_table_coordinates(context, reference).ok()?;
+        let table = self
+            .workbook
+            .sheets()
+            .get(sheet_index)?
+            .tables()
+            .get(table_index)?;
+        Some(TableDependency {
+            table_id: table.id(),
+            topology: *self.table_topologies.get(&table.id())?,
+        })
+    }
+
+    fn collect_dependency_targets(
         &self,
         context: EvalContext<'_>,
         expr: &Expr,
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
-        output: &mut Vec<RectSpan>,
+        output: &mut Vec<DependencyTarget>,
     ) {
         if context.is_cancelled() {
             return;
@@ -446,17 +690,43 @@ impl Engine<'_> {
         match expr {
             Expr::Ref(reference) => {
                 if let Ok(span) = self.resolve_reference_span(context.sheet(), reference) {
-                    output.push(span);
+                    output.push(DependencyTarget::from_span(span));
                 }
             }
-            Expr::StructuredRef(_) => {
-                if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
-                    output.extend(reference.areas().iter().map(|area| area.as_span()));
+            Expr::StructuredRef(reference) => {
+                if let Some(table) = self.structured_table_dependency(context, reference) {
+                    output.push(DependencyTarget::TableIdentity(table));
                 }
+                if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
+                    output.extend(
+                        reference
+                            .areas()
+                            .iter()
+                            .map(|area| DependencyTarget::from_span(area.as_span())),
+                    );
+                }
+            }
+            Expr::SpillRef(anchor) => {
+                if let Ok(anchor_cell) = self.resolve_spill_anchor_expr(context, anchor) {
+                    output.push(DependencyTarget::SpillAnchor(anchor_cell));
+                }
+                let mut selection_names = VisitedDefinitions::default();
+                self.collect_reference_selection_inputs(
+                    context,
+                    anchor,
+                    &mut selection_names,
+                    local_names,
+                    output,
+                );
             }
             Expr::ReferenceUnion { .. } | Expr::ReferenceIntersection { .. } => {
                 if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
-                    output.extend(reference.areas().iter().map(|area| area.as_span()));
+                    output.extend(
+                        reference
+                            .areas()
+                            .iter()
+                            .map(|area| DependencyTarget::from_span(area.as_span())),
+                    );
                 }
                 let mut selection_names = VisitedDefinitions::default();
                 self.collect_reference_selection_inputs(
@@ -469,10 +739,10 @@ impl Engine<'_> {
             }
             Expr::Range { start, end } => {
                 if let Ok(rect) = self.resolve_rect_expr(context, expr) {
-                    output.push(RectSpan::single(rect));
+                    output.push(DependencyTarget::from_span(RectSpan::single(rect)));
                 }
-                self.collect_dependency_rects(context, start, visited, local_names, output);
-                self.collect_dependency_rects(context, end, visited, local_names, output);
+                self.collect_dependency_targets(context, start, visited, local_names, output);
+                self.collect_dependency_targets(context, end, visited, local_names, output);
             }
             Expr::Name(name) => {
                 if context.binding(name).is_some() || is_local_name(name, local_names) {
@@ -481,7 +751,7 @@ impl Engine<'_> {
                 if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
                     && visited.values.insert(id.clone())
                 {
-                    self.collect_dependency_rects(
+                    self.collect_dependency_targets(
                         context
                             .without_bindings()
                             .with_defined_name_scope(Some(id.scope())),
@@ -494,7 +764,7 @@ impl Engine<'_> {
             }
             Expr::ImplicitIntersection(inner) => {
                 if let Ok(rect) = self.resolve_rect_expr(context, expr) {
-                    output.push(RectSpan::single(rect));
+                    output.push(DependencyTarget::from_span(RectSpan::single(rect)));
                     let mut selection_names = VisitedDefinitions::default();
                     self.collect_reference_selection_inputs(
                         context,
@@ -504,15 +774,15 @@ impl Engine<'_> {
                         output,
                     );
                 } else {
-                    self.collect_dependency_rects(context, inner, visited, local_names, output);
+                    self.collect_dependency_targets(context, inner, visited, local_names, output);
                 }
             }
-            Expr::Paren(inner) | Expr::SpillRef(inner) | Expr::Unary { operand: inner, .. } => {
-                self.collect_dependency_rects(context, inner, visited, local_names, output);
+            Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
+                self.collect_dependency_targets(context, inner, visited, local_names, output);
             }
             Expr::Binary { left, right, .. } => {
-                self.collect_dependency_rects(context, left, visited, local_names, output);
-                self.collect_dependency_rects(context, right, visited, local_names, output);
+                self.collect_dependency_targets(context, left, visited, local_names, output);
+                self.collect_dependency_targets(context, right, visited, local_names, output);
             }
             Expr::Call { name, args } => {
                 if let Some(binding) = context.binding(name) {
@@ -520,13 +790,13 @@ impl Engine<'_> {
                         return;
                     }
                     for arg in args {
-                        self.collect_dependency_rects(context, arg, visited, local_names, output);
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
                     }
                     return;
                 }
                 if is_local_name(name, local_names) {
                     for arg in args {
-                        self.collect_dependency_rects(context, arg, visited, local_names, output);
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
                     }
                     return;
                 }
@@ -535,7 +805,7 @@ impl Engine<'_> {
                     if let Some(lambda) = crate::calculation::lambda::definition(named) {
                         if visited.lambdas.insert(id.clone()) {
                             let mut lambda_names = lambda.parameters().to_vec();
-                            self.collect_dependency_rects(
+                            self.collect_dependency_targets(
                                 context
                                     .without_bindings()
                                     .with_defined_name_scope(Some(id.scope())),
@@ -546,7 +816,7 @@ impl Engine<'_> {
                             );
                         }
                         for arg in args {
-                            self.collect_dependency_rects(
+                            self.collect_dependency_targets(
                                 context,
                                 arg,
                                 visited,
@@ -574,7 +844,7 @@ impl Engine<'_> {
                 if normalized == "LET" {
                     let _ =
                         with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
-                            engine.collect_dependency_rects(
+                            engine.collect_dependency_targets(
                                 scoped,
                                 arg,
                                 visited,
@@ -594,32 +864,32 @@ impl Engine<'_> {
                     && let Some(value_range) = value_anchor
                         .resized_from_anchor(criteria_range.height(), criteria_range.width())
                 {
-                    output.push(RectSpan::single(value_range));
+                    output.push(DependencyTarget::from_span(RectSpan::single(value_range)));
                 }
                 if matches!(normalized.as_str(), "OFFSET" | "INDIRECT")
                     && let Ok(rect) = self.resolve_dynamic_rect(context, name, args)
                 {
-                    output.push(RectSpan::single(rect));
+                    output.push(DependencyTarget::from_span(RectSpan::single(rect)));
                 }
                 if walk_local_scope(name, args, local_names, |arg, scope| {
-                    self.collect_dependency_rects(context, arg, visited, scope, output);
+                    self.collect_dependency_targets(context, arg, visited, scope, output);
                 }) {
                     return;
                 }
                 for arg in args {
-                    self.collect_dependency_rects(context, arg, visited, local_names, output);
+                    self.collect_dependency_targets(context, arg, visited, local_names, output);
                 }
             }
             Expr::Invoke { callee, args } => {
-                self.collect_dependency_rects(context, callee, visited, local_names, output);
+                self.collect_dependency_targets(context, callee, visited, local_names, output);
                 for arg in args {
-                    self.collect_dependency_rects(context, arg, visited, local_names, output);
+                    self.collect_dependency_targets(context, arg, visited, local_names, output);
                 }
             }
             Expr::Array(rows) => {
                 for row in rows {
                     for element in row {
-                        self.collect_dependency_rects(
+                        self.collect_dependency_targets(
                             context,
                             element,
                             visited,
@@ -645,13 +915,13 @@ impl Engine<'_> {
         expr: &Expr,
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
-        output: &mut Vec<RectSpan>,
+        output: &mut Vec<DependencyTarget>,
     ) {
         if context.is_cancelled() {
             return;
         }
         match expr {
-            Expr::Paren(inner) | Expr::ImplicitIntersection(inner) | Expr::SpillRef(inner) => {
+            Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.collect_reference_selection_inputs(
                     context,
                     inner,
@@ -659,6 +929,23 @@ impl Engine<'_> {
                     local_names,
                     output,
                 );
+            }
+            Expr::SpillRef(anchor) => {
+                if let Ok(anchor_cell) = self.resolve_spill_anchor_expr(context, anchor) {
+                    output.push(DependencyTarget::SpillAnchor(anchor_cell));
+                }
+                self.collect_reference_selection_inputs(
+                    context,
+                    anchor,
+                    visited,
+                    local_names,
+                    output,
+                );
+            }
+            Expr::StructuredRef(reference) => {
+                if let Some(table) = self.structured_table_dependency(context, reference) {
+                    output.push(DependencyTarget::TableIdentity(table));
+                }
             }
             Expr::Range { start, end }
             | Expr::ReferenceUnion {
@@ -702,13 +989,13 @@ impl Engine<'_> {
                         return;
                     }
                     for arg in args {
-                        self.collect_dependency_rects(context, arg, visited, local_names, output);
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
                     }
                     return;
                 }
                 if is_local_name(name, local_names) {
                     for arg in args {
-                        self.collect_dependency_rects(context, arg, visited, local_names, output);
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
                     }
                     return;
                 }
@@ -717,7 +1004,7 @@ impl Engine<'_> {
                     if let Some(lambda) = crate::calculation::lambda::definition(named) {
                         if visited.lambdas.insert(id.clone()) {
                             let mut lambda_names = lambda.parameters().to_vec();
-                            self.collect_dependency_rects(
+                            self.collect_dependency_targets(
                                 context
                                     .without_bindings()
                                     .with_defined_name_scope(Some(id.scope())),
@@ -728,7 +1015,7 @@ impl Engine<'_> {
                             );
                         }
                         for arg in args {
-                            self.collect_dependency_rects(
+                            self.collect_dependency_targets(
                                 context,
                                 arg,
                                 visited,
@@ -751,7 +1038,7 @@ impl Engine<'_> {
                                     output,
                                 );
                             } else {
-                                engine.collect_dependency_rects(
+                                engine.collect_dependency_targets(
                                     scoped,
                                     arg,
                                     visited,
@@ -764,12 +1051,12 @@ impl Engine<'_> {
                     return;
                 }
                 if walk_local_scope(name, args, local_names, |arg, scope| {
-                    self.collect_dependency_rects(context, arg, visited, scope, output);
+                    self.collect_dependency_targets(context, arg, visited, scope, output);
                 }) {
                     return;
                 }
                 for arg in args {
-                    self.collect_dependency_rects(context, arg, visited, local_names, output);
+                    self.collect_dependency_targets(context, arg, visited, local_names, output);
                 }
             }
             Expr::Invoke { callee, args } => {
@@ -798,7 +1085,6 @@ impl Engine<'_> {
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::Array(_)
-            | Expr::StructuredRef(_)
             | Expr::ExternalReference(_)
             | Expr::QualifiedName { .. }
             | Expr::Missing => {}

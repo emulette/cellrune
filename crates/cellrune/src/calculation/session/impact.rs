@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::eval::CompiledWorkbook;
+use super::super::eval::{CompiledWorkbook, DependencyTarget};
 use super::super::runtime::{CellId, Rect};
-use crate::{CalculationCellId, CellContent, WorkbookSnapshot};
+use crate::{
+    CalculationCellId, CalculationSnapshot, CellContent, FormulaMetadata, MaterializedResultOrigin,
+    WorkbookSnapshot,
+};
 
 pub(super) fn affected_formulas(
     workbook: &WorkbookSnapshot,
     compiled: &CompiledWorkbook,
+    previous: Option<&CalculationSnapshot>,
     changed_cells: &[CalculationCellId],
 ) -> BTreeSet<CalculationCellId> {
     if changed_cells.is_empty() {
@@ -19,13 +23,61 @@ pub(super) fn affected_formulas(
         }
     }
     let mut dirty = BTreeSet::new();
-    for (formula, rects) in compiled.dependency_rectangles() {
-        if rects.iter().any(|span| {
-            span.rects().any(|rect| {
+    if let Some(previous) = previous {
+        for cell in changed_cells {
+            let Some(materialized) = previous.materialized_cell(*cell) else {
+                continue;
+            };
+            if let MaterializedResultOrigin::DynamicSpill { anchor, .. } = materialized.origin()
+                && let Some(anchor) = public_to_internal(workbook, anchor)
+            {
+                dirty.insert(anchor);
+            }
+        }
+    }
+    for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
+        let Some(changed) = changed_by_sheet.get(sheet_index) else {
+            continue;
+        };
+        for cell in sheet.cells() {
+            let CellContent::Formula(formula) = cell.content() else {
+                continue;
+            };
+            let FormulaMetadata::DynamicArray {
+                range: Some(range), ..
+            } = formula.metadata()
+            else {
+                continue;
+            };
+            let rect = Rect {
+                sheet: sheet_index,
+                row_start: range.start().row().get(),
+                col_start: range.start().column().get(),
+                row_end: range.end().row().get(),
+                col_end: range.end().column().get(),
+                whole_rows: false,
+            };
+            if rect_contains_any(rect, changed) {
+                dirty.insert((
+                    sheet_index,
+                    cell.address().row().get(),
+                    cell.address().column().get(),
+                ));
+            }
+        }
+    }
+    for (formula, targets) in compiled.dependency_targets() {
+        if targets.iter().any(|target| match target {
+            DependencyTarget::Cell((sheet, row, column))
+            | DependencyTarget::SpillAnchor((sheet, row, column)) => changed_by_sheet
+                .get(*sheet)
+                .is_some_and(|changed| changed.contains(&(*row, *column))),
+            DependencyTarget::Area(span) => span.rects().any(|rect| {
                 changed_by_sheet
                     .get(rect.sheet)
                     .is_some_and(|changed| rect_contains_any(rect, changed))
-            })
+            }),
+            DependencyTarget::TableIdentity(_) => false,
         }) {
             dirty.insert(*formula);
         }

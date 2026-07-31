@@ -7,7 +7,7 @@ use super::decimal::DecimalTrace;
 use super::graph::DependencyGraph;
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
-use super::runtime::{CellId, Rect, RectSpan};
+use super::runtime::{CellId, Rect};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
 use super::syntax::ParsedFormula;
 use super::value::{ErrorKind, Value};
@@ -26,6 +26,8 @@ mod name_graph;
 mod orchestration;
 mod reference;
 
+pub(super) use dependency::DependencyTarget;
+use dependency::{TableTopologyRevision, table_dependency_by_id_cancellable};
 use materialization::ArrayRegion;
 use reference::{ColumnExtents, cell_at};
 
@@ -162,7 +164,8 @@ pub(super) struct CompiledWorkbook {
     asts: BTreeMap<CellId, ParsedFormula>,
     defined_name_asts: Vec<Option<ParsedFormula>>,
     dependencies: DependencyGraph,
-    dependency_rectangles: BTreeMap<CellId, Vec<RectSpan>>,
+    dependency_targets: BTreeMap<CellId, Vec<DependencyTarget>>,
+    table_topologies: BTreeMap<crate::TableId, TableTopologyRevision>,
     parse_failures: BTreeMap<CellId, ParseError>,
     name_cycle_cells: BTreeSet<CellId>,
     name_limit_cells: BTreeSet<CellId>,
@@ -179,10 +182,8 @@ impl CompiledWorkbook {
             asts: clone_map_cancellable(&self.asts, cancelled)?,
             defined_name_asts: clone_vec_cancellable(&self.defined_name_asts, cancelled)?,
             dependencies: clone_vec_map_cancellable(&self.dependencies, cancelled)?,
-            dependency_rectangles: clone_vec_map_cancellable(
-                &self.dependency_rectangles,
-                cancelled,
-            )?,
+            dependency_targets: clone_vec_map_cancellable(&self.dependency_targets, cancelled)?,
+            table_topologies: clone_map_cancellable(&self.table_topologies, cancelled)?,
             parse_failures: clone_map_cancellable(&self.parse_failures, cancelled)?,
             name_cycle_cells: clone_set_cancellable(&self.name_cycle_cells, cancelled)?,
             name_limit_cells: clone_set_cancellable(&self.name_limit_cells, cancelled)?,
@@ -198,8 +199,26 @@ impl CompiledWorkbook {
         &self.dependencies
     }
 
-    pub(super) fn dependency_rectangles(&self) -> &BTreeMap<CellId, Vec<RectSpan>> {
-        &self.dependency_rectangles
+    pub(super) fn dependency_targets(&self) -> &BTreeMap<CellId, Vec<DependencyTarget>> {
+        &self.dependency_targets
+    }
+
+    pub(super) fn table_topology_matches(
+        &self,
+        workbook: &WorkbookSnapshot,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<bool, ()> {
+        for (table_id, topology) in &self.table_topologies {
+            if cancelled() {
+                return Err(());
+            }
+            if !table_dependency_by_id_cancellable(workbook, *table_id, cancelled)?
+                .is_some_and(|current| current.topology() == *topology)
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub(super) const fn limits(&self) -> CalculationLimits {
@@ -454,6 +473,7 @@ enum ValueSource<'engine> {
 pub struct Engine<'workbook> {
     workbook: &'workbook WorkbookSnapshot,
     options: CalculationOptions,
+    table_topologies: BTreeMap<crate::TableId, TableTopologyRevision>,
     asts: BTreeMap<CellId, ParsedFormula>,
     defined_name_asts: Vec<Option<ParsedFormula>>,
     dependencies: DependencyGraph,

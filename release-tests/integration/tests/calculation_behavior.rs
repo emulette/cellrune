@@ -584,7 +584,7 @@ fn function_usage_counts_lambda_bodies_without_user_callable_names() {
 }
 
 #[test]
-fn unresolved_structured_references_are_excel_errors_while_spills_remain_unsupported() {
+fn unresolved_structured_and_non_dynamic_spill_references_are_excel_errors() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Table1[Amount])"),
         (1, 2, "A1#"),
@@ -603,7 +603,15 @@ fn unresolved_structured_references_are_excel_errors_while_spills_remain_unsuppo
             .capability(),
         FormulaCapability::Supported
     ));
-    assert_capability_issue_code(&report, 2, CalculationIssueCode::UnsupportedExpression);
+    assert!(matches!(
+        report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(2))
+            .expect("spill-reference capability entry")
+            .capability(),
+        FormulaCapability::Supported
+    ));
     assert!(matches!(
         report
             .entries()
@@ -634,7 +642,12 @@ fn unresolved_structured_references_are_excel_errors_while_spills_remain_unsuppo
         calculation.cell(cell_id(1)),
         Some(CalculationCellResult::Value(CellValue::Error(_)))
     ));
-    assert_issue(&calculation, 2, CalculationIssueCode::UnsupportedExpression);
+    assert_eq!(
+        calculation.cell(cell_id(2)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Reference
+        )))
+    );
     assert!(matches!(
         calculation.cell(cell_id(3)),
         Some(CalculationCellResult::Value(_))
@@ -1130,7 +1143,7 @@ fn typed_reference_grammar_is_classified_without_parse_failures() {
     ]);
     let report = scan_formula_capabilities(&workbook);
 
-    for column in [1, 5, 6] {
+    for column in [1, 2, 5, 6] {
         assert!(matches!(
             report
                 .entries()
@@ -1141,28 +1154,26 @@ fn typed_reference_grammar_is_classified_without_parse_failures() {
             FormulaCapability::Supported
         ));
     }
-    for column in [2, 3] {
-        let entry = report
-            .entries()
+    let external = report
+        .entries()
+        .iter()
+        .find(|entry| entry.cell() == cell_id(3))
+        .expect("external-reference formula entry");
+    let FormulaCapability::Unsupported(issues) = external.capability() else {
+        panic!("external-reference formula should be unsupported");
+    };
+    assert!(
+        issues
             .iter()
-            .find(|entry| entry.cell() == cell_id(column))
-            .expect("formula entry");
-        let FormulaCapability::Unsupported(issues) = entry.capability() else {
-            panic!("column {column} should be unsupported");
-        };
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.code() == CalculationIssueCode::UnsupportedExpression),
-            "column {column} should be a typed unsupported expression"
-        );
-        assert!(
-            issues
-                .iter()
-                .all(|issue| issue.code() != CalculationIssueCode::ParseError),
-            "column {column} must not regress to a parse failure"
-        );
-    }
+            .any(|issue| issue.code() == CalculationIssueCode::UnsupportedExpression),
+        "external reference should be a typed unsupported expression"
+    );
+    assert!(
+        issues
+            .iter()
+            .all(|issue| issue.code() != CalculationIssueCode::ParseError),
+        "external reference must not regress to a parse failure"
+    );
     assert_capability_issue(
         &report,
         4,
@@ -1643,6 +1654,117 @@ fn undeclared_dynamic_spill_followers_depend_on_their_anchor() {
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
     assert_number_at(&calculation, 1, 1, 3.0, 0.0);
     assert_materialized_number(&calculation, sheet_id, "C2", 2.0);
+}
+
+#[test]
+fn spill_references_resolve_anchor_shapes_and_reject_non_anchors() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    draft
+        .set_cell_value(
+            sheet_id,
+            CellAddress::from_a1("A1").expect("ordinary cell"),
+            CellValue::number(7.0).expect("finite value"),
+        )
+        .expect("ordinary value");
+    for (address, formula) in [
+        ("B1", "SEQUENCE(2,2)"),
+        ("B6", "FILTER({1;2;3},{TRUE;FALSE;TRUE})"),
+        ("D6", "UNIQUE({1,1,2},TRUE)"),
+        ("H1", "SEQUENCE(2)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("dynamic anchor"),
+                FormulaText::from_xlsx(formula).expect("dynamic formula"),
+                None,
+            )
+            .expect("dynamic formula mutation");
+    }
+    draft
+        .set_cell_value(
+            sheet_id,
+            CellAddress::from_a1("H2").expect("spill obstruction"),
+            CellValue::Text("occupied".to_owned()),
+        )
+        .expect("spill obstruction");
+    for (address, formula) in [
+        ("F1", "SUM(B1#)"),
+        ("F2", "ROWS(B1#)"),
+        ("F3", "C1#"),
+        ("F4", "A1#"),
+        ("F5", "SUM(B6#)"),
+        ("F6", "SUM(D6#)"),
+        ("F7", "AREAS(B1#)"),
+        ("F8", "ISREF(B1#)"),
+        ("J1", "H1#"),
+        ("J2", "ISREF(H1#)"),
+    ] {
+        draft
+            .set_cell_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("spill consumer"),
+                FormulaText::from_xlsx(formula).expect("spill reference formula"),
+            )
+            .expect("spill consumer mutation");
+    }
+
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for (address, expected) in [
+        ("F1", 10.0),
+        ("F2", 2.0),
+        ("F5", 4.0),
+        ("F6", 3.0),
+        ("F7", 1.0),
+    ] {
+        let id = CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1(address).expect("result address"),
+        );
+        assert_eq!(
+            calculation.cell(id),
+            Some(&CalculationCellResult::Value(
+                CellValue::number(expected).expect("finite expected value")
+            )),
+            "{address}",
+        );
+    }
+    for address in ["F3", "F4"] {
+        let id = CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1(address).expect("reference error address"),
+        );
+        assert_eq!(
+            calculation.cell(id),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Reference
+            ))),
+            "{address}",
+        );
+    }
+    let blocked = CalculationCellId::new(
+        sheet_id,
+        CellAddress::from_a1("J1").expect("blocked spill consumer"),
+    );
+    assert_eq!(
+        calculation.cell(blocked),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Spill
+        )))
+    );
+    for (address, expected) in [("F8", true), ("J2", false)] {
+        let id = CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1(address).expect("ISREF spill result"),
+        );
+        assert_eq!(
+            calculation.cell(id),
+            Some(&CalculationCellResult::Value(CellValue::Logical(expected))),
+            "{address}",
+        );
+    }
 }
 
 #[test]

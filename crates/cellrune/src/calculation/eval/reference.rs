@@ -149,11 +149,11 @@ impl Engine<'_> {
         Ok(reference)
     }
 
-    fn resolve_structured_reference(
+    pub(super) fn structured_table_coordinates(
         &self,
         context: EvalContext<'_>,
         reference: &StructuredReference,
-    ) -> Result<ReferenceValue, ErrorKind> {
+    ) -> Result<(usize, usize), ErrorKind> {
         let address = crate::CellAddress::from_indices(context.row(), context.column())
             .map_err(|_| ErrorKind::Ref)?;
         let location = match &reference.table {
@@ -169,7 +169,16 @@ impl Engine<'_> {
                     .ok_or(ErrorKind::Value)?
             }
         };
-        let table = &self.workbook.sheets()[location.sheet_index].tables()[location.table_index];
+        Ok((location.sheet_index, location.table_index))
+    }
+
+    fn resolve_structured_reference(
+        &self,
+        context: EvalContext<'_>,
+        reference: &StructuredReference,
+    ) -> Result<ReferenceValue, ErrorKind> {
+        let (sheet_index, table_index) = self.structured_table_coordinates(context, reference)?;
+        let table = &self.workbook.sheets()[sheet_index].tables()[table_index];
         let range = table.range();
         let table_row_start = range.start().row().get();
         let table_row_end = range.end().row().get();
@@ -239,7 +248,7 @@ impl Engine<'_> {
                     Some((table_row_end - table.totals_row_count() + 1, table_row_end))
                 }
                 StructuredItem::ThisRow
-                    if context.sheet() != location.sheet_index
+                    if context.sheet() != sheet_index
                         || context.row() < data_row_start
                         || context.row() > data_row_end =>
                 {
@@ -256,7 +265,7 @@ impl Engine<'_> {
             return Ok(ReferenceValue::Empty);
         };
         Ok(ReferenceValue::from_rect(Rect {
-            sheet: location.sheet_index,
+            sheet: sheet_index,
             row_start,
             col_start,
             row_end,
@@ -277,6 +286,9 @@ impl Engine<'_> {
             }
             Expr::StructuredRef(reference) => {
                 self.resolve_structured_reference(context, reference)?
+            }
+            Expr::SpillRef(anchor) => {
+                ReferenceValue::from_rect(self.resolve_spill_reference(context, anchor)?)
             }
             Expr::ReferenceUnion { left, right } => {
                 let left = self.resolve_reference_value_expr(context, left)?;
@@ -381,8 +393,7 @@ impl Engine<'_> {
                 }
             }
             Expr::ErrorLit(kind) => return Err(*kind),
-            Expr::SpillRef(_)
-            | Expr::ExternalReference(_)
+            Expr::ExternalReference(_)
             | Expr::QualifiedName { .. }
             | Expr::ImplicitIntersection(_)
             | Expr::Invoke { .. }
@@ -395,6 +406,38 @@ impl Engine<'_> {
             | Expr::Missing => return Err(ErrorKind::Value),
         };
         self.validate_reference_value(reference)
+    }
+
+    pub(super) fn resolve_spill_anchor_expr(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> Result<super::CellId, ErrorKind> {
+        let rect = self
+            .resolve_reference_value_expr(context, expr)?
+            .single_rect()?;
+        if !rect.is_single_cell() {
+            return Err(ErrorKind::Ref);
+        }
+        Ok((rect.sheet, rect.row_start, rect.col_start))
+    }
+
+    fn resolve_spill_reference(
+        &self,
+        context: EvalContext<'_>,
+        anchor: &Expr,
+    ) -> Result<Rect, ErrorKind> {
+        let anchor = self.resolve_spill_anchor_expr(context, anchor)?;
+        if let Some(range) = self.dynamic_spill(anchor) {
+            return Ok(range);
+        }
+        if self.dynamic_array_range(anchor).is_none() {
+            return Err(ErrorKind::Ref);
+        }
+        match self.cell_value(anchor) {
+            crate::calculation::value::Value::Error(kind) => Err(kind),
+            _ => Err(ErrorKind::Ref),
+        }
     }
 
     pub(in crate::calculation) fn resolve_rect_span_expr(
@@ -418,6 +461,7 @@ impl Engine<'_> {
                 .and_then(|rect| self.implicit_intersection_rect(context, rect)),
             Expr::Ref(reference) => self.resolve_reference(context.sheet(), reference),
             Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. } => self
                 .resolve_reference_value_expr(context, expr)?

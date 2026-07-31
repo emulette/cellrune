@@ -1,10 +1,16 @@
 use std::cell::Cell;
 
-use super::{Engine, EvalContext, EvaluationBudget, VisitedDefinitions};
-use crate::calculation::runtime::{Rect, RectSpan};
+use super::{
+    DependencyTarget, Engine, EvalContext, EvaluationBudget, VisitedDefinitions,
+    table_dependency_by_id, workbook_table_topologies,
+};
+use crate::calculation::runtime::Rect;
 use crate::{
-    CalculationLimits, CalculationOptions, CellAddress, CellRange, DefinedName, DefinedNameScope,
-    FormulaText, SheetId, SheetName, WorkbookDraft,
+    CalculationHints, CalculationLimits, CalculationOptions, CellAddress, CellContent, CellRange,
+    CellValue, DateSystem, DefinedName, DefinedNameScope, FormulaCell, FormulaDialect,
+    FormulaMetadata, FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet, SheetId,
+    SheetName, SheetVisibility, Table, TableColumn, TableId, TableName, WorkbookDraft,
+    WorkbookSnapshot, WorkbookSource,
 };
 
 #[test]
@@ -347,6 +353,202 @@ fn three_d_dependencies_connect_intermediate_array_owners() {
     );
 }
 
+#[test]
+fn typed_targets_preserve_table_identity_empty_bands_and_current_rows() {
+    let (workbook, table_id) = table_dependency_workbook("B3");
+    let engine = Engine::analyze(&workbook, CalculationOptions::default());
+    let targets = engine
+        .dependency_targets_cancellable(&|| false)
+        .expect("dependency targets");
+
+    let current_row = targets.get(&(0, 2, 3)).expect("current-row targets");
+    assert!(
+        current_row.iter().any(|target| matches!(
+            target,
+            DependencyTarget::TableIdentity(table) if table.table_id() == table_id
+        )),
+        "a structured reference retains stable table identity",
+    );
+    assert!(
+        current_row
+            .iter()
+            .any(|target| matches!(target, DependencyTarget::Cell((0, 2, 2)))),
+        "a current-row selector depends on the cell in its actual data row",
+    );
+
+    let empty_totals = targets.get(&(0, 1, 4)).expect("empty totals targets");
+    assert_eq!(
+        empty_totals
+            .iter()
+            .filter(|target| matches!(target, DependencyTarget::TableIdentity(_)))
+            .count(),
+        1,
+    );
+    assert!(
+        empty_totals
+            .iter()
+            .all(|target| matches!(target, DependencyTarget::TableIdentity(_))),
+        "metadata-only empty bands retain table identity without inventing a cell area",
+    );
+
+    let original = table_dependency_by_id(&workbook, table_id).expect("original topology");
+    let (same_geometry, _) = table_dependency_workbook("B3");
+    assert_eq!(
+        table_dependency_by_id(&same_geometry, table_id),
+        Some(original),
+    );
+    let (grown, _) = table_dependency_workbook("B4");
+    assert_ne!(
+        table_dependency_by_id(&grown, table_id),
+        Some(original),
+        "geometry growth changes the compiled table topology revision",
+    );
+    let (shrunk, _) = table_dependency_workbook("B2");
+    assert_ne!(
+        table_dependency_by_id(&shrunk, table_id),
+        Some(original),
+        "geometry shrink changes the compiled table topology revision",
+    );
+
+    let evaluated = Engine::evaluate(&workbook, CalculationOptions::default());
+    let compiled = evaluated
+        .compiled(&|| false)
+        .expect("compiled dependency topology");
+    assert_eq!(
+        compiled.table_topology_matches(&same_geometry, &|| false),
+        Ok(true),
+    );
+    assert_eq!(
+        compiled.table_topology_matches(&grown, &|| false),
+        Ok(false),
+    );
+    assert_eq!(
+        compiled.table_topology_matches(&shrunk, &|| false),
+        Ok(false),
+    );
+}
+
+#[test]
+fn spill_references_record_typed_anchor_targets_and_schedule_producers() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    draft
+        .set_cell_dynamic_formula(
+            sheet_id,
+            address("B1"),
+            formula("SEQUENCE(2,2)"),
+            Some(CellRange::new(address("B1"), address("C2")).expect("spill range")),
+        )
+        .expect("dynamic anchor");
+    draft
+        .set_cell_formula(sheet_id, address("F1"), formula("SUM(B1#)"))
+        .expect("spill consumer");
+    draft
+        .set_cell_formula(sheet_id, address("G1"), formula("AREAS(B1#)"))
+        .expect("metadata-only spill consumer");
+    let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
+    let targets = engine
+        .dependency_targets_cancellable(&|| false)
+        .expect("dependency targets");
+
+    assert_eq!(
+        targets.get(&(0, 1, 6)),
+        Some(&vec![DependencyTarget::SpillAnchor((0, 1, 2))]),
+    );
+    assert_eq!(
+        engine.dependencies.get(&(0, 1, 6)),
+        Some(&vec![(0, 1, 2)]),
+        "the spill producer must be evaluated before its reference consumer",
+    );
+    assert_eq!(
+        targets.get(&(0, 1, 7)),
+        Some(&vec![DependencyTarget::SpillAnchor((0, 1, 2))]),
+        "metadata-only consumers still depend on spill shape identity",
+    );
+}
+
+#[test]
+fn table_topology_hashing_polls_cancellation_inside_column_work() {
+    let (workbook, _) = table_dependency_workbook("B3");
+    let polls = Cell::new(0_u32);
+    let cancelled = || {
+        let next = polls.get() + 1;
+        polls.set(next);
+        next >= 3
+    };
+
+    assert_eq!(workbook_table_topologies(&workbook, &cancelled), Err(()));
+    assert_eq!(polls.get(), 3);
+}
+
+fn table_dependency_workbook(end: &str) -> (WorkbookSnapshot, TableId) {
+    let sheet_id = SheetId::new(1).expect("sheet ID");
+    let table_id = TableId::new(1).expect("table ID");
+    let mut sheet = Sheet::new(
+        sheet_id,
+        SheetName::new("Sheet1").expect("sheet name"),
+        SheetVisibility::Visible,
+    );
+    for (address_text, value) in [
+        ("A1", CellValue::Text("Label".to_owned())),
+        ("B1", CellValue::Text("Amount".to_owned())),
+        ("A2", CellValue::Text("First".to_owned())),
+        ("B2", CellValue::number(10.0).expect("finite table value")),
+        ("A3", CellValue::Text("Second".to_owned())),
+        ("B3", CellValue::number(20.0).expect("finite table value")),
+        ("A4", CellValue::Text("Third".to_owned())),
+        ("B4", CellValue::number(30.0).expect("finite table value")),
+    ] {
+        sheet
+            .insert_cell(address(address_text), CellContent::Literal(value))
+            .expect("unique literal");
+    }
+    for (address_text, formula_text) in [
+        ("C2", "Sales[@Amount]"),
+        ("C3", "Sales[@Amount]"),
+        ("D1", "AREAS(Sales[#Totals])"),
+    ] {
+        sheet
+            .insert_cell(
+                address(address_text),
+                CellContent::Formula(FormulaCell::new(
+                    FormulaDialect::ExcelA1,
+                    formula(formula_text),
+                    SavedResult::Missing,
+                    FormulaMetadata::Normal,
+                )),
+            )
+            .expect("unique formula");
+    }
+    sheet.set_tables(vec![
+        Table::new(
+            table_id,
+            TableName::new("Sales").expect("table name"),
+            TableName::new("Sales").expect("display name"),
+            CellRange::new(address("A1"), address(end)).expect("table range"),
+            1,
+            0,
+            vec![
+                TableColumn::new(1, "Label", None).expect("label column"),
+                TableColumn::new(2, "Amount", None).expect("amount column"),
+            ],
+        )
+        .expect("valid table"),
+    ]);
+    let workbook = WorkbookSnapshot::new(
+        vec![sheet],
+        DateSystem::Excel1900,
+        CalculationHints::default(),
+        WorkbookSource::default(),
+        Provenance::new(
+            ProviderIdentity::new("dependency-target-test", "1").expect("provider"),
+            None,
+        ),
+    )
+    .expect("valid workbook");
+    (workbook, table_id)
+}
+
 fn has_unresolved_dynamic_dependency(engine: &Engine<'_>, cell: (usize, u32, u32)) -> bool {
     let expr = engine.parsed_expr(cell).expect("parsed test formula");
     let budget = EvaluationBudget::default();
@@ -369,7 +571,11 @@ fn collect_reference_selection_inputs(engine: &Engine<'_>, cell: (usize, u32, u3
         &mut Vec::new(),
         &mut output,
     );
-    output.iter().flat_map(RectSpan::rects).collect()
+    output
+        .iter()
+        .filter_map(DependencyTarget::span)
+        .flat_map(|span| span.rects().collect::<Vec<_>>())
+        .collect()
 }
 
 fn rect(row: u32, column: u32) -> Rect {

@@ -133,6 +133,7 @@ impl Engine<'_> {
             }
             Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. }
             | Expr::Range { .. } => self
@@ -240,6 +241,7 @@ impl Engine<'_> {
             }
             Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. }
             | Expr::Range { .. } => self
@@ -320,7 +322,7 @@ impl Engine<'_> {
             Expr::Text(text) => ScalarEvaluation::untracked(Value::Text(text.clone())),
             Expr::Logical(logical) => ScalarEvaluation::untracked(Value::Logical(*logical)),
             Expr::ErrorLit(kind) => ScalarEvaluation::untracked(Value::Error(*kind)),
-            Expr::SpillRef(_) | Expr::ExternalReference(_) | Expr::QualifiedName { .. } => {
+            Expr::ExternalReference(_) | Expr::QualifiedName { .. } => {
                 ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported))
             }
             Expr::Missing => ScalarEvaluation::untracked(Value::Blank),
@@ -343,6 +345,7 @@ impl Engine<'_> {
             },
             Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. }
             | Expr::Range { .. } => self.eval_reference_with_trace(context, expr),
@@ -407,6 +410,7 @@ impl Engine<'_> {
             ),
             Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. }
             | Expr::Range { .. }
@@ -533,6 +537,7 @@ impl Engine<'_> {
             },
             Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. }
             | Expr::Range { .. } => {
@@ -824,6 +829,7 @@ impl Engine<'_> {
             },
             Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
             | Expr::ReferenceUnion { .. }
             | Expr::ReferenceIntersection { .. }
             | Expr::Range { .. } => self
@@ -867,7 +873,6 @@ impl Engine<'_> {
             | Expr::Text(_)
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
-            | Expr::SpillRef(_)
             | Expr::ExternalReference(_)
             | Expr::QualifiedName { .. }
             | Expr::Missing

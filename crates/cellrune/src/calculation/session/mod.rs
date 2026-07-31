@@ -71,6 +71,7 @@ pub struct WorkbookCalculationSession {
     calculation: Option<CalculationSnapshot>,
     calculation_options: Option<CalculationOptions>,
     dirty: BTreeSet<CalculationCellId>,
+    calculation_changes_pending: bool,
     requires_full_rebuild: bool,
     limits: SessionLimits,
     next_cursor: u64,
@@ -91,6 +92,7 @@ impl WorkbookCalculationSession {
             calculation: None,
             calculation_options: None,
             dirty: BTreeSet::new(),
+            calculation_changes_pending: false,
             requires_full_rebuild: true,
             limits,
             next_cursor: 1,
@@ -212,9 +214,12 @@ impl WorkbookCalculationSession {
             self.dirty.extend(affected_formulas(
                 prepared.draft.workbook(),
                 compiled,
+                self.calculation.as_ref(),
                 prepared.receipt.calculation_changed_cells(),
             ));
         }
+        self.calculation_changes_pending |=
+            !prepared.receipt.calculation_changed_cells().is_empty();
         self.draft = prepared.draft;
         Ok(prepared.receipt)
     }
@@ -259,12 +264,21 @@ impl WorkbookCalculationSession {
             .compiled
             .as_ref()
             .is_some_and(|compiled| compiled.limits() != options.limits());
+        let table_topology_changed = match &self.compiled {
+            Some(compiled) => !compiled
+                .table_topology_matches(self.workbook(), &cancelled)
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
+            None => false,
+        };
         let unsafe_dynamic = self
             .compiled
             .as_ref()
             .is_some_and(|compiled| !compiled.incremental_safe())
-            && !self.dirty.is_empty();
-        let compile_required = no_state || self.requires_full_rebuild || compiled_limit_changed;
+            && self.calculation_changes_pending;
+        let compile_required = no_state
+            || self.requires_full_rebuild
+            || compiled_limit_changed
+            || table_topology_changed;
 
         let (execution_mode, reason) = match mode {
             RecalculationMode::Full => (
@@ -283,7 +297,7 @@ impl WorkbookCalculationSession {
                 return Err(SessionError::new(
                     SessionErrorCode::IncrementalUnsafe,
                     Some(incremental_unsafe_detail(
-                        self.requires_full_rebuild,
+                        self.requires_full_rebuild || table_topology_changed,
                         options_changed || compiled_limit_changed,
                         unsafe_dynamic,
                     )),
@@ -301,7 +315,7 @@ impl WorkbookCalculationSession {
                 CalculationExecutionMode::Full,
                 CalculationDecisionReason::InitialCalculation,
             ),
-            RecalculationMode::Auto if self.requires_full_rebuild => (
+            RecalculationMode::Auto if self.requires_full_rebuild || table_topology_changed => (
                 CalculationExecutionMode::Full,
                 CalculationDecisionReason::TopologyChanged,
             ),
@@ -401,6 +415,7 @@ impl WorkbookCalculationSession {
         self.calculation = Some(completed.calculation);
         self.calculation_options = Some(completed.options);
         self.dirty.clear();
+        self.calculation_changes_pending = false;
         self.requires_full_rebuild = false;
         self.history.push_back(history_delta);
         while self.history.len() > self.limits.max_retained_deltas {

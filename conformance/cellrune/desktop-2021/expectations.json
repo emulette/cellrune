@@ -507,32 +507,28 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.TOCOL) for this oracle case."
   },
   "curated:arraysdynamic:c024": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "15",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c025": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c026": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c027": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression (SharedData!$P$2#) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c028": {
     "classification": "match",

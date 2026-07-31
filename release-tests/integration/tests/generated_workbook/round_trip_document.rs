@@ -2,18 +2,21 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationOptions, CellAddress, CellContent,
-    CellValue, OpenOptions, ReadLimits, ReadOptions, SheetId, WorkbookSourceKind, WriteLimits,
-    WriteOptions, XlsxDocumentKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
-    open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx_bytes,
-    scan_formula_capabilities, write_preserved_xlsx_bytes,
+    CalculationCellId, CalculationCellResult, CalculationExecutionMode, CalculationOptions,
+    CancellationToken, CellAddress, CellContent, CellValue, EditBatch, OpenOptions, ReadLimits,
+    ReadOptions, RecalculationMode, SheetId, WorkbookCalculationSession, WorkbookChange,
+    WorkbookDraft, WorkbookSourceKind, WriteLimits, WriteOptions, XlsxDocumentKind, XlsxErrorCode,
+    XlsxWriteErrorCode, calculate_workbook, open_xlsx_document, open_xlsx_document_bytes,
+    open_xlsx_document_path, read_xlsx_bytes, scan_formula_capabilities,
+    write_preserved_xlsx_bytes,
 };
 use sha2::{Digest, Sha256};
 use zip::read::ZipArchive;
 
 use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_formula_fixture,
-    generated_table_reference_fixture, generated_workbook, generated_workbook_with_comment,
+    generated_table_reference_fixture, generated_table_topology_fixture, generated_workbook,
+    generated_workbook_with_comment,
 };
 
 #[test]
@@ -69,6 +72,110 @@ fn generated_table_references_calculate_before_and_after_preserved_reopen() {
     );
     assert!(scan_formula_capabilities(&reopened).is_supported());
     assert_table_reference_results(&reopened);
+}
+
+#[test]
+fn generated_table_topology_growth_and_shrink_variants_reopen() {
+    for data_rows in [1_u32, 4] {
+        let bytes = generated_table_topology_fixture(data_rows);
+        let document =
+            open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table topology input");
+        assert_table_topology_results(document.workbook(), data_rows);
+
+        let output = write_preserved_xlsx_bytes(&document, WriteOptions::default())
+            .expect("preserved table topology output");
+        let reopened = read_xlsx_bytes(&output, ReadOptions::default())
+            .expect("reopened table topology output");
+        assert_table_topology_results(&reopened, data_rows);
+    }
+}
+
+#[test]
+fn generated_table_value_edits_match_incremental_and_full_calculation() {
+    let bytes = generated_table_topology_fixture(3);
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table value input");
+    let mut session = WorkbookCalculationSession::new(WorkbookDraft::from_document(&document));
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial table calculation");
+    let sheet_id = session.workbook().sheets()[0].id();
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                CellAddress::from_a1("B3").expect("table data cell"),
+                CellValue::number(200.0).expect("finite table edit"),
+            )]),
+        )
+        .expect("table data edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental table calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    let incremental = session.calculation().expect("installed calculation");
+    let full = calculate_workbook(session.workbook(), CalculationOptions::default());
+    assert_eq!(
+        incremental.cells().collect::<Vec<_>>(),
+        full.cells().collect::<Vec<_>>(),
+    );
+    for (address, expected) in [("C3", 200.0), ("E1", 240.0), ("F1", 3.0)] {
+        let id = CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1(address).expect("table result address"),
+        );
+        assert_eq!(
+            incremental.cell(id),
+            Some(&CalculationCellResult::Value(
+                CellValue::number(expected).expect("finite table result")
+            )),
+            "{address}",
+        );
+    }
+}
+
+fn assert_table_topology_results(workbook: &cellrune::WorkbookSnapshot, data_rows: u32) {
+    assert!(scan_formula_capabilities(workbook).is_supported());
+    let table = workbook.table("Sales").expect("Sales table");
+    assert_eq!(
+        table.range().start(),
+        CellAddress::from_a1("A1").expect("start")
+    );
+    assert_eq!(
+        table.range().end(),
+        CellAddress::from_indices(data_rows + 1, 3).expect("topology end"),
+    );
+    let sheet = workbook.sheet_by_name("Data").expect("Data sheet");
+    let calculation = calculate_workbook(workbook, CalculationOptions::default());
+    for (address, expected) in [
+        (
+            "E1".to_owned(),
+            f64::from(data_rows * (data_rows + 1) / 2 * 10),
+        ),
+        ("F1".to_owned(), f64::from(data_rows)),
+        (format!("C{}", data_rows + 1), f64::from(data_rows * 10)),
+    ] {
+        let id = CalculationCellId::new(
+            sheet.id(),
+            CellAddress::from_a1(&address).expect("result address"),
+        );
+        assert_eq!(
+            calculation.cell(id),
+            Some(&CalculationCellResult::Value(
+                CellValue::number(expected).expect("finite topology result")
+            )),
+            "data_rows={data_rows}, address={address}",
+        );
+    }
 }
 
 fn assert_table_reference_results(workbook: &cellrune::WorkbookSnapshot) {

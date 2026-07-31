@@ -1337,6 +1337,12 @@ fn dynamic_spill_edits_use_conservative_full_fallback() {
                     None,
                 )
                 .expect("valid dynamic formula"),
+                WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("SUM(B1#)")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("F1"),
+                    formula("IFERROR(SUM(B1#),99)"),
+                ),
             ]),
         )
         .expect("initial batch");
@@ -1347,6 +1353,107 @@ fn dynamic_spill_edits_use_conservative_full_fallback() {
             CancellationToken::new(),
         )
         .expect("initial spill calculation");
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(number(3.0))),
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("C1"),
+                number(100.0),
+            )]),
+        )
+        .expect("spill child obstruction");
+    let error = session
+        .prepare_recalculation(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect_err("spill child obstruction rejects forced incremental");
+    assert_eq!(error.code(), SessionErrorCode::IncrementalUnsafe);
+    let obstructed = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("auto full spill obstruction calculation");
+    assert_eq!(obstructed.mode(), CalculationExecutionMode::Full);
+    assert_eq!(
+        obstructed.reason(),
+        CalculationDecisionReason::DynamicTopology
+    );
+    assert_eq!(
+        obstructed
+            .removed_materialized_cells()
+            .iter()
+            .map(|cell| cell.address().to_string())
+            .collect::<Vec<_>>(),
+        vec!["C1"],
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("B1")))),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            cellrune::ExcelError::Spill
+        ))),
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            cellrune::ExcelError::Spill
+        ))),
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("F1")))),
+        Some(&CalculationCellResult::Value(number(99.0))),
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed obstructed spill"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::clear_cell(sheet_id, address("C1"))]),
+        )
+        .expect("remove spill child obstruction");
+    let recovered = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("auto full spill recovery");
+    assert_eq!(recovered.mode(), CalculationExecutionMode::Full);
+    assert_eq!(
+        recovered.reason(),
+        CalculationDecisionReason::DynamicTopology
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(number(3.0))),
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed recovered spill"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+
     session
         .apply_changes(
             session.workbook().semantic_revision(),
@@ -1375,6 +1482,12 @@ fn dynamic_spill_edits_use_conservative_full_fallback() {
         .expect("auto full spill calculation");
     assert_eq!(delta.mode(), CalculationExecutionMode::Full);
     assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(number(6.0))),
+    );
     assert_calculations_equal(
         session.calculation().expect("installed expanded spill"),
         &calculate_workbook(session.workbook(), CalculationOptions::default()),
@@ -1405,8 +1518,177 @@ fn dynamic_spill_edits_use_conservative_full_fallback() {
             .collect::<Vec<_>>(),
         vec!["C1", "D1"]
     );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(number(1.0))),
+    );
     assert_calculations_equal(
         session.calculation().expect("installed shrunk spill"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
+fn declared_spill_references_recalculate_incrementally_and_remove_stale_children() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(2.0)),
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("TAKE({1,2,3},,A1)"),
+                    Some(CellRange::new(address("B1"), address("C1")).expect("declared spill")),
+                )
+                .expect("valid dynamic formula"),
+                WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("SUM(B1#)")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("F1"),
+                    formula("IFERROR(SUM(B1#),99)"),
+                ),
+            ]),
+        )
+        .expect("initial declared spill batch");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial declared spill calculation");
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(number(3.0))),
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("C1"),
+                number(100.0),
+            )]),
+        )
+        .expect("declared spill member edit");
+    let member_edit = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("declared spill member invalidates its owner");
+    assert_eq!(member_edit.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(member_edit.dirty_count(), 3);
+    assert_eq!(member_edit.evaluated_count(), 3);
+    assert_calculations_equal(
+        session
+            .calculation()
+            .expect("installed declared member edit"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::clear_cell(sheet_id, address("C1"))]),
+        )
+        .expect("clear declared spill member source");
+    let member_clear = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("declared spill member clear invalidates its owner");
+    assert_eq!(member_clear.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(member_clear.dirty_count(), 3);
+    assert_eq!(member_clear.evaluated_count(), 3);
+    assert_calculations_equal(
+        session
+            .calculation()
+            .expect("installed declared member clear"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(3.0),
+            )]),
+        )
+        .expect("declared shape mismatch input");
+    let blocked = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("declared spill remains incrementally safe");
+    assert_eq!(blocked.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        blocked
+            .removed_materialized_cells()
+            .iter()
+            .map(|cell| cell.address().to_string())
+            .collect::<Vec<_>>(),
+        vec!["C1"],
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            cellrune::ExcelError::Spill
+        ))),
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("F1")))),
+        Some(&CalculationCellResult::Value(number(99.0))),
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed blocked spill"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(2.0),
+            )]),
+        )
+        .expect("restore declared shape");
+    let restored = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("restored declared spill");
+    assert_eq!(restored.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("E1")))),
+        Some(&CalculationCellResult::Value(number(3.0))),
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed restored spill"),
         &calculate_workbook(session.workbook(), CalculationOptions::default()),
     );
 }

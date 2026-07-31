@@ -199,6 +199,85 @@ pub fn generated_table_reference_fixture() -> Vec<u8> {
     )
 }
 
+pub fn generated_table_topology_fixture(data_rows: u32) -> Vec<u8> {
+    assert!(data_rows > 0, "table topology fixture needs data rows");
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    let mut rows = String::from(
+        r#"<row r="1">
+      <c r="A1" t="inlineStr"><is><t>Label</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Amount</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>Echo</t></is></c>
+      <c r="E1"><f>SUM(Sales[Amount])</f></c>
+      <c r="F1"><f>ROWS(Sales[Amount])</f></c>
+    </row>"#,
+    );
+    for index in 1..=data_rows {
+        let row = index + 1;
+        let amount = index * 10;
+        rows.push_str(&format!(
+            r#"<row r="{row}">
+      <c r="A{row}" t="inlineStr"><is><t>Row {index}</t></is></c>
+      <c r="B{row}"><v>{amount}</v></c>
+      <c r="C{row}"><f>Sales[@Amount]</f></c>
+    </row>"#,
+        ));
+    }
+    let end_row = data_rows + 1;
+    let worksheet = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>{rows}</sheetData>
+  <tableParts count="1"><tablePart r:id="rId1"/></tableParts>
+</worksheet>"#,
+    );
+    let worksheet_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let table = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="Sales" displayName="Sales" ref="A1:C{end_row}" headerRowCount="1">
+  <autoFilter ref="A1:C{end_row}"/>
+  <tableColumns count="3">
+    <tableColumn id="1" name="Label"/>
+    <tableColumn id="2" name="Amount"/>
+    <tableColumn id="3" name="Echo"/>
+  </tableColumns>
+</table>"#,
+    );
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", &worksheet),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                worksheet_relationships,
+            ),
+            ("xl/tables/table1.xml", &table),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }
