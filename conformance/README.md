@@ -66,15 +66,38 @@ value. It does not require regenerating the workbook or removing the formula.
 Finite numbers use the case's comparator; other values compare exactly. Non-match entries carry a
 short note explaining the current state.
 
-## Updating
+## Maintaining the CellRune fixtures
 
-1. Generate the workbook.
-2. Recalculate and save it in Excel.
-3. Run `verify_excel_oracle.mjs saved` with the profile's declared output directory
-   (`online/` or `desktop-2021/`). It stages `suite.json` and `case-manifest.json` in the parent.
-4. Run `check_excel_oracle --report` against that staged profile directory to generate
-   expectations. Suite-bound metadata is rejected when the parent suite contract is absent.
-5. Copy the complete staged suite tree into this directory.
-6. Run the audit command above.
+The committed Online and desktop-2021 XLSX files, case manifest, observations, and suite identity
+are stable reference fixtures. Feature work does not add formulas or cases, resave either workbook
+in Excel, add host profiles, or create feature-specific conformance workbooks.
 
-No separate CI step or release-only oracle gate is required.
+When CellRune implements an existing case:
+
+1. Run `check_excel_oracle --report` for both profiles.
+2. Review that every changed classification belongs to the implementation.
+3. Update only the two `expectations.json` files.
+4. Run the complete audit and standard test suite.
+
+A correction to the fixture reader or schema may regenerate derived JSON for both profiles from
+the same committed XLSX bytes. It must not change formulas, cached Excel observations, the case
+manifest, or only one profile. Any intentional dataset revision is separate conformance
+maintenance, not part of a feature implementation.
+
+Coverage not represented by these reference workbooks belongs in an ordinary unit or integration
+test, using a small generated-XLSX fixture outside `conformance/cellrune/`. Generated fixtures
+verify CellRune behavior; they do not represent results saved by Excel.
+
+## Optional local corpora
+
+Two corpus tests are registered with `#[ignore]` because their third-party inputs are not
+distributed in this repository. Developers who have supplied those inputs can run them
+explicitly:
+
+```bash
+WORKBOOK_FORMULA_CORPUS=/path/to/formulas.xlsx \
+  cargo test -p cellrune-integration-tests --test external_formula_corpus -- --ignored
+
+CELLRUNE_WORKBOOK_CORPUS=/path/to/workbook-or-directory \
+  cargo test -p cellrune-integration-tests --test external_workbook_corpus -- --ignored
+```

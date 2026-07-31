@@ -337,37 +337,16 @@ Excel's behavior and can be set to `Ieee754` and `ExtendedSearch` for what 0.1.2
 
 ## Verification
 
-The `conformance/` tree carries the binary workbooks Excel actually calculated, together with
-their host metadata and reviewed expectations. The standard `cargo test` suite audits them. To run
-only that audit:
+Run the standard Rust test suite from the repository root:
 
 ```bash
-cargo run \
-  --package cellrune-integration-tests \
-  --bin check_excel_oracle \
-  --locked
+cargo test --workspace --all-features --locked
 ```
 
-This is a normal regression test, not a separate CI step or release-only gate. It covers 1,295
-formula cells from Apache POI's `FormulaEvalTestData`, 266 materialized array results from its
-matrix fixture, and 1,496 selected results from the CellRune-authored oracle. Excel Online and Mac
-Excel 2021 are recorded independently; a missing host value is simply `host_unsupported`. The
-older POI formula cache currently has 1,290 matches and 5 documented divergences.
-
-Two additional corpus tests are compiled but marked `#[ignore]` because their third-party inputs
-are not distributed in this repository. A developer who has supplied those inputs can run them
-explicitly:
-
-```bash
-WORKBOOK_FORMULA_CORPUS=/path/to/formulas.xlsx \
-  cargo test -p cellrune-integration-tests --test external_formula_corpus -- --ignored
-
-CELLRUNE_WORKBOOK_CORPUS=/path/to/workbook-or-directory \
-  cargo test -p cellrune-integration-tests --test external_workbook_corpus -- --ignored
-```
-
-`#[ignore]` keeps a test registered and compilable while excluding it from ordinary `cargo test`;
-cloning the repository does not provide either external corpus.
+Formula compatibility is regression-tested against committed Excel-saved and Apache POI
+workbooks. See the
+[`conformance/README.md`](https://github.com/emulette/cellrune/blob/main/conformance/README.md)
+reference for the fixture layout, classifications, focused audit command, and maintenance policy.
 
 ## License
 

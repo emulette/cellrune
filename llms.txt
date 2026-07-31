@@ -582,15 +582,11 @@ calculate. Out of scope for the current version:
 
 ## Development verification
 
-- `cargo test --workspace --all-features --locked` runs the ordinary regression
-  suite used by CI, including the committed Excel-saved workbook audit.
-- `cargo run --package cellrune-integration-tests --bin check_excel_oracle
-  --locked` runs that audit by itself or generates reviewed expectations with
-  `--report`. There is no separate CI step or release-only oracle gate.
-- `external_formula_corpus` and `external_workbook_corpus` are compiled
-  `#[ignore]` tests. They are useful to a developer who separately supplies
-  `WORKBOOK_FORMULA_CORPUS` or `CELLRUNE_WORKBOOK_CORPUS`; the corpora are not
-  included in a clone.
+- `cargo test --workspace --all-features --locked` runs the standard Rust test
+  suite.
+- `conformance/README.md` documents the Excel-saved and Apache POI fixture
+  layout, focused audit command, classifications, maintenance policy, and
+  optional local corpus tests.
 
 ## Runnable examples
 
