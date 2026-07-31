@@ -126,7 +126,15 @@ pub use presentation::{
     ResolvedPhoneticRun,
 };
 pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
-pub use table::{Table, TableColumn, TableColumnId, TableId, TableName, TotalsRowFunction};
+pub use table::{
+    Table, TableAutoFilter, TableCalendarType, TableColorFilter, TableColumn, TableColumnId,
+    TableCustomFilter, TableCustomFilterOperator, TableCustomFilters, TableDateGroupItem,
+    TableDateTimeGrouping, TableDateTimeValue, TableDynamicFilter, TableDynamicFilterType,
+    TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula, TableIconFilter,
+    TableIconSet, TableId, TableName, TableNumericValue, TableSortBy, TableSortCondition,
+    TableSortMethod, TableSortState, TableStyleInfo, TableTopFilter, TableType, TableValueFilters,
+    TotalsRowFunction,
+};
 pub use workbook::{
     CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,
     WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,

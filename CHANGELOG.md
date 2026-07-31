@@ -16,11 +16,41 @@ inventories, and measurements belong in the linked documentation rather than in 
   containing-table lookup by worksheet address. The original scalar `TableColumn::id()` and
   positional constructor signatures remain compatible; the constructor now rejects a zero
   column ID instead of accepting an invalid OOXML identity.
+- Complete read-only table metadata for table type, totals-row visibility and labels,
+  calculated-column and totals-row formulas, typed auto-filter criteria and sort conditions,
+  dynamic-filter numeric and ISO date-time bounds, and table style flags.
+  `XlsxDocument::table_part` exposes the accepted source part for a stable table ID.
+- Per-table filter declaration and filter/sort attribute-text read limits with dedicated
+  `TooManyTableFilterItems` and `TableFilterTextTooLarge` error codes.
+
+### Changed
+
+- The workbook fingerprint schema moved from 2 to 3 and now folds the complete persisted table
+  metadata model. Table formulas share the existing per-formula and workbook-wide formula-byte
+  read budgets.
+- Canonical XLSX generation serializes modeled worksheet-table parts, worksheet table
+  relationships, and content-type declarations, reopens them for semantic verification, and
+  fails closed for opaque metadata or query/XML/differential/custom-style dependencies it cannot
+  synthesize.
+- Missing `autoFilter@ref` values are represented distinctly from an explicit range and inherit
+  the owning table range minus totals rows. Missing `tableColumns@count` values are accepted, and
+  mismatches use the actual `tableColumn` children with an `xlsx.table.normalized` diagnostic.
 
 ### Fixed
 
 - XLSX reads now diagnose and drop a later table whose range overlaps an already accepted table
   instead of allowing an ambiguous workbook snapshot.
+- Filter and sort metadata whose ranges extend outside the owning table are diagnosed and dropped
+  with that table. Source-linked writes preserve accepted table parts byte-for-byte, while output
+  verification now compares the complete table model.
+- Table names, totals metadata, filter/sort tokens and cardinalities, grouped dates, numeric
+  thresholds, and icon indexes are validated before they enter the semantic model. Table XML also
+  rejects misplaced or non-1.0 declarations, malformed comments, invalid processing-instruction
+  targets, non-XML document whitespace, and child-order or filter-choice violations.
+- Strict SpreadsheetML dynamic filters reject Transitional-only `maxVal`, validate ISO date-time
+  bounds, and retain ambiguous prose cases for source-linked preservation instead of silently
+  canonicalizing them. Built-in table-style detection now rejects leading-zero lookalikes such as
+  `TableStyleLight01`.
 
 ## [0.1.8] - 2026-07-30
 

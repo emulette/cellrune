@@ -12,8 +12,11 @@ use crate::{
     DocumentPresentation, FiniteNumber, FormulaText, FrozenPane, NumberFormat, NumberFormatKind,
     PhoneticAlignment, PhoneticProperties, PhoneticRun, PhoneticTextRange, PhoneticType,
     PhoneticWriteOptions, Provenance, ProviderIdentity, RecalculationWriteOptions, SavedResult,
-    Sheet, SheetId, SheetName, SheetVisibility, ValidationError, WorkbookDraft, WorkbookSnapshot,
-    WorkbookSource, WriteOptions, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
+    Sheet, SheetId, SheetName, SheetVisibility, Table, TableAutoFilter, TableColorFilter,
+    TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula, TableId,
+    TableName, TableSortCondition, TableSortState, TableStyleInfo, TableType, TableValueFilters,
+    TotalsRowFunction, ValidationError, WorkbookDraft, WorkbookSnapshot, WorkbookSource,
+    WriteOptions, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
     write_recalculated_xlsx_bytes, write_xlsx_draft_bytes,
 };
 
@@ -88,6 +91,440 @@ fn base_sheet() -> Sheet {
             NumberFormat::default(),
         )],
     )
+}
+
+#[test]
+fn canonical_writer_reopens_the_complete_table_model() {
+    let table_range = CellRange::new(address("A1"), address("C4")).expect("table range");
+    let filter_range = CellRange::new(address("A1"), address("C3")).expect("filter range");
+    let sort_range = CellRange::new(address("A2"), address("C3")).expect("sort range");
+    let nested_sort = TableSortState::from_xlsx(
+        sort_range,
+        true,
+        false,
+        None,
+        vec![TableSortCondition::from_xlsx(
+            CellRange::new(address("B2"), address("B3")).expect("sort condition"),
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )],
+    );
+    let auto_filter = TableAutoFilter::from_xlsx(
+        filter_range,
+        true,
+        vec![TableFilterColumn::from_xlsx(
+            1,
+            false,
+            true,
+            Some(TableFilterCriteria::Values(TableValueFilters::from_xlsx(
+                false,
+                None,
+                vec![TableFilterItem::Value(Some("East".into()))],
+            ))),
+        )],
+        Some(nested_sort),
+    );
+    let table_sort = TableSortState::from_xlsx(
+        sort_range,
+        false,
+        true,
+        None,
+        vec![TableSortCondition::from_xlsx(
+            CellRange::new(address("A2"), address("C2")).expect("sort condition"),
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )],
+    );
+    let columns = vec![
+        TableColumn::new(1, "Region", None)
+            .expect("column")
+            .with_metadata(Some("Total".to_owned()), None, None),
+        TableColumn::new(5, "Amount", None)
+            .expect("column")
+            .with_metadata(
+                None,
+                Some(TableFormula::new(
+                    FormulaText::from_xlsx("[@Amount]*2").expect("formula"),
+                    true,
+                )),
+                None,
+            ),
+        TableColumn::new(3, "Note", Some(TotalsRowFunction::Custom))
+            .expect("column")
+            .with_metadata(
+                None,
+                None,
+                Some(TableFormula::new(
+                    FormulaText::from_xlsx("SUBTOTAL(109,[Amount])").expect("formula"),
+                    false,
+                )),
+            ),
+    ];
+    let table = Table::new(
+        TableId::new(1).expect("table id"),
+        TableName::new("Sales").expect("table name"),
+        TableName::new("SalesDisplay").expect("display name"),
+        table_range,
+        1,
+        1,
+        columns,
+    )
+    .expect("table")
+    .try_with_metadata(
+        TableType::Worksheet,
+        true,
+        Some(auto_filter),
+        Some(table_sort),
+        Some(TableStyleInfo::new(
+            Some("TableStyleMedium2".to_owned()),
+            true,
+            false,
+            true,
+            false,
+        )),
+        None,
+    )
+    .expect("valid table metadata");
+    let mut sheet = sheet(
+        1,
+        "Sheet1",
+        SheetVisibility::Visible,
+        &[
+            (
+                address("A1"),
+                CellContent::Literal(CellValue::Text("Region".to_owned())),
+                NumberFormat::default(),
+            ),
+            (
+                address("B1"),
+                CellContent::Literal(CellValue::Text("Amount".to_owned())),
+                NumberFormat::default(),
+            ),
+            (
+                address("C1"),
+                CellContent::Literal(CellValue::Text("Note".to_owned())),
+                NumberFormat::default(),
+            ),
+        ],
+    );
+    sheet.set_tables(vec![table]);
+    let workbook = snapshot(
+        vec![sheet],
+        Vec::new(),
+        DateSystem::Excel1900,
+        CalculationHints::default(),
+    );
+    let draft = WorkbookDraft::from_snapshot_for_test(workbook);
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("canonical table workbook");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), crate::OpenOptions::default()).expect("reopen");
+
+    assert_eq!(
+        reopened
+            .workbook()
+            .sheet_by_id(SheetId::new(1).expect("sheet id"))
+            .expect("reopened sheet")
+            .tables()
+            .len(),
+        1
+    );
+    assert_eq!(
+        reopened
+            .workbook()
+            .table("SalesDisplay")
+            .expect("reopened table"),
+        draft.workbook().table("SalesDisplay").expect("draft table")
+    );
+    assert_eq!(
+        reopened
+            .table_part(TableId::new(1).expect("table id"))
+            .expect("table part")
+            .as_str(),
+        "xl/tables/table1.xml"
+    );
+}
+
+#[test]
+fn canonical_writer_fails_closed_for_opaque_table_metadata() {
+    let table = Table::new(
+        TableId::new(1).expect("table id"),
+        TableName::new("Opaque").expect("table name"),
+        TableName::new("Opaque").expect("display name"),
+        CellRange::new(address("A1"), address("A2")).expect("table range"),
+        1,
+        0,
+        vec![TableColumn::new(1, "Value", None).expect("column")],
+    )
+    .expect("table")
+    .try_with_metadata(
+        TableType::Worksheet,
+        true,
+        None,
+        None,
+        None,
+        Some(br#"<table published="1"/>"#.to_vec()),
+    )
+    .expect("valid table metadata");
+    let mut sheet = sheet(
+        1,
+        "Sheet1",
+        SheetVisibility::Visible,
+        &[(
+            address("A1"),
+            CellContent::Literal(CellValue::Text("Value".to_owned())),
+            NumberFormat::default(),
+        )],
+    );
+    sheet.set_tables(vec![table]);
+    let workbook = snapshot(
+        vec![sheet],
+        Vec::new(),
+        DateSystem::Excel1900,
+        CalculationHints::default(),
+    );
+    let draft = WorkbookDraft::from_snapshot_for_test(workbook);
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let error = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect_err("opaque canonical table must fail closed");
+
+    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+}
+
+#[test]
+fn canonical_writer_rejects_publicly_constructible_names_outside_ooxml_rules() {
+    let assert_unsupported = |table: Table, header: String| {
+        let mut sheet = sheet(
+            1,
+            "Sheet1",
+            SheetVisibility::Visible,
+            &[(
+                address("A1"),
+                CellContent::Literal(CellValue::Text(header)),
+                NumberFormat::default(),
+            )],
+        );
+        sheet.set_tables(vec![table]);
+        let workbook = snapshot(
+            vec![sheet],
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+        );
+        let draft = WorkbookDraft::from_snapshot_for_test(workbook);
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let error =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect_err("canonical XLSX must enforce its stricter scalar boundary");
+        assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    };
+
+    let invalid_name_table = Table::new(
+        TableId::new(1).expect("table id"),
+        TableName::new("1Sales").expect("compatible public constructor"),
+        TableName::new("SalesDisplay").expect("display name"),
+        CellRange::new(address("A1"), address("A2")).expect("table range"),
+        1,
+        0,
+        vec![TableColumn::new(1, "Value", None).expect("column")],
+    )
+    .expect("core table");
+    assert_unsupported(invalid_name_table, "Value".to_owned());
+
+    let long_column_name = "x".repeat(256);
+    let invalid_column_table = Table::new(
+        TableId::new(1).expect("table id"),
+        TableName::new("Sales").expect("table name"),
+        TableName::new("SalesDisplay").expect("display name"),
+        CellRange::new(address("A1"), address("A2")).expect("table range"),
+        1,
+        0,
+        vec![
+            TableColumn::new(1, long_column_name.clone(), None)
+                .expect("compatible public constructor"),
+        ],
+    )
+    .expect("core table");
+    assert_unsupported(invalid_column_table, long_column_name);
+}
+
+#[test]
+fn canonical_writer_fails_closed_for_external_table_dependencies() {
+    for table_type in [TableType::QueryTable, TableType::Xml] {
+        let table = Table::new(
+            TableId::new(1).expect("table id"),
+            TableName::new("External").expect("table name"),
+            TableName::new("External").expect("display name"),
+            CellRange::new(address("A1"), address("A2")).expect("table range"),
+            1,
+            0,
+            vec![TableColumn::new(1, "Value", None).expect("column")],
+        )
+        .expect("table")
+        .try_with_metadata(table_type, true, None, None, None, None)
+        .expect("valid metadata");
+        let mut sheet = sheet(
+            1,
+            "Sheet1",
+            SheetVisibility::Visible,
+            &[(
+                address("A1"),
+                CellContent::Literal(CellValue::Text("Value".to_owned())),
+                NumberFormat::default(),
+            )],
+        );
+        sheet.set_tables(vec![table]);
+        let workbook = snapshot(
+            vec![sheet],
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+        );
+        let draft = WorkbookDraft::from_snapshot_for_test(workbook);
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let error =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect_err("external table dependencies cannot be synthesized");
+        assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    }
+}
+
+#[test]
+fn canonical_writer_fails_closed_for_external_table_style_dependencies() {
+    let assert_unsupported = |table: Table| {
+        let mut sheet = sheet(
+            1,
+            "Sheet1",
+            SheetVisibility::Visible,
+            &[(
+                address("A1"),
+                CellContent::Literal(CellValue::Text("Value".to_owned())),
+                NumberFormat::default(),
+            )],
+        );
+        sheet.set_tables(vec![table]);
+        let workbook = snapshot(
+            vec![sheet],
+            Vec::new(),
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+        );
+        let draft = WorkbookDraft::from_snapshot_for_test(workbook);
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let error =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect_err("unmodeled style dependencies cannot be synthesized");
+        assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    };
+
+    let color_filter = TableAutoFilter::from_xlsx(
+        CellRange::new(address("A1"), address("A2")).expect("filter range"),
+        true,
+        vec![TableFilterColumn::from_xlsx(
+            0,
+            false,
+            true,
+            Some(TableFilterCriteria::Color(TableColorFilter::from_xlsx(
+                Some(4),
+                true,
+            ))),
+        )],
+        None,
+    );
+    let color_table = Table::new(
+        TableId::new(1).expect("table id"),
+        TableName::new("Color").expect("table name"),
+        TableName::new("Color").expect("display name"),
+        CellRange::new(address("A1"), address("A2")).expect("table range"),
+        1,
+        0,
+        vec![TableColumn::new(1, "Value", None).expect("column")],
+    )
+    .expect("table")
+    .try_with_metadata(
+        TableType::Worksheet,
+        true,
+        Some(color_filter),
+        None,
+        None,
+        None,
+    )
+    .expect("valid metadata");
+    assert_unsupported(color_table);
+
+    for style_name in ["CustomTableStyle", "TableStyleLight01"] {
+        let custom_style_table = Table::new(
+            TableId::new(1).expect("table id"),
+            TableName::new("Styled").expect("table name"),
+            TableName::new("Styled").expect("display name"),
+            CellRange::new(address("A1"), address("A2")).expect("table range"),
+            1,
+            0,
+            vec![TableColumn::new(1, "Value", None).expect("column")],
+        )
+        .expect("table")
+        .try_with_metadata(
+            TableType::Worksheet,
+            true,
+            None,
+            None,
+            Some(TableStyleInfo::new(
+                Some(style_name.to_owned()),
+                false,
+                false,
+                false,
+                false,
+            )),
+            None,
+        )
+        .expect("valid metadata");
+        assert_unsupported(custom_style_table);
+    }
+}
+
+#[test]
+fn canonical_writer_rejects_table_header_mismatch() {
+    let table = Table::new(
+        TableId::new(1).expect("table id"),
+        TableName::new("Headers").expect("table name"),
+        TableName::new("Headers").expect("display name"),
+        CellRange::new(address("A1"), address("A2")).expect("table range"),
+        1,
+        0,
+        vec![TableColumn::new(1, "Expected", None).expect("column")],
+    )
+    .expect("table");
+    let mut sheet = sheet(
+        1,
+        "Sheet1",
+        SheetVisibility::Visible,
+        &[(
+            address("A1"),
+            CellContent::Literal(CellValue::Text("Different".to_owned())),
+            NumberFormat::default(),
+        )],
+    );
+    sheet.set_tables(vec![table]);
+    let workbook = snapshot(
+        vec![sheet],
+        Vec::new(),
+        DateSystem::Excel1900,
+        CalculationHints::default(),
+    );
+    let draft = WorkbookDraft::from_snapshot_for_test(workbook);
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let error = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect_err("table headers must match their column metadata");
+    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
 }
 
 #[test]

@@ -10,7 +10,8 @@ use super::reader::{PresentationCapture, read_xlsx_with_identity};
 use super::write::PreservedPackage;
 use super::{PackageSummary, ReadOptions, XlsxErrorCode, XlsxReadError};
 use crate::{
-    DocumentPresentation, InputHash, SheetId, SourceId, WorkbookSnapshot, WorkbookSourceKind,
+    DocumentPresentation, InputHash, SheetId, SourceId, TableId, WorkbookSnapshot,
+    WorkbookSourceKind,
 };
 
 /// Open XML spreadsheet package kind retained by a writable document.
@@ -50,6 +51,7 @@ pub struct XlsxDocument {
     package_summary: PackageSummary,
     workbook_part: PartPath,
     worksheet_parts: BTreeMap<SheetId, PartPath>,
+    table_parts: BTreeMap<TableId, PartPath>,
     package: PreservedPackage,
 }
 
@@ -101,6 +103,11 @@ impl XlsxDocument {
     /// Returns the worksheet package part associated with a stable sheet ID.
     pub fn worksheet_part(&self, sheet_id: SheetId) -> Option<SourceId> {
         self.worksheet_parts.get(&sheet_id).map(PartPath::source_id)
+    }
+
+    /// Returns the table-definition package part associated with a stable table ID.
+    pub fn table_part(&self, table_id: TableId) -> Option<SourceId> {
+        self.table_parts.get(&table_id).map(PartPath::source_id)
     }
 
     pub(crate) const fn preserved_package(&self) -> &PreservedPackage {
@@ -204,6 +211,7 @@ fn open_with_source<R: Read + Seek>(
         package_summary: read.package_summary,
         workbook_part: read.workbook_part,
         worksheet_parts: read.worksheet_parts,
+        table_parts: read.table_parts,
         package: PreservedPackage::new(bytes, input_hash, kind),
     })
 }

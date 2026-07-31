@@ -24,13 +24,14 @@ use std::marker::PhantomData;
 use cellrune::{
     ApplyChangesError, CalculationCellResult, CalculationExecutionMode, CalculationHints,
     CalculationIssue, CalculationMode, CalculationOptions, CalculationSnapshot, CellAddress,
-    CellContent, CellValue, DateSystem, DefinedName, DefinedNameScope, Diagnostic,
+    CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope, Diagnostic,
     DiagnosticSeverity, FormulaCapability, FormulaCapabilityReport, FormulaCell, FunctionSupport,
     NumberFormatKind, Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode,
     RecalculationWriteOptions, SavedResult, SavedResultIssue, SessionError, SharedFormulaRole,
-    Sheet, SheetId, SheetVisibility, TableColumn, TableColumnId, ValidationError, WorkbookSnapshot,
-    WorkbookSource, WorkbookSourceKind, XlsxDocument, XlsxReadError, XlsxWriteError,
-    calculate_workbook, read_xlsx_bytes, scan_formula_capabilities, write_recalculated_xlsx_bytes,
+    Sheet, SheetId, SheetVisibility, Table, TableColumn, TableColumnId, TableId, TableName,
+    ValidationError, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind, XlsxDocument,
+    XlsxReadError, XlsxWriteError, calculate_workbook, read_xlsx_bytes, scan_formula_capabilities,
+    write_recalculated_xlsx_bytes,
 };
 
 /// Captures a payload binding's exact type. The intermediate `let pinned = payload(…);` at every
@@ -196,6 +197,17 @@ fn frozen_table_column_scalar_api() {
     let _: u32 = column.id();
     let _: TableColumnId = column.column_id();
 }
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_TABLE_NEW: fn(
+    TableId,
+    TableName,
+    TableName,
+    CellRange,
+    u32,
+    u32,
+    Vec<TableColumn>,
+) -> Result<Table, ValidationError> = Table::new;
 
 #[allow(clippy::type_complexity)]
 const _FROZEN_NEW_WITH_METADATA: fn(

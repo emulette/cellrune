@@ -13,6 +13,7 @@ mod recalculation;
 mod report;
 mod serialization;
 mod styles_patch;
+mod table;
 mod workbook_edit;
 mod workbook_patch;
 mod worksheet_edit;

@@ -342,12 +342,20 @@ fn read_limits_reject_zero_values() {
         })
     );
     type LimitSetter = fn(ReadLimits, u64) -> Result<ReadLimits, ReadOptionsError>;
-    let table_setters: [(LimitSetter, &str); 3] = [
+    let table_setters: [(LimitSetter, &str); 5] = [
         (ReadLimits::with_max_tables, "max_tables"),
         (ReadLimits::with_max_table_columns, "max_table_columns"),
         (
             ReadLimits::with_max_table_name_bytes,
             "max_table_name_bytes",
+        ),
+        (
+            ReadLimits::with_max_table_filter_items,
+            "max_table_filter_items",
+        ),
+        (
+            ReadLimits::with_max_table_filter_text_bytes,
+            "max_table_filter_text_bytes",
         ),
     ];
     for (setter, name) in table_setters {

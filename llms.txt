@@ -115,7 +115,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   part of the contract.
 - **Validated newtypes are constructed through `::new(...)` or a named
   variant, returning `Result<Self, ValidationError>`.** There is no public way
-  to build an invalid instance. Examples: `Row::new(u32)`,
+  to violate the constructor contract documented by that type; a file-format
+  boundary can impose additional rules without tightening an existing public
+  constructor in a patch release. Examples: `Row::new(u32)`,
   `Column::new(u32)`, `SheetId::new(u32)`, `FiniteNumber::new(f64)`,
   `CellAddress::from_indices(row, column)`, `CellAddress::from_a1("A1")`,
   `SheetName::new(String)`, `DiagnosticCode::new(String)`,
@@ -148,7 +150,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `CalculationDecisionReason`, `MaterializedResultOrigin`, `FormulaDialect`,
   `FormulaMetadata`, `WorkbookChange`, `XlsxDocumentKind`,
   `RecalculationWritePolicy`, `ArithmeticSemantics`, `FinancialSolverSemantics`,
-  `PhoneticType`, `PhoneticAlignment`, and `TotalsRowFunction`). A
+  `PhoneticType`, `PhoneticAlignment`, `TableType`, `TotalsRowFunction`,
+  `TableCalendarType`, `TableDateTimeGrouping`, `TableCustomFilterOperator`,
+  `TableDynamicFilterType`, `TableIconSet`, `TableSortBy`, `TableSortMethod`,
+  `TableFilterItem`, and `TableFilterCriteria`). A
   `match` on one of these needs a wildcard arm even if every current variant
   is handled.
 - **Every stable machine code exposes `.as_str()`,** returning `&str` or
@@ -183,16 +188,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   `XlsxDocument` under the `OpenOptions`/`ReadLimits` budget. The document
   retains no host path and exposes no ZIP or XML types.
 - `ReadOptions::default()` / `ReadOptions::new(ReadLimits)`, `.limits()`
-- `ReadLimits::default()` + 25 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
+- `ReadLimits::default()` + 27 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
   archive bytes, ZIP entry count, per-entry/total uncompressed bytes,
   compression ratio, XML depth/attributes, sheet count, cells per
   sheet/total, shared string count/bytes/total bytes, defined names,
   formula bytes per-cell/total, merged-range declarations, tables,
-  table columns, table name bytes, plus phonetic runs, annotated
-  references, and phonetic text bytes. Exceeding the merged-range or
-  table budgets fails the read with the dedicated `XlsxErrorCode`
-  variants `TooManyMergedRanges`, `TooManyTables`,
-  `TooManyTableColumns`, or `TableNameTooLarge`.
+  table columns, table name bytes, per-table filter declarations, per-table
+  filter/sort attribute text, plus phonetic runs, annotated references, and
+  phonetic text bytes. Exceeding the merged-range or table budgets fails the
+  read with the dedicated `XlsxErrorCode` variants `TooManyMergedRanges`,
+  `TooManyTables`, `TooManyTableColumns`, `TableNameTooLarge`,
+  `TooManyTableFilterItems`, or `TableFilterTextTooLarge`.
 
 ### Workbook model — read-only, format-neutral
 
@@ -209,14 +215,35 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
   `.merged_ranges() -> &[CellRange]` (sorted by top-left address),
   `.tables() -> &[Table]` (XLSX declaration order).
-- `Table`: `.id() -> TableId` (non-zero, workbook-global stable ID),
+- `Table`: `.id() -> TableId` (OOXML-valid non-zero, workbook-global stable ID),
   `.name() -> &TableName` (worksheet-local programmatic name),
   `.display_name() -> &TableName` (workbook-global formula/UI name),
-  `.range()`, `.header_row_count()`, `.totals_row_count()`,
-  `.columns() -> &[TableColumn]`.
+  `.range()`, `.table_type()`, `.header_row_count()`, `.totals_row_count()`,
+  `.totals_row_shown()`, `.columns() -> &[TableColumn]`, `.auto_filter()`,
+  `.sort_state()`, `.style_info()`, and `.has_opaque_metadata()`.
 - `TableColumn`: `.id() -> u32` (the original scalar API),
   `.column_id() -> TableColumnId` (typed non-zero stable identity),
-  `.name()`, `.totals_row_function() -> Option<TotalsRowFunction>`.
+  `.name()`, `.totals_row_function() -> Option<TotalsRowFunction>`,
+  `.totals_row_label()`, `.calculated_column_formula()`, and
+  `.totals_row_formula()`.
+- `TableType` (`Worksheet | Xml | QueryTable`) exposes `.as_str()`.
+  `TableFormula` exposes validated storage-form `.text()` and `.is_array()`.
+  `TableAutoFilter` exposes its effective `.range()`,
+  `.declared_range() -> Option<CellRange>` (absent when `autoFilter@ref` was
+  omitted and inherited from the table), typed `.filter_columns()`, and an
+  optional nested `.sort_state()`. Each `TableFilterColumn` exposes its zero-based
+  `.column_id()`, button flags, and optional `TableFilterCriteria`
+  (`Values | Custom | Dynamic | Color | Icon | Top`). `TableSortState`
+  exposes `.range()`, `.case_sensitive()`, `.column_sort()`,
+  `.sort_method()`, and typed `.conditions()`.
+  Calendar, grouping, comparison, dynamic-filter, icon-set, sort-by, and
+  sort-method tokens are exposed as non-exhaustive enums. Dynamic filters
+  retain numeric `val`/`maxVal` through validated `TableNumericValue` source
+  spellings and ISO `valIso`/`maxValIso` through validated
+  `TableDateTimeValue` spellings. Strict SpreadsheetML rejects `maxVal`;
+  Transitional SpreadsheetML may retain both serial and ISO forms.
+  `TableStyleInfo` exposes its optional name plus the four first/last-column
+  and row/column-stripe flags.
 - `TotalsRowFunction` (`#[non_exhaustive]`): `Sum | Min | Max | Average |
   Count | CountNumbers | StdDev | Var | Custom`; `.as_str()` returns the
   OOXML token. Invalid table definitions, duplicate IDs or display names,
@@ -249,11 +276,20 @@ than guessing a name from a different XLSX crate (`calamine`,
 
 - `XlsxDocument`: `.workbook()`, `.input_hash()`, `.kind()`,
   `.semantic_revision()`, `.presentation()`, `.presentation_revision()`,
-  `.package_summary()`, `.workbook_part()`, and `.worksheet_part(SheetId)`.
+  `.package_summary()`, `.workbook_part()`, `.worksheet_part(SheetId)`, and
+  `.table_part(TableId)`.
 - `XlsxDocumentKind`: `Xlsx | Xlsm`. Macro parts are retained but never
   executed.
 - `write_preserved_xlsx_bytes(&XlsxDocument, WriteOptions) ->
   Result<Vec<u8>, XlsxWriteError>` raw-copies every unchanged ZIP entry.
+- Accepted table metadata participates in write verification. Source-linked
+  writes retain table parts byte-for-byte; the canonical serializer emits
+  modeled worksheet tables and fails with `UnsupportedPreservation` rather
+  than discard opaque metadata or invent the dependent parts required by
+  query/XML tables, differential formats, or custom table styles. Canonical
+  serialization also enforces the complete OOXML table-name and column-name
+  rules even though the older public constructors retain their 0.1.8
+  validation contract for patch-version compatibility.
 - `write_recalculated_xlsx_bytes(&XlsxDocument, &CalculationSnapshot,
   RecalculationWriteOptions) -> Result<RecalculatedWorkbook,
   XlsxWriteError>` prepares owned verified bytes plus a `WriteReport`.

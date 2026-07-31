@@ -62,6 +62,8 @@ const MESSAGE_TABLE_COLUMN_ID_ZERO: &str = "table column ID must be greater than
 const MESSAGE_TABLE_NAME_EMPTY: &str = "table name must not be empty";
 const MESSAGE_TABLE_NAME_TOO_LONG: &str = "table name exceeds 255 UTF-16 code units";
 const MESSAGE_TABLE_NAME_INVALID_CHARACTER: &str = "table name contains an invalid character";
+const MESSAGE_TABLE_NAME_REFERENCE_CONFLICT: &str =
+    "table name must not be an A1 or R1C1 reference";
 const MESSAGE_DUPLICATE_TABLE_DISPLAY_NAME: &str =
     "workbook contains a duplicate case-insensitive table display name";
 const MESSAGE_DUPLICATE_TABLE_ID: &str = "workbook contains a duplicate table ID";
@@ -73,12 +75,15 @@ const MESSAGE_TABLE_COLUMNS_EMPTY: &str = "table must declare at least one colum
 const MESSAGE_TABLE_COLUMN_COUNT_MISMATCH: &str =
     "table column count does not match the table range width";
 const MESSAGE_TABLE_COLUMN_NAME_EMPTY: &str = "table column name must not be empty";
+const MESSAGE_TABLE_COLUMN_NAME_TOO_LONG: &str = "table column name exceeds 255 UTF-16 code units";
 const MESSAGE_DUPLICATE_TABLE_COLUMN_NAME: &str =
     "table contains a duplicate case-insensitive column name";
 const MESSAGE_DUPLICATE_TABLE_COLUMN_ID: &str = "table contains a duplicate column identifier";
 const MESSAGE_OVERLAPPING_TABLES: &str = "worksheet contains overlapping table ranges";
 const MESSAGE_TABLE_ROW_COUNTS_EXCEED_RANGE: &str =
     "table header and totals rows exceed the table range height";
+const MESSAGE_INVALID_TABLE_TOTALS_METADATA: &str =
+    "table totals label, function, and formula metadata are inconsistent";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
@@ -189,6 +194,8 @@ pub enum ValidationErrorCode {
     TableNameTooLong,
     /// A table name contains a forbidden character.
     TableNameInvalidCharacter,
+    /// A table name is an A1 or R1C1 reference.
+    TableNameReferenceConflict,
     /// A workbook contains a duplicate case-insensitive table display name.
     DuplicateTableDisplayName,
     /// A workbook contains a duplicate table identifier.
@@ -203,6 +210,8 @@ pub enum ValidationErrorCode {
     TableColumnCountMismatch,
     /// A table column name is empty.
     TableColumnNameEmpty,
+    /// A table column name exceeds Excel's length limit.
+    TableColumnNameTooLong,
     /// A table contains a duplicate case-insensitive column name.
     DuplicateTableColumnName,
     /// A table contains a duplicate column identifier.
@@ -211,6 +220,8 @@ pub enum ValidationErrorCode {
     OverlappingTables,
     /// A table's header and totals rows exceed its range height.
     TableRowCountsExceedRange,
+    /// A table column contains inconsistent totals metadata.
+    InvalidTableTotalsMetadata,
 }
 
 impl ValidationErrorCode {
@@ -272,6 +283,7 @@ impl ValidationErrorCode {
             Self::TableNameEmpty => "validation.table_name_empty",
             Self::TableNameTooLong => "validation.table_name_too_long",
             Self::TableNameInvalidCharacter => "validation.table_name_invalid_character",
+            Self::TableNameReferenceConflict => "validation.table_name_reference_conflict",
             Self::DuplicateTableDisplayName => "validation.duplicate_table_display_name",
             Self::DuplicateTableId => "validation.duplicate_table_id",
             Self::DuplicateTableProgrammaticName => "validation.duplicate_table_programmatic_name",
@@ -281,10 +293,12 @@ impl ValidationErrorCode {
             Self::TableColumnsEmpty => "validation.table_columns_empty",
             Self::TableColumnCountMismatch => "validation.table_column_count_mismatch",
             Self::TableColumnNameEmpty => "validation.table_column_name_empty",
+            Self::TableColumnNameTooLong => "validation.table_column_name_too_long",
             Self::DuplicateTableColumnName => "validation.duplicate_table_column_name",
             Self::DuplicateTableColumnId => "validation.duplicate_table_column_id",
             Self::OverlappingTables => "validation.overlapping_tables",
             Self::TableRowCountsExceedRange => "validation.table_row_counts_exceed_range",
+            Self::InvalidTableTotalsMetadata => "validation.invalid_table_totals_metadata",
         }
     }
 }
@@ -491,6 +505,8 @@ pub enum ValidationError {
         /// Forbidden character found in the table name.
         character: char,
     },
+    /// A table name is parsed by Excel as an A1 or R1C1 reference.
+    TableNameReferenceConflict,
     /// Two tables anywhere in the workbook use display names that compare equal without case.
     DuplicateTableDisplayName {
         /// Repeated table display name as supplied by the caller.
@@ -522,6 +538,11 @@ pub enum ValidationError {
     },
     /// A table column name is empty.
     TableColumnNameEmpty,
+    /// A table column name is longer than Excel's 255 UTF-16 code-unit limit.
+    TableColumnNameTooLong {
+        /// Length of the rejected name in UTF-16 code units.
+        utf16_len: usize,
+    },
     /// Two columns in one table use names that compare equal without case.
     DuplicateTableColumnName {
         /// Repeated column name as supplied by the caller.
@@ -550,6 +571,8 @@ pub enum ValidationError {
         /// Height of the table range in rows.
         height: u32,
     },
+    /// A table column's totals label, function, and formula metadata are inconsistent.
+    InvalidTableTotalsMetadata,
 }
 
 impl ValidationError {
@@ -625,6 +648,7 @@ impl ValidationError {
             Self::TableNameInvalidCharacter { .. } => {
                 ValidationErrorCode::TableNameInvalidCharacter
             }
+            Self::TableNameReferenceConflict => ValidationErrorCode::TableNameReferenceConflict,
             Self::DuplicateTableDisplayName { .. } => {
                 ValidationErrorCode::DuplicateTableDisplayName
             }
@@ -638,12 +662,14 @@ impl ValidationError {
             Self::TableColumnsEmpty => ValidationErrorCode::TableColumnsEmpty,
             Self::TableColumnCountMismatch { .. } => ValidationErrorCode::TableColumnCountMismatch,
             Self::TableColumnNameEmpty => ValidationErrorCode::TableColumnNameEmpty,
+            Self::TableColumnNameTooLong { .. } => ValidationErrorCode::TableColumnNameTooLong,
             Self::DuplicateTableColumnName { .. } => ValidationErrorCode::DuplicateTableColumnName,
             Self::DuplicateTableColumnId { .. } => ValidationErrorCode::DuplicateTableColumnId,
             Self::OverlappingTables { .. } => ValidationErrorCode::OverlappingTables,
             Self::TableRowCountsExceedRange { .. } => {
                 ValidationErrorCode::TableRowCountsExceedRange
             }
+            Self::InvalidTableTotalsMetadata => ValidationErrorCode::InvalidTableTotalsMetadata,
         }
     }
 }
@@ -793,6 +819,9 @@ impl fmt::Display for ValidationError {
                 formatter,
                 "{MESSAGE_TABLE_NAME_INVALID_CHARACTER}: {character:?}"
             ),
+            Self::TableNameReferenceConflict => {
+                formatter.write_str(MESSAGE_TABLE_NAME_REFERENCE_CONFLICT)
+            }
             Self::DuplicateTableDisplayName { name } => {
                 write!(formatter, "{MESSAGE_DUPLICATE_TABLE_DISPLAY_NAME}: {name}")
             }
@@ -817,6 +846,12 @@ impl fmt::Display for ValidationError {
                 "{MESSAGE_TABLE_COLUMN_COUNT_MISMATCH}: {columns} columns, width {width}"
             ),
             Self::TableColumnNameEmpty => formatter.write_str(MESSAGE_TABLE_COLUMN_NAME_EMPTY),
+            Self::TableColumnNameTooLong { utf16_len } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_TABLE_COLUMN_NAME_TOO_LONG}: {utf16_len}"
+                )
+            }
             Self::DuplicateTableColumnName { name } => {
                 write!(formatter, "{MESSAGE_DUPLICATE_TABLE_COLUMN_NAME}: {name}")
             }
@@ -839,6 +874,9 @@ impl fmt::Display for ValidationError {
                 formatter,
                 "{MESSAGE_TABLE_ROW_COUNTS_EXCEED_RANGE}: header {header_row_count}, totals {totals_row_count}, height {height}"
             ),
+            Self::InvalidTableTotalsMetadata => {
+                formatter.write_str(MESSAGE_INVALID_TABLE_TOTALS_METADATA)
+            }
         }
     }
 }
@@ -1053,6 +1091,10 @@ mod tests {
                 "validation.table_name_invalid_character",
             ),
             (
+                ValidationErrorCode::TableNameReferenceConflict,
+                "validation.table_name_reference_conflict",
+            ),
+            (
                 ValidationErrorCode::DuplicateTableDisplayName,
                 "validation.duplicate_table_display_name",
             ),
@@ -1081,6 +1123,10 @@ mod tests {
                 "validation.table_column_name_empty",
             ),
             (
+                ValidationErrorCode::TableColumnNameTooLong,
+                "validation.table_column_name_too_long",
+            ),
+            (
                 ValidationErrorCode::DuplicateTableColumnName,
                 "validation.duplicate_table_column_name",
             ),
@@ -1095,6 +1141,10 @@ mod tests {
             (
                 ValidationErrorCode::TableRowCountsExceedRange,
                 "validation.table_row_counts_exceed_range",
+            ),
+            (
+                ValidationErrorCode::InvalidTableTotalsMetadata,
+                "validation.invalid_table_totals_metadata",
             ),
         ];
         let mut seen_codes = BTreeSet::new();

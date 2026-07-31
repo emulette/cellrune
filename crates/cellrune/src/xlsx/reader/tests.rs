@@ -708,6 +708,21 @@ const TABLE_ONE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   </tableColumns>
 </table>"#;
 
+const TABLE_WITH_METADATA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="SalesDisplay" ref="A1:C4" tableType="queryTable" headerRowCount="1" totalsRowCount="1" totalsRowShown="1">
+  <autoFilter ref="A1:C3">
+    <filterColumn colId="1"><filters><filter val="East"/></filters></filterColumn>
+    <sortState ref="A2:C3" caseSensitive="1" sortMethod="stroke"><sortCondition ref="B2:B3" descending="1" sortBy="cellColor" dxfId="4"/></sortState>
+  </autoFilter>
+  <sortState ref="A2:C3" columnSort="1" sortMethod="pinYin"><sortCondition ref="A2:C2" sortBy="icon" iconSet="3Arrows" iconId="2"/></sortState>
+  <tableColumns count="3">
+    <tableColumn id="1" name="Region" totalsRowLabel="Total"/>
+    <tableColumn id="5" name="Amount"><calculatedColumnFormula array="1">[@Amount]*2</calculatedColumnFormula></tableColumn>
+    <tableColumn id="3" name="Note" totalsRowFunction="custom"><totalsRowFormula>SUBTOTAL(109,[Amount])</totalsRowFormula></tableColumn>
+  </tableColumns>
+  <tableStyleInfo name="TableStyleMedium2" showFirstColumn="1" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>
+</table>"#;
+
 fn table_content_types() -> String {
     CONTENT_TYPES.replace(
         "</Types>",
@@ -851,6 +866,866 @@ fn reads_table_metadata_through_worksheet_relationships() {
             .iter()
             .all(|diagnostic| !diagnostic.code().as_str().starts_with("xlsx.table")),
         "a valid table must not produce diagnostics"
+    );
+}
+
+#[test]
+fn reads_complete_table_metadata_and_records_the_source_part() {
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_WITH_METADATA),
+        ],
+    );
+    let document =
+        open_xlsx_document_bytes(&archive, OpenOptions::default()).expect("table document");
+    let table_id = crate::TableId::new(1).expect("table id");
+    assert_eq!(
+        document
+            .table_part(table_id)
+            .expect("accepted table source part")
+            .as_str(),
+        "xl/tables/table1.xml"
+    );
+    let table = document
+        .workbook()
+        .table("SalesDisplay")
+        .expect("complete table");
+    assert_eq!(table.table_type(), crate::TableType::QueryTable);
+    assert!(table.totals_row_shown());
+    assert!(!table.has_opaque_metadata());
+
+    let filter = table.auto_filter().expect("auto filter");
+    assert_eq!(filter.range().start().to_string(), "A1");
+    assert_eq!(filter.range().end().to_string(), "C3");
+    assert_eq!(filter.filter_columns().len(), 1);
+    assert_eq!(filter.filter_columns()[0].column_id(), 1);
+    match filter.filter_columns()[0]
+        .criteria()
+        .expect("filter criteria")
+    {
+        crate::TableFilterCriteria::Values(filters) => {
+            assert_eq!(
+                filters.items(),
+                &[crate::TableFilterItem::Value(Some("East".into()))]
+            );
+        }
+        other => panic!("unexpected filter criteria: {other:?}"),
+    }
+    let filter_sort = filter.sort_state().expect("nested sort");
+    assert!(filter_sort.case_sensitive());
+    assert!(!filter_sort.column_sort());
+    assert_eq!(
+        filter_sort.sort_method(),
+        Some(crate::TableSortMethod::Stroke)
+    );
+    assert_eq!(
+        filter_sort
+            .conditions()
+            .iter()
+            .map(crate::TableSortCondition::range)
+            .collect::<Vec<_>>(),
+        &[crate::CellRange::new(address("B2"), address("B3")).expect("condition range")]
+    );
+    assert!(filter_sort.conditions()[0].descending());
+    assert_eq!(
+        filter_sort.conditions()[0].sort_by(),
+        Some(crate::TableSortBy::CellColor)
+    );
+    assert_eq!(
+        filter_sort.conditions()[0].differential_format_id(),
+        Some(4)
+    );
+
+    let table_sort = table.sort_state().expect("table sort");
+    assert!(!table_sort.case_sensitive());
+    assert!(table_sort.column_sort());
+    assert_eq!(
+        table_sort.sort_method(),
+        Some(crate::TableSortMethod::PinYin)
+    );
+    assert_eq!(
+        table_sort
+            .conditions()
+            .iter()
+            .map(crate::TableSortCondition::range)
+            .collect::<Vec<_>>(),
+        &[crate::CellRange::new(address("A2"), address("C2")).expect("condition range")]
+    );
+    assert_eq!(
+        table_sort.conditions()[0].sort_by(),
+        Some(crate::TableSortBy::Icon)
+    );
+    assert_eq!(
+        table_sort.conditions()[0].icon_set(),
+        Some(crate::TableIconSet::ThreeArrows)
+    );
+    assert_eq!(table_sort.conditions()[0].icon_id(), Some(2));
+
+    let columns = table.columns();
+    assert_eq!(columns[0].totals_row_label(), Some("Total"));
+    let calculated = columns[1]
+        .calculated_column_formula()
+        .expect("calculated column formula");
+    assert_eq!(calculated.text().as_str(), "[@Amount]*2");
+    assert!(calculated.is_array());
+    assert_eq!(
+        columns[2]
+            .totals_row_formula()
+            .expect("totals formula")
+            .text()
+            .as_str(),
+        "SUBTOTAL(109,[Amount])"
+    );
+    assert_eq!(
+        columns[2].totals_row_function(),
+        Some(crate::TotalsRowFunction::Custom)
+    );
+
+    let style = table.style_info().expect("table style");
+    assert_eq!(style.name(), Some("TableStyleMedium2"));
+    assert!(style.show_first_column());
+    assert!(!style.show_last_column());
+    assert!(style.show_row_stripes());
+    assert!(!style.show_column_stripes());
+}
+
+#[test]
+fn reads_each_typed_table_filter_criteria_variant() {
+    let read_criteria = |replacement: &str| {
+        let table =
+            TABLE_WITH_METADATA.replace(r#"<filters><filter val="East"/></filters>"#, replacement);
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table workbook");
+        snapshot
+            .table("SalesDisplay")
+            .expect("table")
+            .auto_filter()
+            .expect("auto filter")
+            .filter_columns()[0]
+            .criteria()
+            .expect("criteria")
+            .clone()
+    };
+
+    match read_criteria(
+        r#"<filters blank="1" calendarType="gregorian"><filter val="East"/><dateGroupItem year="2026" month="7" day="31" dateTimeGrouping="day"/></filters>"#,
+    ) {
+        crate::TableFilterCriteria::Values(filters) => {
+            assert!(filters.blank());
+            assert_eq!(
+                filters.calendar_type(),
+                Some(crate::TableCalendarType::Gregorian)
+            );
+            assert_eq!(filters.items().len(), 2);
+            let crate::TableFilterItem::DateGroup(date) = &filters.items()[1] else {
+                panic!("expected grouped date");
+            };
+            assert_eq!(date.year(), 2026);
+            assert_eq!(date.month(), Some(7));
+            assert_eq!(date.day(), Some(31));
+            assert_eq!(date.grouping(), crate::TableDateTimeGrouping::Day);
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<filters><filter/></filters>"#) {
+        crate::TableFilterCriteria::Values(filters) => {
+            assert_eq!(filters.items(), &[crate::TableFilterItem::Value(None)]);
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(
+        r#"<customFilters and="1"><customFilter operator="greaterThan" val="10"/></customFilters>"#,
+    ) {
+        crate::TableFilterCriteria::Custom(filters) => {
+            assert!(filters.and());
+            assert_eq!(
+                filters.filters()[0].operator(),
+                Some(crate::TableCustomFilterOperator::GreaterThan)
+            );
+            assert_eq!(filters.filters()[0].value(), Some("10"));
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<customFilters><customFilter/></customFilters>"#) {
+        crate::TableFilterCriteria::Custom(filters) => {
+            assert_eq!(filters.filters()[0].operator(), None);
+            assert_eq!(filters.filters()[0].value(), None);
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<dynamicFilter type="thisMonth" val="1" maxVal="2"/>"#) {
+        crate::TableFilterCriteria::Dynamic(filter) => {
+            assert_eq!(filter.kind(), crate::TableDynamicFilterType::ThisMonth);
+            assert_eq!(
+                filter.value().map(crate::TableNumericValue::as_str),
+                Some("1")
+            );
+            assert_eq!(
+                filter.max_value().map(crate::TableNumericValue::as_str),
+                Some("2")
+            );
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<dynamicFilter type="today"/>"#) {
+        crate::TableFilterCriteria::Dynamic(filter) => {
+            assert_eq!(filter.value(), None);
+            assert_eq!(filter.max_value(), None);
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(
+        r#"<dynamicFilter type="today" valIso="2026-07-31T00:00:00Z" maxValIso="2026-08-01T00:00:00Z"/>"#,
+    ) {
+        crate::TableFilterCriteria::Dynamic(filter) => {
+            assert_eq!(
+                filter.iso_value().map(crate::TableDateTimeValue::as_str),
+                Some("2026-07-31T00:00:00Z")
+            );
+            assert_eq!(
+                filter
+                    .max_iso_value()
+                    .map(crate::TableDateTimeValue::as_str),
+                Some("2026-08-01T00:00:00Z")
+            );
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<dynamicFilter type="null"/>"#) {
+        crate::TableFilterCriteria::Dynamic(filter) => {
+            assert_eq!(filter.kind(), crate::TableDynamicFilterType::Null);
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<colorFilter dxfId="4" cellColor="0"/>"#) {
+        crate::TableFilterCriteria::Color(filter) => {
+            assert_eq!(filter.differential_format_id(), Some(4));
+            assert!(!filter.cell_color());
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<colorFilter/>"#) {
+        crate::TableFilterCriteria::Color(filter) => {
+            assert_eq!(filter.differential_format_id(), None);
+            assert!(filter.cell_color());
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<iconFilter iconSet="3Arrows" iconId="2"/>"#) {
+        crate::TableFilterCriteria::Icon(filter) => {
+            assert_eq!(filter.icon_set(), crate::TableIconSet::ThreeArrows);
+            assert_eq!(filter.icon_id(), Some(2));
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<iconFilter iconSet="3Arrows"/>"#) {
+        crate::TableFilterCriteria::Icon(filter) => {
+            assert_eq!(filter.icon_id(), None);
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+    match read_criteria(r#"<top10 top="0" percent="1" val="10" filterVal="42"/>"#) {
+        crate::TableFilterCriteria::Top(filter) => {
+            assert!(!filter.top());
+            assert!(filter.percent());
+            assert_eq!(filter.value().as_str(), "10");
+            assert_eq!(
+                filter.filter_value().map(crate::TableNumericValue::as_str),
+                Some("42")
+            );
+        }
+        other => panic!("unexpected criteria: {other:?}"),
+    }
+}
+
+#[test]
+fn invalid_table_filter_and_sort_scalars_fail_closed() {
+    let criteria = r#"<filters><filter val="East"/></filters>"#;
+    let invalid_criteria = [
+        r#"<filters calendarType="future"><filter val="East"/></filters>"#,
+        r#"<filters><dateGroupItem year="65536" dateTimeGrouping="year"/></filters>"#,
+        r#"<filters><dateGroupItem year="2026" month="13" dateTimeGrouping="month"/></filters>"#,
+        r#"<filters><dateGroupItem year="2026" dateTimeGrouping="year"/><filter val="East"/></filters>"#,
+        r#"<customFilters/>"#,
+        r#"<customFilters><customFilter/><customFilter/><customFilter/></customFilters>"#,
+        r#"<customFilters><customFilter operator="future"/></customFilters>"#,
+        r#"<dynamicFilter type="future"/>"#,
+        r#"<dynamicFilter type="today" val="inf"/>"#,
+        r#"<dynamicFilter type="today" valIso="2026-02-30T00:00:00Z"/>"#,
+        r#"<iconFilter iconSet="3Arrows" iconId="3"/>"#,
+        r#"<top10 val="."/>"#,
+    ];
+    let mut invalid_tables: Vec<String> = invalid_criteria
+        .into_iter()
+        .map(|replacement| TABLE_WITH_METADATA.replace(criteria, replacement))
+        .collect();
+    invalid_tables.extend([
+        TABLE_WITH_METADATA.replace(r#"sortMethod="stroke""#, r#"sortMethod="future""#),
+        TABLE_WITH_METADATA.replace(r#"sortBy="cellColor""#, r#"sortBy="future""#),
+        TABLE_WITH_METADATA.replace(
+            r#"sortBy="cellColor" dxfId="4""#,
+            r#"sortBy="cellColor" dxfId="4" iconSet="3Arrows""#,
+        ),
+        TABLE_WITH_METADATA.replace(r#"iconId="2""#, r#"iconId="3""#),
+    ]);
+
+    for invalid_table in invalid_tables {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("bounded read");
+        assert!(snapshot.table("SalesDisplay").is_none(), "{invalid_table}");
+        assert_eq!(
+            snapshot
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+                .count(),
+            1,
+            "{invalid_table}"
+        );
+    }
+}
+
+#[test]
+fn canonical_writer_reopens_each_self_contained_typed_filter_criteria_variant() {
+    for criteria in [
+        r#"<filters blank="1" calendarType="gregorian"><filter val="East"/><dateGroupItem year="2026" month="7" day="31" dateTimeGrouping="day"/></filters>"#,
+        r#"<filters><filter/></filters>"#,
+        r#"<customFilters and="1"><customFilter operator="greaterThan" val="10"/></customFilters>"#,
+        r#"<customFilters><customFilter/></customFilters>"#,
+        r#"<dynamicFilter type="thisMonth" val="1" maxVal="2"/>"#,
+        r#"<dynamicFilter type="today"/>"#,
+        r#"<dynamicFilter type="today" valIso="2026-07-31T00:00:00Z" maxValIso="2026-08-01T00:00:00Z"/>"#,
+        r#"<dynamicFilter type="null"/>"#,
+        r#"<colorFilter/>"#,
+        r#"<iconFilter iconSet="3Arrows" iconId="2"/>"#,
+        r#"<iconFilter iconSet="3Arrows"/>"#,
+        r#"<top10 top="0" percent="1" val="10" filterVal="42"/>"#,
+    ] {
+        let table = TABLE_WITH_METADATA
+            .replace(r#"tableType="queryTable""#, r#"tableType="worksheet""#)
+            .replace(
+                r#"<sortCondition ref="B2:B3" descending="1" sortBy="cellColor" dxfId="4"/>"#,
+                r#"<sortCondition ref="B2:B3" descending="1" sortBy="value"/>"#,
+            )
+            .replace(r#"<filters><filter val="East"/></filters>"#, criteria);
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table workbook");
+        let expected = snapshot.table("SalesDisplay").expect("table").clone();
+        let mut draft = WorkbookDraft::from_snapshot_for_test(snapshot);
+        for (cell, header) in [("A1", "Region"), ("B1", "Amount"), ("C1", "Note")] {
+            draft
+                .set_cell_value(
+                    SheetId::new(1).expect("sheet"),
+                    address(cell),
+                    CellValue::Text(header.to_owned()),
+                )
+                .expect("header");
+        }
+        let calculation =
+            calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+        let output =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect("canonical write");
+        let reopened =
+            open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+        assert_eq!(
+            reopened
+                .workbook()
+                .table("SalesDisplay")
+                .expect("reopened table"),
+            &expected
+        );
+    }
+}
+
+#[test]
+fn strict_dynamic_filters_accept_iso_bounds_and_reject_transitional_max_val() {
+    const TRANSITIONAL: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    const STRICT: &str = "http://purl.oclc.org/ooxml/spreadsheetml/main";
+    let criteria = r#"<filters><filter val="East"/></filters>"#;
+    let strict_table = TABLE_WITH_METADATA.replace(TRANSITIONAL, STRICT);
+    let valid = strict_table.replace(
+        criteria,
+        r#"<dynamicFilter type="today" valIso="2026-07-31T00:00:00Z" maxValIso="2026-08-01T00:00:00Z"/>"#,
+    );
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &valid),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("strict table");
+    let table = snapshot.table("SalesDisplay").expect("strict table");
+    assert!(!table.has_opaque_metadata());
+    let crate::TableFilterCriteria::Dynamic(filter) =
+        table.auto_filter().expect("auto filter").filter_columns()[0]
+            .criteria()
+            .expect("criteria")
+    else {
+        panic!("expected dynamic filter");
+    };
+    assert_eq!(
+        filter.iso_value().map(crate::TableDateTimeValue::as_str),
+        Some("2026-07-31T00:00:00Z")
+    );
+    assert_eq!(
+        filter
+            .max_iso_value()
+            .map(crate::TableDateTimeValue::as_str),
+        Some("2026-08-01T00:00:00Z")
+    );
+
+    let invalid = strict_table.replace(
+        criteria,
+        r#"<dynamicFilter type="today" valIso="2026-07-31T00:00:00Z" maxVal="46235"/>"#,
+    );
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &invalid),
+        ],
+    );
+    let snapshot =
+        read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("bounded strict read");
+    assert!(snapshot.table("SalesDisplay").is_none());
+    assert!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+    );
+}
+
+#[test]
+fn ambiguous_dynamic_filter_values_require_source_linked_preservation() {
+    for replacement in [
+        r#"<dynamicFilter type="aboveAverage"/>"#,
+        r#"<dynamicFilter type="aboveAverage" val="10" valIso="2026-07-31T00:00:00Z"/>"#,
+        r#"<dynamicFilter type="Q1" val="1"/>"#,
+    ] {
+        let table =
+            TABLE_WITH_METADATA.replace(r#"<filters><filter val="East"/></filters>"#, replacement);
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("tolerant read");
+        assert!(
+            snapshot
+                .table("SalesDisplay")
+                .expect("source-preserved table")
+                .has_opaque_metadata(),
+            "{replacement}"
+        );
+    }
+}
+
+#[test]
+fn prefixed_transitional_and_strict_table_fragments_remain_canonical() {
+    const TRANSITIONAL: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    const STRICT: &str = "http://purl.oclc.org/ooxml/spreadsheetml/main";
+
+    let mut prefixed = TABLE_WITH_METADATA
+        .replace(
+            &format!(r#"<table xmlns="{TRANSITIONAL}""#),
+            &format!(r#"<x:table xmlns:x="{TRANSITIONAL}" xmlns="{TRANSITIONAL}""#),
+        )
+        .replace("</table>", "</x:table>")
+        .replace(r#"tableType="queryTable""#, r#"tableType="worksheet""#)
+        .replace(
+            r#"<sortCondition ref="B2:B3" descending="1" sortBy="cellColor" dxfId="4"/>"#,
+            r#"<sortCondition ref="B2:B3" descending="1" sortBy="value"/>"#,
+        );
+    for element in [
+        "autoFilter",
+        "filterColumn",
+        "filters",
+        "filter",
+        "sortState",
+        "sortCondition",
+    ] {
+        prefixed = prefixed
+            .replace(&format!("<{element}"), &format!("<x:{element}"))
+            .replace(&format!("</{element}>"), &format!("</x:{element}>"));
+    }
+
+    for table_xml in [prefixed.clone(), prefixed.replace(TRANSITIONAL, STRICT)] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &table_xml),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("prefixed table");
+        let expected = snapshot.table("SalesDisplay").expect("table").clone();
+        assert!(
+            !expected.has_opaque_metadata(),
+            "recognized namespace prefixes are semantic, not opaque"
+        );
+
+        let mut draft = WorkbookDraft::from_snapshot_for_test(snapshot);
+        for (cell, header) in [("A1", "Region"), ("B1", "Amount"), ("C1", "Note")] {
+            draft
+                .set_cell_value(
+                    SheetId::new(1).expect("sheet"),
+                    address(cell),
+                    CellValue::Text(header.to_owned()),
+                )
+                .expect("header");
+        }
+        let calculation =
+            calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+        let output =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect("canonical write");
+        let reopened =
+            open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+        assert_eq!(
+            reopened
+                .workbook()
+                .table("SalesDisplay")
+                .expect("reopened table"),
+            &expected
+        );
+    }
+}
+
+#[test]
+fn auto_filter_without_ref_inherits_the_table_range_without_totals_rows() {
+    let table_xml = TABLE_WITH_METADATA
+        .replace(r#"tableType="queryTable""#, r#"tableType="worksheet""#)
+        .replace(r#"<autoFilter ref="A1:C3">"#, "<autoFilter>")
+        .replace(r#"sortBy="cellColor" dxfId="4""#, r#"sortBy="value""#);
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &table_xml),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table");
+    let table = snapshot.table("SalesDisplay").expect("table");
+    let filter = table.auto_filter().expect("auto filter");
+    assert_eq!(filter.range().start().to_string(), "A1");
+    assert_eq!(filter.range().end().to_string(), "C3");
+    assert_eq!(filter.declared_range(), None);
+    assert!(!table.has_opaque_metadata());
+
+    let mut draft = WorkbookDraft::from_snapshot_for_test(snapshot);
+    for (cell, header) in [("A1", "Region"), ("B1", "Amount"), ("C1", "Note")] {
+        draft
+            .set_cell_value(
+                SheetId::new(1).expect("sheet"),
+                address(cell),
+                CellValue::Text(header.to_owned()),
+            )
+            .expect("header");
+    }
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("canonical write");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    assert_eq!(
+        reopened
+            .workbook()
+            .table("SalesDisplay")
+            .expect("reopened table")
+            .auto_filter()
+            .expect("auto filter")
+            .declared_range(),
+        None
+    );
+}
+
+#[test]
+fn unmodeled_table_metadata_is_marked_for_source_linked_preservation() {
+    for table in [
+        TABLE_WITH_METADATA.replace(r#"ref="A1:C4""#, r#"ref="A1:C4" published="1""#),
+        TABLE_WITH_METADATA.replace(
+            r#"<filter val="East"/>"#,
+            r#"<filter val="East" future="1"/><futureFilter/>"#,
+        ),
+        TABLE_WITH_METADATA.replace("[@Amount]*2", "[@Amount]<future>IGNORED</future>*2"),
+        TABLE_WITH_METADATA.replace(
+            r#"<tableColumns count="3">"#,
+            r#"<tableColumns count="3" future="1"><futureColumn/>"#,
+        ),
+        TABLE_WITH_METADATA.replace(
+            r#"<autoFilter ref="A1:C3">"#,
+            r#"<autoFilter ref="A1:C3">PAYLOAD<filter val="WrongLevel"/>"#,
+        ),
+        TABLE_WITH_METADATA.replace(
+            r#"<tableColumns count="3">"#,
+            "<![CDATA[PAYLOAD]]><tableColumns count=\"3\">",
+        ),
+    ] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("table workbook");
+        let table = snapshot.table("SalesDisplay").expect("table");
+        assert!(table.has_opaque_metadata());
+        assert_eq!(
+            table.columns()[1]
+                .calculated_column_formula()
+                .expect("formula")
+                .text()
+                .as_str(),
+            "[@Amount]*2",
+            "nested metadata text must not become formula text"
+        );
+    }
+}
+
+#[test]
+fn table_fragments_reject_undeclared_entities_and_document_level_text() {
+    for invalid_table in [
+        TABLE_WITH_METADATA.replace(
+            r#"<filter val="East"/>"#,
+            r#"<filter val="East">&bogus;</filter>"#,
+        ),
+        TABLE_WITH_METADATA.replace(r#"<table xmlns="#, r#"PAYLOAD<table xmlns="#),
+    ] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect_err("invalid table XML must fail the read");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidXml);
+    }
+}
+
+#[test]
+fn table_xml_declarations_comments_and_whitespace_fail_closed() {
+    let declaration = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
+    let body = TABLE_ONE
+        .strip_prefix(declaration)
+        .expect("fixture declaration");
+    let invalid_tables = [
+        format!("{declaration}\n{TABLE_ONE}"),
+        format!(" \n{TABLE_ONE}"),
+        format!("<!--before-->{TABLE_ONE}"),
+        format!("<?probe value?>{TABLE_ONE}"),
+        format!("<?XML value?>{TABLE_ONE}"),
+        format!("<?1probe value?>{TABLE_ONE}"),
+        TABLE_ONE.replace(r#"version="1.0""#, r#"version="1.1""#),
+        TABLE_ONE.replace(declaration, r#"<?xml encoding="UTF-8"?>"#),
+        TABLE_ONE.replace(declaration, r#"<?xml version="1.0" version="1.0"?>"#),
+        TABLE_ONE.replace(declaration, r#"<?xml version="1.0" standalone="maybe"?>"#),
+        TABLE_ONE.replace(
+            declaration,
+            r#"<?xml version="1.0" standalone="yes" encoding="UTF-8"?>"#,
+        ),
+        TABLE_ONE.replace(declaration, r#"<?xml version="1.0" encoding="UTF 8"?>"#),
+        TABLE_ONE.replace(
+            declaration,
+            r#"<?xml version="1.0" extension="unsupported"?>"#,
+        ),
+        TABLE_ONE.replace("  <tableColumns", r#"  <?xml version="1.0"?><tableColumns"#),
+        TABLE_ONE.replace("  <tableColumns", "  <!--bad--comment--><tableColumns"),
+        format!("\u{a0}{body}"),
+        format!("{body}\u{a0}"),
+    ];
+    for invalid_table in invalid_tables {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect_err("malformed table XML must fail the read");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidXml, "{invalid_table}");
+    }
+
+    for valid_table in [
+        format!(" \t\r\n{body}"),
+        TABLE_ONE.replace(
+            declaration,
+            &format!("{declaration}\n<!--prolog--><?probe value?>"),
+        ),
+        TABLE_ONE.replace(
+            declaration,
+            &format!(r#"{declaration}<?xml-stylesheet href="table.xsl"?>"#),
+        ),
+    ] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &valid_table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("valid XML prolog");
+        assert!(snapshot.table("SalesDisplay").is_some());
+    }
+}
+
+#[test]
+fn table_child_sequences_and_filter_column_choice_are_enforced() {
+    let invalid_tables = [
+        TABLE_ONE.replace(
+            "</tableColumns>",
+            r#"</tableColumns><autoFilter ref="A1:C3"/>"#,
+        ),
+        TABLE_ONE.replace(
+            "  <tableColumns",
+            r#"  <autoFilter ref="A1:C3"><sortState ref="A2:C3"/><filterColumn colId="0"/></autoFilter>
+  <tableColumns"#,
+        ),
+        TABLE_ONE.replace(
+            r#"<tableColumn id="1" name="Region"/>"#,
+            r#"<tableColumn id="1" name="Region"><totalsRowFormula>1</totalsRowFormula><calculatedColumnFormula>2</calculatedColumnFormula></tableColumn>"#,
+        ),
+        TABLE_ONE.replace(
+            "  <tableColumns",
+            r#"  <autoFilter ref="A1:C3"><filterColumn colId="0"><filters/><extLst/></filterColumn></autoFilter>
+  <tableColumns"#,
+        ),
+    ];
+    for invalid_table in invalid_tables {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("bounded read");
+        assert!(snapshot.table("SalesDisplay").is_none(), "{invalid_table}");
+        assert!(
+            snapshot
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+        );
+    }
+}
+
+#[test]
+fn table_filter_and_sort_ranges_must_stay_inside_the_table() {
+    let filter_column_outside_filter_range = TABLE_ONE.replace(
+        "  <tableColumns",
+        r#"  <autoFilter ref="B1:C3"><filterColumn colId="2"/></autoFilter>
+  <tableColumns"#,
+    );
+    let duplicate_filter_column = TABLE_ONE.replace(
+        "  <tableColumns",
+        r#"  <autoFilter ref="A1:C3"><filterColumn colId="1"/><filterColumn colId="1"/></autoFilter>
+  <tableColumns"#,
+    );
+    for invalid_table in [
+        TABLE_WITH_METADATA.replacen(r#"autoFilter ref="A1:C3""#, r#"autoFilter ref="A1:D3""#, 1),
+        TABLE_WITH_METADATA.replacen(
+            r#"<sortState ref="A2:C3" columnSort="1" sortMethod="pinYin">"#,
+            r#"<sortState ref="A2:D3" columnSort="1" sortMethod="pinYin">"#,
+            1,
+        ),
+        TABLE_WITH_METADATA
+            .replacen(
+                r#"<sortState ref="A2:C3" columnSort="1" sortMethod="pinYin">"#,
+                r#"<sortState ref="A2:B3" columnSort="1" sortMethod="pinYin">"#,
+                1,
+            )
+            .replacen(
+                r#"<sortCondition ref="A2:C2""#,
+                r#"<sortCondition ref="C2:C3""#,
+                1,
+            ),
+        filter_column_outside_filter_range,
+        duplicate_filter_column,
+    ] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("bounded read");
+        assert!(snapshot.table("SalesDisplay").is_none());
+        assert_eq!(
+            snapshot
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn table_sort_state_rejects_more_than_sixty_four_conditions() {
+    let conditions = r#"<sortCondition ref="A2:A3"/>"#.repeat(65);
+    let table = TABLE_ONE.replace(
+        "  <tableColumns",
+        &format!(
+            r#"  <sortState ref="A2:C3">{conditions}</sortState>
+  <tableColumns"#
+        ),
+    );
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &table),
+        ],
+    );
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("bounded read");
+    assert!(snapshot.table("SalesDisplay").is_none());
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
+            .count(),
+        1
     );
 }
 
@@ -1039,13 +1914,12 @@ fn table_display_names_conflicting_with_defined_names_are_dropped() {
 }
 
 #[test]
-fn required_table_and_column_ids_and_declared_column_count_are_validated() {
+fn required_table_and_column_ids_are_validated() {
     let invalid_tables = [
         TABLE_ONE.replace(r#" id="1""#, ""),
         TABLE_ONE.replace(r#"id="1""#, r#"id="0""#),
         TABLE_ONE.replace(r#"<tableColumn id="1""#, r#"<tableColumn id="0""#),
-        TABLE_ONE.replace(r#"tableColumns count="3""#, "tableColumns"),
-        TABLE_ONE.replace(r#"tableColumns count="3""#, r#"tableColumns count="2""#),
+        TABLE_ONE.replace(r#"tableColumns count="3""#, r#"tableColumns count="bad""#),
     ];
     for invalid_table in invalid_tables {
         let archive = build_table_archive(
@@ -1071,6 +1945,40 @@ fn required_table_and_column_ids_and_declared_column_count_are_validated() {
                 .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.invalid")
                 .count(),
             1
+        );
+    }
+}
+
+#[test]
+fn optional_and_mismatched_table_column_counts_use_the_declared_children() {
+    for (table_xml, expected_normalization_count) in [
+        (
+            TABLE_ONE.replace(r#"tableColumns count="3""#, "tableColumns"),
+            0,
+        ),
+        (
+            TABLE_ONE.replace(r#"tableColumns count="3""#, r#"tableColumns count="2""#),
+            1,
+        ),
+    ] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &table_xml),
+            ],
+        );
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read must succeed");
+        let table = snapshot.table("SalesDisplay").expect("valid table");
+        assert_eq!(table.columns().len(), 3);
+        assert_eq!(
+            snapshot
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.code().as_str() == "xlsx.table.normalized")
+                .count(),
+            expected_normalization_count
         );
     }
 }
@@ -1156,6 +2064,179 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(columns_limit))
         .expect_err("columns in duplicate containers must still consume the column budget");
     assert_eq!(error.code(), XlsxErrorCode::TooManyTableColumns);
+
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", TABLE_WITH_METADATA),
+        ],
+    );
+    let formula_limit = ReadLimits::default()
+        .with_max_formula_bytes(5)
+        .expect("limit");
+    let error = read_xlsx(
+        Cursor::new(archive.clone()),
+        ReadOptions::new(formula_limit),
+    )
+    .expect_err("table formulas must use the per-formula budget");
+    assert_eq!(error.code(), XlsxErrorCode::FormulaTooLarge);
+
+    let total_formula_limit = ReadLimits::default()
+        .with_max_total_formula_bytes(20)
+        .expect("limit");
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(total_formula_limit))
+        .expect_err("table formulas must use the workbook formula budget");
+    assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
+
+    for invalid_table in [
+        TABLE_WITH_METADATA.replacen(r#"id="1""#, r#"id="0""#, 1),
+        TABLE_WITH_METADATA.replacen(r#"<tableColumn id="5""#, r#"<tableColumn id="0""#, 1),
+    ] {
+        let archive = build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", &invalid_table),
+            ],
+        );
+        let error = read_xlsx(
+            Cursor::new(archive.clone()),
+            ReadOptions::new(formula_limit),
+        )
+        .expect_err("invalid tables must still consume the per-formula budget");
+        assert_eq!(error.code(), XlsxErrorCode::FormulaTooLarge);
+
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::new(total_formula_limit))
+            .expect_err("invalid tables must still consume the total formula budget");
+        assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
+    }
+}
+
+#[test]
+fn table_filter_resource_limits_are_exact_and_apply_to_invalid_tables() {
+    let one_filter = TABLE_ONE.replace(
+        "  <tableColumns",
+        r#"  <autoFilter ref="A1:C3"><filterColumn colId="0"><filters><filter val="é"/></filters></filterColumn></autoFilter>
+  <tableColumns"#,
+    );
+    let two_filters = one_filter.replace(
+        r#"<filter val="é"/>"#,
+        r#"<filter val="é"/><filter val="B"/>"#,
+    );
+    let archive_for = |table: &str| {
+        build_table_archive(
+            SHEET_WITH_TABLE,
+            &[
+                ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+                ("xl/tables/table1.xml", table),
+            ],
+        )
+    };
+
+    let item_limit = ReadLimits::default()
+        .with_max_table_filter_items(2)
+        .expect("limit");
+    let snapshot = read_xlsx(
+        Cursor::new(archive_for(&two_filters)),
+        ReadOptions::new(item_limit),
+    )
+    .expect("two filter items are exactly at the limit");
+    assert!(snapshot.table("SalesDisplay").is_some());
+    let item_limit = ReadLimits::default()
+        .with_max_table_filter_items(1)
+        .expect("limit");
+    let error = read_xlsx(
+        Cursor::new(archive_for(&two_filters)),
+        ReadOptions::new(item_limit),
+    )
+    .expect_err("two filter items must exceed a limit of one");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTableFilterItems);
+
+    let text_limit = ReadLimits::default()
+        .with_max_table_filter_text_bytes(8)
+        .expect("limit");
+    let snapshot = read_xlsx(
+        Cursor::new(archive_for(&one_filter)),
+        ReadOptions::new(text_limit),
+    )
+    .expect("five ref bytes, one colId byte, and two UTF-8 value bytes are at the limit");
+    assert!(snapshot.table("SalesDisplay").is_some());
+    let text_limit = ReadLimits::default()
+        .with_max_table_filter_text_bytes(7)
+        .expect("limit");
+    let error = read_xlsx(
+        Cursor::new(archive_for(&one_filter)),
+        ReadOptions::new(text_limit),
+    )
+    .expect_err("filter text must use decoded UTF-8 byte length");
+    assert_eq!(error.code(), XlsxErrorCode::TableFilterTextTooLarge);
+
+    let invalid_table = two_filters.replacen(r#"id="1""#, r#"id="0""#, 1);
+    let error = read_xlsx(
+        Cursor::new(archive_for(&invalid_table)),
+        ReadOptions::new(item_limit),
+    )
+    .expect_err("invalid tables must still consume the filter-item budget");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTableFilterItems);
+    let invalid_table = one_filter.replacen(r#"id="1""#, r#"id="0""#, 1);
+    let error = read_xlsx(
+        Cursor::new(archive_for(&invalid_table)),
+        ReadOptions::new(text_limit),
+    )
+    .expect_err("invalid tables must still consume the filter-text budget");
+    assert_eq!(error.code(), XlsxErrorCode::TableFilterTextTooLarge);
+
+    let invalid_filter_range = two_filters.replace(r#"ref="A1:C3""#, r#"ref="invalid""#);
+    let error = read_xlsx(
+        Cursor::new(archive_for(&invalid_filter_range)),
+        ReadOptions::new(item_limit),
+    )
+    .expect_err("invalid autoFilter ranges must not bypass descendant item accounting");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyTableFilterItems);
+
+    let invalid_sort_range = TABLE_ONE.replace(
+        "  <tableColumns",
+        r#"  <autoFilter ref="A1:C3"><sortState ref="bad"><sortCondition ref="A2:A3" customList="01234567890123456789012345678901"/></sortState></autoFilter>
+  <tableColumns"#,
+    );
+    let descendant_text_limit = ReadLimits::default()
+        .with_max_table_filter_text_bytes(20)
+        .expect("limit");
+    let error = read_xlsx(
+        Cursor::new(archive_for(&invalid_sort_range)),
+        ReadOptions::new(descendant_text_limit),
+    )
+    .expect_err("invalid sort ranges must not bypass descendant text accounting");
+    assert_eq!(error.code(), XlsxErrorCode::TableFilterTextTooLarge);
+}
+
+#[test]
+fn nested_table_formula_text_consumes_formula_budgets() {
+    let nested_formula = TABLE_WITH_METADATA.replace("[@Amount]*2", "A<future>123456</future>B");
+    let archive = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &nested_formula),
+        ],
+    );
+    let formula_limit = ReadLimits::default()
+        .with_max_formula_bytes(5)
+        .expect("limit");
+    let error = read_xlsx(
+        Cursor::new(archive.clone()),
+        ReadOptions::new(formula_limit),
+    )
+    .expect_err("nested markup text must consume the per-formula budget");
+    assert_eq!(error.code(), XlsxErrorCode::FormulaTooLarge);
+
+    let total_limit = ReadLimits::default()
+        .with_max_total_formula_bytes(5)
+        .expect("limit");
+    let error = read_xlsx(Cursor::new(archive), ReadOptions::new(total_limit))
+        .expect_err("nested markup text must consume the total formula budget");
+    assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
 }
 
 #[test]
@@ -1164,11 +2245,16 @@ fn tables_survive_edit_write_reopen() {
         SHEET_WITH_TABLE,
         &[
             ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
-            ("xl/tables/table1.xml", TABLE_ONE),
+            ("xl/tables/table1.xml", TABLE_WITH_METADATA),
         ],
     );
     let document =
         open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    let source_table = document
+        .workbook()
+        .table("SalesDisplay")
+        .expect("source table")
+        .clone();
     let sheet_id = SheetId::new(1).expect("sheet");
     let mut draft = WorkbookDraft::from_document(&document);
     let semantic_revision = draft.semantic_revision();
@@ -1189,7 +2275,14 @@ fn tables_survive_edit_write_reopen() {
         .workbook()
         .table("SalesDisplay")
         .expect("table survives");
-    assert_eq!(table.display_name().as_str(), "SalesDisplay");
+    assert_eq!(table, &source_table);
+    assert_eq!(table.table_type(), crate::TableType::QueryTable);
+    assert!(
+        table.columns()[1]
+            .calculated_column_formula()
+            .expect("calculated formula")
+            .is_array()
+    );
     let first = reopened.workbook().sheet_by_name("First").expect("sheet");
     assert_eq!(first.tables().len(), 1);
     assert_eq!(
@@ -1209,6 +2302,55 @@ fn tables_survive_edit_write_reopen() {
         .table("SalesDisplay")
         .expect("draft keeps table");
     assert_eq!(draft_table.columns().len(), 3);
+}
+
+#[test]
+fn opaque_table_part_survives_a_source_linked_cell_edit_byte_identically() {
+    let opaque_table =
+        TABLE_WITH_METADATA.replace(r#"ref="A1:C4""#, r#"ref="A1:C4" published="1""#);
+    let source = build_table_archive(
+        SHEET_WITH_TABLE,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &opaque_table),
+        ],
+    );
+    let document =
+        open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    assert!(
+        document
+            .workbook()
+            .table("SalesDisplay")
+            .expect("opaque table")
+            .has_opaque_metadata()
+    );
+
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            SheetId::new(1).expect("sheet"),
+            address("A2"),
+            CellValue::Number(crate::FiniteNumber::new(7.0).expect("finite")),
+        )
+        .expect("cell edit");
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("source-linked write");
+
+    assert_eq!(
+        archive_text(&source, "xl/tables/table1.xml"),
+        archive_text(output.bytes(), "xl/tables/table1.xml"),
+        "an unrelated cell edit must not rewrite opaque table XML"
+    );
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    assert!(
+        reopened
+            .workbook()
+            .table("SalesDisplay")
+            .expect("reopened table")
+            .has_opaque_metadata()
+    );
 }
 
 #[test]

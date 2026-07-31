@@ -274,6 +274,7 @@ fn verify_output(
             .ok_or_else(verification_error)?;
         if reopened_sheet.name() != original_sheet.name()
             || reopened_sheet.visibility() != original_sheet.visibility()
+            || reopened_sheet.tables() != original_sheet.tables()
         {
             return Err(verification_error());
         }

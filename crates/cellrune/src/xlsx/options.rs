@@ -20,6 +20,8 @@ const MAX_MERGED_RANGES: &str = "max_merged_ranges";
 const MAX_TABLES: &str = "max_tables";
 const MAX_TABLE_COLUMNS: &str = "max_table_columns";
 const MAX_TABLE_NAME_BYTES: &str = "max_table_name_bytes";
+const MAX_TABLE_FILTER_ITEMS: &str = "max_table_filter_items";
+const MAX_TABLE_FILTER_TEXT_BYTES: &str = "max_table_filter_text_bytes";
 const MAX_PHONETIC_RUNS_PER_ITEM: &str = "max_phonetic_runs_per_item";
 const MAX_TOTAL_PHONETIC_RUNS: &str = "max_total_phonetic_runs";
 const MAX_ANNOTATED_CELLS: &str = "max_annotated_cells";
@@ -49,6 +51,8 @@ pub struct ReadLimits {
     max_tables: u64,
     max_table_columns: u64,
     max_table_name_bytes: u64,
+    max_table_filter_items: u64,
+    max_table_filter_text_bytes: u64,
     max_phonetic_runs_per_item: u64,
     max_total_phonetic_runs: u64,
     max_annotated_cells: u64,
@@ -164,6 +168,17 @@ impl ReadLimits {
     /// Returns the maximum UTF-8 byte length of one table, display, or column name.
     pub const fn max_table_name_bytes(self) -> u64 {
         self.max_table_name_bytes
+    }
+
+    /// Returns the maximum filter-item count in one table definition.
+    pub const fn max_table_filter_items(self) -> u64 {
+        self.max_table_filter_items
+    }
+
+    /// Returns the maximum combined UTF-8 byte length of filter and sort attribute values in one
+    /// table definition.
+    pub const fn max_table_filter_text_bytes(self) -> u64 {
+        self.max_table_filter_text_bytes
     }
 
     /// Returns the maximum phonetic run count in one string item.
@@ -400,6 +415,29 @@ impl ReadLimits {
         Ok(self)
     }
 
+    /// Replaces the per-table filter-item count limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_table_filter_items(mut self, value: u64) -> Result<Self, ReadOptionsError> {
+        self.max_table_filter_items = nonzero(MAX_TABLE_FILTER_ITEMS, value)?;
+        Ok(self)
+    }
+
+    /// Replaces the per-table filter and sort attribute-text byte limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_table_filter_text_bytes(
+        mut self,
+        value: u64,
+    ) -> Result<Self, ReadOptionsError> {
+        self.max_table_filter_text_bytes = nonzero(MAX_TABLE_FILTER_TEXT_BYTES, value)?;
+        Ok(self)
+    }
+
     /// Replaces the per-item phonetic run-count limit.
     ///
     /// # Errors
@@ -477,6 +515,8 @@ impl Default for ReadLimits {
             max_tables: 10_000,
             max_table_columns: 16_384,
             max_table_name_bytes: 1_024,
+            max_table_filter_items: 100_000,
+            max_table_filter_text_bytes: 16 * 1024 * 1024,
             max_phonetic_runs_per_item: 32_768,
             max_total_phonetic_runs: 2_000_000,
             max_annotated_cells: 2_000_000,

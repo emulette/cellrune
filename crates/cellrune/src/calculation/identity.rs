@@ -15,9 +15,9 @@ pub(crate) fn workbook_fingerprint_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 2: 0.1.6 folds merged ranges and the full table model per sheet.
-    // Bumping it deliberately invalidates every fingerprint persisted under schema 1.
-    hash.u8(2);
+    // Schema byte 3: 0.1.9 folds the complete persisted table metadata model.
+    // Bumping it deliberately invalidates every fingerprint persisted under schema 2.
+    hash.u8(3);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());
@@ -65,26 +65,45 @@ pub(crate) fn workbook_fingerprint_cancellable(
                 return Err(());
             }
             hash.u32(table.id().get());
-            hash.string(table.name().as_str());
-            hash.string(table.display_name().as_str());
+            hash.string_cancellable(table.name().as_str(), cancelled)?;
+            hash.string_cancellable(table.display_name().as_str(), cancelled)?;
             hash.range(table.range());
+            hash.string_cancellable(table.table_type().as_str(), cancelled)?;
             hash.u32(table.header_row_count());
             hash.u32(table.totals_row_count());
+            hash.boolean(table.totals_row_shown());
             hash.usize(table.columns().len());
             for column in table.columns() {
                 if cancelled() {
                     return Err(());
                 }
                 hash.u32(column.id());
-                hash.string(column.name());
+                hash.string_cancellable(column.name(), cancelled)?;
                 match column.totals_row_function() {
                     None => hash.u8(0),
                     Some(function) => {
                         hash.u8(1);
-                        hash.string(function.as_str());
+                        hash.string_cancellable(function.as_str(), cancelled)?;
                     }
                 }
+                hash.optional_string_cancellable(column.totals_row_label(), cancelled)?;
+                hash.optional_table_formula(column.calculated_column_formula(), cancelled)?;
+                hash.optional_table_formula(column.totals_row_formula(), cancelled)?;
             }
+            hash.optional_table_auto_filter(table.auto_filter(), cancelled)?;
+            hash.optional_table_sort_state(table.sort_state(), cancelled)?;
+            match table.style_info() {
+                Some(style) => {
+                    hash.u8(1);
+                    hash.optional_string_cancellable(style.name(), cancelled)?;
+                    hash.boolean(style.show_first_column());
+                    hash.boolean(style.show_last_column());
+                    hash.boolean(style.show_row_stripes());
+                    hash.boolean(style.show_column_stripes());
+                }
+                None => hash.u8(0),
+            }
+            hash.optional_bytes_cancellable(table.opaque_source_xml(), cancelled)?;
         }
     }
     hash.usize(workbook.defined_names().len());
@@ -136,6 +155,240 @@ impl SemanticHash {
         }
     }
 
+    fn optional_table_formula(
+        &mut self,
+        value: Option<&crate::TableFormula>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        match value {
+            Some(value) => {
+                self.u8(1);
+                self.string_cancellable(value.text().as_str(), cancelled)?;
+                self.boolean(value.is_array());
+            }
+            None => self.u8(0),
+        }
+        Ok(())
+    }
+
+    fn optional_table_auto_filter(
+        &mut self,
+        value: Option<&crate::TableAutoFilter>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        match value {
+            Some(value) => {
+                self.u8(1);
+                self.range(value.range());
+                self.boolean(value.declared_range().is_some());
+                self.usize(value.filter_columns().len());
+                for column in value.filter_columns() {
+                    if cancelled() {
+                        return Err(());
+                    }
+                    self.u32(column.column_id());
+                    self.boolean(column.hidden_button());
+                    self.boolean(column.show_button());
+                    self.optional_table_filter_criteria(column.criteria(), cancelled)?;
+                }
+                self.optional_table_sort_state(value.sort_state(), cancelled)?;
+            }
+            None => self.u8(0),
+        }
+        Ok(())
+    }
+
+    fn optional_table_filter_criteria(
+        &mut self,
+        value: Option<&crate::TableFilterCriteria>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        let Some(value) = value else {
+            self.u8(0);
+            return Ok(());
+        };
+        self.u8(1);
+        match value {
+            crate::TableFilterCriteria::Values(filters) => {
+                self.u8(0);
+                self.boolean(filters.blank());
+                self.optional_string_cancellable(
+                    filters
+                        .calendar_type()
+                        .map(crate::TableCalendarType::as_str),
+                    cancelled,
+                )?;
+                self.usize(filters.items().len());
+                for item in filters.items() {
+                    if cancelled() {
+                        return Err(());
+                    }
+                    match item {
+                        crate::TableFilterItem::Value(value) => {
+                            self.u8(0);
+                            self.optional_string_cancellable(value.as_deref(), cancelled)?;
+                        }
+                        crate::TableFilterItem::DateGroup(item) => {
+                            self.u8(1);
+                            self.u32(u32::from(item.year()));
+                            self.optional_u16(item.month());
+                            self.optional_u16(item.day());
+                            self.optional_u16(item.hour());
+                            self.optional_u16(item.minute());
+                            self.optional_u16(item.second());
+                            self.string_cancellable(item.grouping().as_str(), cancelled)?;
+                        }
+                    }
+                }
+            }
+            crate::TableFilterCriteria::Custom(filters) => {
+                self.u8(1);
+                self.boolean(filters.and());
+                self.usize(filters.filters().len());
+                for filter in filters.filters() {
+                    if cancelled() {
+                        return Err(());
+                    }
+                    self.optional_string_cancellable(
+                        filter
+                            .operator()
+                            .map(crate::TableCustomFilterOperator::as_str),
+                        cancelled,
+                    )?;
+                    self.optional_string_cancellable(filter.value(), cancelled)?;
+                }
+            }
+            crate::TableFilterCriteria::Dynamic(filter) => {
+                self.u8(2);
+                self.string_cancellable(filter.kind().as_str(), cancelled)?;
+                self.optional_string_cancellable(
+                    filter.value().map(crate::TableNumericValue::as_str),
+                    cancelled,
+                )?;
+                self.optional_string_cancellable(
+                    filter.iso_value().map(crate::TableDateTimeValue::as_str),
+                    cancelled,
+                )?;
+                self.optional_string_cancellable(
+                    filter.max_value().map(crate::TableNumericValue::as_str),
+                    cancelled,
+                )?;
+                self.optional_string_cancellable(
+                    filter
+                        .max_iso_value()
+                        .map(crate::TableDateTimeValue::as_str),
+                    cancelled,
+                )?;
+            }
+            crate::TableFilterCriteria::Color(filter) => {
+                self.u8(3);
+                self.optional_u32(filter.differential_format_id());
+                self.boolean(filter.cell_color());
+            }
+            crate::TableFilterCriteria::Icon(filter) => {
+                self.u8(4);
+                self.string_cancellable(filter.icon_set().as_str(), cancelled)?;
+                self.optional_u32(filter.icon_id());
+            }
+            crate::TableFilterCriteria::Top(filter) => {
+                self.u8(5);
+                self.boolean(filter.top());
+                self.boolean(filter.percent());
+                self.string_cancellable(filter.value().as_str(), cancelled)?;
+                self.optional_string_cancellable(
+                    filter.filter_value().map(crate::TableNumericValue::as_str),
+                    cancelled,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn optional_table_sort_state(
+        &mut self,
+        value: Option<&crate::TableSortState>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        match value {
+            Some(value) => {
+                self.u8(1);
+                self.range(value.range());
+                self.boolean(value.case_sensitive());
+                self.boolean(value.column_sort());
+                self.optional_string_cancellable(
+                    value.sort_method().map(crate::TableSortMethod::as_str),
+                    cancelled,
+                )?;
+                self.usize(value.conditions().len());
+                for condition in value.conditions() {
+                    if cancelled() {
+                        return Err(());
+                    }
+                    self.range(condition.range());
+                    self.boolean(condition.descending());
+                    self.optional_string_cancellable(
+                        condition.sort_by().map(crate::TableSortBy::as_str),
+                        cancelled,
+                    )?;
+                    self.optional_string_cancellable(condition.custom_list(), cancelled)?;
+                    self.optional_u32(condition.differential_format_id());
+                    self.optional_string_cancellable(
+                        condition.icon_set().map(crate::TableIconSet::as_str),
+                        cancelled,
+                    )?;
+                    self.optional_u32(condition.icon_id());
+                }
+            }
+            None => self.u8(0),
+        }
+        Ok(())
+    }
+
+    fn optional_bytes_cancellable(
+        &mut self,
+        value: Option<&[u8]>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        match value {
+            Some(value) => {
+                self.u8(1);
+                self.bytes_cancellable(value, cancelled)?;
+            }
+            None => self.u8(0),
+        }
+        Ok(())
+    }
+
+    fn optional_string_cancellable(
+        &mut self,
+        value: Option<&str>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        match value {
+            Some(value) => {
+                self.u8(1);
+                self.string_cancellable(value, cancelled)?;
+            }
+            None => self.u8(0),
+        }
+        Ok(())
+    }
+
+    fn string_cancellable(&mut self, value: &str, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
+        self.bytes_cancellable(value.as_bytes(), cancelled)
+    }
+
+    fn bytes_cancellable(&mut self, value: &[u8], cancelled: &impl Fn() -> bool) -> Result<(), ()> {
+        self.u64(value.len() as u64);
+        for chunk in value.chunks(64 * 1024) {
+            if cancelled() {
+                return Err(());
+            }
+            self.0.update(chunk);
+        }
+        Ok(())
+    }
+
     fn boolean(&mut self, value: bool) {
         self.u8(u8::from(value));
     }
@@ -184,6 +437,10 @@ impl SemanticHash {
             }
             None => self.u8(0),
         }
+    }
+
+    fn optional_u16(&mut self, value: Option<u16>) {
+        self.optional_u32(value.map(u32::from));
     }
 
     fn optional_bool(&mut self, value: Option<bool>) {
@@ -332,9 +589,12 @@ mod tests {
 
     use super::{workbook_fingerprint, workbook_fingerprint_cancellable};
     use crate::{
-        CalculationHints, CellAddress, CellContent, CellRange, CellValue, DateSystem, Provenance,
-        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableColumn, TableId,
-        TableName, TotalsRowFunction, WorkbookSnapshot, WorkbookSource,
+        CalculationHints, CellAddress, CellContent, CellRange, CellValue, DateSystem, FormulaText,
+        Provenance, ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table,
+        TableAutoFilter, TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem,
+        TableFormula, TableId, TableName, TableSortCondition, TableSortMethod, TableSortState,
+        TableStyleInfo, TableType, TableValueFilters, TotalsRowFunction, WorkbookSnapshot,
+        WorkbookSource,
     };
 
     #[test]
@@ -375,6 +635,48 @@ mod tests {
         assert_eq!(
             workbook_fingerprint(&merged),
             workbook_fingerprint(&workbook_with_extras(vec![range("A1", "B2")], Vec::new()))
+        );
+    }
+
+    #[test]
+    fn workbook_fingerprint_polls_cancellation_while_hashing_opaque_table_metadata() {
+        let table = Table::new(
+            TableId::new(1).expect("table id"),
+            TableName::new("Opaque").expect("table name"),
+            TableName::new("Opaque").expect("display name"),
+            range("A1", "B3"),
+            1,
+            0,
+            vec![
+                TableColumn::new(1, "First", None).expect("column"),
+                TableColumn::new(2, "Second", None).expect("column"),
+            ],
+        )
+        .expect("table")
+        .try_with_metadata(
+            TableType::Worksheet,
+            true,
+            None,
+            None,
+            None,
+            Some(vec![b'x'; 256 * 1024]),
+        )
+        .expect("valid metadata");
+        let workbook = workbook_with_extras(Vec::new(), vec![table]);
+        let polls = Cell::new(0_u32);
+        let cancelled = || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            next >= 6
+        };
+
+        assert_eq!(
+            workbook_fingerprint_cancellable(&workbook, &cancelled),
+            Err(())
+        );
+        assert!(
+            polls.get() >= 6,
+            "opaque bytes must be hashed in cancellable chunks"
         );
     }
 
@@ -430,6 +732,14 @@ mod tests {
         assert_ne!(reference, workbook_fingerprint(&build(changed)), "table ID");
 
         let mut changed = base();
+        changed.0 = "Other";
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "programmatic name"
+        );
+
+        let mut changed = base();
         changed.2 = range("A1", "B5");
         assert_ne!(reference, workbook_fingerprint(&build(changed)), "@ref");
 
@@ -460,11 +770,27 @@ mod tests {
         );
 
         let mut changed = base();
+        changed.5[0].1 = 3;
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "column ID"
+        );
+
+        let mut changed = base();
         changed.3 = 0;
         assert_ne!(
             reference,
             workbook_fingerprint(&build(changed)),
             "header row count"
+        );
+
+        let mut changed = base();
+        changed.4 = 1;
+        assert_ne!(
+            reference,
+            workbook_fingerprint(&build(changed)),
+            "totals row count"
         );
 
         let mut changed = base();
@@ -476,6 +802,233 @@ mod tests {
         );
 
         assert_eq!(reference, workbook_fingerprint(&build(base())), "stable");
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum ExtendedTableMutation {
+        TableType,
+        TotalsRowShown,
+        TotalsRowLabel,
+        CalculatedFormulaText,
+        CalculatedFormulaArray,
+        TotalsFormulaText,
+        AutoFilterRange,
+        AutoFilterRangePresence,
+        AutoFilterColumns,
+        NestedSortState,
+        FilterCriteria,
+        SortStateRange,
+        SortStateFlags,
+        SortStateConditions,
+        SortConditionAttributes,
+        StyleName,
+        StyleFlags,
+        OpaqueSource,
+    }
+
+    #[test]
+    fn workbook_fingerprint_folds_extended_table_metadata() {
+        let reference = workbook_fingerprint(&workbook_with_extended_table(None));
+        for mutation in [
+            ExtendedTableMutation::TableType,
+            ExtendedTableMutation::TotalsRowShown,
+            ExtendedTableMutation::TotalsRowLabel,
+            ExtendedTableMutation::CalculatedFormulaText,
+            ExtendedTableMutation::CalculatedFormulaArray,
+            ExtendedTableMutation::TotalsFormulaText,
+            ExtendedTableMutation::AutoFilterRange,
+            ExtendedTableMutation::AutoFilterRangePresence,
+            ExtendedTableMutation::AutoFilterColumns,
+            ExtendedTableMutation::NestedSortState,
+            ExtendedTableMutation::FilterCriteria,
+            ExtendedTableMutation::SortStateRange,
+            ExtendedTableMutation::SortStateFlags,
+            ExtendedTableMutation::SortStateConditions,
+            ExtendedTableMutation::SortConditionAttributes,
+            ExtendedTableMutation::StyleName,
+            ExtendedTableMutation::StyleFlags,
+            ExtendedTableMutation::OpaqueSource,
+        ] {
+            assert_ne!(
+                reference,
+                workbook_fingerprint(&workbook_with_extended_table(Some(mutation))),
+                "{mutation:?}"
+            );
+        }
+        assert_eq!(
+            reference,
+            workbook_fingerprint(&workbook_with_extended_table(None)),
+            "stable"
+        );
+    }
+
+    fn workbook_with_extended_table(mutation: Option<ExtendedTableMutation>) -> WorkbookSnapshot {
+        let table_type = if matches!(mutation, Some(ExtendedTableMutation::TableType)) {
+            TableType::Xml
+        } else {
+            TableType::QueryTable
+        };
+        let totals_row_shown = !matches!(mutation, Some(ExtendedTableMutation::TotalsRowShown));
+        let label = if matches!(mutation, Some(ExtendedTableMutation::TotalsRowLabel)) {
+            "Grand Total"
+        } else {
+            "Total"
+        };
+        let calculated_text =
+            if matches!(mutation, Some(ExtendedTableMutation::CalculatedFormulaText)) {
+                "[@Amount]*3"
+            } else {
+                "[@Amount]*2"
+            };
+        let calculated_array = !matches!(
+            mutation,
+            Some(ExtendedTableMutation::CalculatedFormulaArray)
+        );
+        let totals_text = if matches!(mutation, Some(ExtendedTableMutation::TotalsFormulaText)) {
+            "SUBTOTAL(101,[Amount])"
+        } else {
+            "SUBTOTAL(109,[Amount])"
+        };
+        let columns = vec![
+            TableColumn::new(1, "Region", None)
+                .expect("column")
+                .with_metadata(Some(label.to_owned()), None, None),
+            TableColumn::new(2, "Amount", Some(TotalsRowFunction::Custom))
+                .expect("column")
+                .with_metadata(
+                    None,
+                    Some(TableFormula::new(
+                        FormulaText::from_xlsx(calculated_text).expect("formula"),
+                        calculated_array,
+                    )),
+                    Some(TableFormula::new(
+                        FormulaText::from_xlsx(totals_text).expect("formula"),
+                        false,
+                    )),
+                ),
+        ];
+        let auto_filter_range = if matches!(mutation, Some(ExtendedTableMutation::AutoFilterRange))
+        {
+            range("A1", "B4")
+        } else {
+            range("A1", "B3")
+        };
+        let filter_column_id = if matches!(mutation, Some(ExtendedTableMutation::AutoFilterColumns))
+        {
+            0
+        } else {
+            1
+        };
+        let filter_value = if matches!(mutation, Some(ExtendedTableMutation::FilterCriteria)) {
+            "West"
+        } else {
+            "East"
+        };
+        let nested_sort = TableSortState::from_xlsx(
+            range("A2", "B3"),
+            !matches!(mutation, Some(ExtendedTableMutation::NestedSortState)),
+            false,
+            None,
+            vec![TableSortCondition::from_xlsx(
+                range("B2", "B3"),
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )],
+        );
+        let auto_filter = TableAutoFilter::from_xlsx(
+            auto_filter_range,
+            !matches!(
+                mutation,
+                Some(ExtendedTableMutation::AutoFilterRangePresence)
+            ),
+            vec![TableFilterColumn::from_xlsx(
+                filter_column_id,
+                false,
+                true,
+                Some(TableFilterCriteria::Values(TableValueFilters::from_xlsx(
+                    false,
+                    None,
+                    vec![TableFilterItem::Value(Some(filter_value.into()))],
+                ))),
+            )],
+            Some(nested_sort),
+        );
+        let sort_range = if matches!(mutation, Some(ExtendedTableMutation::SortStateRange)) {
+            range("A1", "B3")
+        } else {
+            range("A2", "B3")
+        };
+        let sort_flags = matches!(mutation, Some(ExtendedTableMutation::SortStateFlags));
+        let condition_range =
+            if matches!(mutation, Some(ExtendedTableMutation::SortStateConditions)) {
+                range("A2", "A3")
+            } else {
+                range("B2", "B3")
+            };
+        let condition_descending = matches!(
+            mutation,
+            Some(ExtendedTableMutation::SortConditionAttributes)
+        );
+        let conditions = vec![TableSortCondition::from_xlsx(
+            condition_range,
+            condition_descending,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )];
+        let sort_method = if matches!(
+            mutation,
+            Some(ExtendedTableMutation::SortConditionAttributes)
+        ) {
+            Some(TableSortMethod::Stroke)
+        } else {
+            None
+        };
+        let sort_state =
+            TableSortState::from_xlsx(sort_range, sort_flags, false, sort_method, conditions);
+        let style_name = if matches!(mutation, Some(ExtendedTableMutation::StyleName)) {
+            "TableStyleMedium3"
+        } else {
+            "TableStyleMedium2"
+        };
+        let style_flags = matches!(mutation, Some(ExtendedTableMutation::StyleFlags));
+        let opaque_source = if matches!(mutation, Some(ExtendedTableMutation::OpaqueSource)) {
+            b"opaque:b".to_vec()
+        } else {
+            b"opaque:a".to_vec()
+        };
+        let table = Table::new(
+            TableId::new(1).expect("table id"),
+            TableName::new("Sales").expect("table name"),
+            TableName::new("SalesDisplay").expect("display name"),
+            range("A1", "B4"),
+            1,
+            0,
+            columns,
+        )
+        .expect("table")
+        .try_with_metadata(
+            table_type,
+            totals_row_shown,
+            Some(auto_filter),
+            Some(sort_state),
+            Some(TableStyleInfo::new(
+                Some(style_name.to_owned()),
+                style_flags,
+                false,
+                true,
+                false,
+            )),
+            Some(opaque_source),
+        )
+        .expect("valid table metadata");
+        workbook_with_extras(Vec::new(), vec![table])
     }
 
     fn range(start: &str, end: &str) -> CellRange {

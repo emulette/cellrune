@@ -104,6 +104,18 @@ pub(crate) fn write_canonical_draft(
             )?
             .into_bytes(),
         );
+        if let Some(relationships) = super::table::worksheet_relationships_xml(sheet) {
+            parts.insert(
+                super::table::worksheet_relationships_part_name(index),
+                relationships.into_bytes(),
+            );
+        }
+        for table in sheet.tables() {
+            parts.insert(
+                super::table::table_part_name(table),
+                super::table::table_xml(table)?.into_bytes(),
+            );
+        }
     }
     validate_generated_parts(&parts, limits)?;
     let bytes = write_archive(&parts, limits)?;
@@ -243,6 +255,7 @@ pub(super) fn generated_worksheet_xml(
     materialization: &BTreeMap<CellAddress, &super::materialization::PlannedMaterialization>,
     presentation: &crate::DocumentPresentation,
 ) -> Result<String, XlsxWriteError> {
+    super::table::validate_table_headers(sheet)?;
     let mut cells = BTreeMap::<CellAddress, String>::new();
     for cell in sheet.cells() {
         let calculation = materialization
@@ -272,8 +285,14 @@ pub(super) fn generated_worksheet_xml(
         }
     }
     let mut xml = String::from(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#,
     );
+    if !sheet.tables().is_empty() {
+        xml.push_str(
+            r#" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#,
+        );
+    }
+    xml.push('>');
     if !cells.is_empty() {
         let row_start = cells
             .keys()
@@ -328,7 +347,9 @@ pub(super) fn generated_worksheet_xml(
         }
         xml.push_str("</row>");
     }
-    xml.push_str("</sheetData></worksheet>");
+    xml.push_str("</sheetData>");
+    super::table::push_table_parts(&mut xml, sheet);
+    xml.push_str("</worksheet>");
     Ok(xml)
 }
 
@@ -508,6 +529,15 @@ fn content_types_xml(workbook: &WorkbookSnapshot) -> Result<String, XlsxWriteErr
         xml.push_str(&(index + 1).to_string());
         xml.push_str(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>");
     }
+    for sheet in workbook.sheets() {
+        for table in sheet.tables() {
+            xml.push_str("<Override PartName=\"/xl/tables/table");
+            xml.push_str(&table.id().get().to_string());
+            xml.push_str(".xml\" ContentType=\"");
+            xml.push_str(super::table::TABLE_CONTENT_TYPE);
+            xml.push_str("\"/>");
+        }
+    }
     if workbook_has_dynamic_arrays(workbook) {
         xml.push_str("<Override PartName=\"/xl/metadata.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml\"/>");
     }
@@ -682,6 +712,7 @@ fn draft_semantics_match(
         };
         if expected_sheet.name() != actual_sheet.name()
             || expected_sheet.visibility() != actual_sheet.visibility()
+            || expected_sheet.tables() != actual_sheet.tables()
         {
             return false;
         }

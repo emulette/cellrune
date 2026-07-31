@@ -66,6 +66,9 @@ pub(crate) mod compatibility {
         "merged range overlaps an earlier merged range and was dropped";
     pub(crate) const TABLE_INVALID_CODE: &str = "xlsx.table.invalid";
     pub(crate) const TABLE_INVALID_MESSAGE: &str = "table definition is invalid and was dropped";
+    pub(crate) const TABLE_NORMALIZED_CODE: &str = "xlsx.table.normalized";
+    pub(crate) const TABLE_NORMALIZED_MESSAGE: &str =
+        "table metadata was normalized from its semantic children";
     pub(crate) const TABLE_DUPLICATE_DISPLAY_NAME_CODE: &str = "xlsx.table.duplicate_display_name";
     pub(crate) const TABLE_DUPLICATE_DISPLAY_NAME_MESSAGE: &str =
         "table display name duplicates an earlier table and was dropped";
@@ -225,6 +228,10 @@ pub enum XlsxErrorCode {
     TooManyTableColumns,
     /// A table, display, or column name exceeds the configured byte limit.
     TableNameTooLarge,
+    /// One table definition exceeds the configured filter-item count limit.
+    TooManyTableFilterItems,
+    /// Filter and sort attribute text in one table exceeds the configured byte limit.
+    TableFilterTextTooLarge,
 }
 
 impl XlsxErrorCode {
@@ -288,6 +295,8 @@ impl XlsxErrorCode {
             Self::TooManyTables => "xlsx.too_many_tables",
             Self::TooManyTableColumns => "xlsx.too_many_table_columns",
             Self::TableNameTooLarge => "xlsx.table_name_too_large",
+            Self::TooManyTableFilterItems => "xlsx.too_many_table_filter_items",
+            Self::TableFilterTextTooLarge => "xlsx.table_filter_text_too_large",
         }
     }
 
@@ -364,6 +373,10 @@ impl XlsxErrorCode {
             Self::TooManyTables => "workbook table count exceeds the configured limit",
             Self::TooManyTableColumns => "table column count exceeds the configured limit",
             Self::TableNameTooLarge => "table name exceeds the configured byte limit",
+            Self::TooManyTableFilterItems => "table filter item count exceeds the configured limit",
+            Self::TableFilterTextTooLarge => {
+                "table filter and sort text exceeds the configured byte limit"
+            }
         }
     }
 }

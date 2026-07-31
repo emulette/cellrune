@@ -47,6 +47,7 @@ pub(super) struct ReadWorkbook {
     pub(super) package_summary: PackageSummary,
     pub(super) workbook_part: PartPath,
     pub(super) worksheet_parts: BTreeMap<SheetId, PartPath>,
+    pub(super) table_parts: BTreeMap<TableId, PartPath>,
     pub(super) package_kind: WorkbookPackageKind,
 }
 
@@ -139,6 +140,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     let mut presentation = DocumentPresentation::default();
     let mut sheets = Vec::with_capacity(workbook.sheets.len());
     let mut worksheet_parts = BTreeMap::new();
+    let mut table_parts = BTreeMap::new();
     let mut used_relationships = BTreeSet::new();
     let mut total_cells = 0_u64;
     let mut total_merged_ranges = 0_u64;
@@ -203,6 +205,8 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             defined_name_keys: &defined_name_keys,
             seen_table_ids: &mut seen_table_ids,
             seen_table_display_names: &mut seen_table_display_names,
+            accepted_table_parts: &mut table_parts,
+            total_formula_bytes: &mut total_formula_bytes,
             diagnostics: &mut diagnostics,
         })?;
         sheets.push(sheet);
@@ -237,6 +241,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         package_summary,
         workbook_part,
         worksheet_parts,
+        table_parts,
         package_kind,
     })
 }
@@ -249,6 +254,8 @@ struct SheetTableContext<'a, R: Read + Seek> {
     defined_name_keys: &'a BTreeSet<Box<str>>,
     seen_table_ids: &'a mut BTreeSet<TableId>,
     seen_table_display_names: &'a mut BTreeSet<Box<str>>,
+    accepted_table_parts: &'a mut BTreeMap<TableId, PartPath>,
+    total_formula_bytes: &'a mut u64,
     diagnostics: &'a mut Vec<Diagnostic>,
 }
 
@@ -269,6 +276,8 @@ fn read_sheet_tables<R: Read + Seek>(
         defined_name_keys,
         seen_table_ids,
         seen_table_display_names,
+        accepted_table_parts,
+        total_formula_bytes,
         diagnostics,
     } = context;
     if table_relationship_ids.is_empty() {
@@ -293,15 +302,23 @@ fn read_sheet_tables<R: Read + Seek>(
             continue;
         };
         let bytes = package.read_part(part)?;
-        let Some(parsed) = table::parse(&bytes, part, limits, sheet.id(), diagnostics)? else {
+        let Some(parsed) = table::parse(
+            &bytes,
+            part,
+            limits,
+            sheet.id(),
+            total_formula_bytes,
+            diagnostics,
+        )?
+        else {
             continue;
         };
-        parsed_tables.push(parsed);
+        parsed_tables.push((parsed, part.clone()));
     }
     let mut tables = Vec::new();
     let mut accepted_ranges = TableRangeIndex::default();
     let mut programmatic_names = BTreeSet::<Box<str>>::new();
-    for parsed in parsed_tables {
+    for (parsed, part) in parsed_tables {
         if seen_table_ids.contains(&parsed.id()) {
             table::push_table_diagnostic(
                 diagnostics,
@@ -363,6 +380,7 @@ fn read_sheet_tables<R: Read + Seek>(
         seen_table_ids.insert(parsed.id());
         seen_table_display_names.insert(Box::from(display_key));
         programmatic_names.insert(Box::from(programmatic_key));
+        accepted_table_parts.insert(parsed.id(), part);
         tables.push(parsed);
     }
     sheet.set_tables(tables);

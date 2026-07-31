@@ -1,5 +1,5 @@
 use quick_xml::XmlVersion;
-use quick_xml::events::{BytesCData, BytesRef, BytesStart, BytesText};
+use quick_xml::events::{BytesCData, BytesDecl, BytesPI, BytesRef, BytesStart, BytesText};
 use quick_xml::name::{QName, ResolveResult};
 use quick_xml::reader::NsReader;
 
@@ -42,6 +42,16 @@ impl XmlAttributes {
                     && attribute.local_name.as_ref() == local_name
             })
             .map(|attribute| attribute.value.as_ref())
+    }
+
+    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = (&str, Option<&[u8]>, &str)> {
+        self.0.iter().map(|attribute| {
+            (
+                attribute.local_name.as_ref(),
+                attribute.namespace.as_deref(),
+                attribute.value.as_ref(),
+            )
+        })
     }
 }
 
@@ -100,6 +110,10 @@ impl XmlBudget {
         self.limits
     }
 
+    pub(super) const fn current_depth(&self) -> u64 {
+        self.depth
+    }
+
     pub(super) const fn source_id(&self) -> &SourceId {
         &self.source
     }
@@ -114,9 +128,102 @@ pub(super) fn reader(bytes: &[u8]) -> NsReader<&[u8]> {
     let config = reader.config_mut();
     config.check_end_names = true;
     config.allow_unmatched_ends = false;
+    config.check_comments = true;
     config.expand_empty_elements = false;
     config.trim_text(false);
     reader
+}
+
+pub(super) fn validate_xml_declaration(
+    declaration: &BytesDecl<'_>,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    let version = declaration
+        .xml_version()
+        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
+    if version != XmlVersion::Explicit1_0 {
+        return Err(budget.error(budget.invalid_code));
+    }
+
+    let declaration_text = std::str::from_utf8(&declaration[..])
+        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
+    let declaration_start = BytesStart::from_content(declaration_text, 3);
+    let mut saw_encoding = false;
+    let mut saw_standalone = false;
+    for (index, attribute) in declaration_start.attributes().with_checks(true).enumerate() {
+        let attribute =
+            attribute.map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
+        let key = attribute.key.as_ref();
+        let value = attribute.value.as_ref();
+        let valid = match (index, key) {
+            (0, b"version") => value == b"1.0",
+            (_, b"encoding") if !saw_encoding && !saw_standalone => {
+                saw_encoding = true;
+                is_xml_encoding_name(value)
+            }
+            (_, b"standalone") if !saw_standalone => {
+                saw_standalone = true;
+                matches!(value, b"yes" | b"no")
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err(budget.error(budget.invalid_code));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_processing_instruction(
+    instruction: &BytesPI<'_>,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    let target = std::str::from_utf8(instruction.target())
+        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
+    let mut characters = target.chars();
+    let valid_name = characters.next().is_some_and(is_xml_name_start_character)
+        && characters.all(is_xml_name_character);
+    if !valid_name || target.eq_ignore_ascii_case("xml") {
+        return Err(budget.error(budget.invalid_code));
+    }
+    Ok(())
+}
+
+fn is_xml_name_start_character(character: char) -> bool {
+    matches!(
+        character,
+        ':'
+            | 'A'..='Z'
+            | '_'
+            | 'a'..='z'
+            | '\u{00C0}'..='\u{00D6}'
+            | '\u{00D8}'..='\u{00F6}'
+            | '\u{00F8}'..='\u{02FF}'
+            | '\u{0370}'..='\u{037D}'
+            | '\u{037F}'..='\u{1FFF}'
+            | '\u{200C}'..='\u{200D}'
+            | '\u{2070}'..='\u{218F}'
+            | '\u{2C00}'..='\u{2FEF}'
+            | '\u{3001}'..='\u{D7FF}'
+            | '\u{F900}'..='\u{FDCF}'
+            | '\u{FDF0}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{EFFFF}'
+    )
+}
+
+fn is_xml_name_character(character: char) -> bool {
+    is_xml_name_start_character(character)
+        || matches!(
+            character,
+            '-' | '.' | '0'..='9' | '\u{00B7}' | '\u{0300}'..='\u{036F}' | '\u{203F}'..='\u{2040}'
+        )
+}
+
+fn is_xml_encoding_name(value: &[u8]) -> bool {
+    value.first().is_some_and(u8::is_ascii_alphabetic)
+        && value[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 pub(super) fn read_attributes(

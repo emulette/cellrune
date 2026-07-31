@@ -90,6 +90,20 @@ impl WorkbookDraft {
     pub fn document_kind(&self) -> Option<crate::XlsxDocumentKind> {
         self.source_document.as_ref().map(XlsxDocument::kind)
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_snapshot_for_test(workbook: WorkbookSnapshot) -> Self {
+        Self {
+            workbook,
+            presentation: DocumentPresentation::default(),
+            source_document: None,
+            cell_mutations: BTreeMap::new(),
+            presentation_cell_mutations: BTreeSet::new(),
+            presentation_sheet_mutations: BTreeSet::new(),
+            added_sheets: BTreeSet::new(),
+            workbook_changed: true,
+        }
+    }
 }
 
 fn annotated_text_replacement_required(sheet_id: SheetId, address: CellAddress) -> ValidationError {
