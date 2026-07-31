@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    FinancialSolverSemanticsDto, InteropError, RangeRequestDto, RecalculationModeDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, RangeRequestDto,
+    RecalculationModeDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -249,6 +249,22 @@ impl Workbook {
         conversion::edit_receipt(py, &receipt)
     }
 
+    pub fn apply_changes_v2<'py>(
+        &self,
+        py: Python<'py>,
+        expected_revision: &Bound<'_, PyAny>,
+        changes: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let expected_revision =
+            revision_from_python(expected_revision).map_err(|error| into_py_error(py, error))?;
+        let batch = edit_batch_v2_from_python(py, changes)?;
+        let receipt = self
+            .lock(py)?
+            .apply_changes_v2(expected_revision, batch)
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::edit_receipt_v2(py, &receipt)
+    }
+
     #[pyo3(signature = (cursor=None, *, limit=None))]
     pub fn changes_since<'py>(
         &self,
@@ -474,14 +490,26 @@ fn number_from_python(value: &Bound<'_, PyAny>) -> Result<f64, InteropError> {
 }
 
 fn edit_batch_from_python(py: Python<'_>, changes: &Bound<'_, PyAny>) -> PyResult<EditBatchDto> {
-    let payload = PyDict::new(py);
-    payload.set_item("changes", changes)?;
-    let serialized = py
-        .import("json")?
-        .call_method1("dumps", (payload,))?
-        .extract::<String>()?;
+    let serialized = edit_batch_json_from_python(py, changes)?;
     serde_json::from_str(&serialized)
         .map_err(|error| into_py_error(py, InteropError::invalid_change_payload(error.to_string())))
+}
+
+fn edit_batch_v2_from_python(
+    py: Python<'_>,
+    changes: &Bound<'_, PyAny>,
+) -> PyResult<EditBatchV2Dto> {
+    let serialized = edit_batch_json_from_python(py, changes)?;
+    serde_json::from_str(&serialized)
+        .map_err(|error| into_py_error(py, InteropError::invalid_change_payload(error.to_string())))
+}
+
+fn edit_batch_json_from_python(py: Python<'_>, changes: &Bound<'_, PyAny>) -> PyResult<String> {
+    let payload = PyDict::new(py);
+    payload.set_item("changes", changes)?;
+    py.import("json")?
+        .call_method1("dumps", (payload,))?
+        .extract::<String>()
 }
 
 fn parse_recalculation_mode(value: &str) -> Result<RecalculationModeDto, InteropError> {

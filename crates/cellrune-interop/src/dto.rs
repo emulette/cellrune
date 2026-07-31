@@ -187,6 +187,70 @@ pub struct EditReceiptDto {
     pub calculation_metadata_changed: bool,
 }
 
+/// Table-specific operations added by edit schema v2.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TableChangeV2Dto {
+    /// Renames a table by stable ID.
+    RenameTable {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+        /// New programmatic and display name.
+        new_display_name: String,
+    },
+    /// Renames one table column by stable IDs.
+    RenameTableColumn {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+        /// Stable table-local column ID.
+        column_id: u32,
+        /// New column name.
+        new_name: String,
+    },
+    /// Changes a table's inclusive data-body row range.
+    ResizeTableRows {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+        /// First one-based data-body row.
+        first_data_row: u32,
+        /// Last one-based data-body row.
+        last_data_row: u32,
+    },
+}
+
+/// One v2 workbook mutation.
+///
+/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds only the
+/// three table-authoring operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum WorkbookChangeV2Dto {
+    /// An unchanged edit-schema-v1 operation.
+    V1(WorkbookChangeDto),
+    /// A table-authoring operation introduced by edit schema v2.
+    Table(TableChangeV2Dto),
+}
+
+/// Ordered, atomic edit-schema-v2 change set.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditBatchV2Dto {
+    /// Operations in caller-declared order.
+    #[schemars(length(min = 1))]
+    pub changes: Vec<WorkbookChangeV2Dto>,
+}
+
+/// Result of one committed edit-schema-v2 batch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditReceiptV2Dto {
+    /// The unchanged v1 receipt fields, flattened into the v2 JSON object.
+    #[serde(flatten)]
+    pub receipt: EditReceiptDto,
+    /// Stable IDs of tables changed by the batch.
+    pub changed_table_ids: Vec<u32>,
+}
+
 /// Save behavior exposed across language boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -850,7 +914,9 @@ pub struct WriteReportDto {
 
 #[cfg(test)]
 mod tests {
-    use super::{DefinedNameInspectionResultDto, WorkbookChangeDto};
+    use super::{
+        DefinedNameInspectionResultDto, TableChangeV2Dto, WorkbookChangeDto, WorkbookChangeV2Dto,
+    };
 
     /// The DTOs carry `deny_unknown_fields`, so adding a field to a variant would be a breaking
     /// change to the JSON boundary if a missing one were also rejected. It is not: serde reads an
@@ -893,5 +959,41 @@ mod tests {
                 .expect("empty reference serializes"),
             serde_json::json!({"kind": "empty_reference"})
         );
+    }
+
+    #[test]
+    fn edit_v2_adds_table_operations_without_changing_v1_json_shapes() {
+        let v1: WorkbookChangeV2Dto = serde_json::from_value(serde_json::json!({
+            "kind": "rename_sheet",
+            "sheet": "Old",
+            "new_name": "New"
+        }))
+        .expect("v1 operation in v2");
+        assert!(matches!(
+            v1,
+            WorkbookChangeV2Dto::V1(WorkbookChangeDto::RenameSheet { .. })
+        ));
+        let table: WorkbookChangeV2Dto = serde_json::from_value(serde_json::json!({
+            "kind": "rename_table_column",
+            "table_id": 7,
+            "column_id": 3,
+            "new_name": "Gross Amount"
+        }))
+        .expect("table operation");
+        assert_eq!(
+            table,
+            WorkbookChangeV2Dto::Table(TableChangeV2Dto::RenameTableColumn {
+                table_id: 7,
+                column_id: 3,
+                new_name: "Gross Amount".to_owned(),
+            })
+        );
+        serde_json::from_value::<WorkbookChangeV2Dto>(serde_json::json!({
+            "kind": "rename_table",
+            "table_id": 7,
+            "new_display_name": "Orders",
+            "unexpected": true
+        }))
+        .expect_err("v2 table variants remain closed");
     }
 }

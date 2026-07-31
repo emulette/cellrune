@@ -22,6 +22,7 @@ const MESSAGE_INVALID_CHANGE: &str = "workbook change failed transport validatio
 const MESSAGE_SHEET_CREATION_FAILED: &str = "sheet identifier allocation failed";
 const MESSAGE_REQUEST_ID_EXHAUSTED: &str = "calculation request identifier is exhausted";
 const MESSAGE_CALCULATION_CANCELLED: &str = "calculation request was cancelled or superseded";
+const MESSAGE_EDIT_CANCELLED: &str = "workbook edit was cancelled before installation";
 const MESSAGE_CHANGE_PAYLOAD_INVALID: &str = "edit batch payload is invalid";
 const MESSAGE_REVISION_OR_CURSOR_INVALID: &str =
     "revision or cursor must be an unsigned 64-bit integer";
@@ -187,6 +188,10 @@ impl InteropError {
 
     pub(crate) fn calculation_cancelled() -> Self {
         Self::state("session.cancelled", MESSAGE_CALCULATION_CANCELLED)
+    }
+
+    pub(crate) fn edit_cancelled() -> Self {
+        Self::state("session.cancelled", MESSAGE_EDIT_CANCELLED)
     }
 
     /// Creates the stable malformed typed-change payload error used by bindings.

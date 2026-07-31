@@ -10,6 +10,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-31
+
 ### Added
 
 - Typed non-zero `TableColumnId` values, immutable lookup indexes for tables and columns, and
@@ -22,6 +24,20 @@ inventories, and measurements belong in the linked documentation rather than in 
   `XlsxDocument::table_part` exposes the accepted source part for a stable table ID.
 - Per-table filter declaration and filter/sort attribute-text read limits with dedicated
   `TooManyTableFilterItems` and `TableFilterTextTooLarge` error codes.
+- Lossless typed formula syntax for structured references, spill references, reference union,
+  intersection, range operators, 3-D sheet spans, external workbook targets, and sheet-qualified
+  defined names, with UTF-8 source spans and bounded source/AST work.
+- Structured-table and spill-reference evaluation, typed table/spill dependency topology,
+  multi-area reference identity, and the official `AREAS` function. The supported catalog now
+  contains 287 Excel-facing names.
+- Bounded `analyze_defined_name` APIs that classify rectangular, 3-D, ordered multi-area, empty,
+  dynamic, constant, external, invalid, unsupported, and missing names without requiring a
+  calculation session. The same query is available in Python and Node.js.
+- Atomic stable-ID table rename, table-column rename, and data-row resize operations. Renames update
+  worksheet, defined-name, calculated-column, and totals-row formulas; resize can expand a
+  header-only empty table and materialize modeled formulas and totals.
+- A separate edit schema v2 for Rust interop, Python, Node.js, and MCP. Existing v1 edit shapes are
+  unchanged; v2 adds table operations and changed-table IDs.
 
 ### Changed
 
@@ -35,6 +51,14 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Missing `autoFilter@ref` values are represented distinctly from an explicit range and inherit
   the owning table range minus totals rows. Missing `tableColumns@count` values are accepted, and
   mismatches use the actual `tableColumn` children with an `xlsx.table.normalized` diagnostic.
+- Table and spill topology now participates in incremental dependency identity. Geometry changes
+  safely select a full graph rebuild, while ordinary value edits retain incremental calculation.
+- `SessionLimits` now bounds cumulative formula-rewrite formula/source/AST/edit work and table-row
+  materialization. Edit staging, final snapshot/table-index construction, interop, and MCP v2
+  propagate cooperative cancellation without installing partial state.
+- Source-linked table authoring patches the accepted table part by SpreadsheetML namespace and
+  exact structural path, preserving foreign namespace and opaque extension content. Canonical and
+  source-linked outputs are reopened and compared against the complete table model.
 
 ### Fixed
 
@@ -51,6 +75,15 @@ inventories, and measurements belong in the linked documentation rather than in 
   bounds, and retain ambiguous prose cases for source-linked preservation instead of silently
   canonicalizing them. Built-in table-style detection now rejects leading-zero lookalikes such as
   `TableStyleLight01`.
+- Table and column identity matching now uses the same Unicode case-insensitive key as workbook
+  lookup. Column rename rejects leading/trailing ASCII spaces that OOXML would normalize.
+- Table rename no longer rewrites external-workbook or quoted 3-D lookalikes, and malformed related
+  formulas fail atomically with their owning cell, name, or table-formula location.
+- Table-column rename no longer overwrites annotated header text, and semantic no-ops no longer
+  over-report changed cells or rewritten formulas.
+- Table-row resize streams validation and materialization instead of allocating all targets first,
+  preserves row- and column-oriented sort ranges, and never installs after a resource limit or
+  cancellation.
 
 ## [0.1.8] - 2026-07-30
 
@@ -489,7 +522,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/emulette/cellrune/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/emulette/cellrune/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/emulette/cellrune/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/emulette/cellrune/compare/v0.1.5...v0.1.6

@@ -712,7 +712,7 @@ fn draft_semantics_match(
         };
         if expected_sheet.name() != actual_sheet.name()
             || expected_sheet.visibility() != actual_sheet.visibility()
-            || expected_sheet.tables() != actual_sheet.tables()
+            || !tables_semantically_match(expected_sheet.tables(), actual_sheet.tables())
         {
             return false;
         }
@@ -744,6 +744,14 @@ fn draft_semantics_match(
         }
     }
     true
+}
+
+fn tables_semantically_match(expected: &[crate::Table], actual: &[crate::Table]) -> bool {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual)
+            .all(|(expected, actual)| expected.semantic_eq(actual))
 }
 
 fn calculation_hints_match(

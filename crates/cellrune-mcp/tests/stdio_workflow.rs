@@ -209,7 +209,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
     assert!(
         tools
             .iter()
@@ -391,6 +391,145 @@ fn stdio_workflow_matches_the_rust_interop_session() {
         serde_json::from_str::<Value>(&line)
             .expect("logging must never contaminate stdout protocol lines");
     }
+}
+
+#[test]
+fn table_authoring_v2_is_available_as_a_separate_stdio_contract() {
+    let root = TestDirectory::new("table-authoring-v2");
+    let contract_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../binding-contract/table-authoring-v2.json");
+    let contract: Value = serde_json::from_slice(
+        &fs::read(&contract_path).expect("shared table contract must be readable"),
+    )
+    .expect("shared table contract must be valid JSON");
+    let fixture_name = contract["fixture"]
+        .as_str()
+        .expect("table contract fixture name");
+    let input = root.path.join(fixture_name);
+    fs::copy(
+        contract_path
+            .parent()
+            .expect("contract directory")
+            .join(fixture_name),
+        &input,
+    )
+    .expect("shared table fixture must be copied beneath the approved root");
+
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let opened = successful_tool(mcp.call_tool("workbook_open", json!({"path": input})));
+    let session_id = opened["session_id"]
+        .as_str()
+        .expect("open must return a session ID")
+        .to_owned();
+    let revision = opened["summary"]["semantic_revision"]
+        .as_u64()
+        .expect("summary revision");
+    let unknown_column = failed_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": revision,
+            "changes": [{
+                "kind": "rename_table_column",
+                "table_id": contract["table_id"],
+                "column_id": 99,
+                "new_name": "Missing"
+            }]
+        }),
+    ));
+    assert_eq!(unknown_column["code"], "validation.unknown_table_column_id");
+    let unchanged =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    assert_eq!(unchanged["summary"]["semantic_revision"], revision);
+
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": revision,
+            "changes": [
+                {
+                    "kind": "rename_table",
+                    "table_id": contract["table_id"],
+                    "new_display_name": contract["new_display_name"]
+                },
+                {
+                    "kind": "rename_table_column",
+                    "table_id": contract["table_id"],
+                    "column_id": contract["column_id"],
+                    "new_name": contract["new_column_name"]
+                },
+                {
+                    "kind": "resize_table_rows",
+                    "table_id": contract["table_id"],
+                    "first_data_row": contract["first_data_row"],
+                    "last_data_row": contract["last_data_row"]
+                }
+            ]
+        }),
+    ));
+    assert_eq!(receipt["schema_version"], contract["schema_version"]);
+    assert_eq!(
+        receipt["changed_table_ids"],
+        json!([contract["table_id"].clone()])
+    );
+    let summary =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    let tables = summary["summary"]["sheets"][0]["tables"]
+        .as_array()
+        .expect("tables");
+    let table = tables
+        .iter()
+        .find(|table| table["id"] == contract["table_id"])
+        .expect("edited table");
+    assert_eq!(table["display_name"], contract["new_display_name"]);
+    assert_eq!(table["range"], contract["expected_range"]);
+    assert_eq!(table["columns"][1]["name"], contract["new_column_name"]);
+    let formula = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({
+            "session_id": session_id,
+            "sheet": "Data",
+            "start": "E1",
+            "end": "E1"
+        }),
+    ));
+    assert_eq!(formula["cells"][0]["formula"], "=SUM(Orders[Gross Amount])");
+    let empty = tables
+        .iter()
+        .find(|table| table["id"] == contract["empty_table_id"])
+        .expect("empty table");
+    assert_eq!(empty["display_name"], contract["empty_table_name"]);
+    assert_eq!(empty["range"], contract["empty_table_range"]);
+
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full"}),
+    ));
+    let output = root.path.join("table-authoring-v2-output.xlsx");
+    successful_tool(mcp.call_tool(
+        "workbook_save_as",
+        json!({
+            "session_id": session_id,
+            "path": output,
+            "invalidate_unavailable": true,
+            "replace_existing": false
+        }),
+    ));
+    let reopened = successful_tool(mcp.call_tool("workbook_open", json!({"path": output})));
+    let reopened_tables = reopened["summary"]["sheets"][0]["tables"]
+        .as_array()
+        .expect("reopened tables");
+    let reopened_table = reopened_tables
+        .iter()
+        .find(|table| table["id"] == contract["table_id"])
+        .expect("reopened edited table");
+    assert_eq!(reopened_table["display_name"], contract["new_display_name"]);
+    assert_eq!(reopened_table["range"], contract["expected_range"]);
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
 }
 
 #[test]

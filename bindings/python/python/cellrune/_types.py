@@ -348,6 +348,33 @@ WorkbookChange = (
     | SetCalculationHintsChange
 )
 
+class RenameTableChange(TypedDict):
+    kind: Literal["rename_table"]
+    table_id: int
+    new_display_name: str
+
+
+class RenameTableColumnChange(TypedDict):
+    kind: Literal["rename_table_column"]
+    table_id: int
+    column_id: int
+    new_name: str
+
+
+class ResizeTableRowsChange(TypedDict):
+    kind: Literal["resize_table_rows"]
+    table_id: int
+    first_data_row: int
+    last_data_row: int
+
+
+WorkbookChangeV2 = (
+    WorkbookChange
+    | RenameTableChange
+    | RenameTableColumnChange
+    | ResizeTableRowsChange
+)
+
 
 class EditReceipt(TypedDict):
     schema_version: int
@@ -359,6 +386,10 @@ class EditReceipt(TypedDict):
     created_sheet_ids: list[int]
     topology_changed: bool
     calculation_metadata_changed: bool
+
+
+class EditReceiptV2(EditReceipt):
+    changed_table_ids: list[int]
 
 
 class CalculationDeltaCell(TypedDict):

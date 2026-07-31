@@ -92,6 +92,12 @@ mod table;
 mod workbook;
 mod xlsx;
 
+pub(crate) fn case_insensitive_eq(left: &str, right: &str) -> bool {
+    left.chars()
+        .flat_map(char::to_lowercase)
+        .eq(right.chars().flat_map(char::to_lowercase))
+}
+
 pub use address::{CellAddress, CellRange, Column, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, Row};
 pub use calculation::{
     ApplyChangesError, ArithmeticSemantics, CalculationCellId, CalculationCellResult,
@@ -133,12 +139,12 @@ pub use presentation::{
 pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
 pub use table::{
     Table, TableAutoFilter, TableCalendarType, TableColorFilter, TableColumn, TableColumnId,
-    TableCustomFilter, TableCustomFilterOperator, TableCustomFilters, TableDateGroupItem,
-    TableDateTimeGrouping, TableDateTimeValue, TableDynamicFilter, TableDynamicFilterType,
-    TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula, TableIconFilter,
-    TableIconSet, TableId, TableName, TableNumericValue, TableSortBy, TableSortCondition,
-    TableSortMethod, TableSortState, TableStyleInfo, TableTopFilter, TableType, TableValueFilters,
-    TotalsRowFunction,
+    TableColumnName, TableCustomFilter, TableCustomFilterOperator, TableCustomFilters,
+    TableDateGroupItem, TableDateTimeGrouping, TableDateTimeValue, TableDynamicFilter,
+    TableDynamicFilterType, TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula,
+    TableIconFilter, TableIconSet, TableId, TableName, TableNumericValue, TableSortBy,
+    TableSortCondition, TableSortMethod, TableSortState, TableStyleInfo, TableTopFilter, TableType,
+    TableValueFilters, TotalsRowFunction,
 };
 pub use workbook::{
     CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,

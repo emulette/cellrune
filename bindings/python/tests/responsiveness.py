@@ -5,7 +5,7 @@ import threading
 from collections.abc import Callable
 from typing import TypeVar
 
-from cellrune import Workbook
+from cellrune import Workbook, WorkbookChange
 
 
 T = TypeVar("T")
@@ -16,9 +16,25 @@ WORKER_TIMEOUT_SECONDS = 2.0
 
 def main() -> None:
     workbook = Workbook.create()
-    workbook.set_number("Sheet1", "A1", 1.0)
+    changes: list[WorkbookChange] = [
+        {
+            "kind": "set_value",
+            "sheet": "Sheet1",
+            "address": "A1",
+            "value": {"kind": "number", "value": 1.0},
+        }
+    ]
     for row in range(2, 25_001):
-        workbook.set_formula("Sheet1", f"A{row}", f"=A{row - 1}+1")
+        changes.append(
+            {
+                "kind": "set_formula",
+                "sheet": "Sheet1",
+                "address": f"A{row}",
+                "formula": f"=A{row - 1}+1",
+                "dynamic_range": None,
+            }
+        )
+    workbook.apply_changes(0, changes)
 
     report = assert_allows_interpreter_progress(
         workbook.calculate,

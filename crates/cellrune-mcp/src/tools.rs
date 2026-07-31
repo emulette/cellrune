@@ -1,8 +1,8 @@
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
-    CapabilityPageDto, CompletedRecalculation, EditReceiptDto, FinancialSolverSemanticsDto,
-    FunctionUsageReportDto, InteropError, RangePageDto, RangeRequestDto, WorkbookSession,
-    WriteOptionsDto,
+    CancellationToken as WorkbookCancellationToken, CapabilityPageDto, CompletedRecalculation,
+    EditReceiptDto, EditReceiptV2Dto, FinancialSolverSemanticsDto, FunctionUsageReportDto,
+    InteropError, RangePageDto, RangeRequestDto, WorkbookSession, WriteOptionsDto,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool, tool_router};
@@ -11,9 +11,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::McpError;
 use crate::model::{
-    ApplyChangesArgs, CapabilityArgs, ChangesSinceArgs, CreateWorkbookArgs, OpenWorkbookArgs,
-    ReadRangeArgs, RecalculateArgs, SaveWorkbookArgs, SessionArgs, SessionClosed, SessionStarted,
-    SessionSummary, WorkbookSaved,
+    ApplyChangesArgs, ApplyChangesV2Args, CapabilityArgs, ChangesSinceArgs, CreateWorkbookArgs,
+    OpenWorkbookArgs, ReadRangeArgs, RecalculateArgs, SaveWorkbookArgs, SessionArgs, SessionClosed,
+    SessionStarted, SessionSummary, WorkbookSaved,
 };
 use crate::server::CellruneMcpServer;
 
@@ -268,6 +268,57 @@ sheets, visibility, defined names, date system, and calculation hints.",
             let prepared = workbook.prepare_changes(args.expected_revision, args.batch)?;
             self.ensure_json_size(prepared.receipt())?;
             workbook.install_changes(prepared)?
+        };
+        self.sessions.touch(&args.session_id)?;
+        Ok(Json(receipt))
+    }
+
+    /// Atomically apply a v2 typed edit batch, including stable-ID table authoring.
+    #[tool(
+        name = "workbook_apply_changes_v2",
+        input_schema = crate::schema::mcp_schema::<ApplyChangesV2Args>(),
+        output_schema = crate::schema::mcp_schema::<EditReceiptV2Dto>(),
+        description = "Atomically apply an ordered edit-schema-v2 batch after checking \
+expected_revision. It accepts every unchanged v1 operation plus stable-ID table rename, table \
+column rename, and table data-row resize operations.",
+        annotations(
+            title = "Apply workbook changes v2",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_apply_changes_v2(
+        &self,
+        Parameters(args): Parameters<ApplyChangesV2Args>,
+        cancellation: CancellationToken,
+    ) -> Result<Json<EditReceiptV2Dto>, McpError> {
+        let handle = self.sessions.get(&args.session_id)?;
+        let workbook = handle.workbook().clone();
+        let edit_cancellation = WorkbookCancellationToken::new();
+        let worker_cancellation = edit_cancellation.clone();
+        let expected_revision = args.expected_revision;
+        let batch = args.batch;
+        let mut worker = tokio::task::spawn_blocking(move || {
+            workbook.blocking_lock().prepare_changes_v2_cancellable(
+                expected_revision,
+                batch,
+                &worker_cancellation,
+            )
+        });
+        let prepared = tokio::select! {
+            joined = &mut worker => join_result(joined)?,
+            () = cancellation.cancelled() => {
+                edit_cancellation.cancel();
+                let _ = worker.await;
+                return Err(McpError::cancelled());
+            }
+        };
+        self.ensure_json_size(prepared.receipt())?;
+        let receipt = {
+            let mut workbook = handle.workbook().lock().await;
+            workbook.install_changes_v2(prepared)?
         };
         self.sessions.touch(&args.session_id)?;
         Ok(Json(receipt))

@@ -1314,7 +1314,10 @@ mod tests {
         assert_eq!(components[0].span(), SourceSpan::new(0, 3));
         assert_eq!(components[1].kind(), SourceComponentKind::StructuredItem(0));
         assert_eq!(components[1].span(), SourceSpan::new(5, 13));
-        assert_eq!(components[2].kind(), SourceComponentKind::StructuredColumn);
+        assert_eq!(
+            components[2].kind(),
+            SourceComponentKind::StructuredColumn { grouped: true }
+        );
         assert_eq!(components[2].span(), SourceSpan::new(16, 22));
         for component in components {
             assert!(parsed.original().is_char_boundary(component.span().start));

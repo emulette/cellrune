@@ -148,6 +148,115 @@ function serializeWorkbookChange(change, index) {
   }
 }
 
+function serializeWorkbookChangeV2(change, index) {
+  requireOptions(change);
+  requireString(change.kind, `changes[${index}].kind`);
+  validateV2ChangeKeys(change, index);
+  switch (change.kind) {
+    case "renameTable":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      return {
+        kind: "rename_table",
+        table_id: change.tableId,
+        new_display_name: requiredChangeString(
+          change.newDisplayName,
+          index,
+          "newDisplayName",
+        ),
+      };
+    case "renameTableColumn":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      requireNonNegativeInteger(change.columnId, `changes[${index}].columnId`);
+      return {
+        kind: "rename_table_column",
+        table_id: change.tableId,
+        column_id: change.columnId,
+        new_name: requiredChangeString(change.newName, index, "newName"),
+      };
+    case "resizeTableRows":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      requireNonNegativeInteger(
+        change.firstDataRow,
+        `changes[${index}].firstDataRow`,
+      );
+      requireNonNegativeInteger(
+        change.lastDataRow,
+        `changes[${index}].lastDataRow`,
+      );
+      return {
+        kind: "resize_table_rows",
+        table_id: change.tableId,
+        first_data_row: change.firstDataRow,
+        last_data_row: change.lastDataRow,
+      };
+    default:
+      return serializeWorkbookChange(change, index);
+  }
+}
+
+const V2_CHANGE_KEYS = new Map([
+  ["setValue", ["kind", "sheet", "address", "value"]],
+  ["setFormula", ["kind", "sheet", "address", "formula", "dynamicRange"]],
+  ["clearCell", ["kind", "sheet", "address"]],
+  [
+    "setNumberFormat",
+    ["kind", "sheet", "address", "id", "code", "formatKind"],
+  ],
+  ["addSheet", ["kind", "name"]],
+  ["renameSheet", ["kind", "sheet", "newName"]],
+  ["setSheetVisibility", ["kind", "sheet", "visibility"]],
+  [
+    "setDefinedName",
+    ["kind", "name", "scopeSheet", "formula", "hidden"],
+  ],
+  ["removeDefinedName", ["kind", "name", "scopeSheet"]],
+  ["setDateSystem", ["kind", "dateSystem"]],
+  [
+    "setCalculationHints",
+    [
+      "kind",
+      "mode",
+      "calculationId",
+      "fullCalculationOnLoad",
+      "forceFullCalculation",
+      "iterativeCalculation",
+    ],
+  ],
+  ["renameTable", ["kind", "tableId", "newDisplayName"]],
+  ["renameTableColumn", ["kind", "tableId", "columnId", "newName"]],
+  [
+    "resizeTableRows",
+    ["kind", "tableId", "firstDataRow", "lastDataRow"],
+  ],
+]);
+
+function validateV2ChangeKeys(change, index) {
+  const allowed = V2_CHANGE_KEYS.get(change.kind);
+  if (allowed === undefined) {
+    return;
+  }
+  for (const key of Object.keys(change)) {
+    if (!allowed.includes(key)) {
+      throw inputError(`changes[${index}].${key} is not supported`);
+    }
+  }
+  if (change.kind === "setValue") {
+    validateV2CellValueKeys(change.value, index);
+  }
+}
+
+function validateV2CellValueKeys(value, index) {
+  requireOptions(value);
+  requireString(value.kind, `changes[${index}].value.kind`);
+  const allowed =
+    value.kind === "blank" ? ["kind"] : ["kind", "value"];
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      throw inputError(`changes[${index}].value.${key} is not supported`);
+    }
+  }
+}
+
 function serializeCellValue(value, index) {
   requireOptions(value);
   requireString(value.kind, `changes[${index}].value.kind`);
@@ -178,4 +287,4 @@ function requiredChangeString(value, index, name) {
   return value;
 }
 
-module.exports = { serializeWorkbookChange };
+module.exports = { serializeWorkbookChange, serializeWorkbookChangeV2 };

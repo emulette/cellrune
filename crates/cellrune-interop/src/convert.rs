@@ -161,6 +161,22 @@ pub(crate) fn edit_receipt(workbook: &WorkbookSnapshot, receipt: &EditReceipt) -
     }
 }
 
+pub(crate) fn edit_receipt_v2(
+    workbook: &WorkbookSnapshot,
+    receipt: &EditReceipt,
+) -> crate::EditReceiptV2Dto {
+    let mut projected = edit_receipt(workbook, receipt);
+    projected.schema_version = crate::INTEROP_EDIT_SCHEMA_V2;
+    crate::EditReceiptV2Dto {
+        receipt: projected,
+        changed_table_ids: receipt
+            .changed_table_ids()
+            .iter()
+            .map(|table_id| table_id.get())
+            .collect(),
+    }
+}
+
 pub(crate) fn calculation_delta(
     workbook: &WorkbookSnapshot,
     delta: &CalculationDelta,

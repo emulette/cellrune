@@ -11,6 +11,11 @@ pub struct SessionLimits {
     pub(super) max_delta_cells: usize,
     pub(super) max_retained_deltas: usize,
     pub(super) max_delta_page: usize,
+    pub(super) max_rewrite_formulas: usize,
+    pub(super) max_rewrite_source_bytes: usize,
+    pub(super) max_rewrite_ast_nodes: usize,
+    pub(super) max_rewrite_source_edits: usize,
+    pub(super) max_table_materialized_cells: usize,
 }
 
 impl SessionLimits {
@@ -43,6 +48,7 @@ impl SessionLimits {
             max_delta_cells,
             max_retained_deltas,
             max_delta_page,
+            ..Self::default()
         })
     }
 
@@ -70,6 +76,76 @@ impl SessionLimits {
     pub const fn max_delta_page(self) -> usize {
         self.max_delta_page
     }
+
+    /// Replaces the cumulative typed formula-rewrite limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionErrorCode::InvalidLimits`] when any supplied limit is zero.
+    pub fn with_formula_rewrite_limits(
+        mut self,
+        max_formulas: usize,
+        max_source_bytes: usize,
+        max_ast_nodes: usize,
+        max_source_edits: usize,
+    ) -> Result<Self, SessionError> {
+        if [
+            max_formulas,
+            max_source_bytes,
+            max_ast_nodes,
+            max_source_edits,
+        ]
+        .contains(&0)
+        {
+            return Err(SessionError::new(SessionErrorCode::InvalidLimits, None));
+        }
+        self.max_rewrite_formulas = max_formulas;
+        self.max_rewrite_source_bytes = max_source_bytes;
+        self.max_rewrite_ast_nodes = max_ast_nodes;
+        self.max_rewrite_source_edits = max_source_edits;
+        Ok(self)
+    }
+
+    /// Returns the maximum formulas inspected by one edit batch.
+    pub const fn max_rewrite_formulas(self) -> usize {
+        self.max_rewrite_formulas
+    }
+
+    /// Returns the maximum formula source bytes inspected by one edit batch.
+    pub const fn max_rewrite_source_bytes(self) -> usize {
+        self.max_rewrite_source_bytes
+    }
+
+    /// Returns the maximum typed AST nodes inspected by one edit batch.
+    pub const fn max_rewrite_ast_nodes(self) -> usize {
+        self.max_rewrite_ast_nodes
+    }
+
+    /// Returns the maximum source edits produced by one edit batch.
+    pub const fn max_rewrite_source_edits(self) -> usize {
+        self.max_rewrite_source_edits
+    }
+
+    /// Replaces the cumulative table-resize materialization-cell limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionErrorCode::InvalidLimits`] when `max_cells` is zero.
+    pub fn with_table_materialization_limit(
+        mut self,
+        max_cells: usize,
+    ) -> Result<Self, SessionError> {
+        if max_cells == 0 {
+            return Err(SessionError::new(SessionErrorCode::InvalidLimits, None));
+        }
+        self.max_table_materialized_cells = max_cells;
+        Ok(self)
+    }
+
+    /// Returns the maximum worksheet cells inspected for table materialization by one edit batch.
+    pub const fn max_table_materialized_cells(self) -> usize {
+        self.max_table_materialized_cells
+    }
 }
 
 impl Default for SessionLimits {
@@ -80,6 +156,11 @@ impl Default for SessionLimits {
             max_delta_cells: 1_000_000,
             max_retained_deltas: 256,
             max_delta_page: 100,
+            max_rewrite_formulas: 1_000_000,
+            max_rewrite_source_bytes: 256 * 1024 * 1024,
+            max_rewrite_ast_nodes: 10_000_000,
+            max_rewrite_source_edits: 10_000_000,
+            max_table_materialized_cells: 1_000_000,
         }
     }
 }

@@ -1,7 +1,12 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use super::eval::{CompiledWorkbook, clone_set_cancellable};
+use super::formula_rewrite::{FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits};
 use super::pipeline::{calculate_and_compile, calculate_from_compiled};
+use crate::draft::{
+    BatchExecutionError, TableMaterializationBudget, TableMaterializationError,
+    rewrite_limit_detail,
+};
 use crate::{
     CalculationCellId, CalculationOptions, CalculationSnapshot, EditBatch, EditReceipt,
     ValidationError, WorkbookDraft, WorkbookSnapshot,
@@ -154,6 +159,34 @@ impl WorkbookCalculationSession {
         expected_revision: u64,
         batch: EditBatch,
     ) -> Result<PreparedEditBatch, ApplyChangesError> {
+        self.prepare_changes_with_cancellation(expected_revision, batch, &CancellationToken::new())
+    }
+
+    /// Stages one atomic edit batch with cooperative cancellation.
+    ///
+    /// Cancellation or resource exhaustion leaves the live session and semantic revision
+    /// unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same validation and revision errors as [`Self::prepare_changes`], plus
+    /// [`SessionErrorCode::Cancelled`], [`SessionErrorCode::RewriteLimitExceeded`], or
+    /// [`SessionErrorCode::TableMaterializationLimitExceeded`].
+    pub fn prepare_changes_cancellable(
+        &self,
+        expected_revision: u64,
+        batch: EditBatch,
+        cancellation: &CancellationToken,
+    ) -> Result<PreparedEditBatch, ApplyChangesError> {
+        self.prepare_changes_with_cancellation(expected_revision, batch, cancellation)
+    }
+
+    fn prepare_changes_with_cancellation(
+        &self,
+        expected_revision: u64,
+        batch: EditBatch,
+        cancellation: &CancellationToken,
+    ) -> Result<PreparedEditBatch, ApplyChangesError> {
         let current_revision = self.workbook().semantic_revision();
         if expected_revision != current_revision {
             return Err(SessionError::new(
@@ -178,8 +211,29 @@ impl WorkbookCalculationSession {
             )
             .into());
         }
-        let mut draft = self.draft.clone();
-        let receipt = draft.apply_changes(batch)?;
+        if cancellation.is_cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None).into());
+        }
+        let cancelled = || cancellation.is_cancelled();
+        let mut draft = self
+            .draft
+            .clone_cancellable(&cancelled)
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        let rewrite_limits = FormulaRewriteLimits {
+            max_formulas: self.limits.max_rewrite_formulas,
+            max_source_bytes: self.limits.max_rewrite_source_bytes,
+            max_ast_nodes: self.limits.max_rewrite_ast_nodes,
+            max_source_edits: self.limits.max_rewrite_source_edits,
+        };
+        let mut rewrite_budget = FormulaRewriteBudget::new(rewrite_limits, &cancelled);
+        let mut materialization_budget =
+            TableMaterializationBudget::new(self.limits.max_table_materialized_cells, &cancelled);
+        let receipt = draft
+            .apply_changes_controlled(batch, &mut rewrite_budget, &mut materialization_budget)
+            .map_err(map_batch_execution_error)?;
+        if cancellation.is_cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None).into());
+        }
         Ok(PreparedEditBatch {
             base_revision: current_revision,
             draft,
@@ -708,6 +762,35 @@ impl From<SessionError> for ApplyChangesError {
 impl From<ValidationError> for ApplyChangesError {
     fn from(error: ValidationError) -> Self {
         Self::Validation(error)
+    }
+}
+
+fn map_batch_execution_error(error: BatchExecutionError) -> ApplyChangesError {
+    match error {
+        BatchExecutionError::Rewrite(FormulaRewriteError::Cancelled) => {
+            SessionError::new(SessionErrorCode::Cancelled, None).into()
+        }
+        BatchExecutionError::Rewrite(FormulaRewriteError::LimitExceeded {
+            kind,
+            limit,
+            actual,
+        }) => SessionError::new(
+            SessionErrorCode::RewriteLimitExceeded,
+            Some(rewrite_limit_detail(kind, limit, actual)),
+        )
+        .into(),
+        BatchExecutionError::Materialization(TableMaterializationError::Cancelled) => {
+            SessionError::new(SessionErrorCode::Cancelled, None).into()
+        }
+        BatchExecutionError::Materialization(TableMaterializationError::LimitExceeded {
+            limit,
+            actual,
+        }) => SessionError::new(
+            SessionErrorCode::TableMaterializationLimitExceeded,
+            Some(format!("cells={actual}, limit={limit}")),
+        )
+        .into(),
+        other => other.into_validation().into(),
     }
 }
 

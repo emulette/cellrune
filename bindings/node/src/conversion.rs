@@ -1,7 +1,8 @@
 use cellrune_interop::{
     CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto,
     CalculationResultDto, CellDto, CellReferenceDto, CellValueDto, EditReceiptDto,
-    FunctionUsageReportDto, RangePageDto, SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
+    EditReceiptV2Dto, FunctionUsageReportDto, RangePageDto, SavedValueStateDto, WorkbookSummaryDto,
+    WriteReportDto,
 };
 use napi_derive::napi;
 
@@ -137,6 +138,20 @@ pub struct NativeEditReceipt {
     pub created_sheet_ids: Vec<u32>,
     pub topology_changed: bool,
     pub calculation_metadata_changed: bool,
+}
+
+#[napi(object)]
+pub struct NativeEditReceiptV2 {
+    pub schema_version: u32,
+    pub base_revision: String,
+    pub result_revision: String,
+    pub applied_change_count: f64,
+    pub changed_cells: Vec<NativeCellReference>,
+    pub calculation_changed_cells: Vec<NativeCellReference>,
+    pub created_sheet_ids: Vec<u32>,
+    pub topology_changed: bool,
+    pub calculation_metadata_changed: bool,
+    pub changed_table_ids: Vec<u32>,
 }
 
 #[napi(object)]
@@ -283,6 +298,22 @@ pub(crate) fn edit_receipt(value: EditReceiptDto) -> NativeEditReceipt {
         created_sheet_ids: value.created_sheet_ids,
         topology_changed: value.topology_changed,
         calculation_metadata_changed: value.calculation_metadata_changed,
+    }
+}
+
+pub(crate) fn edit_receipt_v2(value: EditReceiptV2Dto) -> NativeEditReceiptV2 {
+    let receipt = edit_receipt(value.receipt);
+    NativeEditReceiptV2 {
+        schema_version: receipt.schema_version,
+        base_revision: receipt.base_revision,
+        result_revision: receipt.result_revision,
+        applied_change_count: receipt.applied_change_count,
+        changed_cells: receipt.changed_cells,
+        calculation_changed_cells: receipt.calculation_changed_cells,
+        created_sheet_ids: receipt.created_sheet_ids,
+        topology_changed: receipt.topology_changed,
+        calculation_metadata_changed: receipt.calculation_metadata_changed,
+        changed_table_ids: value.changed_table_ids,
     }
 }
 

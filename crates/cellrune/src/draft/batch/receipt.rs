@@ -1,4 +1,4 @@
-use crate::{CalculationCellId, SheetId};
+use crate::{CalculationCellId, SheetId, TableId};
 
 /// Result of committing one atomic edit batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +9,7 @@ pub struct EditReceipt {
     pub(super) changed_cells: Vec<CalculationCellId>,
     pub(super) calculation_changed_cells: Vec<CalculationCellId>,
     pub(super) created_sheet_ids: Vec<SheetId>,
+    pub(super) changed_table_ids: Vec<TableId>,
     pub(super) topology_changed: bool,
     pub(super) calculation_metadata_changed: bool,
 }
@@ -42,6 +43,11 @@ impl EditReceipt {
     /// Returns stable IDs allocated for `AddSheet` operations in operation order.
     pub fn created_sheet_ids(&self) -> &[SheetId] {
         &self.created_sheet_ids
+    }
+
+    /// Returns stable IDs of tables whose metadata or materialized worksheet content changed.
+    pub fn changed_table_ids(&self) -> &[TableId] {
+        &self.changed_table_ids
     }
 
     /// Returns whether formula, name, or sheet topology must be recompiled.

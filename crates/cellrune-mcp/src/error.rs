@@ -27,7 +27,7 @@ const MESSAGE_SERIALIZATION: &str = "MCP response serialization failed";
 const MESSAGE_WORKER: &str = "blocking workbook operation failed";
 const MESSAGE_RESOURCE_NOT_FOUND: &str = "MCP resource does not exist";
 const MESSAGE_RESOURCE_CURSOR_INVALID: &str = "MCP resource cursor is invalid";
-const MESSAGE_CANCELLED: &str = "MCP workbook calculation was cancelled";
+const MESSAGE_CANCELLED: &str = "MCP workbook operation was cancelled";
 
 const CODE_RESOURCE_NOT_FOUND: &str = "mcp.resource.not_found";
 const CODE_RESOURCE_CURSOR_INVALID: &str = "mcp.resource.cursor_invalid";
@@ -325,7 +325,7 @@ impl McpError {
     pub(crate) fn cancelled() -> Self {
         Self::new(
             McpErrorKind::Session,
-            "mcp.calculation.cancelled",
+            "mcp.operation.cancelled",
             MESSAGE_CANCELLED,
             McpErrorDetails::default(),
         )

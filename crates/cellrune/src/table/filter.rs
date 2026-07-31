@@ -1005,6 +1005,70 @@ impl TableSortCondition {
     pub const fn icon_id(&self) -> Option<u32> {
         self.icon_id
     }
+
+    fn resized(&self, old_data_range: CellRange, new_data_range: CellRange) -> Result<Self, ()> {
+        let range = if self.range.start().row() == old_data_range.start().row()
+            && self.range.end().row() == old_data_range.end().row()
+        {
+            CellRange::from_ordered(
+                crate::CellAddress::new(new_data_range.start().row(), self.range.start().column()),
+                crate::CellAddress::new(new_data_range.end().row(), self.range.end().column()),
+            )
+        } else if self.range.start().column() == old_data_range.start().column()
+            && self.range.end().column() == old_data_range.end().column()
+        {
+            let start_offset = self
+                .range
+                .start()
+                .row()
+                .get()
+                .checked_sub(old_data_range.start().row().get())
+                .ok_or(())?;
+            let end_offset = self
+                .range
+                .end()
+                .row()
+                .get()
+                .checked_sub(old_data_range.start().row().get())
+                .ok_or(())?;
+            let start = crate::Row::new(
+                new_data_range
+                    .start()
+                    .row()
+                    .get()
+                    .checked_add(start_offset)
+                    .ok_or(())?,
+            )
+            .map_err(|_| ())?;
+            let end = crate::Row::new(
+                new_data_range
+                    .start()
+                    .row()
+                    .get()
+                    .checked_add(end_offset)
+                    .ok_or(())?,
+            )
+            .map_err(|_| ())?;
+            if end > new_data_range.end().row() {
+                return Err(());
+            }
+            CellRange::from_ordered(
+                crate::CellAddress::new(start, new_data_range.start().column()),
+                crate::CellAddress::new(end, new_data_range.end().column()),
+            )
+        } else {
+            return Err(());
+        };
+        Ok(Self {
+            range,
+            descending: self.descending,
+            sort_by: self.sort_by,
+            custom_list: self.custom_list.clone(),
+            differential_format_id: self.differential_format_id,
+            icon_set: self.icon_set,
+            icon_id: self.icon_id,
+        })
+    }
 }
 
 /// Sort metadata attached to a table or auto-filter definition.
@@ -1069,6 +1133,25 @@ impl TableSortState {
         }
         Ok(Self {
             range: self.range,
+            case_sensitive: self.case_sensitive,
+            column_sort: self.column_sort,
+            sort_method: self.sort_method,
+            conditions,
+        })
+    }
+
+    pub(crate) fn resized(
+        &self,
+        old_data_range: CellRange,
+        new_data_range: CellRange,
+    ) -> Result<Self, ()> {
+        let conditions = self
+            .conditions
+            .iter()
+            .map(|condition| condition.resized(old_data_range, new_data_range))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            range: new_data_range,
             case_sensitive: self.case_sensitive,
             column_sort: self.column_sort,
             sort_method: self.sort_method,
@@ -1143,6 +1226,34 @@ impl TableAutoFilter {
                 .map(|sort| sort.clone_cancellable(cancelled))
                 .transpose()?,
         })
+    }
+
+    pub(crate) fn resized(
+        &self,
+        range: CellRange,
+        old_data_range: CellRange,
+        new_data_range: CellRange,
+    ) -> Result<Self, ()> {
+        Ok(Self {
+            range,
+            range_is_explicit: self.range_is_explicit,
+            filter_columns: self.filter_columns.clone(),
+            sort_state: self
+                .sort_state
+                .as_ref()
+                .map(|sort| sort.resized(old_data_range, new_data_range))
+                .transpose()?,
+        })
+    }
+
+    pub(crate) fn resized_from_empty(&self, range: CellRange) -> Self {
+        debug_assert!(self.sort_state.is_none());
+        Self {
+            range,
+            range_is_explicit: self.range_is_explicit,
+            filter_columns: self.filter_columns.clone(),
+            sort_state: None,
+        }
     }
 }
 

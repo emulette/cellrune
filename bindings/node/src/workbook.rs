@@ -3,15 +3,15 @@ use std::sync::Arc;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    FinancialSolverSemanticsDto, InteropError, RangeRequestDto, RecalculationModeDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, RangeRequestDto,
+    RecalculationModeDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
 
 use crate::conversion::{
-    NativeCalculationDeltaPage, NativeEditReceipt, NativeFunctionUsageReport, NativeRangePage,
-    NativeWorkbookSummary,
+    NativeCalculationDeltaPage, NativeEditReceipt, NativeEditReceiptV2, NativeFunctionUsageReport,
+    NativeRangePage, NativeWorkbookSummary,
 };
 use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
@@ -136,6 +136,21 @@ impl NativeWorkbook {
         self.lock()?
             .apply_changes(expected_revision, batch)
             .map(crate::conversion::edit_receipt)
+            .map_err(napi_error)
+    }
+
+    #[napi]
+    pub fn apply_changes_v2(
+        &self,
+        expected_revision: String,
+        batch_json: String,
+    ) -> napi::Result<NativeEditReceiptV2> {
+        let expected_revision = parse_u64(&expected_revision)?;
+        let batch = serde_json::from_str::<EditBatchV2Dto>(&batch_json)
+            .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
+        self.lock()?
+            .apply_changes_v2(expected_revision, batch)
+            .map(crate::conversion::edit_receipt_v2)
             .map_err(napi_error)
     }
 

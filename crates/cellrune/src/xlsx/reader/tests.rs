@@ -5,11 +5,12 @@ use zip::{CompressionMethod, ZipArchive};
 
 use super::{read_xlsx, read_xlsx_bytes};
 use crate::{
-    CalculationMode, CellAddress, CellContent, CellValue, DateSystem, NumberFormatKind,
+    CalculationMode, CellAddress, CellContent, CellValue, DateSystem, EditBatch, NumberFormatKind,
     OpenOptions, PhoneticAlignment, PhoneticRun, PhoneticTextRange, PhoneticType,
     PhoneticWriteOptions, ReadLimits, ReadOptions, RecalculationWriteOptions, SavedResult, SheetId,
-    SheetVisibility, WorkbookDraft, WorkbookSourceKind, XlsxErrorCode, XlsxWriteErrorCode,
-    calculate_workbook, open_xlsx_document_bytes, write_xlsx_draft_bytes,
+    SheetVisibility, TableColumnId, TableColumnName, TableId, TableName, WorkbookChange,
+    WorkbookDraft, WorkbookSourceKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
+    open_xlsx_document_bytes, write_xlsx_draft_bytes,
 };
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -2302,6 +2303,90 @@ fn tables_survive_edit_write_reopen() {
         .table("SalesDisplay")
         .expect("draft keeps table");
     assert_eq!(draft_table.columns().len(), 3);
+}
+
+#[test]
+fn source_linked_table_authoring_patches_stable_parts_and_preserves_unknown_metadata() {
+    let sheet = SHEET_WITH_TABLE.replace(
+        r#"<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><v>3</v></c></row></sheetData>"#,
+        r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Region</t></is></c><c r="B1" t="inlineStr"><is><t>Amount</t></is></c><c r="C1" t="inlineStr"><is><t>Note</t></is></c></row></sheetData>"#,
+    );
+    let opaque_table = TABLE_WITH_METADATA
+        .replace(
+        r#"totalsRowShown="1""#,
+        r#"totalsRowShown="1" published="1""#,
+        )
+        .replace(
+            "</table>",
+            r#"<extLst><ext uri="opaque"><x:autoFilter xmlns:x="urn:test" ref="KEEP-AUTO"><x:sortState ref="KEEP-NESTED"/></x:autoFilter><x:sortState xmlns:x="urn:test" ref="KEEP-SORT"><x:sortCondition ref="KEEP-CONDITION"/></x:sortState><x:tableColumn xmlns:x="urn:test" id="5" name="KEEP-COLUMN"><x:calculatedColumnFormula>KEEP-FORMULA</x:calculatedColumnFormula></x:tableColumn></ext></extLst></table>"#,
+        );
+    let source = build_table_archive(
+        &sheet,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", &opaque_table),
+        ],
+    );
+    let document =
+        open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    let table_id = TableId::new(1).expect("table ID");
+    let mut draft = WorkbookDraft::from_document(&document);
+    let receipt = draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::rename_table(table_id, TableName::new("Orders").expect("table name")),
+            WorkbookChange::rename_table_column(
+                table_id,
+                TableColumnId::new(5).expect("column ID"),
+                TableColumnName::new("Gross.Amount").expect("column name"),
+            ),
+        ]))
+        .expect("table edits");
+    assert_eq!(receipt.changed_table_ids(), [table_id]);
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("source-linked write");
+    let table_part = archive_text(output.bytes(), "xl/tables/table1.xml");
+    assert!(table_part.contains(r#"name="Orders""#), "{table_part}");
+    assert!(
+        table_part.contains(r#"displayName="Orders""#),
+        "{table_part}"
+    );
+    assert!(
+        table_part.contains(r#"name="Gross.Amount""#),
+        "{table_part}"
+    );
+    assert!(table_part.contains(r#"published="1""#), "{table_part}");
+    assert!(
+        table_part.contains(r#"<x:autoFilter xmlns:x="urn:test" ref="KEEP-AUTO"><x:sortState ref="KEEP-NESTED"/></x:autoFilter>"#),
+        "{table_part}"
+    );
+    assert!(
+        table_part.contains(r#"<x:sortState xmlns:x="urn:test" ref="KEEP-SORT"><x:sortCondition ref="KEEP-CONDITION"/></x:sortState>"#),
+        "{table_part}"
+    );
+    assert!(
+        table_part.contains(r#"<x:tableColumn xmlns:x="urn:test" id="5" name="KEEP-COLUMN"><x:calculatedColumnFormula>KEEP-FORMULA</x:calculatedColumnFormula></x:tableColumn>"#),
+        "{table_part}"
+    );
+    assert!(
+        table_part.contains(r#">[@[Gross.Amount]]*2</calculatedColumnFormula>"#),
+        "{table_part}"
+    );
+    assert!(
+        table_part.contains(r#">SUBTOTAL(109,[[Gross.Amount]])</totalsRowFormula>"#),
+        "{table_part}"
+    );
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    let table = reopened.workbook().table_by_id(table_id).expect("table");
+    assert_eq!(table.display_name().as_str(), "Orders");
+    assert_eq!(table.columns()[1].name(), "Gross.Amount");
+    assert!(table.has_opaque_metadata());
+    let first = reopened.workbook().sheet_by_name("First").expect("sheet");
+    assert!(matches!(
+        first.cell(address("B1")).expect("header").content(),
+        CellContent::Literal(CellValue::Text(value)) if value == "Gross.Amount"
+    ));
 }
 
 #[test]

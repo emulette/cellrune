@@ -2,13 +2,14 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationExecutionMode, CalculationOptions,
-    CancellationToken, CellAddress, CellContent, CellValue, EditBatch, OpenOptions, ReadLimits,
-    ReadOptions, RecalculationMode, SheetId, WorkbookCalculationSession, WorkbookChange,
-    WorkbookDraft, WorkbookSourceKind, WriteLimits, WriteOptions, XlsxDocumentKind, XlsxErrorCode,
-    XlsxWriteErrorCode, calculate_workbook, open_xlsx_document, open_xlsx_document_bytes,
-    open_xlsx_document_path, read_xlsx_bytes, scan_formula_capabilities,
-    write_preserved_xlsx_bytes,
+    ApplyChangesError, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
+    CalculationExecutionMode, CalculationOptions, CancellationToken, CellAddress, CellContent,
+    CellValue, EditBatch, OpenOptions, ReadLimits, ReadOptions, RecalculationMode, Row,
+    SessionErrorCode, SessionLimits, SheetId, TableColumnId, TableColumnName, TableId, TableName,
+    WorkbookCalculationSession, WorkbookChange, WorkbookDraft, WorkbookSourceKind, WriteLimits,
+    WriteOptions, XlsxDocumentKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
+    open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx_bytes,
+    scan_formula_capabilities, write_preserved_xlsx_bytes,
 };
 use sha2::{Digest, Sha256};
 use zip::read::ZipArchive;
@@ -141,6 +142,122 @@ fn generated_table_value_edits_match_incremental_and_full_calculation() {
             "{address}",
         );
     }
+}
+
+#[test]
+fn table_authoring_forces_a_full_rebuild_that_matches_fresh_calculation() {
+    let bytes = generated_table_topology_fixture(3);
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table authoring input");
+    let mut session = WorkbookCalculationSession::new(WorkbookDraft::from_document(&document));
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial table calculation");
+    let table_id = TableId::new(1).expect("stable table ID");
+    let receipt = session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([
+                WorkbookChange::rename_table(
+                    table_id,
+                    TableName::new("Orders").expect("valid table name"),
+                ),
+                WorkbookChange::rename_table_column(
+                    table_id,
+                    TableColumnId::new(2).expect("stable column ID"),
+                    TableColumnName::new("Gross Amount").expect("valid column name"),
+                ),
+                WorkbookChange::resize_table_rows(
+                    table_id,
+                    Row::new(2).expect("first data row"),
+                    Row::new(5).expect("last data row"),
+                )
+                .expect("valid resize"),
+            ]),
+        )
+        .expect("table authoring");
+    assert_eq!(receipt.changed_table_ids(), [table_id]);
+    assert!(receipt.topology_changed());
+
+    let error = session
+        .prepare_recalculation(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect_err("forced incremental cannot reuse stale table topology");
+    assert_eq!(error.code(), SessionErrorCode::IncrementalUnsafe);
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("automatic full rebuild");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
+    assert_eq!(delta.reason(), CalculationDecisionReason::TopologyChanged);
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed authored calculation")
+            .cells()
+            .collect::<Vec<_>>(),
+        calculate_workbook(session.workbook(), CalculationOptions::default())
+            .cells()
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn table_rewrite_budget_and_cancellation_leave_the_session_unchanged() {
+    let bytes = generated_table_reference_fixture();
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table document");
+    let limits = SessionLimits::default()
+        .with_formula_rewrite_limits(1, usize::MAX, usize::MAX, usize::MAX)
+        .expect("positive rewrite limits");
+    let session =
+        WorkbookCalculationSession::with_limits(WorkbookDraft::from_document(&document), limits);
+    let revision = session.workbook().semantic_revision();
+    let table_id = TableId::new(1).expect("stable table ID");
+    let rename = EditBatch::new([WorkbookChange::rename_table(
+        table_id,
+        TableName::new("Orders").expect("valid table name"),
+    )]);
+
+    let error = session
+        .prepare_changes(revision, rename.clone())
+        .expect_err("whole-workbook formula count exceeds the configured limit");
+    assert!(matches!(
+        error,
+        ApplyChangesError::Session(error)
+            if error.code() == SessionErrorCode::RewriteLimitExceeded
+    ));
+    assert_eq!(session.workbook().semantic_revision(), revision);
+    assert_eq!(
+        session
+            .workbook()
+            .table_by_id(table_id)
+            .expect("source table")
+            .display_name()
+            .as_str(),
+        "Sales"
+    );
+
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let error = session
+        .prepare_changes_cancellable(revision, rename, &cancellation)
+        .expect_err("pre-cancelled staging fails");
+    assert!(matches!(
+        error,
+        ApplyChangesError::Session(error) if error.code() == SessionErrorCode::Cancelled
+    ));
+    assert_eq!(session.workbook().semantic_revision(), revision);
 }
 
 fn assert_table_topology_results(workbook: &cellrune::WorkbookSnapshot, data_rows: u32) {

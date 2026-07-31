@@ -294,6 +294,26 @@ export type WorkbookChange =
       readonly iterativeCalculation?: boolean | null;
     };
 
+export type WorkbookChangeV2 =
+  | WorkbookChange
+  | {
+      readonly kind: "renameTable";
+      readonly tableId: number;
+      readonly newDisplayName: string;
+    }
+  | {
+      readonly kind: "renameTableColumn";
+      readonly tableId: number;
+      readonly columnId: number;
+      readonly newName: string;
+    }
+  | {
+      readonly kind: "resizeTableRows";
+      readonly tableId: number;
+      readonly firstDataRow: number;
+      readonly lastDataRow: number;
+    };
+
 export interface EditReceipt {
   readonly schemaVersion: number;
   readonly baseRevision: bigint;
@@ -304,6 +324,10 @@ export interface EditReceipt {
   readonly createdSheetIds: readonly number[];
   readonly topologyChanged: boolean;
   readonly calculationMetadataChanged: boolean;
+}
+
+export interface EditReceiptV2 extends EditReceipt {
+  readonly changedTableIds: readonly number[];
 }
 
 export interface CalculationDeltaCell {
@@ -399,6 +423,10 @@ export class Workbook {
     expectedRevision: bigint,
     changes: readonly WorkbookChange[],
   ): EditReceipt;
+  applyChangesV2(
+    expectedRevision: bigint,
+    changes: readonly WorkbookChangeV2[],
+  ): EditReceiptV2;
   changesSince(
     cursor?: bigint,
     options?: { readonly limit?: number },

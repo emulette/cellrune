@@ -17,6 +17,9 @@ const MESSAGE_DELTA_LIMIT: &str = "calculation delta exceeds the configured cell
 const MESSAGE_CURSOR_EXPIRED: &str = "calculation delta cursor is no longer retained";
 const MESSAGE_PAGE_LIMIT: &str = "calculation delta page exceeds the configured limit";
 const MESSAGE_CANCELLATION: &str = "calculation was cancelled";
+const MESSAGE_REWRITE_LIMIT: &str = "formula rewrite exceeds the configured whole-workbook limit";
+const MESSAGE_TABLE_MATERIALIZATION_LIMIT: &str =
+    "table resize exceeds the configured materialization-cell limit";
 
 /// Stable machine-readable failure produced by a stateful calculation session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,6 +51,10 @@ pub enum SessionErrorCode {
     PageLimitExceeded,
     /// Cooperative cancellation stopped a calculation before installation.
     Cancelled,
+    /// A whole-workbook typed formula rewrite exceeded its configured budget.
+    RewriteLimitExceeded,
+    /// A table resize exceeded its configured worksheet-materialization budget.
+    TableMaterializationLimitExceeded,
 }
 
 impl SessionErrorCode {
@@ -67,6 +74,10 @@ impl SessionErrorCode {
             Self::CursorExpired => "session.delta_cursor_expired",
             Self::PageLimitExceeded => "session.delta_page_limit_exceeded",
             Self::Cancelled => "session.cancelled",
+            Self::RewriteLimitExceeded => "session.formula_rewrite_limit_exceeded",
+            Self::TableMaterializationLimitExceeded => {
+                "session.table_materialization_limit_exceeded"
+            }
         }
     }
 
@@ -85,6 +96,8 @@ impl SessionErrorCode {
             Self::CursorExpired => MESSAGE_CURSOR_EXPIRED,
             Self::PageLimitExceeded => MESSAGE_PAGE_LIMIT,
             Self::Cancelled => MESSAGE_CANCELLATION,
+            Self::RewriteLimitExceeded => MESSAGE_REWRITE_LIMIT,
+            Self::TableMaterializationLimitExceeded => MESSAGE_TABLE_MATERIALIZATION_LIMIT,
         }
     }
 }

@@ -188,6 +188,60 @@ pub struct DocumentPresentation {
 }
 
 impl DocumentPresentation {
+    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut sheets = BTreeMap::new();
+        for (sheet_id, sheet) in &self.sheets {
+            if cancelled() {
+                return Err(());
+            }
+            let mut row_phonetic_visibility = BTreeMap::new();
+            for (row, visible) in &sheet.row_phonetic_visibility {
+                if cancelled() {
+                    return Err(());
+                }
+                row_phonetic_visibility.insert(*row, *visible);
+            }
+            let mut column_phonetic_visibility =
+                Vec::with_capacity(sheet.column_phonetic_visibility.len());
+            for declaration in &sheet.column_phonetic_visibility {
+                if cancelled() {
+                    return Err(());
+                }
+                column_phonetic_visibility.push(*declaration);
+            }
+            let mut cell_phonetics = BTreeMap::new();
+            for (address, phonetics) in &sheet.cell_phonetics {
+                if cancelled() {
+                    return Err(());
+                }
+                cell_phonetics.insert(*address, phonetics.clone());
+            }
+            sheets.insert(
+                *sheet_id,
+                SheetPresentation {
+                    worksheet_phonetic_properties: sheet.worksheet_phonetic_properties.clone(),
+                    row_phonetic_visibility,
+                    column_phonetic_visibility,
+                    cell_phonetics,
+                    frozen_pane: sheet.frozen_pane,
+                    right_to_left: sheet.right_to_left,
+                },
+            );
+        }
+        let mut diagnostics = Vec::with_capacity(self.diagnostics.len());
+        for diagnostic in &self.diagnostics {
+            if cancelled() {
+                return Err(());
+            }
+            diagnostics.push(diagnostic.clone());
+        }
+        Ok(Self {
+            sheets,
+            diagnostics,
+            revision: self.revision,
+        })
+    }
+
     /// Returns the monotonic presentation revision.
     pub const fn revision(&self) -> u64 {
         self.revision

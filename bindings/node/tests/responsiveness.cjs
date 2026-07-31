@@ -11,10 +11,23 @@ function assertBusyError(error) {
 
 async function main() {
   const workbook = Workbook.create();
-  workbook.setNumber("Sheet1", "A1", 1);
+  const changes = [
+    {
+      kind: "setValue",
+      sheet: "Sheet1",
+      address: "A1",
+      value: { kind: "number", value: 1 },
+    },
+  ];
   for (let row = 2; row <= 25_000; row += 1) {
-    workbook.setFormula("Sheet1", `A${row}`, `=A${row - 1}+1`);
+    changes.push({
+      kind: "setFormula",
+      sheet: "Sheet1",
+      address: `A${row}`,
+      formula: `=A${row - 1}+1`,
+    });
   }
+  workbook.applyChanges(0n, changes);
 
   let ticks = 0;
   const timer = setInterval(() => {

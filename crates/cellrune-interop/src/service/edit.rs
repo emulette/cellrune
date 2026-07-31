@@ -3,14 +3,18 @@
 use std::collections::BTreeMap;
 
 use cellrune::{
-    CalculationHints, CalculationMode, CellAddress, CellRange, DateSystem, DefinedName,
-    DefinedNameScope, EditBatch, FormulaText, NumberFormat, NumberFormatKind, PreparedEditBatch,
-    SheetId, SheetName, SheetVisibility, WorkbookChange, WorkbookSnapshot,
+    CalculationHints, CalculationMode, CancellationToken, CellAddress, CellRange, DateSystem,
+    DefinedName, DefinedNameScope, EditBatch, FormulaText, NumberFormat, NumberFormatKind,
+    PreparedEditBatch, Row, SheetId, SheetName, SheetVisibility, TableColumnId, TableColumnName,
+    TableId, TableName, WorkbookChange, WorkbookSnapshot,
 };
 
 use super::WorkbookSession;
-use crate::convert::{edit_receipt, value_from_dto};
-use crate::{EditBatchDto, EditReceiptDto, InteropError, WorkbookChangeDto, WritableCellValueDto};
+use crate::convert::{edit_receipt, edit_receipt_v2, value_from_dto};
+use crate::{
+    EditBatchDto, EditBatchV2Dto, EditReceiptDto, EditReceiptV2Dto, InteropError, TableChangeV2Dto,
+    WorkbookChangeDto, WorkbookChangeV2Dto, WritableCellValueDto,
+};
 
 impl WorkbookSession {
     /// Applies a typed edit batch atomically after checking the expected revision.
@@ -38,7 +42,7 @@ impl WorkbookSession {
         expected_revision: u64,
         batch: EditBatchDto,
     ) -> Result<PreparedChanges, InteropError> {
-        let batch = convert_edit_batch(self.engine.workbook(), batch)?;
+        let batch = convert_edit_batch(self.engine.workbook(), batch, &|| false)?;
         let prepared = self.engine.prepare_changes(expected_revision, batch)?;
         let receipt = edit_receipt(prepared.workbook(), prepared.receipt());
         Ok(PreparedChanges { prepared, receipt })
@@ -55,6 +59,73 @@ impl WorkbookSession {
         prepared: PreparedChanges,
     ) -> Result<EditReceiptDto, InteropError> {
         let PreparedChanges { prepared, receipt } = prepared;
+        self.engine.install_changes(prepared)?;
+        Ok(receipt)
+    }
+
+    /// Applies an edit-schema-v2 batch, including stable-ID table authoring.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same stable revision, input, resource, and workbook-validation errors as
+    /// [`Self::apply_changes`].
+    pub fn apply_changes_v2(
+        &mut self,
+        expected_revision: u64,
+        batch: EditBatchV2Dto,
+    ) -> Result<EditReceiptV2Dto, InteropError> {
+        let prepared = self.prepare_changes_v2(expected_revision, batch)?;
+        self.install_changes_v2(prepared)
+    }
+
+    /// Stages an edit-schema-v2 batch without changing the live workbook session.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::apply_changes_v2`].
+    pub fn prepare_changes_v2(
+        &self,
+        expected_revision: u64,
+        batch: EditBatchV2Dto,
+    ) -> Result<PreparedChangesV2, InteropError> {
+        let batch = convert_edit_batch_v2(self.engine.workbook(), batch, &|| false)?;
+        let prepared = self.engine.prepare_changes(expected_revision, batch)?;
+        let receipt = edit_receipt_v2(prepared.workbook(), prepared.receipt());
+        Ok(PreparedChangesV2 { prepared, receipt })
+    }
+
+    /// Stages an edit-schema-v2 batch with cooperative cancellation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::prepare_changes_v2`] plus `session.cancelled` when
+    /// cancellation is requested before staging completes.
+    pub fn prepare_changes_v2_cancellable(
+        &self,
+        expected_revision: u64,
+        batch: EditBatchV2Dto,
+        cancellation: &CancellationToken,
+    ) -> Result<PreparedChangesV2, InteropError> {
+        let cancelled = || cancellation.is_cancelled();
+        let batch = convert_edit_batch_v2(self.engine.workbook(), batch, &cancelled)?;
+        let prepared =
+            self.engine
+                .prepare_changes_cancellable(expected_revision, batch, cancellation)?;
+        let receipt = edit_receipt_v2(prepared.workbook(), prepared.receipt());
+        Ok(PreparedChangesV2 { prepared, receipt })
+    }
+
+    /// Installs a previously staged edit-schema-v2 batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable revision error without changing the session when the prepared batch is
+    /// stale.
+    pub fn install_changes_v2(
+        &mut self,
+        prepared: PreparedChangesV2,
+    ) -> Result<EditReceiptV2Dto, InteropError> {
+        let PreparedChangesV2 { prepared, receipt } = prepared;
         self.engine.install_changes(prepared)?;
         Ok(receipt)
     }
@@ -194,6 +265,20 @@ pub struct PreparedChanges {
     receipt: EditReceiptDto,
 }
 
+/// A typed edit-schema-v2 batch staged for guarded installation.
+#[derive(Debug)]
+pub struct PreparedChangesV2 {
+    prepared: PreparedEditBatch,
+    receipt: EditReceiptV2Dto,
+}
+
+impl PreparedChangesV2 {
+    /// Returns the exact v2 receipt that installation would commit.
+    pub const fn receipt(&self) -> &EditReceiptV2Dto {
+        &self.receipt
+    }
+}
+
 impl PreparedChanges {
     /// Returns the exact receipt that installation would commit.
     pub const fn receipt(&self) -> &EditReceiptDto {
@@ -212,6 +297,7 @@ fn parse_range(value: &str) -> Result<CellRange, InteropError> {
 fn convert_edit_batch(
     workbook: &WorkbookSnapshot,
     batch: EditBatchDto,
+    cancelled: &impl Fn() -> bool,
 ) -> Result<EditBatch, InteropError> {
     let mut sheets = workbook
         .sheets()
@@ -226,6 +312,9 @@ fn convert_edit_batch(
         .unwrap_or(0);
     let mut changes = Vec::with_capacity(batch.changes.len());
     for change in batch.changes {
+        if cancelled() {
+            return Err(InteropError::edit_cancelled());
+        }
         let converted = match change {
             WorkbookChangeDto::SetValue {
                 sheet,
@@ -364,6 +453,79 @@ fn convert_edit_batch(
         };
         changes.push(converted);
     }
+    Ok(EditBatch::new(changes))
+}
+
+fn convert_edit_batch_v2(
+    workbook: &WorkbookSnapshot,
+    batch: EditBatchV2Dto,
+    cancelled: &impl Fn() -> bool,
+) -> Result<EditBatch, InteropError> {
+    enum Marker {
+        V1,
+        Table(TableChangeV2Dto),
+    }
+
+    let mut markers = Vec::with_capacity(batch.changes.len());
+    let mut v1_changes = Vec::new();
+    for change in batch.changes {
+        if cancelled() {
+            return Err(InteropError::edit_cancelled());
+        }
+        match change {
+            WorkbookChangeV2Dto::V1(change) => {
+                markers.push(Marker::V1);
+                v1_changes.push(change);
+            }
+            WorkbookChangeV2Dto::Table(change) => markers.push(Marker::Table(change)),
+        }
+    }
+    let converted_v1 = convert_edit_batch(
+        workbook,
+        EditBatchDto {
+            changes: v1_changes,
+        },
+        cancelled,
+    )?;
+    let mut converted_v1 = converted_v1.changes().iter().cloned();
+    let mut changes = Vec::with_capacity(markers.len());
+    for marker in markers {
+        if cancelled() {
+            return Err(InteropError::edit_cancelled());
+        }
+        let change = match marker {
+            Marker::V1 => converted_v1
+                .next()
+                .expect("one converted v1 operation for each marker"),
+            Marker::Table(TableChangeV2Dto::RenameTable {
+                table_id,
+                new_display_name,
+            }) => WorkbookChange::rename_table(
+                TableId::new(table_id)?,
+                TableName::new(new_display_name)?,
+            ),
+            Marker::Table(TableChangeV2Dto::RenameTableColumn {
+                table_id,
+                column_id,
+                new_name,
+            }) => WorkbookChange::rename_table_column(
+                TableId::new(table_id)?,
+                TableColumnId::new(column_id)?,
+                TableColumnName::new(new_name)?,
+            ),
+            Marker::Table(TableChangeV2Dto::ResizeTableRows {
+                table_id,
+                first_data_row,
+                last_data_row,
+            }) => WorkbookChange::resize_table_rows(
+                TableId::new(table_id)?,
+                Row::new(first_data_row)?,
+                Row::new(last_data_row)?,
+            )?,
+        };
+        changes.push(change);
+    }
+    debug_assert!(converted_v1.next().is_none());
     Ok(EditBatch::new(changes))
 }
 

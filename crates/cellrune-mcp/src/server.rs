@@ -19,7 +19,7 @@ use crate::session::SessionCache;
 
 const JSON_MIME_TYPE: &str = "application/json";
 const SERVER_INSTRUCTIONS: &str = "Use high-level workbook session tools to open or create a \
-workbook, apply typed edit batches, recalculate existing formulas with CellRune, read bounded \
+workbook, apply typed edit batches (v2 for table authoring), recalculate existing formulas with CellRune, read bounded \
 ranges, and save a verified copy. Tools are not defined per spreadsheet function. Paths must be \
 absolute and remain inside an operator-approved root.";
 
@@ -198,6 +198,7 @@ mod tests {
             names,
             vec![
                 "workbook_apply_changes",
+                "workbook_apply_changes_v2",
                 "workbook_changes_since",
                 "workbook_close",
                 "workbook_create",
@@ -265,8 +266,24 @@ mod tests {
             ),
             "the output-only unsupported value must not appear in an input schema"
         );
+        let apply_changes_v2 = tools
+            .iter()
+            .find(|tool| tool.name == "workbook_apply_changes_v2")
+            .expect("apply-changes-v2 tool must be present");
+        let changes_v2 = apply_changes_v2
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get("changes"))
+            .expect("apply-changes-v2 schema must expose its change list");
+        assert_eq!(
+            changes_v2.get("minItems").and_then(Value::as_u64),
+            Some(1),
+            "apply-changes-v2 must advertise its non-empty batch invariant"
+        );
         let expected_annotations = [
             ("workbook_apply_changes", false, true, true, false),
+            ("workbook_apply_changes_v2", false, true, true, false),
             ("workbook_changes_since", true, false, true, false),
             ("workbook_close", false, true, true, false),
             ("workbook_create", false, true, false, false),

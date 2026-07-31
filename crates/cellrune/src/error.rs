@@ -76,6 +76,10 @@ const MESSAGE_TABLE_COLUMN_COUNT_MISMATCH: &str =
     "table column count does not match the table range width";
 const MESSAGE_TABLE_COLUMN_NAME_EMPTY: &str = "table column name must not be empty";
 const MESSAGE_TABLE_COLUMN_NAME_TOO_LONG: &str = "table column name exceeds 255 UTF-16 code units";
+const MESSAGE_TABLE_COLUMN_NAME_INVALID_CHARACTER: &str =
+    "table column name contains a character forbidden by XML 1.0";
+const MESSAGE_TABLE_COLUMN_NAME_SPACE_BOUNDARY: &str =
+    "table column name must not begin or end with an ASCII space";
 const MESSAGE_DUPLICATE_TABLE_COLUMN_NAME: &str =
     "table contains a duplicate case-insensitive column name";
 const MESSAGE_DUPLICATE_TABLE_COLUMN_ID: &str = "table contains a duplicate column identifier";
@@ -84,6 +88,17 @@ const MESSAGE_TABLE_ROW_COUNTS_EXCEED_RANGE: &str =
     "table header and totals rows exceed the table range height";
 const MESSAGE_INVALID_TABLE_TOTALS_METADATA: &str =
     "table totals label, function, and formula metadata are inconsistent";
+const MESSAGE_UNKNOWN_TABLE_ID: &str = "workbook does not contain the requested table ID";
+const MESSAGE_UNKNOWN_TABLE_COLUMN_ID: &str = "table does not contain the requested column ID";
+const MESSAGE_TABLE_DATA_ROWS_REVERSED: &str = "table data row start must not be after its end";
+const MESSAGE_TABLE_RESIZE_HEADER_UNDERFLOW: &str =
+    "table data row start cannot accommodate the declared header rows";
+const MESSAGE_TABLE_MATERIALIZATION_COLLISION: &str =
+    "table materialization would overwrite non-equivalent worksheet content";
+const MESSAGE_UNSUPPORTED_TABLE_AUTHORING_METADATA: &str =
+    "table metadata cannot be preserved safely by this authoring operation";
+const MESSAGE_FORMULA_REWRITE_PARSE_FAILED: &str =
+    "a formula related to the rename could not be parsed for typed rewriting";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
@@ -212,6 +227,10 @@ pub enum ValidationErrorCode {
     TableColumnNameEmpty,
     /// A table column name exceeds Excel's length limit.
     TableColumnNameTooLong,
+    /// A table column name contains a character forbidden by XML 1.0.
+    TableColumnNameInvalidCharacter,
+    /// A table-column authoring name begins or ends with an ASCII space.
+    TableColumnNameSpaceBoundary,
     /// A table contains a duplicate case-insensitive column name.
     DuplicateTableColumnName,
     /// A table contains a duplicate column identifier.
@@ -222,6 +241,20 @@ pub enum ValidationErrorCode {
     TableRowCountsExceedRange,
     /// A table column contains inconsistent totals metadata.
     InvalidTableTotalsMetadata,
+    /// A draft operation references an unknown table ID.
+    UnknownTableId,
+    /// A draft operation references an unknown table column ID.
+    UnknownTableColumnId,
+    /// A table resize declares reversed data rows.
+    TableDataRowsReversed,
+    /// A table resize cannot place its header above the first data row.
+    TableResizeHeaderUnderflow,
+    /// Table materialization would overwrite non-equivalent worksheet content.
+    TableMaterializationCollision,
+    /// Table metadata cannot be safely authored.
+    UnsupportedTableAuthoringMetadata,
+    /// A target-related formula could not be parsed for typed rewriting.
+    FormulaRewriteParseFailed,
 }
 
 impl ValidationErrorCode {
@@ -294,11 +327,24 @@ impl ValidationErrorCode {
             Self::TableColumnCountMismatch => "validation.table_column_count_mismatch",
             Self::TableColumnNameEmpty => "validation.table_column_name_empty",
             Self::TableColumnNameTooLong => "validation.table_column_name_too_long",
+            Self::TableColumnNameInvalidCharacter => {
+                "validation.table_column_name_invalid_character"
+            }
+            Self::TableColumnNameSpaceBoundary => "validation.table_column_name_space_boundary",
             Self::DuplicateTableColumnName => "validation.duplicate_table_column_name",
             Self::DuplicateTableColumnId => "validation.duplicate_table_column_id",
             Self::OverlappingTables => "validation.overlapping_tables",
             Self::TableRowCountsExceedRange => "validation.table_row_counts_exceed_range",
             Self::InvalidTableTotalsMetadata => "validation.invalid_table_totals_metadata",
+            Self::UnknownTableId => "validation.unknown_table_id",
+            Self::UnknownTableColumnId => "validation.unknown_table_column_id",
+            Self::TableDataRowsReversed => "validation.table_data_rows_reversed",
+            Self::TableResizeHeaderUnderflow => "validation.table_resize_header_underflow",
+            Self::TableMaterializationCollision => "validation.table_materialization_collision",
+            Self::UnsupportedTableAuthoringMetadata => {
+                "validation.unsupported_table_authoring_metadata"
+            }
+            Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
         }
     }
 }
@@ -543,6 +589,13 @@ pub enum ValidationError {
         /// Length of the rejected name in UTF-16 code units.
         utf16_len: usize,
     },
+    /// A table column name contains a character forbidden by XML 1.0.
+    TableColumnNameInvalidCharacter {
+        /// Forbidden character found in the table column name.
+        character: char,
+    },
+    /// A table-column authoring name begins or ends with an ASCII space.
+    TableColumnNameSpaceBoundary,
     /// Two columns in one table use names that compare equal without case.
     DuplicateTableColumnName {
         /// Repeated column name as supplied by the caller.
@@ -573,6 +626,61 @@ pub enum ValidationError {
     },
     /// A table column's totals label, function, and formula metadata are inconsistent.
     InvalidTableTotalsMetadata,
+    /// A draft operation references no table with the supplied stable ID.
+    UnknownTableId {
+        /// Missing table identifier.
+        value: u32,
+    },
+    /// A draft operation references no column with the supplied stable ID.
+    UnknownTableColumnId {
+        /// Table containing the missing column.
+        table_id: u32,
+        /// Missing column identifier.
+        column_id: u32,
+    },
+    /// A table resize declares a first data row below its last data row.
+    TableDataRowsReversed {
+        /// Rejected first data row.
+        first_data_row: u32,
+        /// Rejected last data row.
+        last_data_row: u32,
+    },
+    /// A table resize cannot place declared header rows above its first data row.
+    TableResizeHeaderUnderflow {
+        /// Target table.
+        table_id: u32,
+        /// Rejected first data row.
+        first_data_row: u32,
+        /// Declared header row count.
+        header_row_count: u32,
+    },
+    /// Table materialization would overwrite non-equivalent worksheet content.
+    TableMaterializationCollision {
+        /// Target table.
+        table_id: u32,
+        /// Worksheet containing the collision.
+        sheet_id: u32,
+        /// One-based row of the collision.
+        row: u32,
+        /// One-based column of the collision.
+        column: u32,
+    },
+    /// Table metadata cannot be preserved safely by the requested authoring operation.
+    UnsupportedTableAuthoringMetadata {
+        /// Target table.
+        table_id: u32,
+    },
+    /// A formula related to a rename could not be parsed for typed rewriting.
+    FormulaRewriteParseFailed {
+        /// Stable parser error code.
+        parse_code: String,
+        /// Start byte of the parser error.
+        start: usize,
+        /// End byte of the parser error.
+        end: usize,
+        /// Stable workbook owner context for the rejected formula, when available.
+        owner: Option<String>,
+    },
 }
 
 impl ValidationError {
@@ -663,6 +771,10 @@ impl ValidationError {
             Self::TableColumnCountMismatch { .. } => ValidationErrorCode::TableColumnCountMismatch,
             Self::TableColumnNameEmpty => ValidationErrorCode::TableColumnNameEmpty,
             Self::TableColumnNameTooLong { .. } => ValidationErrorCode::TableColumnNameTooLong,
+            Self::TableColumnNameInvalidCharacter { .. } => {
+                ValidationErrorCode::TableColumnNameInvalidCharacter
+            }
+            Self::TableColumnNameSpaceBoundary => ValidationErrorCode::TableColumnNameSpaceBoundary,
             Self::DuplicateTableColumnName { .. } => ValidationErrorCode::DuplicateTableColumnName,
             Self::DuplicateTableColumnId { .. } => ValidationErrorCode::DuplicateTableColumnId,
             Self::OverlappingTables { .. } => ValidationErrorCode::OverlappingTables,
@@ -670,6 +782,21 @@ impl ValidationError {
                 ValidationErrorCode::TableRowCountsExceedRange
             }
             Self::InvalidTableTotalsMetadata => ValidationErrorCode::InvalidTableTotalsMetadata,
+            Self::UnknownTableId { .. } => ValidationErrorCode::UnknownTableId,
+            Self::UnknownTableColumnId { .. } => ValidationErrorCode::UnknownTableColumnId,
+            Self::TableDataRowsReversed { .. } => ValidationErrorCode::TableDataRowsReversed,
+            Self::TableResizeHeaderUnderflow { .. } => {
+                ValidationErrorCode::TableResizeHeaderUnderflow
+            }
+            Self::TableMaterializationCollision { .. } => {
+                ValidationErrorCode::TableMaterializationCollision
+            }
+            Self::UnsupportedTableAuthoringMetadata { .. } => {
+                ValidationErrorCode::UnsupportedTableAuthoringMetadata
+            }
+            Self::FormulaRewriteParseFailed { .. } => {
+                ValidationErrorCode::FormulaRewriteParseFailed
+            }
         }
     }
 }
@@ -852,6 +979,13 @@ impl fmt::Display for ValidationError {
                     "{MESSAGE_TABLE_COLUMN_NAME_TOO_LONG}: {utf16_len}"
                 )
             }
+            Self::TableColumnNameInvalidCharacter { character } => write!(
+                formatter,
+                "{MESSAGE_TABLE_COLUMN_NAME_INVALID_CHARACTER}: {character:?}"
+            ),
+            Self::TableColumnNameSpaceBoundary => {
+                formatter.write_str(MESSAGE_TABLE_COLUMN_NAME_SPACE_BOUNDARY)
+            }
             Self::DuplicateTableColumnName { name } => {
                 write!(formatter, "{MESSAGE_DUPLICATE_TABLE_COLUMN_NAME}: {name}")
             }
@@ -876,6 +1010,59 @@ impl fmt::Display for ValidationError {
             ),
             Self::InvalidTableTotalsMetadata => {
                 formatter.write_str(MESSAGE_INVALID_TABLE_TOTALS_METADATA)
+            }
+            Self::UnknownTableId { value } => {
+                write!(formatter, "{MESSAGE_UNKNOWN_TABLE_ID}: {value}")
+            }
+            Self::UnknownTableColumnId {
+                table_id,
+                column_id,
+            } => write!(
+                formatter,
+                "{MESSAGE_UNKNOWN_TABLE_COLUMN_ID}: table {table_id}, column {column_id}"
+            ),
+            Self::TableDataRowsReversed {
+                first_data_row,
+                last_data_row,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_DATA_ROWS_REVERSED}: {first_data_row}..{last_data_row}"
+            ),
+            Self::TableResizeHeaderUnderflow {
+                table_id,
+                first_data_row,
+                header_row_count,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_RESIZE_HEADER_UNDERFLOW}: table {table_id}, first data row {first_data_row}, header rows {header_row_count}"
+            ),
+            Self::TableMaterializationCollision {
+                table_id,
+                sheet_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_MATERIALIZATION_COLLISION}: table {table_id}, sheet {sheet_id}, row {row}, column {column}"
+            ),
+            Self::UnsupportedTableAuthoringMetadata { table_id } => write!(
+                formatter,
+                "{MESSAGE_UNSUPPORTED_TABLE_AUTHORING_METADATA}: table {table_id}"
+            ),
+            Self::FormulaRewriteParseFailed {
+                parse_code,
+                start,
+                end,
+                owner,
+            } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_FORMULA_REWRITE_PARSE_FAILED}: {parse_code} at {start}..{end}"
+                )?;
+                if let Some(owner) = owner {
+                    write!(formatter, ", owner {owner}")?;
+                }
+                Ok(())
             }
         }
     }
@@ -1127,6 +1314,14 @@ mod tests {
                 "validation.table_column_name_too_long",
             ),
             (
+                ValidationErrorCode::TableColumnNameInvalidCharacter,
+                "validation.table_column_name_invalid_character",
+            ),
+            (
+                ValidationErrorCode::TableColumnNameSpaceBoundary,
+                "validation.table_column_name_space_boundary",
+            ),
+            (
                 ValidationErrorCode::DuplicateTableColumnName,
                 "validation.duplicate_table_column_name",
             ),
@@ -1145,6 +1340,34 @@ mod tests {
             (
                 ValidationErrorCode::InvalidTableTotalsMetadata,
                 "validation.invalid_table_totals_metadata",
+            ),
+            (
+                ValidationErrorCode::UnknownTableId,
+                "validation.unknown_table_id",
+            ),
+            (
+                ValidationErrorCode::UnknownTableColumnId,
+                "validation.unknown_table_column_id",
+            ),
+            (
+                ValidationErrorCode::TableDataRowsReversed,
+                "validation.table_data_rows_reversed",
+            ),
+            (
+                ValidationErrorCode::TableResizeHeaderUnderflow,
+                "validation.table_resize_header_underflow",
+            ),
+            (
+                ValidationErrorCode::TableMaterializationCollision,
+                "validation.table_materialization_collision",
+            ),
+            (
+                ValidationErrorCode::UnsupportedTableAuthoringMetadata,
+                "validation.unsupported_table_authoring_metadata",
+            ),
+            (
+                ValidationErrorCode::FormulaRewriteParseFailed,
+                "validation.formula_rewrite_parse_failed",
             ),
         ];
         let mut seen_codes = BTreeSet::new();

@@ -2,7 +2,8 @@ use cellrune_interop::{
     CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto, CalculationResultDto,
     CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
-    EditReceiptDto, FunctionUsageReportDto, RangePageDto, WorkbookSummaryDto, WriteReportDto,
+    EditReceiptDto, EditReceiptV2Dto, FunctionUsageReportDto, RangePageDto, WorkbookSummaryDto,
+    WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -94,6 +95,15 @@ pub(crate) fn edit_receipt<'py>(
         "calculation_metadata_changed",
         value.calculation_metadata_changed,
     )?;
+    Ok(result)
+}
+
+pub(crate) fn edit_receipt_v2<'py>(
+    py: Python<'py>,
+    value: &EditReceiptV2Dto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = edit_receipt(py, &value.receipt)?;
+    result.set_item("changed_table_ids", &value.changed_table_ids)?;
     Ok(result)
 }
 

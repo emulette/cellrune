@@ -182,7 +182,7 @@ pub(super) fn parse_structured_reference(
                 let value = trim_syntax_spaces(unwrap_component(single)?);
                 source_components.push(source_component(
                     raw,
-                    SourceComponentKind::StructuredColumn,
+                    SourceComponentKind::StructuredColumn { grouped: true },
                     value,
                 ));
                 StructuredColumns::Single(unescape_name(value)?.into_boxed_str())
@@ -190,7 +190,7 @@ pub(super) fn parse_structured_reference(
             [single] => {
                 source_components.push(source_component(
                     raw,
-                    SourceComponentKind::StructuredColumn,
+                    SourceComponentKind::StructuredColumn { grouped: false },
                     single,
                 ));
                 StructuredColumns::Single(ungrouped_column(single)?)
@@ -200,12 +200,12 @@ pub(super) fn parse_structured_reference(
                 let end = trim_syntax_spaces(unwrap_component(end)?);
                 source_components.push(source_component(
                     raw,
-                    SourceComponentKind::StructuredColumnStart,
+                    SourceComponentKind::StructuredColumnStart { grouped: true },
                     start,
                 ));
                 source_components.push(source_component(
                     raw,
-                    SourceComponentKind::StructuredColumnEnd,
+                    SourceComponentKind::StructuredColumnEnd { grouped: true },
                     end,
                 ));
                 StructuredColumns::Range {
@@ -252,12 +252,12 @@ pub(super) fn parse_structured_reference(
             let end = trim_syntax_spaces(unwrap_component(ranges[1])?);
             source_components.push(source_component(
                 raw,
-                SourceComponentKind::StructuredColumnStart,
+                SourceComponentKind::StructuredColumnStart { grouped: true },
                 start,
             ));
             source_components.push(source_component(
                 raw,
-                SourceComponentKind::StructuredColumnEnd,
+                SourceComponentKind::StructuredColumnEnd { grouped: true },
                 end,
             ));
             columns = Some(StructuredColumns::Range {
@@ -289,7 +289,7 @@ pub(super) fn parse_structured_reference(
         } else if columns.is_none() {
             source_components.push(source_component(
                 raw,
-                SourceComponentKind::StructuredColumn,
+                SourceComponentKind::StructuredColumn { grouped },
                 component,
             ));
             columns = Some(StructuredColumns::Single(if grouped {

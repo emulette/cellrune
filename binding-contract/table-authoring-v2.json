@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "fixture": "table-authoring-v2.xlsx",
+  "table_id": 1,
+  "column_id": 2,
+  "new_display_name": "Orders",
+  "new_column_name": "Gross Amount",
+  "first_data_row": 2,
+  "last_data_row": 4,
+  "expected_range": "A1:C5",
+  "expected_header_address": "B1",
+  "empty_table_id": 2,
+  "empty_table_name": "EmptySales",
+  "empty_table_range": "G1:H1",
+  "empty_defined_name": "EmptyAmount",
+  "empty_defined_name_result": "empty_reference"
+}

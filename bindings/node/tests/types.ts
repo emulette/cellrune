@@ -4,9 +4,11 @@ import {
   type CellValue,
   type DefinedNameInspection,
   type EditReceipt,
+  type EditReceiptV2,
   type RangePage,
   type TableSummary,
   type WorkbookChange,
+  type WorkbookChangeV2,
   Workbook,
 } from "@cellrune/node";
 import type { Buffer } from "node:buffer";
@@ -49,6 +51,19 @@ async function check(): Promise<void> {
     workbook.summary().semanticRevision,
     changes,
   );
+  const changesV2: readonly WorkbookChangeV2[] = [
+    {
+      kind: "renameTableColumn",
+      tableId: 1,
+      columnId: 2,
+      newName: "Gross Amount",
+    },
+  ];
+  const receiptV2: EditReceiptV2 = workbook.applyChangesV2(
+    receipt.resultRevision,
+    changesV2,
+  );
+  receiptV2.changedTableIds.map((tableId) => tableId.toFixed(0));
   receipt.calculationChangedCells.length;
   receipt.calculationMetadataChanged.valueOf();
   const delta: CalculationDelta = await workbook.recalculate({

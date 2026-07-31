@@ -1,12 +1,24 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::{
     DraftCellMutation, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     next_revision,
 };
-use super::formula_edit::{FormulaEditState, rename_sheet, upsert_formula};
+use super::formula_edit::{
+    FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
+};
 use super::staged::{mark_upsert, sheet_by_id_mut};
-use super::{EditBatch, EditReceipt, WorkbookChange};
+use super::table_edit::{
+    TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
+    resize_table_rows, table_locations,
+};
+use super::{
+    BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
+};
+use crate::calculation::formula_rewrite::{
+    FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits,
+};
+use crate::workbook::{WorkbookBuildError, WorkbookSnapshotInput};
 use crate::{
     CalculationCellId, CellContent, CellValue, FormulaCell, FormulaDialect, FormulaMetadata,
     NumberFormat, SavedResult, Sheet, SheetId, SheetVisibility, ValidationError, WorkbookSnapshot,
@@ -23,6 +35,21 @@ impl WorkbookDraft {
     /// Returns a [`ValidationError`] for an invalid sheet, cell, name, range, visibility state,
     /// workbook invariant, or exhausted semantic revision.
     pub fn apply_changes(&mut self, batch: EditBatch) -> Result<EditReceipt, ValidationError> {
+        let never_cancelled = || false;
+        let mut rewrite_budget =
+            FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
+        let mut materialization_budget =
+            TableMaterializationBudget::new(usize::MAX, &never_cancelled);
+        self.apply_changes_controlled(batch, &mut rewrite_budget, &mut materialization_budget)
+            .map_err(BatchExecutionError::into_validation)
+    }
+
+    pub(crate) fn apply_changes_controlled(
+        &mut self,
+        batch: EditBatch,
+        rewrite_budget: &mut FormulaRewriteBudget<'_>,
+        materialization_budget: &mut TableMaterializationBudget<'_>,
+    ) -> Result<EditReceipt, BatchExecutionError> {
         let base_revision = self.semantic_revision();
         if batch.is_empty() {
             return Ok(EditReceipt {
@@ -32,19 +59,29 @@ impl WorkbookDraft {
                 changed_cells: Vec::new(),
                 calculation_changed_cells: Vec::new(),
                 created_sheet_ids: Vec::new(),
+                changed_table_ids: Vec::new(),
                 topology_changed: false,
                 calculation_metadata_changed: false,
             });
         }
 
-        let mut sheets = self.workbook.sheets().to_vec();
-        let mut defined_names = self.workbook.defined_names().to_vec();
+        rewrite_budget.check_cancelled()?;
+        let mut sheets = clone_sheets(self.workbook.sheets(), rewrite_budget)?;
+        let table_locations = table_locations(&sheets)?;
+        let table_formula_locations = table_formula_locations(&sheets, rewrite_budget)?;
+        let mut defined_names = clone_slice(self.workbook.defined_names(), rewrite_budget)?;
         let mut date_system = self.workbook.date_system();
         let mut calculation_hints = self.workbook.calculation_hints();
-        let mut cell_mutations = self.cell_mutations.clone();
-        let mut presentation = self.presentation.clone();
-        let mut presentation_cell_mutations = self.presentation_cell_mutations.clone();
-        let mut added_sheets = self.added_sheets.clone();
+        let mut cell_mutations = clone_map(&self.cell_mutations, rewrite_budget)?;
+        let mut presentation = self
+            .presentation
+            .clone_cancellable(&|| rewrite_budget.check_cancelled().is_err())
+            .map_err(|()| FormulaRewriteError::Cancelled)?;
+        let mut presentation_cell_mutations =
+            clone_set(&self.presentation_cell_mutations, rewrite_budget)?;
+        let mut added_sheets = clone_set(&self.added_sheets, rewrite_budget)?;
+        let previous_changed_table_ids = clone_set(&self.changed_table_ids, rewrite_budget)?;
+        let mut changed_table_ids = BTreeSet::new();
         let mut workbook_changed = self.workbook_changed;
         let mut changed_cells = BTreeSet::new();
         let mut calculation_changed_cells = BTreeSet::new();
@@ -80,7 +117,8 @@ impl WorkbookDraft {
                             {
                                 return Err(annotated_text_replacement_required(
                                     *sheet_id, *address,
-                                ));
+                                )
+                                .into());
                             }
                         }
                     }
@@ -124,7 +162,7 @@ impl WorkbookDraft {
                     formula,
                 } => {
                     if presentation.has_cell_annotation(*sheet_id, *address) {
-                        return Err(annotated_text_replacement_required(*sheet_id, *address));
+                        return Err(annotated_text_replacement_required(*sheet_id, *address).into());
                     }
                     let formula = FormulaCell::new(
                         FormulaDialect::ExcelA1,
@@ -155,7 +193,7 @@ impl WorkbookDraft {
                     range,
                 } => {
                     if presentation.has_cell_annotation(*sheet_id, *address) {
-                        return Err(annotated_text_replacement_required(*sheet_id, *address));
+                        return Err(annotated_text_replacement_required(*sheet_id, *address).into());
                     }
                     let formula = FormulaCell::new(
                         FormulaDialect::ExcelA1,
@@ -238,7 +276,8 @@ impl WorkbookDraft {
                     {
                         return Err(ValidationError::DuplicateSheetName {
                             name: name.as_str().to_owned(),
-                        });
+                        }
+                        .into());
                     }
                     let maximum = sheets
                         .iter()
@@ -261,9 +300,17 @@ impl WorkbookDraft {
                     if rename_sheet(
                         &mut sheets,
                         &mut defined_names,
-                        &mut cell_mutations,
-                        &mut changed_cells,
-                        &mut calculation_changed_cells,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
                         *sheet_id,
                         name,
                     )? {
@@ -286,7 +333,7 @@ impl WorkbookDraft {
                                 .count()
                                 == 1
                         {
-                            return Err(ValidationError::LastVisibleSheet);
+                            return Err(ValidationError::LastVisibleSheet.into());
                         }
                         sheet_by_id_mut(&mut sheets, *sheet_id)?.set_visibility(*visibility);
                         workbook_changed = true;
@@ -340,6 +387,92 @@ impl WorkbookDraft {
                         semantic_changed = true;
                     }
                 }
+                WorkbookChange::RenameTable {
+                    table_id,
+                    new_display_name,
+                } => {
+                    if rename_table(
+                        &mut sheets,
+                        &mut defined_names,
+                        TableFormulaEdit {
+                            state: TableEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                                changed_table_ids: &mut changed_table_ids,
+                                presentation: &presentation,
+                            },
+                            locations: &table_locations,
+                            formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *table_id,
+                        new_display_name,
+                    )? {
+                        workbook_changed = true;
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
+                WorkbookChange::RenameTableColumn {
+                    table_id,
+                    column_id,
+                    new_name,
+                } => {
+                    if rename_table_column(
+                        &mut sheets,
+                        &mut defined_names,
+                        TableFormulaEdit {
+                            state: TableEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                                changed_table_ids: &mut changed_table_ids,
+                                presentation: &presentation,
+                            },
+                            locations: &table_locations,
+                            formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *table_id,
+                        *column_id,
+                        new_name,
+                    )? {
+                        workbook_changed = true;
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
+                WorkbookChange::ResizeTableRows {
+                    table_id,
+                    first_data_row,
+                    last_data_row,
+                } => {
+                    if resize_table_rows(
+                        &mut sheets,
+                        TableResizeEdit {
+                            state: TableEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                                changed_table_ids: &mut changed_table_ids,
+                                presentation: &presentation,
+                            },
+                            locations: &table_locations,
+                            rewrite_budget,
+                            materialization_budget,
+                        },
+                        *table_id,
+                        *first_data_row,
+                        *last_data_row,
+                    )? {
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
             }
         }
 
@@ -351,15 +484,25 @@ impl WorkbookDraft {
         } else {
             base_revision
         };
-        let workbook = WorkbookSnapshot::new_with_metadata(
-            sheets,
-            defined_names,
-            self.workbook.diagnostics().to_vec(),
-            date_system,
-            calculation_hints,
-            self.workbook.source(),
-            self.workbook.provenance().clone(),
-        )?
+        let diagnostics = clone_slice(self.workbook.diagnostics(), rewrite_budget)?;
+        let workbook = WorkbookSnapshot::new_with_metadata_cancellable(
+            WorkbookSnapshotInput {
+                sheets,
+                defined_names,
+                diagnostics,
+                date_system,
+                calculation_hints,
+                source: self.workbook.source(),
+                provenance: self.workbook.provenance().clone(),
+            },
+            &|| rewrite_budget.check_cancelled().is_err(),
+        )
+        .map_err(|error| match error {
+            WorkbookBuildError::Validation(error) => BatchExecutionError::Validation(error),
+            WorkbookBuildError::Cancelled => {
+                BatchExecutionError::Rewrite(FormulaRewriteError::Cancelled)
+            }
+        })?
         .with_semantic_revision(result_revision);
 
         self.workbook = workbook;
@@ -367,6 +510,10 @@ impl WorkbookDraft {
         self.presentation = presentation;
         self.presentation_cell_mutations = presentation_cell_mutations;
         self.added_sheets = added_sheets;
+        self.changed_table_ids = previous_changed_table_ids
+            .union(&changed_table_ids)
+            .copied()
+            .collect();
         self.workbook_changed = workbook_changed;
 
         Ok(EditReceipt {
@@ -376,8 +523,68 @@ impl WorkbookDraft {
             changed_cells: changed_cells.into_iter().collect(),
             calculation_changed_cells: calculation_changed_cells.into_iter().collect(),
             created_sheet_ids,
+            changed_table_ids: changed_table_ids.into_iter().collect(),
             topology_changed,
             calculation_metadata_changed,
         })
     }
+}
+
+fn clone_sheets(
+    source: &[Sheet],
+    budget: &FormulaRewriteBudget<'_>,
+) -> Result<Vec<Sheet>, FormulaRewriteError> {
+    let mut cloned = Vec::with_capacity(source.len());
+    for sheet in source {
+        budget.check_cancelled()?;
+        cloned.push(
+            sheet
+                .clone_cancellable(&|| budget.check_cancelled().is_err())
+                .map_err(|()| FormulaRewriteError::Cancelled)?,
+        );
+    }
+    Ok(cloned)
+}
+
+fn clone_slice<T: Clone>(
+    source: &[T],
+    budget: &FormulaRewriteBudget<'_>,
+) -> Result<Vec<T>, FormulaRewriteError> {
+    let mut cloned = Vec::with_capacity(source.len());
+    for value in source {
+        budget.check_cancelled()?;
+        cloned.push(value.clone());
+    }
+    Ok(cloned)
+}
+
+fn clone_map<K, V>(
+    source: &BTreeMap<K, V>,
+    budget: &FormulaRewriteBudget<'_>,
+) -> Result<BTreeMap<K, V>, FormulaRewriteError>
+where
+    K: Clone + Ord,
+    V: Clone,
+{
+    let mut cloned = BTreeMap::new();
+    for (key, value) in source {
+        budget.check_cancelled()?;
+        cloned.insert(key.clone(), value.clone());
+    }
+    Ok(cloned)
+}
+
+fn clone_set<T>(
+    source: &BTreeSet<T>,
+    budget: &FormulaRewriteBudget<'_>,
+) -> Result<BTreeSet<T>, FormulaRewriteError>
+where
+    T: Clone + Ord,
+{
+    let mut cloned = BTreeSet::new();
+    for value in source {
+        budget.check_cancelled()?;
+        cloned.insert(value.clone());
+    }
+    Ok(cloned)
 }

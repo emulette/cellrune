@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.8, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.9, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -82,10 +82,10 @@ high-level workbook lifecycle, summary, range, usage, capability, batch edit,
 recalculation, delta, and Save As operations—not one tool per spreadsheet
 function. Configured filesystem roots are canonicalized at startup; every
 workbook path supplied to a tool must be absolute and resolve inside one of
-those roots. It has no remote transport. The 11 tools are `workbook_create`,
+those roots. It has no remote transport. The 12 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
-`workbook_apply_changes`, `workbook_recalculate`,
+`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`,
 `workbook_changes_since`, and `workbook_save_as`.
 Read-only JSON resources expose the versioned function catalog at
 `cellrune://support/functions` and active session metadata through the
@@ -120,7 +120,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   constructor in a patch release. Examples: `Row::new(u32)`,
   `Column::new(u32)`, `SheetId::new(u32)`, `FiniteNumber::new(f64)`,
   `CellAddress::from_indices(row, column)`, `CellAddress::from_a1("A1")`,
-  `SheetName::new(String)`, `DiagnosticCode::new(String)`,
+  `SheetName::new(String)`, `TableName::new(String)`,
+  `TableColumnName::new(String)`, `DiagnosticCode::new(String)`,
   `SourceId::new(String)`, `FormulaText::from_xlsx(String)` /
   `FormulaText::from_user_input(String)`, `DefinedName::new(...)`,
   `ProviderIdentity::new(name, version)`, `Diagnostic::new(...)`,
@@ -130,8 +131,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.with_max_x(value)`, returning `ReadOptionsError`, `WriteOptionsError`, or
   `CalculationOptionsError` when a zero budget is rejected. `SessionLimits`
   uses either `Default::default()` or the five-argument
-  `SessionLimits::new(...) -> Result<Self, SessionError>`; it has no
-  `with_*` setters. Option constructors and non-budget setters such as
+  `SessionLimits::new(...) -> Result<Self, SessionError>`, then optionally
+  `.with_formula_rewrite_limits(...)` and
+  `.with_table_materialization_limit(...)`. Option constructors and
+  non-budget setters such as
   `ReadOptions::new`, `WriteOptions::new`,
   `RecalculationWriteOptions::new`,
   `CalculationOptions::with_today_serial`,
@@ -140,7 +143,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - **Getters are bare nouns, never `get_`-prefixed,** and are frequently
   `const fn` (`.code()`, `.severity()`, `.limits()`,
   `.max_dependency_edges()`, `.today_serial()`).
-- **Eleven public failure/value families, owned by different boundaries — never mixed:**
+- **Public failure/value families are owned by different boundaries — never mixed:**
   see the Error taxonomy table below. Pick the family by *what layer failed*,
   not by guessing a generic `Error`/`Result` shape.
 - **Public enums that may grow new variants are `#[non_exhaustive]`**
@@ -150,6 +153,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `CalculationDecisionReason`, `MaterializedResultOrigin`, `FormulaDialect`,
   `FormulaMetadata`, `WorkbookChange`, `XlsxDocumentKind`,
   `RecalculationWritePolicy`, `ArithmeticSemantics`, `FinancialSolverSemantics`,
+  `DefinedNameAnalysis`, `DefinedNameReferenceArea`,
+  `DefinedNameDynamicKind`, `DefinedNameExternalTargetKind`,
+  `DefinedNameInvalidReason`, `DefinedNameUnsupportedReason`,
+  `DefinedNameAnalysisLimitKind`, `DefinedNameAnalysisErrorKind`,
   `PhoneticType`, `PhoneticAlignment`, `TableType`, `TotalsRowFunction`,
   `TableCalendarType`, `TableDateTimeGrouping`, `TableCustomFilterOperator`,
   `TableDynamicFilterType`, `TableIconSet`, `TableSortBy`, `TableSortMethod`,
@@ -226,6 +233,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.name()`, `.totals_row_function() -> Option<TotalsRowFunction>`,
   `.totals_row_label()`, `.calculated_column_formula()`, and
   `.totals_row_formula()`.
+- `TableName` validates a table's formula/UI identity; `TableColumnName`
+  validates a rename target and rejects a leading or trailing ASCII space
+  because OOXML normalization would change that identity.
 - `TableType` (`Worksheet | Xml | QueryTable`) exposes `.as_str()`.
   `TableFormula` exposes validated storage-form `.text()` and `.is_array()`.
   `TableAutoFilter` exposes its effective `.range()`,
@@ -272,6 +282,24 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `DefinedName`: `.name()`, `.scope()` (`DefinedNameScope::Workbook | Sheet(SheetId)`),
   `.formula() -> &FormulaText`, `.hidden()`.
 
+### Defined-name inspection
+
+- `analyze_defined_name(&WorkbookSnapshot, name, current_sheet)` uses default
+  bounded options. `analyze_defined_name_with_options(...)` accepts
+  `DefinedNameAnalysisOptions`, and `analyze_defined_name_cancellable(...)`
+  additionally accepts a request-owned `CancellationToken`.
+- `DefinedNameAnalysis` distinguishes `Rectangular`, `ThreeDimensional`,
+  ordered `NonRectangular` areas, `EmptyReference`, `DynamicFormula`,
+  `Constant`, typed `ExternalReference`, `Invalid`, `Unsupported`, and
+  `NotFound`. Sheet spans and area order/multiplicity are preserved.
+- `DefinedNameAnalysisOptions::new(CalculationOptions)` reuses formula,
+  reference-area, and pairwise-work limits and adds configurable
+  name-chain-depth and cumulative scan-node limits.
+- Execution failures are separate from semantic results:
+  `DefinedNameAnalysisError` reports `UnknownCurrentSheet`,
+  `ResourceLimit`, or `Cancelled`, with a typed
+  `DefinedNameAnalysisLimitKind` when a budget was exhausted.
+
 ### Package-backed document and preservation writing
 
 - `XlsxDocument`: `.workbook()`, `.input_hash()`, `.kind()`,
@@ -282,14 +310,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   executed.
 - `write_preserved_xlsx_bytes(&XlsxDocument, WriteOptions) ->
   Result<Vec<u8>, XlsxWriteError>` raw-copies every unchanged ZIP entry.
-- Accepted table metadata participates in write verification. Source-linked
-  writes retain table parts byte-for-byte; the canonical serializer emits
-  modeled worksheet tables and fails with `UnsupportedPreservation` rather
-  than discard opaque metadata or invent the dependent parts required by
-  query/XML tables, differential formats, or custom table styles. Canonical
-  serialization also enforces the complete OOXML table-name and column-name
-  rules even though the older public constructors retain their 0.1.8
-  validation contract for patch-version compatibility.
+- Accepted table metadata participates in write verification. Unchanged
+  source-linked table parts are retained byte-for-byte. Stable-ID table
+  authoring patches only modeled SpreadsheetML children and attributes in the
+  accepted table part; foreign namespace and opaque extension content is
+  preserved. The canonical serializer emits modeled worksheet tables and
+  fails with `UnsupportedPreservation` rather than discard opaque metadata or
+  invent the dependent parts required by query/XML tables, differential
+  formats, or custom table styles. Canonical serialization also enforces the
+  complete OOXML table-name and column-name rules even though the older public
+  constructors retain their 0.1.8 validation contract for patch-version
+  compatibility.
 - `write_recalculated_xlsx_bytes(&XlsxDocument, &CalculationSnapshot,
   RecalculationWriteOptions) -> Result<RecalculatedWorkbook,
   XlsxWriteError>` prepares owned verified bytes plus a `WriteReport`.
@@ -398,24 +429,37 @@ than guessing a name from a different XLSX crate (`calamine`,
   changes with `set_cell_value`, `set_cell_formula`,
   `set_cell_dynamic_formula`, `clear_cell`, `set_cell_number_format`,
   `add_sheet`, `rename_sheet`, `set_sheet_visibility`, `set_defined_name`,
-  `remove_defined_name`, `set_date_system`, and `set_calculation_hints`.
+  `remove_defined_name`, `set_date_system`, `set_calculation_hints`,
+  `rename_table(TableId, TableName)`,
+  `rename_table_column(TableId, TableColumnId, TableColumnName)`, and
+  `resize_table_rows(TableId, first_data_row, last_data_row)`.
 - `EditBatch::new(changes)` preserves operation order.
   `WorkbookDraft::apply_changes(batch)` stages once and commits one semantic
   revision or rolls the complete batch back. If every accepted operation is
   a semantic no-op, the receipt keeps the base revision and reports no
   topology or calculation-metadata change.
+- Table and column renames rewrite every typed reference in worksheet cells,
+  defined names, calculated-column formulas, and totals-row formulas while
+  preserving source text outside the target spans. Row resize keeps stable
+  table/column identities, remaps filter/sort ranges, materializes modeled
+  calculated/totals/header cells, and can expand a header-only empty table.
+  Unsupported metadata, collisions, formula rewrite failures, limits, and
+  cancellation roll back the complete batch.
 - `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
   draft plus persistent parsed formulas, dependency state, results, dirty
   roots, and bounded delta history.
 - `session.apply_changes(expected_revision, batch)` returns `EditReceipt`;
   it distinguishes all source/format changes from calculation-semantic
-  changes and reports topology/metadata impact. Stale writers fail with
+  changes, reports stable `.changed_table_ids()`, and records
+  topology/metadata impact. Stale writers fail with
   `SessionErrorCode::RevisionMismatch`.
 - To validate and size an edit before committing it, call
   `session.prepare_changes(expected_revision, batch)`. The returned
   `PreparedEditBatch` exposes the prospective `.workbook()` and `.receipt()`;
   `session.install_changes(prepared)` commits only if its base revision is
-  still current.
+  still current. `prepare_changes_cancellable` adds cooperative cancellation
+  to formula rewriting, table materialization, and final snapshot/index
+  construction.
 - `session.recalculate(RecalculationMode::Auto, options, token)` returns a
   `CalculationDelta`. `Auto` uses a proven dirty subset and falls back to
   full calculation for formula/name/sheet/options or uncertain dynamic/spill
@@ -432,8 +476,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   explains why that schedule was selected. `changes_since(cursor, limit)`
   returns a bounded `CalculationDeltaPage`.
 - `SessionLimits` bounds batch operations, evaluated formulas, delta cells,
-  retained deltas, and page size. `SessionErrorCode` is the stable
-  machine-readable error family.
+  retained deltas, page size, cumulative formula-rewrite formula/source/AST/
+  source-edit work, and table-resize materialized cells. `SessionErrorCode`
+  is the stable machine-readable error family.
 - `ApplyChangesError` distinguishes a staged `ValidationError` from a
   `SessionError`. `SessionError` exposes `.code()`, `.message()`, and
   `.detail()`.
@@ -473,8 +518,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.8 catalog contains 286 official Excel-facing names
-  (273 official kernels plus 13 aliases) and one non-official compatibility
+  `.is_official()`. The 0.1.9 catalog contains 287 official Excel-facing names
+  (274 official kernels plus 13 aliases) and one non-official compatibility
   entry for the OOXML dummy-function marker.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
   `scan_function_usage_with_options(&WorkbookSnapshot, CalculationOptions)`
@@ -511,10 +556,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   and `FinancialSolverSemantics::ExtendedSearch`.** Both axes are also carried
   by the interop DTO and the Python, Node.js, and MCP boundaries.
   `docs/NUMERICS.md` records the policies and their oracles.
-- `CalculationLimits::default()` + 10 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
-  budgets: formula tokens, AST nodes, AST nesting depth, dependency edges,
-  array cells, calculated text bytes, data-dependent function iterations, LET
-  bindings, active LAMBDA depth, and cumulative LAMBDA/MAP invocations.
+- `CalculationLimits::default()` + 12 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
+  budgets: formula tokens, source bytes, AST nodes, AST nesting depth,
+  dependency edges, reference areas, array cells, calculated text bytes,
+  data-dependent function iterations, LET bindings, active LAMBDA depth, and
+  cumulative LAMBDA/MAP invocations.
 - `LAMBDA` is a first-class scoped value. Literal, immediate, `LET`-bound,
   workbook-defined, and sheet-local callables share one evaluator with lexical
   capture and caller isolation. `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`,
@@ -563,16 +609,24 @@ than guessing a name from a different XLSX crate (`calamine`,
   with the number of references, not with the number of sheets spanned. The
   span is expanded only while building graph edges, and
   `max_dependency_edges` still counts the distinct edges produced.
-- Structured table references (`Table1[Amount]`, `[@Amount]`, `[#Data]`,
-  nested and escaped selector spellings) are recognized as one opaque
-  expression and classified as the
-  `CalculationIssueCode::UnsupportedStructuredReference` capability issue
-  (`calculation.unsupported_structured_reference`) with the original
-  spelling as detail — not resolved, and no longer a misleading
-  `calculation.parse_error`. External-workbook spellings such as
-  `[1]Sheet1!A1`, `[Book1.xlsx]Sheet1!A1`, and `[1]!Name` remain parse
-  errors; the distinction is made by what follows the closing bracket,
-  never by the bracket contents.
+- Structured table references (`Table1[Amount]`, `[@Amount]`, item selectors,
+  column spans, and nested/escaped column spellings) are typed and resolved
+  against stable table/column identities. Empty data or totals bands remain a
+  valid empty reference, while `#This Row` uses the formula's actual table
+  row. Dependencies retain table identity and topology, so table rename or
+  resize forces a safe graph rebuild rather than reusing stale geometry.
+- Reference union, intersection, and range operators preserve ordered
+  multi-area identity. `AREAS` is in the official catalog; consumers that
+  require one rectangle fail with the documented Excel error rather than
+  silently flattening a multi-area value.
+- Spill postfix references such as `A1#` and the OOXML storage form
+  `_xlfn.ANCHORARRAY(A1)` share one typed node. Evaluation resolves the
+  current spill registry, schedules the producer anchor first, rejects
+  non-anchors, propagates blocked spills, and removes stale spill children
+  when a shape changes.
+- External-workbook references and sheet-qualified defined names are typed by
+  the parser. External workbook calculation remains unsupported and never
+  opens or follows the referenced package.
 
 ### Diagnostics and provenance
 
@@ -591,6 +645,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 | `ValidationError` | Caller-supplied address/name/number/model value violates an invariant | No object is produced | `.code(): ValidationErrorCode`; match on the non-exhaustive enum only when structured fields are needed |
 | `ReadOptionsError` | A `ReadLimits` budget was invalid (zero) | Fails before reading starts | Match on the enum variant |
 | `CalculationOptionsError` | A `CalculationLimits` budget was invalid (zero) | Fails before calculation starts | Match on the enum variant |
+| `DefinedNameAnalysisOptionsError` | A defined-name chain or scan budget was invalid (zero) | Fails before inspection starts | Match the concrete error type |
+| `DefinedNameAnalysisError` | Defined-name inspection saw an unknown current sheet, exhausted a budget, or was cancelled | No semantic inspection result is produced | `.kind()`, optional `.limit()`, and `.detail()` |
 | `XlsxReadError` | No trustworthy `WorkbookSnapshot` could be produced at all | No snapshot | `.code(): XlsxErrorCode`, `.source_id()`, `.detail()` |
 | `WriteOptionsError` | A `WriteLimits` budget was invalid (zero) | Fails before writing starts | Match on the enum variant |
 | `XlsxWriteError` | The source/calculation binding, package plan, write budget, destination, or completed output was invalid | No successful output artifact | `.code(): XlsxWriteErrorCode`, `.source_id()`, `.detail()` |
@@ -614,12 +670,8 @@ calculate. Out of scope for the current version:
 
 - `.xls`, `.xlsb`, `.ods`, and CSV.
 - Macro, add-in, external-workbook, query, or data-connection execution.
-- Structured-reference resolution: table definitions are read and exposed,
-  and structured-reference formulas are recognized and honestly classified,
-  but not yet resolved to values. 3-D references outside the audited
-  direct-consumer policy described under Calculation are likewise reported,
-  not resolved.
-- Spill postfix references such as `A1#` and data-table calculation.
+- 3-D references outside the audited direct-consumer policy described under
+  Calculation, and data-table calculation.
 - Iterative calculation and automatic host-time or random inputs (`TODAY()`
   and `NOW()` are supported only through explicit `CalculationOptions` inputs).
 

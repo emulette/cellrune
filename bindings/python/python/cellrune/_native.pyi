@@ -8,10 +8,12 @@ from ._types import (
     CalculationReport,
     DefinedNameInspection,
     EditReceipt,
+    EditReceiptV2,
     ErrorDetails,
     FunctionUsageReport,
     RangePage,
     WorkbookChange,
+    WorkbookChangeV2,
     WorkbookSummary,
     WriteReport,
 )
@@ -83,6 +85,11 @@ class Workbook:
         expected_revision: int,
         changes: list[WorkbookChange],
     ) -> EditReceipt: ...
+    def apply_changes_v2(
+        self,
+        expected_revision: int,
+        changes: list[WorkbookChangeV2],
+    ) -> EditReceiptV2: ...
     def changes_since(
         self,
         cursor: int = 0,

@@ -1,6 +1,6 @@
 use cellrune_interop::{
-    ArithmeticSemanticsDto, EditBatchDto, FinancialSolverSemanticsDto, WorkbookSummaryDto,
-    WriteReportDto,
+    ArithmeticSemanticsDto, EditBatchDto, EditBatchV2Dto, FinancialSolverSemanticsDto,
+    WorkbookSummaryDto, WriteReportDto,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -83,6 +83,19 @@ pub(crate) struct ApplyChangesArgs {
     /// Ordered typed changes committed together or not at all.
     #[serde(flatten)]
     pub(crate) batch: EditBatchDto,
+}
+
+/// Input for one optimistic, atomic edit-schema-v2 batch.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ApplyChangesV2Args {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Current semantic revision that must still match when the batch commits.
+    pub(crate) expected_revision: u64,
+    /// Ordered v1 or stable-ID table changes committed together or not at all.
+    #[serde(flatten)]
+    pub(crate) batch: EditBatchV2Dto,
 }
 
 /// Input for one full or incremental workbook recalculation.

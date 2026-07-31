@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 
 mod table_index;
 
 pub(crate) use table_index::TableRangeIndex;
-use table_index::{TableColumnLocation, TableIndex, TableLocation};
+use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
 
 use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
@@ -125,6 +125,7 @@ pub struct Sheet {
     name: SheetName,
     visibility: SheetVisibility,
     cells: BTreeMap<CellAddress, Cell>,
+    formula_addresses: BTreeSet<CellAddress>,
     min_row: Option<Row>,
     min_column: Option<Column>,
     max_row: Option<Row>,
@@ -134,8 +135,15 @@ pub struct Sheet {
 }
 
 impl Sheet {
-    fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let cells = clone_map_cancellable(&self.cells, cancelled)?;
+        let mut formula_addresses = BTreeSet::new();
+        for address in &self.formula_addresses {
+            if cancelled() {
+                return Err(());
+            }
+            formula_addresses.insert(*address);
+        }
         let mut merged_ranges = Vec::with_capacity(self.merged_ranges.len());
         for range in &self.merged_ranges {
             if cancelled() {
@@ -155,6 +163,7 @@ impl Sheet {
             name: self.name.clone(),
             visibility: self.visibility,
             cells,
+            formula_addresses,
             min_row: self.min_row,
             min_column: self.min_column,
             max_row: self.max_row,
@@ -171,6 +180,7 @@ impl Sheet {
             name,
             visibility,
             cells: BTreeMap::new(),
+            formula_addresses: BTreeSet::new(),
             min_row: None,
             min_column: None,
             max_row: None,
@@ -220,11 +230,15 @@ impl Sheet {
                 column: address.column().get(),
             });
         }
+        let is_formula = matches!(content, CellContent::Formula(_));
         self.update_bounds(address);
         self.cells.insert(
             address,
             Cell::with_number_format(address, content, number_format),
         );
+        if is_formula {
+            self.formula_addresses.insert(address);
+        }
         Ok(())
     }
 
@@ -245,6 +259,17 @@ impl Sheet {
     /// Iterates sparse cells in deterministic row-major order.
     pub fn cells(&self) -> impl ExactSizeIterator<Item = &Cell> + DoubleEndedIterator {
         self.cells.values()
+    }
+
+    pub(crate) fn next_formula_cell_after(&self, after: Option<CellAddress>) -> Option<Cell> {
+        let address = match after {
+            Some(address) => self
+                .formula_addresses
+                .range(address..)
+                .find(|candidate| **candidate > address),
+            None => self.formula_addresses.first(),
+        }?;
+        self.cells.get(address).cloned()
     }
 
     /// Returns the number of stored sparse cells.
@@ -285,6 +310,10 @@ impl Sheet {
         self.tables = tables;
     }
 
+    pub(crate) fn tables_mut(&mut self) -> &mut [Table] {
+        &mut self.tables
+    }
+
     /// Returns the smallest bounding rectangle containing all sparse cells.
     pub fn used_range(&self) -> Option<CellRange> {
         let start = CellAddress::new(self.min_row?, self.min_column?);
@@ -317,6 +346,7 @@ impl Sheet {
         content: CellContent,
         number_format: NumberFormat,
     ) {
+        self.track_formula_address(address, &content);
         self.cells.insert(
             address,
             Cell::with_content_and_number_format(address, content, number_format),
@@ -330,6 +360,7 @@ impl Sheet {
         content: CellContent,
         number_format: NumberFormat,
     ) {
+        self.track_formula_address(address, &content);
         self.cells.insert(
             address,
             Cell::with_content_and_number_format(address, content, number_format),
@@ -337,6 +368,7 @@ impl Sheet {
     }
 
     pub(crate) fn remove_cell_deferred(&mut self, address: CellAddress) -> bool {
+        self.formula_addresses.remove(&address);
         self.cells.remove(&address).is_some()
     }
 
@@ -360,6 +392,14 @@ impl Sheet {
         let addresses = self.cells.keys().copied().collect::<Vec<_>>();
         for address in addresses {
             self.update_bounds(address);
+        }
+    }
+
+    fn track_formula_address(&mut self, address: CellAddress, content: &CellContent) {
+        if matches!(content, CellContent::Formula(_)) {
+            self.formula_addresses.insert(address);
+        } else {
+            self.formula_addresses.remove(&address);
         }
     }
 }
@@ -499,6 +539,27 @@ pub struct WorkbookSnapshot {
     semantic_revision: u64,
 }
 
+pub(crate) enum WorkbookBuildError {
+    Validation(ValidationError),
+    Cancelled,
+}
+
+pub(crate) struct WorkbookSnapshotInput {
+    pub(crate) sheets: Vec<Sheet>,
+    pub(crate) defined_names: Vec<DefinedName>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) date_system: DateSystem,
+    pub(crate) calculation_hints: CalculationHints,
+    pub(crate) source: WorkbookSource,
+    pub(crate) provenance: Provenance,
+}
+
+impl From<ValidationError> for WorkbookBuildError {
+    fn from(error: ValidationError) -> Self {
+        Self::Validation(error)
+    }
+}
+
 impl WorkbookSnapshot {
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut sheets = Vec::with_capacity(self.sheets.len());
@@ -613,30 +674,72 @@ impl WorkbookSnapshot {
         source: WorkbookSource,
         provenance: Provenance,
     ) -> Result<Self, ValidationError> {
+        match Self::new_with_metadata_cancellable(
+            WorkbookSnapshotInput {
+                sheets,
+                defined_names,
+                diagnostics,
+                date_system,
+                calculation_hints,
+                source,
+                provenance,
+            },
+            &|| false,
+        ) {
+            Ok(workbook) => Ok(workbook),
+            Err(WorkbookBuildError::Validation(error)) => Err(error),
+            Err(WorkbookBuildError::Cancelled) => {
+                unreachable!("the non-cancellable snapshot builder cannot be cancelled")
+            }
+        }
+    }
+
+    pub(crate) fn new_with_metadata_cancellable(
+        input: WorkbookSnapshotInput,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, WorkbookBuildError> {
+        let WorkbookSnapshotInput {
+            sheets,
+            defined_names,
+            diagnostics,
+            date_system,
+            calculation_hints,
+            source,
+            provenance,
+        } = input;
         let mut sheet_id_index = BTreeMap::new();
         let mut sheet_name_index = BTreeMap::new();
         for (index, sheet) in sheets.iter().enumerate() {
+            if cancelled() {
+                return Err(WorkbookBuildError::Cancelled);
+            }
             if sheet_id_index.insert(sheet.id(), index).is_some() {
                 return Err(ValidationError::DuplicateSheetId {
                     value: sheet.id().get(),
-                });
+                }
+                .into());
             }
             let name_key = Box::<str>::from(sheet.name().lookup_key());
             if sheet_name_index.insert(name_key, index).is_some() {
                 return Err(ValidationError::DuplicateSheetName {
                     name: sheet.name().as_str().to_owned(),
-                });
+                }
+                .into());
             }
         }
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
         let mut defined_name_keys = std::collections::BTreeSet::<Box<str>>::new();
         for (index, defined_name) in defined_names.iter().enumerate() {
+            if cancelled() {
+                return Err(WorkbookBuildError::Cancelled);
+            }
             if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope()
                 && !sheet_id_index.contains_key(&sheet_id)
             {
                 return Err(ValidationError::DefinedNameUnknownSheet {
                     sheet_id: sheet_id.get(),
-                });
+                }
+                .into());
             }
             let previous = defined_name_index
                 .entry(defined_name.scope())
@@ -645,11 +748,19 @@ impl WorkbookSnapshot {
             if previous.is_some() {
                 return Err(ValidationError::DuplicateDefinedName {
                     name: defined_name.name().to_owned(),
-                });
+                }
+                .into());
             }
             defined_name_keys.insert(Box::from(defined_name.lookup_key()));
         }
-        let table_index = TableIndex::new(&sheets, &defined_name_keys)?;
+        let table_index = TableIndex::new_cancellable(&sheets, &defined_name_keys, cancelled)
+            .map_err(|error| match error {
+                TableIndexBuildError::Validation(error) => WorkbookBuildError::Validation(error),
+                TableIndexBuildError::Cancelled => WorkbookBuildError::Cancelled,
+            })?;
+        if cancelled() {
+            return Err(WorkbookBuildError::Cancelled);
+        }
         Ok(Self {
             sheets,
             sheet_id_index,

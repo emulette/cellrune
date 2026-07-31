@@ -4,10 +4,12 @@ from cellrune import (
     CellValue,
     DefinedNameInspection,
     EditReceipt,
+    EditReceiptV2,
     RangePage,
     TableSummary,
     Workbook,
     WorkbookChange,
+    WorkbookChangeV2,
 )
 
 table_summary: TableSummary = {
@@ -76,6 +78,19 @@ def check() -> None:
     output: bytes = workbook.to_bytes()
     reopened: Workbook = Workbook.from_bytes(output)
     reopened.close()
+
+
+def check_v2_types(workbook: Workbook, revision: int) -> None:
+    changes_v2: list[WorkbookChangeV2] = [
+        {
+            "kind": "rename_table_column",
+            "table_id": 1,
+            "column_id": 2,
+            "new_name": "Gross Amount",
+        }
+    ]
+    receipt_v2: EditReceiptV2 = workbook.apply_changes_v2(revision, changes_v2)
+    assert isinstance(receipt_v2["changed_table_ids"], list)
 
 
 def inspect_error(error: CellRuneError) -> str:

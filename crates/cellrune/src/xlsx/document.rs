@@ -121,6 +121,10 @@ impl XlsxDocument {
     pub(in crate::xlsx) fn worksheet_part_path(&self, sheet_id: SheetId) -> Option<&PartPath> {
         self.worksheet_parts.get(&sheet_id)
     }
+
+    pub(in crate::xlsx) fn table_part_path(&self, table_id: TableId) -> Option<&PartPath> {
+        self.table_parts.get(&table_id)
+    }
 }
 
 impl fmt::Debug for XlsxDocument {

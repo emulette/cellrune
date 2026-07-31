@@ -1,7 +1,10 @@
 "use strict";
 
 const native = require("./native.js");
-const { serializeWorkbookChange } = require("./lib/changes.js");
+const {
+  serializeWorkbookChange,
+  serializeWorkbookChangeV2,
+} = require("./lib/changes.js");
 const {
   CellRuneError,
   closedError,
@@ -15,6 +18,7 @@ const {
   normalizeCalculationReport,
   normalizeDefinedNameInspection,
   normalizeEditReceipt,
+  normalizeEditReceiptV2,
   normalizeFunctionUsage,
   normalizeRangePage,
   normalizeSummary,
@@ -169,6 +173,26 @@ class Workbook {
     return normalizeEditReceipt(
       withSyncErrors(() =>
         this.#session().applyChanges(
+          expectedRevision.toString(),
+          JSON.stringify(payload),
+        ),
+      ),
+    );
+  }
+
+  applyChangesV2(expectedRevision, changes) {
+    requireU64BigInt(expectedRevision, "expectedRevision");
+    if (!Array.isArray(changes) || changes.length === 0) {
+      throw inputError("changes must be a non-empty array");
+    }
+    const payload = {
+      changes: changes.map((change, index) =>
+        serializeWorkbookChangeV2(change, index),
+      ),
+    };
+    return normalizeEditReceiptV2(
+      withSyncErrors(() =>
+        this.#session().applyChangesV2(
           expectedRevision.toString(),
           JSON.stringify(payload),
         ),

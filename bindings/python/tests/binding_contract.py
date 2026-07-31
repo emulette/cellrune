@@ -11,6 +11,11 @@ CORPUS_PATH = pathlib.Path(__file__).parents[3] / "binding-contract" / "v1.json"
 DEFINED_NAME_CORPUS_PATH = (
     pathlib.Path(__file__).parents[3] / "binding-contract" / "defined-name-v1.json"
 )
+TABLE_AUTHORING_CONTRACT_PATH = (
+    pathlib.Path(__file__).parents[3]
+    / "binding-contract"
+    / "table-authoring-v2.json"
+)
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 
@@ -74,6 +79,9 @@ def main() -> None:
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")
+    )
+    table_contract = json.loads(
+        TABLE_AUTHORING_CONTRACT_PATH.read_text(encoding="utf-8")
     )
     assert defined_name_corpus["schema_version"] == 1
     with Workbook.create() as workbook:
@@ -305,6 +313,88 @@ def main() -> None:
         assert error.kind == "validation"
     else:
         raise AssertionError("invalid address did not raise CellRuneError")
+
+    table_workbook = Workbook.open_path(
+        TABLE_AUTHORING_CONTRACT_PATH.parent / table_contract["fixture"]
+    )
+    assert_error(
+        "interop.change.payload_invalid",
+        lambda: table_workbook.apply_changes_v2(
+            table_workbook.summary()["semantic_revision"],
+            [
+                {
+                    "kind": "rename_table",
+                    "table_id": table_contract["table_id"],
+                    "new_display_name": table_contract["new_display_name"],
+                    "unexpected": True,
+                }
+            ],
+        ),
+    )
+    table_receipt = table_workbook.apply_changes_v2(
+        table_workbook.summary()["semantic_revision"],
+        [
+            {
+                "kind": "rename_table",
+                "table_id": table_contract["table_id"],
+                "new_display_name": table_contract["new_display_name"],
+            },
+            {
+                "kind": "rename_table_column",
+                "table_id": table_contract["table_id"],
+                "column_id": table_contract["column_id"],
+                "new_name": table_contract["new_column_name"],
+            },
+            {
+                "kind": "resize_table_rows",
+                "table_id": table_contract["table_id"],
+                "first_data_row": table_contract["first_data_row"],
+                "last_data_row": table_contract["last_data_row"],
+            },
+        ],
+    )
+    assert table_receipt["schema_version"] == table_contract["schema_version"]
+    assert table_receipt["changed_table_ids"] == [table_contract["table_id"]]
+    assert_table_authoring_result(table_workbook, table_contract)
+    table_workbook.recalculate(mode="full")
+    reopened_table_workbook = Workbook.from_bytes(
+        table_workbook.to_bytes(invalidate_unavailable=True)
+    )
+    assert_table_authoring_result(reopened_table_workbook, table_contract)
+
+
+def assert_table_authoring_result(
+    workbook: Workbook, contract: dict[str, object]
+) -> None:
+    tables = workbook.summary()["sheets"][0]["tables"]
+    table = next(candidate for candidate in tables if candidate["id"] == contract["table_id"])
+    assert table["id"] == contract["table_id"]
+    assert table["name"] == contract["new_display_name"]
+    assert table["display_name"] == contract["new_display_name"]
+    assert table["range"] == contract["expected_range"]
+    assert table["columns"][1]["id"] == contract["column_id"]
+    assert table["columns"][1]["name"] == contract["new_column_name"]
+    address = str(contract["expected_header_address"])
+    header = workbook.read_range("Data", address, address)["cells"][0]
+    assert header["source_value"] == {
+        "kind": "text",
+        "value": contract["new_column_name"],
+    }
+    formula = workbook.read_range("Data", "E1", "E1")["cells"][0]["formula"]
+    assert formula == "=SUM(Orders[Gross Amount])"
+    empty_table = next(
+        candidate
+        for candidate in tables
+        if candidate["id"] == contract["empty_table_id"]
+    )
+    assert empty_table["name"] == contract["empty_table_name"]
+    assert empty_table["range"] == contract["empty_table_range"]
+    assert (
+        workbook.inspect_defined_name(str(contract["empty_defined_name"]))["result"][
+            "kind"
+        ]
+        == contract["empty_defined_name_result"]
+    )
 
 
 if __name__ == "__main__":

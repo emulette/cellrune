@@ -262,6 +262,13 @@ impl TableFormula {
     pub const fn is_array(&self) -> bool {
         self.array
     }
+
+    pub(crate) fn with_text(&self, text: FormulaText) -> Self {
+        Self {
+            text,
+            array: self.array,
+        }
+    }
 }
 
 /// The style flags attached to one table.
@@ -376,6 +383,52 @@ pub struct TableColumn {
     totals_row_formula: Option<TableFormula>,
 }
 
+/// A validated table-column name for authoring operations.
+///
+/// Unlike table display names, column names may contain spaces, punctuation, and strings that
+/// resemble A1 or R1C1 references. Structured-reference escaping handles those spellings.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TableColumnName(Box<str>);
+
+impl TableColumnName {
+    /// Validates a table-column name at the authoring boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ValidationError`] when the name is empty, begins or ends with an ASCII space,
+    /// exceeds 255 UTF-16 code units, or contains a character forbidden by XML 1.0.
+    pub fn new(value: impl Into<String>) -> Result<Self, ValidationError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(ValidationError::TableColumnNameEmpty);
+        }
+        if value.starts_with(' ') || value.ends_with(' ') {
+            return Err(ValidationError::TableColumnNameSpaceBoundary);
+        }
+        let utf16_len = value.encode_utf16().count();
+        if utf16_len > 255 {
+            return Err(ValidationError::TableColumnNameTooLong { utf16_len });
+        }
+        if let Some(character) = value
+            .chars()
+            .find(|character| !is_xml_10_character(*character))
+        {
+            return Err(ValidationError::TableColumnNameInvalidCharacter { character });
+        }
+        Ok(Self(value.into_boxed_str()))
+    }
+
+    /// Returns the validated original spelling.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+fn is_xml_10_character(character: char) -> bool {
+    matches!(character, '\u{9}' | '\u{A}' | '\u{D}')
+        || matches!(character as u32, 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF)
+}
+
 impl TableColumn {
     /// Validates and constructs a table column.
     ///
@@ -488,6 +541,23 @@ impl TableColumn {
             calculated_column_formula,
             totals_row_formula,
         })
+    }
+
+    pub(crate) fn rename(&mut self, name: &TableColumnName) {
+        self.name = Box::from(name.as_str());
+    }
+
+    pub(crate) fn rewrite_formulas(
+        &mut self,
+        calculated: Option<FormulaText>,
+        totals: Option<FormulaText>,
+    ) {
+        if let (Some(formula), Some(text)) = (&self.calculated_column_formula, calculated) {
+            self.calculated_column_formula = Some(formula.with_text(text));
+        }
+        if let (Some(formula), Some(text)) = (&self.totals_row_formula, totals) {
+            self.totals_row_formula = Some(formula.with_text(text));
+        }
     }
 }
 
@@ -710,6 +780,145 @@ impl Table {
     pub(crate) fn opaque_source_xml(&self) -> Option<&[u8]> {
         self.opaque_source_xml.as_deref()
     }
+
+    pub(crate) fn semantic_eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.name == other.name
+            && self.display_name == other.display_name
+            && self.range == other.range
+            && self.table_type == other.table_type
+            && self.header_row_count == other.header_row_count
+            && self.totals_row_count == other.totals_row_count
+            && self.totals_row_shown == other.totals_row_shown
+            && self.columns == other.columns
+            && self.auto_filter == other.auto_filter
+            && self.sort_state == other.sort_state
+            && self.style_info == other.style_info
+    }
+
+    pub(crate) fn rename(&mut self, name: TableName) {
+        self.name = name.clone();
+        self.display_name = name;
+    }
+
+    pub(crate) fn rename_column(
+        &mut self,
+        column_id: TableColumnId,
+        name: &TableColumnName,
+    ) -> bool {
+        let Some(column) = self
+            .columns
+            .iter_mut()
+            .find(|column| column.column_id() == column_id)
+        else {
+            return false;
+        };
+        column.rename(name);
+        true
+    }
+
+    pub(crate) fn columns_mut(&mut self) -> &mut [TableColumn] {
+        &mut self.columns
+    }
+
+    pub(crate) fn resize_data_rows(
+        &mut self,
+        first_data_row: crate::Row,
+        last_data_row: crate::Row,
+    ) -> Result<(), ()> {
+        let start_row = first_data_row
+            .get()
+            .checked_sub(self.header_row_count)
+            .and_then(|row| crate::Row::new(row).ok())
+            .ok_or(())?;
+        let end_row = last_data_row
+            .get()
+            .checked_add(self.totals_row_count)
+            .and_then(|row| crate::Row::new(row).ok())
+            .ok_or(())?;
+        let old_data_range = self.data_range();
+        let new_data_range = CellRange::from_ordered(
+            crate::CellAddress::new(first_data_row, self.range.start().column()),
+            crate::CellAddress::new(last_data_row, self.range.end().column()),
+        );
+        let new_range = CellRange::from_ordered(
+            crate::CellAddress::new(start_row, self.range.start().column()),
+            crate::CellAddress::new(end_row, self.range.end().column()),
+        );
+        match old_data_range {
+            Some(old_data_range) => {
+                self.auto_filter = self
+                    .auto_filter
+                    .as_ref()
+                    .map(|filter| {
+                        filter.resized(
+                            new_filter_range(new_range, self.totals_row_count),
+                            old_data_range,
+                            new_data_range,
+                        )
+                    })
+                    .transpose()?;
+                self.sort_state = self
+                    .sort_state
+                    .as_ref()
+                    .map(|sort| sort.resized(old_data_range, new_data_range))
+                    .transpose()?;
+            }
+            None => {
+                if self.sort_state.is_some()
+                    || self
+                        .auto_filter
+                        .as_ref()
+                        .is_some_and(|filter| filter.sort_state().is_some())
+                {
+                    return Err(());
+                }
+                self.auto_filter = self.auto_filter.as_ref().map(|filter| {
+                    filter.resized_from_empty(new_filter_range(new_range, self.totals_row_count))
+                });
+            }
+        }
+        self.range = new_range;
+        Ok(())
+    }
+
+    pub(crate) fn data_range(&self) -> Option<CellRange> {
+        let first = self
+            .range
+            .start()
+            .row()
+            .get()
+            .checked_add(self.header_row_count)
+            .and_then(|row| crate::Row::new(row).ok())?;
+        let last = self
+            .range
+            .end()
+            .row()
+            .get()
+            .checked_sub(self.totals_row_count)
+            .and_then(|row| crate::Row::new(row).ok())?;
+        (first <= last).then(|| {
+            CellRange::from_ordered(
+                crate::CellAddress::new(first, self.range.start().column()),
+                crate::CellAddress::new(last, self.range.end().column()),
+            )
+        })
+    }
+}
+
+fn new_filter_range(table_range: CellRange, totals_row_count: u32) -> CellRange {
+    let end_row = crate::Row::new(
+        table_range
+            .end()
+            .row()
+            .get()
+            .saturating_sub(totals_row_count),
+    )
+    .expect("validated table range retains at least one non-totals row");
+    CellRange::from_ordered(
+        crate::CellAddress::new(table_range.start().row(), table_range.start().column()),
+        crate::CellAddress::new(end_row, table_range.end().column()),
+    )
 }
 
 fn validate_table_metadata(
@@ -864,15 +1073,15 @@ mod tests {
     use std::cell::Cell;
 
     use super::{
-        Table, TableAutoFilter, TableColumn, TableColumnId, TableCustomFilters, TableDateGroupItem,
-        TableDateTimeGrouping, TableFilterColumn, TableFilterCriteria, TableFilterItem,
-        TableFormula, TableIconFilter, TableIconSet, TableId, TableMetadataValidationError,
-        TableName, TableSortBy, TableSortCondition, TableSortState, TableValueFilters,
-        TotalsRowFunction,
+        Table, TableAutoFilter, TableColumn, TableColumnId, TableColumnName, TableCustomFilters,
+        TableDateGroupItem, TableDateTimeGrouping, TableFilterColumn, TableFilterCriteria,
+        TableFilterItem, TableFormula, TableIconFilter, TableIconSet, TableId,
+        TableMetadataValidationError, TableName, TableSortBy, TableSortCondition, TableSortState,
+        TableValueFilters, TotalsRowFunction,
     };
     use crate::{
         CalculationHints, CellAddress, CellRange, DateSystem, DefinedName, DefinedNameScope,
-        FormulaText, Provenance, ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility,
+        FormulaText, Provenance, ProviderIdentity, Row, Sheet, SheetId, SheetName, SheetVisibility,
         ValidationError, WorkbookSnapshot, WorkbookSource,
     };
 
@@ -1162,6 +1371,53 @@ mod tests {
     }
 
     #[test]
+    fn table_resize_preserves_row_and_column_sort_orientation() {
+        let row_sort = TableSortState::from_xlsx(
+            range("A2", "B3"),
+            false,
+            false,
+            None,
+            vec![sort_condition(range("B2", "B3"))],
+        );
+        let filter =
+            TableAutoFilter::from_xlsx(range("A1", "B3"), true, Vec::new(), Some(row_sort));
+        let column_sort = TableSortState::from_xlsx(
+            range("A2", "B3"),
+            false,
+            true,
+            None,
+            vec![sort_condition(range("A2", "B2"))],
+        );
+        let mut table = table(1, "Sales", "Sales")
+            .try_with_metadata(
+                super::TableType::Worksheet,
+                true,
+                Some(filter),
+                Some(column_sort),
+                None,
+                None,
+            )
+            .expect("valid row- and column-oriented sort metadata");
+
+        table
+            .resize_data_rows(Row::new(2).expect("first"), Row::new(5).expect("last"))
+            .expect("resize with both sort orientations");
+
+        let row_sort = table
+            .auto_filter()
+            .and_then(TableAutoFilter::sort_state)
+            .expect("row sort");
+        assert!(!row_sort.column_sort());
+        assert_eq!(row_sort.range(), range("A2", "B5"));
+        assert_eq!(row_sort.conditions()[0].range(), range("B2", "B5"));
+
+        let column_sort = table.sort_state().expect("column sort");
+        assert!(column_sort.column_sort());
+        assert_eq!(column_sort.range(), range("A2", "B5"));
+        assert_eq!(column_sort.conditions()[0].range(), range("A2", "B2"));
+    }
+
+    #[test]
     fn table_clone_polls_cancellation_inside_filter_criteria() {
         let items = (0..32)
             .map(|index| TableFilterItem::Value(Some(format!("value-{index}").into())))
@@ -1322,6 +1578,15 @@ mod tests {
             TableColumn::new(0, "First", None),
             Err(ValidationError::TableColumnIdZero)
         );
+        assert_eq!(
+            TableColumnName::new(" Amount"),
+            Err(ValidationError::TableColumnNameSpaceBoundary)
+        );
+        assert_eq!(
+            TableColumnName::new("Amount "),
+            Err(ValidationError::TableColumnNameSpaceBoundary)
+        );
+        assert!(TableColumnName::new("Gross Amount").is_ok());
         assert!(TableColumn::new(1, "😀".repeat(128), None).is_ok());
         assert_eq!(
             TableColumn::from_xlsx(1, "😀".repeat(128), None),

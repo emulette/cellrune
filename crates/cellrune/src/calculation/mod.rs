@@ -15,6 +15,7 @@ mod decimal;
 mod defined_name_analysis;
 mod error;
 mod eval;
+pub(crate) mod formula_rewrite;
 mod functions;
 mod graph;
 mod identity;

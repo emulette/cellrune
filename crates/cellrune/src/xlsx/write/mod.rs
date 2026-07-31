@@ -14,6 +14,7 @@ mod report;
 mod serialization;
 mod styles_patch;
 mod table;
+mod table_patch;
 mod workbook_edit;
 mod workbook_patch;
 mod worksheet_edit;

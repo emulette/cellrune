@@ -11,23 +11,28 @@ mod dto;
 mod error;
 mod service;
 
+pub use cellrune::CancellationToken;
 pub use dto::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationOptionsDto, CalculationReportDto, CalculationResultDto, CapabilityEntryDto,
     CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, DefinedNameDynamicKindDto,
     DefinedNameExternalTargetKindDto, DefinedNameInspectionDto, DefinedNameInspectionRequestDto,
     DefinedNameInspectionResultDto, DefinedNameInvalidReasonDto, DefinedNameReferenceAreaDto,
-    DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, EditBatchDto, EditReceiptDto,
-    FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
-    FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto, RangeRequestDto,
-    RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableColumnDto, TableSummaryDto,
-    WorkbookChangeDto, WorkbookSummaryDto, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, EditBatchDto, EditBatchV2Dto,
+    EditReceiptDto, EditReceiptV2Dto, FinancialSolverSemanticsDto, FunctionCatalogEntryDto,
+    FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto,
+    RangeRequestDto, RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto,
+    TableColumnDto, TableSummaryDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookSummaryDto,
+    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use service::{
-    CompletedRecalculation, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PreparedChanges,
+    CompletedRecalculation, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PreparedChanges, PreparedChangesV2,
     PreparedRecalculation, PreparedWorkbookSave, WorkbookSession, function_catalog,
 };
 
 /// Version of the serialized interop contract.
 pub const INTEROP_SCHEMA_VERSION: u32 = 1;
+
+/// Version of the parallel table-authoring edit contract.
+pub const INTEROP_EDIT_SCHEMA_V2: u32 = 2;

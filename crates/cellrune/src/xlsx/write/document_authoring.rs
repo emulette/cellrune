@@ -12,6 +12,7 @@ use super::package_metadata_patch::{
 use super::phonetic_preservation::ensure_phonetic_edit_preservation;
 use super::serialization::validate_phonetic_limits;
 use super::styles_patch::{StyleRequest, plan_document_styles};
+use super::table_patch::patch_table_xml;
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
 use super::worksheet_edit::{
     WorksheetSemanticEdit, patch_worksheet_semantics, read_cell_style_indices,
@@ -39,6 +40,7 @@ const REL_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 const DETAIL_CALCULATION_IDENTITY: &str = "calculation does not belong to the current draft";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
+const DETAIL_MISSING_TABLE_PART: &str = "source table part mapping was not found";
 const DETAIL_EDITED_CELL_COUNT: &str = "max_edited_cells";
 const DETAIL_EDITED_SHEET_COUNT: &str = "max_edited_sheets";
 const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
@@ -71,6 +73,7 @@ pub(crate) fn write_document_draft(
         && draft.cell_mutations().is_empty()
         && draft.presentation_cell_mutations().is_empty()
         && draft.presentation_sheet_mutations().is_empty()
+        && draft.changed_table_ids().is_empty()
     {
         return super::recalculation::write_recalculated_xlsx_bytes(document, calculation, options);
     }
@@ -103,6 +106,19 @@ pub(crate) fn write_document_draft(
     let mut additions = BTreeMap::<PartPath, Vec<u8>>::new();
     let mut new_content_types = BTreeMap::<PartPath, &'static str>::new();
     let mut new_relationships = Vec::<NewRelationship>::new();
+
+    for table_id in draft.changed_table_ids() {
+        let part = document
+            .table_part_path(*table_id)
+            .cloned()
+            .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
+        let table = draft
+            .workbook()
+            .table_by_id(*table_id)
+            .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
+        let bytes = source.read_part(&part)?;
+        replacements.insert(part.clone(), patch_table_xml(&bytes, &part, table, limits)?);
+    }
 
     let workbook_part = document.workbook_part_path();
     let relationship_part = workbook_part
@@ -485,17 +501,30 @@ fn validate_dynamic_formula_edits(
         let Some(current) = current else {
             continue;
         };
-        let is_dynamic = matches!(
-            current.content(),
+        let current_formula = match current.content() {
             crate::CellContent::Formula(formula)
-                if matches!(formula.metadata(), crate::FormulaMetadata::DynamicArray { .. })
-        );
+                if matches!(
+                    formula.metadata(),
+                    crate::FormulaMetadata::DynamicArray { .. }
+                ) =>
+            {
+                Some(formula)
+            }
+            _ => None,
+        };
         let source_content = document
             .workbook()
             .sheet_by_id(id.sheet_id())
             .and_then(|sheet| sheet.cell(id.address()))
             .map(crate::Cell::content);
-        if is_dynamic && source_content != Some(current.content()) {
+        let preserves_dynamic_metadata = current_formula.is_none_or(|current| {
+            matches!(
+                source_content,
+                Some(crate::CellContent::Formula(source))
+                    if source.metadata() == current.metadata()
+            )
+        });
+        if !preserves_dynamic_metadata {
             return Err(
                 XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
                     .with_detail(DETAIL_DYNAMIC_FORMULA_METADATA),

@@ -8,6 +8,7 @@ const {
 } = require("./validation.js");
 
 const INTEROP_SCHEMA_VERSION = 1;
+const INTEROP_EDIT_SCHEMA_V2 = 2;
 const DYNAMIC_KINDS = new Set(["offset", "indirect", "spill", "mixed"]);
 const EXTERNAL_TARGET_KINDS = new Set([
   "reference",
@@ -360,6 +361,29 @@ function normalizeEditReceipt(receipt) {
   };
 }
 
+function normalizeEditReceiptV2(receipt) {
+  requireObject(receipt, "edit receipt v2");
+  if (receipt.schemaVersion !== INTEROP_EDIT_SCHEMA_V2) {
+    throw protocolError("edit receipt v2 schema version is unsupported");
+  }
+  if (
+    !Array.isArray(receipt.changedTableIds) ||
+    receipt.changedTableIds.some(
+      (tableId) =>
+        typeof tableId !== "number" ||
+        !Number.isInteger(tableId) ||
+        tableId <= 0 ||
+        tableId > 4294967295,
+    )
+  ) {
+    throw protocolError("edit receipt v2 table IDs are malformed");
+  }
+  return {
+    ...normalizeEditReceipt(receipt),
+    changedTableIds: receipt.changedTableIds,
+  };
+}
+
 function normalizeFunctionUsage(report) {
   return {
     schemaVersion: report.schemaVersion,
@@ -403,6 +427,7 @@ module.exports = {
   normalizeCalculationReport,
   normalizeDefinedNameInspection,
   normalizeEditReceipt,
+  normalizeEditReceiptV2,
   normalizeFunctionUsage,
   normalizeRangePage,
   normalizeSummary,

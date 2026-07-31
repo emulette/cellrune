@@ -1,6 +1,7 @@
 use crate::{
     CalculationHints, CellAddress, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope,
-    FormulaText, NumberFormat, SheetId, SheetName, SheetVisibility, ValidationError,
+    FormulaText, NumberFormat, Row, SheetId, SheetName, SheetVisibility, TableColumnId,
+    TableColumnName, TableId, TableName, ValidationError,
 };
 
 /// One validated workbook mutation in an atomic [`EditBatch`].
@@ -92,6 +93,31 @@ pub enum WorkbookChange {
     SetCalculationHints {
         /// New calculation hints.
         calculation_hints: CalculationHints,
+    },
+    /// Renames a table while retaining its stable identifier.
+    RenameTable {
+        /// Target table.
+        table_id: TableId,
+        /// New programmatic and display name.
+        new_display_name: TableName,
+    },
+    /// Renames one table column while retaining its stable identifier.
+    RenameTableColumn {
+        /// Target table.
+        table_id: TableId,
+        /// Target column.
+        column_id: TableColumnId,
+        /// New column name.
+        new_name: TableColumnName,
+    },
+    /// Changes only the inclusive data-body row range of one table.
+    ResizeTableRows {
+        /// Target table.
+        table_id: TableId,
+        /// First one-based data-body row.
+        first_data_row: Row,
+        /// Last one-based data-body row.
+        last_data_row: Row,
     },
 }
 
@@ -198,6 +224,51 @@ impl WorkbookChange {
     /// Constructs a calculation-hints change.
     pub const fn set_calculation_hints(calculation_hints: CalculationHints) -> Self {
         Self::SetCalculationHints { calculation_hints }
+    }
+
+    /// Constructs a stable-ID table rename.
+    pub const fn rename_table(table_id: TableId, new_display_name: TableName) -> Self {
+        Self::RenameTable {
+            table_id,
+            new_display_name,
+        }
+    }
+
+    /// Constructs a stable-ID table-column rename.
+    pub const fn rename_table_column(
+        table_id: TableId,
+        column_id: TableColumnId,
+        new_name: TableColumnName,
+    ) -> Self {
+        Self::RenameTableColumn {
+            table_id,
+            column_id,
+            new_name,
+        }
+    }
+
+    /// Constructs a stable-ID table data-row resize.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::TableDataRowsReversed`] when the first data row is after the
+    /// last data row.
+    pub fn resize_table_rows(
+        table_id: TableId,
+        first_data_row: Row,
+        last_data_row: Row,
+    ) -> Result<Self, ValidationError> {
+        if first_data_row > last_data_row {
+            return Err(ValidationError::TableDataRowsReversed {
+                first_data_row: first_data_row.get(),
+                last_data_row: last_data_row.get(),
+            });
+        }
+        Ok(Self::ResizeTableRows {
+            table_id,
+            first_data_row,
+            last_data_row,
+        })
     }
 }
 

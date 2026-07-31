@@ -209,16 +209,34 @@ pub(super) struct TableIndex {
     containing_tables: BTreeMap<SheetId, TableRangeIndex<TableLocation>>,
 }
 
+pub(super) enum TableIndexBuildError {
+    Validation(ValidationError),
+    Cancelled,
+}
+
+impl From<ValidationError> for TableIndexBuildError {
+    fn from(error: ValidationError) -> Self {
+        Self::Validation(error)
+    }
+}
+
 impl TableIndex {
-    pub(super) fn new(
+    pub(super) fn new_cancellable(
         sheets: &[Sheet],
         defined_name_keys: &BTreeSet<Box<str>>,
-    ) -> Result<Self, ValidationError> {
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, TableIndexBuildError> {
         let mut index = Self::default();
         for (sheet_index, sheet) in sheets.iter().enumerate() {
+            if cancelled() {
+                return Err(TableIndexBuildError::Cancelled);
+            }
             let mut programmatic_names = BTreeSet::<Box<str>>::new();
             let mut locations = Vec::with_capacity(sheet.tables().len());
             for (table_index, table) in sheet.tables().iter().enumerate() {
+                if cancelled() {
+                    return Err(TableIndexBuildError::Cancelled);
+                }
                 let location = TableLocation {
                     sheet_index,
                     table_index,
@@ -226,27 +244,34 @@ impl TableIndex {
                 if index.table_ids.insert(table.id(), location).is_some() {
                     return Err(ValidationError::DuplicateTableId {
                         id: table.id().get(),
-                    });
+                    }
+                    .into());
                 }
                 let display_key = Box::<str>::from(table.display_name().lookup_key());
                 if defined_name_keys.contains(display_key.as_ref()) {
                     return Err(ValidationError::TableDisplayNameConflictsWithDefinedName {
                         name: table.display_name().as_str().to_owned(),
-                    });
+                    }
+                    .into());
                 }
                 if index.display_names.insert(display_key, location).is_some() {
                     return Err(ValidationError::DuplicateTableDisplayName {
                         name: table.display_name().as_str().to_owned(),
-                    });
+                    }
+                    .into());
                 }
                 let programmatic_key = Box::<str>::from(table.name().lookup_key());
                 if !programmatic_names.insert(programmatic_key) {
                     return Err(ValidationError::DuplicateTableProgrammaticName {
                         name: table.name().as_str().to_owned(),
-                    });
+                    }
+                    .into());
                 }
                 let mut column_names = BTreeMap::new();
                 for (column_index, column) in table.columns().iter().enumerate() {
+                    if cancelled() {
+                        return Err(TableIndexBuildError::Cancelled);
+                    }
                     let column_location = TableColumnLocation {
                         table: location,
                         column_index,
@@ -254,15 +279,25 @@ impl TableIndex {
                     index
                         .column_ids
                         .insert((table.id(), column.column_id()), column_location);
-                    column_names
-                        .insert(Box::from(case_insensitive_key(column.name())), column_index);
+                    if column_names
+                        .insert(Box::from(case_insensitive_key(column.name())), column_index)
+                        .is_some()
+                    {
+                        return Err(ValidationError::DuplicateTableColumnName {
+                            name: column.name().to_owned(),
+                        }
+                        .into());
+                    }
                 }
                 index.column_names.insert(table.id(), column_names);
                 locations.push(location);
             }
-            let locations = validate_non_overlapping(sheets, sheet_index, locations)?;
+            let locations = validate_non_overlapping(sheets, sheet_index, locations, cancelled)?;
             let mut spatial = TableRangeIndex::default();
             for location in locations {
+                if cancelled() {
+                    return Err(TableIndexBuildError::Cancelled);
+                }
                 let range = sheets[location.sheet_index].tables()[location.table_index].range();
                 spatial.insert(range, location);
             }
@@ -339,7 +374,11 @@ fn validate_non_overlapping(
     sheets: &[Sheet],
     sheet_index: usize,
     mut locations: Vec<TableLocation>,
-) -> Result<Vec<TableLocation>, ValidationError> {
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<TableLocation>, TableIndexBuildError> {
+    if cancelled() {
+        return Err(TableIndexBuildError::Cancelled);
+    }
     locations.sort_unstable_by_key(|location| {
         let table = &sheets[location.sheet_index].tables()[location.table_index];
         (table.range().start(), table.range().end(), table.id())
@@ -347,6 +386,9 @@ fn validate_non_overlapping(
     let mut active_columns = BTreeMap::<u32, (u32, TableId)>::new();
     let mut active_expiry = BinaryHeap::<Reverse<(u32, u32)>>::new();
     for location in &locations {
+        if cancelled() {
+            return Err(TableIndexBuildError::Cancelled);
+        }
         let table = &sheets[location.sheet_index].tables()[location.table_index];
         let range = table.range();
         let start_row = range.start().row().get();
@@ -367,7 +409,8 @@ fn validate_non_overlapping(
                 sheet_id: sheets[sheet_index].id().get(),
                 first_table_id: first_table_id.get(),
                 second_table_id: table.id().get(),
-            });
+            }
+            .into());
         }
         active_columns.insert(column_start, (column_end, table.id()));
         active_expiry.push(Reverse((range.end().row().get(), column_start)));

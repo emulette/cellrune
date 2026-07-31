@@ -19,6 +19,17 @@ async function main() {
   const definedNameCorpus = JSON.parse(
     fs.readFileSync(definedNameCorpusPath, "utf8"),
   );
+  const tableContractPath = path.join(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "binding-contract",
+    "table-authoring-v2.json",
+  );
+  const tableContract = JSON.parse(
+    fs.readFileSync(tableContractPath, "utf8"),
+  );
   assert.equal(definedNameCorpus.schema_version, 1);
   const workbook = Workbook.create();
   for (const operation of corpus.operations) {
@@ -217,6 +228,121 @@ async function main() {
       error instanceof CellRuneError &&
       error.code === corpus.invalid_address_code &&
       error.kind === "validation",
+  );
+
+  const tableWorkbook = await Workbook.openPath(
+    path.join(path.dirname(tableContractPath), tableContract.fixture),
+  );
+  assert.throws(
+    () =>
+      tableWorkbook.applyChanges(tableWorkbook.summary().semanticRevision, [
+        {
+          kind: "renameTable",
+          tableId: tableContract.table_id,
+          newDisplayName: tableContract.new_display_name,
+        },
+      ]),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "interop.input.invalid",
+  );
+  assert.throws(
+    () =>
+      tableWorkbook.applyChangesV2(
+        tableWorkbook.summary().semanticRevision,
+        [
+          {
+            kind: "renameTable",
+            tableId: tableContract.table_id,
+            newDisplayName: tableContract.new_display_name,
+            unexpected: true,
+          },
+        ],
+      ),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "interop.input.invalid" &&
+      error.details.detail === "changes[0].unexpected is not supported",
+  );
+  assert.throws(
+    () =>
+      tableWorkbook.applyChangesV2(
+        tableWorkbook.summary().semanticRevision,
+        [
+          {
+            kind: "setValue",
+            sheet: "Data",
+            address: "F1",
+            value: { kind: "number", value: 1, unexpected: true },
+          },
+        ],
+      ),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "interop.input.invalid" &&
+      error.details.detail ===
+        "changes[0].value.unexpected is not supported",
+  );
+  const tableReceipt = tableWorkbook.applyChangesV2(
+    tableWorkbook.summary().semanticRevision,
+    [
+      {
+        kind: "renameTable",
+        tableId: tableContract.table_id,
+        newDisplayName: tableContract.new_display_name,
+      },
+      {
+        kind: "renameTableColumn",
+        tableId: tableContract.table_id,
+        columnId: tableContract.column_id,
+        newName: tableContract.new_column_name,
+      },
+      {
+        kind: "resizeTableRows",
+        tableId: tableContract.table_id,
+        firstDataRow: tableContract.first_data_row,
+        lastDataRow: tableContract.last_data_row,
+      },
+    ],
+  );
+  assert.equal(tableReceipt.schemaVersion, tableContract.schema_version);
+  assert.deepEqual(tableReceipt.changedTableIds, [tableContract.table_id]);
+  assertTableAuthoringResult(tableWorkbook, tableContract);
+  await tableWorkbook.recalculate({ mode: "full" });
+  const reopenedTableWorkbook = await Workbook.fromBytes(
+    await tableWorkbook.toBytes({ invalidateUnavailable: true }),
+  );
+  assertTableAuthoringResult(reopenedTableWorkbook, tableContract);
+}
+
+function assertTableAuthoringResult(workbook, contract) {
+  const tables = workbook.summary().sheets[0].tables;
+  const table = tables.find((candidate) => candidate.id === contract.table_id);
+  assert.ok(table);
+  assert.equal(table.id, contract.table_id);
+  assert.equal(table.name, contract.new_display_name);
+  assert.equal(table.displayName, contract.new_display_name);
+  assert.equal(table.range, contract.expected_range);
+  assert.equal(table.columns[1].id, contract.column_id);
+  assert.equal(table.columns[1].name, contract.new_column_name);
+  const header = workbook.readRange(
+    "Data",
+    contract.expected_header_address,
+    contract.expected_header_address,
+  ).cells[0];
+  assert.equal(header.sourceValue.kind, "text");
+  assert.equal(header.sourceValue.value, contract.new_column_name);
+  const formula = workbook.readRange("Data", "E1", "E1").cells[0].formula;
+  assert.equal(formula, "=SUM(Orders[Gross Amount])");
+  const emptyTable = tables.find(
+    (candidate) => candidate.id === contract.empty_table_id,
+  );
+  assert.ok(emptyTable);
+  assert.equal(emptyTable.name, contract.empty_table_name);
+  assert.equal(emptyTable.range, contract.empty_table_range);
+  assert.equal(
+    workbook.inspectDefinedName(contract.empty_defined_name).result.kind,
+    "emptyReference",
   );
 }
 

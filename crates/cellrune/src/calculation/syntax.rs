@@ -119,9 +119,9 @@ impl NodeSpanTree {
 pub enum SourceComponentKind {
     StructuredTable,
     StructuredItem(u16),
-    StructuredColumn,
-    StructuredColumnStart,
-    StructuredColumnEnd,
+    StructuredColumn { grouped: bool },
+    StructuredColumnStart { grouped: bool },
+    StructuredColumnEnd { grouped: bool },
     SheetQualifier,
     SheetRangeEnd,
     DefinedName,

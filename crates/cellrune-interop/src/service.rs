@@ -15,7 +15,7 @@ use cellrune::{
 use crate::InteropError;
 
 pub use calculation::{CompletedRecalculation, PreparedRecalculation};
-pub use edit::PreparedChanges;
+pub use edit::{PreparedChanges, PreparedChangesV2};
 pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog};
 pub use save::PreparedWorkbookSave;
 

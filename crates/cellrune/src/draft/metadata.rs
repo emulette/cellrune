@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{DraftCellMutation, WorkbookDraft, next_revision};
 use crate::{
-    CalculationCellId, CellAddress, DefinedName, Sheet, SheetId, ValidationError, WorkbookSnapshot,
-    XlsxDocument,
+    CalculationCellId, CellAddress, DefinedName, Sheet, SheetId, TableId, ValidationError,
+    WorkbookSnapshot, XlsxDocument,
 };
 
 impl WorkbookDraft {
-    pub(crate) const fn source_document(&self) -> Option<&XlsxDocument> {
-        self.source_document.as_ref()
+    pub(crate) fn source_document(&self) -> Option<&XlsxDocument> {
+        self.source_document.as_deref()
     }
 
     pub(crate) const fn cell_mutations(&self) -> &BTreeMap<CalculationCellId, DraftCellMutation> {
@@ -25,6 +25,10 @@ impl WorkbookDraft {
 
     pub(crate) const fn added_sheets(&self) -> &BTreeSet<SheetId> {
         &self.added_sheets
+    }
+
+    pub(crate) const fn changed_table_ids(&self) -> &BTreeSet<TableId> {
+        &self.changed_table_ids
     }
 
     pub(crate) const fn workbook_changed(&self) -> bool {

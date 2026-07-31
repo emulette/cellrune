@@ -10,6 +10,7 @@ export declare class NativeWorkbook {
   calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationReport>
   recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationDelta>
   applyChanges(expectedRevision: string, batchJson: string): NativeEditReceipt
+  applyChangesV2(expectedRevision: string, batchJson: string): NativeEditReceiptV2
   changesSince(cursor: string, limit: number): NativeCalculationDeltaPage
   cancelCalculation(): boolean
   calculationActive(): boolean
@@ -145,6 +146,19 @@ export interface NativeEditReceipt {
   createdSheetIds: Array<number>
   topologyChanged: boolean
   calculationMetadataChanged: boolean
+}
+
+export interface NativeEditReceiptV2 {
+  schemaVersion: number
+  baseRevision: string
+  resultRevision: string
+  appliedChangeCount: number
+  changedCells: Array<NativeCellReference>
+  calculationChangedCells: Array<NativeCellReference>
+  createdSheetIds: Array<number>
+  topologyChanged: boolean
+  calculationMetadataChanged: boolean
+  changedTableIds: Array<number>
 }
 
 export interface NativeFunctionUsageEntry {

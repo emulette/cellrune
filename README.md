@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.8 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.9 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.8
+cargo add cellrune@0.1.9
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.8"
+cellrune = "0.1.9"
 ```
 
 ## Features
@@ -26,8 +26,12 @@ cellrune = "0.1.8"
   round-trip preservation;
 - preserves sheet order, sparse cells, formulas, saved results, defined names, and relevant
   number-format metadata;
-- exposes merged ranges and validated worksheet-owned Excel tables, including stable table IDs,
-  programmatic names, formula/UI display names, ranges, and column metadata;
+- exposes merged ranges and validated worksheet-owned Excel tables, including stable table and
+  column IDs, complete filter/sort/formula/style metadata, and case-insensitive lookup indexes;
+- resolves typed multi-area, 3-D, structured table, current-row, and spill references under
+  cumulative reference and dependency budgets;
+- inspects workbook and sheet-local defined names without running a calculation session, preserving
+  rectangular, 3-D, ordered multi-area, empty, dynamic, external, invalid, and unsupported results;
 - expands shared formulas while preserving absolute and relative references;
 - returns typed formula values and stable per-cell calculation issues in one result snapshot;
 - reports normalized per-workbook function demand and exposes the implemented function catalog;
@@ -42,8 +46,9 @@ cellrune = "0.1.8"
 - returns stable error and issue codes for programmatic handling;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies;
-- creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name,
-  number-format, date-system, and calculation-property edits through `WorkbookDraft`;
+- creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name, table rename,
+  table-column rename, table-row resize, number-format, date-system, and calculation-property edits
+  through `WorkbookDraft`;
 - reads, queries, preserves, and explicitly authors SpreadsheetML phonetic annotations and default
   frozen panes without mixing presentation state into formula calculation;
 - exposes the same versioned read/edit/calculate/write contract through typed Python and
@@ -156,6 +161,22 @@ Long-running work can be prepared outside the session lock with `prepare_recalcu
 through a request-owned `CancellationToken`, and installed only if its source revision is still
 current.
 
+Table authoring uses stable identities rather than positional names. Construct
+`WorkbookChange::rename_table`, `rename_table_column`, or `resize_table_rows` and include it in the
+same atomic `EditBatch` as other workbook changes. Renames update cell formulas, defined names,
+calculated-column formulas, and totals-row formulas through one typed source-span rewrite path.
+Resize preserves table identity and filter/sort orientation, materializes calculated and totals
+cells, and supports expanding a header-only empty table. Through
+`WorkbookCalculationSession`, formula rewriting and table materialization are bounded by
+`SessionLimits`. A successful `EditReceipt` lists the affected stable table IDs; any invalid
+target, collision, rewrite error, resource limit, or cancellation rolls the whole batch back.
+
+Use `analyze_defined_name`, `analyze_defined_name_with_options`, or
+`analyze_defined_name_cancellable` to inspect a defined name against an immutable
+`WorkbookSnapshot`. The typed result distinguishes a single rectangle, a 3-D span, ordered
+multi-area geometry, a valid empty reference, dynamic formulas, constants, external targets,
+invalid definitions, unsupported expressions, and missing names.
+
 `open_xlsx_document_*` retains the exact input package for writing.
 `write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
 `write_recalculated_xlsx_path` bind a calculation to that exact input, update typed formula
@@ -196,17 +217,21 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.8 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.9 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.8"
-npm install "@cellrune/node@0.1.8"
+python -m pip install "cellrune==0.1.9"
+npm install "@cellrune/node@0.1.9"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
 availability remains platform-specific; package managers must select a wheel or exact-version npm
 platform package compatible with the current runtime.
+Python `inspect_defined_name` and Node.js `inspectDefinedName` expose the typed defined-name query.
+The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separate
+`apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
+table-row resize plus `changed_table_ids`/`changedTableIds` receipts.
 
 Python workbooks are context managers:
 
@@ -261,10 +286,11 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 11 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
+Its 12 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
 `workbook_read_range`, `workbook_function_usage`, `workbook_scan_capabilities`,
-`workbook_apply_changes`, `workbook_recalculate`, `workbook_changes_since`, and
-`workbook_save_as`.
+`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`,
+`workbook_changes_since`, and `workbook_save_as`. The v2 edit tool adds stable-ID table rename,
+table-column rename, and table-row resize while retaining the v1 edit shapes.
 
 The server also publishes read-only JSON resources at `cellrune://support/functions` and the
 `cellrune://sessions/{session_id}/summary` resource template. Operators can set
@@ -326,8 +352,8 @@ The following are outside the current scope:
 
 - `.xls`, `.xlsb`, `.ods`, and CSV;
 - macro, add-in, external-workbook, query, or data-connection execution;
-- table structured references and 3-D references outside the audited direct-consumer policy above;
-- spill postfix references such as `A1#` and data-table calculation; and
+- 3-D references outside the audited direct-consumer policy above;
+- data-table calculation; and
 - iterative calculation and automatic host-time inputs.
 
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
