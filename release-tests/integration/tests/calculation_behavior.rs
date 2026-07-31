@@ -600,7 +600,7 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
         CalculationIssueCode::UnsupportedStructuredReference,
         Some("Table1[Amount]"),
     );
-    assert_capability_issue_code(&report, 2, CalculationIssueCode::ParseError);
+    assert_capability_issue_code(&report, 2, CalculationIssueCode::UnsupportedExpression);
     assert!(matches!(
         report
             .entries()
@@ -632,7 +632,7 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
         1,
         CalculationIssueCode::UnsupportedStructuredReference,
     );
-    assert_issue(&calculation, 2, CalculationIssueCode::ParseError);
+    assert_issue(&calculation, 2, CalculationIssueCode::UnsupportedExpression);
     assert!(matches!(
         calculation.cell(cell_id(3)),
         Some(CalculationCellResult::Value(_))
@@ -641,11 +641,9 @@ fn unsupported_reference_and_lambda_surfaces_are_reported_explicitly() {
 }
 
 #[test]
-fn structured_references_classify_honestly_and_external_links_stay_parse_errors() {
-    // 0.1.6 boundary: the lexer consumes balanced brackets opaquely, so structured
-    // references are recognized (not resolved), while external-workbook spellings -
-    // told apart by the `!` after the closing bracket, never by the bracket contents -
-    // remain parse errors.
+fn structured_and_external_references_are_typed_before_resolution() {
+    // Structured and external workbook references have distinct typed syntax nodes. Resolution
+    // remains unsupported at this checkpoint, while malformed brackets remain parse failures.
     let workbook = workbook_with_formulas(&[
         (1, 1, "Table1[Amount]"),
         (1, 2, "SUM([@Amount])"),
@@ -667,9 +665,10 @@ fn structured_references_classify_honestly_and_external_links_stay_parse_errors(
             CalculationIssueCode::UnsupportedStructuredReference,
         );
     }
-    for column in 6..=9 {
-        assert_capability_issue_code(&report, column, CalculationIssueCode::ParseError);
+    for column in 6..=8 {
+        assert_capability_issue_code(&report, column, CalculationIssueCode::UnsupportedExpression);
     }
+    assert_capability_issue_code(&report, 9, CalculationIssueCode::ParseError);
     assert_capability_issue_code(
         &report,
         10,
@@ -685,9 +684,14 @@ fn structured_references_classify_honestly_and_external_links_stay_parse_errors(
             CalculationIssueCode::UnsupportedStructuredReference,
         );
     }
-    for column in 6..=9 {
-        assert_issue(&calculation, column, CalculationIssueCode::ParseError);
+    for column in 6..=8 {
+        assert_issue(
+            &calculation,
+            column,
+            CalculationIssueCode::UnsupportedExpression,
+        );
     }
+    assert_issue(&calculation, 9, CalculationIssueCode::ParseError);
     assert_issue(
         &calculation,
         10,
@@ -989,10 +993,9 @@ fn cross_sheet_range_operator_calculates_the_excel_value_error() {
 
 #[test]
 fn quoted_external_workbook_references_are_unsupported_and_cannot_be_hidden_by_iferror() {
-    // `[1]Sheet1!A1` never reaches the parser because the lexer has no bracket token, but Excel
-    // also stores the quoted spelling, which arrives as one sheet-name token. Resolving it as an
-    // ordinary missing sheet would yield `#REF!` — a spreadsheet error value that `IFERROR` is
-    // allowed to hide — and would report the formula as Supported.
+    // Both quoted and unquoted external workbook spellings reach one typed node. Resolving either
+    // as an ordinary missing sheet would yield a catchable `#REF!` and misreport the formula as
+    // supported, so the capability remains an engine-level unsupported expression.
     let workbook = workbook_with_formulas(&[
         (1, 1, "'[1]Sheet1'!A1"),
         (1, 2, "IFERROR('[1]Sheet1'!A1,0)"),
@@ -1067,9 +1070,9 @@ fn external_workbook_references_built_by_indirect_stay_catchable() {
 }
 
 #[test]
-fn parse_error_details_locate_lex_failures_by_character_and_parse_failures_by_token() {
-    // A lex failure happens before any token exists, so it can only be located by character
-    // offset. Reporting it as a token index mislabels the position.
+fn parse_error_details_use_stable_codes_and_utf8_byte_spans() {
+    // Lex and parse failures share one location contract so callers never have to interpret the
+    // same integer as either a character offset or a token index.
     let workbook = workbook_with_formulas(&[
         (1, 1, "SUM(Table1?Amount)"),
         (1, 2, "\"unterminated"),
@@ -1082,25 +1085,73 @@ fn parse_error_details_locate_lex_failures_by_character_and_parse_failures_by_to
         &report,
         1,
         CalculationIssueCode::ParseError,
-        Some("character 10: unexpected character in formula"),
+        Some("bytes 10..11 [formula.lex.unexpected_character]: unexpected character in formula"),
     );
     assert_capability_issue(
         &report,
         2,
         CalculationIssueCode::ParseError,
-        Some("character 0: unterminated string literal"),
+        Some("bytes 0..13 [formula.lex.unterminated_string]: unterminated string literal"),
     );
     assert_capability_issue(
         &report,
         3,
         CalculationIssueCode::ParseError,
-        Some("token 2: unexpected end of formula"),
+        Some("bytes 2..2 [formula.parse.unexpected_end]: unexpected end of formula"),
     );
     assert_capability_issue(
         &report,
         4,
         CalculationIssueCode::ParseError,
-        Some("token 4: unexpected token"),
+        Some("bytes 6..7 [formula.parse.unexpected_token]: unexpected token"),
+    );
+}
+
+#[test]
+fn typed_reference_grammar_is_classified_without_parse_failures() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "SUM(Table1[Amount])"),
+        (1, 2, "A1#"),
+        (1, 3, "[Book.xlsx]Sheet1!A1"),
+        (1, 4, "Sheet1!LocalRate"),
+        (1, 5, "A1,B1"),
+        (1, 6, "A1 B1"),
+    ]);
+    let report = scan_formula_capabilities(&workbook);
+
+    assert_capability_issue(
+        &report,
+        1,
+        CalculationIssueCode::UnsupportedStructuredReference,
+        Some("Table1[Amount]"),
+    );
+    for column in [2, 3, 5, 6] {
+        let entry = report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(column))
+            .expect("formula entry");
+        let FormulaCapability::Unsupported(issues) = entry.capability() else {
+            panic!("column {column} should be unsupported");
+        };
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code() == CalculationIssueCode::UnsupportedExpression),
+            "column {column} should be a typed unsupported expression"
+        );
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.code() != CalculationIssueCode::ParseError),
+            "column {column} must not regress to a parse failure"
+        );
+    }
+    assert_capability_issue(
+        &report,
+        4,
+        CalculationIssueCode::UnsupportedName,
+        Some("LocalRate"),
     );
 }
 
@@ -1905,6 +1956,12 @@ fn calculation_limits_reject_zero_values() {
         })
     );
     assert_eq!(
+        CalculationLimits::default().with_max_formula_source_bytes(0),
+        Err(CalculationOptionsError::ZeroLimit {
+            name: "max_formula_source_bytes",
+        })
+    );
+    assert_eq!(
         CalculationLimits::default().with_max_dependency_edges(0),
         Err(CalculationOptionsError::ZeroLimit {
             name: "max_dependency_edges",
@@ -1961,6 +2018,20 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
         &parser_calculation,
         1,
         CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    let source_limits = CalculationLimits::default()
+        .with_max_formula_source_bytes(3)
+        .expect("nonzero formula source limit");
+    let source_report = scan_formula_capabilities_with_options(
+        &workbook_with_formulas(&[(1, 1, "표A")]),
+        CalculationOptions::default().with_limits(source_limits),
+    );
+    assert_capability_issue(
+        &source_report,
+        1,
+        CalculationIssueCode::ResourceLimitExceeded,
+        Some("max_formula_source_bytes"),
     );
 
     let ast_limits = CalculationLimits::default()

@@ -50,14 +50,14 @@ impl Engine<'_> {
                 }
             }
         }
-        for (cell, expr) in &self.asts {
+        for (cell, parsed) in &self.asts {
             if cancelled() {
                 return Err(());
             }
             let budget = EvaluationBudget::default();
             let found = self.expr_has_unresolved_dynamic_dependency(
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
-                expr,
+                parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
             );
@@ -92,14 +92,14 @@ impl Engine<'_> {
                 }
             }
         }
-        for (cell, expr) in &self.asts {
+        for (cell, parsed) in &self.asts {
             if cancelled() {
                 return Err(());
             }
             let budget = EvaluationBudget::default();
             let found = self.expr_contains_dynamic_reference_function(
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
-                expr,
+                parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
             );
@@ -124,7 +124,7 @@ impl Engine<'_> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<BTreeMap<super::CellId, Vec<RectSpan>>, ()> {
         let mut result = BTreeMap::new();
-        for (cell, expr) in &self.asts {
+        for (cell, parsed) in &self.asts {
             if cancelled() {
                 return Err(());
             }
@@ -132,7 +132,7 @@ impl Engine<'_> {
             let budget = EvaluationBudget::default();
             self.collect_dependency_rects(
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
-                expr,
+                parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
                 &mut rects,
@@ -271,11 +271,14 @@ impl Engine<'_> {
                     })
             }
             Expr::ImplicitIntersection(inner)
+            | Expr::SpillRef(inner)
             | Expr::Paren(inner)
             | Expr::Unary { operand: inner, .. } => {
                 self.expr_has_unresolved_dynamic_dependency(context, inner, visited, local_names)
             }
             Expr::Binary { left, right, .. }
+            | Expr::ReferenceUnion { left, right }
+            | Expr::ReferenceIntersection { left, right }
             | Expr::Range {
                 start: left,
                 end: right,
@@ -297,6 +300,8 @@ impl Engine<'_> {
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
             | Expr::Missing => false,
         }
     }
@@ -324,7 +329,7 @@ impl Engine<'_> {
             formula_cells.push(cells);
         }
         let mut edge_count = 0_u64;
-        for (cell, expr) in &self.asts {
+        for (cell, parsed) in &self.asts {
             if cancelled() {
                 return Err(());
             }
@@ -338,7 +343,7 @@ impl Engine<'_> {
             let budget = EvaluationBudget::default();
             self.collect_dependency_rects(
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
-                expr,
+                parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
                 &mut rects,
@@ -484,10 +489,12 @@ impl Engine<'_> {
                     self.collect_dependency_rects(context, inner, visited, local_names, output);
                 }
             }
-            Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
+            Expr::Paren(inner) | Expr::SpillRef(inner) | Expr::Unary { operand: inner, .. } => {
                 self.collect_dependency_rects(context, inner, visited, local_names, output);
             }
-            Expr::Binary { left, right, .. } => {
+            Expr::Binary { left, right, .. }
+            | Expr::ReferenceUnion { left, right }
+            | Expr::ReferenceIntersection { left, right } => {
                 self.collect_dependency_rects(context, left, visited, local_names, output);
                 self.collect_dependency_rects(context, right, visited, local_names, output);
             }
@@ -598,6 +605,8 @@ impl Engine<'_> {
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
             | Expr::StructuredRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
             | Expr::Missing => {}
         }
     }
@@ -614,7 +623,7 @@ impl Engine<'_> {
             return;
         }
         match expr {
-            Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
+            Expr::Paren(inner) | Expr::ImplicitIntersection(inner) | Expr::SpillRef(inner) => {
                 self.collect_reference_selection_inputs(
                     context,
                     inner,
@@ -623,7 +632,15 @@ impl Engine<'_> {
                     output,
                 );
             }
-            Expr::Range { start, end } => {
+            Expr::Range { start, end }
+            | Expr::ReferenceUnion {
+                left: start,
+                right: end,
+            }
+            | Expr::ReferenceIntersection {
+                left: start,
+                right: end,
+            } => {
                 self.collect_reference_selection_inputs(
                     context,
                     start,
@@ -754,6 +771,8 @@ impl Engine<'_> {
             | Expr::Binary { .. }
             | Expr::Array(_)
             | Expr::StructuredRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
             | Expr::Missing => {}
         }
     }
@@ -871,11 +890,14 @@ impl Engine<'_> {
                     })
             }
             Expr::ImplicitIntersection(inner)
+            | Expr::SpillRef(inner)
             | Expr::Paren(inner)
             | Expr::Unary { operand: inner, .. } => {
                 self.expr_contains_dynamic_reference_function(context, inner, visited, local_names)
             }
             Expr::Binary { left, right, .. }
+            | Expr::ReferenceUnion { left, right }
+            | Expr::ReferenceIntersection { left, right }
             | Expr::Range {
                 start: left,
                 end: right,
@@ -902,6 +924,8 @@ impl Engine<'_> {
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
             | Expr::StructuredRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
             | Expr::Missing => false,
         }
     }

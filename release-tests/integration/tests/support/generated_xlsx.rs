@@ -79,6 +79,42 @@ pub fn generated_workbook(profile: ProducerProfile) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, None)
 }
 
+pub fn generated_formula_fixture(formulas: &[&str]) -> Vec<u8> {
+    let rows = formulas
+        .iter()
+        .enumerate()
+        .map(|(index, formula)| {
+            let row = index + 2;
+            let escaped = formula
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            format!(r#"<row r="{row}"><c r="B{row}"><f>{escaped}</f></c></row>"#)
+        })
+        .collect::<String>();
+    let calculations = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{rows}</sheetData>
+</worksheet>"#
+    );
+    build_archive(
+        &[
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", WORKBOOK),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+            ("xl/styles.xml", STYLES),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#,
+            ),
+            ("xl/worksheets/sheet2.xml", &calculations),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }

@@ -274,6 +274,7 @@ fn collect_function_calls_in_scope(
             }
         }
         Expr::ImplicitIntersection(inner)
+        | Expr::SpillRef(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
             collect_function_calls_in_scope(
@@ -286,6 +287,8 @@ fn collect_function_calls_in_scope(
             );
         }
         Expr::Binary { left, right, .. }
+        | Expr::ReferenceUnion { left, right }
+        | Expr::ReferenceIntersection { left, right }
         | Expr::Range {
             start: left,
             end: right,
@@ -340,6 +343,8 @@ fn collect_function_calls_in_scope(
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
         | Expr::StructuredRef(_)
+        | Expr::ExternalReference(_)
+        | Expr::QualifiedName { .. }
         | Expr::Missing => {}
     }
 }
@@ -414,7 +419,7 @@ fn scan_with_engine_cancellable(
                         Some(limit) => issues.push(resource_limit_issue(limit)),
                         None => issues.push(CalculationIssue::new(
                             CalculationIssueCode::ParseError,
-                            Some(parse_error_detail(error.position, error.message)),
+                            Some(parse_error_detail(error)),
                         )),
                     },
                     None if has_name_cycle || has_name_limit => {}
@@ -855,11 +860,14 @@ fn expr_contains_function(
                 })
         }
         Expr::ImplicitIntersection(inner)
+        | Expr::SpillRef(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
             expr_contains_function(engine, sheet, inner, expected, names, local_scope)
         }
-        Expr::Binary { left, right, .. } => {
+        Expr::Binary { left, right, .. }
+        | Expr::ReferenceUnion { left, right }
+        | Expr::ReferenceIntersection { left, right } => {
             expr_contains_function(engine, sheet, left, expected, names, local_scope)
                 || expr_contains_function(engine, sheet, right, expected, names, local_scope)
         }
@@ -896,6 +904,8 @@ fn expr_contains_function(
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
         | Expr::StructuredRef(_)
+        | Expr::ExternalReference(_)
+        | Expr::QualifiedName { .. }
         | Expr::Missing => false,
     }
 }
@@ -948,10 +958,15 @@ fn expr_is_definitely_non_callable(expr: &Expr) -> bool {
         | Expr::Logical(_)
         | Expr::ErrorLit(_)
         | Expr::StructuredRef(_)
+        | Expr::ExternalReference(_)
+        | Expr::QualifiedName { .. }
         | Expr::Missing
         | Expr::Ref(_)
         | Expr::Range { .. }
         | Expr::ImplicitIntersection(_)
+        | Expr::SpillRef(_)
+        | Expr::ReferenceUnion { .. }
+        | Expr::ReferenceIntersection { .. }
         | Expr::Array(_)
         | Expr::Unary { .. }
         | Expr::Binary { .. } => true,
@@ -1188,6 +1203,21 @@ fn inspect_expr(
                 }
             }
         }
+        Expr::SpillRef(inner) => {
+            issues.push(CalculationIssue::new(
+                CalculationIssueCode::UnsupportedExpression,
+                Some(expr.to_string()),
+            ));
+            inspect_expr(
+                engine,
+                sheet,
+                inner,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_scope,
+                issues,
+            );
+        }
         Expr::ImplicitIntersection(inner) | Expr::Unary { operand: inner, .. } => {
             inspect_expr(
                 engine,
@@ -1205,6 +1235,30 @@ fn inspect_expr(
                 sheet,
                 inner,
                 sheet_span_policy,
+                names,
+                local_scope,
+                issues,
+            );
+        }
+        Expr::ReferenceUnion { left, right } | Expr::ReferenceIntersection { left, right } => {
+            issues.push(CalculationIssue::new(
+                CalculationIssueCode::UnsupportedExpression,
+                Some(expr.to_string()),
+            ));
+            inspect_expr(
+                engine,
+                sheet,
+                left,
+                ARRAY_EXPRESSION_POLICY,
+                names,
+                local_scope,
+                issues,
+            );
+            inspect_expr(
+                engine,
+                sheet,
+                right,
+                ARRAY_EXPRESSION_POLICY,
                 names,
                 local_scope,
                 issues,
@@ -1279,6 +1333,26 @@ fn inspect_expr(
             issues.push(CalculationIssue::new(
                 CalculationIssueCode::UnsupportedStructuredReference,
                 Some(text.to_string()),
+            ));
+        }
+        Expr::ExternalReference(reference) => {
+            let mut detail = reference.workbook.to_string();
+            if let Some(sheet) = &reference.sheet {
+                detail.push_str(sheet);
+                if let Some(sheet_end) = &reference.sheet_end {
+                    detail.push(':');
+                    detail.push_str(sheet_end);
+                }
+            }
+            issues.push(CalculationIssue::new(
+                CalculationIssueCode::UnsupportedExpression,
+                Some(detail),
+            ));
+        }
+        Expr::QualifiedName { name, .. } => {
+            issues.push(CalculationIssue::new(
+                CalculationIssueCode::UnsupportedName,
+                Some(name.to_string()),
             ));
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {}

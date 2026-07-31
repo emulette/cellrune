@@ -91,11 +91,10 @@ impl SheetPrefix {
     /// Returns the offending name when this prefix addresses another workbook.
     ///
     /// Excel forbids `[` and `]` in sheet names, so a bracket in the sheet-name position is always
-    /// an external-workbook prefix such as `'[1]Sheet1'!A1` or `'[Book.xlsx]Sheet1'!A1`. The
-    /// unquoted spelling never reaches the parser because the lexer has no bracket token, but the
-    /// quoted spelling arrives as a single sheet-name token. Without this check it would resolve
-    /// as an ordinary missing sheet and produce `#REF!`, which `IFERROR` is allowed to hide —
-    /// exactly the outcome the crate's failure model forbids for an unsupported capability.
+    /// an external-workbook prefix. The typed parser routes authored external spellings to
+    /// `ExternalWorkbookReference`; this check remains a fail-closed guard for references created
+    /// by dynamic parsing or older internal paths. Without it, an external reference could resolve
+    /// as an ordinary missing sheet and produce a catchable `#REF!`.
     pub fn external_workbook_detail(&self) -> Option<String> {
         [Some(&self.name), self.end_name.as_ref()]
             .into_iter()
@@ -109,6 +108,64 @@ impl SheetPrefix {
 pub struct Reference {
     pub sheet: Option<SheetPrefix>,
     pub body: RefBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuredItem {
+    All,
+    Data,
+    Headers,
+    Totals,
+    ThisRow,
+}
+
+impl StructuredItem {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "#All",
+            Self::Data => "#Data",
+            Self::Headers => "#Headers",
+            Self::Totals => "#Totals",
+            Self::ThisRow => "#This Row",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuredColumns {
+    Single(Box<str>),
+    Range { start: Box<str>, end: Box<str> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredReference {
+    pub table: Option<Box<str>>,
+    pub items: Vec<StructuredItem>,
+    pub columns: Option<StructuredColumns>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExternalReferenceTarget {
+    Reference(RefBody),
+    DefinedName(Box<str>),
+    StructuredReference(StructuredReference),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalWorkbookReference {
+    pub workbook: Box<str>,
+    pub sheet: Option<Box<str>>,
+    pub sheet_end: Option<Box<str>>,
+    pub sheet_quoted: bool,
+    pub quoted: bool,
+    pub target: ExternalReferenceTarget,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormulaDisplayMode {
+    Authored,
+    Storage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -148,10 +205,21 @@ pub enum Expr {
     Logical(bool),
     ErrorLit(ErrorKind),
     Ref(Reference),
-    /// One opaque structured table reference with its original spelling, such as
-    /// `Table1[Amount]` or `[@Amount]`. Recognized and classified but not resolved;
-    /// 0.1.9 replaces this node with a typed selector model.
-    StructuredRef(Box<str>),
+    StructuredRef(StructuredReference),
+    ReferenceUnion {
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    ReferenceIntersection {
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    SpillRef(Box<Expr>),
+    ExternalReference(ExternalWorkbookReference),
+    QualifiedName {
+        sheet: SheetPrefix,
+        name: Box<str>,
+    },
     Range {
         start: Box<Expr>,
         end: Box<Expr>,
@@ -184,6 +252,17 @@ impl Expr {
     pub(super) fn number(value: f64) -> Self {
         Self::Number(NumberLiteral::from_number(value))
     }
+
+    #[allow(dead_code)]
+    pub(super) const fn display_with_mode(&self, mode: FormulaDisplayMode) -> ExprDisplay<'_> {
+        ExprDisplay { expr: self, mode }
+    }
+}
+
+#[allow(dead_code)]
+pub(super) struct ExprDisplay<'a> {
+    expr: &'a Expr,
+    mode: FormulaDisplayMode,
 }
 
 pub fn column_label(column: u32) -> String {
@@ -227,18 +306,22 @@ fn write_cell(formatter: &mut fmt::Formatter<'_>, cell: &CellRef) -> fmt::Result
     write!(formatter, "{}", cell.row)
 }
 
+fn write_sheet_prefix(formatter: &mut fmt::Formatter<'_>, sheet: &SheetPrefix) -> fmt::Result {
+    let label = match &sheet.end_name {
+        Some(end) => format!("{}:{}", sheet.name, end),
+        None => sheet.name.clone(),
+    };
+    if sheet.quoted {
+        write!(formatter, "'{}'!", label.replace('\'', "''"))
+    } else {
+        write!(formatter, "{label}!")
+    }
+}
+
 impl fmt::Display for Reference {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(sheet) = &self.sheet {
-            let label = match &sheet.end_name {
-                Some(end) => format!("{}:{}", sheet.name, end),
-                None => sheet.name.clone(),
-            };
-            if sheet.quoted {
-                write!(formatter, "'{}'!", label.replace('\'', "''"))?;
-            } else {
-                write!(formatter, "{label}!")?;
-            }
+            write_sheet_prefix(formatter, sheet)?;
         }
         match &self.body {
             RefBody::Cell(cell) => write_cell(formatter, cell),
@@ -273,8 +356,187 @@ impl fmt::Display for Reference {
     }
 }
 
-impl fmt::Display for Expr {
+fn write_structured_name(formatter: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    for character in name.chars() {
+        if matches!(character, '[' | ']' | '#' | '\'' | '@') {
+            formatter.write_str("'")?;
+        }
+        write!(formatter, "{character}")?;
+    }
+    Ok(())
+}
+
+fn write_structured_component(formatter: &mut fmt::Formatter<'_>, component: &str) -> fmt::Result {
+    formatter.write_str("[")?;
+    write_structured_name(formatter, component)?;
+    formatter.write_str("]")
+}
+
+pub(super) fn structured_column_needs_grouping(column: &str) -> bool {
+    column
+        .chars()
+        .any(structured_column_character_needs_grouping)
+}
+
+pub(super) const fn structured_column_character_needs_grouping(character: char) -> bool {
+    matches!(
+        character,
+        '\t' | '\n'
+            | '\r'
+            | ','
+            | ':'
+            | '.'
+            | '['
+            | ']'
+            | '#'
+            | '\''
+            | '"'
+            | '{'
+            | '}'
+            | '$'
+            | '^'
+            | '&'
+            | '*'
+            | '+'
+            | '='
+            | '-'
+            | '>'
+            | '<'
+            | '/'
+            | '@'
+            | '\\'
+            | '!'
+            | '('
+            | ')'
+            | '%'
+            | '?'
+            | '`'
+            | ';'
+            | '~'
+            | '_'
+    )
+}
+
+fn write_structured_reference(
+    formatter: &mut fmt::Formatter<'_>,
+    reference: &StructuredReference,
+) -> fmt::Result {
+    if let Some(table) = &reference.table {
+        formatter.write_str(table)?;
+    }
+    formatter.write_str("[")?;
+    if reference.items == [StructuredItem::ThisRow] {
+        formatter.write_str("@")?;
+        match &reference.columns {
+            None => {}
+            Some(StructuredColumns::Single(column)) => {
+                if structured_column_needs_grouping(column) {
+                    write_structured_component(formatter, column)?;
+                } else {
+                    write_structured_name(formatter, column)?;
+                }
+            }
+            Some(StructuredColumns::Range { start, end }) => {
+                write_structured_component(formatter, start)?;
+                formatter.write_str(":")?;
+                write_structured_component(formatter, end)?;
+            }
+        }
+        return formatter.write_str("]");
+    }
+    let needs_grouping = !reference.items.is_empty() && reference.columns.is_some()
+        || reference.items.len() > 1
+        || matches!(reference.columns, Some(StructuredColumns::Range { .. }))
+        || matches!(
+            &reference.columns,
+            Some(StructuredColumns::Single(column))
+                if structured_column_needs_grouping(column)
+        );
+    if needs_grouping {
+        let mut wrote = false;
+        for item in &reference.items {
+            if wrote {
+                formatter.write_str(",")?;
+            }
+            write!(formatter, "[{}]", item.as_str())?;
+            wrote = true;
+        }
+        if let Some(columns) = &reference.columns {
+            if wrote {
+                formatter.write_str(",")?;
+            }
+            match columns {
+                StructuredColumns::Single(column) => {
+                    write_structured_component(formatter, column)?;
+                }
+                StructuredColumns::Range { start, end } => {
+                    write_structured_component(formatter, start)?;
+                    formatter.write_str(":")?;
+                    write_structured_component(formatter, end)?;
+                }
+            }
+        }
+    } else if let Some(item) = reference.items.first() {
+        formatter.write_str(item.as_str())?;
+    } else if let Some(StructuredColumns::Single(column)) = &reference.columns {
+        write_structured_name(formatter, column)?;
+    }
+    formatter.write_str("]")
+}
+
+impl fmt::Display for StructuredReference {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_structured_reference(formatter, self)
+    }
+}
+
+fn write_arguments(
+    formatter: &mut fmt::Formatter<'_>,
+    args: &[Expr],
+    mode: FormulaDisplayMode,
+) -> fmt::Result {
+    for (index, arg) in args.iter().enumerate() {
+        if index > 0 {
+            formatter.write_str(",")?;
+        }
+        arg.fmt_mode(formatter, mode)?;
+    }
+    Ok(())
+}
+
+fn write_storage_wrapper(
+    formatter: &mut fmt::Formatter<'_>,
+    function: &str,
+    operand: &Expr,
+    mode: FormulaDisplayMode,
+) -> fmt::Result {
+    write!(formatter, "{function}(")?;
+    let needs_argument_grouping = storage_argument_needs_grouping(operand);
+    if needs_argument_grouping {
+        formatter.write_str("(")?;
+    }
+    operand.fmt_mode(formatter, mode)?;
+    if needs_argument_grouping {
+        formatter.write_str(")")?;
+    }
+    formatter.write_str(")")
+}
+
+fn storage_argument_needs_grouping(operand: &Expr) -> bool {
+    match operand {
+        Expr::ReferenceUnion { .. } => true,
+        Expr::Unary { operand, .. } => storage_argument_needs_grouping(operand),
+        Expr::Paren(_) => false,
+        _ => false,
+    }
+}
+
+impl Expr {
+    fn fmt_mode(
+        &self,
+        formatter: &mut fmt::Formatter<'_>,
+        mode: FormulaDisplayMode,
+    ) -> fmt::Result {
         match self {
             Expr::Number(number) => {
                 formatter.write_str(&super::value::number_to_general_text(number.value()))
@@ -283,48 +545,145 @@ impl fmt::Display for Expr {
             Expr::Logical(true) => formatter.write_str("TRUE"),
             Expr::Logical(false) => formatter.write_str("FALSE"),
             Expr::ErrorLit(kind) => formatter.write_str(kind.as_str()),
-            Expr::Ref(reference) => reference.fmt(formatter),
-            Expr::StructuredRef(text) => formatter.write_str(text),
-            Expr::Range { start, end } => write!(formatter, "{start}:{end}"),
+            Expr::Ref(reference) => fmt::Display::fmt(reference, formatter),
+            Expr::StructuredRef(reference) => write_structured_reference(formatter, reference),
+            Expr::ReferenceUnion { left, right } => {
+                left.fmt_mode(formatter, mode)?;
+                formatter.write_str(",")?;
+                right.fmt_mode(formatter, mode)
+            }
+            Expr::ReferenceIntersection { left, right } => {
+                left.fmt_mode(formatter, mode)?;
+                formatter.write_str(" ")?;
+                right.fmt_mode(formatter, mode)
+            }
+            Expr::SpillRef(anchor) => match mode {
+                FormulaDisplayMode::Authored => {
+                    let needs_grouping = matches!(
+                        anchor.as_ref(),
+                        Expr::ReferenceUnion { .. }
+                            | Expr::ReferenceIntersection { .. }
+                            | Expr::Range { .. }
+                            | Expr::ImplicitIntersection(_)
+                            | Expr::Unary { .. }
+                            | Expr::Binary { .. }
+                    );
+                    if needs_grouping {
+                        formatter.write_str("(")?;
+                    }
+                    anchor.fmt_mode(formatter, mode)?;
+                    if needs_grouping {
+                        formatter.write_str(")")?;
+                    }
+                    formatter.write_str("#")
+                }
+                FormulaDisplayMode::Storage => {
+                    write_storage_wrapper(formatter, "_xlfn.ANCHORARRAY", anchor, mode)
+                }
+            },
+            Expr::ExternalReference(reference) => {
+                if reference.quoted {
+                    let mut prefix = reference.workbook.to_string();
+                    if let Some(sheet) = &reference.sheet {
+                        prefix.push_str(sheet);
+                        if let Some(sheet_end) = &reference.sheet_end {
+                            prefix.push(':');
+                            prefix.push_str(sheet_end);
+                        }
+                    }
+                    write!(formatter, "'{}'!", prefix.replace('\'', "''"))?;
+                } else {
+                    formatter.write_str(&reference.workbook)?;
+                    if let Some(sheet) = &reference.sheet {
+                        let mut label = sheet.to_string();
+                        if let Some(sheet_end) = &reference.sheet_end {
+                            label.push(':');
+                            label.push_str(sheet_end);
+                        }
+                        if reference.sheet_quoted {
+                            write!(formatter, "'{}'", label.replace('\'', "''"))?;
+                        } else {
+                            formatter.write_str(&label)?;
+                        }
+                    }
+                    formatter.write_str("!")?;
+                }
+                match &reference.target {
+                    ExternalReferenceTarget::Reference(body) => fmt::Display::fmt(
+                        &Reference {
+                            sheet: None,
+                            body: *body,
+                        },
+                        formatter,
+                    ),
+                    ExternalReferenceTarget::DefinedName(name) => formatter.write_str(name),
+                    ExternalReferenceTarget::StructuredReference(structured) => {
+                        write_structured_reference(formatter, structured)
+                    }
+                }
+            }
+            Expr::QualifiedName { sheet, name } => {
+                write_sheet_prefix(formatter, sheet)?;
+                formatter.write_str(name)
+            }
+            Expr::Range { start, end } => {
+                start.fmt_mode(formatter, mode)?;
+                formatter.write_str(":")?;
+                end.fmt_mode(formatter, mode)
+            }
             Expr::Name(name) => formatter.write_str(name),
             Expr::Call { name, args } => {
                 formatter.write_str(name)?;
                 formatter.write_str("(")?;
-                for (index, arg) in args.iter().enumerate() {
-                    if index > 0 {
-                        formatter.write_str(",")?;
-                    }
-                    arg.fmt(formatter)?;
-                }
+                write_arguments(formatter, args, mode)?;
                 formatter.write_str(")")
             }
             Expr::Invoke { callee, args } => {
-                write!(formatter, "{callee}(")?;
-                for (index, arg) in args.iter().enumerate() {
-                    if index > 0 {
-                        formatter.write_str(",")?;
-                    }
-                    arg.fmt(formatter)?;
-                }
+                callee.fmt_mode(formatter, mode)?;
+                formatter.write_str("(")?;
+                write_arguments(formatter, args, mode)?;
                 formatter.write_str(")")
             }
-            Expr::ImplicitIntersection(operand) => write!(formatter, "@{operand}"),
+            Expr::ImplicitIntersection(operand) => match mode {
+                FormulaDisplayMode::Authored => {
+                    formatter.write_str("@")?;
+                    operand.fmt_mode(formatter, mode)
+                }
+                FormulaDisplayMode::Storage => {
+                    write_storage_wrapper(formatter, "_xlfn.SINGLE", operand, mode)
+                }
+            },
             Expr::Unary {
                 op: UnaryOp::Negate,
                 operand,
-            } => write!(formatter, "-{operand}"),
+            } => {
+                formatter.write_str("-")?;
+                operand.fmt_mode(formatter, mode)
+            }
             Expr::Unary {
                 op: UnaryOp::Plus,
                 operand,
-            } => write!(formatter, "+{operand}"),
+            } => {
+                formatter.write_str("+")?;
+                operand.fmt_mode(formatter, mode)
+            }
             Expr::Unary {
                 op: UnaryOp::Percent,
                 operand,
-            } => write!(formatter, "{operand}%"),
-            Expr::Binary { op, left, right } => {
-                write!(formatter, "{left}{}{right}", op.symbol())
+            } => {
+                operand.fmt_mode(formatter, mode)?;
+                formatter.write_str("%")
             }
-            Expr::Paren(inner) => write!(formatter, "({inner})"),
+            Expr::Binary { op, left, right } => {
+                left.fmt_mode(formatter, mode)?;
+                formatter.write_str(op.symbol())?;
+                right.fmt_mode(formatter, mode)
+            }
+            Expr::Paren(inner) => {
+                formatter.write_str("(")?;
+                inner.fmt_mode(formatter, mode)?;
+                formatter.write_str(")")
+            }
             Expr::Array(rows) => {
                 formatter.write_str("{")?;
                 for (row_index, row) in rows.iter().enumerate() {
@@ -335,12 +694,24 @@ impl fmt::Display for Expr {
                         if col_index > 0 {
                             formatter.write_str(",")?;
                         }
-                        element.fmt(formatter)?;
+                        element.fmt_mode(formatter, mode)?;
                     }
                 }
                 formatter.write_str("}")
             }
             Expr::Missing => Ok(()),
         }
+    }
+}
+
+impl fmt::Display for ExprDisplay<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.expr.fmt_mode(formatter, self.mode)
+    }
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_mode(formatter, FormulaDisplayMode::Authored)
     }
 }

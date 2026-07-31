@@ -332,6 +332,13 @@ impl Engine<'_> {
             Expr::StructuredRef(_) => {
                 ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported))
             }
+            Expr::ReferenceUnion { .. }
+            | Expr::ReferenceIntersection { .. }
+            | Expr::SpillRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. } => {
+                ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported))
+            }
             Expr::Missing => ScalarEvaluation::untracked(Value::Blank),
             Expr::Paren(inner) => self.eval_scalar_with_trace(context, inner),
             Expr::ImplicitIntersection(inner) => {
@@ -839,6 +846,11 @@ impl Engine<'_> {
             | Expr::Logical(_)
             | Expr::ErrorLit(_)
             | Expr::StructuredRef(_)
+            | Expr::ReferenceUnion { .. }
+            | Expr::ReferenceIntersection { .. }
+            | Expr::SpillRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
             | Expr::Missing
             | Expr::ImplicitIntersection(_)
             | Expr::Array(_)

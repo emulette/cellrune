@@ -17,11 +17,11 @@ enum NameGraphStatus {
 
 impl Engine<'_> {
     pub(super) fn classify_name_graphs(&mut self, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
-        for (cell, expr) in &self.asts {
+        for (cell, parsed) in &self.asts {
             if cancelled() {
                 return Err(());
             }
-            match self.inspect_name_graph(cell.0, expr, cancelled)? {
+            match self.inspect_name_graph(cell.0, parsed.root(), cancelled)? {
                 NameGraphStatus::Supported => {}
                 NameGraphStatus::Cycle => {
                     self.name_cycle_cells.insert(*cell);
@@ -62,7 +62,7 @@ impl Engine<'_> {
             let Some(expr) = self.defined_name_asts[defined_name_index].as_ref() else {
                 continue;
             };
-            if definition(expr).is_some() {
+            if definition(expr.root()).is_some() {
                 if expanded {
                     active_callables.remove(&key);
                     continue;
@@ -84,7 +84,7 @@ impl Engine<'_> {
                     self.name_references_for_scope(
                         sheet,
                         Some(defined_name.scope()),
-                        expr,
+                        expr.root(),
                         cancelled,
                     )?
                     .into_iter()
@@ -109,9 +109,14 @@ impl Engine<'_> {
             active_values.insert(key);
             pending.push((name, true, depth, lookup_scope));
             pending.extend(
-                self.name_references_for_scope(sheet, Some(defined_name.scope()), expr, cancelled)?
-                    .into_iter()
-                    .map(|child| (child, false, depth + 1, Some(defined_name.scope()))),
+                self.name_references_for_scope(
+                    sheet,
+                    Some(defined_name.scope()),
+                    expr.root(),
+                    cancelled,
+                )?
+                .into_iter()
+                .map(|child| (child, false, depth + 1, Some(defined_name.scope()))),
             );
         }
         Ok(NameGraphStatus::Supported)
@@ -166,7 +171,7 @@ impl Engine<'_> {
         let (index, defined_name) = self.resolve_defined_name_scoped(sheet, lookup_scope, name)?;
         let id = DefinedLambdaId::from_defined_name(defined_name);
         let expr = self.defined_name_asts.get(index)?.as_ref()?;
-        Some((id, expr))
+        Some((id, expr.root()))
     }
 
     pub(in crate::calculation) fn resolve_defined_lambda_in_context(
@@ -241,7 +246,7 @@ fn collect_name_references(
                     .defined_name_asts
                     .get(index)
                     .and_then(Option::as_ref)
-                    .is_some_and(|named| definition(named).is_some())
+                    .is_some_and(|named| definition(named.root()).is_some())
                 {
                     names.push(name.clone());
                     for arg in args {
@@ -391,6 +396,7 @@ fn collect_name_references(
             }
         }
         Expr::ImplicitIntersection(inner)
+        | Expr::SpillRef(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
             collect_name_references(
@@ -403,7 +409,9 @@ fn collect_name_references(
                 cancelled,
             )?;
         }
-        Expr::Binary { left, right, .. } => {
+        Expr::Binary { left, right, .. }
+        | Expr::ReferenceUnion { left, right }
+        | Expr::ReferenceIntersection { left, right } => {
             collect_name_references(
                 engine,
                 sheet,
@@ -462,6 +470,8 @@ fn collect_name_references(
         | Expr::ErrorLit(_)
         | Expr::Ref(_)
         | Expr::StructuredRef(_)
+        | Expr::ExternalReference(_)
+        | Expr::QualifiedName { .. }
         | Expr::Missing => {}
     }
     Ok(())
@@ -489,10 +499,15 @@ fn expr_is_definitely_non_callable(expr: &Expr) -> bool {
         | Expr::Logical(_)
         | Expr::ErrorLit(_)
         | Expr::StructuredRef(_)
+        | Expr::ExternalReference(_)
+        | Expr::QualifiedName { .. }
         | Expr::Missing
         | Expr::Ref(_)
         | Expr::Range { .. }
         | Expr::ImplicitIntersection(_)
+        | Expr::SpillRef(_)
+        | Expr::ReferenceUnion { .. }
+        | Expr::ReferenceIntersection { .. }
         | Expr::Array(_)
         | Expr::Unary { .. }
         | Expr::Binary { .. } => true,

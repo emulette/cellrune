@@ -9,6 +9,7 @@ use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
 use super::runtime::{CellId, Rect, RectSpan};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
+use super::syntax::ParsedFormula;
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
@@ -158,8 +159,8 @@ fn collect_workbook_layout(
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledWorkbook {
-    asts: BTreeMap<CellId, Expr>,
-    defined_name_asts: Vec<Option<Expr>>,
+    asts: BTreeMap<CellId, ParsedFormula>,
+    defined_name_asts: Vec<Option<ParsedFormula>>,
     dependencies: DependencyGraph,
     dependency_rectangles: BTreeMap<CellId, Vec<RectSpan>>,
     parse_failures: BTreeMap<CellId, ParseError>,
@@ -412,8 +413,8 @@ enum ValueSource<'engine> {
 pub struct Engine<'workbook> {
     workbook: &'workbook WorkbookSnapshot,
     options: CalculationOptions,
-    asts: BTreeMap<CellId, Expr>,
-    defined_name_asts: Vec<Option<Expr>>,
+    asts: BTreeMap<CellId, ParsedFormula>,
+    defined_name_asts: Vec<Option<ParsedFormula>>,
     dependencies: DependencyGraph,
     results: BTreeMap<CellId, Value>,
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
@@ -532,7 +533,7 @@ impl<'workbook> Engine<'workbook> {
     }
 
     pub(super) fn parsed_expr(&self, cell: CellId) -> Option<&Expr> {
-        self.asts.get(&cell)
+        self.asts.get(&cell).map(ParsedFormula::root)
     }
 
     pub(super) fn parse_failure(&self, cell: CellId) -> Option<&ParseError> {

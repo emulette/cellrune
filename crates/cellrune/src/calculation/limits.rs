@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 const MAX_FORMULA_TOKENS: &str = "max_formula_tokens";
+const MAX_FORMULA_SOURCE_BYTES: &str = "max_formula_source_bytes";
 const MAX_FORMULA_AST_NODES: &str = "max_formula_ast_nodes";
 const MAX_FORMULA_NESTING_DEPTH: &str = "max_formula_nesting_depth";
 const MAX_DEPENDENCY_EDGES: &str = "max_dependency_edges";
@@ -12,11 +13,13 @@ const MAX_LET_BINDINGS: &str = "max_let_bindings";
 const MAX_LAMBDA_DEPTH: &str = "max_lambda_depth";
 const MAX_LAMBDA_INVOCATIONS: &str = "max_lambda_invocations";
 const MESSAGE_ZERO_LIMIT: &str = "calculation limit must be greater than zero";
+pub(super) const SAFE_FORMULA_NESTING_DEPTH: u64 = 256;
 
 /// Resource limits applied while formulas are parsed, scheduled, and evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CalculationLimits {
     max_formula_tokens: u64,
+    max_formula_source_bytes: u64,
     max_formula_ast_nodes: u64,
     max_formula_nesting_depth: u64,
     max_dependency_edges: u64,
@@ -34,12 +37,20 @@ impl CalculationLimits {
         self.max_formula_tokens
     }
 
+    /// Returns the maximum UTF-8 byte length of one formula source.
+    pub const fn max_formula_source_bytes(self) -> u64 {
+        self.max_formula_source_bytes
+    }
+
     /// Returns the maximum AST node count of one formula.
     pub const fn max_formula_ast_nodes(self) -> u64 {
         self.max_formula_ast_nodes
     }
 
-    /// Returns the maximum AST nesting depth of one formula.
+    /// Returns the caller-configured maximum AST nesting depth of one formula.
+    ///
+    /// The parser can apply a lower implementation safety ceiling while preserving this configured
+    /// value for API compatibility.
     pub const fn max_formula_nesting_depth(self) -> u64 {
         self.max_formula_nesting_depth
     }
@@ -89,6 +100,19 @@ impl CalculationLimits {
         Ok(self)
     }
 
+    /// Replaces the per-formula UTF-8 source byte limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CalculationOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_formula_source_bytes(
+        mut self,
+        value: u64,
+    ) -> Result<Self, CalculationOptionsError> {
+        self.max_formula_source_bytes = nonzero(MAX_FORMULA_SOURCE_BYTES, value)?;
+        Ok(self)
+    }
+
     /// Replaces the per-formula AST node limit.
     ///
     /// # Errors
@@ -102,7 +126,10 @@ impl CalculationLimits {
         Ok(self)
     }
 
-    /// Replaces the per-formula AST nesting-depth limit.
+    /// Replaces the caller-configured per-formula AST nesting-depth limit.
+    ///
+    /// Values above the parser's implementation safety ceiling remain accepted for compatibility;
+    /// parsing still fails closed at that ceiling instead of constructing an unsafe recursive AST.
     ///
     /// # Errors
     ///
@@ -199,6 +226,7 @@ impl Default for CalculationLimits {
     fn default() -> Self {
         Self {
             max_formula_tokens: 8_192,
+            max_formula_source_bytes: 1024 * 1024,
             max_formula_ast_nodes: 8_192,
             max_formula_nesting_depth: 256,
             max_dependency_edges: 10_000_000,
@@ -243,6 +271,7 @@ fn nonzero(name: &'static str, value: u64) -> Result<u64, CalculationOptionsErro
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum CalculationLimitKind {
     FormulaTokens,
+    FormulaSourceBytes,
     FormulaAstNodes,
     FormulaNestingDepth,
     DependencyEdges,
@@ -258,6 +287,7 @@ impl CalculationLimitKind {
     pub(super) const fn detail(self) -> &'static str {
         match self {
             Self::FormulaTokens => MAX_FORMULA_TOKENS,
+            Self::FormulaSourceBytes => MAX_FORMULA_SOURCE_BYTES,
             Self::FormulaAstNodes => MAX_FORMULA_AST_NODES,
             Self::FormulaNestingDepth => MAX_FORMULA_NESTING_DEPTH,
             Self::DependencyEdges => MAX_DEPENDENCY_EDGES,
@@ -273,6 +303,7 @@ impl CalculationLimitKind {
     pub(super) fn from_detail(value: &str) -> Option<Self> {
         match value {
             MAX_FORMULA_TOKENS => Some(Self::FormulaTokens),
+            MAX_FORMULA_SOURCE_BYTES => Some(Self::FormulaSourceBytes),
             MAX_FORMULA_AST_NODES => Some(Self::FormulaAstNodes),
             MAX_FORMULA_NESTING_DEPTH => Some(Self::FormulaNestingDepth),
             MAX_DEPENDENCY_EDGES => Some(Self::DependencyEdges),
@@ -295,6 +326,7 @@ mod tests {
     fn every_limit_kind_round_trips_through_its_detail() {
         let kinds = [
             CalculationLimitKind::FormulaTokens,
+            CalculationLimitKind::FormulaSourceBytes,
             CalculationLimitKind::FormulaAstNodes,
             CalculationLimitKind::FormulaNestingDepth,
             CalculationLimitKind::DependencyEdges,
@@ -309,5 +341,16 @@ mod tests {
         for kind in kinds {
             assert_eq!(CalculationLimitKind::from_detail(kind.detail()), Some(kind));
         }
+    }
+
+    #[test]
+    fn nesting_configuration_remains_source_compatible_above_internal_safe_depth() {
+        let limits = CalculationLimits::default()
+            .with_max_formula_nesting_depth(SAFE_FORMULA_NESTING_DEPTH + 1)
+            .expect("existing nonzero configuration remains accepted");
+        assert_eq!(
+            limits.max_formula_nesting_depth(),
+            SAFE_FORMULA_NESTING_DEPTH + 1
+        );
     }
 }

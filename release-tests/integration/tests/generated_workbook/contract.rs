@@ -3,14 +3,15 @@ use std::io::Cursor;
 use std::path::Path;
 
 use cellrune::{
-    CalculationCellResult, CalculationOptions, CellAddress, CellContent, CellValue, DateSystem,
-    NumberFormatKind, ReadOptions, SavedResult, WorkbookSnapshot, WorkbookSourceKind,
-    XlsxErrorCode, calculate_workbook, inspect_package, read_xlsx, read_xlsx_bytes, read_xlsx_path,
-    scan_formula_capabilities,
+    CalculationCellResult, CalculationIssueCode, CalculationOptions, CellAddress, CellContent,
+    CellValue, DateSystem, FormulaCapability, NumberFormatKind, ReadOptions, SavedResult,
+    WorkbookSnapshot, WorkbookSourceKind, XlsxErrorCode, calculate_workbook, inspect_package,
+    read_xlsx, read_xlsx_bytes, read_xlsx_path, scan_formula_capabilities,
 };
 
 use crate::support::generated_xlsx::{
-    ProducerProfile, TemporaryWorkbook, generated_workbook, generated_xlsb_package,
+    ProducerProfile, TemporaryWorkbook, generated_formula_fixture, generated_workbook,
+    generated_xlsb_package,
 };
 
 const EXPECTED_FORMULAS: [(&str, &str); 8] = [
@@ -23,6 +24,57 @@ const EXPECTED_FORMULAS: [(&str, &str); 8] = [
     ("B8", "1/0"),
     ("B9", "Inputs!B6&\" / \"&TEXT(Inputs!B2,\"0.0\")"),
 ];
+
+#[test]
+fn generated_reference_grammar_fixture_reaches_typed_capability_analysis() {
+    let formulas = [
+        "Table1[]",
+        "Table1[[#Data], [Amount]]",
+        "Table1[ Amount ]",
+        "Table1[@[Amount]]",
+        "Table1[ @Amount ]",
+        "Table1[A|B]",
+        "Table1[😀]",
+        "Table1['#OfItems]",
+        "A1 B1",
+        "_xlfn.ANCHORARRAY((A1 B1))",
+        "_xlfn.SINGLE((A1,B1))",
+        "[Book.xlsx]Sheet1:Sheet3!A1",
+        "[1]!DataTable[Amount]",
+        "Sheet1!MyLambda(1)",
+        "A1:#REF!",
+    ];
+    let bytes = generated_formula_fixture(&formulas);
+    let workbook =
+        read_xlsx_bytes(&bytes, ReadOptions::default()).expect("generated grammar fixture");
+    let calculations = workbook
+        .sheet_by_name("Calculations")
+        .expect("Calculations sheet");
+    for (index, expected) in formulas.iter().enumerate() {
+        let address = format!("B{}", index + 2);
+        let CellContent::Formula(formula) = cell(calculations, &address).content() else {
+            panic!("expected formula at {address}");
+        };
+        assert_eq!(
+            formula.text().expect("formula text").as_str(),
+            *expected,
+            "{address}"
+        );
+    }
+
+    let capabilities = scan_formula_capabilities(&workbook);
+    assert_eq!(capabilities.formula_count(), formulas.len());
+    for entry in capabilities.entries() {
+        if let FormulaCapability::Unsupported(issues) = entry.capability() {
+            assert!(
+                issues
+                    .iter()
+                    .all(|issue| issue.code() != CalculationIssueCode::ParseError),
+                "{entry:?}"
+            );
+        }
+    }
+}
 
 #[test]
 fn generated_package_exposes_the_expected_reader_contract() {

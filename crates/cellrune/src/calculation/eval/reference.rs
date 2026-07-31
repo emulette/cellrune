@@ -331,10 +331,10 @@ impl Engine<'_> {
             // a reference, so degrade to that; a resource limit is a genuine engine outcome and
             // still propagates.
             return self
-                .resolve_rect_expr(context, &parsed)
+                .resolve_rect_expr(context, parsed.root())
                 .map_err(|error| match error {
-                    ErrorKind::Unsupported => ErrorKind::Ref,
-                    other => other,
+                    resource @ ErrorKind::ResourceLimit(_) => resource,
+                    _ => ErrorKind::Ref,
                 });
         }
         if !normalized.eq_ignore_ascii_case("OFFSET") || args.len() < 3 || args.len() > 5 {

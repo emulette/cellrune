@@ -2,17 +2,49 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
 
 use cellrune::{
-    CalculationOptions, OpenOptions, ReadLimits, ReadOptions, SheetId, WorkbookSourceKind,
-    WriteLimits, WriteOptions, XlsxDocumentKind, XlsxErrorCode, XlsxWriteErrorCode,
-    calculate_workbook, open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path,
-    read_xlsx_bytes, write_preserved_xlsx_bytes,
+    CalculationOptions, CellContent, OpenOptions, ReadLimits, ReadOptions, SheetId,
+    WorkbookSourceKind, WriteLimits, WriteOptions, XlsxDocumentKind, XlsxErrorCode,
+    XlsxWriteErrorCode, calculate_workbook, open_xlsx_document, open_xlsx_document_bytes,
+    open_xlsx_document_path, read_xlsx_bytes, write_preserved_xlsx_bytes,
 };
 use sha2::{Digest, Sha256};
 use zip::read::ZipArchive;
 
 use crate::support::generated_xlsx::{
-    ProducerProfile, TemporaryWorkbook, generated_workbook, generated_workbook_with_comment,
+    ProducerProfile, TemporaryWorkbook, generated_formula_fixture, generated_workbook,
+    generated_workbook_with_comment,
 };
+
+#[test]
+fn typed_reference_formula_fixture_survives_preserved_write_and_reopen() {
+    let formulas = [
+        "Table1[ @Amount ]",
+        "_xlfn.ANCHORARRAY((A1,B1))",
+        "[Book.xlsx]Sheet1:Sheet3!A1",
+        "[1]!DataTable[Amount]",
+    ];
+    let bytes = generated_formula_fixture(&formulas);
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("grammar document");
+    let output = write_preserved_xlsx_bytes(&document, WriteOptions::default())
+        .expect("preserved grammar output");
+    let reopened =
+        read_xlsx_bytes(&output, ReadOptions::default()).expect("reopened grammar output");
+    let sheet = reopened
+        .sheet_by_name("Calculations")
+        .expect("Calculations sheet");
+    for (index, expected) in formulas.iter().enumerate() {
+        let address = format!("B{}", index + 2);
+        let cell = sheet
+            .cell_by_a1(&address)
+            .expect("valid address")
+            .expect("formula cell");
+        let CellContent::Formula(formula) = cell.content() else {
+            panic!("expected formula at {address}");
+        };
+        assert_eq!(formula.text().expect("formula text").as_str(), *expected);
+    }
+}
 
 #[test]
 fn document_adapters_retain_exact_identity_without_changing_read_only_behavior() {

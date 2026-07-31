@@ -27,6 +27,8 @@ mod runtime;
 mod scope;
 mod session;
 mod sheet_span;
+mod structured_reference;
+mod syntax;
 mod textfmt;
 mod value;
 
@@ -38,12 +40,6 @@ use error::{
 };
 
 pub(super) use crate::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
-pub(crate) use error::{
-    ERROR_LEX_UNEXPECTED_CHARACTER, ERROR_LEX_UNKNOWN_ERROR_LITERAL,
-    ERROR_LEX_UNTERMINATED_SHEET_NAME, ERROR_LEX_UNTERMINATED_STRING,
-    ERROR_PARSE_INVALID_REFERENCE, ERROR_PARSE_MISMATCHED_RANGE, ERROR_PARSE_UNEXPECTED_END,
-    ERROR_PARSE_UNEXPECTED_TOKEN,
-};
 use limits::CalculationLimitKind;
 pub use limits::{CalculationLimits, CalculationOptionsError};
 pub use session::{

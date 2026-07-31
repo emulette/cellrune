@@ -239,7 +239,7 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_final_array_with_trace(context, &expr),
+                Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
             };
             self.materialize_legacy_array(cell, range, result, cancelled)?;
@@ -251,7 +251,7 @@ impl<'workbook> Engine<'workbook> {
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_final_array_with_trace(context, &expr),
+                Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
             };
             self.materialize_dynamic_array(cell, declared_range, result, cancelled)?;
@@ -265,7 +265,7 @@ impl<'workbook> Engine<'workbook> {
                 Value::Error(ErrorKind::Unsupported)
             }
             Some(expr) => {
-                let evaluated = self.eval_final_scalar_with_trace(context, &expr);
+                let evaluated = self.eval_final_scalar_with_trace(context, expr.root());
                 if let (Value::Number(_), Some(trace)) = (&evaluated.value, evaluated.decimal_trace)
                 {
                     self.numeric_decimal_traces.insert(cell, trace);
