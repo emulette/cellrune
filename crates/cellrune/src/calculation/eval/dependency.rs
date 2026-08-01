@@ -6,7 +6,8 @@ use sha2::{Digest, Sha256};
 use super::{Engine, EvalContext, EvaluationBudget};
 use crate::CellContent;
 use crate::calculation::ast::{Expr, StructuredReference};
-use crate::calculation::functions::{normalize_name, with_let_scope};
+use crate::calculation::functions::descriptor::DependencyKind;
+use crate::calculation::functions::{function_dependency_kind, normalize_name, with_let_scope};
 use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan};
@@ -430,7 +431,10 @@ impl Engine<'_> {
                         });
                     return found || result.is_err();
                 }
-                let dynamic = matches!(normalized.as_str(), "OFFSET" | "INDIRECT");
+                let dynamic = matches!(
+                    function_dependency_kind(&normalized),
+                    Some(DependencyKind::DynamicReference(_))
+                );
                 if dynamic && self.resolve_dynamic_rect(context, name, args).is_err() {
                     return true;
                 }
@@ -855,8 +859,10 @@ impl Engine<'_> {
                         });
                     return;
                 }
-                if matches!(normalized.as_str(), "SUMIF" | "AVERAGEIF")
-                    && args.len() == 3
+                if matches!(
+                    function_dependency_kind(&normalized),
+                    Some(DependencyKind::ResizedCriteriaValueRange)
+                ) && args.len() == 3
                     && let (Ok(criteria_range), Ok(value_anchor)) = (
                         self.resolve_rect_expr(context, &args[0]),
                         self.resolve_rect_expr(context, &args[2]),
@@ -866,8 +872,10 @@ impl Engine<'_> {
                 {
                     output.push(DependencyTarget::from_span(RectSpan::single(value_range)));
                 }
-                if matches!(normalized.as_str(), "OFFSET" | "INDIRECT")
-                    && let Ok(rect) = self.resolve_dynamic_rect(context, name, args)
+                if matches!(
+                    function_dependency_kind(&normalized),
+                    Some(DependencyKind::DynamicReference(_))
+                ) && let Ok(rect) = self.resolve_dynamic_rect(context, name, args)
                 {
                     output.push(DependencyTarget::from_span(RectSpan::single(rect)));
                 }
@@ -1153,7 +1161,10 @@ impl Engine<'_> {
                             )
                         });
                 }
-                if matches!(normalize_name(name).as_str(), "OFFSET" | "INDIRECT") {
+                if matches!(
+                    function_dependency_kind(name),
+                    Some(DependencyKind::DynamicReference(_))
+                ) {
                     return true;
                 }
                 let mut found = false;

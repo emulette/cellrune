@@ -4,11 +4,15 @@ use super::ast::{Expr, SheetPrefix};
 use super::convert::cell_from_value;
 use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
-use super::functions::{descriptor_sheet_span_policy, is_supported_function, normalize_name};
+use super::functions::descriptor::{DependencyKind, ReferenceMetadataKind, Volatility};
+use super::functions::{
+    descriptor_sheet_span_policy, function_dependency_kind, function_volatility,
+    is_supported_function, normalize_name,
+};
 use super::lambda::definition;
 use super::scope::DefinedLambdaId;
 use super::scope::canonical_local_name;
-use super::sheet_span::{ARRAY_EXPRESSION_POLICY, SheetSpanPolicy, function_policy};
+use super::sheet_span::{ARRAY_EXPRESSION_POLICY, SheetSpanPolicy};
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssue, CalculationIssueCode,
@@ -564,9 +568,19 @@ fn snapshot_from_engine_cancellable(
                         let missing_volatile_input =
                             engine.parsed_expr(internal_id).is_some_and(|expr| {
                                 (options.today_serial().is_none()
-                                    && contains_function(engine, sheet_index, expr, "TODAY"))
+                                    && contains_volatility(
+                                        engine,
+                                        sheet_index,
+                                        expr,
+                                        Volatility::Today,
+                                    ))
                                     || (options.now_serial().is_none()
-                                        && contains_function(engine, sheet_index, expr, "NOW"))
+                                        && contains_volatility(
+                                            engine,
+                                            sheet_index,
+                                            expr,
+                                            Volatility::Now,
+                                        ))
                             });
                         let code = if missing_volatile_input {
                             CalculationIssueCode::VolatileInputMissing
@@ -714,8 +728,13 @@ fn resource_limit_issue(limit: CalculationLimitKind) -> CalculationIssue {
     )
 }
 
-fn contains_function(engine: &Engine<'_>, sheet: usize, expr: &Expr, expected: &str) -> bool {
-    expr_contains_function(
+fn contains_volatility(
+    engine: &Engine<'_>,
+    sheet: usize,
+    expr: &Expr,
+    expected: Volatility,
+) -> bool {
+    expr_contains_volatility(
         engine,
         NameScanContext::root(sheet),
         expr,
@@ -725,11 +744,11 @@ fn contains_function(engine: &Engine<'_>, sheet: usize, expr: &Expr, expected: &
     )
 }
 
-fn expr_contains_function(
+fn expr_contains_volatility(
     engine: &Engine<'_>,
     sheet: NameScanContext,
     expr: &Expr,
-    expected: &str,
+    expected: Volatility,
     names: &mut BTreeSet<DefinedLambdaId>,
     local_scope: &mut CapabilityScope,
 ) -> bool {
@@ -740,7 +759,7 @@ fn expr_contains_function(
                     return false;
                 }
                 return args.iter().any(|arg| {
-                    expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                    expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
                 });
             }
             if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
@@ -757,7 +776,7 @@ fn expr_contains_function(
                     for parameter in lambda.parameters() {
                         lambda_scope.push_parameter(parameter.clone());
                     }
-                    found |= expr_contains_function(
+                    found |= expr_contains_volatility(
                         engine,
                         sheet.for_definition(id.scope()),
                         lambda.body(),
@@ -768,10 +787,10 @@ fn expr_contains_function(
                 }
                 return found
                     || args.iter().any(|arg| {
-                        expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                        expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
                     });
             }
-            if normalize_name(name).eq_ignore_ascii_case(expected) {
+            if function_volatility(name) == Some(expected) {
                 return true;
             }
             match normalize_name(name).as_str() {
@@ -780,7 +799,7 @@ fn expr_contains_function(
                     let mut found = false;
                     if let Some((final_expr, pairs)) = args.split_last() {
                         for pair in pairs.chunks_exact(2) {
-                            found |= expr_contains_function(
+                            found |= expr_contains_volatility(
                                 engine,
                                 sheet,
                                 &pair[1],
@@ -792,7 +811,7 @@ fn expr_contains_function(
                                 local_scope.push_expression(binding_name, &pair[1]);
                             }
                         }
-                        found |= expr_contains_function(
+                        found |= expr_contains_volatility(
                             engine,
                             sheet,
                             final_expr,
@@ -812,7 +831,7 @@ fn expr_contains_function(
                     for parameter in lambda.parameters() {
                         local_scope.push_parameter(parameter.clone());
                     }
-                    let found = expr_contains_function(
+                    let found = expr_contains_volatility(
                         engine,
                         sheet,
                         lambda.body(),
@@ -831,13 +850,13 @@ fn expr_contains_function(
                         return false;
                     };
                     let mut found = array_exprs.iter().any(|arg| {
-                        expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                        expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
                     });
                     let previous_len = local_scope.len();
                     for parameter in lambda.parameters() {
                         local_scope.push_parameter(parameter.clone());
                     }
-                    found |= expr_contains_function(
+                    found |= expr_contains_volatility(
                         engine,
                         sheet,
                         lambda.body(),
@@ -850,33 +869,34 @@ fn expr_contains_function(
                 }
                 _ => {}
             }
-            args.iter()
-                .any(|arg| expr_contains_function(engine, sheet, arg, expected, names, local_scope))
+            args.iter().any(|arg| {
+                expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
+            })
         }
         Expr::Invoke { callee, args } => {
-            expr_contains_function(engine, sheet, callee, expected, names, local_scope)
+            expr_contains_volatility(engine, sheet, callee, expected, names, local_scope)
                 || args.iter().any(|arg| {
-                    expr_contains_function(engine, sheet, arg, expected, names, local_scope)
+                    expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
                 })
         }
         Expr::ImplicitIntersection(inner)
         | Expr::SpillRef(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
-            expr_contains_function(engine, sheet, inner, expected, names, local_scope)
+            expr_contains_volatility(engine, sheet, inner, expected, names, local_scope)
         }
         Expr::Binary { left, right, .. }
         | Expr::ReferenceUnion { left, right }
         | Expr::ReferenceIntersection { left, right } => {
-            expr_contains_function(engine, sheet, left, expected, names, local_scope)
-                || expr_contains_function(engine, sheet, right, expected, names, local_scope)
+            expr_contains_volatility(engine, sheet, left, expected, names, local_scope)
+                || expr_contains_volatility(engine, sheet, right, expected, names, local_scope)
         }
         Expr::Range { start, end } => {
-            expr_contains_function(engine, sheet, start, expected, names, local_scope)
-                || expr_contains_function(engine, sheet, end, expected, names, local_scope)
+            expr_contains_volatility(engine, sheet, start, expected, names, local_scope)
+                || expr_contains_volatility(engine, sheet, end, expected, names, local_scope)
         }
         Expr::Array(rows) => rows.iter().flatten().any(|element| {
-            expr_contains_function(engine, sheet, element, expected, names, local_scope)
+            expr_contains_volatility(engine, sheet, element, expected, names, local_scope)
         }),
         Expr::Name(name) => {
             if local_scope.lookup(name).is_some() {
@@ -888,7 +908,7 @@ fn expr_contains_function(
                     if !names.insert(id.clone()) {
                         return false;
                     }
-                    expr_contains_function(
+                    expr_contains_volatility(
                         engine,
                         sheet.for_definition(id.scope()),
                         named,
@@ -1093,15 +1113,17 @@ fn inspect_expr(
             if normalized == "LAMBDA" {
                 return;
             }
-            let argument_policy = if normalized == "ISREF" {
-                SheetSpanPolicy::ReturnExcelError(ErrorKind::Value)
-            } else {
-                descriptor_sheet_span_policy(&normalized)
-                    .unwrap_or_else(|| function_policy(&normalized))
-            };
+            let argument_policy =
+                descriptor_sheet_span_policy(&normalized).unwrap_or(SheetSpanPolicy::Unsupported);
+            let suppresses_missing_names = matches!(
+                function_dependency_kind(&normalized),
+                Some(DependencyKind::ReferenceMetadataOnly(
+                    ReferenceMetadataKind::Predicate
+                ))
+            );
             let argument_policy = CapabilityInspectionPolicy::new(
                 argument_policy,
-                policy.suppress_missing_names || normalized == "ISREF",
+                policy.suppress_missing_names || suppresses_missing_names,
             );
             if normalized == "MAP"
                 && let Some((lambda_expr, array_exprs)) = args.split_last()

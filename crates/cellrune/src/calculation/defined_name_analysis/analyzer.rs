@@ -8,7 +8,8 @@ use super::{
 };
 use crate::calculation::ast::{Expr, ExternalReferenceTarget, Reference, StructuredItem};
 use crate::calculation::error::parse_error_detail;
-use crate::calculation::functions::normalize_name;
+use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
+use crate::calculation::functions::{function_dependency_kind, normalize_name};
 use crate::calculation::lambda::{definition, is_local_name};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::{ParseError, parse_formula_with_limits};
@@ -1057,19 +1058,24 @@ impl Analyzer<'_, '_> {
                     outcomes.push(non_reference(&formula));
                     return Ok(());
                 }
-                match normalize_name(&name).as_str() {
-                    "OFFSET" => outcomes.push(Outcome::Dynamic {
-                        kind: DefinedNameDynamicKind::Offset,
-                        formula,
-                    }),
-                    "INDIRECT" => outcomes.push(Outcome::Dynamic {
-                        kind: DefinedNameDynamicKind::Indirect,
-                        formula,
-                    }),
-                    "INDEX" | "LET" => outcomes.push(Outcome::Unsupported {
-                        reason: DefinedNameUnsupportedReason::ContextDependent,
-                        detail: Some(formula.as_str().to_owned().into_boxed_str()),
-                    }),
+                match function_dependency_kind(&name) {
+                    Some(DependencyKind::DynamicReference(DynamicReferenceKind::Offset)) => {
+                        outcomes.push(Outcome::Dynamic {
+                            kind: DefinedNameDynamicKind::Offset,
+                            formula,
+                        })
+                    }
+                    Some(DependencyKind::DynamicReference(DynamicReferenceKind::Indirect)) => {
+                        outcomes.push(Outcome::Dynamic {
+                            kind: DefinedNameDynamicKind::Indirect,
+                            formula,
+                        })
+                    }
+                    _ if matches!(normalize_name(&name).as_str(), "INDEX" | "LET") => outcomes
+                        .push(Outcome::Unsupported {
+                            reason: DefinedNameUnsupportedReason::ContextDependent,
+                            detail: Some(formula.as_str().to_owned().into_boxed_str()),
+                        }),
                     _ => outcomes.push(non_reference(&formula)),
                 }
             }

@@ -3,8 +3,12 @@ use super::eval::{Engine, EvalContext};
 use super::operators::element_at;
 use super::runtime::Array;
 use super::scope::ArrayEvaluation;
-use super::sheet_span::{SheetSpanPolicy, function_policy};
+use super::sheet_span::SheetSpanPolicy;
 use super::value::{ErrorKind, Value};
+use descriptor::{
+    ArgumentPolicy, ArrayEvaluator, CompatibilityVersion, DependencyKind, Evaluator,
+    FunctionDescriptor,
+};
 
 mod aggregate;
 mod array;
@@ -12,7 +16,7 @@ mod calendar;
 mod combinatorics;
 mod date;
 mod date_additional;
-mod descriptor;
+pub(super) mod descriptor;
 mod dynamic;
 mod engineering;
 mod financial;
@@ -46,46 +50,64 @@ pub(super) fn call_function(
     if let Some(value) = callable_call_scope(engine, context, name, args) {
         return scope_value_to_scalar(engine, context, value);
     }
-    if let Some(kind) = direct_sheet_span_error(engine, context, &normalized, args) {
+    let Some(descriptor) = descriptor::descriptor(&normalized) else {
+        return Value::Error(ErrorKind::Unsupported);
+    };
+    if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
         return Value::Error(kind);
     }
-    if let Some(descriptor) = descriptor::descriptor(&normalized) {
-        return descriptor::dispatch(descriptor, engine, context, args);
+    match descriptor.argument_policy() {
+        ArgumentPolicy::EvaluatorManaged => {
+            dispatch_scalar(descriptor, engine, context, &normalized, args)
+        }
     }
-    match function_group(&normalized) {
-        Some(FunctionGroup::Legacy) => legacy::call_legacy(engine, context, &normalized, args),
-        Some(FunctionGroup::Logical) => logical::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Aggregate) => aggregate::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Math) => math::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Trigonometry) => trigonometry::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Combinatorics) => {
-            combinatorics::call(engine, context, &normalized, args)
+}
+
+fn dispatch_scalar(
+    descriptor: FunctionDescriptor,
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    canonical_name: &str,
+    args: &[Expr],
+) -> Value {
+    match descriptor.evaluator() {
+        Evaluator::Legacy => legacy::call_legacy(engine, context, canonical_name, args),
+        Evaluator::Logical => logical::call(engine, context, canonical_name, args),
+        Evaluator::Aggregate => aggregate::call(engine, context, canonical_name, args),
+        Evaluator::Math => math::call(engine, context, canonical_name, args),
+        Evaluator::Trigonometry => trigonometry::call(engine, context, canonical_name, args),
+        Evaluator::Combinatorics => combinatorics::call(engine, context, canonical_name, args),
+        Evaluator::SumOfSquares => sum_of_squares::call(engine, context, canonical_name, args),
+        Evaluator::Engineering => engineering::call(engine, context, canonical_name, args),
+        Evaluator::Lookup => lookup::call(engine, context, canonical_name, args),
+        Evaluator::Information => information::call(engine, context, canonical_name, args),
+        Evaluator::Text => text::call(engine, context, canonical_name, args),
+        Evaluator::TextAdditional => text_additional::call(engine, context, canonical_name, args),
+        Evaluator::Date => date::call(engine, context, canonical_name, args),
+        Evaluator::DateAdditional => date_additional::call(engine, context, canonical_name, args),
+        Evaluator::Dynamic => dynamic::call(engine, context, canonical_name, args),
+        Evaluator::Array => array::call_scalar(engine, context, canonical_name, args),
+        Evaluator::Statistical => statistical::call(engine, context, canonical_name, args),
+        Evaluator::StatisticalAdditional => {
+            statistical_additional::call(engine, context, canonical_name, args)
         }
-        Some(FunctionGroup::SumOfSquares) => {
-            sum_of_squares::call(engine, context, &normalized, args)
+        Evaluator::Financial => financial::call(engine, context, canonical_name, args),
+        Evaluator::FinancialAdditional => {
+            financial_additional::call(engine, context, canonical_name, args)
         }
-        Some(FunctionGroup::Engineering) => engineering::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Lookup) => lookup::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Information) => information::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Text) => text::call(engine, context, &normalized, args),
-        Some(FunctionGroup::TextAdditional) => {
-            text_additional::call(engine, context, &normalized, args)
-        }
-        Some(FunctionGroup::Date) => date::call(engine, context, &normalized, args),
-        Some(FunctionGroup::DateAdditional) => {
-            date_additional::call(engine, context, &normalized, args)
-        }
-        Some(FunctionGroup::Dynamic) => dynamic::call(engine, context, &normalized, args),
-        Some(FunctionGroup::Array) => array::call_scalar(engine, context, &normalized, args),
-        Some(FunctionGroup::Statistical) => statistical::call(engine, context, &normalized, args),
-        Some(FunctionGroup::StatisticalAdditional) => {
-            statistical_additional::call(engine, context, &normalized, args)
-        }
-        Some(FunctionGroup::Financial) => financial::call(engine, context, &normalized, args),
-        Some(FunctionGroup::FinancialAdditional) => {
-            financial_additional::call(engine, context, &normalized, args)
-        }
-        None => Value::Error(ErrorKind::Unsupported),
+        Evaluator::Areas => areas(engine, context, args),
+    }
+}
+
+fn areas(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [reference] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    match engine.resolve_reference_value_expr(context, reference) {
+        Ok(super::runtime::ReferenceValue::Empty) => Value::Error(ErrorKind::Ref),
+        Ok(reference) if reference.has_sheet_span() => Value::Error(ErrorKind::Value),
+        Ok(reference) => Value::Number(reference.area_count() as f64),
+        Err(kind) => Value::Error(kind),
     }
 }
 
@@ -111,9 +133,12 @@ pub(super) fn callable_call_scope(
 }
 
 pub(super) fn uses_reference_metadata_only(normalized_name: &str) -> bool {
-    descriptor::descriptor(normalized_name)
-        .is_some_and(descriptor::FunctionDescriptor::reference_metadata_only)
-        || normalized_name == "ISREF"
+    descriptor::descriptor(normalized_name).is_some_and(|descriptor| {
+        matches!(
+            descriptor.dependency_kind(),
+            DependencyKind::ReferenceMetadataOnly(_)
+        )
+    })
 }
 
 fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
@@ -153,23 +178,16 @@ fn scope_value_to_scalar(
 fn direct_sheet_span_error(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    normalized_name: &str,
+    descriptor: FunctionDescriptor,
     args: &[Expr],
 ) -> Option<ErrorKind> {
-    if normalized_name == "ISREF" {
+    if matches!(
+        descriptor.dependency_kind(),
+        DependencyKind::ReferenceMetadataOnly(descriptor::ReferenceMetadataKind::Predicate)
+    ) {
         return None;
     }
-    if descriptor::descriptor(normalized_name).is_some_and(|descriptor| {
-        matches!(
-            descriptor.sheet_span_policy(),
-            SheetSpanPolicy::CollectAcrossSheets
-        )
-    }) {
-        return None;
-    }
-    let policy = descriptor::descriptor(normalized_name)
-        .map(descriptor::FunctionDescriptor::sheet_span_policy)
-        .unwrap_or_else(|| function_policy(normalized_name));
+    let policy = descriptor.sheet_span_policy();
     if matches!(policy, SheetSpanPolicy::CollectAcrossSheets) {
         return None;
     }
@@ -208,45 +226,32 @@ pub(super) fn call_function_array(
     args: &[Expr],
 ) -> Option<Result<ArrayEvaluation, ErrorKind>> {
     let normalized = normalize_name(name);
-    if let Some(result) = helper_array_with_trace(engine, context, &normalized, args) {
-        return Some(result);
-    }
-    let specialized = match normalized.as_str() {
-        "MAP" => Some(dynamic::map_array_with_trace(engine, context, args)),
-        "CHOOSECOLS" | "CHOOSEROWS" | "DROP" | "FILTER" | "HSTACK" | "MMULT" | "SEQUENCE"
-        | "SORT" | "TAKE" | "TRANSPOSE" | "UNIQUE" | "VSTACK" => Some(
-            array::call_array(engine, context, &normalized, args).map(ArrayEvaluation::untracked),
-        ),
-        "ERROR.TYPE" | "ISBLANK" | "ISERR" | "ISERROR" | "ISEVEN" | "ISLOGICAL" | "ISNA"
-        | "ISNONTEXT" | "ISNUMBER" | "ISODD" | "ISTEXT" | "N" | "T" | "TYPE" => {
-            information::call_array(engine, context, &normalized, args)
-                .map(|result| result.map(ArrayEvaluation::untracked))
-        }
-        _ => legacy::call_legacy_array(engine, context, &normalized, args)
+    let descriptor = descriptor::descriptor(&normalized)?;
+    match descriptor.array_evaluator()? {
+        ArrayEvaluator::Legacy => legacy::call_legacy_array(engine, context, &normalized, args)
             .map(|result| result.map(ArrayEvaluation::untracked)),
-    };
-    if specialized.is_some() {
-        return specialized;
-    }
-    if ELEMENTWISE_ARRAY_FUNCTIONS.contains(&normalized.as_str()) {
-        return Some(
+        ArrayEvaluator::Information => information::call_array(engine, context, &normalized, args)
+            .map(|result| result.map(ArrayEvaluation::untracked)),
+        ArrayEvaluator::Elementwise => Some(
             call_elementwise_array(engine, context, &normalized, args)
                 .map(ArrayEvaluation::untracked),
-        );
+        ),
+        ArrayEvaluator::DynamicHelper => {
+            helper_array_with_trace(engine, context, &normalized, args)
+        }
+        ArrayEvaluator::Map => Some(dynamic::map_array_with_trace(engine, context, args)),
+        ArrayEvaluator::Array => Some(
+            array::call_array(engine, context, &normalized, args).map(ArrayEvaluation::untracked),
+        ),
     }
-    None
 }
 
 pub(super) fn is_supported_function(name: &str) -> bool {
-    let normalized = normalize_name(name);
-    descriptor::descriptor(&normalized).is_some() || function_group(&normalized).is_some()
+    descriptor::resolve(name).is_some()
 }
 
 pub(super) fn is_reference_returning_function(name: &str) -> bool {
-    let normalized = normalize_name(name);
-    descriptor::descriptor(&normalized)
-        .is_some_and(descriptor::FunctionDescriptor::returns_reference)
-        || matches!(normalized.as_str(), "INDEX" | "INDIRECT" | "OFFSET")
+    descriptor::resolve(name).is_some_and(|descriptor| descriptor.result_kind().returns_reference())
 }
 
 pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy> {
@@ -255,47 +260,45 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    let mut entries = FUNCTION_GROUPS
+    function_catalog_for_version(CompatibilityVersion::V0_1_10)
+}
+
+fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::FunctionCatalogEntry> {
+    let mut entries = descriptor::descriptors()
         .iter()
-        .flat_map(|(_, names)| names.iter().copied())
-        .map(|name| {
-            super::FunctionCatalogEntry::new(
-                name.to_owned(),
-                name.to_owned(),
-                false,
-                is_array_result_function(name),
-                name != "__XLUDF.DUMMYFUNCTION",
-            )
-        })
-        .chain(descriptor::descriptors().iter().copied().map(|descriptor| {
-            super::FunctionCatalogEntry::new(
+        .copied()
+        .filter(|descriptor| descriptor.minimum_version() <= version)
+        .flat_map(|descriptor| {
+            let canonical = std::iter::once(super::FunctionCatalogEntry::new(
                 descriptor.canonical_name().to_owned(),
                 descriptor.canonical_name().to_owned(),
                 false,
-                descriptor.returns_array(),
+                descriptor.result_kind().returns_array(),
                 descriptor.is_official(),
-            )
-        }))
-        .chain(LEGACY_ALIASES.iter().map(|(alias, canonical)| {
-            super::FunctionCatalogEntry::new(
-                (*alias).to_owned(),
-                (*canonical).to_owned(),
-                true,
-                is_array_result_function(canonical),
-                true,
-            )
-        }))
+            ));
+            let aliases = descriptor.aliases().iter().map(move |alias| {
+                debug_assert_eq!(alias.adapter(), descriptor::AliasAdapter::Canonical);
+                super::FunctionCatalogEntry::new(
+                    alias.name().to_owned(),
+                    descriptor.canonical_name().to_owned(),
+                    true,
+                    descriptor.result_kind().returns_array(),
+                    alias.is_official(),
+                )
+            });
+            canonical.chain(aliases)
+        })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| left.name().cmp(right.name()));
     entries
 }
 
-fn is_array_result_function(name: &str) -> bool {
-    DYNAMIC_FUNCTIONS.contains(&name)
-        || ARRAY_FUNCTIONS.contains(&name)
-        || LEGACY_ARRAY_FUNCTIONS.contains(&name)
-        || INFORMATION_ARRAY_FUNCTIONS.contains(&name)
-        || ELEMENTWISE_ARRAY_FUNCTIONS.contains(&name)
+pub(super) fn function_volatility(name: &str) -> Option<descriptor::Volatility> {
+    descriptor::resolve(name).map(FunctionDescriptor::volatility)
+}
+
+pub(super) fn function_dependency_kind(name: &str) -> Option<DependencyKind> {
+    descriptor::resolve(name).map(FunctionDescriptor::dependency_kind)
 }
 
 fn call_elementwise_array(
@@ -343,391 +346,17 @@ fn value_as_expr(value: &Value) -> Expr {
     }
 }
 
-const LEGACY_ARRAY_FUNCTIONS: &[&str] = &["IF", "COUNTIF", "COUNTIFS", "INDEX"];
-const INFORMATION_ARRAY_FUNCTIONS: &[&str] = &[
-    "ERROR.TYPE",
-    "ISBLANK",
-    "ISERR",
-    "ISERROR",
-    "ISEVEN",
-    "ISLOGICAL",
-    "ISNA",
-    "ISNONTEXT",
-    "ISNUMBER",
-    "ISODD",
-    "ISTEXT",
-    "N",
-    "T",
-    "TYPE",
-];
-const ELEMENTWISE_ARRAY_FUNCTIONS: &[&str] = &["ABS"];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FunctionGroup {
-    Legacy,
-    Logical,
-    Aggregate,
-    Math,
-    Trigonometry,
-    Combinatorics,
-    SumOfSquares,
-    Engineering,
-    Lookup,
-    Information,
-    Text,
-    TextAdditional,
-    Date,
-    DateAdditional,
-    Dynamic,
-    Array,
-    Statistical,
-    StatisticalAdditional,
-    Financial,
-    FinancialAdditional,
-}
-
-fn function_group(name: &str) -> Option<FunctionGroup> {
-    FUNCTION_GROUPS
-        .iter()
-        .find_map(|(group, names)| names.contains(&name).then_some(*group))
-}
-
-const LEGACY_FUNCTIONS: &[&str] = &[
-    "IF",
-    "AND",
-    "IFERROR",
-    "LOWER",
-    "TEXT",
-    "COUNTIF",
-    "COUNTIFS",
-    "SUMPRODUCT",
-    "INDEX",
-    "MATCH",
-    "__XLUDF.DUMMYFUNCTION",
-];
-const LOGICAL_FUNCTIONS: &[&str] = &["TRUE", "FALSE", "NOT", "OR", "XOR", "IFNA", "IFS", "SWITCH"];
-const AGGREGATE_FUNCTIONS: &[&str] = &[
-    "SUM",
-    "AVERAGE",
-    "MIN",
-    "MAX",
-    "COUNT",
-    "COUNTA",
-    "COUNTBLANK",
-    "PRODUCT",
-    "SUBTOTAL",
-    "SUMIF",
-    "SUMIFS",
-    "AVERAGEIF",
-    "AVERAGEIFS",
-];
-const MATH_FUNCTIONS: &[&str] = &[
-    "ABS",
-    "BASE",
-    "CEILING",
-    "CEILING.MATH",
-    "CEILING.PRECISE",
-    "DECIMAL",
-    "EVEN",
-    "EXP",
-    "FLOOR",
-    "FLOOR.MATH",
-    "FLOOR.PRECISE",
-    "INT",
-    "ISO.CEILING",
-    "LN",
-    "LOG",
-    "LOG10",
-    "MOD",
-    "MROUND",
-    "ODD",
-    "PI",
-    "POWER",
-    "QUOTIENT",
-    "ROUND",
-    "ROUNDDOWN",
-    "ROUNDUP",
-    "SERIESSUM",
-    "SIGN",
-    "SQRT",
-    "SQRTPI",
-    "TRUNC",
-];
-const TRIGONOMETRY_FUNCTIONS: &[&str] = &[
-    "ACOS", "ACOSH", "ACOT", "ACOTH", "ASIN", "ASINH", "ATAN", "ATAN2", "ATANH", "COS", "COSH",
-    "COT", "COTH", "CSC", "CSCH", "DEGREES", "RADIANS", "SEC", "SECH", "SIN", "SINH", "TAN",
-    "TANH",
-];
-const COMBINATORICS_FUNCTIONS: &[&str] = &[
-    "COMBIN",
-    "COMBINA",
-    "FACT",
-    "FACTDOUBLE",
-    "GCD",
-    "LCM",
-    "MULTINOMIAL",
-    "PERMUT",
-    "PERMUTATIONA",
-];
-const SUM_OF_SQUARES_FUNCTIONS: &[&str] = &["SUMSQ", "SUMX2MY2", "SUMX2PY2", "SUMXMY2"];
-const ENGINEERING_FUNCTIONS: &[&str] = &[
-    "BIN2DEC",
-    "BIN2HEX",
-    "BIN2OCT",
-    "BITAND",
-    "BITLSHIFT",
-    "BITOR",
-    "BITRSHIFT",
-    "BITXOR",
-    "DEC2BIN",
-    "DEC2HEX",
-    "DEC2OCT",
-    "DELTA",
-    "ERF",
-    "ERF.PRECISE",
-    "ERFC",
-    "ERFC.PRECISE",
-    "GESTEP",
-    "HEX2BIN",
-    "HEX2DEC",
-    "HEX2OCT",
-    "OCT2BIN",
-    "OCT2DEC",
-    "OCT2HEX",
-];
-const LOOKUP_FUNCTIONS: &[&str] = &[
-    "ADDRESS",
-    "CHOOSE",
-    "COLUMN",
-    "COLUMNS",
-    "HLOOKUP",
-    "HYPERLINK",
-    "INDIRECT",
-    "LOOKUP",
-    "OFFSET",
-    "ROWS",
-    "ROW",
-    "VLOOKUP",
-    "XLOOKUP",
-];
-const INFORMATION_FUNCTIONS: &[&str] = &[
-    "ERROR.TYPE",
-    "ISBLANK",
-    "ISERR",
-    "ISERROR",
-    "ISEVEN",
-    "ISLOGICAL",
-    "ISNA",
-    "ISNONTEXT",
-    "ISNUMBER",
-    "ISODD",
-    "ISREF",
-    "ISTEXT",
-    "N",
-    "NA",
-    "T",
-    "TYPE",
-];
-const TEXT_FUNCTIONS: &[&str] = &[
-    "CONCAT",
-    "EXACT",
-    "FIND",
-    "LEFT",
-    "LEN",
-    "MID",
-    "PROPER",
-    "REPLACE",
-    "REPT",
-    "RIGHT",
-    "SEARCH",
-    "SUBSTITUTE",
-    "TEXTJOIN",
-    "TRIM",
-    "UPPER",
-];
-const TEXT_ADDITIONAL_FUNCTIONS: &[&str] = &[
-    "CHAR",
-    "CLEAN",
-    "CONCATENATE",
-    "DOLLAR",
-    "TEXTAFTER",
-    "TEXTBEFORE",
-    "UNICHAR",
-    "UNICODE",
-    "VALUE",
-    "VALUETOTEXT",
-];
-const DATE_FUNCTIONS: &[&str] = &[
-    "DATE",
-    "DATEDIF",
-    "DAY",
-    "EDATE",
-    "EOMONTH",
-    "MONTH",
-    "NETWORKDAYS",
-    "NOW",
-    "TODAY",
-    "WEEKDAY",
-    "WORKDAY",
-    "YEAR",
-    "YEARFRAC",
-];
-const DATE_ADDITIONAL_FUNCTIONS: &[&str] = &[
-    "DAYS",
-    "DAYS360",
-    "HOUR",
-    "ISOWEEKNUM",
-    "MINUTE",
-    "SECOND",
-    "TIME",
-    "WEEKNUM",
-];
-const DYNAMIC_FUNCTIONS: &[&str] = &[
-    "BYCOL",
-    "BYROW",
-    "ISOMITTED",
-    "LAMBDA",
-    "LET",
-    "MAKEARRAY",
-    "MAP",
-    "REDUCE",
-    "SCAN",
-];
-const ARRAY_FUNCTIONS: &[&str] = &[
-    "CHOOSECOLS",
-    "CHOOSEROWS",
-    "DROP",
-    "FILTER",
-    "HSTACK",
-    "MMULT",
-    "SEQUENCE",
-    "SORT",
-    "TAKE",
-    "TRANSPOSE",
-    "UNIQUE",
-    "VSTACK",
-];
-const STATISTICAL_FUNCTIONS: &[&str] = &[
-    "CORREL",
-    "COVARIANCE.P",
-    "INTERCEPT",
-    "LARGE",
-    "MAXIFS",
-    "MEDIAN",
-    "MINIFS",
-    "MODE.SNGL",
-    "NORMSDIST",
-    "NORM.S.DIST",
-    "PEARSON",
-    "PERCENTILE.INC",
-    "PERCENTRANK.INC",
-    "QUARTILE.INC",
-    "RANK.EQ",
-    "RSQ",
-    "SLOPE",
-    "SMALL",
-    "STDEV.S",
-    "VAR.S",
-];
-const STATISTICAL_ADDITIONAL_FUNCTIONS: &[&str] = &[
-    "AVEDEV",
-    "AVERAGEA",
-    "DEVSQ",
-    "EXPON.DIST",
-    "GAUSS",
-    "GEOMEAN",
-    "HARMEAN",
-    "MAXA",
-    "MINA",
-    "NORM.DIST",
-    "PHI",
-    "POISSON.DIST",
-    "STANDARDIZE",
-    "STDEV.P",
-    "VAR.P",
-];
-const FINANCIAL_FUNCTIONS: &[&str] = &[
-    "DB", "FV", "IPMT", "IRR", "NPER", "NPV", "PMT", "PPMT", "PV", "RATE", "SLN", "SYD", "XIRR",
-];
-const FINANCIAL_ADDITIONAL_FUNCTIONS: &[&str] = &[
-    "DOLLARDE",
-    "DOLLARFR",
-    "EFFECT",
-    "FVSCHEDULE",
-    "ISPMT",
-    "MIRR",
-    "NOMINAL",
-    "PDURATION",
-    "RRI",
-];
-
-const FUNCTION_GROUPS: &[(FunctionGroup, &[&str])] = &[
-    (FunctionGroup::Legacy, LEGACY_FUNCTIONS),
-    (FunctionGroup::Logical, LOGICAL_FUNCTIONS),
-    (FunctionGroup::Aggregate, AGGREGATE_FUNCTIONS),
-    (FunctionGroup::Math, MATH_FUNCTIONS),
-    (FunctionGroup::Trigonometry, TRIGONOMETRY_FUNCTIONS),
-    (FunctionGroup::Combinatorics, COMBINATORICS_FUNCTIONS),
-    (FunctionGroup::SumOfSquares, SUM_OF_SQUARES_FUNCTIONS),
-    (FunctionGroup::Engineering, ENGINEERING_FUNCTIONS),
-    (FunctionGroup::Lookup, LOOKUP_FUNCTIONS),
-    (FunctionGroup::Information, INFORMATION_FUNCTIONS),
-    (FunctionGroup::Text, TEXT_FUNCTIONS),
-    (FunctionGroup::TextAdditional, TEXT_ADDITIONAL_FUNCTIONS),
-    (FunctionGroup::Date, DATE_FUNCTIONS),
-    (FunctionGroup::DateAdditional, DATE_ADDITIONAL_FUNCTIONS),
-    (FunctionGroup::Dynamic, DYNAMIC_FUNCTIONS),
-    (FunctionGroup::Array, ARRAY_FUNCTIONS),
-    (FunctionGroup::Statistical, STATISTICAL_FUNCTIONS),
-    (
-        FunctionGroup::StatisticalAdditional,
-        STATISTICAL_ADDITIONAL_FUNCTIONS,
-    ),
-    (FunctionGroup::Financial, FINANCIAL_FUNCTIONS),
-    (
-        FunctionGroup::FinancialAdditional,
-        FINANCIAL_ADDITIONAL_FUNCTIONS,
-    ),
-];
-
-const LEGACY_ALIASES: &[(&str, &str)] = &[
-    ("COVAR", "COVARIANCE.P"),
-    ("EXPONDIST", "EXPON.DIST"),
-    ("MODE", "MODE.SNGL"),
-    ("NORMDIST", "NORM.DIST"),
-    ("PERCENTILE", "PERCENTILE.INC"),
-    ("PERCENTRANK", "PERCENTRANK.INC"),
-    ("POISSON", "POISSON.DIST"),
-    ("QUARTILE", "QUARTILE.INC"),
-    ("RANK", "RANK.EQ"),
-    ("STDEV", "STDEV.S"),
-    ("STDEVP", "STDEV.P"),
-    ("VAR", "VAR.S"),
-    ("VARP", "VAR.P"),
-];
-
 pub(super) fn normalize_name(name: &str) -> String {
-    let upper = name.to_ascii_uppercase();
-    let mut base = upper.as_str();
-    while let Some(stripped) = base
-        .strip_prefix("_XLFN.")
-        .or_else(|| base.strip_prefix("_XLUDF."))
-        .or_else(|| base.strip_prefix("_XLWS."))
-    {
-        base = stripped;
-    }
-    LEGACY_ALIASES
-        .iter()
-        .find_map(|(alias, target)| (*alias == base).then_some(*target))
-        .unwrap_or(base)
-        .to_owned()
+    descriptor::normalize_name(name)
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{FUNCTION_GROUPS, LEGACY_ALIASES, function_group, normalize_name};
+    use sha2::{Digest, Sha256};
+
+    use super::{descriptor, normalize_name};
 
     #[test]
     fn normalization_removes_composed_excel_storage_prefixes() {
@@ -738,36 +367,39 @@ mod tests {
 
     #[test]
     fn coverage_registry_has_287_unique_excel_facing_names() {
-        let kernels: BTreeSet<&str> = FUNCTION_GROUPS
+        let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
-            .flat_map(|(_, names)| names.iter().copied())
+            .map(|descriptor| descriptor.canonical_name())
             .collect();
-        let registered_kernel_count: usize =
-            FUNCTION_GROUPS.iter().map(|(_, names)| names.len()).sum();
-        assert_eq!(kernels.len(), registered_kernel_count);
+        assert_eq!(kernels.len(), descriptor::descriptors().len());
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 274);
+        assert_eq!(kernels.len(), 275);
 
-        let aliases: BTreeSet<&str> = LEGACY_ALIASES.iter().map(|(alias, _)| *alias).collect();
-        assert_eq!(aliases.len(), LEGACY_ALIASES.len());
+        let aliases = descriptor::descriptors()
+            .iter()
+            .flat_map(|descriptor| descriptor.aliases())
+            .map(|alias| alias.name())
+            .collect::<BTreeSet<_>>();
+        let alias_count = descriptor::descriptors()
+            .iter()
+            .map(|descriptor| descriptor.aliases().len())
+            .sum::<usize>();
+        assert_eq!(aliases.len(), alias_count);
+        assert_eq!(aliases.len(), 13);
         assert!(aliases.is_disjoint(&kernels));
         assert!(
-            LEGACY_ALIASES
+            descriptor::descriptors()
                 .iter()
-                .all(|(_, target)| function_group(target).is_some())
+                .flat_map(|descriptor| descriptor.aliases())
+                .all(|alias| descriptor::resolve(alias.name()).is_some())
         );
-
-        let official_kernels = kernels.len() - 1;
-        assert_eq!(
-            official_kernels + aliases.len() + super::descriptor::descriptors().len(),
-            287
-        );
-        assert!(function_group("AREAS").is_none());
 
         let catalog = super::function_catalog();
+        assert_eq!(catalog.len(), kernels.len() + aliases.len());
+        assert_eq!(catalog.len(), 288);
         assert_eq!(
-            catalog.len(),
-            kernels.len() + aliases.len() + super::descriptor::descriptors().len()
+            catalog.iter().filter(|entry| entry.is_official()).count(),
+            287
         );
         assert!(
             catalog
@@ -780,6 +412,41 @@ mod tests {
                 .filter(|entry| entry.name() == "AREAS")
                 .count(),
             1
+        );
+        assert_eq!(
+            catalog
+                .iter()
+                .find(|entry| entry.name() == "COVAR")
+                .map(|entry| entry.canonical_name()),
+            Some("COVARIANCE.P")
+        );
+    }
+
+    #[test]
+    fn migrated_catalog_is_byte_exact_with_the_v0_1_9_snapshot() {
+        let mut digest = Sha256::new();
+        for entry in
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_9)
+        {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual: [u8; 32] = digest.finalize().into();
+        assert_eq!(
+            actual,
+            [
+                0xd0, 0xa5, 0x38, 0x20, 0x7e, 0x53, 0x6d, 0x3c, 0x5b, 0x52, 0xe2, 0xae, 0x1c, 0x33,
+                0x53, 0xcf, 0xef, 0x3e, 0xe9, 0x65, 0xb8, 0xea, 0x84, 0x1c, 0x14, 0x1b, 0xf2, 0x0a,
+                0x6c, 0x12, 0xd9, 0xae,
+            ]
         );
     }
 }
