@@ -413,7 +413,7 @@ jobs:
 
       - name: Install cross-compilation cargo tools
         if: matrix.cargo_tool != ''
-        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2
         with:
           tool: ${{ matrix.cargo_tool }}
           fallback: none
