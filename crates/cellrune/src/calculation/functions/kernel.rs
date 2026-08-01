@@ -266,15 +266,22 @@ function_enum!(ArrayFunction {
     ChooseCols,
     ChooseRows,
     Drop,
+    Expand,
     Filter,
     HStack,
     MMult,
     Sequence,
     Sort,
+    SortBy,
     Take,
+    ToCol,
+    ToRow,
     Transpose,
+    TrimRange,
     Unique,
     VStack,
+    WrapCols,
+    WrapRows,
 });
 
 function_enum!(StatisticalFunction {

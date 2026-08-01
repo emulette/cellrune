@@ -16,6 +16,9 @@ pub(in crate::calculation) use kernel::{DynamicFunction, Evaluator};
 
 mod aggregate;
 mod array;
+mod array_common;
+mod array_reshape;
+mod array_sort;
 mod calendar;
 mod combinatorics;
 mod contract;
@@ -903,14 +906,14 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_287_unique_excel_facing_names() {
+    fn coverage_registry_has_294_unique_excel_facing_names() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
             .collect();
         assert_eq!(kernels.len(), descriptor::descriptors().len());
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 275);
+        assert_eq!(kernels.len(), 282);
 
         let aliases = descriptor::descriptors()
             .iter()
@@ -933,10 +936,10 @@ mod tests {
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());
-        assert_eq!(catalog.len(), 288);
+        assert_eq!(catalog.len(), 295);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            287
+            294
         );
         assert!(
             catalog
@@ -984,6 +987,32 @@ mod tests {
                 0x53, 0xcf, 0xef, 0x3e, 0xe9, 0x65, 0xb8, 0xea, 0x84, 0x1c, 0x14, 0x1b, 0xf2, 0x0a,
                 0x6c, 0x12, 0xd9, 0xae,
             ]
+        );
+    }
+
+    #[test]
+    fn v0_1_10_array_checkpoint_catalog_is_byte_exact() {
+        let mut digest = Sha256::new();
+        for entry in super::function_catalog() {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            "f34103747a1228b8e747def032256669b72b6fe5943134456e1e6ace767c5b6f"
         );
     }
 }

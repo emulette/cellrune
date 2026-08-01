@@ -166,6 +166,39 @@ impl ArgumentDefault {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct RepeatingArgumentDefault {
+    first_position: u16,
+    step: u16,
+    trigger: DefaultTrigger,
+    value: ArgumentDefaultValue,
+}
+
+impl RepeatingArgumentDefault {
+    const fn new(
+        first_position: u16,
+        step: u16,
+        trigger: DefaultTrigger,
+        value: ArgumentDefaultValue,
+    ) -> Self {
+        Self {
+            first_position,
+            step,
+            trigger,
+            value,
+        }
+    }
+
+    fn applies_at(self, position: usize, trigger: DefaultTrigger) -> bool {
+        let position = u16::try_from(position).ok();
+        position.is_some_and(|position| {
+            position >= self.first_position
+                && (position - self.first_position).is_multiple_of(self.step)
+                && (self.trigger == trigger || self.trigger == DefaultTrigger::AbsentOrMissing)
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum MissingArgumentPolicy {
     CoerceToBlank,
     Preserve,
@@ -184,6 +217,7 @@ pub(super) struct CallContract {
     layout: ArgumentLayout,
     missing: MissingArgumentPolicy,
     defaults: &'static [ArgumentDefault],
+    repeating_defaults: &'static [RepeatingArgumentDefault],
 }
 
 impl CallContract {
@@ -193,6 +227,7 @@ impl CallContract {
             layout: ArgumentLayout::Uniform(mode),
             missing: MissingArgumentPolicy::CoerceToBlank,
             defaults: &[],
+            repeating_defaults: &[],
         }
     }
 
@@ -202,6 +237,7 @@ impl CallContract {
             layout: ArgumentLayout::Positional(modes),
             missing: MissingArgumentPolicy::CoerceToBlank,
             defaults: &[],
+            repeating_defaults: &[],
         }
     }
 
@@ -220,6 +256,7 @@ impl CallContract {
             },
             missing: MissingArgumentPolicy::CoerceToBlank,
             defaults: &[],
+            repeating_defaults: &[],
         }
     }
 
@@ -229,6 +266,7 @@ impl CallContract {
             layout,
             missing: MissingArgumentPolicy::CoerceToBlank,
             defaults: &[],
+            repeating_defaults: &[],
         }
     }
 
@@ -239,6 +277,14 @@ impl CallContract {
 
     const fn with_defaults(mut self, defaults: &'static [ArgumentDefault]) -> Self {
         self.defaults = defaults;
+        self
+    }
+
+    const fn with_repeating_defaults(
+        mut self,
+        defaults: &'static [RepeatingArgumentDefault],
+    ) -> Self {
+        self.repeating_defaults = defaults;
         self
     }
 
@@ -267,6 +313,13 @@ impl CallContract {
                         || default.trigger == DefaultTrigger::AbsentOrMissing)
             })
             .map(|default| default.value)
+            .or_else(|| {
+                self.repeating_defaults
+                    .iter()
+                    .copied()
+                    .find(|default| default.applies_at(position, trigger))
+                    .map(|default| default.value)
+            })
     }
 
     pub(super) fn missing_behavior_at(self, position: usize) -> MissingArgumentBehavior {
@@ -519,6 +572,54 @@ const FILTER_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     2,
     DefaultTrigger::AbsentOrMissing,
     ArgumentDefaultValue::CalculationError,
+)];
+const EXPAND_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(1, DefaultTrigger::Missing, ArgumentDefaultValue::SourceRows),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::SourceColumns,
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::NoPadding,
+    ),
+];
+const SORTBY_DEFAULTS: &[RepeatingArgumentDefault] = &[RepeatingArgumentDefault::new(
+    2,
+    2,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(1.0),
+)];
+const FLATTEN_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        1,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Logical(false),
+    ),
+];
+const TRIM_RANGE_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        1,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(3.0),
+    ),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(3.0),
+    ),
+];
+const WRAP_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    2,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::NoPadding,
 )];
 const SEQUENCE_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(
@@ -1057,6 +1158,10 @@ impl ArrayFunction {
                 CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
                     .with_defaults(TAKE_DROP_DEFAULTS)
             }
+            Self::Expand => {
+                CallContract::positional(Arity::range(2, 4), &[ARRAY, SCALAR, SCALAR, SCALAR])
+                    .with_defaults(EXPAND_DEFAULTS)
+            }
             Self::Filter => CallContract::positional(Arity::range(2, 3), &[ARRAY, ARRAY, DEFERRED])
                 .with_defaults(FILTER_DEFAULTS),
             Self::HStack | Self::VStack => {
@@ -1071,9 +1176,28 @@ impl ArrayFunction {
                 CallContract::positional(Arity::range(1, 4), &[ARRAY, SCALAR, SCALAR, SCALAR])
                     .with_defaults(SORT_DEFAULTS)
             }
+            Self::SortBy => CallContract::repeating(
+                Arity::range(2, MAX_EXCEL_ARGUMENTS),
+                &[ARRAY],
+                &[ARRAY, SCALAR],
+                &[],
+            )
+            .with_repeating_defaults(SORTBY_DEFAULTS),
+            Self::ToCol | Self::ToRow => {
+                CallContract::positional(Arity::range(1, 3), &[ARRAY, SCALAR, SCALAR])
+                    .with_defaults(FLATTEN_DEFAULTS)
+            }
             Self::Transpose => CallContract::uniform(Arity::exact(1), ARRAY),
+            Self::TrimRange => {
+                CallContract::positional(Arity::range(1, 3), &[ARRAY, SCALAR, SCALAR])
+                    .with_defaults(TRIM_RANGE_DEFAULTS)
+            }
             Self::Unique => CallContract::positional(Arity::range(1, 3), &[ARRAY, SCALAR, SCALAR])
                 .with_defaults(UNIQUE_DEFAULTS),
+            Self::WrapCols | Self::WrapRows => {
+                CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
+                    .with_defaults(WRAP_DEFAULTS)
+            }
         }
     }
 }
@@ -1270,6 +1394,21 @@ mod tests {
             indirect.missing_behavior_at(1),
             MissingArgumentBehavior::CoerceToBlank,
         );
+
+        let sort_by = Evaluator::Array(ArrayFunction::SortBy).call_contract();
+        for position in [2, 4, 254] {
+            assert_eq!(
+                sort_by.default_at(position, DefaultTrigger::Absent),
+                Some(ArgumentDefaultValue::Number(1.0)),
+                "SORTBY order at position {position} must default to ascending",
+            );
+            assert_eq!(
+                sort_by.default_at(position, DefaultTrigger::Missing),
+                Some(ArgumentDefaultValue::Number(1.0)),
+                "SORTBY missing order at position {position} must default to ascending",
+            );
+        }
+        assert_eq!(sort_by.default_at(3, DefaultTrigger::Absent), None);
     }
 
     #[test]

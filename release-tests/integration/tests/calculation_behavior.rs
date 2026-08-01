@@ -1803,7 +1803,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        287
+        294
     );
     let let_entry = catalog
         .iter()
@@ -2371,18 +2371,274 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
 }
 
 #[test]
+fn array_reshape_and_order_functions_preserve_excel_shapes_and_defaults() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, value) in [("B10", 1.0), ("C10", 2.0), ("B11", 3.0), ("C11", 4.0)] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid trim source address"),
+                CellValue::number(value).expect("finite trim source value"),
+            )
+            .expect("trim source mutation");
+    }
+    for (address, formula) in [
+        ("A1", "=EXPAND({1,2;3,4},3,4,\"pad\")"),
+        (
+            "F1",
+            "=SORTBY({\"r1\",10;\"r2\",20;\"r3\",30},{\"b\";\"a\";\"a\"},1,{2;1;2},-1)",
+        ),
+        ("K1", "=TOCOL({1,2,3;4,5,6},0,TRUE)"),
+        ("M1", "=TOROW({1,2,3;4,5,6},0,TRUE)"),
+        ("A14", "=TRIMRANGE(A9:D12)"),
+        ("F10", "=WRAPCOLS({1,2,3,4,5},2)"),
+        ("J10", "=WRAPROWS({1;2;3;4;5},2,0)"),
+        ("M10", "=_xlfn.TOCOL({7,8})"),
+        ("T1", "=SORTBY({10;20;30},{2;1;1})"),
+        ("V1", "=TOCOL({1,#N/A;2,3},2)"),
+        ("X1", "=TOROW({1,2;3,4})"),
+        ("D14", "=WRAPCOLS({1,2},5)"),
+        ("F14", "=WRAPROWS({1;2},5)"),
+        ("I14", "=EXPAND({1,2;3,4},,3)"),
+        ("A18", "=SORTBY({10,20,30},{2,1,3})"),
+        ("E18", "=SORTBY({3;2;1},{3;2;1},)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid dynamic anchor"),
+                FormulaText::from_user_input(formula).expect("valid dynamic formula"),
+                None,
+            )
+            .expect("dynamic formula mutation");
+    }
+
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for (address, expected) in [
+        ("A1", 1.0),
+        ("B1", 2.0),
+        ("A2", 3.0),
+        ("B2", 4.0),
+        ("G1", 30.0),
+        ("G2", 20.0),
+        ("G3", 10.0),
+        ("K1", 1.0),
+        ("K2", 4.0),
+        ("K3", 2.0),
+        ("K4", 5.0),
+        ("K5", 3.0),
+        ("K6", 6.0),
+        ("M1", 1.0),
+        ("N1", 4.0),
+        ("O1", 2.0),
+        ("P1", 5.0),
+        ("Q1", 3.0),
+        ("R1", 6.0),
+        ("A14", 1.0),
+        ("B14", 2.0),
+        ("A15", 3.0),
+        ("B15", 4.0),
+        ("F10", 1.0),
+        ("G10", 3.0),
+        ("H10", 5.0),
+        ("F11", 2.0),
+        ("G11", 4.0),
+        ("J10", 1.0),
+        ("K10", 2.0),
+        ("J11", 3.0),
+        ("K11", 4.0),
+        ("J12", 5.0),
+        ("K12", 0.0),
+        ("M10", 7.0),
+        ("M11", 8.0),
+        ("T1", 20.0),
+        ("T2", 30.0),
+        ("T3", 10.0),
+        ("V1", 1.0),
+        ("V2", 2.0),
+        ("V3", 3.0),
+        ("X1", 1.0),
+        ("Y1", 2.0),
+        ("Z1", 3.0),
+        ("AA1", 4.0),
+        ("D14", 1.0),
+        ("D15", 2.0),
+        ("F14", 1.0),
+        ("G14", 2.0),
+        ("I14", 1.0),
+        ("J14", 2.0),
+        ("I15", 3.0),
+        ("J15", 4.0),
+        ("A18", 20.0),
+        ("B18", 10.0),
+        ("C18", 30.0),
+        ("E18", 1.0),
+        ("E19", 2.0),
+        ("E20", 3.0),
+    ] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+    for (address, expected) in [("F1", "r3"), ("F2", "r2"), ("F3", "r1")] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            ))),
+            "unexpected SORTBY value at {address}",
+        );
+    }
+    for address in ["C1", "D1", "C2", "D2", "A3", "B3", "C3", "D3"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                "pad".to_owned()
+            ))),
+            "unexpected EXPAND padding at {address}",
+        );
+    }
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "H11"),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::NotAvailable
+        )))
+    );
+    for address in ["K14", "K15"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::NotAvailable
+            )))
+        );
+    }
+}
+
+#[test]
+fn array_reshape_and_order_functions_reject_invalid_domains() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "EXPAND({1;2},1)"),
+        (1, 2, "EXPAND({1},0)"),
+        (1, 3, "SORTBY({1;2},{1;2},2)"),
+        (1, 4, "SORTBY({1;2},{1,2})"),
+        (1, 5, "TOCOL({1},4)"),
+        (1, 6, "TOROW({1},-1)"),
+        (1, 7, "TRIMRANGE({1},4)"),
+        (1, 8, "WRAPCOLS({1,2;3,4},2)"),
+        (1, 9, "WRAPROWS({1;2},0)"),
+        (1, 10, "TOCOL({#N/A},2)"),
+        (1, 11, "TRIMRANGE(A100:B101)"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=8 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "invalid array reshape domain in column {column} was accepted",
+        );
+    }
+    assert_eq!(
+        calculation.cell(cell_id(9)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Number
+        )))
+    );
+    assert_eq!(
+        calculation.cell(cell_id(10)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Calculation
+        )))
+    );
+    assert_eq!(
+        calculation.cell(cell_id(11)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Reference
+        )))
+    );
+}
+
+#[test]
+fn array_reshape_and_order_functions_block_on_upstream_engine_issues() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, value) in [("A1", 7.0), ("A3", 8.0)] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid source address"),
+                CellValue::number(value).expect("finite source value"),
+            )
+            .expect("source value mutation");
+    }
+    draft
+        .set_cell_formula(
+            sheet_id,
+            CellAddress::from_a1("A2").expect("valid unsupported formula address"),
+            FormulaText::from_user_input("=MYSTERY()").expect("valid unsupported formula"),
+        )
+        .expect("unsupported formula mutation");
+    for (address, formula) in [
+        ("C1", "=EXPAND(A1:A2,3)"),
+        ("E1", "=TRIMRANGE(A1:A3)"),
+        ("G1", "=SORTBY(A1:A2,{2;1})"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid dynamic anchor"),
+                FormulaText::from_user_input(formula).expect("valid dynamic formula"),
+                None,
+            )
+            .expect("dynamic formula mutation");
+    }
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let unsupported_id = CalculationCellId::new(
+        sheet_id,
+        CellAddress::from_a1("A2").expect("valid unsupported formula address"),
+    );
+    let Some(CalculationCellResult::Unavailable(unsupported)) = calculation.cell(unsupported_id)
+    else {
+        panic!("unsupported source formula unexpectedly calculated");
+    };
+    assert_eq!(
+        unsupported.code(),
+        CalculationIssueCode::UnsupportedFunction
+    );
+
+    for address in ["C1", "E1", "G1"] {
+        let id = CalculationCellId::new(
+            sheet_id,
+            CellAddress::from_a1(address).expect("valid dynamic anchor"),
+        );
+        let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(id) else {
+            panic!("{address} leaked an upstream engine issue into an array value");
+        };
+        assert_eq!(issue.code(), CalculationIssueCode::BlockedByUpstream);
+    }
+}
+
+#[test]
 fn modern_array_function_work_is_bounded_before_materialization() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "CHOOSECOLS({1;2},1,1,1)"),
         (1, 2, "TAKE({1,2,3;4,5,6},2,3)"),
         (1, 3, "HSTACK({1;2;3},{4})"),
+        (1, 4, "EXPAND({1},3,3)"),
+        (1, 5, "SORTBY({1;2;3},{3;2;1})"),
+        (1, 6, "TOCOL({1,2,3;4,5,6})"),
+        (1, 7, "TRIMRANGE(A100:C102)"),
+        (1, 8, "WRAPROWS({1;2;3;4;5;6},2)"),
     ]);
     let limits = CalculationLimits::default()
         .with_max_function_iterations(5)
         .expect("positive iteration limit");
     let calculation =
         calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
-    for column in 1..=3 {
+    for column in 1..=8 {
         assert_issue(
             &calculation,
             column,

@@ -429,11 +429,10 @@
     "excel_rich_error": false
   },
   "curated:arraysdynamic:c003": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SORTBY) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c004": {
     "classification": "match",
@@ -496,11 +495,10 @@
     "excel_rich_error": false
   },
   "curated:arraysdynamic:c023": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOCOL) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arraysdynamic:c024": {
     "classification": "match",
@@ -1036,11 +1034,10 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
   },
   "curated:unsupported:c014": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "Mixed",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TRIMRANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c015": {
     "classification": "match",
@@ -3789,25 +3786,22 @@
     "excel_rich_error": false
   },
   "function:expand": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.EXPAND) for this oracle case."
+    "excel_rich_error": false
   },
   "function:expand:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.EXPAND) for this oracle case."
+    "excel_rich_error": false
   },
   "function:expand:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.EXPAND) for this oracle case."
+    "excel_rich_error": false
   },
   "function:expon-dist": {
     "classification": "match",
@@ -7898,25 +7892,22 @@
     "excel_rich_error": false
   },
   "function:sortby": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SORTBY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sortby:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SORTBY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sortby:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SORTBY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sqrt": {
     "classification": "match",
@@ -8729,46 +8720,40 @@
     "note": "CellRune reports calculation.unsupported_function (TINV) for this oracle case."
   },
   "function:tocol": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOCOL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tocol:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOCOL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tocol:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOCOL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:torow": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#SPILL!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOROW) for this oracle case."
+    "excel_rich_error": true
   },
   "function:torow:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#SPILL!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOROW) for this oracle case."
+    "excel_rich_error": true
   },
   "function:torow:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TOROW) for this oracle case."
+    "excel_rich_error": false
   },
   "function:transpose": {
     "classification": "match",
@@ -8843,25 +8828,22 @@
     "note": "CellRune reports calculation.unsupported_function (TRIMMEAN) for this oracle case."
   },
   "function:trimrange": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "Mixed",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TRIMRANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:trimrange:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "K001",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TRIMRANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:trimrange:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#REF!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TRIMRANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:true": {
     "classification": "match",
@@ -9305,46 +9287,40 @@
     "excel_rich_error": false
   },
   "function:wrapcols": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WRAPCOLS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:wrapcols:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WRAPCOLS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:wrapcols:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WRAPCOLS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:wraprows": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WRAPROWS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:wraprows:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WRAPROWS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:wraprows:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WRAPROWS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xirr": {
     "classification": "match",

@@ -667,6 +667,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ChooseRows, "CHOOSEROWS", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::ChooseRows)),
     function!(Drop, "DROP", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Drop)),
+    function!(Expand, "EXPAND", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Expand))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Filter, "FILTER", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Filter)),
     function!(HStack, "HSTACK", Array)
@@ -676,13 +679,31 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Sequence, "SEQUENCE", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sequence)),
     function!(Sort, "SORT", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sort)),
+    function!(SortBy, "SORTBY", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::SortBy))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Take, "TAKE", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Take)),
+    function!(ToCol, "TOCOL", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::ToCol))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(ToRow, "TOROW", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::ToRow))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Transpose, "TRANSPOSE", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Transpose)),
+    function!(TrimRange, "TRIMRANGE", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::TrimRange))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Unique, "UNIQUE", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Unique)),
     function!(VStack, "VSTACK", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::VStack)),
+    function!(WrapCols, "WRAPCOLS", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::WrapCols))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(WrapRows, "WRAPROWS", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::WrapRows))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Correl, "CORREL", Statistical),
     function!(CovarianceP, "COVARIANCE.P", Statistical)
         .with_aliases(&[FunctionAlias::official("COVAR")]),
@@ -954,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn v0_1_10_typed_callable_semantic_registry_is_byte_exact() {
+    fn v0_1_10_semantic_registry_is_byte_exact() {
         let mut digest = Sha256::new();
         for descriptor in DESCRIPTORS {
             digest.update(format!("{descriptor:?}\n").as_bytes());
@@ -966,7 +987,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "1ee5038f19906c186c7d7903aaeec6991aadbe159cef7806f8e74af2151b2bb8"
+            "678f03064961d8e41e4c6db94bbbc8c3a83b887096c4639a544cba2d281d8012"
         );
     }
 
@@ -1037,5 +1058,28 @@ mod tests {
         let let_function = descriptor("LET").expect("LET descriptor");
         assert_eq!(let_function.result_kind(), FunctionResultKind::Contextual);
         assert!(let_function.catalog_returns_array());
+
+        for name in [
+            "EXPAND",
+            "SORTBY",
+            "TOCOL",
+            "TOROW",
+            "TRIMRANGE",
+            "WRAPCOLS",
+            "WRAPROWS",
+        ] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_10,
+                "{name}",
+            );
+            assert_eq!(
+                descriptor.result_kind(),
+                FunctionResultKind::Array,
+                "{name}"
+            );
+            assert!(descriptor.catalog_returns_array(), "{name}");
+        }
     }
 }
