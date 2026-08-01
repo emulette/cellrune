@@ -238,6 +238,686 @@ fn v0_1_10_text_and_regex_work_respects_calculation_limits() {
 }
 
 #[test]
+fn v0_1_10_grouped_aggregations_share_callable_and_spill_semantics() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, formula) in [
+        (
+            "A1",
+            "=GROUPBY({\"A\";\"B\";\"A\";\"C\"},{100;200;300;400},SUM)",
+        ),
+        (
+            "D1",
+            "=PIVOTBY({\"A\";\"B\";\"A\";\"C\"},{FALSE;FALSE;TRUE;TRUE},{100;200;300;400},SUM)",
+        ),
+        (
+            "I1",
+            "=GROUPBY({\"A\";\"B\";\"A\";\"C\"},{100;200;300;400},LAMBDA(items,SUM(items)))",
+        ),
+        (
+            "L1",
+            "=GROUPBY({\"A\";\"B\";\"A\";\"C\"},{100;200;300;400},PERCENTOF)",
+        ),
+        (
+            "Q1",
+            "=PIVOTBY({\"A\";\"A\";\"B\";\"B\"},{\"X\";\"Y\";\"X\";\"Y\"},{10;30;20;40},LAMBDA(subset,totalset,SUM(subset)/SUM(totalset)),,,,,,,1)",
+        ),
+        (
+            "V1",
+            "=PIVOTBY({\"Region\";\"A\";\"A\";\"B\";\"B\"},{\"Period\";\"X\";\"Y\";\"X\";\"Y\"},{\"Sales\",\"Units\";10,1;30,3;20,2;40,4},SUM,3)",
+        ),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid grouped anchor"),
+                FormulaText::from_user_input(formula).expect("valid grouped formula"),
+                None,
+            )
+            .expect("grouped formula mutation");
+    }
+    draft
+        .set_cell_formula(
+            sheet_id,
+            CellAddress::from_a1("O1").expect("valid percent anchor"),
+            FormulaText::from_user_input("=PERCENTOF({100;200;300;400},100)")
+                .expect("valid percent formula"),
+        )
+        .expect("percent formula mutation");
+    for (address, formula) in [
+        ("AD1", "=ISBLANK(F3)"),
+        ("AE1", "=ISTEXT(F3)"),
+        ("AF1", "=F3=0"),
+        ("AG1", "=COUNTBLANK(F3)"),
+    ] {
+        draft
+            .set_cell_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid empty-intersection check"),
+                FormulaText::from_user_input(formula)
+                    .expect("valid empty-intersection check formula"),
+            )
+            .expect("empty-intersection check mutation");
+    }
+
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+
+    for (address, expected) in [
+        ("B1", 400.0),
+        ("B2", 200.0),
+        ("B3", 400.0),
+        ("B4", 1_000.0),
+        ("E2", 100.0),
+        ("F2", 300.0),
+        ("G2", 400.0),
+        ("E3", 200.0),
+        ("G3", 200.0),
+        ("F4", 400.0),
+        ("G4", 400.0),
+        ("E5", 300.0),
+        ("F5", 700.0),
+        ("G5", 1_000.0),
+        ("J1", 400.0),
+        ("J4", 1_000.0),
+        ("M1", 0.4),
+        ("M2", 0.2),
+        ("M3", 0.4),
+        ("M4", 1.0),
+        ("O1", 10.0),
+        ("R2", 0.25),
+        ("S2", 0.75),
+        ("T2", 1.0),
+        ("R3", 1.0 / 3.0),
+        ("S3", 2.0 / 3.0),
+        ("T3", 1.0),
+        ("W4", 10.0),
+        ("X4", 1.0),
+        ("Y4", 30.0),
+        ("Z4", 3.0),
+        ("AA4", 40.0),
+        ("AB4", 4.0),
+        ("W5", 20.0),
+        ("X5", 2.0),
+        ("Y5", 40.0),
+        ("Z5", 4.0),
+        ("AA5", 60.0),
+        ("AB5", 6.0),
+        ("W6", 30.0),
+        ("X6", 3.0),
+        ("Y6", 70.0),
+        ("Z6", 7.0),
+        ("AA6", 100.0),
+        ("AB6", 10.0),
+    ] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+    for (address, expected) in [
+        ("A1", "A"),
+        ("A2", "B"),
+        ("A3", "C"),
+        ("A4", "Total"),
+        ("D2", "A"),
+        ("D3", "B"),
+        ("D4", "C"),
+        ("D5", "Total"),
+        ("W1", "Period"),
+        ("W2", "X"),
+        ("X2", "X"),
+        ("Y2", "Y"),
+        ("Z2", "Y"),
+        ("AA2", "Total"),
+        ("AB2", "Total"),
+        ("V3", "Region"),
+        ("W3", "Sales"),
+        ("X3", "Units"),
+        ("Y3", "Sales"),
+        ("Z3", "Units"),
+        ("V4", "A"),
+        ("V5", "B"),
+        ("V6", "Total"),
+    ] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            ))),
+            "unexpected grouped label at {address}",
+        );
+    }
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "D1"),
+        Some(&CalculationCellResult::Value(
+            CellValue::Text(String::new())
+        ))
+    );
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "E1"),
+        Some(&CalculationCellResult::Value(CellValue::Logical(false)))
+    );
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "F1"),
+        Some(&CalculationCellResult::Value(CellValue::Logical(true)))
+    );
+    for (address, expected) in [("AD1", false), ("AE1", true), ("AF1", false)] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Logical(expected))),
+            "unexpected empty-intersection reference semantics at {address}",
+        );
+    }
+    assert_materialized_number(&calculation, sheet_id, "AG1", 1.0);
+    for address in ["E4", "F3"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(
+                CellValue::Text(String::new())
+            )),
+            "expected an empty pivot intersection at {address}",
+        );
+    }
+}
+
+#[test]
+fn v0_1_10_grouped_options_are_typed_before_grouping() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, formula) in [
+        (
+            "A1",
+            "=GROUPBY({\"Category\";\"B\";\"A\";\"B\";\"C\"},{\"Amount\";10;30;20;40},SUM,3,-1,-2,{TRUE;TRUE;TRUE;FALSE;TRUE},0)",
+        ),
+        (
+            "E1",
+            "=PIVOTBY({\"A\";\"A\";\"B\";\"B\"},{\"X\";\"Y\";\"X\";\"Y\"},{10;30;20;40},PERCENTOF)",
+        ),
+        (
+            "K1",
+            "=GROUPBY({\"East\",\"A\";\"East\",\"B\";\"West\",\"A\"},{10;20;30},SUM)",
+        ),
+        ("P1", "=GROUPBY({1,1;1,2;2,1},{10;20;30},SUM,,,,,1)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid grouped option anchor"),
+                FormulaText::from_user_input(formula).expect("valid grouped option formula"),
+                None,
+            )
+            .expect("grouped option formula mutation");
+    }
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+
+    for (address, expected) in [
+        ("A1", "Category"),
+        ("A2", "Total"),
+        ("A3", "C"),
+        ("A4", "A"),
+        ("A5", "B"),
+    ] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            )))
+        );
+    }
+    for (address, expected) in [
+        ("B2", 80.0),
+        ("B3", 40.0),
+        ("B4", 30.0),
+        ("B5", 10.0),
+        ("F2", 1.0 / 3.0),
+        ("G2", 3.0 / 7.0),
+        ("H2", 0.4),
+        ("F3", 2.0 / 3.0),
+        ("G3", 4.0 / 7.0),
+        ("H3", 0.6),
+        ("F4", 1.0),
+        ("G4", 1.0),
+        ("H4", 1.0),
+        ("M1", 10.0),
+        ("M2", 20.0),
+        ("M3", 30.0),
+        ("M4", 60.0),
+        ("R1", 10.0),
+        ("R2", 20.0),
+        ("R3", 30.0),
+        ("R4", 60.0),
+    ] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+    for (address, expected) in [
+        ("K1", "East"),
+        ("L1", "A"),
+        ("K2", "East"),
+        ("L2", "B"),
+        ("K3", "West"),
+        ("L3", "A"),
+        ("K4", "Total"),
+    ] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            )))
+        );
+    }
+}
+
+#[test]
+fn v0_1_10_grouped_hierarchy_sort_headers_and_relative_sets_are_stable() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, formula) in [
+        (
+            "A1",
+            "=PIVOTBY({\"A\";\"A\";\"B\";\"B\"},{\"X\";\"Y\";\"X\";\"Y\"},{10;30;20;40},PERCENTOF,,,,,,,1)",
+        ),
+        (
+            "F1",
+            "=PIVOTBY({\"A\";\"A\";\"B\";\"B\"},{\"X\";\"Y\";\"X\";\"Y\"},{10;30;20;40},PERCENTOF,,,,,,,2)",
+        ),
+        (
+            "K1",
+            "=GROUPBY({2,\"b\";1,\"c\";1,\"a\"},{20;30;10},SUM,,0,{-1;2})",
+        ),
+        ("O1", "=GROUPBY({\"B\";\"A\"},{2;1},SUM,,P10)"),
+        (
+            "R1",
+            "=GROUPBY({\"Category\";\"B\";\"A\"},{\"Amount\";2;1},SUM,1,0)",
+        ),
+        ("U1", "=GROUPBY({\"B\";\"A\"},{2;1},SUM,2,0)"),
+        (
+            "Y1",
+            "=PIVOTBY({\"A\",\"a\";\"A\",\"b\";\"B\",\"a\";\"B\",\"b\"},{\"X\",\"x\";\"X\",\"y\";\"Y\",\"x\";\"Y\",\"y\"},{10;30;20;40},PERCENTOF,0,2,,2,,,3)",
+        ),
+        (
+            "AI1",
+            "=PIVOTBY({\"A\",\"a\";\"A\",\"b\";\"B\",\"a\";\"B\",\"b\"},{\"X\",\"x\";\"X\",\"y\";\"Y\",\"x\";\"Y\",\"y\"},{10;30;20;40},PERCENTOF,0,2,,2,,,4)",
+        ),
+        (
+            "AR1",
+            "=GROUPBY({\"A\",\"x\";\"A\",\"y\";\"B\",\"x\";\"B\",\"y\"},{100;1;60;50},SUM,,2,-3)",
+        ),
+        (
+            "AU1",
+            "=GROUPBY({\"Category\";\"A\";\"B\"},{\"Amount\";1;2},SUM)",
+        ),
+        (
+            "AW1",
+            "=PIVOTBY({\"Row\";\"A\";\"A\";\"B\";\"B\"},{\"Col\";\"X\";\"Y\";\"X\";\"Y\"},{\"V1\",\"V2\";10,1;30,3;20,2;40,4},SUM,1,0,,0)",
+        ),
+        (
+            "BB1",
+            "=PIVOTBY({\"A\",\"a\";\"B\",\"b\"},{\"X\",\"x\";\"Y\",\"y\"},{10;20},SUM,2,0,,0)",
+        ),
+        (
+            "BF1",
+            "=GROUPBY({\"H1\",\"H2\";\"A\",\"x\";\"A\",\"y\";\"B\",\"x\";\"B\",\"y\"},{\"V\";10;30;20;40},SUM)",
+        ),
+        ("BO1", "=GROUPBY(BM1:BM2,BN1:BN2,SUM,0,0,-1)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid grouped edge anchor"),
+                FormulaText::from_user_input(formula).expect("valid grouped edge formula"),
+                None,
+            )
+            .expect("grouped edge formula mutation");
+    }
+    for (address, value) in [("BN1", 1.0), ("BN2", 2.0)] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid blank-key value address"),
+                CellValue::number(value).expect("finite blank-key value"),
+            )
+            .expect("blank-key value mutation");
+    }
+    draft
+        .set_cell_value(
+            sheet_id,
+            CellAddress::from_a1("BM2").expect("valid blank-key label address"),
+            CellValue::Text("A".to_owned()),
+        )
+        .expect("blank-key label mutation");
+    for (address, value) in [("BR2", 0.0), ("BS1", 1.0), ("BS2", 2.0)] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid blank-sort input address"),
+                CellValue::number(value).expect("finite blank-sort input"),
+            )
+            .expect("blank-sort input mutation");
+    }
+    draft
+        .set_cell_dynamic_formula(
+            sheet_id,
+            CellAddress::from_a1("BT1").expect("valid blank-sort anchor"),
+            FormulaText::from_user_input("=GROUPBY(BR1:BR2,BS1:BS2,SUM,0,0)")
+                .expect("valid blank-sort formula"),
+            None,
+        )
+        .expect("blank-sort formula mutation");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+
+    for (address, expected) in [
+        ("B2", 0.25),
+        ("C2", 0.75),
+        ("D2", 1.0),
+        ("B3", 1.0 / 3.0),
+        ("C3", 2.0 / 3.0),
+        ("D3", 1.0),
+        ("B4", 0.3),
+        ("C4", 0.7),
+        ("D4", 1.0),
+        ("G2", 0.1),
+        ("H2", 0.3),
+        ("I2", 0.4),
+        ("G3", 0.2),
+        ("H3", 0.4),
+        ("I3", 0.6),
+        ("G4", 0.3),
+        ("H4", 0.7),
+        ("I4", 1.0),
+        ("M1", 20.0),
+        ("M2", 10.0),
+        ("M3", 30.0),
+        ("P1", 1.0),
+        ("P2", 2.0),
+        ("S1", 1.0),
+        ("S2", 2.0),
+        ("V2", 1.0),
+        ("V3", 2.0),
+        ("AA3", 0.25),
+        ("AC3", 0.1),
+        ("AB4", 0.75),
+        ("AC4", 0.3),
+        ("AA5", 0.25),
+        ("AB5", 0.75),
+        ("AC5", 0.4),
+        ("AD6", 1.0 / 3.0),
+        ("AE7", 2.0 / 3.0),
+        ("AF8", 0.6),
+        ("AG9", 1.0),
+        ("AK3", 0.25),
+        ("AL4", 0.75),
+        ("AM5", 0.4),
+        ("AN6", 1.0 / 3.0),
+        ("AO7", 2.0 / 3.0),
+        ("AP8", 0.6),
+        ("AQ9", 1.0),
+        ("AT1", 60.0),
+        ("AT2", 50.0),
+        ("AT3", 110.0),
+        ("AT4", 100.0),
+        ("AT5", 1.0),
+        ("AT6", 101.0),
+        ("AT7", 211.0),
+        ("AV1", 1.0),
+        ("AV2", 2.0),
+        ("AV3", 3.0),
+        ("AX2", 10.0),
+        ("AY2", 1.0),
+        ("AZ2", 30.0),
+        ("BA2", 3.0),
+        ("AX3", 20.0),
+        ("AY3", 2.0),
+        ("AZ3", 40.0),
+        ("BA3", 4.0),
+        ("BD5", 10.0),
+        ("BE6", 20.0),
+        ("BH1", 10.0),
+        ("BH2", 30.0),
+        ("BH3", 20.0),
+        ("BH4", 40.0),
+        ("BH5", 100.0),
+        ("BO2", 0.0),
+        ("BP1", 2.0),
+        ("BP2", 1.0),
+        ("BT1", 0.0),
+        ("BU1", 2.0),
+        ("BT2", 0.0),
+        ("BU2", 1.0),
+    ] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+    for (address, expected) in [
+        ("K1", "2"),
+        ("L1", "b"),
+        ("K2", "1"),
+        ("L2", "a"),
+        ("K3", "1"),
+        ("L3", "c"),
+        ("O1", "A"),
+        ("O2", "B"),
+        ("R1", "A"),
+        ("R2", "B"),
+        ("U1", "Row Field 1"),
+        ("V1", "Value 1"),
+        ("U2", "A"),
+        ("U3", "B"),
+        ("AR1", "B"),
+        ("AS1", "x"),
+        ("AR2", "B"),
+        ("AS2", "y"),
+        ("AR3", "B"),
+        ("AR4", "A"),
+        ("AR6", "A"),
+        ("AR7", "Grand Total"),
+        ("AU1", "A"),
+        ("AU2", "B"),
+        ("AU3", "Total"),
+        ("AX1", "X"),
+        ("AY1", "X"),
+        ("AZ1", "Y"),
+        ("BA1", "Y"),
+        ("AW2", "A"),
+        ("AW3", "B"),
+        ("BD1", "Column Field"),
+        ("BD2", "X"),
+        ("BE2", "Y"),
+        ("BD3", "x"),
+        ("BE3", "y"),
+        ("BB4", "Row Field 1"),
+        ("BC4", "Row Field 2"),
+        ("BD4", "Value 1"),
+        ("BE4", "Value 1"),
+        ("BB5", "A"),
+        ("BC5", "a"),
+        ("BB6", "B"),
+        ("BC6", "b"),
+        ("BF1", "A"),
+        ("BG1", "x"),
+        ("BF2", "A"),
+        ("BG2", "y"),
+        ("BF3", "B"),
+        ("BG3", "x"),
+        ("BF4", "B"),
+        ("BG4", "y"),
+        ("BF5", "Total"),
+        ("BO1", "A"),
+    ] {
+        let expected = if let Ok(number) = expected.parse::<f64>() {
+            CellValue::number(number).expect("finite grouped label")
+        } else {
+            CellValue::Text(expected.to_owned())
+        };
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(expected)),
+            "unexpected grouped edge label at {address}",
+        );
+    }
+    assert!(materialized_result(&calculation, sheet_id, "O3").is_none());
+    assert!(materialized_result(&calculation, sheet_id, "R3").is_none());
+    assert!(materialized_result(&calculation, sheet_id, "K4").is_none());
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "AW1"),
+        Some(&CalculationCellResult::Value(
+            CellValue::Text(String::new())
+        ))
+    );
+    assert!(materialized_result(&calculation, sheet_id, "AW4").is_none());
+    for address in ["AB3", "AS3", "AS6", "BE5", "BD6", "BG5"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(
+                CellValue::Text(String::new())
+            )),
+            "expected a materialized grouped blank at {address}",
+        );
+    }
+    assert!(materialized_result(&calculation, sheet_id, "BB7").is_none());
+    assert!(materialized_result(&calculation, sheet_id, "BF6").is_none());
+    assert!(materialized_result(&calculation, sheet_id, "BO3").is_none());
+    assert!(materialized_result(&calculation, sheet_id, "BT3").is_none());
+}
+
+#[test]
+fn v0_1_10_grouped_options_reject_invalid_shapes_domains_and_callables() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "GROUPBY({1;2},{1},SUM)"),
+        (1, 2, "GROUPBY({1;2},{1;2},COUNTBLANK)"),
+        (1, 3, "GROUPBY({1;2},{1;2},LAMBDA(a,b,c,SUM(a)))"),
+        (1, 4, "GROUPBY({1;2},{1;2},SUM,4)"),
+        (1, 5, "GROUPBY({1;2},{1;2},SUM,,2)"),
+        (1, 6, "GROUPBY({1;2},{1;2},SUM,,,0)"),
+        (1, 7, "GROUPBY({1;2},{1;2},SUM,,,,{TRUE,FALSE})"),
+        (1, 8, "GROUPBY({1;2},{1;2},SUM,,,,{TRUE;FALSE},2)"),
+        (1, 9, "GROUPBY({1,1;1,2},{1;2},SUM,,2,,,1)"),
+        (1, 10, "PIVOTBY({1;2},{1;2},{1;2},SUM,,,,,,,5)"),
+        (1, 11, "PERCENTOF({1;2},0)"),
+        (1, 12, "GROUPBY({1,1;1,2},{1;2},LAMBDA(items,1/0),,2,-3,,1)"),
+        (1, 13, "GROUPBY({1;2},{1;2},COUNTBLANK,,,,{FALSE;FALSE})"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=10 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "invalid grouped option in column {column} was accepted",
+        );
+    }
+    assert_eq!(
+        calculation.cell(cell_id(11)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::DivisionByZero
+        )))
+    );
+    for column in [12, 13] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "grouped validation in column {column} did not fail before execution",
+        );
+    }
+}
+
+#[test]
+fn v0_1_10_grouping_amplification_respects_calculation_limits() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    draft
+        .set_cell_dynamic_formula(
+            sheet_id,
+            CellAddress::from_a1("A1").expect("valid bounded pivot anchor"),
+            FormulaText::from_user_input("=IFERROR(PIVOTBY({1;2;3;4},{1;2;3;4},{1;2;3;4},SUM),42)")
+                .expect("valid bounded pivot formula"),
+            None,
+        )
+        .expect("bounded pivot formula mutation");
+    let array_limits = CalculationLimits::default()
+        .with_max_array_cells(20)
+        .expect("positive grouped array limit");
+    let array_limited = calculate_workbook(
+        draft.workbook(),
+        CalculationOptions::default().with_limits(array_limits),
+    );
+    let anchor = CalculationCellId::new(
+        sheet_id,
+        CellAddress::from_a1("A1").expect("valid bounded pivot anchor"),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = array_limited.cell(anchor) else {
+        panic!("pivot output amplification must consume the array-cell budget");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_array_cells"));
+
+    let iteration_limits = CalculationLimits::default()
+        .with_max_function_iterations(20)
+        .expect("positive grouped iteration limit");
+    let iteration_limited = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "IFERROR(GROUPBY({1;2;3;4;5;6},{1;2;3;4;5;6},SUM),42)")]),
+        CalculationOptions::default().with_limits(iteration_limits),
+    );
+    assert_issue(
+        &iteration_limited,
+        1,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    let text_limits = CalculationLimits::default()
+        .with_max_text_bytes(1)
+        .expect("positive grouped text limit");
+    let text_limited = calculate_workbook(
+        &workbook_with_formulas(&[
+            (1, 1, "GROUPBY({1;2},{1;2},SUM)"),
+            (1, 2, "GROUPBY({1,1;2,2},{1;2},SUM,2,0)"),
+            (1, 3, "GROUPBY({1,1;2,2},{1;2},SUM,0,2)"),
+        ]),
+        CalculationOptions::default().with_limits(text_limits),
+    );
+    assert_issue(
+        &text_limited,
+        1,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+    assert_issue(
+        &text_limited,
+        2,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+    assert_issue(
+        &text_limited,
+        3,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    for max_function_iterations in 100..=220 {
+        let limits = CalculationLimits::default()
+            .with_max_function_iterations(max_function_iterations)
+            .expect("positive relative-set iteration limit");
+        let relative = calculate_workbook(
+            &workbook_with_formulas(&[
+                (
+                    1,
+                    1,
+                    "PIVOTBY({1,1;1,2;2,1;2,2},{1;1;2;2},{10;20;30;40},SUM,,,,,,,0)",
+                ),
+                (
+                    1,
+                    2,
+                    "PIVOTBY({1,1;1,2;2,1;2,2},{1;1;2;2},{10;20;30;40},SUM,,,,,,,4)",
+                ),
+            ]),
+            CalculationOptions::default().with_limits(limits),
+        );
+        assert_eq!(
+            relative.cell(cell_id(1)),
+            relative.cell(cell_id(2)),
+            "relative_to changed unary aggregate work at iteration limit {max_function_iterations}",
+        );
+    }
+}
+
+#[test]
 fn lambda_core_captures_lexical_bindings_and_rejects_callable_coercion() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "LET(a,2,f,LAMBDA(x,x+a),f(3))"),
@@ -2019,7 +2699,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        304
+        307
     );
     let let_entry = catalog
         .iter()

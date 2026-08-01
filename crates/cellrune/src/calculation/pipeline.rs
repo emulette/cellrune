@@ -8,8 +8,9 @@ use super::functions::descriptor::{DependencyKind, ReferenceMetadataKind, Volati
 use super::functions::{
     CallableShadow, DynamicFunction, Evaluator, builtin_invocation_arguments_are_reachable,
     callable_shadow_arguments_are_reachable, classify_callable_value, descriptor_sheet_span_policy,
-    direct_builtin_callable, function_arguments_are_reachable, function_dependency_kind,
-    function_evaluator, function_volatility, is_supported_function, normalize_name,
+    direct_builtin_callable, function_argument_is_callable, function_arguments_are_reachable,
+    function_dependency_kind, function_evaluator, function_volatility, is_supported_function,
+    normalize_name,
 };
 use super::lambda::definition;
 use super::scope::DefinedLambdaId;
@@ -1312,7 +1313,15 @@ fn inspect_expr(
                 local_scope.truncate(previous_len);
                 return;
             }
-            for arg in args {
+            for (index, arg) in args.iter().enumerate() {
+                let argument_policy =
+                    if function_argument_is_callable(&normalized, index, args.len())
+                        && callable_argument_names_known_function(arg)
+                    {
+                        CapabilityInspectionPolicy::new(argument_policy.sheet_span, true)
+                    } else {
+                        argument_policy
+                    };
                 inspect_expr(
                     engine,
                     sheet,
@@ -1549,6 +1558,14 @@ fn inspect_expr(
             ));
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {}
+    }
+}
+
+fn callable_argument_names_known_function(expr: &Expr) -> bool {
+    match expr {
+        Expr::Name(name) => is_supported_function(name),
+        Expr::Paren(inner) => callable_argument_names_known_function(inner),
+        _ => false,
     }
 }
 

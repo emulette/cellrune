@@ -8,10 +8,11 @@ use super::kernel::{
     AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction,
     DateAdditionalFunction, DateFunction, DynamicArrayFunction, DynamicFunction,
     ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
-    FinancialFunction, InformationArrayFunction, InformationFunction, LegacyArrayFunction,
-    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextArrayFunction,
-    ModernTextFunction, StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
-    TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    FinancialFunction, GroupedArrayFunction, GroupedFunction, InformationArrayFunction,
+    InformationFunction, LegacyArrayFunction, LegacyFunction, LogicalFunction, LookupFunction,
+    MathFunction, ModernTextArrayFunction, ModernTextFunction, StatisticalAdditionalFunction,
+    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
+    TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -29,6 +30,21 @@ pub(in crate::calculation) struct BuiltinCallable(FunctionId);
 impl BuiltinCallable {
     pub(in crate::calculation) const fn canonical_name(self) -> &'static str {
         self.0.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::calculation) enum AggregateCallableCapability {
+    Unary,
+    Relative,
+}
+
+impl AggregateCallableCapability {
+    pub(in crate::calculation) const fn argument_count(self) -> usize {
+        match self {
+            Self::Unary => 1,
+            Self::Relative => 2,
+        }
     }
 }
 
@@ -143,6 +159,7 @@ pub(super) struct FunctionDescriptor {
     public_catalog: bool,
     official: bool,
     builtin_callable: Option<BuiltinCallable>,
+    aggregate_callable: Option<AggregateCallableCapability>,
 }
 
 impl FunctionDescriptor {
@@ -164,6 +181,7 @@ impl FunctionDescriptor {
             public_catalog: true,
             official: true,
             builtin_callable: None,
+            aggregate_callable: None,
         }
     }
 
@@ -234,8 +252,9 @@ impl FunctionDescriptor {
         self
     }
 
-    const fn with_builtin_callable(mut self) -> Self {
+    const fn with_builtin_aggregate(mut self, capability: AggregateCallableCapability) -> Self {
         self.builtin_callable = Some(BuiltinCallable(self.id));
+        self.aggregate_callable = Some(capability);
         self
     }
 
@@ -302,6 +321,10 @@ impl FunctionDescriptor {
     pub(super) const fn builtin_callable(self) -> Option<BuiltinCallable> {
         self.builtin_callable
     }
+
+    pub(super) const fn aggregate_callable(self) -> Option<AggregateCallableCapability> {
+        self.aggregate_callable
+    }
 }
 
 macro_rules! function {
@@ -313,6 +336,9 @@ macro_rules! function {
     };
     ($variant:ident, $name:literal, Aggregate) => {
         FunctionDescriptor::new($name, Evaluator::Aggregate(AggregateFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Grouped) => {
+        FunctionDescriptor::new($name, Evaluator::Grouped(GroupedFunction::$variant))
     };
     ($variant:ident, $name:literal, Math) => {
         FunctionDescriptor::new($name, Evaluator::Math(MathFunction::$variant))
@@ -428,26 +454,26 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Switch, "SWITCH", Logical),
     function!(Sum, "SUM", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(Average, "AVERAGE", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(Min, "MIN", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(Max, "MAX", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(Count, "COUNT", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(CountA, "COUNTA", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(CountBlank, "COUNTBLANK", Aggregate),
     function!(Product, "PRODUCT", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
-        .with_builtin_callable(),
+        .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(Subtotal, "SUBTOTAL", Aggregate),
     function!(SumIf, "SUMIF", Aggregate)
         .with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
@@ -580,6 +606,15 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(VLookup, "VLOOKUP", Lookup).with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
     function!(XMatch, "XMATCH", Lookup).with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(XLookup, "XLOOKUP", Lookup),
+    function!(GroupBy, "GROUPBY", Grouped)
+        .with_array_evaluator(ArrayEvaluator::Grouped(GroupedArrayFunction::GroupBy))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(PercentOf, "PERCENTOF", Grouped)
+        .with_builtin_aggregate(AggregateCallableCapability::Relative)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(PivotBy, "PIVOTBY", Grouped)
+        .with_array_evaluator(ArrayEvaluator::Grouped(GroupedArrayFunction::PivotBy))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(ErrorType, "ERROR.TYPE", Information).with_array_evaluator(
         ArrayEvaluator::Information(InformationArrayFunction::ErrorType),
     ),
@@ -1011,15 +1046,35 @@ mod tests {
             .iter()
             .filter_map(|descriptor| descriptor.builtin_callable())
             .collect::<BTreeSet<_>>();
-        assert_eq!(registered.len(), 7);
+        assert_eq!(registered.len(), 8);
         assert_eq!(callables.len(), registered.len());
 
         for descriptor in registered {
             let callable = descriptor.builtin_callable().expect("callable descriptor");
             assert_eq!(callable_descriptor(callable), descriptor);
             assert_eq!(descriptor.canonical_name(), callable.canonical_name());
-            assert!(matches!(descriptor.evaluator(), Evaluator::Aggregate(_)));
+            assert!(matches!(
+                descriptor.evaluator(),
+                Evaluator::Aggregate(_) | Evaluator::Grouped(GroupedFunction::PercentOf)
+            ));
+            assert!(descriptor.aggregate_callable().is_some());
         }
+
+        for name in ["SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "PRODUCT"] {
+            assert_eq!(
+                descriptor(name).and_then(FunctionDescriptor::aggregate_callable),
+                Some(AggregateCallableCapability::Unary),
+                "{name}",
+            );
+        }
+        assert_eq!(
+            descriptor("PERCENTOF").and_then(FunctionDescriptor::aggregate_callable),
+            Some(AggregateCallableCapability::Relative),
+        );
+        assert_eq!(
+            descriptor("COUNTBLANK").and_then(FunctionDescriptor::aggregate_callable),
+            None,
+        );
     }
 
     #[test]
@@ -1035,7 +1090,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "f72dca54e43690862fc2959a32f0b3dea01aceaa0a3135a6ac30551268945642"
+            "6fce7ef5bfcd8b6fe13370d5dbfa8cb692c4805b039d0db0ae5b61970d3b30cd"
         );
     }
 

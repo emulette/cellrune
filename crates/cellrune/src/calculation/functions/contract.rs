@@ -1,9 +1,10 @@
 use super::kernel::{
     AggregateFunction, ArrayFunction, CombinatoricsFunction, DateAdditionalFunction, DateFunction,
     DynamicFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
-    FinancialFunction, InformationFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, ModernTextFunction, StatisticalAdditionalFunction, StatisticalFunction,
-    SumOfSquaresFunction, TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    FinancialFunction, GroupedFunction, InformationFunction, LegacyFunction, LogicalFunction,
+    LookupFunction, MathFunction, ModernTextFunction, StatisticalAdditionalFunction,
+    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
+    TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +131,7 @@ pub(super) enum DefaultTrigger {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum ArgumentDefaultValue {
+    Omitted,
     Number(f64),
     Logical(bool),
     NotAvailable,
@@ -812,6 +814,22 @@ const DB_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::Absent,
     ArgumentDefaultValue::Number(12.0),
 )];
+const GROUPBY_OPTION_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(3, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(4, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(5, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(6, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(7, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+];
+const PIVOTBY_OPTION_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(4, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(5, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(6, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(7, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(8, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(9, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(10, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+];
 
 impl Evaluator {
     pub(super) const fn call_contract(self) -> CallContract {
@@ -819,6 +837,7 @@ impl Evaluator {
             Self::Legacy(function) => function.call_contract(),
             Self::Logical(function) => function.call_contract(),
             Self::Aggregate(function) => function.call_contract(),
+            Self::Grouped(function) => function.call_contract(),
             Self::Math(function) => function.call_contract(),
             Self::Trigonometry(function) => function.call_contract(),
             Self::Combinatorics(function) => function.call_contract(),
@@ -924,6 +943,29 @@ impl AggregateFunction {
                 &[REFERENCE, SCALAR],
                 &[],
             ),
+        }
+    }
+}
+
+impl GroupedFunction {
+    const fn call_contract(self) -> CallContract {
+        match self {
+            Self::GroupBy => CallContract::positional(
+                Arity::range(3, 8),
+                &[ARRAY, ARRAY, CALLABLE, SCALAR, SCALAR, ARRAY, ARRAY, SCALAR],
+            )
+            .with_missing(MissingArgumentPolicy::Preserve)
+            .with_defaults(GROUPBY_OPTION_DEFAULTS),
+            Self::PercentOf => CallContract::positional(Arity::exact(2), &[ARRAY, ARRAY]),
+            Self::PivotBy => CallContract::positional(
+                Arity::range(4, 11),
+                &[
+                    ARRAY, ARRAY, ARRAY, CALLABLE, SCALAR, SCALAR, ARRAY, SCALAR, ARRAY, ARRAY,
+                    SCALAR,
+                ],
+            )
+            .with_missing(MissingArgumentPolicy::Preserve)
+            .with_defaults(PIVOTBY_OPTION_DEFAULTS),
         }
     }
 }

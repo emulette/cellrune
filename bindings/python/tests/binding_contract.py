@@ -20,14 +20,14 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 CATALOG_V0_1_10_REFERENCE_SHA256 = (
-    "d7b2743f3f9d612cafb8d4fa9797008f11001649726499efdde2d29b86e534ee"
+    "9bbdf4572e791639bc6dabdc3ac0e359a7340c186bd814898440aa3b2c6b901c"
 )
 
 
 def catalog_digest() -> str:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 305
+    assert len(catalog["entries"]) == 308
     digest = hashlib.sha256()
     for entry in catalog["entries"]:
         row = "\0".join(

@@ -53,6 +53,12 @@ function_enum!(AggregateFunction {
     AverageIfs,
 });
 
+function_enum!(GroupedFunction {
+    GroupBy,
+    PercentOf,
+    PivotBy,
+});
+
 function_enum!(MathFunction {
     Abs,
     Base,
@@ -371,6 +377,7 @@ pub(in crate::calculation) enum Evaluator {
     Legacy(LegacyFunction),
     Logical(LogicalFunction),
     Aggregate(AggregateFunction),
+    Grouped(GroupedFunction),
     Math(MathFunction),
     Trigonometry(TrigonometryFunction),
     Combinatorics(CombinatoricsFunction),
@@ -399,6 +406,7 @@ impl Evaluator {
         evaluators.extend(LegacyFunction::ALL.iter().copied().map(Self::Legacy));
         evaluators.extend(LogicalFunction::ALL.iter().copied().map(Self::Logical));
         evaluators.extend(AggregateFunction::ALL.iter().copied().map(Self::Aggregate));
+        evaluators.extend(GroupedFunction::ALL.iter().copied().map(Self::Grouped));
         evaluators.extend(MathFunction::ALL.iter().copied().map(Self::Math));
         evaluators.extend(
             TrigonometryFunction::ALL
@@ -537,6 +545,8 @@ function_enum!(ModernTextArrayFunction {
     TextSplit,
 });
 
+function_enum!(GroupedArrayFunction { GroupBy, PivotBy });
+
 impl ElementwiseArrayFunction {
     pub(super) const fn scalar_function(self) -> MathFunction {
         match self {
@@ -554,6 +564,7 @@ pub(in crate::calculation) enum ArrayEvaluator {
     Map,
     Array(ArrayFunction),
     ModernText(ModernTextArrayFunction),
+    Grouped(GroupedArrayFunction),
 }
 
 #[cfg(test)]
@@ -582,6 +593,7 @@ impl ArrayEvaluator {
                 .copied()
                 .map(Self::ModernText),
         );
+        evaluators.extend(GroupedArrayFunction::ALL.iter().copied().map(Self::Grouped));
         evaluators
     }
 }

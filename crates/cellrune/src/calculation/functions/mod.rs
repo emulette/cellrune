@@ -29,6 +29,10 @@ mod dynamic;
 mod engineering;
 mod financial;
 mod financial_additional;
+mod grouped;
+mod grouping_kernel;
+mod grouping_options;
+mod grouping_output;
 mod information;
 pub(in crate::calculation) mod kernel;
 mod legacy;
@@ -103,6 +107,7 @@ impl<'formula> CallArguments<'formula> {
 
 fn materialize_default(value: contract::ArgumentDefaultValue, args: &[Expr]) -> Option<Expr> {
     match value {
+        contract::ArgumentDefaultValue::Omitted => None,
         contract::ArgumentDefaultValue::Number(number) => Some(Expr::number(number)),
         contract::ArgumentDefaultValue::Logical(logical) => Some(Expr::Logical(logical)),
         contract::ArgumentDefaultValue::NotAvailable => Some(Expr::ErrorLit(ErrorKind::NA)),
@@ -191,6 +196,7 @@ fn dispatch_scalar(
         Evaluator::Legacy(function) => legacy::call_legacy(engine, context, function, args),
         Evaluator::Logical(function) => logical::call(engine, context, function, args),
         Evaluator::Aggregate(function) => aggregate::call(engine, context, function, args),
+        Evaluator::Grouped(function) => grouped::call_scalar(engine, context, function, args),
         Evaluator::Math(function) => math::call(engine, context, function, args),
         Evaluator::Trigonometry(function) => trigonometry::call(engine, context, function, args),
         Evaluator::Combinatorics(function) => combinatorics::call(engine, context, function, args),
@@ -391,6 +397,9 @@ pub(super) fn call_function_array(
             modern_text::call_array(engine, context, function, args)
                 .map(ArrayEvaluation::untracked),
         ),
+        ArrayEvaluator::Grouped(function) => {
+            Some(grouped::call_array(engine, context, function, args))
+        }
     }
 }
 
@@ -689,8 +698,17 @@ fn call_builtin_callable(
         Evaluator::Aggregate(function) => {
             aggregate::call_scope_values(engine, context, function, args)
         }
+        Evaluator::Grouped(kernel::GroupedFunction::PercentOf) => {
+            grouped::percent_of_scope_values(engine, context, args)
+        }
         _ => unreachable!("BuiltinCallable descriptor must use a callable evaluator"),
     }
+}
+
+pub(in crate::calculation) fn builtin_aggregate_capability(
+    callable: BuiltinCallable,
+) -> Option<descriptor::AggregateCallableCapability> {
+    descriptor::callable_descriptor(callable).aggregate_callable()
 }
 
 pub(in crate::calculation) fn prepare_evaluator_arguments<'formula>(
@@ -917,14 +935,14 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_304_unique_excel_facing_names() {
+    fn coverage_registry_has_307_unique_excel_facing_names() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
             .collect();
         assert_eq!(kernels.len(), descriptor::descriptors().len());
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 292);
+        assert_eq!(kernels.len(), 295);
 
         let aliases = descriptor::descriptors()
             .iter()
@@ -947,10 +965,10 @@ mod tests {
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());
-        assert_eq!(catalog.len(), 305);
+        assert_eq!(catalog.len(), 308);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            304
+            307
         );
         assert!(
             catalog
@@ -1002,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn v0_1_10_text_checkpoint_catalog_is_byte_exact() {
+    fn v0_1_10_grouped_checkpoint_catalog_is_byte_exact() {
         let mut digest = Sha256::new();
         for entry in super::function_catalog() {
             digest.update(entry.name().as_bytes());
@@ -1023,7 +1041,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "d7b2743f3f9d612cafb8d4fa9797008f11001649726499efdde2d29b86e534ee"
+            "9bbdf4572e791639bc6dabdc3ac0e359a7340c186bd814898440aa3b2c6b901c"
         );
     }
 }

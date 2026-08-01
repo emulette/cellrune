@@ -947,6 +947,94 @@ fn immediate_lambda_invocation_recalculates_incrementally_with_cell_dependencies
 }
 
 #[test]
+fn grouped_spills_match_full_calculation_after_incremental_value_edits() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let grouped_range = CellRange::new(address("E1"), address("F4")).expect("grouped spill range");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address("A1"),
+                    CellValue::Text("A".to_owned()),
+                ),
+                WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address("A2"),
+                    CellValue::Text("B".to_owned()),
+                ),
+                WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address("A3"),
+                    CellValue::Text("A".to_owned()),
+                ),
+                WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address("A4"),
+                    CellValue::Text("C".to_owned()),
+                ),
+                WorkbookChange::set_cell_value(sheet_id, address("B1"), number(10.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("B2"), number(20.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("B3"), number(30.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("B4"), number(40.0)),
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("E1"),
+                    formula("GROUPBY(A1:A4,B1:B4,SUM)"),
+                    Some(grouped_range),
+                )
+                .expect("valid grouped spill change"),
+            ]),
+        )
+        .expect("grouped spill workbook");
+    let initial = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial grouped calculation");
+    assert_eq!(initial.mode(), CalculationExecutionMode::Full);
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("B2"),
+                number(25.0),
+            )]),
+        )
+        .expect("grouped value edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental grouped calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        delta.reason(),
+        CalculationDecisionReason::IncrementalRequested
+    );
+
+    let installed = session
+        .calculation()
+        .expect("installed grouped calculation");
+    let full = calculate_workbook(session.workbook(), CalculationOptions::default());
+    assert_calculations_equal(installed, &full);
+    assert_eq!(
+        installed
+            .materialized_cell(CalculationCellId::new(sheet_id, address("F2")))
+            .map(|cell| cell.result()),
+        Some(&CalculationCellResult::Value(number(25.0))),
+    );
+}
+
+#[test]
 fn named_lambda_body_dependencies_schedule_and_recalculate_incrementally() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");

@@ -165,7 +165,7 @@ fn compare_sort_keys(
     Ok(Ordering::Equal)
 }
 
-fn compare_sort_values(left: &Value, right: &Value) -> Ordering {
+pub(super) fn compare_sort_values(left: &Value, right: &Value) -> Ordering {
     match (left, right) {
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,
@@ -188,7 +188,7 @@ fn sort_value_rank(value: &Value) -> u8 {
     }
 }
 
-fn stable_sort_indexes(
+pub(super) fn stable_sort_indexes(
     indexes: &mut [u32],
     context: EvalContext<'_>,
     mut compare: impl FnMut(u32, u32) -> Result<Ordering, ErrorKind>,

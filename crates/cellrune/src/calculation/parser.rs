@@ -1553,6 +1553,20 @@ mod tests {
                 .to_string(),
             "_xlfn._xlws.BYROW({1},_xleta.SUM)"
         );
+
+        let grouped = parse("GROUPBY({\"A\";\"B\"},{1;2},PERCENTOF)");
+        let Expr::Call { args, .. } = grouped.root() else {
+            panic!("GROUPBY call expected");
+        };
+        assert!(matches!(args[2], Expr::BuiltinCallable(_)));
+        let grouped_storage = grouped
+            .display_with_mode(FormulaDisplayMode::Storage)
+            .to_string();
+        assert_eq!(
+            grouped_storage,
+            "GROUPBY({\"A\";\"B\"},{1;2},_xleta.PERCENTOF)"
+        );
+        assert_eq!(grouped.root(), parse(&grouped_storage).root());
     }
 
     #[test]

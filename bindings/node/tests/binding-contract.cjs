@@ -7,12 +7,12 @@ const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
 const CATALOG_V0_1_10_REFERENCE_SHA256 =
-  "d7b2743f3f9d612cafb8d4fa9797008f11001649726499efdde2d29b86e534ee";
+  "9bbdf4572e791639bc6dabdc3ac0e359a7340c186bd814898440aa3b2c6b901c";
 
 function catalogDigest() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 305);
+  assert.equal(catalog.entries.length, 308);
   const digest = createHash("sha256");
   for (const entry of catalog.entries) {
     digest.update(
