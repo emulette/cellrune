@@ -1018,18 +1018,178 @@
     "excel_rich_error": false
   },
   "curated:unsupported:c012": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "A",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "cellrune_value": "A",
+    "cellrune_type": "str",
+    "cellrune_result": {
+      "status": "materialized",
+      "range": "Unsupported!F941:G944",
+      "rows": 4,
+      "columns": 2,
+      "cells": [
+        {
+          "address": "Unsupported!F941",
+          "value": "A",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G941",
+          "value": "700",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!F942",
+          "value": "B",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G942",
+          "value": "770",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!F943",
+          "value": "C",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G943",
+          "value": "630",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!F944",
+          "value": "Total",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G944",
+          "value": "2100",
+          "value_type": "n"
+        }
+      ]
+    },
+    "note": "Excel Online stored the locale-generated total label `합계`, while CellRune emits `Total`; all other array cells match."
   },
   "curated:unsupported:c013": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "cellrune_value": "",
+    "cellrune_type": "str",
+    "cellrune_result": {
+      "status": "materialized",
+      "range": "Unsupported!F965:I969",
+      "rows": 5,
+      "columns": 4,
+      "cells": [
+        {
+          "address": "Unsupported!F965",
+          "value": "",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G965",
+          "value": "0",
+          "value_type": "b"
+        },
+        {
+          "address": "Unsupported!H965",
+          "value": "1",
+          "value_type": "b"
+        },
+        {
+          "address": "Unsupported!I965",
+          "value": "Total",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!F966",
+          "value": "A",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G966",
+          "value": "300",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!H966",
+          "value": "400",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!I966",
+          "value": "700",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!F967",
+          "value": "B",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G967",
+          "value": "440",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!H967",
+          "value": "330",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!I967",
+          "value": "770",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!F968",
+          "value": "C",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G968",
+          "value": "360",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!H968",
+          "value": "270",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!I968",
+          "value": "630",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!F969",
+          "value": "Total",
+          "value_type": "str"
+        },
+        {
+          "address": "Unsupported!G969",
+          "value": "1100",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!H969",
+          "value": "1000",
+          "value_type": "n"
+        },
+        {
+          "address": "Unsupported!I969",
+          "value": "2100",
+          "value_type": "n"
+        }
+      ]
+    },
+    "note": "Excel Online stored the locale-generated total label `합계`, while CellRune emits `Total`; all other array cells match."
   },
   "curated:unsupported:c014": {
     "classification": "match",
@@ -4577,25 +4737,73 @@
     "excel_rich_error": false
   },
   "function:groupby": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "A",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "cellrune_value": "A",
+    "cellrune_type": "str",
+    "cellrune_result": {
+      "status": "materialized",
+      "range": "ArraysDynamic!F197:G200",
+      "rows": 4,
+      "columns": 2,
+      "cells": [
+        {
+          "address": "ArraysDynamic!F197",
+          "value": "A",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G197",
+          "value": "700",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!F198",
+          "value": "B",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G198",
+          "value": "770",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!F199",
+          "value": "C",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G199",
+          "value": "630",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!F200",
+          "value": "Total",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G200",
+          "value": "2100",
+          "value_type": "n"
+        }
+      ]
+    },
+    "note": "Excel Online stored the locale-generated total label `합계`, while CellRune emits `Total`; all other array cells match."
   },
   "function:groupby:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:groupby:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:growth": {
     "classification": "not_implemented",
@@ -6693,25 +6901,22 @@
     "excel_rich_error": false
   },
   "function:percentof": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "21",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTOF) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentof:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1050",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTOF) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentof:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTOF) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentrank": {
     "classification": "match",
@@ -6838,25 +7043,133 @@
     "excel_rich_error": false
   },
   "function:pivotby": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "cellrune_value": "",
+    "cellrune_type": "str",
+    "cellrune_result": {
+      "status": "materialized",
+      "range": "ArraysDynamic!F509:I513",
+      "rows": 5,
+      "columns": 4,
+      "cells": [
+        {
+          "address": "ArraysDynamic!F509",
+          "value": "",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G509",
+          "value": "0",
+          "value_type": "b"
+        },
+        {
+          "address": "ArraysDynamic!H509",
+          "value": "1",
+          "value_type": "b"
+        },
+        {
+          "address": "ArraysDynamic!I509",
+          "value": "Total",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!F510",
+          "value": "A",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G510",
+          "value": "300",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!H510",
+          "value": "400",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!I510",
+          "value": "700",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!F511",
+          "value": "B",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G511",
+          "value": "440",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!H511",
+          "value": "330",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!I511",
+          "value": "770",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!F512",
+          "value": "C",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G512",
+          "value": "360",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!H512",
+          "value": "270",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!I512",
+          "value": "630",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!F513",
+          "value": "Total",
+          "value_type": "str"
+        },
+        {
+          "address": "ArraysDynamic!G513",
+          "value": "1100",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!H513",
+          "value": "1000",
+          "value_type": "n"
+        },
+        {
+          "address": "ArraysDynamic!I513",
+          "value": "2100",
+          "value_type": "n"
+        }
+      ]
+    },
+    "note": "Excel Online stored the locale-generated total label `합계`, while CellRune emits `Total`; all other array cells match."
   },
   "function:pivotby:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:pivotby:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:pmt": {
     "classification": "match",

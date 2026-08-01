@@ -19,7 +19,9 @@ The checker:
 - opens each workbook and selects the active manifest formula cells;
 - compares Excel's saved value with `expectations.json`;
 - calculates the same workbook with CellRune;
-- verifies the recorded classification.
+- compares each declared array result's materialized range, shape, and cells;
+- verifies the recorded classification and the exact CellRune-side result for reviewed
+  multi-cell array divergences.
 
 ## Layout
 
@@ -64,7 +66,9 @@ conformance/
 value. It does not require regenerating the workbook or removing the formula.
 
 Finite numbers use the case's comparator; other values compare exactly. Non-match entries carry a
-short note explaining the current state.
+short note explaining the current state. A divergent array whose shape or non-anchor cells differ
+also records `cellrune_result`; its range, shape, and every typed cell must remain exact. A sole
+one-cell anchor difference remains owned by the scalar `cellrune_value`/`cellrune_type` signature.
 
 ## Maintaining the CellRune fixtures
 

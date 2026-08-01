@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellRange, CellValue,
-    ReadOptions, SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
+    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellValue, ReadOptions,
+    SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
 };
 use cellrune_integration_tests::oracle::{
     ArtifactReference, CASE_MANIFEST_SCHEMA, CacheStatus, CaseManifest, Classification, Comparator,
@@ -18,6 +18,8 @@ use cellrune_integration_tests::oracle::{
     SUITE_SCHEMA, values_match,
 };
 
+#[path = "check_excel_oracle/array.rs"]
+mod array;
 #[path = "check_excel_oracle/raw.rs"]
 mod raw;
 #[path = "check_excel_oracle/report.rs"]
@@ -1174,13 +1176,32 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
             }
         }
         audit_saved_cache(&context, key, loaded, id, expectation, problems);
-        if let Some(observation) = loaded
+        if expectation.classification != Classification::Divergent
+            && expectation.cellrune_result.is_some()
+        {
+            problems.push(format!(
+                "{context}: only divergent cases may record a CellRune array result"
+            ));
+        }
+        let compare_array_calculation = matches!(
+            expectation.classification,
+            Classification::Match | Classification::Divergent
+        );
+        let array_audit = loaded
             .observations
             .as_ref()
             .and_then(|observations| observations.get(key))
-        {
-            audit_observed_result(&context, loaded, id, observation, expectation, problems);
-        }
+            .and_then(|observation| {
+                array::audit_observed_result(
+                    &context,
+                    loaded,
+                    id,
+                    observation,
+                    compare_array_calculation,
+                    problems,
+                )
+            });
+        let array_mismatch_count = array_audit.as_ref().map(|audit| audit.mismatch_count);
         let result = calculated_result(loaded, id);
         match expectation.classification {
             Classification::Match => {
@@ -1200,7 +1221,13 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                     &ObservedValue::from_expectation(expectation),
                     expectation.comparator,
                 ) {
-                    Ok(true) => counts.matched += 1,
+                    Ok(true) if calculated_case_matches(true, array_mismatch_count) => {
+                        counts.matched += 1;
+                    }
+                    Ok(true) => problems.push(format!(
+                        "{context}: {} array result cells differ from Excel",
+                        array_mismatch_count.unwrap_or_default()
+                    )),
                     Ok(false) => problems.push(format!(
                         "{context}: expected {:?}, got {actual:?}",
                         ObservedValue::from_expectation(expectation)
@@ -1209,6 +1236,7 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                 }
             }
             Classification::Divergent => {
+                let mut divergence_is_current = true;
                 let actual = match observed_result(result) {
                     Ok(Some(actual)) => actual,
                     Ok(None) => {
@@ -1221,12 +1249,17 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                     }
                 };
                 let expected = ObservedValue::from_expectation(expectation);
-                match values_match(&actual, &expected, expectation.comparator) {
-                    Ok(true) => {
-                        problems.push(format!("{context}: divergent case now matches Excel"));
+                let scalar_matches = match values_match(&actual, &expected, expectation.comparator)
+                {
+                    Ok(matches) => matches,
+                    Err(error) => {
+                        problems.push(format!("{context}: {error}"));
+                        continue;
                     }
-                    Ok(false) => {}
-                    Err(error) => problems.push(format!("{context}: {error}")),
+                };
+                if calculated_case_matches(scalar_matches, array_mismatch_count) {
+                    problems.push(format!("{context}: divergent case now matches Excel"));
+                    divergence_is_current = false;
                 }
                 let Some(recorded) = ObservedValue::from_recorded_cellrune(expectation) else {
                     problems.push(format!(
@@ -1235,11 +1268,50 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
                     continue;
                 };
                 match values_match(&actual, &recorded, expectation.comparator) {
-                    Ok(true) => counts.divergent += 1,
-                    Ok(false) => problems.push(format!(
-                        "{context}: CellRune side changed from {recorded:?} to {actual:?}"
-                    )),
-                    Err(error) => problems.push(format!("{context}: {error}")),
+                    Ok(true) => {}
+                    Ok(false) => {
+                        problems.push(format!(
+                            "{context}: CellRune side changed from {recorded:?} to {actual:?}"
+                        ));
+                        divergence_is_current = false;
+                    }
+                    Err(error) => {
+                        problems.push(format!("{context}: {error}"));
+                        divergence_is_current = false;
+                    }
+                }
+                match (&array_audit, &expectation.cellrune_result) {
+                    (Some(audit), Some(recorded)) if audit.signature_mismatch_count > 0 => {
+                        if &audit.calculated != recorded {
+                            problems.push(format!(
+                                "{context}: CellRune array result changed from {recorded:?} to {:?}",
+                                audit.calculated
+                            ));
+                            divergence_is_current = false;
+                        }
+                    }
+                    (Some(audit), None) if audit.signature_mismatch_count > 0 => {
+                        problems.push(format!(
+                            "{context}: divergent array case lacks a CellRune result signature"
+                        ));
+                        divergence_is_current = false;
+                    }
+                    (Some(_), Some(_)) => {
+                        problems.push(format!(
+                            "{context}: matching array result retains a stale CellRune result signature"
+                        ));
+                        divergence_is_current = false;
+                    }
+                    (None, Some(_)) => {
+                        problems.push(format!(
+                            "{context}: scalar case cannot record a CellRune array result"
+                        ));
+                        divergence_is_current = false;
+                    }
+                    (Some(_), None) | (None, None) => {}
+                }
+                if divergence_is_current {
+                    counts.divergent += 1;
                 }
             }
             Classification::NotImplemented => {
@@ -1263,143 +1335,9 @@ fn audit_loaded(loaded: &LoadedOracle, problems: &mut Vec<String>) -> Counts {
     counts
 }
 
-fn audit_observed_result(
-    context: &str,
-    loaded: &LoadedOracle,
-    anchor_id: CalculationCellId,
-    observation: &ObservedCase,
-    expectation: &Expectation,
-    problems: &mut Vec<String>,
-) {
-    let Some(result) = observation.result.as_ref() else {
-        return;
-    };
-    let Some((sheet_name, range_text)) = result.range.rsplit_once('!') else {
-        problems.push(format!("{context}: array result has an invalid range"));
-        return;
-    };
-    let (start_text, end_text) = range_text
-        .split_once(':')
-        .map_or((range_text, range_text), |(start, end)| (start, end));
-    let Ok(start) = CellAddress::from_a1(start_text) else {
-        problems.push(format!(
-            "{context}: array result has an invalid start address"
-        ));
-        return;
-    };
-    let Ok(end) = CellAddress::from_a1(end_text) else {
-        problems.push(format!(
-            "{context}: array result has an invalid end address"
-        ));
-        return;
-    };
-    let Ok(range) = CellRange::new(start, end) else {
-        problems.push(format!("{context}: array result range is not ordered"));
-        return;
-    };
-    let Some(sheet) = loaded.workbook.sheet_by_name(sheet_name) else {
-        problems.push(format!("{context}: array result names an unknown sheet"));
-        return;
-    };
-    let expected_cells = u64::from(range.height()) * u64::from(range.width());
-    if result.rows != range.height()
-        || result.columns != range.width()
-        || u64::try_from(result.cells.len()).ok() != Some(expected_cells)
-    {
-        problems.push(format!(
-            "{context}: array result shape does not match its range"
-        ));
-        return;
-    }
-    let anchor = CalculationCellId::new(sheet.id(), start);
-    if anchor != anchor_id {
-        problems.push(format!(
-            "{context}: array result range does not start at its formula anchor"
-        ));
-    }
-    let mut addresses = BTreeSet::new();
-    let mut mismatches = 0_usize;
-    for cell in &result.cells {
-        if !addresses.insert(cell.address.as_str()) {
-            problems.push(format!("{context}: array result contains a duplicate cell"));
-            continue;
-        }
-        let Some((cell_sheet, cell_address)) = cell.address.rsplit_once('!') else {
-            problems.push(format!(
-                "{context}: array result cell has an invalid address"
-            ));
-            continue;
-        };
-        if cell_sheet != sheet_name {
-            problems.push(format!(
-                "{context}: array result cell escapes its result sheet"
-            ));
-            continue;
-        }
-        let Ok(address) = CellAddress::from_a1(cell_address) else {
-            problems.push(format!(
-                "{context}: array result cell has an invalid address"
-            ));
-            continue;
-        };
-        if !range.contains(address) {
-            problems.push(format!(
-                "{context}: array result cell escapes its declared range"
-            ));
-            continue;
-        }
-        let id = CalculationCellId::new(sheet.id(), address);
-        let actual = loaded
-            .calculation
-            .materialized_cell(id)
-            .map(cellrune::MaterializedCalculationCell::result)
-            .or_else(|| loaded.calculation.cell(id));
-        let expected = observed_result_cell_value(cell);
-        let actual = actual.and_then(|value| observed_result(Some(value)).ok().flatten());
-        let matches = match (actual.as_ref(), expected.as_ref()) {
-            (Some(actual), Some(expected)) => values_match(actual, expected, None).unwrap_or(false),
-            (None, None) => true,
-            _ => false,
-        };
-        if !matches {
-            mismatches += 1;
-        }
-    }
-    match expectation.classification {
-        Classification::Match if mismatches > 0 => problems.push(format!(
-            "{context}: {mismatches} array result cells differ from Excel"
-        )),
-        Classification::Divergent if mismatches == 0 => problems.push(format!(
-            "{context}: divergent array result now matches Excel in every cell"
-        )),
-        _ => {}
-    }
+fn calculated_case_matches(scalar_matches: bool, array_mismatch_count: Option<usize>) -> bool {
+    scalar_matches && array_mismatch_count.unwrap_or_default() == 0
 }
-
-fn observed_result_cell_value(
-    cell: &cellrune_integration_tests::oracle::ObservedResultCell,
-) -> Option<ObservedValue> {
-    if cell.cache_status != CacheStatus::Semantic {
-        return None;
-    }
-    let value = cell
-        .rich_error
-        .resolved_error
-        .as_ref()
-        .or(cell.rich_error.fallback_error.as_ref())
-        .or(cell.cache_value.as_ref())?
-        .clone();
-    let value_type = if cell.rich_error.present {
-        "e"
-    } else {
-        &cell.cache_type
-    };
-    Some(ObservedValue {
-        value,
-        value_type: value_type.to_owned(),
-    })
-}
-
 fn audit_saved_cache(
     context: &str,
     key: &str,
@@ -1529,14 +1467,18 @@ fn observed_result(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::Path;
 
-    use cellrune_integration_tests::oracle::{OracleMetadata, OracleSuite};
+    use cellrune_integration_tests::oracle::{
+        CellRuneArrayResult, CellRuneArrayResultCell, ObservedResult, ObservedValue,
+        OracleMetadata, OracleSuite,
+    };
 
     use super::{
-        MESSAGE_ITERATIVE_CALCULATION, MESSAGE_SUITE_REQUIRED, audit_all, oracle_root, raw,
-        raw_cell_matches_implicit_blank, read_json, resolve_suite_path, validate_suite_contract,
-        verify_iterative_calculation,
+        MESSAGE_ITERATIVE_CALCULATION, MESSAGE_SUITE_REQUIRED, array, audit_all,
+        calculated_case_matches, oracle_root, raw, raw_cell_matches_implicit_blank, read_json,
+        resolve_suite_path, validate_suite_contract, verify_iterative_calculation,
     };
 
     #[test]
@@ -1630,5 +1572,87 @@ mod tests {
             rich_error: None,
         };
         assert!(!raw_cell_matches_implicit_blank(Some(&typed_value)));
+    }
+
+    #[test]
+    fn array_case_match_requires_the_anchor_and_every_spill_cell() {
+        assert!(calculated_case_matches(true, None));
+        assert!(calculated_case_matches(true, Some(0)));
+        assert!(!calculated_case_matches(false, None));
+        assert!(!calculated_case_matches(false, Some(0)));
+        assert!(!calculated_case_matches(true, Some(1)));
+    }
+
+    #[test]
+    fn array_divergence_signature_excludes_only_the_recorded_anchor_scalar() {
+        let observed = ObservedResult {
+            range: "Sheet1!A1:B1".to_owned(),
+            rows: 1,
+            columns: 2,
+            cells: Vec::new(),
+        };
+        let observed_cells = BTreeMap::from([
+            (
+                "Sheet1!A1",
+                Some(ObservedValue {
+                    value: "1".to_owned(),
+                    value_type: "n".to_owned(),
+                }),
+            ),
+            (
+                "Sheet1!B1",
+                Some(ObservedValue {
+                    value: "2".to_owned(),
+                    value_type: "n".to_owned(),
+                }),
+            ),
+        ]);
+        let calculated = |range: &str, columns: u32, first: &str, second: &str| {
+            CellRuneArrayResult::Materialized {
+                range: range.to_owned(),
+                rows: 1,
+                columns,
+                cells: vec![
+                    CellRuneArrayResultCell {
+                        address: "Sheet1!A1".to_owned(),
+                        value: first.to_owned(),
+                        value_type: "n".to_owned(),
+                    },
+                    CellRuneArrayResultCell {
+                        address: "Sheet1!B1".to_owned(),
+                        value: second.to_owned(),
+                        value_type: "n".to_owned(),
+                    },
+                ],
+            }
+        };
+
+        assert_eq!(
+            array::array_result_comparison(
+                &observed,
+                &observed_cells,
+                "Sheet1!A1",
+                &calculated("Sheet1!A1:B1", 2, "9", "2"),
+            ),
+            (1, 0)
+        );
+        assert_eq!(
+            array::array_result_comparison(
+                &observed,
+                &observed_cells,
+                "Sheet1!A1",
+                &calculated("Sheet1!A1:B1", 2, "1", "9"),
+            ),
+            (1, 1)
+        );
+        assert_eq!(
+            array::array_result_comparison(
+                &observed,
+                &observed_cells,
+                "Sheet1!A1",
+                &calculated("Sheet1!A1:C1", 3, "1", "2"),
+            ),
+            (1, 1)
+        );
     }
 }

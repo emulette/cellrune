@@ -339,9 +339,33 @@ pub struct Expectation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cellrune_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cellrune_result: Option<CellRuneArrayResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comparator: Option<Comparator>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+}
+
+/// Exact CellRune-side materialization recorded for a reviewed array divergence.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CellRuneArrayResult {
+    Missing,
+    Materialized {
+        range: String,
+        rows: u32,
+        columns: u32,
+        cells: Vec<CellRuneArrayResultCell>,
+    },
+}
+
+/// One typed CellRune value in a recorded divergent array result.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellRuneArrayResultCell {
+    pub address: String,
+    pub value: String,
+    pub value_type: String,
 }
 
 /// Reviewed case state.

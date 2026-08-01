@@ -1026,18 +1026,16 @@
     "excel_rich_error": false
   },
   "curated:unsupported:c012": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "A",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c013": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c014": {
     "classification": "match",
@@ -4587,25 +4585,22 @@
     "excel_rich_error": false
   },
   "function:groupby": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "A",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:groupby:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:groupby:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GROUPBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:growth": {
     "classification": "not_implemented",
@@ -6707,25 +6702,22 @@
     "excel_rich_error": false
   },
   "function:percentof": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "21",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTOF) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentof:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1050",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTOF) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentof:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTOF) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentrank": {
     "classification": "match",
@@ -6852,25 +6844,22 @@
     "excel_rich_error": false
   },
   "function:pivotby": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:pivotby:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:pivotby:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PIVOTBY) for this oracle case."
+    "excel_rich_error": true
   },
   "function:pmt": {
     "classification": "match",
