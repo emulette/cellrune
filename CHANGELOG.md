@@ -10,6 +10,35 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-08-01
+
+### Added
+
+- Seven bounded array reshape and ordering functions: `EXPAND`, `SORTBY`, `TOCOL`, `TOROW`,
+  `TRIMRANGE`, `WRAPCOLS`, and `WRAPROWS`.
+- Five text and PCRE2 functions: `ARRAYTOTEXT`, `TEXTSPLIT`, `REGEXEXTRACT`, `REGEXREPLACE`, and
+  `REGEXTEST`. Regex compilation, scanning, captures, copies, output, and cancellation are governed
+  by the existing calculation limits.
+- Five reference and introspection functions: `FORMULATEXT`, `ISFORMULA`, `SHEET`, `SHEETS`, and
+  `XMATCH`. `XMATCH` supports exact, wildcard, next-smaller, and next-larger matching with forward,
+  reverse, and sorted search modes.
+- `GROUPBY`, `PERCENTOF`, and `PIVOTBY`, with typed header, total, sort, filter, relationship, and
+  relative-total options. Grouped calculations accept supported built-in aggregate callables and
+  compatible `LAMBDA` values.
+
+### Changed
+
+- One typed function registry now drives evaluator dispatch, formula capability and usage scans,
+  public catalog metadata, and Rust, MCP, Python, and Node.js catalog serialization. The catalog
+  contains 307 official Excel-facing names and 308 accepted entries including the non-official
+  OOXML dummy-function marker.
+- The new array-producing functions use the shared spill materialization and dependency topology,
+  keeping full and incremental recalculation aligned under the same array, text, iteration, and
+  cancellation limits.
+- Excel Oracle expectations now validate reviewed array divergences by exact materialized range,
+  shape, and typed cell contents while preserving host-specific regex availability and localized
+  generated total labels.
+
 ## [0.1.9] - 2026-07-31
 
 ### Added
@@ -522,7 +551,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/emulette/cellrune/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/emulette/cellrune/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/emulette/cellrune/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/emulette/cellrune/compare/v0.1.6...v0.1.7

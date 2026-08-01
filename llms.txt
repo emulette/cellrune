@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.9, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.10, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -518,9 +518,24 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.9 catalog contains 287 official Excel-facing names
-  (274 official kernels plus 13 aliases) and one non-official compatibility
-  entry for the OOXML dummy-function marker.
+  `.is_official()`. The 0.1.10 catalog contains 307 official Excel-facing names
+  and one non-official compatibility entry for the OOXML dummy-function marker.
+- The 20 official names added in 0.1.10 are `EXPAND`, `SORTBY`, `TOCOL`,
+  `TOROW`, `TRIMRANGE`, `WRAPCOLS`, `WRAPROWS`, `ARRAYTOTEXT`, `TEXTSPLIT`,
+  `REGEXEXTRACT`, `REGEXREPLACE`, `REGEXTEST`, `FORMULATEXT`, `ISFORMULA`,
+  `SHEET`, `SHEETS`, `XMATCH`, `GROUPBY`, `PERCENTOF`, and `PIVOTBY`.
+- Array reshape/order, text split, regex extraction, and grouped aggregation
+  results use the same bounded dynamic-spill materialization as other array
+  formulas. Full and incremental calculation share that route. Regex matching
+  targets PCRE2 semantics and charges compile, scan, capture, copy, and output
+  work to the calculation limits while honoring cooperative cancellation.
+  Prebuilt Python, Node.js, and MCP artifacts pin bundled PCRE2 10.46. Rust
+  consumers follow `pcre2-sys` linkage policy and can set `PCRE2_SYS_STATIC=1`
+  to select its bundled source build.
+- `GROUPBY` and `PIVOTBY` accept supported built-in aggregate callables or a
+  compatible one- or two-parameter `LAMBDA`. Their omitted option values remain
+  distinct from explicit blanks. `PERCENTOF(data_subset, data_all)` is both a
+  direct function and a relative aggregate callable for grouped calculations.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
   `scan_function_usage_with_options(&WorkbookSnapshot, CalculationOptions)`
   count normalized function calls without calculating the workbook.
