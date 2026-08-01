@@ -903,11 +903,10 @@
     "excel_rich_error": false
   },
   "curated:textdate:c011": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "k001-k002-k003-k004-k005",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXREPLACE) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:textdate:c012": {
     "classification": "not_implemented",
@@ -1326,25 +1325,22 @@
     "excel_rich_error": false
   },
   "function:arraytotext": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "{0.1,\"K001\",\"A\";0.2,\"K002\",\"B\";-0.3,\"K003\",\"C\"}",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ARRAYTOTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:arraytotext:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ARRAYTOTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:arraytotext:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ARRAYTOTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:asc": {
     "classification": "not_implemented",
@@ -7280,46 +7276,40 @@
     "excel_rich_error": false
   },
   "function:regexextract": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2026",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXEXTRACT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:regexextract:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": true,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXEXTRACT) for this oracle case."
+    "excel_rich_error": true
   },
   "function:regexreplace": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "CR-####-####",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXREPLACE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:regexreplace:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "CR-2026-0727",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXREPLACE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:regextest": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "b",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:regextest:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "b",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.REGEXTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:replace": {
     "classification": "match",
@@ -8644,18 +8634,16 @@
     "excel_rich_error": false
   },
   "function:textsplit": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "alpha",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TEXTSPLIT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:textsplit:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": " ",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TEXTSPLIT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:time": {
     "classification": "match",

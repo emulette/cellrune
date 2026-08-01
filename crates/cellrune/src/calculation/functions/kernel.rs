@@ -228,6 +228,14 @@ function_enum!(TextAdditionalFunction {
     ValueToText,
 });
 
+function_enum!(ModernTextFunction {
+    ArrayToText,
+    RegexExtract,
+    RegexReplace,
+    RegexTest,
+    TextSplit,
+});
+
 function_enum!(DateFunction {
     Date,
     DateDif,
@@ -372,6 +380,7 @@ pub(in crate::calculation) enum Evaluator {
     Information(InformationFunction),
     Text(TextFunction),
     TextAdditional(TextAdditionalFunction),
+    ModernText(ModernTextFunction),
     Date(DateFunction),
     DateAdditional(DateAdditionalFunction),
     Dynamic(DynamicFunction),
@@ -428,6 +437,12 @@ impl Evaluator {
                 .iter()
                 .copied()
                 .map(Self::TextAdditional),
+        );
+        evaluators.extend(
+            ModernTextFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::ModernText),
         );
         evaluators.extend(DateFunction::ALL.iter().copied().map(Self::Date));
         evaluators.extend(
@@ -517,6 +532,11 @@ function_enum!(DynamicArrayFunction {
 
 function_enum!(ElementwiseArrayFunction { Abs });
 
+function_enum!(ModernTextArrayFunction {
+    RegexExtract,
+    TextSplit,
+});
+
 impl ElementwiseArrayFunction {
     pub(super) const fn scalar_function(self) -> MathFunction {
         match self {
@@ -533,6 +553,7 @@ pub(in crate::calculation) enum ArrayEvaluator {
     Dynamic(DynamicArrayFunction),
     Map,
     Array(ArrayFunction),
+    ModernText(ModernTextArrayFunction),
 }
 
 #[cfg(test)]
@@ -555,6 +576,12 @@ impl ArrayEvaluator {
         evaluators.extend(DynamicArrayFunction::ALL.iter().copied().map(Self::Dynamic));
         evaluators.push(Self::Map);
         evaluators.extend(ArrayFunction::ALL.iter().copied().map(Self::Array));
+        evaluators.extend(
+            ModernTextArrayFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::ModernText),
+        );
         evaluators
     }
 }

@@ -30,9 +30,12 @@ are not part of this binary notice.
 | `itoa` | `1.0.18` | `MIT OR Apache-2.0` |
 | `libc` | `0.2.189` | `MIT OR Apache-2.0` |
 | `libm` | `0.2.16` | `MIT` |
+| `log` | `0.4.33` | `MIT OR Apache-2.0` |
 | `memchr` | `2.8.3` | `Unlicense OR MIT` |
 | `miniz_oxide` | `0.8.9` | `MIT OR Zlib OR Apache-2.0` |
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` |
+| `pcre2` | `0.2.11` | `Unlicense OR MIT` |
+| `pcre2-sys` | `0.2.10` | `Unlicense OR MIT` |
 | `portable-atomic` | `1.14.0` | `Apache-2.0 OR MIT` |
 | `pyo3` | `0.29.0` | `MIT OR Apache-2.0` |
 | `pyo3-ffi` | `0.29.0` | `MIT OR Apache-2.0` |
@@ -598,8 +601,8 @@ DEALINGS IN THE SOFTWARE.
 
 ### License text 7
 
-Components: `cfg-if 1.0.4`, `equivalent 1.0.2`, `flate2 1.1.9`, `hashbrown 0.17.1`, `indexmap 2.14.0`,
-  `once_cell 1.21.4`
+Components: `cfg-if 1.0.4`, `equivalent 1.0.2`, `flate2 1.1.9`, `hashbrown 0.17.1`, `indexmap 2.14.0`, `log
+  0.4.33`, `once_cell 1.21.4`
 
 Source filenames: `LICENSE-APACHE`
 
@@ -1809,14 +1812,36 @@ Copyright notices are retained in src/* files where relevant.
 
 ### License text 21
 
-Components: `memchr 2.8.3`
+Components: `log 0.4.33`
 
-Source filenames: `COPYING`
+Source filenames: `LICENSE-MIT`
 
 ```text
-This project is dual-licensed under the Unlicense and MIT licenses.
+Copyright (c) 2014 The Rust Project Developers
 
-You may use this code under the terms of either license.
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
 ### License text 22
@@ -1851,6 +1876,18 @@ THE SOFTWARE.
 
 ### License text 23
 
+Components: `memchr 2.8.3`, `pcre2 0.2.11`, `pcre2-sys 0.2.10`
+
+Source filenames: `COPYING`
+
+```text
+This project is dual-licensed under the Unlicense and MIT licenses.
+
+You may use this code under the terms of either license.
+```
+
+### License text 24
+
 Components: `miniz_oxide 0.8.9`
 
 Source filenames: `LICENSE`
@@ -1883,7 +1920,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 24
+### License text 25
 
 Components: `miniz_oxide 0.8.9`
 
@@ -1916,7 +1953,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 25
+### License text 26
 
 Components: `miniz_oxide 0.8.9`
 
@@ -1939,7 +1976,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### License text 26
+### License text 27
 
 Components: `miniz_oxide 0.8.9`, `portable-atomic 1.14.0`
 
@@ -2124,7 +2161,113 @@ Apache License
    END OF TERMS AND CONDITIONS
 ```
 
-### License text 27
+### License text 28
+
+Components: `pcre2 0.2.11`, `pcre2-sys 0.2.10`
+
+Source filenames: `LICENSE-MIT`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2017 Andrew Gallant
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### License text 29
+
+Components: `pcre2-sys 0.2.10`
+
+Source filenames: `PCRE2-10.46-LICENSE`
+
+```text
+PCRE2 LICENCE
+-------------
+
+PCRE2 is a library of functions to support regular expressions whose syntax
+and semantics are as close as possible to those of the Perl 5 language.
+
+Written by Philip Hazel
+Original API code Copyright (c) 1997-2012 University of Cambridge
+New API code Copyright (c) 2016-2024 University of Cambridge
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+
+    * Neither the name of the University of Cambridge nor the names of its
+      contributors may be used to endorse or promote products derived from
+      this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+```
+
+### License text 30
+
+Components: `pcre2-sys 0.2.10`
+
+Source filenames: `SLJIT-LICENSE`
+
+```text
+Stack-less Just-In-Time compiler
+
+Copyright Zoltan Herczeg (hzmester@freemail.hu). All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+  1. Redistributions of source code must retain the above copyright notice, this list of
+     conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above copyright notice, this list
+     of conditions and the following disclaimer in the documentation and/or other materials
+     provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER(S) AND CONTRIBUTORS ``AS IS'' AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### License text 31
 
 Components: `pyo3 0.29.0`, `pyo3-ffi 0.29.0`
 
@@ -2311,7 +2454,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 END OF TERMS AND CONDITIONS
 ```
 
-### License text 28
+### License text 32
 
 Components: `pyo3 0.29.0`, `pyo3-ffi 0.29.0`
 
@@ -2345,7 +2488,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 29
+### License text 33
 
 Components: `quick-xml 0.41.0`
 
@@ -2377,7 +2520,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 30
+### License text 34
 
 Components: `schemars 1.2.1`
 
@@ -2407,7 +2550,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 31
+### License text 35
 
 Components: `sha2 0.11.0`
 
@@ -2444,7 +2587,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 32
+### License text 36
 
 Components: `simd-adler32 0.3.10`
 
@@ -2474,7 +2617,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 33
+### License text 37
 
 Components: `typenum 1.20.1`
 
@@ -2484,7 +2627,7 @@ Source filenames: `LICENSE`
 MIT OR Apache-2.0
 ```
 
-### License text 34
+### License text 38
 
 Components: `typenum 1.20.1`
 
@@ -2694,7 +2837,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 35
+### License text 39
 
 Components: `typenum 1.20.1`
 
@@ -2724,7 +2867,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 36
+### License text 40
 
 Components: `zip 8.6.0`
 
@@ -2754,7 +2897,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 37
+### License text 41
 
 Components: `zlib-rs 0.6.6`
 

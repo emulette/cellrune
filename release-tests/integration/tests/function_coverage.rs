@@ -112,6 +112,88 @@ fn new_functions_propagate_excel_errors_at_documented_boundaries() {
 }
 
 #[test]
+fn v0_1_10_text_and_pcre2_functions_match_documented_semantics() {
+    let cases = [
+        text(
+            "ARRAYTOTEXT({0.1,\"K001\",\"A\";0.2,\"K002\",\"B\";-0.3,\"K003\",\"C\"},1)",
+            "{0.1,\"K001\",\"A\";0.2,\"K002\",\"B\";-0.3,\"K003\",\"C\"}",
+        ),
+        text("ARRAYTOTEXT({\"a\",\"b\"},0)", "a, b"),
+        text("REGEXEXTRACT(\"CR-2026-0727\",\"[0-9]{4}\")", "2026"),
+        text(
+            "REGEXEXTRACT(\"prefix-cell-cell\",\"(?<=prefix-)([a-z]+)-\\1\")",
+            "cell-cell",
+        ),
+        text(
+            "REGEXREPLACE(\"CR-2026-0727\",\"[0-9]\",\"#\")",
+            "CR-####-####",
+        ),
+        text(
+            "REGEXREPLACE(\"2026-0727\",\"([0-9]{4})-([0-9]{4})\",\"$2/$1\")",
+            "0727/2026",
+        ),
+        text(
+            "REGEXREPLACE(\"cellrune\",\"(?<word>[a-z]+)\",\"$<word>-$&\")",
+            "cellrune-cellrune",
+        ),
+        text("REGEXREPLACE(\"a\",\"(?:|a)\",\"X\")", "XXX"),
+        text(
+            "REGEXREPLACE(\"b\",\"(?J)(?<part>a)|(?<part>b)\",\"${part}\")",
+            "b",
+        ),
+        text(
+            "REGEXREPLACE(\"a1 b22 c333\",\"[0-9]+\",\"#\",-2)",
+            "a1 b# c333",
+        ),
+        logical("REGEXTEST(\"CellRune\",\"^cellrune$\",1)", true),
+        logical("REGEXTEST(\"CellRune\",\"^cellrune$\")", false),
+        logical("REGEXTEST(\"a\",\"(*NO_AUTO_POSSESS)a\")", true),
+        logical("REGEXTEST(\"a\",\"(*UTF)a\")", true),
+        logical("REGEXTEST(\"abc\",\"\\Qabc\")", true),
+        text(
+            "REGEXREPLACE(\"a\",\"(*NO_AUTO_POSSESS)(?:|a)\",\"X\")",
+            "XXX",
+        ),
+        text("REGEXREPLACE(\"a\",\"(?x)# (?R)\n(?:|a)\",\"X\")", "XXX"),
+        text("REGEXREPLACE(\"a\",\"(*MARK:(?R)\",\"X\")", "XaX"),
+        text("REGEXREPLACE(\"a\",\"(?C\"\"(?R)\"\")\",\"X\")", "XaX"),
+        text(
+            "REGEXREPLACE(\"a\",\"(?x)# comment\"&CHAR(13)&\"|a(?R)\",\"X\")",
+            "XaX",
+        ),
+        text("REGEXREPLACE(\"a\",\"[](?R)]|\",\"X\")", "XaX"),
+        text("REGEXREPLACE(\"a\",\"\\Q\",\"X\")", "XaX"),
+        text("TEXTSPLIT(\"alpha|beta\",\"|\")", "alpha"),
+        error("REGEXEXTRACT(\"abc\",\"[0-9]+\")", ExcelError::NotAvailable),
+        error("REGEXTEST(\"abc\",\"(\")", ExcelError::Value),
+        error(
+            "REGEXTEST(\"a\",\"(*LIMIT_MATCH=999999999999999)a\")",
+            ExcelError::Value,
+        ),
+        error("REGEXREPLACE(\"a\",\"|a(?0)\",\"X\")", ExcelError::Value),
+        error("REGEXREPLACE(\"a\",\"|a(?000)\",\"X\")", ExcelError::Value),
+        error("REGEXREPLACE(\"a\",\"|a\\g<00>\",\"X\")", ExcelError::Value),
+        error(
+            "REGEXREPLACE(\"a\",\"(?#\\)|a(?R)\",\"X\")",
+            ExcelError::Value,
+        ),
+        error(
+            "REGEXREPLACE(\"a\",\"(*CR)(?x)# comment\"&CHAR(13)&\"|a(?R)\",\"X\")",
+            ExcelError::Value,
+        ),
+        error("REGEXREPLACE(\"b\",\"(a)?b\",\"$1\")", ExcelError::Value),
+        error("TEXTSPLIT(\"abc\",\"\")", ExcelError::Value),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn collection_arguments_follow_excel_direct_and_range_coercion_rules() {
     let sheet_id = SheetId::new(1).expect("valid sheet ID");
     let mut sheet = Sheet::new(

@@ -26,6 +26,7 @@ ERROR_MESSAGES = {
     "graph.empty": "{package} has no third-party dependencies",
     "license.vcs_metadata": "{component} VCS metadata is not an object",
     "license.revision": "{component} fallback license revision needs review",
+    "license.version": "{component} supplemental license version needs review",
     "license.missing": "{component} has no distributable license file",
     "target.host": "rustc did not report a host target",
 }
@@ -56,6 +57,12 @@ FALLBACK_LICENSES = {
     "rmcp-macros": (
         "519577601db3823616dbd7c4eb84ed569d8e17d4",
         "rmcp-LICENSE",
+    ),
+}
+SUPPLEMENTAL_LICENSES = {
+    "pcre2-sys": (
+        ("0.2.10", "PCRE2-10.46-LICENSE"),
+        ("0.2.10", "SLJIT-LICENSE"),
     ),
 }
 PACKAGE_FEATURES = {
@@ -221,6 +228,12 @@ def component_license_files(
                 "license.revision", component=component.label
             )
         files = [repository_root / "bindings/licenses" / filename]
+    supplemental = SUPPLEMENTAL_LICENSES.get(component.name)
+    if supplemental is not None:
+        for expected_version, filename in supplemental:
+            if component.version != expected_version:
+                raise generation_error("license.version", component=component.label)
+            files.append(repository_root / "bindings/licenses" / filename)
     if not files:
         raise generation_error("license.missing", component=component.label)
     return files

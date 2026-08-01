@@ -1,0 +1,5 @@
+[env]
+# Published native artifacts must never acquire an undeclared runtime dependency
+# on whichever libpcre2 happens to be installed on the build host. Downstream
+# Rust consumers may still override this explicitly when they own that linkage.
+PCRE2_SYS_STATIC = { value = "1", force = false }

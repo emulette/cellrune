@@ -9,9 +9,9 @@ use super::kernel::{
     DateAdditionalFunction, DateFunction, DynamicArrayFunction, DynamicFunction,
     ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
     FinancialFunction, InformationArrayFunction, InformationFunction, LegacyArrayFunction,
-    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, StatisticalAdditionalFunction,
-    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
-    TrigonometryFunction,
+    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextArrayFunction,
+    ModernTextFunction, StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
+    TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -353,6 +353,9 @@ macro_rules! function {
             Evaluator::TextAdditional(TextAdditionalFunction::$variant),
         )
     };
+    ($variant:ident, $name:literal, ModernText) => {
+        FunctionDescriptor::new($name, Evaluator::ModernText(ModernTextFunction::$variant))
+    };
     ($variant:ident, $name:literal, Date) => {
         FunctionDescriptor::new($name, Evaluator::Date(DateFunction::$variant))
     };
@@ -656,6 +659,22 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Unicode, "UNICODE", TextAdditional),
     function!(Value, "VALUE", TextAdditional),
     function!(ValueToText, "VALUETOTEXT", TextAdditional),
+    function!(ArrayToText, "ARRAYTOTEXT", ModernText)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(RegexExtract, "REGEXEXTRACT", ModernText)
+        .with_array_evaluator(ArrayEvaluator::ModernText(
+            ModernTextArrayFunction::RegexExtract,
+        ))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(RegexReplace, "REGEXREPLACE", ModernText)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(RegexTest, "REGEXTEST", ModernText)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(TextSplit, "TEXTSPLIT", ModernText)
+        .with_array_evaluator(ArrayEvaluator::ModernText(
+            ModernTextArrayFunction::TextSplit,
+        ))
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Date, "DATE", Date),
     function!(DateDif, "DATEDIF", Date),
     function!(Day, "DAY", Date),
@@ -1016,7 +1035,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "f0d8e9f24aef11601304b63d8cc99a34fc593f7ef87dd0cba49ce0556838ad6a"
+            "f72dca54e43690862fc2959a32f0b3dea01aceaa0a3135a6ac30551268945642"
         );
     }
 

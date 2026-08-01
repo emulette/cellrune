@@ -1333,25 +1333,22 @@
     "excel_rich_error": false
   },
   "function:arraytotext": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "{0.1,\"K001\",\"A\";0.2,\"K002\",\"B\";-0.3,\"K003\",\"C\"}",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ARRAYTOTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:arraytotext:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ARRAYTOTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:arraytotext:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ARRAYTOTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:asc": {
     "classification": "not_implemented",
@@ -8659,18 +8656,16 @@
     "excel_rich_error": false
   },
   "function:textsplit": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "alpha",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TEXTSPLIT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:textsplit:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": " ",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.TEXTSPLIT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:time": {
     "classification": "match",

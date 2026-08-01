@@ -26,7 +26,10 @@ without confusing development-only tools with shipped library requirements.
 | `indexmap` | 2.14.0 | `Apache-2.0 OR MIT` |
 | `libc` | 0.2.189 | `MIT OR Apache-2.0` |
 | `libm` | 0.2.16 | `MIT` |
+| `log` | 0.4.33 | `MIT OR Apache-2.0` |
 | `memchr` | 2.8.3 | `Unlicense OR MIT` |
+| `pcre2` | 0.2.11 | `Unlicense OR MIT` |
+| `pcre2-sys` | 0.2.10 | `Unlicense OR MIT` |
 | `quick-xml` | 0.41.0 | `MIT` |
 | `sha2` | 0.11.0 | `MIT OR Apache-2.0` |
 | `typenum` | 1.20.1 | `MIT OR Apache-2.0` |
@@ -34,7 +37,7 @@ without confusing development-only tools with shipped library requirements.
 | `zip` | 8.6.0 | `MIT` |
 | `zlib-rs` | 0.6.6 | `Zlib` |
 
-`libm`, `quick-xml`, `sha2`, and `zip` are CellRune's direct runtime dependencies.
+`libm`, `pcre2`, `pcre2-sys`, `quick-xml`, `sha2`, and `zip` are CellRune's direct runtime dependencies.
 The remaining crates are selected transitively by those dependencies.
 
 The table covers the default feature set. The optional `capability-fs` feature adds

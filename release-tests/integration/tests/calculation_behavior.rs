@@ -36,6 +36,208 @@ fn unsupported_functions_are_not_hidden_by_iferror() {
 }
 
 #[test]
+fn v0_1_10_text_array_functions_materialize_rectangular_spills() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, formula) in [
+        ("A1", "=TEXTSPLIT(\"alpha|beta;gamma|delta\",\"|\",\";\")"),
+        ("D1", "=REGEXEXTRACT(\"a1 b22 c333\",\"[0-9]+\",1)"),
+        (
+            "F1",
+            "=REGEXEXTRACT(\"CR-2026-0727\",\"([A-Z]+)-([0-9]{4})\",2)",
+        ),
+        ("I1", "=TEXTSPLIT(\"a|b;c\",\"|\",\";\",FALSE,0,\"-\")"),
+        ("L1", "=TEXTSPLIT(\"Axxb|c\",{\"XX\",\"|\"},,TRUE,1)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid dynamic anchor"),
+                FormulaText::from_user_input(formula).expect("valid dynamic formula"),
+                None,
+            )
+            .expect("dynamic formula mutation");
+    }
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+
+    for (address, expected) in [
+        ("A1", "alpha"),
+        ("B1", "beta"),
+        ("A2", "gamma"),
+        ("B2", "delta"),
+        ("D1", "1"),
+        ("D2", "22"),
+        ("D3", "333"),
+        ("F1", "CR"),
+        ("G1", "2026"),
+        ("I1", "a"),
+        ("J1", "b"),
+        ("I2", "c"),
+        ("J2", "-"),
+        ("L1", "A"),
+        ("M1", "b"),
+        ("N1", "c"),
+    ] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            ))),
+            "unexpected materialized text at {address}",
+        );
+    }
+}
+
+#[test]
+fn v0_1_10_text_and_regex_work_respects_calculation_limits() {
+    let literal = "a".repeat(1_000);
+    let literal_formula = format!("REGEXTEST(\"{literal}\",\"{literal}\")");
+    let literal_result = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, literal_formula.as_str())]),
+        CalculationOptions::default(),
+    );
+    assert_eq!(
+        literal_result.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Logical(true)))
+    );
+
+    let linear_formula = format!("REGEXREPLACE(\"{}\",\"(?:a)+\",\"X\")", "a".repeat(1_000));
+    let linear = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, linear_formula.as_str())]),
+        CalculationOptions::default(),
+    );
+    assert_eq!(
+        linear.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Text(
+            "X".to_owned()
+        )))
+    );
+
+    let regex_limits = CalculationLimits::default()
+        .with_max_function_iterations(60)
+        .expect("positive regex work limit");
+    let regex = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "IFERROR(REGEXTEST(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"(a+)+b\"),FALSE)",
+        )]),
+        CalculationOptions::default().with_limits(regex_limits),
+    );
+    assert_issue(&regex, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let split_limits = CalculationLimits::default()
+        .with_max_function_iterations(25)
+        .expect("positive split work limit");
+    let split = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "IFERROR(TEXTSPLIT(\"a|a|a|a|a|a|a|a|a|a\",\"|\"),\"hidden\")",
+        )]),
+        CalculationOptions::default().with_limits(split_limits),
+    );
+    assert_issue(&split, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let delimiter_formula = format!("IFERROR(TEXTSPLIT(\"\",\"{}\"),\"hidden\")", "x".repeat(64));
+    let delimiter_limits = CalculationLimits::default()
+        .with_max_function_iterations(100)
+        .expect("positive delimiter preprocessing limit");
+    let delimiter = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, delimiter_formula.as_str())]),
+        CalculationOptions::default().with_limits(delimiter_limits),
+    );
+    assert_issue(&delimiter, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let text_limits = CalculationLimits::default()
+        .with_max_text_bytes(8)
+        .expect("positive text limit");
+    let output = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "IFERROR(REGEXREPLACE(\"aaaa\",\"a\",\"xxxx\"),\"hidden\")",
+        )]),
+        CalculationOptions::default().with_limits(text_limits),
+    );
+    assert_issue(&output, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let mut split_draft = WorkbookDraft::new();
+    let split_sheet = split_draft.workbook().sheets()[0].id();
+    split_draft
+        .set_cell_dynamic_formula(
+            split_sheet,
+            CellAddress::from_a1("A1").expect("valid split anchor"),
+            FormulaText::from_user_input("=TEXTSPLIT(\"a|b;c\",\"|\",\";\",FALSE,0,\"123456789\")")
+                .expect("valid split formula"),
+            None,
+        )
+        .expect("dynamic split formula mutation");
+    let padded = calculate_workbook(
+        split_draft.workbook(),
+        CalculationOptions::default().with_limits(text_limits),
+    );
+    assert_issue(&padded, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let padding_formula = format!(
+        "IFERROR(TEXTSPLIT(\"a|b;c\",\"|\",\";\",FALSE,0,\"{}\"),\"hidden\")",
+        "p".repeat(256)
+    );
+    let padding_limits = CalculationLimits::default()
+        .with_max_function_iterations(200)
+        .expect("positive aggregate padding limit");
+    let padding = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, padding_formula.as_str())]),
+        CalculationOptions::default().with_limits(padding_limits),
+    );
+    assert_issue(&padding, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let capture_limits = CalculationLimits::default()
+        .with_max_function_iterations(100)
+        .expect("positive capture work limit");
+    let captures = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "IFERROR(REGEXREPLACE(\"aaaa\",\"()()()()()()()()()()a\",\"\"),\"hidden\")",
+        )]),
+        CalculationOptions::default().with_limits(capture_limits),
+    );
+    assert_issue(&captures, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let repeated_limits = CalculationLimits::default()
+        .with_max_function_iterations(500)
+        .expect("positive repeated native-call limit");
+    let repeated = calculate_workbook(
+        &workbook_with_formulas(&[(
+            1,
+            1,
+            "IFERROR(REGEXREPLACE(\"aaaaaaaaaaaaaaaaaaaa\",\"(*NO_START_OPT)(*NO_AUTO_POSSESS)(?=(?:(a|aa)+b))|\",\"\"),\"hidden\")",
+        )]),
+        CalculationOptions::default().with_limits(repeated_limits),
+    );
+    assert_issue(&repeated, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let named_pattern = format!("{}(?<target>)", "()".repeat(100));
+    let named_replacement = "${target}".repeat(100);
+    let named_formula = format!("REGEXREPLACE(\"\",\"{named_pattern}\",\"{named_replacement}\")");
+    let named_limits = CalculationLimits::default()
+        .with_max_function_iterations(9_000)
+        .expect("positive named-capture lookup limit");
+    let named = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, named_formula.as_str())]),
+        CalculationOptions::default().with_limits(named_limits),
+    );
+    assert_eq!(
+        named.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(
+            CellValue::Text(String::new())
+        ))
+    );
+}
+
+#[test]
 fn lambda_core_captures_lexical_bindings_and_rejects_callable_coercion() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "LET(a,2,f,LAMBDA(x,x+a),f(3))"),
@@ -859,6 +1061,19 @@ fn helper_callbacks_preserve_engine_issues_and_cumulative_work_limits() {
             ExcelError::Calculation
         )))
     );
+
+    let capture_subject = "a".repeat(1_000);
+    let amplified_pattern = format!("{}.*", "(?=(.*))".repeat(100));
+    let amplified_formula =
+        format!("REGEXEXTRACT(\"{capture_subject}\",\"{amplified_pattern}\",2)");
+    let amplified_limits = CalculationLimits::default()
+        .with_max_function_iterations(250_000)
+        .expect("positive aggregate capture-copy limit");
+    let amplified = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, amplified_formula.as_str())]),
+        CalculationOptions::default().with_limits(amplified_limits),
+    );
+    assert_issue(&amplified, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
 
 #[test]
@@ -1804,7 +2019,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        299
+        304
     );
     let let_entry = catalog
         .iter()

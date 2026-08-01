@@ -37,12 +37,19 @@ mod lookup;
 mod lookup_common;
 mod math;
 mod modern_array;
+mod modern_text;
 mod reference_introspection;
+mod regex_common;
+mod regex_options;
+mod regex_pattern;
+mod regex_text;
 mod statistical;
 mod statistical_additional;
 mod sum_of_squares;
 mod text;
 mod text_additional;
+mod text_common;
+mod text_split;
 mod trigonometry;
 mod util;
 mod xmatch;
@@ -194,6 +201,9 @@ fn dispatch_scalar(
         Evaluator::Text(function) => text::call(engine, context, function, args),
         Evaluator::TextAdditional(function) => {
             text_additional::call(engine, context, function, args)
+        }
+        Evaluator::ModernText(function) => {
+            modern_text::call_scalar(engine, context, function, args)
         }
         Evaluator::Date(function) => date::call(engine, context, function, args),
         Evaluator::DateAdditional(function) => {
@@ -377,6 +387,10 @@ pub(super) fn call_function_array(
         ArrayEvaluator::Array(function) => {
             Some(array::call_array(engine, context, function, args).map(ArrayEvaluation::untracked))
         }
+        ArrayEvaluator::ModernText(function) => Some(
+            modern_text::call_array(engine, context, function, args)
+                .map(ArrayEvaluation::untracked),
+        ),
     }
 }
 
@@ -903,14 +917,14 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_299_unique_excel_facing_names() {
+    fn coverage_registry_has_304_unique_excel_facing_names() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
             .collect();
         assert_eq!(kernels.len(), descriptor::descriptors().len());
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 287);
+        assert_eq!(kernels.len(), 292);
 
         let aliases = descriptor::descriptors()
             .iter()
@@ -933,10 +947,10 @@ mod tests {
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());
-        assert_eq!(catalog.len(), 300);
+        assert_eq!(catalog.len(), 305);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            299
+            304
         );
         assert!(
             catalog
@@ -988,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn v0_1_10_reference_checkpoint_catalog_is_byte_exact() {
+    fn v0_1_10_text_checkpoint_catalog_is_byte_exact() {
         let mut digest = Sha256::new();
         for entry in super::function_catalog() {
             digest.update(entry.name().as_bytes());
@@ -1009,7 +1023,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "0e1a7f6728f8c55b207d5ec0c45cd49c5c1eead947651e4ada2e0c78efd82841"
+            "d7b2743f3f9d612cafb8d4fa9797008f11001649726499efdde2d29b86e534ee"
         );
     }
 }

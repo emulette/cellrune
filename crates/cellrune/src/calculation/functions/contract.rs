@@ -2,8 +2,8 @@ use super::kernel::{
     AggregateFunction, ArrayFunction, CombinatoricsFunction, DateAdditionalFunction, DateFunction,
     DynamicFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
     FinancialFunction, InformationFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
-    TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    MathFunction, ModernTextFunction, StatisticalAdditionalFunction, StatisticalFunction,
+    SumOfSquaresFunction, TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -562,6 +562,62 @@ const VALUE_TO_TEXT_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::AbsentOrMissing,
     ArgumentDefaultValue::Logical(false),
 )];
+const ARRAY_TO_TEXT_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    1,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const REGEX_EXTRACT_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+];
+const REGEX_REPLACE_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        4,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+];
+const REGEX_TEST_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    2,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const TEXT_SPLIT_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::EmptyCollection,
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Logical(false),
+    ),
+    ArgumentDefault::new(
+        4,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        5,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::NotAvailable,
+    ),
+];
 const ROW_COLUMN_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     0,
     DefaultTrigger::Absent,
@@ -772,6 +828,7 @@ impl Evaluator {
             Self::Information(function) => function.call_contract(),
             Self::Text(function) => function.call_contract(),
             Self::TextAdditional(function) => function.call_contract(),
+            Self::ModernText(function) => function.call_contract(),
             Self::Date(function) => function.call_contract(),
             Self::DateAdditional(function) => function.call_contract(),
             Self::Dynamic(function) => function.call_contract(),
@@ -1105,6 +1162,34 @@ impl TextAdditionalFunction {
             .with_defaults(TEXT_BOUNDARY_DEFAULTS),
             Self::ValueToText => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                 .with_defaults(VALUE_TO_TEXT_DEFAULTS),
+        }
+    }
+}
+
+impl ModernTextFunction {
+    const fn call_contract(self) -> CallContract {
+        match self {
+            Self::ArrayToText => CallContract::positional(Arity::range(1, 2), &[ARRAY, SCALAR])
+                .with_defaults(ARRAY_TO_TEXT_DEFAULTS),
+            Self::RegexExtract => {
+                CallContract::positional(Arity::range(2, 4), &[SCALAR, SCALAR, SCALAR, SCALAR])
+                    .with_defaults(REGEX_EXTRACT_DEFAULTS)
+            }
+            Self::RegexReplace => CallContract::positional(
+                Arity::range(3, 5),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(REGEX_REPLACE_DEFAULTS),
+            Self::RegexTest => {
+                CallContract::positional(Arity::range(2, 3), &[SCALAR, SCALAR, SCALAR])
+                    .with_defaults(REGEX_TEST_DEFAULTS)
+            }
+            Self::TextSplit => CallContract::positional(
+                Arity::range(2, 6),
+                &[SCALAR, ARRAY, ARRAY, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(TEXT_SPLIT_DEFAULTS)
+            .with_missing(MissingArgumentPolicy::Preserve),
         }
     }
 }

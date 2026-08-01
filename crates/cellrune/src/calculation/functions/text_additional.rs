@@ -1,5 +1,5 @@
 use super::super::ast::Expr;
-use super::super::coerce::{to_logical, to_number, to_text};
+use super::super::coerce::{to_logical, to_number};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::textfmt::format_number;
@@ -300,21 +300,11 @@ fn value_to_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
         },
         None => false,
     };
-    let value = engine.eval_scalar(context, &args[0]);
-    if let Value::Error(kind) = value
-        && kind.is_engine_issue()
-    {
-        return Value::Error(kind);
-    }
-    let text = match value {
-        Value::Text(text) if strict => format!("\"{}\"", text.replace('"', "\"\"")),
-        Value::Text(text) => text,
-        Value::Error(kind) => kind.as_str().to_owned(),
-        other => match to_text(&other) {
+    let text =
+        match super::text_common::value_to_text(&engine.eval_scalar(context, &args[0]), strict) {
             Ok(text) => text,
             Err(kind) => return Value::Error(kind),
-        },
-    };
+        };
     engine.bounded_text(text)
 }
 

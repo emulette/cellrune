@@ -27,6 +27,8 @@ capability-fs = ["dep:cap-std"]
 [dependencies]
 cap-std = { workspace = true, optional = true }
 libm.workspace = true
+pcre2.workspace = true
+pcre2-sys.workspace = true
 quick-xml.workspace = true
 sha2.workspace = true
 zip.workspace = true

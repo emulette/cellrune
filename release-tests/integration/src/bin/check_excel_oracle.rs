@@ -997,8 +997,7 @@ fn verify_catalog_identity(
         Ok(())
     } else {
         Err(format!(
-            "{catalog_address}: stable case key is {:?}, expected {expected_key}",
-            actual
+            "{catalog_address}: stable case key is {actual:?}, expected {expected_key}"
         ))
     }
 }
