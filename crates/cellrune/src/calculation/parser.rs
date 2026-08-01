@@ -206,7 +206,10 @@ fn split_cell_ident(ident: &str) -> Option<(String, Option<u32>)> {
 }
 
 fn is_lambda_name(name: &str) -> bool {
-    super::functions::normalize_name(name) == "LAMBDA"
+    super::functions::function_evaluator(name)
+        == Some(super::functions::Evaluator::Dynamic(
+            super::functions::DynamicFunction::Lambda,
+        ))
 }
 
 fn can_be_reference_expression(expr: &Expr) -> bool {

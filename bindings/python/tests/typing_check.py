@@ -5,11 +5,13 @@ from cellrune import (
     DefinedNameInspection,
     EditReceipt,
     EditReceiptV2,
+    FunctionCatalogReport,
     RangePage,
     TableSummary,
     Workbook,
     WorkbookChange,
     WorkbookChangeV2,
+    function_catalog,
 )
 
 table_summary: TableSummary = {
@@ -27,6 +29,8 @@ table_summary: TableSummary = {
 
 
 def check() -> None:
+    catalog: FunctionCatalogReport = function_catalog()
+    catalog["entries"][0]["canonical_name"].upper()
     with Workbook.create() as scoped:
         scoped.summary()
     assert scoped.closed

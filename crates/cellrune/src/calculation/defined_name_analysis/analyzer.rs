@@ -9,8 +9,12 @@ use super::{
 use crate::calculation::ast::{Expr, ExternalReferenceTarget, Reference, StructuredItem};
 use crate::calculation::error::parse_error_detail;
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
-use crate::calculation::functions::{function_dependency_kind, normalize_name};
-use crate::calculation::lambda::{definition, is_local_name};
+use crate::calculation::functions::kernel::LegacyFunction;
+use crate::calculation::functions::{
+    DynamicFunction, Evaluator, function_arguments_are_reachable, function_dependency_kind,
+    function_evaluator,
+};
+use crate::calculation::lambda::{definition, definition_from_args, is_local_name};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::{ParseError, parse_formula_with_limits};
 use crate::calculation::reference_resolution::{
@@ -504,7 +508,7 @@ impl Analyzer<'_, '_> {
                 Ok(None)
             }
             Expr::Call { name, args } => {
-                let normalized = normalize_name(&name);
+                let evaluator = function_evaluator(&name);
                 if !is_local_name(&name, &local_names)
                     && let Some((index, _)) =
                         self.lookup_name(context_sheet, Some(lookup_scope), &name)
@@ -550,12 +554,17 @@ impl Analyzer<'_, '_> {
                     );
                     return Ok(None);
                 }
-                if normalized == "LAMBDA" {
-                    let expression = Expr::Call {
-                        name,
-                        args: args.clone(),
-                    };
-                    if let Some(lambda) = definition(&expression) {
+                if evaluator.is_some()
+                    && !function_arguments_are_reachable(
+                        &name,
+                        &args,
+                        self.options.calculation().limits().max_let_bindings(),
+                    )
+                {
+                    return Ok(None);
+                }
+                if evaluator == Some(Evaluator::Dynamic(DynamicFunction::Lambda)) {
+                    if let Some(lambda) = definition_from_args(&args) {
                         let mut lambda_locals = local_names;
                         lambda_locals.extend(lambda.parameters().iter().cloned());
                         self.charge_scan_nodes(
@@ -580,7 +589,7 @@ impl Analyzer<'_, '_> {
                     }
                     return Ok(None);
                 }
-                if normalized == "LET" {
+                if evaluator == Some(Evaluator::Dynamic(DynamicFunction::Let)) {
                     Self::push_let_validation(
                         tasks,
                         args,
@@ -1071,11 +1080,17 @@ impl Analyzer<'_, '_> {
                             formula,
                         })
                     }
-                    _ if matches!(normalize_name(&name).as_str(), "INDEX" | "LET") => outcomes
-                        .push(Outcome::Unsupported {
+                    _ if matches!(
+                        function_evaluator(&name),
+                        Some(Evaluator::Legacy(LegacyFunction::Index))
+                            | Some(Evaluator::Dynamic(DynamicFunction::Let))
+                    ) =>
+                    {
+                        outcomes.push(Outcome::Unsupported {
                             reason: DefinedNameUnsupportedReason::ContextDependent,
                             detail: Some(formula.as_str().to_owned().into_boxed_str()),
-                        }),
+                        })
+                    }
                     _ => outcomes.push(non_reference(&formula)),
                 }
             }

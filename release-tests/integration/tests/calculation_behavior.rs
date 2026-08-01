@@ -959,12 +959,25 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                 | "AREAS"
                 | "ISREF"
         );
+        let result = calculation.cell(capability.cell());
         match capability.capability() {
-            FormulaCapability::Supported => assert!(
-                calculates_sheet_span_argument,
-                "{} unexpectedly accepted a 3-D argument",
-                entry.name(),
-            ),
+            FormulaCapability::Supported if calculates_sheet_span_argument => {
+                assert!(
+                    matches!(result, Some(CalculationCellResult::Value(_))),
+                    "{} scanner/kernel policy mismatch: {result:?}",
+                    entry.name(),
+                );
+            }
+            FormulaCapability::Supported => {
+                assert_eq!(
+                    result,
+                    Some(&CalculationCellResult::Value(CellValue::Error(
+                        ExcelError::Value
+                    ))),
+                    "{} must reject an invalid unary call before inspecting its 3-D argument",
+                    entry.name(),
+                );
+            }
             FormulaCapability::Unsupported(issues) => {
                 assert!(
                     !calculates_sheet_span_argument,
@@ -978,15 +991,13 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                     "{} lost the sheet-range diagnosis: {issues:?}",
                     entry.name(),
                 );
+                assert!(
+                    !matches!(result, Some(CalculationCellResult::Value(_))),
+                    "{} scanner/kernel policy mismatch: {result:?}",
+                    entry.name(),
+                );
             }
         }
-        let result = calculation.cell(capability.cell());
-        assert_eq!(
-            matches!(result, Some(CalculationCellResult::Value(_))),
-            calculates_sheet_span_argument,
-            "{} scanner/kernel policy mismatch: {result:?}",
-            entry.name(),
-        );
     }
 }
 
@@ -3595,8 +3606,22 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
         (1, 7, "LET(valid,1,valid)"),
         (1, 8, "LET(Δ,2,δ+1)"),
         (1, 9, r"LET(\rate,3,\RATE+1)"),
+        (1, 10, "LET(x,MYSTERY())"),
+        (1, 11, "LET(1,MYSTERY(),0)"),
+        (1, 12, "LET(x,MYSTERY(),X,2,x)"),
+        (1, 13, "LET(1,NoSuchName,0)"),
+        (1, 14, "LET(R1C1,MYSTERY(),R1C1)"),
     ]);
     assert!(scan_formula_capabilities(&workbook).is_supported());
+    assert_eq!(
+        scan_function_usage(&workbook)
+            .entries()
+            .iter()
+            .map(|entry| entry.name())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["LET"]),
+        "invalid LET arguments are unreachable and must not leak nested function usage",
+    );
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     for column in 1..=6 {
@@ -3611,6 +3636,71 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
     assert_number(&calculation, 7, 1.0, 0.0);
     assert_number(&calculation, 8, 3.0, 0.0);
     assert_number(&calculation, 9, 4.0, 0.0);
+    for column in 10..=14 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "invalid LET must reject its call shape before inspecting column {column}",
+        );
+    }
+}
+
+#[test]
+fn function_specific_argument_limits_are_enforced_before_evaluation() {
+    let concat = format!("CONCAT({})", vec!["\"x\""; 254].join(","));
+    let text_join = format!("TEXTJOIN(\"\",TRUE,{})", vec!["\"x\""; 253].join(","));
+    let switch = format!(
+        "SWITCH(1,{})",
+        (1..=127)
+            .flat_map(|value| [value.to_string(), value.to_string()])
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let max_ifs = format!("MAXIFS({})", vec!["1"; 255].join(","));
+    let min_ifs = format!("MINIFS({})", vec!["1"; 255].join(","));
+    let formulas = [concat, text_join, switch, max_ifs, min_ifs];
+    let cells = formulas
+        .iter()
+        .enumerate()
+        .map(|(index, formula)| (1, index as u32 + 1, formula.as_str()))
+        .collect::<Vec<_>>();
+    let workbook = workbook_with_formulas(&cells);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=5 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "argument limit was not enforced for column {column}",
+        );
+    }
+}
+
+#[test]
+fn invalid_intrinsic_arguments_are_unreachable_to_dependency_analysis() {
+    let over_limit_sum = format!("SUM(C1,{})", vec!["1"; 255].join(","));
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "COUNTBLANK(A1,A2)"),
+        (1, 2, "ABS(B1,1)"),
+        (1, 3, over_limit_sum.as_str()),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=3 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "invalid intrinsic arguments must be rejected before dependency analysis in column {column}",
+        );
+    }
 }
 
 #[test]

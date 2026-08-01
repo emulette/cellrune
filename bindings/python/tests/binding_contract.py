@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 from collections.abc import Callable
 from typing import Literal, cast
 
-from cellrune import CellRuneError, Workbook
+from cellrune import CellRuneError, Workbook, function_catalog
 
 CORPUS_PATH = pathlib.Path(__file__).parents[3] / "binding-contract" / "v1.json"
 DEFINED_NAME_CORPUS_PATH = (
@@ -18,6 +19,26 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 )
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
+CATALOG_V0_1_9_SHA256 = "d0a538207e536d3c5b52e2ae1c3353cfef3ee965b8ea841c141bf20a6c12d9ae"
+
+
+def catalog_digest() -> str:
+    catalog = function_catalog()
+    assert catalog["schema_version"] == 1
+    assert len(catalog["entries"]) == 288
+    digest = hashlib.sha256()
+    for entry in catalog["entries"]:
+        row = "\0".join(
+            (
+                entry["name"],
+                entry["canonical_name"],
+                "1" if entry["alias"] else "0",
+                "1" if entry["returns_array"] else "0",
+                "1" if entry["official"] else "0",
+            )
+        )
+        digest.update(f"{row}\n".encode())
+    return digest.hexdigest()
 
 
 def assert_error(code: str, operation: Callable[[], object]) -> None:
@@ -76,6 +97,7 @@ def recalculate_with_invalid_solver_semantics(
 
 
 def main() -> None:
+    assert catalog_digest() == CATALOG_V0_1_9_SHA256
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")

@@ -1,3 +1,4 @@
+use super::kernel::DateFunction;
 use std::collections::BTreeSet;
 
 use super::super::ast::Expr;
@@ -13,24 +14,23 @@ use crate::DateSystem;
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: DateFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "NOW" => now(engine, args),
-        "TODAY" => today(engine, args),
-        "DATE" => date(engine, context, args),
-        "YEAR" => date_part(engine, context, args, DatePart::Year),
-        "MONTH" => date_part(engine, context, args, DatePart::Month),
-        "DAY" => date_part(engine, context, args, DatePart::Day),
-        "EDATE" => edate(engine, context, args),
-        "EOMONTH" => eomonth(engine, context, args),
-        "DATEDIF" => datedif(engine, context, args),
-        "YEARFRAC" => yearfrac(engine, context, args),
-        "WEEKDAY" => weekday(engine, context, args),
-        "WORKDAY" => workday(engine, context, args),
-        "NETWORKDAYS" => networkdays(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        DateFunction::Now => now(engine, args),
+        DateFunction::Today => today(engine, args),
+        DateFunction::Date => date(engine, context, args),
+        DateFunction::Year => date_part(engine, context, args, DatePart::Year),
+        DateFunction::Month => date_part(engine, context, args, DatePart::Month),
+        DateFunction::Day => date_part(engine, context, args, DatePart::Day),
+        DateFunction::EDate => edate(engine, context, args),
+        DateFunction::Eomonth => eomonth(engine, context, args),
+        DateFunction::DateDif => datedif(engine, context, args),
+        DateFunction::YearFrac => yearfrac(engine, context, args),
+        DateFunction::Weekday => weekday(engine, context, args),
+        DateFunction::Workday => workday(engine, context, args),
+        DateFunction::NetworkDays => networkdays(engine, context, args),
     }
 }
 

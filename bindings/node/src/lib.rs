@@ -16,6 +16,11 @@ pub fn schema_version() -> u32 {
 }
 
 #[napi]
+pub fn function_catalog() -> conversion::NativeFunctionCatalogReport {
+    conversion::function_catalog(cellrune_interop::function_catalog())
+}
+
+#[napi]
 pub fn create_workbook() -> NativeWorkbook {
     NativeWorkbook::create()
 }

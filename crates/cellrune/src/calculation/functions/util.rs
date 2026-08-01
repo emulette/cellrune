@@ -7,7 +7,7 @@ use super::super::runtime::Rect;
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::{let_scope_value, normalize_name};
+use super::{DynamicFunction, Evaluator, function_evaluator, let_scope_value};
 
 #[derive(Debug, Clone)]
 pub(super) struct ArgumentValue {
@@ -128,7 +128,7 @@ fn let_arguments<'expr>(
                 && engine
                     .resolve_name_expr_with_id_in_context(context, name)
                     .is_none()
-                && normalize_name(name) == "LET" =>
+                && function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Let)) =>
         {
             Some(args)
         }

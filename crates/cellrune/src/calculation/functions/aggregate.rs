@@ -6,33 +6,37 @@ use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::AggregateFunction;
 use super::util::{ArgumentValue, ExcelSum, collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: AggregateFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "SUM" => aggregate_numbers(engine, context, args, Aggregate::Sum),
-        "AVERAGE" => aggregate_numbers(engine, context, args, Aggregate::Average),
-        "MIN" => aggregate_numbers(engine, context, args, Aggregate::Min),
-        "MAX" => aggregate_numbers(engine, context, args, Aggregate::Max),
-        "PRODUCT" => aggregate_numbers(engine, context, args, Aggregate::Product),
-        "COUNT" => count_numbers(engine, context, args),
-        "COUNTA" => count_nonblank(engine, context, args),
-        "COUNTBLANK" => count_blank(engine, context, args),
-        "SUBTOTAL" => subtotal(engine, context, args),
-        "SUMIF" => conditional_aggregate(engine, context, args, ConditionalAggregate::SumIf),
-        "SUMIFS" => conditional_aggregate(engine, context, args, ConditionalAggregate::SumIfs),
-        "AVERAGEIF" => {
+    match function {
+        AggregateFunction::Sum => aggregate_numbers(engine, context, args, Aggregate::Sum),
+        AggregateFunction::Average => aggregate_numbers(engine, context, args, Aggregate::Average),
+        AggregateFunction::Min => aggregate_numbers(engine, context, args, Aggregate::Min),
+        AggregateFunction::Max => aggregate_numbers(engine, context, args, Aggregate::Max),
+        AggregateFunction::Product => aggregate_numbers(engine, context, args, Aggregate::Product),
+        AggregateFunction::Count => count_numbers(engine, context, args),
+        AggregateFunction::CountA => count_nonblank(engine, context, args),
+        AggregateFunction::CountBlank => count_blank(engine, context, args),
+        AggregateFunction::Subtotal => subtotal(engine, context, args),
+        AggregateFunction::SumIf => {
+            conditional_aggregate(engine, context, args, ConditionalAggregate::SumIf)
+        }
+        AggregateFunction::SumIfs => {
+            conditional_aggregate(engine, context, args, ConditionalAggregate::SumIfs)
+        }
+        AggregateFunction::AverageIf => {
             conditional_aggregate(engine, context, args, ConditionalAggregate::AverageIf)
         }
-        "AVERAGEIFS" => {
+        AggregateFunction::AverageIfs => {
             conditional_aggregate(engine, context, args, ConditionalAggregate::AverageIfs)
         }
-        _ => Value::Error(ErrorKind::Unsupported),
     }
 }
 

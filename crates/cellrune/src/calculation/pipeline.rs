@@ -6,8 +6,9 @@ use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::descriptor::{DependencyKind, ReferenceMetadataKind, Volatility};
 use super::functions::{
-    descriptor_sheet_span_policy, function_dependency_kind, function_volatility,
-    is_supported_function, normalize_name,
+    DynamicFunction, Evaluator, canonical_name_for_evaluator, descriptor_sheet_span_policy,
+    function_arguments_are_reachable, function_dependency_kind, function_evaluator,
+    function_volatility, is_supported_function, normalize_name,
 };
 use super::lambda::definition;
 use super::scope::DefinedLambdaId;
@@ -26,6 +27,13 @@ use crate::{CellAddress, CellContent, DefinedNameScope, FormulaMetadata, Workboo
 struct NameScanContext {
     sheet: usize,
     defined_name_scope: Option<DefinedNameScope>,
+}
+
+fn dynamic_function(name: &str) -> Option<DynamicFunction> {
+    match function_evaluator(name) {
+        Some(Evaluator::Dynamic(function)) => Some(function),
+        _ => None,
+    }
 }
 
 impl NameScanContext {
@@ -179,7 +187,13 @@ fn collect_function_calls_in_scope(
                         );
                     }
                     if active_names.insert(id.clone()) {
-                        output.push("LAMBDA".to_owned());
+                        output.push(
+                            canonical_name_for_evaluator(Evaluator::Dynamic(
+                                DynamicFunction::Lambda,
+                            ))
+                            .expect("the LAMBDA evaluator is registered")
+                            .to_owned(),
+                        );
                         let mut lambda_scope = CapabilityScope::default();
                         for parameter in lambda.parameters() {
                             lambda_scope.push_parameter(parameter.clone());
@@ -197,8 +211,17 @@ fn collect_function_calls_in_scope(
                 }
                 return;
             }
-            if normalized == "LET" {
+            let arguments_are_reachable = !is_supported_function(name)
+                || function_arguments_are_reachable(
+                    name,
+                    args,
+                    engine.calculation_limits().max_let_bindings(),
+                );
+            if dynamic_function(name) == Some(DynamicFunction::Let) {
                 output.push(normalized);
+                if !arguments_are_reachable {
+                    return;
+                }
                 let previous_len = local_scope.len();
                 if let Some((final_expr, pairs)) = args.split_last() {
                     for pair in pairs.chunks_exact(2) {
@@ -226,8 +249,11 @@ fn collect_function_calls_in_scope(
                 local_scope.truncate(previous_len);
                 return;
             }
-            if normalized == "LAMBDA" {
+            if dynamic_function(name) == Some(DynamicFunction::Lambda) {
                 output.push(normalized);
+                if !arguments_are_reachable {
+                    return;
+                }
                 if let Some(lambda) = definition(expr) {
                     let previous_len = local_scope.len();
                     for parameter in lambda.parameters() {
@@ -246,6 +272,9 @@ fn collect_function_calls_in_scope(
                 return;
             }
             output.push(normalized);
+            if !arguments_are_reachable {
+                return;
+            }
             for arg in args {
                 collect_function_calls_in_scope(
                     engine,
@@ -790,11 +819,20 @@ fn expr_contains_volatility(
                         expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
                     });
             }
+            if is_supported_function(name)
+                && !function_arguments_are_reachable(
+                    name,
+                    args,
+                    engine.calculation_limits().max_let_bindings(),
+                )
+            {
+                return false;
+            }
             if function_volatility(name) == Some(expected) {
                 return true;
             }
-            match normalize_name(name).as_str() {
-                "LET" => {
+            match dynamic_function(name) {
+                Some(DynamicFunction::Let) => {
                     let previous_len = local_scope.len();
                     let mut found = false;
                     if let Some((final_expr, pairs)) = args.split_last() {
@@ -823,7 +861,7 @@ fn expr_contains_volatility(
                     local_scope.truncate(previous_len);
                     return found;
                 }
-                "LAMBDA" => {
+                Some(DynamicFunction::Lambda) => {
                     let Some(lambda) = definition(expr) else {
                         return false;
                     };
@@ -842,7 +880,7 @@ fn expr_contains_volatility(
                     local_scope.truncate(previous_len);
                     return found;
                 }
-                "MAP" => {
+                Some(DynamicFunction::Map) => {
                     let Some((lambda_expr, array_exprs)) = args.split_last() else {
                         return false;
                     };
@@ -1087,11 +1125,20 @@ fn inspect_expr(
                     Some(name.to_ascii_uppercase()),
                 ));
             }
-            if normalized == "LET" {
+            if is_supported_function(name)
+                && !function_arguments_are_reachable(
+                    name,
+                    args,
+                    engine.calculation_limits().max_let_bindings(),
+                )
+            {
+                return;
+            }
+            if dynamic_function(name) == Some(DynamicFunction::Let) {
                 inspect_let(engine, sheet, args, policy, names, local_scope, issues);
                 return;
             }
-            if normalized == "LAMBDA"
+            if dynamic_function(name) == Some(DynamicFunction::Lambda)
                 && let Some(lambda) = definition(expr)
             {
                 let previous_len = local_scope.len();
@@ -1110,7 +1157,7 @@ fn inspect_expr(
                 local_scope.truncate(previous_len);
                 return;
             }
-            if normalized == "LAMBDA" {
+            if dynamic_function(name) == Some(DynamicFunction::Lambda) {
                 return;
             }
             let argument_policy =
@@ -1125,7 +1172,7 @@ fn inspect_expr(
                 argument_policy,
                 policy.suppress_missing_names || suppresses_missing_names,
             );
-            if normalized == "MAP"
+            if dynamic_function(name) == Some(DynamicFunction::Map)
                 && let Some((lambda_expr, array_exprs)) = args.split_last()
                 && let Some(lambda) = definition(lambda_expr)
             {

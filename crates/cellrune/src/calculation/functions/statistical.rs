@@ -1,3 +1,4 @@
+use super::kernel::StatisticalFunction;
 use std::collections::BTreeMap;
 
 use super::super::ast::Expr;
@@ -16,31 +17,44 @@ use super::util::{
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: StatisticalFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "LARGE" => order_statistic(engine, context, args, false),
-        "SMALL" => order_statistic(engine, context, args, true),
-        "MEDIAN" => median(engine, context, args),
-        "MODE.SNGL" => mode(engine, context, args),
-        "CORREL" => paired_statistic(engine, context, args, PairedStatistic::Correlation),
-        "SLOPE" => paired_statistic(engine, context, args, PairedStatistic::Slope),
-        "PERCENTRANK.INC" => percent_rank(engine, context, args),
-        "PERCENTILE.INC" => percentile(engine, context, args, false),
-        "QUARTILE.INC" => percentile(engine, context, args, true),
-        "RANK.EQ" => rank(engine, context, args),
-        "NORMSDIST" => standard_normal_distribution(engine, context, args, true),
-        "NORM.S.DIST" => standard_normal_distribution(engine, context, args, false),
-        "STDEV.S" => sample_variance(engine, context, args, true),
-        "VAR.S" => sample_variance(engine, context, args, false),
-        "MINIFS" => conditional_extreme(engine, context, args, true),
-        "MAXIFS" => conditional_extreme(engine, context, args, false),
-        "PEARSON" => paired_statistic(engine, context, args, PairedStatistic::Correlation),
-        "RSQ" => rsq(engine, context, args),
-        "INTERCEPT" => paired_statistic(engine, context, args, PairedStatistic::Intercept),
-        "COVARIANCE.P" => paired_statistic(engine, context, args, PairedStatistic::Covariance),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        StatisticalFunction::Large => order_statistic(engine, context, args, false),
+        StatisticalFunction::Small => order_statistic(engine, context, args, true),
+        StatisticalFunction::Median => median(engine, context, args),
+        StatisticalFunction::ModeSingle => mode(engine, context, args),
+        StatisticalFunction::Correl => {
+            paired_statistic(engine, context, args, PairedStatistic::Correlation)
+        }
+        StatisticalFunction::Slope => {
+            paired_statistic(engine, context, args, PairedStatistic::Slope)
+        }
+        StatisticalFunction::PercentRankInc => percent_rank(engine, context, args),
+        StatisticalFunction::PercentileInc => percentile(engine, context, args, false),
+        StatisticalFunction::QuartileInc => percentile(engine, context, args, true),
+        StatisticalFunction::RankEq => rank(engine, context, args),
+        StatisticalFunction::NormSDistLegacy => {
+            standard_normal_distribution(engine, context, args, true)
+        }
+        StatisticalFunction::NormSDist => {
+            standard_normal_distribution(engine, context, args, false)
+        }
+        StatisticalFunction::StDevS => sample_variance(engine, context, args, true),
+        StatisticalFunction::VarS => sample_variance(engine, context, args, false),
+        StatisticalFunction::MinIfs => conditional_extreme(engine, context, args, true),
+        StatisticalFunction::MaxIfs => conditional_extreme(engine, context, args, false),
+        StatisticalFunction::Pearson => {
+            paired_statistic(engine, context, args, PairedStatistic::Correlation)
+        }
+        StatisticalFunction::Rsq => rsq(engine, context, args),
+        StatisticalFunction::Intercept => {
+            paired_statistic(engine, context, args, PairedStatistic::Intercept)
+        }
+        StatisticalFunction::CovarianceP => {
+            paired_statistic(engine, context, args, PairedStatistic::Covariance)
+        }
     }
 }
 

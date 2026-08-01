@@ -10,6 +10,7 @@ from ._types import (
     EditReceipt,
     EditReceiptV2,
     ErrorDetails,
+    FunctionCatalogReport,
     FunctionUsageReport,
     RangePage,
     WorkbookChange,
@@ -19,6 +20,8 @@ from ._types import (
 )
 
 SCHEMA_VERSION: int
+
+def function_catalog() -> FunctionCatalogReport: ...
 
 class CellRuneError(Exception):
     code: str

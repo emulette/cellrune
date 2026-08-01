@@ -19,6 +19,7 @@ const {
   normalizeDefinedNameInspection,
   normalizeEditReceipt,
   normalizeEditReceiptV2,
+  normalizeFunctionCatalog,
   normalizeFunctionUsage,
   normalizeRangePage,
   normalizeSummary,
@@ -331,8 +332,13 @@ class Workbook {
   }
 }
 
+function functionCatalog() {
+  return normalizeFunctionCatalog(withSyncErrors(() => native.functionCatalog()));
+}
+
 module.exports = {
   SCHEMA_VERSION: native.schemaVersion(),
   CellRuneError,
   Workbook,
+  functionCatalog,
 };

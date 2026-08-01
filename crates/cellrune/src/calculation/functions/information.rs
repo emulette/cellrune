@@ -2,21 +2,22 @@ use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::{InformationArrayFunction, InformationFunction};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: InformationFunction,
     args: &[Expr],
 ) -> Value {
-    if name == "NA" {
+    if function == InformationFunction::Na {
         return if args.is_empty() {
             Value::Error(ErrorKind::NA)
         } else {
             Value::Error(ErrorKind::Value)
         };
     }
-    if name == "ISREF" {
+    if function == InformationFunction::IsRef {
         return if args.len() == 1 {
             match engine.resolve_reference_value_expr(context, &args[0]) {
                 Ok(reference) => Value::Logical(
@@ -33,7 +34,7 @@ pub(super) fn call(
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let value = if name == "T" {
+    let value = if function == InformationFunction::T {
         match engine.resolve_rect_expr(context, &args[0]) {
             Ok(rect) => engine
                 .read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
@@ -46,13 +47,13 @@ pub(super) fn call(
     if matches!(value, Value::Error(kind) if kind.is_engine_issue()) {
         return value;
     }
-    apply(name, value)
+    apply(function, value)
 }
 
 pub(super) fn call_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: InformationArrayFunction,
     args: &[Expr],
 ) -> Option<Result<Array, ErrorKind>> {
     if args.len() != 1 {
@@ -69,34 +70,36 @@ pub(super) fn call_array(
         data: array
             .data
             .into_iter()
-            .map(|value| apply(name, value))
+            .map(|value| apply(function.scalar_function(), value))
             .collect(),
     }))
 }
 
-fn apply(name: &str, value: Value) -> Value {
+fn apply(function: InformationFunction, value: Value) -> Value {
     if matches!(value, Value::Error(kind) if kind.is_engine_issue()) {
         return value;
     }
-    match name {
-        "ISBLANK" => Value::Logical(matches!(value, Value::Blank)),
-        "ISERR" => Value::Logical(matches!(
+    match function {
+        InformationFunction::IsBlank => Value::Logical(matches!(value, Value::Blank)),
+        InformationFunction::IsErr => Value::Logical(matches!(
             value,
             Value::Error(kind) if kind != ErrorKind::NA
         )),
-        "ISERROR" => Value::Logical(matches!(value, Value::Error(_))),
-        "ISNA" => Value::Logical(matches!(value, Value::Error(ErrorKind::NA))),
-        "ISLOGICAL" => Value::Logical(matches!(value, Value::Logical(_))),
-        "ISNONTEXT" => Value::Logical(!matches!(value, Value::Text(_))),
-        "ISNUMBER" => Value::Logical(matches!(value, Value::Number(_))),
-        "ISTEXT" => Value::Logical(matches!(value, Value::Text(_))),
-        "ISEVEN" => parity(value, false),
-        "ISODD" => parity(value, true),
-        "N" => n(value),
-        "T" => t(value),
-        "TYPE" => value_type(value),
-        "ERROR.TYPE" => error_type(value),
-        _ => Value::Error(ErrorKind::Unsupported),
+        InformationFunction::IsError => Value::Logical(matches!(value, Value::Error(_))),
+        InformationFunction::IsNa => Value::Logical(matches!(value, Value::Error(ErrorKind::NA))),
+        InformationFunction::IsLogical => Value::Logical(matches!(value, Value::Logical(_))),
+        InformationFunction::IsNonText => Value::Logical(!matches!(value, Value::Text(_))),
+        InformationFunction::IsNumber => Value::Logical(matches!(value, Value::Number(_))),
+        InformationFunction::IsText => Value::Logical(matches!(value, Value::Text(_))),
+        InformationFunction::IsEven => parity(value, false),
+        InformationFunction::IsOdd => parity(value, true),
+        InformationFunction::N => n(value),
+        InformationFunction::T => t(value),
+        InformationFunction::Type => value_type(value),
+        InformationFunction::ErrorType => error_type(value),
+        InformationFunction::Na | InformationFunction::IsRef => {
+            unreachable!("NA and ISREF return before value classification")
+        }
     }
 }
 

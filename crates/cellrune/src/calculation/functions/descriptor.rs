@@ -3,6 +3,16 @@ use std::sync::OnceLock;
 
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::ErrorKind;
+use super::contract::CallContract;
+use super::kernel::{
+    AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction,
+    DateAdditionalFunction, DateFunction, DynamicArrayFunction, DynamicFunction,
+    ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
+    FinancialFunction, InformationArrayFunction, InformationFunction, LegacyArrayFunction,
+    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, StatisticalAdditionalFunction,
+    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
+    TrigonometryFunction,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) struct FunctionId(&'static str);
@@ -14,62 +24,19 @@ impl FunctionId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Evaluator {
-    Legacy,
-    Logical,
-    Aggregate,
-    Math,
-    Trigonometry,
-    Combinatorics,
-    SumOfSquares,
-    Engineering,
-    Lookup,
-    Information,
-    Text,
-    TextAdditional,
-    Date,
-    DateAdditional,
-    Dynamic,
-    Array,
-    Statistical,
-    StatisticalAdditional,
-    Financial,
-    FinancialAdditional,
-    Areas,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ArrayEvaluator {
-    Legacy,
-    Information,
-    Elementwise,
-    DynamicHelper,
-    Map,
-    Array,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FunctionResultKind {
+pub(in crate::calculation) enum FunctionResultKind {
     Scalar,
     Array,
     Reference,
     ReferenceOrArray,
-    Dynamic,
+    Callable,
+    Contextual,
 }
 
 impl FunctionResultKind {
-    pub(super) const fn returns_array(self) -> bool {
-        matches!(self, Self::Array | Self::ReferenceOrArray | Self::Dynamic)
-    }
-
     pub(super) const fn returns_reference(self) -> bool {
         matches!(self, Self::Reference | Self::ReferenceOrArray)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ArgumentPolicy {
-    EvaluatorManaged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,20 +112,22 @@ pub(super) enum StoragePrefixPolicy {
     ExcelNamespaces,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct FunctionDescriptor {
     id: FunctionId,
     canonical_name: &'static str,
     aliases: &'static [FunctionAlias],
     evaluator: Evaluator,
     array_evaluator: Option<ArrayEvaluator>,
-    argument_policy: ArgumentPolicy,
+    call_contract: CallContract,
     result_kind: FunctionResultKind,
     sheet_span_policy: SheetSpanPolicy,
     volatility: Volatility,
     dependency_kind: DependencyKind,
     storage_prefix_policy: StoragePrefixPolicy,
     minimum_version: CompatibilityVersion,
+    catalog_array_result: bool,
+    public_catalog: bool,
     official: bool,
 }
 
@@ -170,13 +139,15 @@ impl FunctionDescriptor {
             aliases: &[],
             evaluator,
             array_evaluator: None,
-            argument_policy: ArgumentPolicy::EvaluatorManaged,
+            call_contract: evaluator.call_contract(),
             result_kind: FunctionResultKind::Scalar,
             sheet_span_policy: SheetSpanPolicy::Unsupported,
             volatility: Volatility::None,
             dependency_kind: DependencyKind::Standard,
             storage_prefix_policy: StoragePrefixPolicy::ExcelNamespaces,
             minimum_version: CompatibilityVersion::Baseline,
+            catalog_array_result: false,
+            public_catalog: true,
             official: true,
         }
     }
@@ -189,12 +160,25 @@ impl FunctionDescriptor {
     const fn with_array_evaluator(mut self, evaluator: ArrayEvaluator) -> Self {
         self.array_evaluator = Some(evaluator);
         self.result_kind = FunctionResultKind::Array;
+        self.catalog_array_result = true;
         self
     }
 
-    const fn with_dynamic_result(mut self, evaluator: Option<ArrayEvaluator>) -> Self {
+    const fn with_contextual_result(mut self, evaluator: Option<ArrayEvaluator>) -> Self {
         self.array_evaluator = evaluator;
-        self.result_kind = FunctionResultKind::Dynamic;
+        self.result_kind = FunctionResultKind::Contextual;
+        self.catalog_array_result = true;
+        self
+    }
+
+    const fn with_callable_result(mut self) -> Self {
+        self.result_kind = FunctionResultKind::Callable;
+        self.catalog_array_result = true;
+        self
+    }
+
+    const fn with_catalog_array_result(mut self) -> Self {
+        self.catalog_array_result = true;
         self
     }
 
@@ -206,6 +190,7 @@ impl FunctionDescriptor {
     const fn with_reference_array_result(mut self, evaluator: ArrayEvaluator) -> Self {
         self.array_evaluator = Some(evaluator);
         self.result_kind = FunctionResultKind::ReferenceOrArray;
+        self.catalog_array_result = true;
         self
     }
 
@@ -254,8 +239,8 @@ impl FunctionDescriptor {
         self.array_evaluator
     }
 
-    pub(super) const fn argument_policy(self) -> ArgumentPolicy {
-        self.argument_policy
+    pub(super) const fn call_contract(self) -> CallContract {
+        self.call_contract
     }
 
     pub(super) const fn result_kind(self) -> FunctionResultKind {
@@ -282,14 +267,103 @@ impl FunctionDescriptor {
         self.minimum_version
     }
 
+    pub(super) const fn catalog_returns_array(self) -> bool {
+        self.catalog_array_result
+    }
+
+    pub(super) const fn is_in_public_catalog(self) -> bool {
+        self.public_catalog
+    }
+
     pub(super) const fn is_official(self) -> bool {
         self.official
     }
 }
 
 macro_rules! function {
-    ($name:literal, $evaluator:ident) => {
-        FunctionDescriptor::new($name, Evaluator::$evaluator)
+    ($variant:ident, $name:literal, Legacy) => {
+        FunctionDescriptor::new($name, Evaluator::Legacy(LegacyFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Logical) => {
+        FunctionDescriptor::new($name, Evaluator::Logical(LogicalFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Aggregate) => {
+        FunctionDescriptor::new($name, Evaluator::Aggregate(AggregateFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Math) => {
+        FunctionDescriptor::new($name, Evaluator::Math(MathFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Trigonometry) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::Trigonometry(TrigonometryFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, Combinatorics) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::Combinatorics(CombinatoricsFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, SumOfSquares) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::SumOfSquares(SumOfSquaresFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, Engineering) => {
+        FunctionDescriptor::new($name, Evaluator::Engineering(EngineeringFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Lookup) => {
+        FunctionDescriptor::new($name, Evaluator::Lookup(LookupFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Information) => {
+        FunctionDescriptor::new($name, Evaluator::Information(InformationFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Text) => {
+        FunctionDescriptor::new($name, Evaluator::Text(TextFunction::$variant))
+    };
+    ($variant:ident, $name:literal, TextAdditional) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::TextAdditional(TextAdditionalFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, Date) => {
+        FunctionDescriptor::new($name, Evaluator::Date(DateFunction::$variant))
+    };
+    ($variant:ident, $name:literal, DateAdditional) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::DateAdditional(DateAdditionalFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, Dynamic) => {
+        FunctionDescriptor::new($name, Evaluator::Dynamic(DynamicFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Array) => {
+        FunctionDescriptor::new($name, Evaluator::Array(ArrayFunction::$variant))
+    };
+    ($variant:ident, $name:literal, Statistical) => {
+        FunctionDescriptor::new($name, Evaluator::Statistical(StatisticalFunction::$variant))
+    };
+    ($variant:ident, $name:literal, StatisticalAdditional) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::StatisticalAdditional(StatisticalAdditionalFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, Financial) => {
+        FunctionDescriptor::new($name, Evaluator::Financial(FinancialFunction::$variant))
+    };
+    ($variant:ident, $name:literal, FinancialAdditional) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::FinancialAdditional(FinancialAdditionalFunction::$variant),
+        )
+    };
+    (Areas, "AREAS", Areas) => {
+        FunctionDescriptor::new("AREAS", Evaluator::Areas)
     };
 }
 
@@ -301,309 +375,355 @@ const REF_ON_SHEET_SPAN: SheetSpanPolicy = SheetSpanPolicy::ReturnExcelError(Err
 // flags beside each canonical registration so evaluation, capability analysis and catalog
 // serialization cannot drift into independent name lists.
 const DESCRIPTORS: &[FunctionDescriptor] = &[
-    function!("IF", Legacy).with_array_evaluator(ArrayEvaluator::Legacy),
-    function!("AND", Legacy),
-    function!("IFERROR", Legacy),
-    function!("LOWER", Legacy),
-    function!("TEXT", Legacy),
-    function!("COUNTIF", Legacy).with_array_evaluator(ArrayEvaluator::Legacy),
-    function!("COUNTIFS", Legacy).with_array_evaluator(ArrayEvaluator::Legacy),
-    function!("SUMPRODUCT", Legacy),
-    function!("INDEX", Legacy)
-        .with_reference_array_result(ArrayEvaluator::Legacy)
+    function!(If, "IF", Legacy)
+        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::If)),
+    function!(And, "AND", Legacy),
+    function!(IfError, "IFERROR", Legacy),
+    function!(Lower, "LOWER", Legacy),
+    function!(Text, "TEXT", Legacy),
+    function!(CountIf, "COUNTIF", Legacy)
+        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::CountIf)),
+    function!(CountIfs, "COUNTIFS", Legacy)
+        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::CountIfs)),
+    function!(SumProduct, "SUMPRODUCT", Legacy),
+    function!(Index, "INDEX", Legacy)
+        .with_reference_array_result(ArrayEvaluator::Legacy(LegacyArrayFunction::Index))
         .with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
-    function!("MATCH", Legacy),
-    function!("__XLUDF.DUMMYFUNCTION", Legacy).unofficial(),
-    function!("TRUE", Logical),
-    function!("FALSE", Logical),
-    function!("NOT", Logical),
-    function!("OR", Logical),
-    function!("XOR", Logical),
-    function!("IFNA", Logical),
-    function!("IFS", Logical),
-    function!("SWITCH", Logical),
-    function!("SUM", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("AVERAGE", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("MIN", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("MAX", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("COUNT", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("COUNTA", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("COUNTBLANK", Aggregate),
-    function!("PRODUCT", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("SUBTOTAL", Aggregate),
-    function!("SUMIF", Aggregate).with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
-    function!("SUMIFS", Aggregate),
-    function!("AVERAGEIF", Aggregate)
+    function!(Match, "MATCH", Legacy),
+    function!(DummyFunction, "__XLUDF.DUMMYFUNCTION", Legacy).unofficial(),
+    function!(True, "TRUE", Logical),
+    function!(False, "FALSE", Logical),
+    function!(Not, "NOT", Logical),
+    function!(Or, "OR", Logical),
+    function!(Xor, "XOR", Logical),
+    function!(IfNa, "IFNA", Logical),
+    function!(Ifs, "IFS", Logical),
+    function!(Switch, "SWITCH", Logical),
+    function!(Sum, "SUM", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Average, "AVERAGE", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Min, "MIN", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Max, "MAX", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Count, "COUNT", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(CountA, "COUNTA", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(CountBlank, "COUNTBLANK", Aggregate),
+    function!(Product, "PRODUCT", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Subtotal, "SUBTOTAL", Aggregate),
+    function!(SumIf, "SUMIF", Aggregate)
         .with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
-    function!("AVERAGEIFS", Aggregate),
-    function!("ABS", Math).with_array_evaluator(ArrayEvaluator::Elementwise),
-    function!("BASE", Math),
-    function!("CEILING", Math),
-    function!("CEILING.MATH", Math),
-    function!("CEILING.PRECISE", Math),
-    function!("DECIMAL", Math),
-    function!("EVEN", Math),
-    function!("EXP", Math),
-    function!("FLOOR", Math),
-    function!("FLOOR.MATH", Math),
-    function!("FLOOR.PRECISE", Math),
-    function!("INT", Math),
-    function!("ISO.CEILING", Math),
-    function!("LN", Math),
-    function!("LOG", Math),
-    function!("LOG10", Math),
-    function!("MOD", Math),
-    function!("MROUND", Math),
-    function!("ODD", Math),
-    function!("PI", Math),
-    function!("POWER", Math),
-    function!("QUOTIENT", Math),
-    function!("ROUND", Math),
-    function!("ROUNDDOWN", Math),
-    function!("ROUNDUP", Math),
-    function!("SERIESSUM", Math),
-    function!("SIGN", Math),
-    function!("SQRT", Math),
-    function!("SQRTPI", Math),
-    function!("TRUNC", Math),
-    function!("ACOS", Trigonometry),
-    function!("ACOSH", Trigonometry),
-    function!("ACOT", Trigonometry),
-    function!("ACOTH", Trigonometry),
-    function!("ASIN", Trigonometry),
-    function!("ASINH", Trigonometry),
-    function!("ATAN", Trigonometry),
-    function!("ATAN2", Trigonometry),
-    function!("ATANH", Trigonometry),
-    function!("COS", Trigonometry),
-    function!("COSH", Trigonometry),
-    function!("COT", Trigonometry),
-    function!("COTH", Trigonometry),
-    function!("CSC", Trigonometry),
-    function!("CSCH", Trigonometry),
-    function!("DEGREES", Trigonometry),
-    function!("RADIANS", Trigonometry),
-    function!("SEC", Trigonometry),
-    function!("SECH", Trigonometry),
-    function!("SIN", Trigonometry),
-    function!("SINH", Trigonometry),
-    function!("TAN", Trigonometry),
-    function!("TANH", Trigonometry),
-    function!("COMBIN", Combinatorics),
-    function!("COMBINA", Combinatorics),
-    function!("FACT", Combinatorics),
-    function!("FACTDOUBLE", Combinatorics),
-    function!("GCD", Combinatorics),
-    function!("LCM", Combinatorics),
-    function!("MULTINOMIAL", Combinatorics),
-    function!("PERMUT", Combinatorics),
-    function!("PERMUTATIONA", Combinatorics),
-    function!("SUMSQ", SumOfSquares),
-    function!("SUMX2MY2", SumOfSquares),
-    function!("SUMX2PY2", SumOfSquares),
-    function!("SUMXMY2", SumOfSquares),
-    function!("BIN2DEC", Engineering),
-    function!("BIN2HEX", Engineering),
-    function!("BIN2OCT", Engineering),
-    function!("BITAND", Engineering),
-    function!("BITLSHIFT", Engineering),
-    function!("BITOR", Engineering),
-    function!("BITRSHIFT", Engineering),
-    function!("BITXOR", Engineering),
-    function!("DEC2BIN", Engineering),
-    function!("DEC2HEX", Engineering),
-    function!("DEC2OCT", Engineering),
-    function!("DELTA", Engineering),
-    function!("ERF", Engineering),
-    function!("ERF.PRECISE", Engineering),
-    function!("ERFC", Engineering),
-    function!("ERFC.PRECISE", Engineering),
-    function!("GESTEP", Engineering),
-    function!("HEX2BIN", Engineering),
-    function!("HEX2DEC", Engineering),
-    function!("HEX2OCT", Engineering),
-    function!("OCT2BIN", Engineering),
-    function!("OCT2DEC", Engineering),
-    function!("OCT2HEX", Engineering),
-    function!("ADDRESS", Lookup),
-    function!("CHOOSE", Lookup),
-    function!("COLUMN", Lookup),
-    function!("COLUMNS", Lookup),
-    function!("HLOOKUP", Lookup),
-    function!("HYPERLINK", Lookup),
-    function!("INDIRECT", Lookup)
+    function!(SumIfs, "SUMIFS", Aggregate),
+    function!(AverageIf, "AVERAGEIF", Aggregate)
+        .with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
+    function!(AverageIfs, "AVERAGEIFS", Aggregate),
+    function!(Abs, "ABS", Math)
+        .with_array_evaluator(ArrayEvaluator::Elementwise(ElementwiseArrayFunction::Abs)),
+    function!(Base, "BASE", Math),
+    function!(Ceiling, "CEILING", Math),
+    function!(CeilingMath, "CEILING.MATH", Math),
+    function!(CeilingPrecise, "CEILING.PRECISE", Math),
+    function!(Decimal, "DECIMAL", Math),
+    function!(Even, "EVEN", Math),
+    function!(Exp, "EXP", Math),
+    function!(Floor, "FLOOR", Math),
+    function!(FloorMath, "FLOOR.MATH", Math),
+    function!(FloorPrecise, "FLOOR.PRECISE", Math),
+    function!(Int, "INT", Math),
+    function!(IsoCeiling, "ISO.CEILING", Math),
+    function!(Ln, "LN", Math),
+    function!(Log, "LOG", Math),
+    function!(Log10, "LOG10", Math),
+    function!(Mod, "MOD", Math),
+    function!(MRound, "MROUND", Math),
+    function!(Odd, "ODD", Math),
+    function!(Pi, "PI", Math),
+    function!(Power, "POWER", Math),
+    function!(Quotient, "QUOTIENT", Math),
+    function!(Round, "ROUND", Math),
+    function!(RoundDown, "ROUNDDOWN", Math),
+    function!(RoundUp, "ROUNDUP", Math),
+    function!(SeriesSum, "SERIESSUM", Math),
+    function!(Sign, "SIGN", Math),
+    function!(Sqrt, "SQRT", Math),
+    function!(SqrtPi, "SQRTPI", Math),
+    function!(Trunc, "TRUNC", Math),
+    function!(Acos, "ACOS", Trigonometry),
+    function!(Acosh, "ACOSH", Trigonometry),
+    function!(Acot, "ACOT", Trigonometry),
+    function!(Acoth, "ACOTH", Trigonometry),
+    function!(Asin, "ASIN", Trigonometry),
+    function!(Asinh, "ASINH", Trigonometry),
+    function!(Atan, "ATAN", Trigonometry),
+    function!(Atan2, "ATAN2", Trigonometry),
+    function!(Atanh, "ATANH", Trigonometry),
+    function!(Cos, "COS", Trigonometry),
+    function!(Cosh, "COSH", Trigonometry),
+    function!(Cot, "COT", Trigonometry),
+    function!(Coth, "COTH", Trigonometry),
+    function!(Csc, "CSC", Trigonometry),
+    function!(Csch, "CSCH", Trigonometry),
+    function!(Degrees, "DEGREES", Trigonometry),
+    function!(Radians, "RADIANS", Trigonometry),
+    function!(Sec, "SEC", Trigonometry),
+    function!(Sech, "SECH", Trigonometry),
+    function!(Sin, "SIN", Trigonometry),
+    function!(Sinh, "SINH", Trigonometry),
+    function!(Tan, "TAN", Trigonometry),
+    function!(Tanh, "TANH", Trigonometry),
+    function!(Combin, "COMBIN", Combinatorics),
+    function!(Combina, "COMBINA", Combinatorics),
+    function!(Fact, "FACT", Combinatorics),
+    function!(FactDouble, "FACTDOUBLE", Combinatorics),
+    function!(Gcd, "GCD", Combinatorics),
+    function!(Lcm, "LCM", Combinatorics),
+    function!(Multinomial, "MULTINOMIAL", Combinatorics),
+    function!(Permut, "PERMUT", Combinatorics),
+    function!(PermutationA, "PERMUTATIONA", Combinatorics),
+    function!(SumSq, "SUMSQ", SumOfSquares),
+    function!(SumX2My2, "SUMX2MY2", SumOfSquares),
+    function!(SumX2Py2, "SUMX2PY2", SumOfSquares),
+    function!(SumXMy2, "SUMXMY2", SumOfSquares),
+    function!(Bin2Dec, "BIN2DEC", Engineering),
+    function!(Bin2Hex, "BIN2HEX", Engineering),
+    function!(Bin2Oct, "BIN2OCT", Engineering),
+    function!(BitAnd, "BITAND", Engineering),
+    function!(BitLShift, "BITLSHIFT", Engineering),
+    function!(BitOr, "BITOR", Engineering),
+    function!(BitRShift, "BITRSHIFT", Engineering),
+    function!(BitXor, "BITXOR", Engineering),
+    function!(Dec2Bin, "DEC2BIN", Engineering),
+    function!(Dec2Hex, "DEC2HEX", Engineering),
+    function!(Dec2Oct, "DEC2OCT", Engineering),
+    function!(Delta, "DELTA", Engineering),
+    function!(Erf, "ERF", Engineering),
+    function!(ErfPrecise, "ERF.PRECISE", Engineering),
+    function!(Erfc, "ERFC", Engineering),
+    function!(ErfcPrecise, "ERFC.PRECISE", Engineering),
+    function!(GeStep, "GESTEP", Engineering),
+    function!(Hex2Bin, "HEX2BIN", Engineering),
+    function!(Hex2Dec, "HEX2DEC", Engineering),
+    function!(Hex2Oct, "HEX2OCT", Engineering),
+    function!(Oct2Bin, "OCT2BIN", Engineering),
+    function!(Oct2Dec, "OCT2DEC", Engineering),
+    function!(Oct2Hex, "OCT2HEX", Engineering),
+    function!(Address, "ADDRESS", Lookup),
+    function!(Choose, "CHOOSE", Lookup),
+    function!(Column, "COLUMN", Lookup),
+    function!(Columns, "COLUMNS", Lookup),
+    function!(HLookup, "HLOOKUP", Lookup),
+    function!(Hyperlink, "HYPERLINK", Lookup),
+    function!(Indirect, "INDIRECT", Lookup)
         .with_reference_result()
         .with_dependency_kind(DependencyKind::DynamicReference(
             DynamicReferenceKind::Indirect,
         )),
-    function!("LOOKUP", Lookup),
-    function!("OFFSET", Lookup)
+    function!(Lookup, "LOOKUP", Lookup),
+    function!(Offset, "OFFSET", Lookup)
         .with_reference_result()
         .with_sheet_span_policy(REF_ON_SHEET_SPAN)
         .with_dependency_kind(DependencyKind::DynamicReference(
             DynamicReferenceKind::Offset,
         )),
-    function!("ROWS", Lookup),
-    function!("ROW", Lookup),
-    function!("VLOOKUP", Lookup).with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
-    function!("XLOOKUP", Lookup),
-    function!("ERROR.TYPE", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISBLANK", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISERR", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISERROR", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISEVEN", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISLOGICAL", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISNA", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISNONTEXT", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISNUMBER", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISODD", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("ISREF", Information)
+    function!(Rows, "ROWS", Lookup),
+    function!(Row, "ROW", Lookup),
+    function!(VLookup, "VLOOKUP", Lookup).with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
+    function!(XLookup, "XLOOKUP", Lookup),
+    function!(ErrorType, "ERROR.TYPE", Information).with_array_evaluator(
+        ArrayEvaluator::Information(InformationArrayFunction::ErrorType),
+    ),
+    function!(IsBlank, "ISBLANK", Information).with_array_evaluator(ArrayEvaluator::Information(
+        InformationArrayFunction::IsBlank,
+    )),
+    function!(IsErr, "ISERR", Information)
+        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::IsErr)),
+    function!(IsError, "ISERROR", Information).with_array_evaluator(ArrayEvaluator::Information(
+        InformationArrayFunction::IsError,
+    )),
+    function!(IsEven, "ISEVEN", Information).with_array_evaluator(ArrayEvaluator::Information(
+        InformationArrayFunction::IsEven,
+    )),
+    function!(IsLogical, "ISLOGICAL", Information).with_array_evaluator(
+        ArrayEvaluator::Information(InformationArrayFunction::IsLogical),
+    ),
+    function!(IsNa, "ISNA", Information)
+        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::IsNa)),
+    function!(IsNonText, "ISNONTEXT", Information).with_array_evaluator(
+        ArrayEvaluator::Information(InformationArrayFunction::IsNonText),
+    ),
+    function!(IsNumber, "ISNUMBER", Information).with_array_evaluator(ArrayEvaluator::Information(
+        InformationArrayFunction::IsNumber,
+    )),
+    function!(IsOdd, "ISODD", Information)
+        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::IsOdd)),
+    function!(IsRef, "ISREF", Information)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::Predicate,
         ))
         .with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
-    function!("ISTEXT", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("N", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("NA", Information),
-    function!("T", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("TYPE", Information).with_array_evaluator(ArrayEvaluator::Information),
-    function!("CONCAT", Text),
-    function!("EXACT", Text),
-    function!("FIND", Text),
-    function!("LEFT", Text),
-    function!("LEN", Text),
-    function!("MID", Text),
-    function!("PROPER", Text),
-    function!("REPLACE", Text),
-    function!("REPT", Text),
-    function!("RIGHT", Text),
-    function!("SEARCH", Text),
-    function!("SUBSTITUTE", Text),
-    function!("TEXTJOIN", Text),
-    function!("TRIM", Text),
-    function!("UPPER", Text),
-    function!("CHAR", TextAdditional),
-    function!("CLEAN", TextAdditional),
-    function!("CONCATENATE", TextAdditional),
-    function!("DOLLAR", TextAdditional),
-    function!("TEXTAFTER", TextAdditional),
-    function!("TEXTBEFORE", TextAdditional),
-    function!("UNICHAR", TextAdditional),
-    function!("UNICODE", TextAdditional),
-    function!("VALUE", TextAdditional),
-    function!("VALUETOTEXT", TextAdditional),
-    function!("DATE", Date),
-    function!("DATEDIF", Date),
-    function!("DAY", Date),
-    function!("EDATE", Date),
-    function!("EOMONTH", Date),
-    function!("MONTH", Date),
-    function!("NETWORKDAYS", Date),
-    function!("NOW", Date).with_volatility(Volatility::Now),
-    function!("TODAY", Date).with_volatility(Volatility::Today),
-    function!("WEEKDAY", Date),
-    function!("WORKDAY", Date),
-    function!("YEAR", Date),
-    function!("YEARFRAC", Date),
-    function!("DAYS", DateAdditional),
-    function!("DAYS360", DateAdditional),
-    function!("HOUR", DateAdditional),
-    function!("ISOWEEKNUM", DateAdditional),
-    function!("MINUTE", DateAdditional),
-    function!("SECOND", DateAdditional),
-    function!("TIME", DateAdditional),
-    function!("WEEKNUM", DateAdditional),
-    function!("BYCOL", Dynamic).with_dynamic_result(Some(ArrayEvaluator::DynamicHelper)),
-    function!("BYROW", Dynamic).with_dynamic_result(Some(ArrayEvaluator::DynamicHelper)),
-    function!("ISOMITTED", Dynamic).with_dynamic_result(None),
-    function!("LAMBDA", Dynamic).with_dynamic_result(None),
-    function!("LET", Dynamic).with_dynamic_result(None),
-    function!("MAKEARRAY", Dynamic).with_dynamic_result(Some(ArrayEvaluator::DynamicHelper)),
-    function!("MAP", Dynamic).with_dynamic_result(Some(ArrayEvaluator::Map)),
-    function!("REDUCE", Dynamic).with_dynamic_result(Some(ArrayEvaluator::DynamicHelper)),
-    function!("SCAN", Dynamic).with_dynamic_result(Some(ArrayEvaluator::DynamicHelper)),
-    function!("CHOOSECOLS", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("CHOOSEROWS", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("DROP", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("FILTER", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("HSTACK", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("MMULT", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("SEQUENCE", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("SORT", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("TAKE", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("TRANSPOSE", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("UNIQUE", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("VSTACK", Array).with_array_evaluator(ArrayEvaluator::Array),
-    function!("CORREL", Statistical),
-    function!("COVARIANCE.P", Statistical).with_aliases(&[FunctionAlias::official("COVAR")]),
-    function!("INTERCEPT", Statistical),
-    function!("LARGE", Statistical),
-    function!("MAXIFS", Statistical),
-    function!("MEDIAN", Statistical),
-    function!("MINIFS", Statistical),
-    function!("MODE.SNGL", Statistical).with_aliases(&[FunctionAlias::official("MODE")]),
-    function!("NORMSDIST", Statistical),
-    function!("NORM.S.DIST", Statistical),
-    function!("PEARSON", Statistical),
-    function!("PERCENTILE.INC", Statistical).with_aliases(&[FunctionAlias::official("PERCENTILE")]),
-    function!("PERCENTRANK.INC", Statistical)
+    function!(IsText, "ISTEXT", Information).with_array_evaluator(ArrayEvaluator::Information(
+        InformationArrayFunction::IsText,
+    )),
+    function!(N, "N", Information)
+        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::N)),
+    function!(Na, "NA", Information),
+    function!(T, "T", Information)
+        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::T)),
+    function!(Type, "TYPE", Information)
+        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::Type)),
+    function!(Concat, "CONCAT", Text),
+    function!(Exact, "EXACT", Text),
+    function!(Find, "FIND", Text),
+    function!(Left, "LEFT", Text),
+    function!(Len, "LEN", Text),
+    function!(Mid, "MID", Text),
+    function!(Proper, "PROPER", Text),
+    function!(Replace, "REPLACE", Text),
+    function!(Rept, "REPT", Text),
+    function!(Right, "RIGHT", Text),
+    function!(Search, "SEARCH", Text),
+    function!(Substitute, "SUBSTITUTE", Text),
+    function!(TextJoin, "TEXTJOIN", Text),
+    function!(Trim, "TRIM", Text),
+    function!(Upper, "UPPER", Text),
+    function!(Char, "CHAR", TextAdditional),
+    function!(Clean, "CLEAN", TextAdditional),
+    function!(Concatenate, "CONCATENATE", TextAdditional),
+    function!(Dollar, "DOLLAR", TextAdditional),
+    function!(TextAfter, "TEXTAFTER", TextAdditional),
+    function!(TextBefore, "TEXTBEFORE", TextAdditional),
+    function!(UniChar, "UNICHAR", TextAdditional),
+    function!(Unicode, "UNICODE", TextAdditional),
+    function!(Value, "VALUE", TextAdditional),
+    function!(ValueToText, "VALUETOTEXT", TextAdditional),
+    function!(Date, "DATE", Date),
+    function!(DateDif, "DATEDIF", Date),
+    function!(Day, "DAY", Date),
+    function!(EDate, "EDATE", Date),
+    function!(Eomonth, "EOMONTH", Date),
+    function!(Month, "MONTH", Date),
+    function!(NetworkDays, "NETWORKDAYS", Date),
+    function!(Now, "NOW", Date).with_volatility(Volatility::Now),
+    function!(Today, "TODAY", Date).with_volatility(Volatility::Today),
+    function!(Weekday, "WEEKDAY", Date),
+    function!(Workday, "WORKDAY", Date),
+    function!(Year, "YEAR", Date),
+    function!(YearFrac, "YEARFRAC", Date),
+    function!(Days, "DAYS", DateAdditional),
+    function!(Days360, "DAYS360", DateAdditional),
+    function!(Hour, "HOUR", DateAdditional),
+    function!(IsoWeekNum, "ISOWEEKNUM", DateAdditional),
+    function!(Minute, "MINUTE", DateAdditional),
+    function!(Second, "SECOND", DateAdditional),
+    function!(Time, "TIME", DateAdditional),
+    function!(WeekNum, "WEEKNUM", DateAdditional),
+    function!(ByCol, "BYCOL", Dynamic)
+        .with_array_evaluator(ArrayEvaluator::Dynamic(DynamicArrayFunction::ByCol)),
+    function!(ByRow, "BYROW", Dynamic)
+        .with_array_evaluator(ArrayEvaluator::Dynamic(DynamicArrayFunction::ByRow)),
+    function!(IsOmitted, "ISOMITTED", Dynamic).with_catalog_array_result(),
+    function!(Lambda, "LAMBDA", Dynamic).with_callable_result(),
+    function!(Let, "LET", Dynamic).with_contextual_result(None),
+    function!(MakeArray, "MAKEARRAY", Dynamic)
+        .with_array_evaluator(ArrayEvaluator::Dynamic(DynamicArrayFunction::MakeArray)),
+    function!(Map, "MAP", Dynamic).with_array_evaluator(ArrayEvaluator::Map),
+    function!(Reduce, "REDUCE", Dynamic)
+        .with_contextual_result(Some(ArrayEvaluator::Dynamic(DynamicArrayFunction::Reduce))),
+    function!(Scan, "SCAN", Dynamic)
+        .with_array_evaluator(ArrayEvaluator::Dynamic(DynamicArrayFunction::Scan)),
+    function!(ChooseCols, "CHOOSECOLS", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::ChooseCols)),
+    function!(ChooseRows, "CHOOSEROWS", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::ChooseRows)),
+    function!(Drop, "DROP", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Drop)),
+    function!(Filter, "FILTER", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Filter)),
+    function!(HStack, "HSTACK", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::HStack)),
+    function!(MMult, "MMULT", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MMult)),
+    function!(Sequence, "SEQUENCE", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sequence)),
+    function!(Sort, "SORT", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sort)),
+    function!(Take, "TAKE", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Take)),
+    function!(Transpose, "TRANSPOSE", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Transpose)),
+    function!(Unique, "UNIQUE", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Unique)),
+    function!(VStack, "VSTACK", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::VStack)),
+    function!(Correl, "CORREL", Statistical),
+    function!(CovarianceP, "COVARIANCE.P", Statistical)
+        .with_aliases(&[FunctionAlias::official("COVAR")]),
+    function!(Intercept, "INTERCEPT", Statistical),
+    function!(Large, "LARGE", Statistical),
+    function!(MaxIfs, "MAXIFS", Statistical),
+    function!(Median, "MEDIAN", Statistical),
+    function!(MinIfs, "MINIFS", Statistical),
+    function!(ModeSingle, "MODE.SNGL", Statistical)
+        .with_aliases(&[FunctionAlias::official("MODE")]),
+    function!(NormSDistLegacy, "NORMSDIST", Statistical),
+    function!(NormSDist, "NORM.S.DIST", Statistical),
+    function!(Pearson, "PEARSON", Statistical),
+    function!(PercentileInc, "PERCENTILE.INC", Statistical)
+        .with_aliases(&[FunctionAlias::official("PERCENTILE")]),
+    function!(PercentRankInc, "PERCENTRANK.INC", Statistical)
         .with_aliases(&[FunctionAlias::official("PERCENTRANK")]),
-    function!("QUARTILE.INC", Statistical).with_aliases(&[FunctionAlias::official("QUARTILE")]),
-    function!("RANK.EQ", Statistical).with_aliases(&[FunctionAlias::official("RANK")]),
-    function!("RSQ", Statistical),
-    function!("SLOPE", Statistical),
-    function!("SMALL", Statistical),
-    function!("STDEV.S", Statistical)
+    function!(QuartileInc, "QUARTILE.INC", Statistical)
+        .with_aliases(&[FunctionAlias::official("QUARTILE")]),
+    function!(RankEq, "RANK.EQ", Statistical).with_aliases(&[FunctionAlias::official("RANK")]),
+    function!(Rsq, "RSQ", Statistical),
+    function!(Slope, "SLOPE", Statistical),
+    function!(Small, "SMALL", Statistical),
+    function!(StDevS, "STDEV.S", Statistical)
         .with_aliases(&[FunctionAlias::official("STDEV")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("VAR.S", Statistical)
+    function!(VarS, "VAR.S", Statistical)
         .with_aliases(&[FunctionAlias::official("VAR")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("AVEDEV", StatisticalAdditional),
-    function!("AVERAGEA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("DEVSQ", StatisticalAdditional),
-    function!("EXPON.DIST", StatisticalAdditional)
+    function!(AveDev, "AVEDEV", StatisticalAdditional),
+    function!(AverageA, "AVERAGEA", StatisticalAdditional)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(DevSq, "DEVSQ", StatisticalAdditional),
+    function!(ExponDist, "EXPON.DIST", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("EXPONDIST")]),
-    function!("GAUSS", StatisticalAdditional),
-    function!("GEOMEAN", StatisticalAdditional),
-    function!("HARMEAN", StatisticalAdditional),
-    function!("MAXA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("MINA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("NORM.DIST", StatisticalAdditional)
+    function!(Gauss, "GAUSS", StatisticalAdditional),
+    function!(GeoMean, "GEOMEAN", StatisticalAdditional),
+    function!(HarMean, "HARMEAN", StatisticalAdditional),
+    function!(MaxA, "MAXA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(MinA, "MINA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(NormDist, "NORM.DIST", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("NORMDIST")]),
-    function!("PHI", StatisticalAdditional),
-    function!("POISSON.DIST", StatisticalAdditional)
+    function!(Phi, "PHI", StatisticalAdditional),
+    function!(PoissonDist, "POISSON.DIST", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("POISSON")]),
-    function!("STANDARDIZE", StatisticalAdditional),
-    function!("STDEV.P", StatisticalAdditional)
+    function!(Standardize, "STANDARDIZE", StatisticalAdditional),
+    function!(StDevP, "STDEV.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("STDEVP")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("VAR.P", StatisticalAdditional)
+    function!(VarP, "VAR.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("VARP")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!("DB", Financial),
-    function!("FV", Financial),
-    function!("IPMT", Financial),
-    function!("IRR", Financial),
-    function!("NPER", Financial),
-    function!("NPV", Financial),
-    function!("PMT", Financial),
-    function!("PPMT", Financial),
-    function!("PV", Financial),
-    function!("RATE", Financial),
-    function!("SLN", Financial),
-    function!("SYD", Financial),
-    function!("XIRR", Financial),
-    function!("DOLLARDE", FinancialAdditional),
-    function!("DOLLARFR", FinancialAdditional),
-    function!("EFFECT", FinancialAdditional),
-    function!("FVSCHEDULE", FinancialAdditional),
-    function!("ISPMT", FinancialAdditional),
-    function!("MIRR", FinancialAdditional),
-    function!("NOMINAL", FinancialAdditional),
-    function!("PDURATION", FinancialAdditional),
-    function!("RRI", FinancialAdditional),
-    function!("AREAS", Areas)
+    function!(Db, "DB", Financial),
+    function!(Fv, "FV", Financial),
+    function!(Ipmt, "IPMT", Financial),
+    function!(Irr, "IRR", Financial),
+    function!(Nper, "NPER", Financial),
+    function!(Npv, "NPV", Financial),
+    function!(Pmt, "PMT", Financial),
+    function!(Ppmt, "PPMT", Financial),
+    function!(Pv, "PV", Financial),
+    function!(Rate, "RATE", Financial),
+    function!(Sln, "SLN", Financial),
+    function!(Syd, "SYD", Financial),
+    function!(Xirr, "XIRR", Financial),
+    function!(DollarDe, "DOLLARDE", FinancialAdditional),
+    function!(DollarFr, "DOLLARFR", FinancialAdditional),
+    function!(Effect, "EFFECT", FinancialAdditional),
+    function!(FvSchedule, "FVSCHEDULE", FinancialAdditional),
+    function!(IsPmt, "ISPMT", FinancialAdditional),
+    function!(Mirr, "MIRR", FinancialAdditional),
+    function!(Nominal, "NOMINAL", FinancialAdditional),
+    function!(PDuration, "PDURATION", FinancialAdditional),
+    function!(Rri, "RRI", FinancialAdditional),
+    function!(Areas, "AREAS", Areas)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::AreaCount,
         ))
@@ -709,6 +829,8 @@ fn strip_storage_prefixes(mut name: &str) -> &str {
 mod tests {
     use std::collections::BTreeSet;
 
+    use sha2::{Digest, Sha256};
+
     use super::*;
 
     #[test]
@@ -739,6 +861,50 @@ mod tests {
     }
 
     #[test]
+    fn every_typed_evaluator_is_registered_exactly_once() {
+        let registered = DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.evaluator())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(registered.len(), DESCRIPTORS.len());
+        assert_eq!(
+            registered,
+            Evaluator::all().into_iter().collect::<BTreeSet<_>>()
+        );
+
+        let registered_arrays = DESCRIPTORS
+            .iter()
+            .filter_map(|descriptor| descriptor.array_evaluator())
+            .collect::<BTreeSet<_>>();
+        let registered_array_count = DESCRIPTORS
+            .iter()
+            .filter(|descriptor| descriptor.array_evaluator().is_some())
+            .count();
+        assert_eq!(registered_arrays.len(), registered_array_count);
+        assert_eq!(
+            registered_arrays,
+            ArrayEvaluator::all().into_iter().collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn migrated_v0_1_9_semantic_registry_is_byte_exact() {
+        let mut digest = Sha256::new();
+        for descriptor in DESCRIPTORS {
+            digest.update(format!("{descriptor:?}\n").as_bytes());
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            "c396e3d1ff50d13e0c5771c52e18a2e00d9399664be154eda0adbc677f5e4853"
+        );
+    }
+
+    #[test]
     fn storage_and_legacy_spellings_resolve_to_canonical_descriptors() {
         assert_eq!(normalize_name("_xlfn._xlws.FILTER"), "FILTER");
         assert_eq!(normalize_name("_xludf._xlfn.COVAR"), "COVARIANCE.P");
@@ -755,7 +921,8 @@ mod tests {
         let areas = descriptor("AREAS").expect("AREAS descriptor");
         assert_eq!(areas.canonical_name(), "AREAS");
         assert_eq!(areas.evaluator(), Evaluator::Areas);
-        assert_eq!(areas.argument_policy(), ArgumentPolicy::EvaluatorManaged);
+        assert!(areas.call_contract().arity().accepts(1));
+        assert!(!areas.call_contract().arity().accepts(0));
         assert_eq!(areas.result_kind(), FunctionResultKind::Scalar);
         assert_eq!(areas.minimum_version(), CompatibilityVersion::V0_1_9);
         assert_eq!(
@@ -794,5 +961,15 @@ mod tests {
                 "{alias}",
             );
         }
+
+        let is_omitted = descriptor("ISOMITTED").expect("ISOMITTED descriptor");
+        assert_eq!(is_omitted.result_kind(), FunctionResultKind::Scalar);
+        assert!(is_omitted.catalog_returns_array());
+        let lambda = descriptor("LAMBDA").expect("LAMBDA descriptor");
+        assert_eq!(lambda.result_kind(), FunctionResultKind::Callable);
+        assert!(lambda.catalog_returns_array());
+        let let_function = descriptor("LET").expect("LET descriptor");
+        assert_eq!(let_function.result_kind(), FunctionResultKind::Contextual);
+        assert!(let_function.catalog_returns_array());
     }
 }

@@ -2,61 +2,71 @@ use super::super::ast::Expr;
 use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::kernel::MathFunction;
 use super::util::{collect_argument_values, required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: MathFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "ABS" => unary(engine, context, args, f64::abs),
-        "INT" => unary(engine, context, args, f64::floor),
-        "SIGN" => unary(engine, context, args, excel_sign),
-        "EXP" => unary(engine, context, args, f64::exp),
-        "LN" => unary_checked(engine, context, args, |number| {
+    match function {
+        MathFunction::Abs => unary(engine, context, args, f64::abs),
+        MathFunction::Int => unary(engine, context, args, f64::floor),
+        MathFunction::Sign => unary(engine, context, args, excel_sign),
+        MathFunction::Exp => unary(engine, context, args, f64::exp),
+        MathFunction::Ln => unary_checked(engine, context, args, |number| {
             (number > 0.0).then(|| number.ln())
         }),
-        "SQRT" => unary_checked(engine, context, args, |number| {
+        MathFunction::Sqrt => unary_checked(engine, context, args, |number| {
             (number >= 0.0).then(|| number.sqrt())
         }),
-        "ROUND" => round(engine, context, args, RoundMode::Nearest),
-        "ROUNDDOWN" | "TRUNC" => round(engine, context, args, RoundMode::TowardZero),
-        "ROUNDUP" => round(engine, context, args, RoundMode::AwayFromZero),
-        "MOD" => checked_binary(engine, context, args, excel_mod),
-        "POWER" => checked_binary(engine, context, args, excel_power),
-        "CEILING" => multiple(engine, context, args, true),
-        "FLOOR" => multiple(engine, context, args, false),
-        "EVEN" => parity_round(engine, context, args, false),
-        "ODD" => parity_round(engine, context, args, true),
-        "LOG" => logarithm(engine, context, args),
-        "LOG10" => unary_checked(engine, context, args, |number| {
+        MathFunction::Round => round(engine, context, args, RoundMode::Nearest),
+        MathFunction::RoundDown | MathFunction::Trunc => {
+            round(engine, context, args, RoundMode::TowardZero)
+        }
+        MathFunction::RoundUp => round(engine, context, args, RoundMode::AwayFromZero),
+        MathFunction::Mod => checked_binary(engine, context, args, excel_mod),
+        MathFunction::Power => checked_binary(engine, context, args, excel_power),
+        MathFunction::Ceiling => multiple(engine, context, args, true),
+        MathFunction::Floor => multiple(engine, context, args, false),
+        MathFunction::Even => parity_round(engine, context, args, false),
+        MathFunction::Odd => parity_round(engine, context, args, true),
+        MathFunction::Log => logarithm(engine, context, args),
+        MathFunction::Log10 => unary_checked(engine, context, args, |number| {
             (number > 0.0).then(|| number.log10())
         }),
-        "MROUND" => mround(engine, context, args),
-        "PI" if args.is_empty() => Value::Number(std::f64::consts::PI),
-        "PI" => Value::Error(ErrorKind::Value),
-        "QUOTIENT" => checked_binary(engine, context, args, |numerator, denominator| {
-            if denominator == 0.0 {
-                Err(ErrorKind::Div0)
-            } else {
-                Ok((numerator / denominator).trunc())
-            }
-        }),
-        "SQRTPI" => unary_checked(engine, context, args, |number| {
+        MathFunction::MRound => mround(engine, context, args),
+        MathFunction::Pi if args.is_empty() => Value::Number(std::f64::consts::PI),
+        MathFunction::Pi => Value::Error(ErrorKind::Value),
+        MathFunction::Quotient => {
+            checked_binary(engine, context, args, |numerator, denominator| {
+                if denominator == 0.0 {
+                    Err(ErrorKind::Div0)
+                } else {
+                    Ok((numerator / denominator).trunc())
+                }
+            })
+        }
+        MathFunction::SqrtPi => unary_checked(engine, context, args, |number| {
             (number >= 0.0).then(|| (number * std::f64::consts::PI).sqrt())
         }),
-        "CEILING.MATH" => modern_multiple(engine, context, args, ModernMultiple::CeilingMath),
-        "CEILING.PRECISE" | "ISO.CEILING" => {
+        MathFunction::CeilingMath => {
+            modern_multiple(engine, context, args, ModernMultiple::CeilingMath)
+        }
+        MathFunction::CeilingPrecise | MathFunction::IsoCeiling => {
             modern_multiple(engine, context, args, ModernMultiple::CeilingPrecise)
         }
-        "FLOOR.MATH" => modern_multiple(engine, context, args, ModernMultiple::FloorMath),
-        "FLOOR.PRECISE" => modern_multiple(engine, context, args, ModernMultiple::FloorPrecise),
-        "BASE" => base(engine, context, args),
-        "DECIMAL" => decimal(engine, context, args),
-        "SERIESSUM" => series_sum(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+        MathFunction::FloorMath => {
+            modern_multiple(engine, context, args, ModernMultiple::FloorMath)
+        }
+        MathFunction::FloorPrecise => {
+            modern_multiple(engine, context, args, ModernMultiple::FloorPrecise)
+        }
+        MathFunction::Base => base(engine, context, args),
+        MathFunction::Decimal => decimal(engine, context, args),
+        MathFunction::SeriesSum => series_sum(engine, context, args),
     }
 }
 

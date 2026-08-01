@@ -2,31 +2,38 @@ use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::ArrayFunction;
 use super::util::required_number;
 
 pub(super) fn call_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: ArrayFunction,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
-    match name {
-        "CHOOSECOLS" | "CHOOSEROWS" | "DROP" | "FILTER" | "HSTACK" | "SORT" | "TAKE" | "UNIQUE"
-        | "VSTACK" => super::modern_array::call(engine, context, name, args),
-        "MMULT" => mmult(engine, context, args),
-        "SEQUENCE" => sequence(engine, context, args),
-        "TRANSPOSE" => transpose(engine, context, args),
-        _ => Err(ErrorKind::Unsupported),
+    match function {
+        ArrayFunction::ChooseCols => super::modern_array::choose_cols(engine, context, args),
+        ArrayFunction::ChooseRows => super::modern_array::choose_rows(engine, context, args),
+        ArrayFunction::Drop => super::modern_array::drop(engine, context, args),
+        ArrayFunction::Filter => super::modern_array::filter_array(engine, context, args),
+        ArrayFunction::HStack => super::modern_array::hstack(engine, context, args),
+        ArrayFunction::Sort => super::modern_array::sort_array(engine, context, args),
+        ArrayFunction::Take => super::modern_array::take(engine, context, args),
+        ArrayFunction::Unique => super::modern_array::unique_array(engine, context, args),
+        ArrayFunction::VStack => super::modern_array::vstack(engine, context, args),
+        ArrayFunction::MMult => mmult(engine, context, args),
+        ArrayFunction::Sequence => sequence(engine, context, args),
+        ArrayFunction::Transpose => transpose(engine, context, args),
     }
 }
 
 pub(super) fn call_scalar(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: ArrayFunction,
     args: &[Expr],
 ) -> Value {
-    match call_array(engine, context, name, args) {
+    match call_array(engine, context, function, args) {
         Ok(array) => array
             .data
             .into_iter()

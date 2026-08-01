@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use super::ast::Expr;
-use super::functions::normalize_name;
+use super::functions::{
+    DynamicFunction, Evaluator, function_arguments_are_reachable, function_evaluator,
+};
 use super::scope::canonical_local_name;
 use super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
@@ -63,15 +65,26 @@ pub(super) fn walk_local_scope<F>(
     name: &str,
     args: &[Expr],
     scope: &mut Vec<String>,
+    max_let_bindings: u64,
     walk: F,
 ) -> bool
 where
     F: FnMut(&Expr, &mut Vec<String>),
 {
-    match normalize_name(name).as_str() {
-        "MAP" => walk_map_scope(args, scope, walk),
-        "LAMBDA" => walk_lambda_scope(args, scope, walk),
-        "LET" => {
+    let evaluator = function_evaluator(name);
+    if matches!(
+        evaluator,
+        Some(Evaluator::Dynamic(
+            DynamicFunction::Map | DynamicFunction::Lambda | DynamicFunction::Let
+        ))
+    ) && !function_arguments_are_reachable(name, args, max_let_bindings)
+    {
+        return true;
+    }
+    match evaluator {
+        Some(Evaluator::Dynamic(DynamicFunction::Map)) => walk_map_scope(args, scope, walk),
+        Some(Evaluator::Dynamic(DynamicFunction::Lambda)) => walk_lambda_scope(args, scope, walk),
+        Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
             walk_let_scope(args, scope, walk);
             true
         }
@@ -83,11 +96,7 @@ fn walk_lambda_scope<F>(args: &[Expr], scope: &mut Vec<String>, mut walk: F) -> 
 where
     F: FnMut(&Expr, &mut Vec<String>),
 {
-    let expression = Expr::Call {
-        name: "LAMBDA".to_owned(),
-        args: args.to_vec(),
-    };
-    let Some(lambda) = definition(&expression) else {
+    let Some(lambda) = definition_from_args(args) else {
         return false;
     };
     let previous_local_count = scope.len();
@@ -211,7 +220,14 @@ pub(super) fn definition(expr: &Expr) -> Option<LambdaDefinition<'_>> {
     let Expr::Call { name, args } = expr else {
         return None;
     };
-    if !is_lambda_function(name) || args.is_empty() || args.len() > MAX_LAMBDA_PARAMETERS + 1 {
+    if !is_lambda_function(name) {
+        return None;
+    }
+    definition_from_args(args)
+}
+
+pub(super) fn definition_from_args(args: &[Expr]) -> Option<LambdaDefinition<'_>> {
+    if args.is_empty() || args.len() > MAX_LAMBDA_PARAMETERS + 1 {
         return None;
     }
     let (body, raw_parameters) = args.split_last()?;
@@ -234,7 +250,7 @@ pub(super) fn definition(expr: &Expr) -> Option<LambdaDefinition<'_>> {
 }
 
 fn is_lambda_function(name: &str) -> bool {
-    normalize_name(name) == "LAMBDA"
+    function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Lambda))
 }
 
 #[cfg(test)]
@@ -269,6 +285,7 @@ mod tests {
             &name,
             &args,
             &mut scope,
+            u64::MAX,
             |expr, active_scope| {
                 let Expr::Name(name) = expr else {
                     panic!("fixture callback receives names");
@@ -306,6 +323,7 @@ mod tests {
             "LET",
             &args,
             &mut scope,
+            u64::MAX,
             |expr, active_scope| {
                 let Expr::Name(name) = expr else {
                     panic!("fixture callback receives names");

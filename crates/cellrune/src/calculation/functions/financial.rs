@@ -4,6 +4,7 @@ use super::super::decimal::{DecimalTrace, RationalTrace};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::calendar::date_from_serial;
+use super::kernel::FinancialFunction;
 use super::util::{
     ExcelSum, collect_argument_values, collect_argument_values_with_counter, required_number,
     required_number_with_trace,
@@ -12,24 +13,23 @@ use super::util::{
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: FinancialFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "PMT" => pmt(engine, context, args),
-        "FV" => fv(engine, context, args),
-        "PV" => pv(engine, context, args),
-        "NPER" => nper(engine, context, args),
-        "IPMT" => ipmt(engine, context, args),
-        "PPMT" => ppmt(engine, context, args),
-        "NPV" => npv(engine, context, args),
-        "IRR" => irr(engine, context, args),
-        "XIRR" => xirr(engine, context, args),
-        "RATE" => rate(engine, context, args),
-        "SLN" => sln(engine, context, args),
-        "SYD" => syd(engine, context, args),
-        "DB" => db(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        FinancialFunction::Pmt => pmt(engine, context, args),
+        FinancialFunction::Fv => fv(engine, context, args),
+        FinancialFunction::Pv => pv(engine, context, args),
+        FinancialFunction::Nper => nper(engine, context, args),
+        FinancialFunction::Ipmt => ipmt(engine, context, args),
+        FinancialFunction::Ppmt => ppmt(engine, context, args),
+        FinancialFunction::Npv => npv(engine, context, args),
+        FinancialFunction::Irr => irr(engine, context, args),
+        FinancialFunction::Xirr => xirr(engine, context, args),
+        FinancialFunction::Rate => rate(engine, context, args),
+        FinancialFunction::Sln => sln(engine, context, args),
+        FinancialFunction::Syd => syd(engine, context, args),
+        FinancialFunction::Db => db(engine, context, args),
     }
 }
 

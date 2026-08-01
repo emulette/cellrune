@@ -3,32 +3,46 @@ use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::StatisticalAdditionalFunction;
 use super::statistical::{numeric_arguments, numeric_arguments_with_policy};
 use super::util::{collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: StatisticalAdditionalFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "AVEDEV" => deviation_aggregate(engine, context, args, DeviationAggregate::Average),
-        "DEVSQ" => deviation_aggregate(engine, context, args, DeviationAggregate::SumOfSquares),
-        "AVERAGEA" => aggregate_a(engine, context, args, AggregateA::Average),
-        "MAXA" => aggregate_a(engine, context, args, AggregateA::Maximum),
-        "MINA" => aggregate_a(engine, context, args, AggregateA::Minimum),
-        "GEOMEAN" => mean(engine, context, args, Mean::Geometric),
-        "HARMEAN" => mean(engine, context, args, Mean::Harmonic),
-        "VAR.P" => population_variance(engine, context, args, false),
-        "STDEV.P" => population_variance(engine, context, args, true),
-        "STANDARDIZE" => standardize(engine, context, args),
-        "PHI" => normal_helper(engine, context, args, NormalHelper::Density),
-        "GAUSS" => normal_helper(engine, context, args, NormalHelper::Gauss),
-        "NORM.DIST" => normal_distribution(engine, context, args),
-        "EXPON.DIST" => exponential_distribution(engine, context, args),
-        "POISSON.DIST" => poisson_distribution(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        StatisticalAdditionalFunction::AveDev => {
+            deviation_aggregate(engine, context, args, DeviationAggregate::Average)
+        }
+        StatisticalAdditionalFunction::DevSq => {
+            deviation_aggregate(engine, context, args, DeviationAggregate::SumOfSquares)
+        }
+        StatisticalAdditionalFunction::AverageA => {
+            aggregate_a(engine, context, args, AggregateA::Average)
+        }
+        StatisticalAdditionalFunction::MaxA => {
+            aggregate_a(engine, context, args, AggregateA::Maximum)
+        }
+        StatisticalAdditionalFunction::MinA => {
+            aggregate_a(engine, context, args, AggregateA::Minimum)
+        }
+        StatisticalAdditionalFunction::GeoMean => mean(engine, context, args, Mean::Geometric),
+        StatisticalAdditionalFunction::HarMean => mean(engine, context, args, Mean::Harmonic),
+        StatisticalAdditionalFunction::VarP => population_variance(engine, context, args, false),
+        StatisticalAdditionalFunction::StDevP => population_variance(engine, context, args, true),
+        StatisticalAdditionalFunction::Standardize => standardize(engine, context, args),
+        StatisticalAdditionalFunction::Phi => {
+            normal_helper(engine, context, args, NormalHelper::Density)
+        }
+        StatisticalAdditionalFunction::Gauss => {
+            normal_helper(engine, context, args, NormalHelper::Gauss)
+        }
+        StatisticalAdditionalFunction::NormDist => normal_distribution(engine, context, args),
+        StatisticalAdditionalFunction::ExponDist => exponential_distribution(engine, context, args),
+        StatisticalAdditionalFunction::PoissonDist => poisson_distribution(engine, context, args),
     }
 }
 

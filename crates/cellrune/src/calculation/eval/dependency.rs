@@ -7,7 +7,10 @@ use super::{Engine, EvalContext, EvaluationBudget};
 use crate::CellContent;
 use crate::calculation::ast::{Expr, StructuredReference};
 use crate::calculation::functions::descriptor::DependencyKind;
-use crate::calculation::functions::{function_dependency_kind, normalize_name, with_let_scope};
+use crate::calculation::functions::{
+    DynamicFunction, Evaluator, function_arguments_are_reachable, function_dependency_kind,
+    function_evaluator, normalize_name, with_let_scope,
+};
 use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan};
@@ -16,6 +19,10 @@ use crate::{SheetId, Table, TableId, WorkbookSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TableTopologyRevision([u8; 32]);
+
+fn is_let_function(name: &str) -> bool {
+    function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Let))
+}
 
 impl TableTopologyRevision {
     fn from_table(
@@ -215,6 +222,15 @@ struct VisitedDefinitions {
 }
 
 impl Engine<'_> {
+    fn builtin_arguments_are_reachable(&self, name: &str, args: &[Expr]) -> bool {
+        function_evaluator(name).is_none()
+            || function_arguments_are_reachable(
+                name,
+                args,
+                self.calculation_limits().max_let_bindings(),
+            )
+    }
+
     pub(super) fn dependencies_cancellable(
         &self,
         cancelled: &impl Fn() -> bool,
@@ -416,8 +432,11 @@ impl Engine<'_> {
                             )
                         });
                 }
+                if !self.builtin_arguments_are_reachable(name, args) {
+                    return false;
+                }
                 let normalized = normalize_name(name);
-                if normalized == "LET" {
+                if is_let_function(name) {
                     let mut found = false;
                     let result =
                         with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
@@ -431,18 +450,23 @@ impl Engine<'_> {
                         });
                     return found || result.is_err();
                 }
-                let dynamic = matches!(
-                    function_dependency_kind(&normalized),
-                    Some(DependencyKind::DynamicReference(_))
-                );
-                if dynamic && self.resolve_dynamic_rect(context, name, args).is_err() {
+                if let Some(DependencyKind::DynamicReference(kind)) =
+                    function_dependency_kind(&normalized)
+                    && self.resolve_dynamic_rect(context, kind, args).is_err()
+                {
                     return true;
                 }
                 let mut found = false;
-                if walk_local_scope(name, args, local_names, |arg, scope| {
-                    found |=
-                        self.expr_has_unresolved_dynamic_dependency(context, arg, visited, scope);
-                }) {
+                if walk_local_scope(
+                    name,
+                    args,
+                    local_names,
+                    self.calculation_limits().max_let_bindings(),
+                    |arg, scope| {
+                        found |= self
+                            .expr_has_unresolved_dynamic_dependency(context, arg, visited, scope);
+                    },
+                ) {
                     return found;
                 }
                 args.iter().any(|arg| {
@@ -831,6 +855,9 @@ impl Engine<'_> {
                     }
                     return;
                 }
+                if !self.builtin_arguments_are_reachable(name, args) {
+                    return;
+                }
                 let normalized = normalize_name(name);
                 if crate::calculation::functions::uses_reference_metadata_only(&normalized) {
                     let mut selection_names = VisitedDefinitions::default();
@@ -845,7 +872,7 @@ impl Engine<'_> {
                     }
                     return;
                 }
-                if normalized == "LET" {
+                if is_let_function(name) {
                     let _ =
                         with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
                             engine.collect_dependency_targets(
@@ -872,16 +899,21 @@ impl Engine<'_> {
                 {
                     output.push(DependencyTarget::from_span(RectSpan::single(value_range)));
                 }
-                if matches!(
-                    function_dependency_kind(&normalized),
-                    Some(DependencyKind::DynamicReference(_))
-                ) && let Ok(rect) = self.resolve_dynamic_rect(context, name, args)
+                if let Some(DependencyKind::DynamicReference(kind)) =
+                    function_dependency_kind(&normalized)
+                    && let Ok(rect) = self.resolve_dynamic_rect(context, kind, args)
                 {
                     output.push(DependencyTarget::from_span(RectSpan::single(rect)));
                 }
-                if walk_local_scope(name, args, local_names, |arg, scope| {
-                    self.collect_dependency_targets(context, arg, visited, scope, output);
-                }) {
+                if walk_local_scope(
+                    name,
+                    args,
+                    local_names,
+                    self.calculation_limits().max_let_bindings(),
+                    |arg, scope| {
+                        self.collect_dependency_targets(context, arg, visited, scope, output);
+                    },
+                ) {
                     return;
                 }
                 for arg in args {
@@ -1034,7 +1066,10 @@ impl Engine<'_> {
                     }
                     return;
                 }
-                if normalize_name(name) == "LET" {
+                if !self.builtin_arguments_are_reachable(name, args) {
+                    return;
+                }
+                if is_let_function(name) {
                     let _ =
                         with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
                             if final_arg {
@@ -1058,9 +1093,15 @@ impl Engine<'_> {
                         });
                     return;
                 }
-                if walk_local_scope(name, args, local_names, |arg, scope| {
-                    self.collect_dependency_targets(context, arg, visited, scope, output);
-                }) {
+                if walk_local_scope(
+                    name,
+                    args,
+                    local_names,
+                    self.calculation_limits().max_let_bindings(),
+                    |arg, scope| {
+                        self.collect_dependency_targets(context, arg, visited, scope, output);
+                    },
+                ) {
                     return;
                 }
                 for arg in args {
@@ -1161,6 +1202,9 @@ impl Engine<'_> {
                             )
                         });
                 }
+                if !self.builtin_arguments_are_reachable(name, args) {
+                    return false;
+                }
                 if matches!(
                     function_dependency_kind(name),
                     Some(DependencyKind::DynamicReference(_))
@@ -1168,10 +1212,16 @@ impl Engine<'_> {
                     return true;
                 }
                 let mut found = false;
-                if walk_local_scope(name, args, local_names, |arg, scope| {
-                    found |=
-                        self.expr_contains_dynamic_reference_function(context, arg, visited, scope);
-                }) {
+                if walk_local_scope(
+                    name,
+                    args,
+                    local_names,
+                    self.calculation_limits().max_let_bindings(),
+                    |arg, scope| {
+                        found |= self
+                            .expr_contains_dynamic_reference_function(context, arg, visited, scope);
+                    },
+                ) {
                     return found;
                 }
                 args.iter().any(|arg| {

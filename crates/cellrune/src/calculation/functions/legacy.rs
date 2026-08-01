@@ -10,43 +10,42 @@ use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::{LegacyArrayFunction, LegacyFunction};
 use super::util::ExcelSum;
 
 pub(super) fn call_legacy(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: LegacyFunction,
     args: &[Expr],
 ) -> Value {
-    match name.to_ascii_uppercase().as_str() {
-        "IF" => kernel_if(engine, context, args),
-        "AND" => kernel_and(engine, context, args),
-        "IFERROR" => kernel_iferror(engine, context, args),
-        "LOWER" => kernel_lower(engine, context, args),
-        "TEXT" => kernel_text(engine, context, args),
-        "COUNTIF" => kernel_countifs(engine, context, args, true),
-        "COUNTIFS" => kernel_countifs(engine, context, args, false),
-        "SUMPRODUCT" => kernel_sumproduct(engine, context, args),
-        "INDEX" => kernel_index(engine, context, args),
-        "MATCH" => kernel_match(engine, context, args),
-        "__XLUDF.DUMMYFUNCTION" if args.len() == 1 => Value::Error(ErrorKind::Name),
-        "__XLUDF.DUMMYFUNCTION" => Value::Error(ErrorKind::Value),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        LegacyFunction::If => kernel_if(engine, context, args),
+        LegacyFunction::And => kernel_and(engine, context, args),
+        LegacyFunction::IfError => kernel_iferror(engine, context, args),
+        LegacyFunction::Lower => kernel_lower(engine, context, args),
+        LegacyFunction::Text => kernel_text(engine, context, args),
+        LegacyFunction::CountIf => kernel_countifs(engine, context, args, true),
+        LegacyFunction::CountIfs => kernel_countifs(engine, context, args, false),
+        LegacyFunction::SumProduct => kernel_sumproduct(engine, context, args),
+        LegacyFunction::Index => kernel_index(engine, context, args),
+        LegacyFunction::Match => kernel_match(engine, context, args),
+        LegacyFunction::DummyFunction if args.len() == 1 => Value::Error(ErrorKind::Name),
+        LegacyFunction::DummyFunction => Value::Error(ErrorKind::Value),
     }
 }
 
 pub(super) fn call_legacy_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: LegacyArrayFunction,
     args: &[Expr],
 ) -> Option<Result<Array, ErrorKind>> {
-    match name.to_ascii_uppercase().as_str() {
-        "IF" => Some(if_array(engine, context, args)),
-        "COUNTIF" => countifs_array(engine, context, args, true),
-        "COUNTIFS" => countifs_array(engine, context, args, false),
-        "INDEX" => Some(index_array(engine, context, args)),
-        _ => None,
+    match function {
+        LegacyArrayFunction::If => Some(if_array(engine, context, args)),
+        LegacyArrayFunction::CountIf => countifs_array(engine, context, args, true),
+        LegacyArrayFunction::CountIfs => countifs_array(engine, context, args, false),
+        LegacyArrayFunction::Index => Some(index_array(engine, context, args)),
     }
 }
 

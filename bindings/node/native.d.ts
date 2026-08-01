@@ -29,6 +29,8 @@ export declare class NativeWorkbook {
 
 export declare function createWorkbook(): NativeWorkbook
 
+export declare function functionCatalog(): NativeFunctionCatalogReport
+
 export interface NativeCalculationDelta {
   schemaVersion: number
   cursor: string
@@ -159,6 +161,19 @@ export interface NativeEditReceiptV2 {
   topologyChanged: boolean
   calculationMetadataChanged: boolean
   changedTableIds: Array<number>
+}
+
+export interface NativeFunctionCatalogEntry {
+  name: string
+  canonicalName: string
+  alias: boolean
+  returnsArray: boolean
+  official: boolean
+}
+
+export interface NativeFunctionCatalogReport {
+  schemaVersion: number
+  entries: Array<NativeFunctionCatalogEntry>
 }
 
 export interface NativeFunctionUsageEntry {

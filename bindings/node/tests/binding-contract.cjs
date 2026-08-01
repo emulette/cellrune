@@ -1,11 +1,35 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { CellRuneError, Workbook } = require("..");
+const { CellRuneError, Workbook, functionCatalog } = require("..");
+
+const CATALOG_V0_1_9_SHA256 =
+  "d0a538207e536d3c5b52e2ae1c3353cfef3ee965b8ea841c141bf20a6c12d9ae";
+
+function catalogDigest() {
+  const catalog = functionCatalog();
+  assert.equal(catalog.schemaVersion, 1);
+  assert.equal(catalog.entries.length, 288);
+  const digest = createHash("sha256");
+  for (const entry of catalog.entries) {
+    digest.update(
+      [
+        entry.name,
+        entry.canonicalName,
+        entry.alias ? "1" : "0",
+        entry.returnsArray ? "1" : "0",
+        entry.official ? "1" : "0",
+      ].join("\0") + "\n",
+    );
+  }
+  return digest.digest("hex");
+}
 
 async function main() {
+  assert.equal(catalogDigest(), CATALOG_V0_1_9_SHA256);
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(

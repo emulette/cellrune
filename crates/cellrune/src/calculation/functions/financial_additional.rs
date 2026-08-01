@@ -2,25 +2,25 @@ use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::financial::{financial_value, scalar_arguments};
+use super::kernel::FinancialAdditionalFunction;
 use super::util::{collect_argument_values, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: FinancialAdditionalFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "DOLLARDE" => dollar_fraction(engine, context, args, false),
-        "DOLLARFR" => dollar_fraction(engine, context, args, true),
-        "EFFECT" => annual_rate(engine, context, args, false),
-        "NOMINAL" => annual_rate(engine, context, args, true),
-        "RRI" => rri(engine, context, args),
-        "PDURATION" => pduration(engine, context, args),
-        "ISPMT" => ispmt(engine, context, args),
-        "FVSCHEDULE" => fvschedule(engine, context, args),
-        "MIRR" => mirr(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        FinancialAdditionalFunction::DollarDe => dollar_fraction(engine, context, args, false),
+        FinancialAdditionalFunction::DollarFr => dollar_fraction(engine, context, args, true),
+        FinancialAdditionalFunction::Effect => annual_rate(engine, context, args, false),
+        FinancialAdditionalFunction::Nominal => annual_rate(engine, context, args, true),
+        FinancialAdditionalFunction::Rri => rri(engine, context, args),
+        FinancialAdditionalFunction::PDuration => pduration(engine, context, args),
+        FinancialAdditionalFunction::IsPmt => ispmt(engine, context, args),
+        FinancialAdditionalFunction::FvSchedule => fvschedule(engine, context, args),
+        FinancialAdditionalFunction::Mirr => mirr(engine, context, args),
     }
 }
 

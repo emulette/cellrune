@@ -2,8 +2,8 @@ use cellrune_interop::{
     CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto, CalculationResultDto,
     CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
-    EditReceiptDto, EditReceiptV2Dto, FunctionUsageReportDto, RangePageDto, WorkbookSummaryDto,
-    WriteReportDto,
+    EditReceiptDto, EditReceiptV2Dto, FunctionCatalogReportDto, FunctionUsageReportDto,
+    RangePageDto, WorkbookSummaryDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -332,6 +332,26 @@ pub(crate) fn function_usage<'py>(
             samples.append(cell)?;
         }
         item.set_item("sample_cells", samples)?;
+        entries.append(item)?;
+    }
+    result.set_item("entries", entries)?;
+    Ok(result)
+}
+
+pub(crate) fn function_catalog<'py>(
+    py: Python<'py>,
+    value: &FunctionCatalogReportDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("schema_version", value.schema_version)?;
+    let entries = PyList::empty(py);
+    for entry in &value.entries {
+        let item = PyDict::new(py);
+        item.set_item("name", &entry.name)?;
+        item.set_item("canonical_name", &entry.canonical_name)?;
+        item.set_item("alias", entry.alias)?;
+        item.set_item("returns_array", entry.returns_array)?;
+        item.set_item("official", entry.official)?;
         entries.append(item)?;
     }
     result.set_item("entries", entries)?;

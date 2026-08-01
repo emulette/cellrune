@@ -5,11 +5,13 @@ import {
   type DefinedNameInspection,
   type EditReceipt,
   type EditReceiptV2,
+  type FunctionCatalogReport,
   type RangePage,
   type TableSummary,
   type WorkbookChange,
   type WorkbookChangeV2,
   Workbook,
+  functionCatalog,
 } from "@cellrune/node";
 import type { Buffer } from "node:buffer";
 
@@ -31,6 +33,8 @@ const tableSummary: TableSummary = {
 tableSummary.id.toFixed(0);
 
 async function check(): Promise<void> {
+  const catalog: FunctionCatalogReport = functionCatalog();
+  catalog.entries[0].canonicalName.toUpperCase();
   const workbook: Workbook = Workbook.create();
   workbook.setNumber("Sheet1", "A1", 1);
   workbook.setFormula("Sheet1", "B1", "=A1+1");

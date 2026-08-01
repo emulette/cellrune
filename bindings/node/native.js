@@ -589,6 +589,7 @@ if (!nativeBinding) {
 module.exports = nativeBinding
 module.exports.NativeWorkbook = nativeBinding.NativeWorkbook
 module.exports.createWorkbook = nativeBinding.createWorkbook
+module.exports.functionCatalog = nativeBinding.functionCatalog
 module.exports.openWorkbookBytes = nativeBinding.openWorkbookBytes
 module.exports.openWorkbookPath = nativeBinding.openWorkbookPath
 module.exports.schemaVersion = nativeBinding.schemaVersion

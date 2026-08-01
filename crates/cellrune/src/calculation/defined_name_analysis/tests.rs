@@ -848,6 +848,29 @@ fn caller_limits_are_enforced_at_exact_boundaries() {
 }
 
 #[test]
+fn let_binding_limit_precedes_defined_name_body_validation() {
+    let workbook = workbook(vec![defined_name(
+        "OverLimitLet",
+        DefinedNameScope::Workbook,
+        "LET(first,1,second,2,NoSuchName)",
+    )]);
+    let limits = CalculationLimits::default()
+        .with_max_let_bindings(1)
+        .expect("positive LET binding limit");
+    let options =
+        DefinedNameAnalysisOptions::new(CalculationOptions::default().with_limits(limits));
+
+    assert!(matches!(
+        analyze_defined_name_with_options(&workbook, "OverLimitLet", None, options)
+            .expect("analysis succeeds"),
+        DefinedNameAnalysis::Unsupported {
+            reason: DefinedNameUnsupportedReason::ContextDependent,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn cancellation_is_checked_before_and_during_reachable_scans() {
     let workbook = workbook(vec![defined_name(
         "Areas",

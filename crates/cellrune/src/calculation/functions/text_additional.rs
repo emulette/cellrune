@@ -4,26 +4,26 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::TextAdditionalFunction;
 use super::util::{required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: TextAdditionalFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "CHAR" => character(engine, context, args),
-        "CLEAN" => clean(engine, context, args),
-        "CONCATENATE" => concatenate(engine, context, args),
-        "DOLLAR" => dollar(engine, context, args),
-        "UNICHAR" => unichar(engine, context, args),
-        "UNICODE" => unicode(engine, context, args),
-        "TEXTBEFORE" => text_boundary(engine, context, args, false),
-        "TEXTAFTER" => text_boundary(engine, context, args, true),
-        "VALUE" => value(engine, context, args),
-        "VALUETOTEXT" => value_to_text(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        TextAdditionalFunction::Char => character(engine, context, args),
+        TextAdditionalFunction::Clean => clean(engine, context, args),
+        TextAdditionalFunction::Concatenate => concatenate(engine, context, args),
+        TextAdditionalFunction::Dollar => dollar(engine, context, args),
+        TextAdditionalFunction::UniChar => unichar(engine, context, args),
+        TextAdditionalFunction::Unicode => unicode(engine, context, args),
+        TextAdditionalFunction::TextBefore => text_boundary(engine, context, args, false),
+        TextAdditionalFunction::TextAfter => text_boundary(engine, context, args, true),
+        TextAdditionalFunction::Value => value(engine, context, args),
+        TextAdditionalFunction::ValueToText => value_to_text(engine, context, args),
     }
 }
 

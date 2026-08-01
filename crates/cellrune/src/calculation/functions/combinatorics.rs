@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::kernel::CombinatoricsFunction;
 use super::util::{excel_numeric_arguments, required_number};
 
 const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
@@ -9,20 +10,23 @@ const MAX_EXCEL_ARGUMENTS: usize = 255;
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: CombinatoricsFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "FACT" => factorial_function(engine, context, args, false),
-        "FACTDOUBLE" => factorial_function(engine, context, args, true),
-        "GCD" => gcd_lcm(engine, context, args, false),
-        "LCM" => gcd_lcm(engine, context, args, true),
-        "COMBIN" => selection(engine, context, args, Selection::Combination),
-        "COMBINA" => selection(engine, context, args, Selection::CombinationWithRepetition),
-        "PERMUT" => selection(engine, context, args, Selection::Permutation),
-        "PERMUTATIONA" => selection(engine, context, args, Selection::PermutationWithRepetition),
-        "MULTINOMIAL" => multinomial(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        CombinatoricsFunction::Fact => factorial_function(engine, context, args, false),
+        CombinatoricsFunction::FactDouble => factorial_function(engine, context, args, true),
+        CombinatoricsFunction::Gcd => gcd_lcm(engine, context, args, false),
+        CombinatoricsFunction::Lcm => gcd_lcm(engine, context, args, true),
+        CombinatoricsFunction::Combin => selection(engine, context, args, Selection::Combination),
+        CombinatoricsFunction::Combina => {
+            selection(engine, context, args, Selection::CombinationWithRepetition)
+        }
+        CombinatoricsFunction::Permut => selection(engine, context, args, Selection::Permutation),
+        CombinatoricsFunction::PermutationA => {
+            selection(engine, context, args, Selection::PermutationWithRepetition)
+        }
+        CombinatoricsFunction::Multinomial => multinomial(engine, context, args),
     }
 }
 

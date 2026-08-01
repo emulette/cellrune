@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::kernel::SumOfSquaresFunction;
 use super::util::excel_numeric_arguments;
 
 const MAX_EXCEL_ARGUMENTS: usize = 255;
@@ -8,21 +9,20 @@ const MAX_EXCEL_ARGUMENTS: usize = 255;
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: SumOfSquaresFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "SUMSQ" => sumsq(engine, context, args),
-        "SUMX2MY2" => paired(engine, context, args, |left, right| {
+    match function {
+        SumOfSquaresFunction::SumSq => sumsq(engine, context, args),
+        SumOfSquaresFunction::SumX2My2 => paired(engine, context, args, |left, right| {
             left * left - right * right
         }),
-        "SUMX2PY2" => paired(engine, context, args, |left, right| {
+        SumOfSquaresFunction::SumX2Py2 => paired(engine, context, args, |left, right| {
             left * left + right * right
         }),
-        "SUMXMY2" => paired(engine, context, args, |left, right| {
+        SumOfSquaresFunction::SumXMy2 => paired(engine, context, args, |left, right| {
             (left - right) * (left - right)
         }),
-        _ => Value::Error(ErrorKind::Unsupported),
     }
 }
 

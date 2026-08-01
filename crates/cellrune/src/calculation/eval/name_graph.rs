@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Engine, EvalContext};
 use crate::calculation::ast::Expr;
-use crate::calculation::functions::normalize_name;
+use crate::calculation::functions::{
+    DynamicFunction, Evaluator, function_arguments_are_reachable, function_evaluator,
+};
 use crate::calculation::lambda::definition;
 use crate::calculation::runtime::CellId;
 use crate::calculation::scope::{
@@ -15,6 +17,13 @@ enum NameGraphStatus {
     Supported,
     Cycle,
     LimitExceeded,
+}
+
+fn dynamic_function(name: &str) -> Option<DynamicFunction> {
+    match function_evaluator(name) {
+        Some(Evaluator::Dynamic(function)) => Some(function),
+        _ => None,
+    }
 }
 
 impl Engine<'_> {
@@ -258,8 +267,17 @@ fn collect_name_references(
                 }
                 return Ok(());
             }
-            match normalize_name(name).as_str() {
-                "LET" => {
+            if function_evaluator(name).is_some()
+                && !function_arguments_are_reachable(
+                    name,
+                    args,
+                    engine.calculation_limits().max_let_bindings(),
+                )
+            {
+                return Ok(());
+            }
+            match dynamic_function(name) {
+                Some(DynamicFunction::Let) => {
                     let previous_len = local_names.len();
                     if let Some((final_expr, pairs)) = args.split_last() {
                         for pair in pairs.chunks_exact(2) {
@@ -294,7 +312,7 @@ fn collect_name_references(
                     local_names.truncate(previous_len);
                     return Ok(());
                 }
-                "LAMBDA" => {
+                Some(DynamicFunction::Lambda) => {
                     let Some(lambda) = definition(expr) else {
                         return Ok(());
                     };
@@ -317,7 +335,7 @@ fn collect_name_references(
                     local_names.truncate(previous_len);
                     return Ok(());
                 }
-                "MAP" => {
+                Some(DynamicFunction::Map) => {
                     let Some((lambda_expr, array_exprs)) = args.split_last() else {
                         return Ok(());
                     };

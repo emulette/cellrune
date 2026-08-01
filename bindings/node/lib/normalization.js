@@ -26,6 +26,10 @@ const UNSUPPORTED_REASONS = new Set([
   "context_dependent",
   "unsupported_expression",
 ]);
+const PROTOCOL_DETAILS = Object.freeze({
+  FUNCTION_CATALOG_ENTRIES: "native function catalog entries are missing",
+  FUNCTION_CATALOG_ENTRY: "native function catalog entry is malformed",
+});
 
 function requireProtocolVersion(value, name) {
   if (value !== INTEROP_SCHEMA_VERSION) {
@@ -400,6 +404,39 @@ function normalizeFunctionUsage(report) {
   };
 }
 
+function normalizeFunctionCatalog(report) {
+  requireObject(report, "function catalog");
+  requireProtocolVersion(report.schemaVersion, "function catalog");
+  if (!Array.isArray(report.entries)) {
+    throw protocolError(PROTOCOL_DETAILS.FUNCTION_CATALOG_ENTRIES);
+  }
+  return {
+    schemaVersion: report.schemaVersion,
+    entries: report.entries.map((entry) => {
+      requireObject(entry, "function catalog entry");
+      requireProtocolString(entry.name, "function catalog name");
+      requireProtocolString(
+        entry.canonicalName,
+        "function catalog canonical name",
+      );
+      if (
+        typeof entry.alias !== "boolean" ||
+        typeof entry.returnsArray !== "boolean" ||
+        typeof entry.official !== "boolean"
+      ) {
+        throw protocolError(PROTOCOL_DETAILS.FUNCTION_CATALOG_ENTRY);
+      }
+      return {
+        name: entry.name,
+        canonicalName: entry.canonicalName,
+        alias: entry.alias,
+        returnsArray: entry.returnsArray,
+        official: entry.official,
+      };
+    }),
+  };
+}
+
 function normalizeWriteReport(report) {
   return {
     schemaVersion: report.schemaVersion,
@@ -428,6 +465,7 @@ module.exports = {
   normalizeDefinedNameInspection,
   normalizeEditReceipt,
   normalizeEditReceiptV2,
+  normalizeFunctionCatalog,
   normalizeFunctionUsage,
   normalizeRangePage,
   normalizeSummary,

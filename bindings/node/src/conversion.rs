@@ -1,8 +1,8 @@
 use cellrune_interop::{
     CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto,
     CalculationResultDto, CellDto, CellReferenceDto, CellValueDto, EditReceiptDto,
-    EditReceiptV2Dto, FunctionUsageReportDto, RangePageDto, SavedValueStateDto, WorkbookSummaryDto,
-    WriteReportDto,
+    EditReceiptV2Dto, FunctionCatalogReportDto, FunctionUsageReportDto, RangePageDto,
+    SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
 };
 use napi_derive::napi;
 
@@ -180,6 +180,21 @@ pub struct NativeFunctionUsageReport {
 }
 
 #[napi(object)]
+pub struct NativeFunctionCatalogEntry {
+    pub name: String,
+    pub canonical_name: String,
+    pub alias: bool,
+    pub returns_array: bool,
+    pub official: bool,
+}
+
+#[napi(object)]
+pub struct NativeFunctionCatalogReport {
+    pub schema_version: u32,
+    pub entries: Vec<NativeFunctionCatalogEntry>,
+}
+
+#[napi(object)]
 pub struct NativeWriteReport {
     pub schema_version: u32,
     pub complete: bool,
@@ -345,6 +360,23 @@ pub(crate) fn function_usage(value: FunctionUsageReportDto) -> NativeFunctionUsa
                 call_count: entry.call_count as f64,
                 formula_count: entry.formula_count as f64,
                 sample_cells: entry.sample_cells.into_iter().map(cell_reference).collect(),
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn function_catalog(value: FunctionCatalogReportDto) -> NativeFunctionCatalogReport {
+    NativeFunctionCatalogReport {
+        schema_version: value.schema_version,
+        entries: value
+            .entries
+            .into_iter()
+            .map(|entry| NativeFunctionCatalogEntry {
+                name: entry.name,
+                canonical_name: entry.canonical_name,
+                alias: entry.alias,
+                returns_array: entry.returns_array,
+                official: entry.official,
             })
             .collect(),
     }

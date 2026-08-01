@@ -5,25 +5,76 @@ use super::super::coerce::{to_logical, to_number};
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
-
-pub(super) fn call(
+pub(super) fn choose_cols(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
-    match name {
-        "CHOOSECOLS" => choose(engine, context, args, Axis::Columns),
-        "CHOOSEROWS" => choose(engine, context, args, Axis::Rows),
-        "DROP" => take_or_drop(engine, context, args, SliceOperation::Drop),
-        "FILTER" => filter(engine, context, args),
-        "HSTACK" => stack(engine, context, args, Axis::Columns),
-        "SORT" => sort(engine, context, args),
-        "TAKE" => take_or_drop(engine, context, args, SliceOperation::Take),
-        "UNIQUE" => unique(engine, context, args),
-        "VSTACK" => stack(engine, context, args, Axis::Rows),
-        _ => Err(ErrorKind::Unsupported),
-    }
+    choose(engine, context, args, Axis::Columns)
+}
+
+pub(super) fn choose_rows(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    choose(engine, context, args, Axis::Rows)
+}
+
+pub(super) fn drop(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    take_or_drop(engine, context, args, SliceOperation::Drop)
+}
+
+pub(super) fn filter_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    filter(engine, context, args)
+}
+
+pub(super) fn hstack(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    stack(engine, context, args, Axis::Columns)
+}
+
+pub(super) fn sort_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    sort(engine, context, args)
+}
+
+pub(super) fn take(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    take_or_drop(engine, context, args, SliceOperation::Take)
+}
+
+pub(super) fn unique_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    unique(engine, context, args)
+}
+
+pub(super) fn vstack(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    stack(engine, context, args, Axis::Rows)
 }
 
 #[derive(Debug, Clone, Copy)]

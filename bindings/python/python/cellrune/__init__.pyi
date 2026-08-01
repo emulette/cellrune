@@ -2,6 +2,7 @@ from ._native import (
     SCHEMA_VERSION as SCHEMA_VERSION,
     CellRuneError as CellRuneError,
     Workbook as Workbook,
+    function_catalog as function_catalog,
 )
 from ._types import (
     AddSheetChange as AddSheetChange,
@@ -38,6 +39,8 @@ from ._types import (
     ErrorValue as ErrorValue,
     FunctionUsageEntry as FunctionUsageEntry,
     FunctionUsageReport as FunctionUsageReport,
+    FunctionCatalogEntry as FunctionCatalogEntry,
+    FunctionCatalogReport as FunctionCatalogReport,
     LogicalValue as LogicalValue,
     NumberValue as NumberValue,
     RangePage as RangePage,
@@ -103,6 +106,9 @@ __all__ = [
     "ErrorValue",
     "FunctionUsageEntry",
     "FunctionUsageReport",
+    "FunctionCatalogEntry",
+    "FunctionCatalogReport",
+    "function_catalog",
     "LogicalValue",
     "NumberValue",
     "RangePage",

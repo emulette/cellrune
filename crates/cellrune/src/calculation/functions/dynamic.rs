@@ -1,9 +1,10 @@
+use super::kernel::{DynamicArrayFunction, DynamicFunction, Evaluator};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
-use super::super::lambda::{LocalNamePolicy, definition, validate_local_name};
+use super::super::lambda::{LocalNamePolicy, definition_from_args, validate_local_name};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::element_at;
 use super::super::runtime::{Array, ReferenceValue};
@@ -15,20 +16,35 @@ use super::super::value::{ErrorKind, Value};
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: DynamicFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "MAP" => map_scalar_with_trace(engine, context, args).value,
-        "ISOMITTED" => is_omitted(context, args),
-        "BYROW" | "BYCOL" | "REDUCE" | "SCAN" | "MAKEARRAY" => {
-            helper_scalar_with_trace(engine, context, name, args).value
+    match function {
+        DynamicFunction::Map => map_scalar_with_trace(engine, context, args).value,
+        DynamicFunction::IsOmitted => is_omitted(context, args),
+        DynamicFunction::ByRow => {
+            helper_scalar_with_trace(engine, context, DynamicArrayFunction::ByRow, args).value
         }
-        "LET" => {
+        DynamicFunction::ByCol => {
+            helper_scalar_with_trace(engine, context, DynamicArrayFunction::ByCol, args).value
+        }
+        DynamicFunction::Reduce => {
+            helper_scalar_with_trace(engine, context, DynamicArrayFunction::Reduce, args).value
+        }
+        DynamicFunction::Scan => {
+            helper_scalar_with_trace(engine, context, DynamicArrayFunction::Scan, args).value
+        }
+        DynamicFunction::MakeArray => {
+            helper_scalar_with_trace(engine, context, DynamicArrayFunction::MakeArray, args).value
+        }
+        DynamicFunction::Let => {
             let scoped = let_scope_value(engine, context, args);
             engine.scalar_from_scope(context, &scoped).value
         }
-        _ => Value::Error(ErrorKind::Unsupported),
+        DynamicFunction::Lambda => {
+            let scoped = lambda_scope_value(context, args, None);
+            engine.scalar_from_scope(context, &scoped).value
+        }
     }
 }
 
@@ -51,11 +67,7 @@ pub(in crate::calculation) fn lambda_scope_value(
     args: &[Expr],
     defined_name: Option<DefinedLambdaId>,
 ) -> ScopeValue {
-    let expression = Expr::Call {
-        name: "LAMBDA".to_owned(),
-        args: args.to_vec(),
-    };
-    let Some(definition) = definition(&expression) else {
+    let Some(definition) = definition_from_args(args) else {
         return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
     };
     ScopeValue::Callable(std::sync::Arc::new(LambdaClosure {
@@ -213,27 +225,26 @@ pub(super) fn map_array_with_trace(
 pub(in crate::calculation) fn helper_array_with_trace(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: DynamicArrayFunction,
     args: &[Expr],
-) -> Option<Result<ArrayEvaluation, ErrorKind>> {
-    match name {
-        "BYROW" => Some(byrow(engine, context, args)),
-        "BYCOL" => Some(bycol(engine, context, args)),
-        "REDUCE" => Some(reduce(engine, context, args, false)),
-        "SCAN" => Some(reduce(engine, context, args, true)),
-        "MAKEARRAY" => Some(makearray(engine, context, args)),
-        _ => None,
+) -> Result<ArrayEvaluation, ErrorKind> {
+    match function {
+        DynamicArrayFunction::ByRow => byrow(engine, context, args),
+        DynamicArrayFunction::ByCol => bycol(engine, context, args),
+        DynamicArrayFunction::Reduce => reduce(engine, context, args, false),
+        DynamicArrayFunction::Scan => reduce(engine, context, args, true),
+        DynamicArrayFunction::MakeArray => makearray(engine, context, args),
     }
 }
 
 pub(in crate::calculation) fn helper_scalar_with_trace(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: DynamicArrayFunction,
     args: &[Expr],
 ) -> ScalarEvaluation {
-    match helper_array_with_trace(engine, context, name, args) {
-        Some(Ok(result)) => ScalarEvaluation {
+    match helper_array_with_trace(engine, context, function, args) {
+        Ok(result) => ScalarEvaluation {
             value: result
                 .array
                 .data
@@ -242,8 +253,7 @@ pub(in crate::calculation) fn helper_scalar_with_trace(
                 .unwrap_or(Value::Error(ErrorKind::Value)),
             decimal_trace: result.decimal_traces.first().copied().flatten(),
         },
-        Some(Err(kind)) => ScalarEvaluation::untracked(Value::Error(kind)),
-        None => ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported)),
+        Err(kind) => ScalarEvaluation::untracked(Value::Error(kind)),
     }
 }
 
@@ -650,6 +660,10 @@ pub(in crate::calculation) fn with_let_scope<ResultValue>(
     args: &[Expr],
     mut visit: impl FnMut(&Engine<'_>, EvalContext<'_>, &Expr, bool) -> Option<ResultValue>,
 ) -> Result<ResultValue, ErrorKind> {
+    let prepared =
+        super::prepare_evaluator_arguments(Evaluator::Dynamic(DynamicFunction::Let), args)
+            .ok_or(ErrorKind::Value)?;
+    let args = prepared.as_ref();
     if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(ErrorKind::Value);
     }

@@ -2,6 +2,21 @@ import type { Buffer } from "node:buffer";
 
 export const SCHEMA_VERSION: number;
 
+export interface FunctionCatalogEntry {
+  readonly name: string;
+  readonly canonicalName: string;
+  readonly alias: boolean;
+  readonly returnsArray: boolean;
+  readonly official: boolean;
+}
+
+export interface FunctionCatalogReport {
+  readonly schemaVersion: number;
+  readonly entries: readonly FunctionCatalogEntry[];
+}
+
+export function functionCatalog(): FunctionCatalogReport;
+
 export type CellRuneErrorKind =
   | "input"
   | "validation"
@@ -455,6 +470,7 @@ declare const packageExports: {
   readonly SCHEMA_VERSION: typeof SCHEMA_VERSION;
   readonly CellRuneError: typeof CellRuneError;
   readonly Workbook: typeof Workbook;
+  readonly functionCatalog: typeof functionCatalog;
 };
 
 export default packageExports;

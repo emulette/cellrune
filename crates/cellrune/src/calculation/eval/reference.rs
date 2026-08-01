@@ -4,7 +4,12 @@ use super::{Engine, EvalContext};
 use crate::Sheet;
 use crate::calculation::ast::{Expr, Reference, StructuredReference};
 use crate::calculation::coerce::{to_logical, to_number, to_text};
-use crate::calculation::functions::{callable_call_scope, let_reference, normalize_name};
+use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
+use crate::calculation::functions::kernel::{LegacyFunction, LookupFunction};
+use crate::calculation::functions::{
+    DynamicFunction, Evaluator, callable_call_scope, function_call_shape_is_valid,
+    function_dependency_kind, function_evaluator, let_reference, prepare_evaluator_arguments,
+};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::reference_resolution::{
@@ -194,7 +199,8 @@ impl Engine<'_> {
                         ScopeValue::Reference(reference) => reference,
                         _ => return Err(ErrorKind::Value),
                     }
-                } else if normalize_name(name) == "LET" {
+                } else if function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Let))
+                {
                     let_reference(self, context, args)?
                 } else {
                     ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?)
@@ -306,10 +312,22 @@ impl Engine<'_> {
                         _ => Err(ErrorKind::Value),
                     };
                 }
-                match normalize_name(name).as_str() {
-                    "LET" => let_reference(self, context, args)?.into_single_rect(),
-                    "INDEX" => self.resolve_index_rect(context, args),
-                    _ => self.resolve_dynamic_rect(context, name, args),
+                if function_evaluator(name).is_some() && !function_call_shape_is_valid(name, args) {
+                    return Err(ErrorKind::Value);
+                }
+                match function_evaluator(name) {
+                    Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
+                        let_reference(self, context, args)?.into_single_rect()
+                    }
+                    Some(Evaluator::Legacy(LegacyFunction::Index)) => {
+                        self.resolve_index_rect(context, args)
+                    }
+                    _ => match function_dependency_kind(name) {
+                        Some(DependencyKind::DynamicReference(kind)) => {
+                            self.resolve_dynamic_rect(context, kind, args)
+                        }
+                        _ => Err(ErrorKind::Value),
+                    },
                 }
             }
             _ => Err(ErrorKind::Value),
@@ -321,9 +339,9 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         args: &[Expr],
     ) -> Result<Rect, ErrorKind> {
-        if args.len() < 2 || args.len() > 4 {
-            return Err(ErrorKind::Value);
-        }
+        let prepared = prepare_evaluator_arguments(Evaluator::Legacy(LegacyFunction::Index), args)
+            .ok_or(ErrorKind::Value)?;
+        let args = prepared.as_ref();
         let reference = self.resolve_reference_value_expr(context, &args[0])?;
         let area_index = match args.get(3) {
             Some(Expr::Missing) | None => 1.0,
@@ -377,17 +395,19 @@ impl Engine<'_> {
         })
     }
 
-    pub(super) fn resolve_dynamic_rect(
+    pub(in crate::calculation) fn resolve_dynamic_rect(
         &self,
         context: EvalContext<'_>,
-        name: &str,
+        dynamic_kind: DynamicReferenceKind,
         args: &[Expr],
     ) -> Result<Rect, ErrorKind> {
-        let normalized = normalize_name(name);
-        if normalized.eq_ignore_ascii_case("INDIRECT") {
-            if args.is_empty() || args.len() > 2 {
-                return Err(ErrorKind::Value);
-            }
+        let evaluator = match dynamic_kind {
+            DynamicReferenceKind::Indirect => Evaluator::Lookup(LookupFunction::Indirect),
+            DynamicReferenceKind::Offset => Evaluator::Lookup(LookupFunction::Offset),
+        };
+        let prepared = prepare_evaluator_arguments(evaluator, args).ok_or(ErrorKind::Value)?;
+        let args = prepared.as_ref();
+        if dynamic_kind == DynamicReferenceKind::Indirect {
             if let Some(style) = args.get(1)
                 && !to_logical(&self.eval_scalar(context, style))?
             {
@@ -414,7 +434,7 @@ impl Engine<'_> {
                     _ => ErrorKind::Ref,
                 });
         }
-        if !normalized.eq_ignore_ascii_case("OFFSET") || args.len() < 3 || args.len() > 5 {
+        if dynamic_kind != DynamicReferenceKind::Offset {
             return Err(ErrorKind::Value);
         }
         let span = self.resolve_rect_span_expr(context, &args[0])?;

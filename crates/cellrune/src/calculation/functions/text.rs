@@ -3,37 +3,37 @@ use super::super::coerce::{to_logical, to_text};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
+use super::kernel::TextFunction;
 use super::util::{collect_argument_values, required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: TextFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "LEFT" => left(engine, context, args),
-        "RIGHT" => right(engine, context, args),
-        "MID" => mid(engine, context, args),
-        "FIND" => find(engine, context, args, true),
-        "SEARCH" => find(engine, context, args, false),
-        "SUBSTITUTE" => substitute(engine, context, args),
-        "LEN" => unary_text(
+    match function {
+        TextFunction::Left => left(engine, context, args),
+        TextFunction::Right => right(engine, context, args),
+        TextFunction::Mid => mid(engine, context, args),
+        TextFunction::Find => find(engine, context, args, true),
+        TextFunction::Search => find(engine, context, args, false),
+        TextFunction::Substitute => substitute(engine, context, args),
+        TextFunction::Len => unary_text(
             engine,
             context,
             args,
             |text| text.chars().count().to_string(),
             true,
         ),
-        "TRIM" => unary_text(engine, context, args, trim_excel, false),
-        "UPPER" => unary_text(engine, context, args, |text| text.to_uppercase(), false),
-        "PROPER" => unary_text(engine, context, args, proper, false),
-        "EXACT" => exact(engine, context, args),
-        "REPLACE" => replace(engine, context, args),
-        "REPT" => rept(engine, context, args),
-        "CONCAT" => concat(engine, context, args),
-        "TEXTJOIN" => textjoin(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+        TextFunction::Trim => unary_text(engine, context, args, trim_excel, false),
+        TextFunction::Upper => unary_text(engine, context, args, |text| text.to_uppercase(), false),
+        TextFunction::Proper => unary_text(engine, context, args, proper, false),
+        TextFunction::Exact => exact(engine, context, args),
+        TextFunction::Replace => replace(engine, context, args),
+        TextFunction::Rept => rept(engine, context, args),
+        TextFunction::Concat => concat(engine, context, args),
+        TextFunction::TextJoin => textjoin(engine, context, args),
     }
 }
 

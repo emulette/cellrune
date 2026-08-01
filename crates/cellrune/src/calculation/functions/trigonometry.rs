@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::kernel::TrigonometryFunction;
 use super::util::required_number;
 
 const RECIPROCAL_INPUT_LIMIT: f64 = 134_217_728.0;
@@ -8,44 +9,43 @@ const RECIPROCAL_INPUT_LIMIT: f64 = 134_217_728.0;
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: TrigonometryFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "ACOS" => checked_unary(engine, context, args, |number| {
+    match function {
+        TrigonometryFunction::Acos => checked_unary(engine, context, args, |number| {
             (-1.0..=1.0).contains(&number).then(|| number.acos())
         }),
-        "ACOSH" => checked_unary(engine, context, args, |number| {
+        TrigonometryFunction::Acosh => checked_unary(engine, context, args, |number| {
             (number >= 1.0).then(|| number.acosh())
         }),
-        "ACOT" => unary(engine, context, args, |number| 1.0_f64.atan2(number)),
-        "ACOTH" => checked_unary(engine, context, args, |number| {
+        TrigonometryFunction::Acot => unary(engine, context, args, |number| 1.0_f64.atan2(number)),
+        TrigonometryFunction::Acoth => checked_unary(engine, context, args, |number| {
             (number.abs() > 1.0).then(|| 0.5 * ((number + 1.0) / (number - 1.0)).ln())
         }),
-        "ASIN" => checked_unary(engine, context, args, |number| {
+        TrigonometryFunction::Asin => checked_unary(engine, context, args, |number| {
             (-1.0..=1.0).contains(&number).then(|| number.asin())
         }),
-        "ASINH" => unary(engine, context, args, f64::asinh),
-        "ATAN" => unary(engine, context, args, f64::atan),
-        "ATAN2" => atan2(engine, context, args),
-        "ATANH" => checked_unary(engine, context, args, |number| {
+        TrigonometryFunction::Asinh => unary(engine, context, args, f64::asinh),
+        TrigonometryFunction::Atan => unary(engine, context, args, f64::atan),
+        TrigonometryFunction::Atan2 => atan2(engine, context, args),
+        TrigonometryFunction::Atanh => checked_unary(engine, context, args, |number| {
             (number.abs() < 1.0).then(|| number.atanh())
         }),
-        "COS" => unary(engine, context, args, f64::cos),
-        "COSH" => unary(engine, context, args, f64::cosh),
-        "COT" => reciprocal_trig(engine, context, args, f64::tan),
-        "COTH" => reciprocal_trig(engine, context, args, f64::tanh),
-        "CSC" => reciprocal_trig(engine, context, args, f64::sin),
-        "CSCH" => reciprocal_trig(engine, context, args, f64::sinh),
-        "DEGREES" => unary(engine, context, args, f64::to_degrees),
-        "RADIANS" => unary(engine, context, args, f64::to_radians),
-        "SEC" => reciprocal_trig(engine, context, args, f64::cos),
-        "SECH" => reciprocal_trig(engine, context, args, f64::cosh),
-        "SIN" => unary(engine, context, args, f64::sin),
-        "SINH" => unary(engine, context, args, f64::sinh),
-        "TAN" => unary(engine, context, args, f64::tan),
-        "TANH" => unary(engine, context, args, f64::tanh),
-        _ => Value::Error(ErrorKind::Unsupported),
+        TrigonometryFunction::Cos => unary(engine, context, args, f64::cos),
+        TrigonometryFunction::Cosh => unary(engine, context, args, f64::cosh),
+        TrigonometryFunction::Cot => reciprocal_trig(engine, context, args, f64::tan),
+        TrigonometryFunction::Coth => reciprocal_trig(engine, context, args, f64::tanh),
+        TrigonometryFunction::Csc => reciprocal_trig(engine, context, args, f64::sin),
+        TrigonometryFunction::Csch => reciprocal_trig(engine, context, args, f64::sinh),
+        TrigonometryFunction::Degrees => unary(engine, context, args, f64::to_degrees),
+        TrigonometryFunction::Radians => unary(engine, context, args, f64::to_radians),
+        TrigonometryFunction::Sec => reciprocal_trig(engine, context, args, f64::cos),
+        TrigonometryFunction::Sech => reciprocal_trig(engine, context, args, f64::cosh),
+        TrigonometryFunction::Sin => unary(engine, context, args, f64::sin),
+        TrigonometryFunction::Sinh => unary(engine, context, args, f64::sinh),
+        TrigonometryFunction::Tan => unary(engine, context, args, f64::tan),
+        TrigonometryFunction::Tanh => unary(engine, context, args, f64::tanh),
     }
 }
 

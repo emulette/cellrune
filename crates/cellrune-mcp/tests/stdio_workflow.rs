@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cellrune_interop::{
     CalculationDeltaDto, CalculationOptionsDto, EditBatchDto, RecalculationModeDto,
     WorkbookChangeDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    function_catalog,
 };
 use serde_json::{Value, json};
 
@@ -336,10 +337,9 @@ fn stdio_workflow_matches_the_rust_interop_session() {
         .expect("catalog resource must contain JSON text");
     let catalog_json: Value =
         serde_json::from_str(catalog_text).expect("catalog resource must be valid JSON");
-    assert!(
-        catalog_json["entries"]
-            .as_array()
-            .is_some_and(|entries| !entries.is_empty())
+    assert_eq!(
+        catalog_json,
+        serde_json::to_value(function_catalog()).expect("interop catalog must serialize")
     );
     let session_resource = mcp.request("resources/read", json!({"uri": summary_uri}));
     let session_resource_text = session_resource["result"]["contents"][0]["text"]

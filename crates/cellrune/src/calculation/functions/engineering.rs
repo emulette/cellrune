@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::kernel::EngineeringFunction;
 use super::util::{required_number, required_text};
 
 const MAX_BIT_VALUE: u64 = (1_u64 << 48) - 1;
@@ -8,69 +9,78 @@ const MAX_BIT_VALUE: u64 = (1_u64 << 48) - 1;
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: EngineeringFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "BITAND" => bit_binary(engine, context, args, |left, right| left & right),
-        "BITOR" => bit_binary(engine, context, args, |left, right| left | right),
-        "BITXOR" => bit_binary(engine, context, args, |left, right| left ^ right),
-        "BITLSHIFT" => bit_shift(engine, context, args, true),
-        "BITRSHIFT" => bit_shift(engine, context, args, false),
-        "BIN2DEC" => convert_source(engine, context, args, SourceRadix::Binary, None),
-        "BIN2HEX" => convert_source(
+    match function {
+        EngineeringFunction::BitAnd => {
+            bit_binary(engine, context, args, |left, right| left & right)
+        }
+        EngineeringFunction::BitOr => bit_binary(engine, context, args, |left, right| left | right),
+        EngineeringFunction::BitXor => {
+            bit_binary(engine, context, args, |left, right| left ^ right)
+        }
+        EngineeringFunction::BitLShift => bit_shift(engine, context, args, true),
+        EngineeringFunction::BitRShift => bit_shift(engine, context, args, false),
+        EngineeringFunction::Bin2Dec => {
+            convert_source(engine, context, args, SourceRadix::Binary, None)
+        }
+        EngineeringFunction::Bin2Hex => convert_source(
             engine,
             context,
             args,
             SourceRadix::Binary,
             Some(TargetRadix::Hex),
         ),
-        "BIN2OCT" => convert_source(
+        EngineeringFunction::Bin2Oct => convert_source(
             engine,
             context,
             args,
             SourceRadix::Binary,
             Some(TargetRadix::Octal),
         ),
-        "HEX2BIN" => convert_source(
+        EngineeringFunction::Hex2Bin => convert_source(
             engine,
             context,
             args,
             SourceRadix::Hex,
             Some(TargetRadix::Binary),
         ),
-        "HEX2DEC" => convert_source(engine, context, args, SourceRadix::Hex, None),
-        "HEX2OCT" => convert_source(
+        EngineeringFunction::Hex2Dec => {
+            convert_source(engine, context, args, SourceRadix::Hex, None)
+        }
+        EngineeringFunction::Hex2Oct => convert_source(
             engine,
             context,
             args,
             SourceRadix::Hex,
             Some(TargetRadix::Octal),
         ),
-        "OCT2BIN" => convert_source(
+        EngineeringFunction::Oct2Bin => convert_source(
             engine,
             context,
             args,
             SourceRadix::Octal,
             Some(TargetRadix::Binary),
         ),
-        "OCT2DEC" => convert_source(engine, context, args, SourceRadix::Octal, None),
-        "OCT2HEX" => convert_source(
+        EngineeringFunction::Oct2Dec => {
+            convert_source(engine, context, args, SourceRadix::Octal, None)
+        }
+        EngineeringFunction::Oct2Hex => convert_source(
             engine,
             context,
             args,
             SourceRadix::Octal,
             Some(TargetRadix::Hex),
         ),
-        "DEC2BIN" => convert_decimal(engine, context, args, TargetRadix::Binary),
-        "DEC2HEX" => convert_decimal(engine, context, args, TargetRadix::Hex),
-        "DEC2OCT" => convert_decimal(engine, context, args, TargetRadix::Octal),
-        "DELTA" => comparison(engine, context, args, true),
-        "GESTEP" => comparison(engine, context, args, false),
-        "ERF" => erf(engine, context, args, false),
-        "ERF.PRECISE" => erf(engine, context, args, true),
-        "ERFC" | "ERFC.PRECISE" => erfc(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+        EngineeringFunction::Dec2Bin => convert_decimal(engine, context, args, TargetRadix::Binary),
+        EngineeringFunction::Dec2Hex => convert_decimal(engine, context, args, TargetRadix::Hex),
+        EngineeringFunction::Dec2Oct => convert_decimal(engine, context, args, TargetRadix::Octal),
+        EngineeringFunction::Delta => comparison(engine, context, args, true),
+        EngineeringFunction::GeStep => comparison(engine, context, args, false),
+        EngineeringFunction::Erf => erf(engine, context, args, false),
+        EngineeringFunction::ErfPrecise => erf(engine, context, args, true),
+        EngineeringFunction::Erfc | EngineeringFunction::ErfcPrecise => erfc(engine, context, args),
     }
 }
 

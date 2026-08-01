@@ -450,6 +450,19 @@ class FunctionUsageReport(TypedDict):
     entries: list[FunctionUsageEntry]
 
 
+class FunctionCatalogEntry(TypedDict):
+    name: str
+    canonical_name: str
+    alias: bool
+    returns_array: bool
+    official: bool
+
+
+class FunctionCatalogReport(TypedDict):
+    schema_version: int
+    entries: list[FunctionCatalogEntry]
+
+
 class WriteReport(TypedDict):
     schema_version: int
     complete: bool

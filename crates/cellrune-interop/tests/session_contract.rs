@@ -315,6 +315,15 @@ fn capability_usage_catalog_and_incomplete_write_contracts_are_explicit() {
 
     let catalog = function_catalog();
     assert_eq!(catalog.schema_version, INTEROP_SCHEMA_VERSION);
+    let rust_catalog = cellrune::supported_function_catalog();
+    assert_eq!(catalog.entries.len(), rust_catalog.len());
+    for (interop, rust) in catalog.entries.iter().zip(&rust_catalog) {
+        assert_eq!(interop.name, rust.name());
+        assert_eq!(interop.canonical_name, rust.canonical_name());
+        assert_eq!(interop.alias, rust.is_alias());
+        assert_eq!(interop.returns_array, rust.returns_array());
+        assert_eq!(interop.official, rust.is_official());
+    }
     let sum_catalog = catalog
         .entries
         .iter()

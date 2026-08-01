@@ -6,24 +6,24 @@ use super::calendar::{
     Date, date_from_serial, days_from_civil, is_leap_year, serial_from_date, weekday_monday_zero,
 };
 use super::date::{days_360_european, days_360_us};
+use super::kernel::DateAdditionalFunction;
 use super::util::required_number;
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: DateAdditionalFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "DAYS" => days(engine, context, args),
-        "DAYS360" => days360(engine, context, args),
-        "HOUR" => time_part(engine, context, args, TimePart::Hour),
-        "MINUTE" => time_part(engine, context, args, TimePart::Minute),
-        "SECOND" => time_part(engine, context, args, TimePart::Second),
-        "TIME" => time(engine, context, args),
-        "ISOWEEKNUM" => iso_week_num(engine, context, args),
-        "WEEKNUM" => week_num(engine, context, args),
-        _ => Value::Error(ErrorKind::Unsupported),
+    match function {
+        DateAdditionalFunction::Days => days(engine, context, args),
+        DateAdditionalFunction::Days360 => days360(engine, context, args),
+        DateAdditionalFunction::Hour => time_part(engine, context, args, TimePart::Hour),
+        DateAdditionalFunction::Minute => time_part(engine, context, args, TimePart::Minute),
+        DateAdditionalFunction::Second => time_part(engine, context, args, TimePart::Second),
+        DateAdditionalFunction::Time => time(engine, context, args),
+        DateAdditionalFunction::IsoWeekNum => iso_week_num(engine, context, args),
+        DateAdditionalFunction::WeekNum => week_num(engine, context, args),
     }
 }
 

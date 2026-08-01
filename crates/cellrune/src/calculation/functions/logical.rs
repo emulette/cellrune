@@ -2,24 +2,32 @@ use super::super::ast::Expr;
 use super::super::coerce::{to_logical, values_equal};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::kernel::LogicalFunction;
 use super::util::collect_argument_values;
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: LogicalFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "TRUE" if args.is_empty() => Value::Logical(true),
-        "FALSE" if args.is_empty() => Value::Logical(false),
-        "NOT" => not(engine, context, args),
-        "OR" => logical_aggregate(engine, context, args, false),
-        "XOR" => logical_aggregate(engine, context, args, true),
-        "IFNA" => ifna(engine, context, args),
-        "IFS" => ifs(engine, context, args),
-        "SWITCH" => switch(engine, context, args),
-        _ => Value::Error(ErrorKind::Value),
+    match function {
+        LogicalFunction::True => constant(args, true),
+        LogicalFunction::False => constant(args, false),
+        LogicalFunction::Not => not(engine, context, args),
+        LogicalFunction::Or => logical_aggregate(engine, context, args, false),
+        LogicalFunction::Xor => logical_aggregate(engine, context, args, true),
+        LogicalFunction::IfNa => ifna(engine, context, args),
+        LogicalFunction::Ifs => ifs(engine, context, args),
+        LogicalFunction::Switch => switch(engine, context, args),
+    }
+}
+
+fn constant(args: &[Expr], value: bool) -> Value {
+    if args.is_empty() {
+        Value::Logical(value)
+    } else {
+        Value::Error(ErrorKind::Value)
     }
 }
 

@@ -6,9 +6,10 @@ use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
 use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation};
 use crate::calculation::functions::{
-    call_function, call_function_array, callable_call_scope, helper_scalar_with_trace,
-    invoke_lambda, is_reference_returning_function, lambda_scope_value, let_scope_value,
-    map_scalar_with_trace, normalize_name, reduce_scope_value,
+    DynamicFunction, Evaluator, FunctionResultKind, call_function_array, call_function_with_trace,
+    callable_call_scope, function_call_shape_is_valid, function_evaluator, function_result_kind,
+    intrinsic_scope_value, invoke_lambda, is_reference_returning_function, lambda_scope_value,
+    let_scope_value, reduce_scope_value,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
@@ -143,10 +144,19 @@ impl Engine<'_> {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     return scoped;
                 }
-                match normalize_name(name).as_str() {
-                    "LET" => let_scope_value(self, context, args),
-                    "LAMBDA" => lambda_scope_value(context, args, None),
-                    "REDUCE" => reduce_scope_value(self, context, args).unwrap_or_else(scope_error),
+                if function_evaluator(name).is_some() && !function_call_shape_is_valid(name, args) {
+                    return scope_error(ErrorKind::Value);
+                }
+                match function_evaluator(name) {
+                    Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
+                        let_scope_value(self, context, args)
+                    }
+                    Some(Evaluator::Dynamic(DynamicFunction::Lambda)) => {
+                        lambda_scope_value(context, args, None)
+                    }
+                    Some(Evaluator::Dynamic(DynamicFunction::Reduce)) => {
+                        reduce_scope_value(self, context, args).unwrap_or_else(scope_error)
+                    }
                     _ if is_reference_returning_function(name) => self
                         .resolve_reference_value_expr(context, expr)
                         .map_or_else(scope_error, ScopeValue::Reference),
@@ -197,10 +207,14 @@ impl Engine<'_> {
         let may_return_callable = match expr {
             Expr::Name(_) | Expr::Invoke { .. } => true,
             Expr::Call { name, .. } => {
-                matches!(normalize_name(name).as_str(), "LAMBDA" | "LET" | "REDUCE")
-                    || self
-                        .resolve_defined_lambda_in_context(context, name)
-                        .is_some()
+                function_result_kind(name).is_some_and(|kind| {
+                    matches!(
+                        kind,
+                        FunctionResultKind::Callable | FunctionResultKind::Contextual
+                    )
+                }) || self
+                    .resolve_defined_lambda_in_context(context, name)
+                    .is_some()
             }
             _ => false,
         };
@@ -353,24 +367,10 @@ impl Engine<'_> {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     return self.scalar_from_scope(context, &scoped);
                 }
-                let normalized = normalize_name(name);
-                match normalized.as_str() {
-                    _ if is_reference_returning_function(name) => {
-                        self.eval_reference_with_trace(context, expr)
-                    }
-                    "LET" => {
-                        let scoped = let_scope_value(self, context, args);
-                        self.scalar_from_scope(context, &scoped)
-                    }
-                    "LAMBDA" => {
-                        let scoped = lambda_scope_value(context, args, None);
-                        self.scalar_from_scope(context, &scoped)
-                    }
-                    "MAP" => map_scalar_with_trace(self, context, args),
-                    "BYCOL" | "BYROW" | "MAKEARRAY" | "REDUCE" | "SCAN" => {
-                        helper_scalar_with_trace(self, context, &normalized, args)
-                    }
-                    _ => ScalarEvaluation::untracked(call_function(self, context, name, args)),
+                if is_reference_returning_function(name) {
+                    self.eval_reference_with_trace(context, expr)
+                } else {
+                    call_function_with_trace(self, context, name, args)
                 }
             }
             Expr::Invoke { callee, args } => {
@@ -656,8 +656,7 @@ impl Engine<'_> {
                     }
                     return Ok(evaluated);
                 }
-                if normalize_name(name) == "LET" {
-                    let scoped = let_scope_value(self, context, args);
+                if let Some(scoped) = intrinsic_scope_value(self, context, name, args) {
                     return self.array_from_scope(context, &scoped, evaluation);
                 }
                 if let Some(result) = call_function_array(self, context, name, args) {
@@ -670,8 +669,8 @@ impl Engine<'_> {
                     }
                     Ok(evaluated)
                 } else {
-                    Ok(ArrayEvaluation::scalar(ScalarEvaluation::untracked(
-                        call_function(self, context, name, args),
+                    Ok(ArrayEvaluation::scalar(call_function_with_trace(
+                        self, context, name, args,
                     )))
                 }
             }
@@ -720,10 +719,14 @@ impl Engine<'_> {
                 .resolve_defined_lambda_in_context(context, name)
                 .is_some(),
             Expr::Call { name, .. } => {
-                matches!(normalize_name(name).as_str(), "LAMBDA" | "LET" | "REDUCE")
-                    || self
-                        .resolve_defined_lambda_in_context(context, name)
-                        .is_some()
+                function_result_kind(name).is_some_and(|kind| {
+                    matches!(
+                        kind,
+                        FunctionResultKind::Callable | FunctionResultKind::Contextual
+                    )
+                }) || self
+                    .resolve_defined_lambda_in_context(context, name)
+                    .is_some()
             }
             _ => false,
         };

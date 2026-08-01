@@ -1,3 +1,4 @@
+use super::kernel::LookupFunction;
 use std::cmp::Ordering;
 
 use super::super::ast::Expr;
@@ -6,32 +7,34 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::{Array, Rect};
 use super::super::value::{ErrorKind, Value};
 use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
+use super::descriptor::DynamicReferenceKind;
 use super::util::{required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    name: &str,
+    function: LookupFunction,
     args: &[Expr],
 ) -> Value {
-    match name {
-        "ADDRESS" => address(engine, context, args),
-        "COLUMN" => column(engine, context, args),
-        "HYPERLINK" => hyperlink(engine, context, args),
-        "LOOKUP" => lookup(engine, context, args),
-        "VLOOKUP" => table_lookup(engine, context, args, false),
-        "HLOOKUP" => table_lookup(engine, context, args, true),
-        "XLOOKUP" => xlookup(engine, context, args),
-        "CHOOSE" => choose(engine, context, args),
-        "ROWS" => dimension(engine, context, args, true),
-        "COLUMNS" => dimension(engine, context, args, false),
-        "ROW" => row(engine, context, args),
-        "OFFSET" | "INDIRECT" => {
-            let expression = Expr::Call {
-                name: name.to_owned(),
-                args: args.to_vec(),
+    match function {
+        LookupFunction::Address => address(engine, context, args),
+        LookupFunction::Column => column(engine, context, args),
+        LookupFunction::Hyperlink => hyperlink(engine, context, args),
+        LookupFunction::Lookup => lookup(engine, context, args),
+        LookupFunction::VLookup => table_lookup(engine, context, args, false),
+        LookupFunction::HLookup => table_lookup(engine, context, args, true),
+        LookupFunction::XLookup => xlookup(engine, context, args),
+        LookupFunction::Choose => choose(engine, context, args),
+        LookupFunction::Rows => dimension(engine, context, args, true),
+        LookupFunction::Columns => dimension(engine, context, args, false),
+        LookupFunction::Row => row(engine, context, args),
+        LookupFunction::Offset | LookupFunction::Indirect => {
+            let kind = match function {
+                LookupFunction::Offset => DynamicReferenceKind::Offset,
+                LookupFunction::Indirect => DynamicReferenceKind::Indirect,
+                _ => unreachable!("only reference-returning lookup functions enter this branch"),
             };
-            match engine.resolve_rect_expr(context, &expression) {
+            match engine.resolve_dynamic_rect(context, kind, args) {
                 Ok(rect) if rect.is_single_cell() => engine
                     .read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
                     .unwrap_or_else(Value::Error),
@@ -39,7 +42,6 @@ pub(super) fn call(
                 Err(kind) => Value::Error(kind),
             }
         }
-        _ => Value::Error(ErrorKind::Unsupported),
     }
 }
 
