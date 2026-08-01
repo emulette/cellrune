@@ -6,7 +6,8 @@ use sha2::{Digest, Sha256};
 use super::{Engine, EvalContext, EvaluationBudget};
 use crate::CellContent;
 use crate::calculation::ast::{Expr, StructuredReference};
-use crate::calculation::functions::descriptor::DependencyKind;
+use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
+use crate::calculation::functions::kernel::LegacyFunction;
 use crate::calculation::functions::{
     CallableArity, CallableShadow, DynamicFunction, Evaluator,
     builtin_invocation_arguments_are_reachable, callable_shadow_arguments_are_reachable,
@@ -87,6 +88,7 @@ pub(in crate::calculation) enum DependencyTarget {
     Area(RectSpan),
     TableIdentity(TableDependency),
     SpillAnchor(super::CellId),
+    FormulaContent(super::CellId),
 }
 
 impl DependencyTarget {
@@ -102,16 +104,16 @@ impl DependencyTarget {
     #[cfg(test)]
     pub(super) fn span(&self) -> Option<RectSpan> {
         match self {
-            Self::Cell((sheet, row, column)) | Self::SpillAnchor((sheet, row, column)) => {
-                Some(RectSpan::single(Rect {
-                    sheet: *sheet,
-                    row_start: *row,
-                    col_start: *column,
-                    row_end: *row,
-                    col_end: *column,
-                    whole_rows: false,
-                }))
-            }
+            Self::Cell((sheet, row, column))
+            | Self::SpillAnchor((sheet, row, column))
+            | Self::FormulaContent((sheet, row, column)) => Some(RectSpan::single(Rect {
+                sheet: *sheet,
+                row_start: *row,
+                col_start: *column,
+                row_end: *row,
+                col_end: *column,
+                whole_rows: false,
+            })),
             Self::Area(span) => Some(span.clone()),
             Self::TableIdentity(_) => None,
         }
@@ -124,12 +126,14 @@ fn compare_targets(left: &DependencyTarget, right: &DependencyTarget) -> Orderin
         DependencyTarget::Area(_) => 1,
         DependencyTarget::TableIdentity(_) => 2,
         DependencyTarget::SpillAnchor(_) => 3,
+        DependencyTarget::FormulaContent(_) => 4,
     };
     rank(left)
         .cmp(&rank(right))
         .then_with(|| match (left, right) {
             (DependencyTarget::Cell(left), DependencyTarget::Cell(right))
-            | (DependencyTarget::SpillAnchor(left), DependencyTarget::SpillAnchor(right)) => {
+            | (DependencyTarget::SpillAnchor(left), DependencyTarget::SpillAnchor(right))
+            | (DependencyTarget::FormulaContent(left), DependencyTarget::FormulaContent(right)) => {
                 left.cmp(right)
             }
             (DependencyTarget::Area(left), DependencyTarget::Area(right)) => {
@@ -220,6 +224,12 @@ pub(super) fn table_topologies(
 #[derive(Default)]
 struct VisitedDefinitions {
     values: BTreeSet<DefinedLambdaId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReferenceSelectionMode {
+    ReferenceValue,
+    FormulaMetadata,
 }
 
 fn callable_shadow_from_scope_value(value: &ScopeValue) -> CallableShadow {
@@ -705,7 +715,7 @@ impl Engine<'_> {
                             cell_dependencies.push(owner);
                         }
                     }
-                    DependencyTarget::TableIdentity(_) => {}
+                    DependencyTarget::TableIdentity(_) | DependencyTarget::FormulaContent(_) => {}
                     DependencyTarget::Area(span) => {
                         for rect in span.rects() {
                             if cancelled() {
@@ -850,6 +860,7 @@ impl Engine<'_> {
                 let mut selection_names = VisitedDefinitions::default();
                 self.collect_reference_selection_inputs(
                     context,
+                    ReferenceSelectionMode::ReferenceValue,
                     anchor,
                     &mut selection_names,
                     local_names,
@@ -868,6 +879,7 @@ impl Engine<'_> {
                 let mut selection_names = VisitedDefinitions::default();
                 self.collect_reference_selection_inputs(
                     context,
+                    ReferenceSelectionMode::ReferenceValue,
                     expr,
                     &mut selection_names,
                     local_names,
@@ -882,7 +894,18 @@ impl Engine<'_> {
                 self.collect_dependency_targets(context, end, visited, local_names, output);
             }
             Expr::Name(name) => {
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                if let Some(binding) = context.binding(name) {
+                    if let ScopeValue::Reference(reference) = binding {
+                        output.extend(
+                            reference
+                                .areas()
+                                .iter()
+                                .map(|area| DependencyTarget::from_span(area.as_span())),
+                        );
+                    }
+                    return;
+                }
+                if is_local_name(name, local_names) {
                     return;
                 }
                 if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
@@ -924,6 +947,7 @@ impl Engine<'_> {
                     let mut selection_names = VisitedDefinitions::default();
                     self.collect_reference_selection_inputs(
                         context,
+                        ReferenceSelectionMode::ReferenceValue,
                         inner,
                         &mut selection_names,
                         local_names,
@@ -976,11 +1000,27 @@ impl Engine<'_> {
                     return;
                 }
                 let normalized = normalize_name(name);
-                if crate::calculation::functions::uses_reference_metadata_only(&normalized) {
+                if let Some(DependencyKind::ReferenceMetadataOnly(kind)) =
+                    function_dependency_kind(&normalized)
+                {
                     let mut selection_names = VisitedDefinitions::default();
                     for arg in args {
+                        if matches!(
+                            kind,
+                            crate::calculation::functions::descriptor::ReferenceMetadataKind::FormulaPredicate
+                                | crate::calculation::functions::descriptor::ReferenceMetadataKind::FormulaText
+                        ) && let Ok(reference) = self.resolve_reference_value_expr(context, arg)
+                            && let Ok(rect) = reference.single_rect()
+                        {
+                            output.push(DependencyTarget::FormulaContent((
+                                rect.sheet,
+                                rect.row_start,
+                                rect.col_start,
+                            )));
+                        }
                         self.collect_reference_selection_inputs(
                             context,
+                            ReferenceSelectionMode::FormulaMetadata,
                             arg,
                             &mut selection_names,
                             local_names,
@@ -1079,6 +1119,7 @@ impl Engine<'_> {
     fn collect_reference_selection_inputs(
         &self,
         context: EvalContext<'_>,
+        mode: ReferenceSelectionMode,
         expr: &Expr,
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
@@ -1091,6 +1132,7 @@ impl Engine<'_> {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.collect_reference_selection_inputs(
                     context,
+                    mode,
                     inner,
                     visited,
                     local_names,
@@ -1103,6 +1145,7 @@ impl Engine<'_> {
                 }
                 self.collect_reference_selection_inputs(
                     context,
+                    mode,
                     anchor,
                     visited,
                     local_names,
@@ -1125,12 +1168,20 @@ impl Engine<'_> {
             } => {
                 self.collect_reference_selection_inputs(
                     context,
+                    mode,
                     start,
                     visited,
                     local_names,
                     output,
                 );
-                self.collect_reference_selection_inputs(context, end, visited, local_names, output);
+                self.collect_reference_selection_inputs(
+                    context,
+                    mode,
+                    end,
+                    visited,
+                    local_names,
+                    output,
+                );
             }
             Expr::Name(name) => {
                 if context.binding(name).is_some() || is_local_name(name, local_names) {
@@ -1143,6 +1194,7 @@ impl Engine<'_> {
                         context
                             .without_bindings()
                             .with_defined_name_scope(Some(id.scope())),
+                        mode,
                         named,
                         visited,
                         &mut Vec::new(),
@@ -1162,6 +1214,7 @@ impl Engine<'_> {
                         context
                             .without_bindings()
                             .with_defined_name_scope(Some(id.scope())),
+                        mode,
                         named,
                         visited,
                         &mut Vec::new(),
@@ -1182,6 +1235,7 @@ impl Engine<'_> {
                             context
                                 .without_bindings()
                                 .with_defined_name_scope(Some(id.scope())),
+                            mode,
                             named,
                             visited,
                             &mut Vec::new(),
@@ -1192,6 +1246,7 @@ impl Engine<'_> {
                         for arg in args {
                             self.collect_reference_selection_inputs(
                                 context,
+                                mode,
                                 arg,
                                 visited,
                                 local_names,
@@ -1207,9 +1262,13 @@ impl Engine<'_> {
                 if is_let_function(name) {
                     let _ =
                         with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
-                            if final_arg {
+                            if final_arg
+                                || (mode == ReferenceSelectionMode::FormulaMetadata
+                                    && engine.resolve_reference_value_expr(scoped, arg).is_ok())
+                            {
                                 engine.collect_reference_selection_inputs(
                                     scoped,
+                                    mode,
                                     arg,
                                     visited,
                                     local_names,
@@ -1226,6 +1285,57 @@ impl Engine<'_> {
                             }
                             final_arg.then_some(())
                         });
+                    return;
+                }
+                if mode == ReferenceSelectionMode::FormulaMetadata
+                    && function_evaluator(name) == Some(Evaluator::Legacy(LegacyFunction::Index))
+                {
+                    if let Some((source, selectors)) = args.split_first() {
+                        self.collect_reference_selection_inputs(
+                            context,
+                            mode,
+                            source,
+                            visited,
+                            local_names,
+                            output,
+                        );
+                        for selector in selectors {
+                            self.collect_dependency_targets(
+                                context,
+                                selector,
+                                visited,
+                                local_names,
+                                output,
+                            );
+                        }
+                    }
+                    return;
+                }
+                if mode == ReferenceSelectionMode::FormulaMetadata
+                    && function_dependency_kind(name)
+                        == Some(DependencyKind::DynamicReference(
+                            DynamicReferenceKind::Offset,
+                        ))
+                {
+                    if let Some((base, selectors)) = args.split_first() {
+                        self.collect_reference_selection_inputs(
+                            context,
+                            mode,
+                            base,
+                            visited,
+                            local_names,
+                            output,
+                        );
+                        for selector in selectors {
+                            self.collect_dependency_targets(
+                                context,
+                                selector,
+                                visited,
+                                local_names,
+                                output,
+                            );
+                        }
+                    }
                     return;
                 }
                 if walk_local_scope(
@@ -1247,6 +1357,7 @@ impl Engine<'_> {
                 if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
                     self.collect_reference_selection_inputs(
                         context,
+                        mode,
                         callee,
                         visited,
                         local_names,
@@ -1264,6 +1375,7 @@ impl Engine<'_> {
                 for arg in args {
                     self.collect_reference_selection_inputs(
                         context,
+                        mode,
                         arg,
                         visited,
                         local_names,

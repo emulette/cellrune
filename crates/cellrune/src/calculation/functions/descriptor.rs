@@ -98,6 +98,10 @@ pub(in crate::calculation) enum DynamicReferenceKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::calculation) enum ReferenceMetadataKind {
     Predicate,
+    FormulaPredicate,
+    FormulaText,
+    SheetIndex,
+    SheetCount,
     AreaCount,
 }
 
@@ -558,11 +562,30 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         )),
     function!(Rows, "ROWS", Lookup),
     function!(Row, "ROW", Lookup),
+    function!(Sheet, "SHEET", Lookup)
+        .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
+            ReferenceMetadataKind::SheetIndex,
+        ))
+        .with_sheet_span_policy(VALUE_ON_SHEET_SPAN)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(Sheets, "SHEETS", Lookup)
+        .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
+            ReferenceMetadataKind::SheetCount,
+        ))
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(VLookup, "VLOOKUP", Lookup).with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
+    function!(XMatch, "XMATCH", Lookup).with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(XLookup, "XLOOKUP", Lookup),
     function!(ErrorType, "ERROR.TYPE", Information).with_array_evaluator(
         ArrayEvaluator::Information(InformationArrayFunction::ErrorType),
     ),
+    function!(FormulaText, "FORMULATEXT", Information)
+        .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
+            ReferenceMetadataKind::FormulaText,
+        ))
+        .with_sheet_span_policy(VALUE_ON_SHEET_SPAN)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(IsBlank, "ISBLANK", Information).with_array_evaluator(ArrayEvaluator::Information(
         InformationArrayFunction::IsBlank,
     )),
@@ -574,6 +597,12 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(IsEven, "ISEVEN", Information).with_array_evaluator(ArrayEvaluator::Information(
         InformationArrayFunction::IsEven,
     )),
+    function!(IsFormula, "ISFORMULA", Information)
+        .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
+            ReferenceMetadataKind::FormulaPredicate,
+        ))
+        .with_sheet_span_policy(VALUE_ON_SHEET_SPAN)
+        .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(IsLogical, "ISLOGICAL", Information).with_array_evaluator(
         ArrayEvaluator::Information(InformationArrayFunction::IsLogical),
     ),
@@ -987,7 +1016,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "678f03064961d8e41e4c6db94bbbc8c3a83b887096c4639a544cba2d281d8012"
+            "f0d8e9f24aef11601304b63d8cc99a34fc593f7ef87dd0cba49ce0556838ad6a"
         );
     }
 

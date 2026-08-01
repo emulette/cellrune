@@ -34,8 +34,10 @@ pub(in crate::calculation) mod kernel;
 mod legacy;
 mod logical;
 mod lookup;
+mod lookup_common;
 mod math;
 mod modern_array;
+mod reference_introspection;
 mod statistical;
 mod statistical_additional;
 mod sum_of_squares;
@@ -43,6 +45,7 @@ mod text;
 mod text_additional;
 mod trigonometry;
 mod util;
+mod xmatch;
 
 pub(super) use dynamic::{
     helper_array_with_trace, helper_scalar_with_trace, invoke_callable, lambda_scope_value,
@@ -255,15 +258,6 @@ pub(in crate::calculation) fn intrinsic_scope_value(
     }
 }
 
-pub(super) fn uses_reference_metadata_only(normalized_name: &str) -> bool {
-    descriptor::descriptor(normalized_name).is_some_and(|descriptor| {
-        matches!(
-            descriptor.dependency_kind(),
-            DependencyKind::ReferenceMetadataOnly(_)
-        )
-    })
-}
-
 pub(in crate::calculation) fn invoke_scope_value(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -298,7 +292,10 @@ fn direct_sheet_span_error(
 ) -> Option<ErrorKind> {
     if matches!(
         descriptor.dependency_kind(),
-        DependencyKind::ReferenceMetadataOnly(descriptor::ReferenceMetadataKind::Predicate)
+        DependencyKind::ReferenceMetadataOnly(
+            descriptor::ReferenceMetadataKind::Predicate
+                | descriptor::ReferenceMetadataKind::FormulaPredicate
+        )
     ) {
         return None;
     }
@@ -906,14 +903,14 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_294_unique_excel_facing_names() {
+    fn coverage_registry_has_299_unique_excel_facing_names() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
             .collect();
         assert_eq!(kernels.len(), descriptor::descriptors().len());
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 282);
+        assert_eq!(kernels.len(), 287);
 
         let aliases = descriptor::descriptors()
             .iter()
@@ -936,10 +933,10 @@ mod tests {
 
         let catalog = super::function_catalog();
         assert_eq!(catalog.len(), kernels.len() + aliases.len());
-        assert_eq!(catalog.len(), 295);
+        assert_eq!(catalog.len(), 300);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            294
+            299
         );
         assert!(
             catalog
@@ -991,7 +988,7 @@ mod tests {
     }
 
     #[test]
-    fn v0_1_10_array_checkpoint_catalog_is_byte_exact() {
+    fn v0_1_10_reference_checkpoint_catalog_is_byte_exact() {
         let mut digest = Sha256::new();
         for entry in super::function_catalog() {
             digest.update(entry.name().as_bytes());
@@ -1012,7 +1009,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "f34103747a1228b8e747def032256669b72b6fe5943134456e1e6ace767c5b6f"
+            "0e1a7f6728f8c55b207d5ec0c45cd49c5c1eead947651e4ada2e0c78efd82841"
         );
     }
 }

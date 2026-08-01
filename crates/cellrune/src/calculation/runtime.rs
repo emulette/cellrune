@@ -138,6 +138,10 @@ impl RectSpan {
         self.sheets.is_explicit_range()
     }
 
+    pub(super) fn sheet_count(&self) -> usize {
+        self.sheets.iter().count()
+    }
+
     pub(super) fn sort_key(&self) -> (usize, usize, bool, u32, u32, u32, u32, bool) {
         (
             *self.sheets.sheets.start(),

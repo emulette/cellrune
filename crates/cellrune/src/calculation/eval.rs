@@ -597,6 +597,35 @@ impl<'workbook> Engine<'workbook> {
         self.asts.get(&cell).map(ParsedFormula::root)
     }
 
+    pub(super) fn cell_has_formula(&self, cell: CellId) -> bool {
+        self.workbook
+            .sheets()
+            .get(cell.0)
+            .and_then(|sheet| cell_at(sheet, cell.1, cell.2))
+            .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)))
+    }
+
+    pub(super) fn cell_formula_text(&self, cell: CellId) -> Option<&str> {
+        let CellContent::Formula(formula) = self
+            .workbook
+            .sheets()
+            .get(cell.0)
+            .and_then(|sheet| cell_at(sheet, cell.1, cell.2))?
+            .content()
+        else {
+            return None;
+        };
+        formula.text().map(crate::FormulaText::as_str)
+    }
+
+    pub(super) fn workbook_sheet_count(&self) -> usize {
+        self.workbook.sheets().len()
+    }
+
+    pub(super) fn workbook_sheet_index(&self, name: &str) -> Option<usize> {
+        self.workbook.sheet_index_by_name(name)
+    }
+
     pub(super) fn parse_failure(&self, cell: CellId) -> Option<&ParseError> {
         self.parse_failures.get(&cell)
     }

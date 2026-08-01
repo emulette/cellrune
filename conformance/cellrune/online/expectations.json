@@ -772,11 +772,10 @@
     "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "curated:lookup:c002": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "200",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.XMATCH) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:lookup:c003": {
     "classification": "match",
@@ -4273,18 +4272,16 @@
     "note": "CellRune reports calculation.unsupported_function (FORECAST) for this oracle case."
   },
   "function:formulatext": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "=I6*2+3",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.FORMULATEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:formulatext:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.FORMULATEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:frequency": {
     "classification": "not_implemented",
@@ -5202,18 +5199,16 @@
     "excel_rich_error": false
   },
   "function:isformula": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "b",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ISFORMULA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:isformula:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "b",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.ISFORMULA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:islogical": {
     "classification": "match",
@@ -7693,32 +7688,28 @@
     "excel_rich_error": false
   },
   "function:sheet": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "8",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SHEET) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sheet:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SHEET) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sheets": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SHEETS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sheets:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SHEETS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sign": {
     "classification": "match",
@@ -9360,25 +9351,22 @@
     "excel_rich_error": false
   },
   "function:xmatch": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.XMATCH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xmatch:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "10",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.XMATCH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xmatch:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.XMATCH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xnpv": {
     "classification": "not_implemented",

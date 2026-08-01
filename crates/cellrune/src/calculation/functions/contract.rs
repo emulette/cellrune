@@ -497,6 +497,28 @@ const XLOOKUP_DEFAULTS: &[ArgumentDefault] = &[
         ArgumentDefaultValue::Number(1.0),
     ),
 ];
+const SHEET_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    0,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::CallerReference,
+)];
+const SHEETS_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    0,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::EmptyCollection,
+)];
+const XMATCH_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(1.0),
+    ),
+];
 const DOLLAR_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     1,
     DefaultTrigger::AbsentOrMissing,
@@ -993,6 +1015,14 @@ impl LookupFunction {
                 &[REFERENCE, SCALAR, SCALAR, SCALAR, SCALAR],
             )
             .with_defaults(OFFSET_DEFAULTS),
+            Self::Sheet => CallContract::positional(Arity::range(0, 1), &[REFERENCE])
+                .with_defaults(SHEET_DEFAULTS),
+            Self::Sheets => CallContract::positional(Arity::range(0, 1), &[REFERENCE])
+                .with_defaults(SHEETS_DEFAULTS),
+            Self::XMatch => {
+                CallContract::positional(Arity::range(2, 4), &[SCALAR, ARRAY, SCALAR, SCALAR])
+                    .with_defaults(XMATCH_DEFAULTS)
+            }
             Self::XLookup => CallContract::positional(
                 Arity::range(3, 6),
                 &[SCALAR, REFERENCE, REFERENCE, DEFERRED, SCALAR, SCALAR],
@@ -1006,7 +1036,9 @@ impl InformationFunction {
     const fn call_contract(self) -> CallContract {
         match self {
             Self::Na => CallContract::uniform(Arity::exact(0), SCALAR),
-            Self::IsRef => CallContract::uniform(Arity::exact(1), REFERENCE),
+            Self::FormulaText | Self::IsFormula | Self::IsRef => {
+                CallContract::uniform(Arity::exact(1), REFERENCE)
+            }
             Self::ErrorType
             | Self::IsBlank
             | Self::IsErr

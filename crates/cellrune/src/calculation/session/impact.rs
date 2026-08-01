@@ -69,7 +69,8 @@ pub(super) fn affected_formulas(
     for (formula, targets) in compiled.dependency_targets() {
         if targets.iter().any(|target| match target {
             DependencyTarget::Cell((sheet, row, column))
-            | DependencyTarget::SpillAnchor((sheet, row, column)) => changed_by_sheet
+            | DependencyTarget::SpillAnchor((sheet, row, column))
+            | DependencyTarget::FormulaContent((sheet, row, column)) => changed_by_sheet
                 .get(*sheet)
                 .is_some_and(|changed| changed.contains(&(*row, *column))),
             DependencyTarget::Area(span) => span.rects().any(|rect| {

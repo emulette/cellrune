@@ -1152,6 +1152,85 @@ fn clean_runtime_issues_survive_incremental_reuse_and_match_full() {
 }
 
 #[test]
+fn formula_metadata_dependencies_dirty_without_scheduling_source_values() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("ISFORMULA(A1)")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("C1"),
+                    formula("FORMULATEXT(A1)"),
+                ),
+            ]),
+        )
+        .expect("metadata formulas");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    let before_b1 = session
+        .calculation()
+        .expect("installed initial calculation")
+        .cell(CalculationCellId::new(sheet_id, address("B1")))
+        .cloned();
+    let before_c1 = session
+        .calculation()
+        .expect("installed initial calculation")
+        .cell(CalculationCellId::new(sheet_id, address("C1")))
+        .cloned();
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(2.0),
+            )]),
+        )
+        .expect("source content edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental metadata recalculation");
+
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.dirty_count(), 2);
+    assert_eq!(delta.evaluated_count(), 2);
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed metadata delta")
+            .cell(CalculationCellId::new(sheet_id, address("B1")))
+            .cloned(),
+        before_b1,
+    );
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed metadata delta")
+            .cell(CalculationCellId::new(sheet_id, address("C1")))
+            .cloned(),
+        before_c1,
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed metadata delta"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
 fn topology_changes_fall_back_to_full_and_forced_incremental_fails_closed() {
     let mut session = chain_session();
     session

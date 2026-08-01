@@ -1346,6 +1346,7 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                 | "LAMBDA"
                 | "AREAS"
                 | "ISREF"
+                | "SHEETS"
         );
         let result = calculation.cell(capability.cell());
         match capability.capability() {
@@ -1803,7 +1804,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        294
+        299
     );
     let let_entry = catalog
         .iter()
@@ -2619,6 +2620,205 @@ fn array_reshape_and_order_functions_block_on_upstream_engine_issues() {
         };
         assert_eq!(issue.code(), CalculationIssueCode::BlockedByUpstream);
     }
+}
+
+#[test]
+fn reference_introspection_and_xmatch_follow_metadata_and_lookup_contracts() {
+    let mut first = formula_sheet(
+        1,
+        "Sheet1",
+        &[
+            (1, 1, "1+2"),
+            (1, 3, "MYSTERY()"),
+            (3, 1, "FORMULATEXT(A1)"),
+            (3, 2, "ISFORMULA(A1)"),
+            (3, 3, "ISFORMULA(B1)"),
+            (3, 4, "FORMULATEXT(B1)"),
+            (3, 5, "FORMULATEXT(C1)"),
+            (3, 6, "ISFORMULA(C1)"),
+            (3, 7, "SHEET()"),
+            (3, 8, "SHEET(Sheet3!A1)"),
+            (3, 9, "SHEET(\"Sheet2\")"),
+            (3, 10, "SHEETS()"),
+            (3, 11, "SHEETS(Sheet1:Sheet3!A1)"),
+            (3, 12, "_xlfn.FORMULATEXT(A1)"),
+            (3, 13, "XMATCH(\"beta\",{\"Alpha\",\"beta\",\"beta\"},0,1)"),
+            (3, 14, "XMATCH(\"beta\",{\"Alpha\",\"beta\",\"beta\"},0,-1)"),
+            (3, 15, "XMATCH(25,{10,30,20},-1,1)"),
+            (3, 16, "XMATCH(25,{10,30,20},1,1)"),
+            (3, 17, "XMATCH(\"b?t*\",{\"alpha\",\"BETA\",\"beta2\"},2,1)"),
+            (3, 18, "XMATCH(30,{10,20,30,40},0,2)"),
+            (3, 19, "XMATCH(30,{40,30,20,10},0,-2)"),
+            (3, 20, "XMATCH(2,{1;2;3})"),
+            (3, 21, "XMATCH(2,{1,2;3,4})"),
+            (3, 22, "XMATCH(2,{1,2,3},3)"),
+            (3, 23, "ISFORMULA(W3)"),
+            (3, 24, "FORMULATEXT(X3)"),
+            (3, 25, "ISFORMULA(7)"),
+            (3, 26, "FORMULATEXT(7)"),
+            (3, 27, "SHEET(7)"),
+            (3, 28, "SHEETS(7)"),
+            (3, 29, "SHEET(#REF!)"),
+            (3, 30, "FORMULATEXT(INDEX(AD3:AD3,1))"),
+            (3, 31, "ISFORMULA(OFFSET(AE3,0,0))"),
+            (3, 32, "FORMULATEXT(LET(ref_value,AF3,ref_value))"),
+            (3, 33, "XMATCH(\"~a\",{\"a\",\"~a\"},2)"),
+            (3, 34, "XMATCH(\"a~\",{\"a\",\"a~\"},2)"),
+            (3, 35, "XMATCH(\"a~~\",{\"a\",\"a~\"},2)"),
+        ],
+    );
+    insert_number(&mut first, "B1", 7.0);
+    let workbook = workbook_with_sheets_and_names(
+        vec![
+            first,
+            numeric_sheet(2, "Sheet2", 10.0, SheetVisibility::Hidden),
+            numeric_sheet(3, "Sheet3", 100.0, SheetVisibility::Visible),
+        ],
+        &[],
+    );
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_issue(&calculation, 3, CalculationIssueCode::UnsupportedFunction);
+    for (column, expected) in [
+        (7, 1.0),
+        (8, 3.0),
+        (9, 2.0),
+        (10, 3.0),
+        (11, 3.0),
+        (13, 2.0),
+        (14, 3.0),
+        (15, 3.0),
+        (16, 2.0),
+        (17, 2.0),
+        (18, 3.0),
+        (19, 2.0),
+        (20, 2.0),
+        (33, 2.0),
+        (34, 2.0),
+        (35, 2.0),
+    ] {
+        assert_number_at(&calculation, 3, column, expected, 0.0);
+    }
+    for (column, expected) in [(2, true), (3, false), (6, true), (23, true), (31, true)] {
+        assert_eq!(
+            calculation.cell(calculation_cell_id(3, column)),
+            Some(&CalculationCellResult::Value(CellValue::Logical(expected)))
+        );
+    }
+    for (column, expected) in [
+        (1, "=1+2"),
+        (5, "=MYSTERY()"),
+        (12, "=1+2"),
+        (24, "=FORMULATEXT(X3)"),
+        (30, "=FORMULATEXT(INDEX(AD3:AD3,1))"),
+        (32, "=FORMULATEXT(LET(ref_value,AF3,ref_value))"),
+    ] {
+        assert_eq!(
+            calculation.cell(calculation_cell_id(3, column)),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            )))
+        );
+    }
+    assert_eq!(
+        calculation.cell(calculation_cell_id(3, 4)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::NotAvailable
+        )))
+    );
+    for column in [21, 22, 25, 26] {
+        assert_eq!(
+            calculation.cell(calculation_cell_id(3, column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            )))
+        );
+    }
+    assert_eq!(
+        calculation.cell(calculation_cell_id(3, 27)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::NotAvailable
+        )))
+    );
+    assert_eq!(
+        calculation.cell(calculation_cell_id(3, 28)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Reference
+        )))
+    );
+    assert_eq!(
+        calculation.cell(calculation_cell_id(3, 29)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Reference
+        )))
+    );
+}
+
+#[test]
+fn reference_introspection_and_xmatch_preserve_engine_limits_and_upstream_issues() {
+    let oversized_formula = format!("\"{}\"", "a".repeat(8_190));
+    let oversized = calculate_workbook(
+        &workbook_with_formulas(&[
+            (1, 1, oversized_formula.as_str()),
+            (1, 2, "FORMULATEXT(A1)"),
+        ]),
+        CalculationOptions::default(),
+    );
+    assert_eq!(
+        oversized.cell(cell_id(2)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::NotAvailable
+        )))
+    );
+
+    let text_limits = CalculationLimits::default()
+        .with_max_text_bytes(8)
+        .expect("nonzero formula-text limit");
+    let formula_text = calculate_workbook(
+        &workbook_with_formulas(&[
+            (1, 1, "123456789+1"),
+            (1, 2, "IFERROR(FORMULATEXT(A1),\"hidden\")"),
+        ]),
+        CalculationOptions::default().with_limits(text_limits),
+    );
+    assert_issue(
+        &formula_text,
+        2,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    let work_limits = CalculationLimits::default()
+        .with_max_function_iterations(5)
+        .expect("nonzero XMATCH iteration limit");
+    let xmatch = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "IFERROR(XMATCH(9,{1,2,3,4,5,6,7,8,9}),42)")]),
+        CalculationOptions::default().with_limits(work_limits),
+    );
+    assert_issue(&xmatch, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let approximate_limits = CalculationLimits::default()
+        .with_max_function_iterations(7)
+        .expect("nonzero approximate XMATCH iteration limit");
+    let approximate = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "IFERROR(XMATCH(4,{1,2,3},-1),42)")]),
+        CalculationOptions::default().with_limits(approximate_limits),
+    );
+    assert_issue(&approximate, 1, CalculationIssueCode::ResourceLimitExceeded);
+
+    let upstream = calculate_workbook(
+        &workbook_with_formulas(&[
+            (1, 1, "1"),
+            (2, 1, "MYSTERY()"),
+            (1, 2, "IFERROR(XMATCH(1,A1:A2),42)"),
+        ]),
+        CalculationOptions::default(),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = upstream.cell(calculation_cell_id(2, 1))
+    else {
+        panic!("expected unsupported source formula in A2");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::UnsupportedFunction);
+    assert_issue(&upstream, 2, CalculationIssueCode::BlockedByUpstream);
 }
 
 #[test]

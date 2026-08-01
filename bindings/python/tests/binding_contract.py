@@ -19,15 +19,15 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 )
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
-CATALOG_V0_1_10_ARRAY_SHA256 = (
-    "f34103747a1228b8e747def032256669b72b6fe5943134456e1e6ace767c5b6f"
+CATALOG_V0_1_10_REFERENCE_SHA256 = (
+    "0e1a7f6728f8c55b207d5ec0c45cd49c5c1eead947651e4ada2e0c78efd82841"
 )
 
 
 def catalog_digest() -> str:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 295
+    assert len(catalog["entries"]) == 300
     digest = hashlib.sha256()
     for entry in catalog["entries"]:
         row = "\0".join(
@@ -99,7 +99,7 @@ def recalculate_with_invalid_solver_semantics(
 
 
 def main() -> None:
-    assert catalog_digest() == CATALOG_V0_1_10_ARRAY_SHA256
+    assert catalog_digest() == CATALOG_V0_1_10_REFERENCE_SHA256
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")

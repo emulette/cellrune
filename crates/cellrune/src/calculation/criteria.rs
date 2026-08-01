@@ -191,14 +191,18 @@ enum PatternToken {
 
 fn compile_pattern(pattern: &str) -> Vec<PatternToken> {
     let mut tokens = Vec::new();
-    let mut characters = pattern.chars().flat_map(char::to_lowercase);
+    let mut characters = pattern.chars().flat_map(char::to_lowercase).peekable();
     while let Some(character) = characters.next() {
         match character {
-            '~' => {
-                if let Some(escaped) = characters.next() {
-                    tokens.push(PatternToken::Literal(escaped));
-                }
+            '~' if characters
+                .peek()
+                .is_some_and(|next| matches!(next, '?' | '*' | '~')) =>
+            {
+                tokens.push(PatternToken::Literal(
+                    characters.next().expect("peeked wildcard escape"),
+                ));
             }
+            '~' => tokens.push(PatternToken::Literal('~')),
             '?' => tokens.push(PatternToken::AnyOne),
             '*' => tokens.push(PatternToken::AnySequence),
             _ => tokens.push(PatternToken::Literal(character)),
@@ -212,6 +216,15 @@ pub fn wildcard_match(
     text: &str,
     budget: &mut WildcardStepBudget,
 ) -> Result<bool, ErrorKind> {
+    wildcard_match_with_step(pattern, text, budget, || Ok(()))
+}
+
+pub fn wildcard_match_with_step(
+    pattern: &str,
+    text: &str,
+    budget: &mut WildcardStepBudget,
+    mut on_step: impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<bool, ErrorKind> {
     let tokens = compile_pattern(pattern);
     let characters: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
     let mut token_index = 0_usize;
@@ -220,6 +233,7 @@ pub fn wildcard_match(
     let mut star_char = 0_usize;
     while char_index < characters.len() {
         budget.charge()?;
+        on_step()?;
         let matched = match tokens.get(token_index) {
             Some(PatternToken::AnyOne) => true,
             Some(PatternToken::Literal(literal)) => *literal == characters[char_index],
@@ -242,6 +256,7 @@ pub fn wildcard_match(
     }
     while tokens.get(token_index) == Some(&PatternToken::AnySequence) {
         budget.charge()?;
+        on_step()?;
         token_index += 1;
     }
     Ok(token_index == tokens.len())
@@ -257,6 +272,9 @@ mod tests {
     fn wildcard_matching_is_case_insensitive_and_bounded() {
         let mut ample = WildcardStepBudget::new(100);
         assert_eq!(wildcard_match("a*?~*", "Axx*", &mut ample), Ok(true));
+        assert_eq!(wildcard_match("~a", "~a", &mut ample), Ok(true));
+        assert_eq!(wildcard_match("a~", "a~", &mut ample), Ok(true));
+        assert_eq!(wildcard_match("a~~", "a~", &mut ample), Ok(true));
 
         let mut exhausted = WildcardStepBudget::new(2);
         assert_eq!(

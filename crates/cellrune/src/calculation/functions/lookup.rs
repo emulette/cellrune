@@ -8,6 +8,7 @@ use super::super::runtime::{Array, Rect};
 use super::super::value::{ErrorKind, Value};
 use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 use super::descriptor::DynamicReferenceKind;
+use super::lookup_common::VectorView;
 use super::util::{required_number, required_text};
 
 pub(super) fn call(
@@ -28,6 +29,9 @@ pub(super) fn call(
         LookupFunction::Rows => dimension(engine, context, args, true),
         LookupFunction::Columns => dimension(engine, context, args, false),
         LookupFunction::Row => row(engine, context, args),
+        LookupFunction::Sheet => super::reference_introspection::sheet(engine, context, args),
+        LookupFunction::Sheets => super::reference_introspection::sheets(engine, context, args),
+        LookupFunction::XMatch => super::xmatch::xmatch(engine, context, args),
         LookupFunction::Offset | LookupFunction::Indirect => {
             let kind = match function {
                 LookupFunction::Offset => DynamicReferenceKind::Offset,
@@ -186,23 +190,21 @@ fn lookup(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
 }
 
 fn lookup_vector(engine: &Engine<'_>, lookup: &Value, keys: &Array, results: &Array) -> Value {
-    let Some((key_length, keys_vertical)) = vector_shape(keys) else {
+    let Some(keys) = VectorView::new(keys) else {
         return Value::Error(ErrorKind::NA);
     };
-    let Some((result_length, results_vertical)) = vector_shape(results) else {
+    let Some(results) = VectorView::new(results) else {
         return Value::Error(ErrorKind::NA);
     };
-    if key_length != result_length {
+    if keys.len() != results.len() {
         return Value::Error(ErrorKind::NA);
     }
-    if let Err(kind) = engine.ensure_function_iterations(u64::from(key_length) * 2) {
+    if let Err(kind) = engine.ensure_function_iterations(u64::from(keys.len()) * 2) {
         return Value::Error(kind);
     }
-    let matched = lookup_offset(lookup, key_length, |offset| {
-        vector_value(keys, offset, keys_vertical)
-    });
+    let matched = lookup_offset(lookup, keys.len(), |offset| keys.at(offset));
     matched.map_or(Value::Error(ErrorKind::NA), |offset| {
-        vector_value(results, offset, results_vertical).clone()
+        results.at(offset).clone()
     })
 }
 
@@ -261,24 +263,6 @@ fn lookup_offset<'value>(
         }
     }
     matched
-}
-
-fn vector_shape(array: &Array) -> Option<(u32, bool)> {
-    if array.cols == 1 {
-        Some((array.rows, true))
-    } else if array.rows == 1 {
-        Some((array.cols, false))
-    } else {
-        None
-    }
-}
-
-fn vector_value(array: &Array, offset: u32, vertical: bool) -> &Value {
-    if vertical {
-        array.at(offset, 0)
-    } else {
-        array.at(0, offset)
-    }
 }
 
 fn column_letters(mut column: u32) -> String {

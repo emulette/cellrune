@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
 use super::{
-    DependencyTarget, Engine, EvalContext, EvaluationBudget, VisitedDefinitions,
-    table_dependency_by_id, workbook_table_topologies,
+    DependencyTarget, Engine, EvalContext, EvaluationBudget, ReferenceSelectionMode,
+    VisitedDefinitions, compare_targets, table_dependency_by_id, workbook_table_topologies,
 };
 use crate::calculation::runtime::Rect;
 use crate::{
@@ -178,6 +178,41 @@ fn let_dependencies_follow_sequential_scope_and_shadow_defined_names() {
     assert_eq!(
         collect_reference_selection_inputs(&engine, (0, 1, 2)),
         vec![rect(1, 1)],
+    );
+}
+
+#[test]
+fn formula_metadata_let_selectors_keep_bound_reference_value_dependencies() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = SheetId::new(1).expect("default sheet ID");
+    draft
+        .set_cell_value(sheet_id, address("A1"), CellValue::Blank)
+        .expect("selector input");
+    draft
+        .set_cell_formula(sheet_id, address("C1"), formula("1+1"))
+        .expect("first metadata target");
+    draft
+        .set_cell_formula(sheet_id, address("C2"), formula("2+2"))
+        .expect("second metadata target");
+    draft
+        .set_cell_formula(
+            sheet_id,
+            address("B1"),
+            formula("FORMULATEXT(LET(ref_value,A1,OFFSET(C1,ref_value,0)))"),
+        )
+        .expect("metadata selector formula");
+    let engine = Engine::analyze(draft.workbook(), CalculationOptions::default());
+    let targets = engine
+        .dependency_targets_cancellable(&|| false)
+        .expect("dependency collection");
+
+    assert_eq!(
+        targets.get(&(0, 1, 2)),
+        Some(&vec![
+            DependencyTarget::Cell((0, 1, 1)),
+            DependencyTarget::FormulaContent((0, 1, 3)),
+        ]),
+        "the bound reference selects metadata geometrically but remains a value dependency when used by OFFSET",
     );
 }
 
@@ -566,11 +601,14 @@ fn collect_reference_selection_inputs(engine: &Engine<'_>, cell: (usize, u32, u3
     let budget = EvaluationBudget::default();
     engine.collect_reference_selection_inputs(
         EvalContext::for_evaluation(cell, &budget),
+        ReferenceSelectionMode::ReferenceValue,
         expr,
         &mut VisitedDefinitions::default(),
         &mut Vec::new(),
         &mut output,
     );
+    output.sort_by(compare_targets);
+    output.dedup();
     output
         .iter()
         .filter_map(DependencyTarget::span)

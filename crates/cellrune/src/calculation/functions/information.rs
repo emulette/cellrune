@@ -10,6 +10,12 @@ pub(super) fn call(
     function: InformationFunction,
     args: &[Expr],
 ) -> Value {
+    if function == InformationFunction::FormulaText {
+        return super::reference_introspection::formula_text(engine, context, args);
+    }
+    if function == InformationFunction::IsFormula {
+        return super::reference_introspection::is_formula(engine, context, args);
+    }
     if function == InformationFunction::Na {
         return if args.is_empty() {
             Value::Error(ErrorKind::NA)
@@ -97,8 +103,11 @@ fn apply(function: InformationFunction, value: Value) -> Value {
         InformationFunction::T => t(value),
         InformationFunction::Type => value_type(value),
         InformationFunction::ErrorType => error_type(value),
-        InformationFunction::Na | InformationFunction::IsRef => {
-            unreachable!("NA and ISREF return before value classification")
+        InformationFunction::FormulaText
+        | InformationFunction::IsFormula
+        | InformationFunction::Na
+        | InformationFunction::IsRef => {
+            unreachable!("reference metadata and NA return before value classification")
         }
     }
 }

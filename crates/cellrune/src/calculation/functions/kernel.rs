@@ -169,12 +169,16 @@ function_enum!(LookupFunction {
     Offset,
     Rows,
     Row,
+    Sheet,
+    Sheets,
     VLookup,
+    XMatch,
     XLookup,
 });
 
 function_enum!(InformationFunction {
     ErrorType,
+    FormulaText,
     IsBlank,
     IsErr,
     IsError,
@@ -184,6 +188,7 @@ function_enum!(InformationFunction {
     IsNonText,
     IsNumber,
     IsOdd,
+    IsFormula,
     IsRef,
     IsText,
     N,
