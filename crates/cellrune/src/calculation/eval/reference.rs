@@ -193,6 +193,24 @@ impl Engine<'_> {
                         )
                     })?,
             },
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                match context.binding(name) {
+                    Some(ScopeValue::Reference(reference)) => reference.clone(),
+                    Some(_) => return Err(ErrorKind::Value),
+                    None => self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .ok_or(ErrorKind::Value)
+                        .and_then(|(id, named)| {
+                            self.resolve_reference_value_expr(
+                                context
+                                    .without_bindings()
+                                    .with_defined_name_scope(Some(id.scope())),
+                                named,
+                            )
+                        })?,
+                }
+            }
             Expr::Call { name, args } => {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     match scoped {

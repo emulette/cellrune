@@ -427,6 +427,152 @@ fn constants_and_valid_non_reference_formulas_remain_distinct() {
 }
 
 #[test]
+fn builtin_callable_analysis_uses_the_same_shadow_resolution_as_evaluation() {
+    let workbook = workbook(vec![
+        defined_name("SUM", DefinedNameScope::Workbook, "'Sheet 1'!A1"),
+        defined_name("TypedAlias", DefinedNameScope::Workbook, "_xleta.SUM"),
+        defined_name("PlainAlias", DefinedNameScope::Workbook, "SUM"),
+        defined_name("Unshadowed", DefinedNameScope::Workbook, "_xleta.AVERAGE"),
+        defined_name("COUNT", DefinedNameScope::Workbook, "COUNT"),
+        defined_name("CyclicTyped", DefinedNameScope::Workbook, "_xleta.COUNT"),
+        defined_name(
+            "LocalShadow",
+            DefinedNameScope::Workbook,
+            "LAMBDA(SUM,_xleta.SUM)",
+        ),
+    ]);
+
+    for name in ["TypedAlias", "PlainAlias"] {
+        assert_rectangular(
+            analyze_defined_name(&workbook, name, None).expect("analysis succeeds"),
+            sheet_id(1),
+            "A1",
+        );
+    }
+    assert!(matches!(
+        analyze_defined_name(&workbook, "Unshadowed", None).expect("analysis succeeds"),
+        DefinedNameAnalysis::Unsupported {
+            reason: DefinedNameUnsupportedReason::NonReferenceExpression,
+            ..
+        }
+    ));
+    assert!(matches!(
+        analyze_defined_name(&workbook, "CyclicTyped", None).expect("analysis succeeds"),
+        DefinedNameAnalysis::Invalid {
+            reason: DefinedNameInvalidReason::CircularReference,
+            ..
+        }
+    ));
+    assert!(matches!(
+        analyze_defined_name(&workbook, "LocalShadow", None).expect("analysis succeeds"),
+        DefinedNameAnalysis::Unsupported {
+            reason: DefinedNameUnsupportedReason::NonReferenceExpression,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn invalid_typed_builtin_invocations_do_not_validate_unreachable_arguments() {
+    let arguments = std::iter::once("NoSuchName")
+        .chain(std::iter::repeat_n("1", 255))
+        .collect::<Vec<_>>()
+        .join(",");
+    let workbook = workbook(vec![
+        defined_name(
+            "Direct",
+            DefinedNameScope::Workbook,
+            &format!("_xleta.SUM({arguments})"),
+        ),
+        defined_name(
+            "Parenthesized",
+            DefinedNameScope::Workbook,
+            &format!("(_xleta.SUM)({arguments})"),
+        ),
+        defined_name("X", DefinedNameScope::Workbook, "42"),
+        defined_name("SUM", DefinedNameScope::Workbook, "X"),
+        defined_name(
+            "DefinedNonCallable",
+            DefinedNameScope::Workbook,
+            "_xleta.SUM(NoSuchName)",
+        ),
+        defined_name(
+            "LocalNonCallable",
+            DefinedNameScope::Workbook,
+            "LET(SUM,2,_xleta.SUM(NoSuchName))",
+        ),
+        defined_name(
+            "PlainNonCallable",
+            DefinedNameScope::Workbook,
+            "SUM(NoSuchName)",
+        ),
+        defined_name("F", DefinedNameScope::Workbook, "LAMBDA(value,value)"),
+        defined_name("Alias", DefinedNameScope::Workbook, "F"),
+        defined_name(
+            "AliasInvalidArity",
+            DefinedNameScope::Workbook,
+            "Alias(NoSuchName,1)",
+        ),
+    ]);
+
+    for name in [
+        "Direct",
+        "Parenthesized",
+        "DefinedNonCallable",
+        "LocalNonCallable",
+        "PlainNonCallable",
+        "AliasInvalidArity",
+    ] {
+        let analysis = analyze_defined_name(&workbook, name, None).expect("analysis succeeds");
+        assert!(
+            matches!(analysis, DefinedNameAnalysis::Unsupported { .. }),
+            "{name}: {analysis:?}"
+        );
+    }
+}
+
+#[test]
+fn invoked_callable_cycles_are_dead_targets_but_standalone_aliases_remain_cycles() {
+    let workbook = workbook(vec![
+        defined_name("Loop", DefinedNameScope::Workbook, "Loop"),
+        defined_name(
+            "OrdinaryInvokedCycle",
+            DefinedNameScope::Workbook,
+            "Loop(1)",
+        ),
+        defined_name("SUM", DefinedNameScope::Workbook, "SUM"),
+        defined_name(
+            "TypedInvokedCycle",
+            DefinedNameScope::Workbook,
+            "_xleta.SUM(1)",
+        ),
+    ]);
+
+    for name in ["OrdinaryInvokedCycle", "TypedInvokedCycle"] {
+        let analysis = analyze_defined_name(&workbook, name, None).expect("analysis succeeds");
+        assert!(
+            matches!(
+                analysis,
+                DefinedNameAnalysis::Unsupported {
+                    reason: DefinedNameUnsupportedReason::NonReferenceExpression,
+                    ..
+                }
+            ),
+            "{name}: {analysis:?}"
+        );
+    }
+    for name in ["Loop", "SUM"] {
+        assert!(matches!(
+            analyze_defined_name(&workbook, name, None).expect("analysis succeeds"),
+            DefinedNameAnalysis::Invalid {
+                reason: DefinedNameInvalidReason::CircularReference,
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn invalid_static_references_inside_general_expressions_are_not_unsupported() {
     let workbook = workbook(vec![
         defined_name(

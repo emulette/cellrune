@@ -228,16 +228,19 @@ fn callable_bindings_shadow_builtins_without_falling_through() {
             (1, 2, "ScalarName(1)"),
             (1, 3, "LoopCall(1)"),
             (1, 4, "LET(f,2,f(Loop))"),
+            (1, 5, "_xleta.SUM(1)"),
         ],
         &[
             ("ScalarName", "2"),
             ("LoopCall", "LoopCall"),
             ("Loop", "Loop"),
+            ("SUM", "SUM"),
         ],
     );
-    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let capabilities = scan_formula_capabilities(&workbook);
+    assert!(capabilities.is_supported(), "{capabilities:?}");
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    for column in 1..=4 {
+    for column in 1..=5 {
         assert!(
             matches!(
                 calculation.cell(cell_id(column)),
@@ -391,6 +394,339 @@ fn lambda_invoke_and_iteration_helpers_share_the_callable_kernel() {
 }
 
 #[test]
+fn builtin_aggregates_use_the_shared_typed_callable_kernel() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "SUM(BYROW({1,2;3,4},SUM))"),
+        (1, 2, "SUM(BYCOL({1,2;3,4},AVERAGE))"),
+        (1, 3, "SUM(MAP({1,2},{10,20},SUM))"),
+        (1, 4, "REDUCE(0,{1,2,3},SUM)"),
+        (1, 5, "SUM(SCAN(0,{1,2,3},SUM))"),
+        (1, 6, "SUM(MAKEARRAY(2,2,SUM))"),
+        (1, 7, "SUM(BYROW({1,TRUE;2,FALSE},COUNT))"),
+        (1, 8, "SUM(MAP({TRUE,FALSE},SUM))"),
+        (1, 9, "SUM(BYROW({1,2;3,4},_xleta.SUM))"),
+        (1, 10, "LET(f,_xleta.SUM,f(1,2))"),
+        (1, 11, "SUM(BYROW({1,2;3,4},MIN))"),
+        (1, 12, "SUM(BYROW({1,2;3,4},MAX))"),
+        (1, 13, "SUM(MAP({1,2},COUNTA))"),
+        (1, 14, "SUM(BYROW({1,2;3,4},PRODUCT))"),
+        (1, 15, "_xleta.SUM(1,2)"),
+        (1, 16, "_xleta.COUNT(#N/A)"),
+        (1, 17, "_xleta.COUNTA(#N/A)"),
+        (1, 18, "COUNT(#N/A)"),
+        (1, 19, "COUNTA(#N/A)"),
+        (1, 20, "_xleta.SUM(#N/A)"),
+        (1, 21, "SUM({TRUE})"),
+        (1, 22, "_xleta.SUM({TRUE})"),
+        (1, 23, "SUM({\"1\"})"),
+        (1, 24, "_xleta.SUM({\"1\"})"),
+        (1, 25, "_xleta.SUM(LET(value,{TRUE},value))"),
+    ]);
+
+    let capabilities = scan_formula_capabilities(&workbook);
+    assert!(capabilities.is_supported(), "{:?}", capabilities.entries());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (column, expected) in [
+        (1, 10.0),
+        (2, 5.0),
+        (3, 33.0),
+        (4, 6.0),
+        (5, 10.0),
+        (6, 12.0),
+        (7, 2.0),
+        (8, 1.0),
+        (9, 10.0),
+        (10, 3.0),
+        (11, 4.0),
+        (12, 6.0),
+        (13, 2.0),
+        (14, 14.0),
+        (15, 3.0),
+        (16, 0.0),
+        (17, 1.0),
+        (18, 0.0),
+        (19, 1.0),
+        (21, 0.0),
+        (22, 0.0),
+        (23, 0.0),
+        (24, 0.0),
+        (25, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+    assert_eq!(
+        calculation.cell(cell_id(20)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::NotAvailable
+        )))
+    );
+
+    let usage = scan_function_usage(&workbook);
+    let names = usage
+        .entries()
+        .iter()
+        .map(|entry| entry.name())
+        .collect::<BTreeSet<_>>();
+    for expected in [
+        "AVERAGE",
+        "BYCOL",
+        "BYROW",
+        "COUNT",
+        "COUNTA",
+        "LET",
+        "MAKEARRAY",
+        "MAP",
+        "MAX",
+        "MIN",
+        "PRODUCT",
+        "REDUCE",
+        "SCAN",
+        "SUM",
+    ] {
+        assert!(names.contains(expected), "missing {expected}: {names:?}");
+    }
+    assert!(names.iter().all(|name| !name.contains("XLETA")));
+}
+
+#[test]
+fn invalid_typed_builtin_invocations_do_not_reach_arguments_in_static_or_runtime_paths() {
+    let arguments = std::iter::once("A1")
+        .chain(std::iter::once("NO_SUCH_FUNCTION()"))
+        .chain(std::iter::once("NOW()"))
+        .chain(std::iter::repeat_n("1", 253))
+        .collect::<Vec<_>>()
+        .join(",");
+    let direct = format!("_xleta.SUM({arguments})");
+    let parenthesized = format!("(_xleta.SUM)({arguments})");
+    let workbook = workbook_with_formulas(&[(1, 1, "7"), (1, 2, &direct), (1, 3, &parenthesized)]);
+    let limits = CalculationLimits::default()
+        .with_max_dependency_edges(1)
+        .expect("positive dependency boundary");
+    let options = CalculationOptions::default().with_limits(limits);
+
+    assert!(scan_formula_capabilities_with_options(&workbook, options).is_supported());
+    let calculation = calculate_workbook(&workbook, options);
+    assert_number(&calculation, 1, 7.0, 0.0);
+    for column in [2, 3] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            )))
+        );
+    }
+
+    let usage = scan_function_usage(&workbook);
+    let names = usage
+        .entries()
+        .iter()
+        .map(|entry| entry.name())
+        .collect::<BTreeSet<_>>();
+    assert!(!names.contains("NO_SUCH_FUNCTION"), "{names:?}");
+    assert!(!names.contains("NOW"), "{names:?}");
+
+    let local_shadow = workbook_with_formulas(&[
+        (1, 1, "7"),
+        (1, 2, "LET(SUM,2,_xleta.SUM(A1+NO_SUCH_FUNCTION()+NOW()))"),
+    ]);
+    let defined_shadow = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "7"),
+            (1, 2, "_xleta.SUM(A1+NO_SUCH_FUNCTION()+NOW())"),
+        ],
+        &[("SUM", "42")],
+    );
+    for shadowed in [&local_shadow, &defined_shadow] {
+        assert!(scan_formula_capabilities_with_options(shadowed, options).is_supported());
+        let calculation = calculate_workbook(shadowed, options);
+        assert_eq!(
+            calculation.cell(cell_id(2)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            )))
+        );
+        let usage = scan_function_usage(shadowed);
+        let names = usage
+            .entries()
+            .iter()
+            .map(|entry| entry.name())
+            .collect::<BTreeSet<_>>();
+        assert!(!names.contains("NO_SUCH_FUNCTION"), "{names:?}");
+        assert!(!names.contains("NOW"), "{names:?}");
+    }
+}
+
+#[test]
+fn builtin_callable_normalization_preserves_local_and_defined_name_shadowing() {
+    let local = workbook_with_formulas(&[
+        (
+            1,
+            1,
+            "LET(SUM,LAMBDA(row,41),SUMPRODUCT(BYROW({1,2;3,4},SUM)))",
+        ),
+        (1, 2, "LET(SUM,2,BYROW({1,2},SUM))"),
+        (1, 3, "LET(SUM,LAMBDA(value,43),_xleta.SUM(1))"),
+    ]);
+    assert!(scan_formula_capabilities(&local).is_supported());
+    let calculation = calculate_workbook(&local, CalculationOptions::default());
+    assert_number(&calculation, 1, 82.0, 0.0);
+    assert_eq!(
+        calculation.cell(cell_id(2)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Value
+        )))
+    );
+    assert_number(&calculation, 3, 43.0, 0.0);
+    assert!(
+        scan_function_usage(&local)
+            .entries()
+            .iter()
+            .all(|entry| entry.name() != "SUM")
+    );
+
+    let defined = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "SUMPRODUCT(BYROW({1,2;3,4},SUM))"),
+            (1, 2, "SUMPRODUCT(BYROW({1,2;3,4},_xleta.SUM))"),
+            (1, 26, "40+2"),
+        ],
+        &[("SUM", "LAMBDA(row,Z1)")],
+    );
+    let capabilities = scan_formula_capabilities(&defined);
+    assert!(capabilities.is_supported(), "{:?}", capabilities.entries());
+    let calculation = calculate_workbook(&defined, CalculationOptions::default());
+    assert_number(&calculation, 1, 84.0, 0.0);
+    assert_number(&calculation, 2, 84.0, 0.0);
+    assert!(
+        scan_function_usage(&defined)
+            .entries()
+            .iter()
+            .all(|entry| entry.name() != "SUM")
+    );
+
+    let alias = workbook_with_formulas_and_names(
+        &[(1, 1, "SUM(1)"), (1, 2, "_xleta.SUM(1)")],
+        &[("F", "LAMBDA(value,value+1)"), ("SUM", "F")],
+    );
+    assert!(scan_formula_capabilities(&alias).is_supported());
+    let calculation = calculate_workbook(&alias, CalculationOptions::default());
+    assert_number(&calculation, 1, 2.0, 0.0);
+    assert_number(&calculation, 2, 2.0, 0.0);
+
+    let callable_result = workbook_with_formulas_and_names(
+        &[(1, 1, "SUM(1)"), (1, 2, "_xleta.SUM(1)")],
+        &[("F", "LAMBDA(x,LAMBDA(y,y))"), ("SUM", "F")],
+    );
+    let calculation = calculate_workbook(&callable_result, CalculationOptions::default());
+    for column in [1, 2] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Calculation
+            )))
+        );
+    }
+
+    let array_provenance = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "SUM(({TRUE}))"),
+            (1, 2, "_xleta.SUM(({TRUE}))"),
+            (1, 3, "SUM(LET(value,{TRUE},value))"),
+            (1, 4, "_xleta.SUM(LET(value,{TRUE},value))"),
+            (1, 5, "SUM(X)"),
+            (1, 6, "_xleta.SUM(X)"),
+        ],
+        &[("X", "{TRUE}")],
+    );
+    let calculation = calculate_workbook(&array_provenance, CalculationOptions::default());
+    for column in 1..=6 {
+        assert_number(&calculation, column, 0.0, 0.0);
+    }
+
+    let error_shadow = workbook_with_formulas_and_names(
+        &[(1, 1, "SUM(1)"), (1, 2, "_xleta.SUM(1)")],
+        &[("SUM", "#N/A")],
+    );
+    let calculation = calculate_workbook(&error_shadow, CalculationOptions::default());
+    for column in [1, 2] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::NotAvailable
+            )))
+        );
+    }
+}
+
+#[test]
+fn callable_aliases_share_static_reachability_arity_and_callee_evaluation() {
+    let alias = workbook_with_formulas_and_names(
+        &[(1, 1, "1"), (1, 2, "2"), (1, 3, "SUM(B1)")],
+        &[
+            ("F", "LAMBDA(x,A1+x+NO_SUCH_FUNCTION()+NOW())"),
+            ("SUM", "F"),
+        ],
+    );
+    let capabilities = scan_formula_capabilities(&alias);
+    assert!(!capabilities.is_supported());
+    let usage = scan_function_usage(&alias);
+    let names = usage
+        .entries()
+        .iter()
+        .map(|entry| entry.name())
+        .collect::<BTreeSet<_>>();
+    assert!(names.contains("NO_SUCH_FUNCTION"), "{names:?}");
+    assert!(names.contains("NOW"), "{names:?}");
+    let calculation = calculate_workbook(&alias, CalculationOptions::default());
+    assert_issue(&calculation, 3, CalculationIssueCode::UnsupportedFunction);
+
+    let defined_arity = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "SUM(A1+NO_SUCH_FUNCTION()+NOW(),1)"),
+            (1, 2, "_xleta.SUM(A1+NO_SUCH_FUNCTION()+NOW(),1)"),
+        ],
+        &[("SUM", "LAMBDA(value,value)")],
+    );
+    let local_arity = workbook_with_formulas(&[
+        (
+            1,
+            1,
+            "LET(SUM,LAMBDA(value,value),SUM(A1+NO_SUCH_FUNCTION()+NOW(),1))",
+        ),
+        (
+            1,
+            2,
+            "LET(SUM,LAMBDA(value,value),_xleta.SUM(A1+NO_SUCH_FUNCTION()+NOW(),1))",
+        ),
+        (
+            1,
+            3,
+            "LET(X,2,SUM,X,_xleta.SUM(A1+NO_SUCH_FUNCTION()+NOW()))",
+        ),
+    ]);
+    for workbook in [&defined_arity, &local_arity] {
+        assert!(scan_formula_capabilities(workbook).is_supported());
+        let usage = scan_function_usage(workbook);
+        let names = usage
+            .entries()
+            .iter()
+            .map(|entry| entry.name())
+            .collect::<BTreeSet<_>>();
+        assert!(!names.contains("NO_SUCH_FUNCTION"), "{names:?}");
+        assert!(!names.contains("NOW"), "{names:?}");
+        let calculation = calculate_workbook(workbook, CalculationOptions::default());
+        for column in 1..=workbook.sheets()[0].len() as u32 {
+            assert_eq!(
+                calculation.cell(cell_id(column)),
+                Some(&CalculationCellResult::Value(CellValue::Error(
+                    ExcelError::Value
+                )))
+            );
+        }
+    }
+}
+
+#[test]
 fn lambda_callable_values_errors_and_reduce_seeding_match_excel_contracts() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "LAMBDA(value,42)(1/0)"),
@@ -471,6 +807,28 @@ fn helper_callbacks_preserve_engine_issues_and_cumulative_work_limits() {
     assert_issue(
         &text_limited,
         2,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+
+    let builtin_limited = calculate_workbook(
+        &workbook_with_formulas(&[
+            (1, 1, "IFERROR(BYROW({1,\"ab\"&\"cd\"},COUNTA),42)"),
+            (1, 2, "IFERROR(REDUCE(0,{1,\"ab\"&\"cd\"},COUNTA),42)"),
+            (1, 3, "\"ab\"&\"cd\""),
+            (1, 4, "IFERROR(_xleta.COUNTA(C1),42)"),
+        ]),
+        CalculationOptions::default().with_limits(text_limits),
+    );
+    for column in [1, 2, 3] {
+        assert_issue(
+            &builtin_limited,
+            column,
+            CalculationIssueCode::ResourceLimitExceeded,
+        );
+    }
+    assert_issue(
+        &builtin_limited,
+        4,
         CalculationIssueCode::ResourceLimitExceeded,
     );
 
@@ -671,6 +1029,7 @@ fn structured_and_external_references_are_typed_before_resolution() {
         (1, 8, "[1]!Name"),
         (1, 9, "SUM(Table1[Amount"),
         (1, 10, "Table1['[odd']name]"),
+        (1, 11, "_xleta.COUNTA(Table1[#Data])"),
     ]);
     let report = scan_formula_capabilities(&workbook);
 
@@ -685,6 +1044,15 @@ fn structured_and_external_references_are_typed_before_resolution() {
             FormulaCapability::Supported
         ));
     }
+    assert!(matches!(
+        report
+            .entries()
+            .iter()
+            .find(|entry| entry.cell() == cell_id(11))
+            .expect("typed structured-reference capability entry")
+            .capability(),
+        FormulaCapability::Supported
+    ));
     for column in 6..=8 {
         assert_capability_issue_code(&report, column, CalculationIssueCode::UnsupportedExpression);
     }
@@ -719,6 +1087,7 @@ fn structured_and_external_references_are_typed_before_resolution() {
         calculation.cell(cell_id(10)),
         Some(CalculationCellResult::Value(CellValue::Error(_)))
     ));
+    assert_eq!(calculation.cell(cell_id(11)), calculation.cell(cell_id(5)));
 }
 
 #[test]
@@ -743,6 +1112,25 @@ fn three_d_aggregates_resolve_in_tab_order_across_quoted_prefixes() {
     }
     assert_number(&calculation, 5, 11.0, 0.0);
     assert_number(&calculation, 6, 333.0, 0.0);
+}
+
+#[test]
+fn typed_and_aliased_builtin_aggregates_inherit_the_descriptor_three_d_policy() {
+    let workbook = three_sheet_workbook(
+        &[
+            (1, 1, "SUM(Sheet1:Sheet3!Z1)"),
+            (1, 2, "_xleta.SUM(Sheet1:Sheet3!Z1)"),
+            (1, 3, "LET(F,_xleta.SUM,F(Sheet1:Sheet3!Z1))"),
+            (1, 4, "F(Sheet1:Sheet3!Z1)"),
+        ],
+        &[("F", "_xleta.SUM")],
+    );
+    let capabilities = scan_formula_capabilities(&workbook);
+    assert!(capabilities.is_supported(), "{:?}", capabilities.entries());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for column in 1..=4 {
+        assert_number(&calculation, column, 111.0, 0.0);
+    }
 }
 
 #[test]

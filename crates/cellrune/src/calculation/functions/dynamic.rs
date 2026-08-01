@@ -9,7 +9,8 @@ use super::super::limits::CalculationLimitKind;
 use super::super::operators::element_at;
 use super::super::runtime::{Array, ReferenceValue};
 use super::super::scope::{
-    ArrayEvaluation, DefinedLambdaId, LambdaClosure, ScalarEvaluation, ScopeEntry, ScopeValue,
+    ArrayEvaluation, CallableValue, DefinedLambdaId, LambdaClosure, ScalarEvaluation, ScopeEntry,
+    ScopeValue,
 };
 use super::super::value::{ErrorKind, Value};
 
@@ -70,7 +71,7 @@ pub(in crate::calculation) fn lambda_scope_value(
     let Some(definition) = definition_from_args(args) else {
         return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
     };
-    ScopeValue::Callable(std::sync::Arc::new(LambdaClosure {
+    ScopeValue::Callable(CallableValue::Lambda(std::sync::Arc::new(LambdaClosure {
         parameters: definition.parameters().to_vec(),
         body: definition.body().clone(),
         captured: if defined_name.is_some() {
@@ -83,16 +84,16 @@ pub(in crate::calculation) fn lambda_scope_value(
             .map(DefinedLambdaId::scope)
             .or(context.defined_name_scope()),
         defined_name,
-    }))
+    })))
 }
 
-pub(in crate::calculation) fn invoke_lambda(
+pub(in crate::calculation) fn invoke_callable(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    closure: &LambdaClosure,
+    callable: &CallableValue,
     args: &[Expr],
 ) -> ScopeValue {
-    if closure.parameters.len() != args.len() {
+    if !callable_accepts_argument_count(callable, args.len()) {
         return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
     }
     let mut values = Vec::with_capacity(args.len());
@@ -102,8 +103,14 @@ pub(in crate::calculation) fn invoke_lambda(
                 ErrorKind::ResourceLimit(CalculationLimitKind::LambdaInvocations),
             )));
         }
-        let value = engine.eval_scope_value(context, arg);
-        if let ScopeValue::Scalar(evaluated) = &value
+        let value = match engine.eval_callable_argument_scope_value(context, arg) {
+            Ok(value) => value,
+            Err(kind) => {
+                return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+            }
+        };
+        if matches!(callable, CallableValue::Lambda(_))
+            && let ScopeValue::Scalar(evaluated) = &value
             && let Value::Error(kind) = evaluated.value
         {
             return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
@@ -113,7 +120,55 @@ pub(in crate::calculation) fn invoke_lambda(
         }
         values.push(value);
     }
-    invoke_lambda_values(engine, context, closure, values)
+    invoke_callable_values(engine, context, callable, values)
+}
+
+pub(in crate::calculation) fn callable_accepts_argument_count(
+    callable: &CallableValue,
+    argument_count: usize,
+) -> bool {
+    match callable {
+        CallableValue::Lambda(closure) => closure.parameters.len() == argument_count,
+        CallableValue::Builtin(callable) => {
+            super::builtin_callable_accepts(*callable, argument_count)
+        }
+    }
+}
+
+pub(in crate::calculation) fn invoke_callable_values(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    callable: &CallableValue,
+    values: Vec<ScopeValue>,
+) -> ScopeValue {
+    if let Err(kind) = validate_callable_invocation(context, callable, &values) {
+        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+    }
+    match callable {
+        CallableValue::Lambda(closure) => invoke_lambda_values(engine, context, closure, values),
+        CallableValue::Builtin(callable) => ScopeValue::Scalar(ScalarEvaluation::untracked(
+            super::call_builtin_callable(engine, context, *callable, &values),
+        )),
+    }
+}
+
+fn validate_callable_invocation(
+    context: EvalContext<'_>,
+    callable: &CallableValue,
+    values: &[ScopeValue],
+) -> Result<(), ErrorKind> {
+    if !callable_accepts_argument_count(callable, values.len()) {
+        return Err(ErrorKind::Value);
+    }
+    if context.is_cancelled() {
+        return Err(ErrorKind::ResourceLimit(
+            CalculationLimitKind::LambdaInvocations,
+        ));
+    }
+    if let Some(kind) = values.iter().find_map(ScopeValue::engine_issue) {
+        return Err(kind);
+    }
+    Ok(())
 }
 
 pub(in crate::calculation) fn invoke_lambda_values(
@@ -171,8 +226,8 @@ pub(super) fn map_array_with_trace(
     if array_exprs.is_empty() {
         return Err(ErrorKind::Value);
     }
-    let closure = lambda_closure(engine, context, lambda_expr)?;
-    if closure.parameters.len() != array_exprs.len() {
+    let callable = callable_value(engine, context, lambda_expr)?;
+    if !callable_accepts_argument_count(&callable, array_exprs.len()) {
         return Err(ErrorKind::Value);
     }
 
@@ -207,7 +262,7 @@ pub(super) fn map_array_with_trace(
                     })
                 })
                 .collect();
-            let scoped = invoke_lambda_values(engine, context, &closure, values);
+            let scoped = invoke_callable_values(engine, context, &callable, values);
             let evaluated = lambda_result_scalar(engine, context, &scoped)?;
             if let Some(kind) = evaluated.engine_issue() {
                 return Err(kind);
@@ -257,13 +312,13 @@ pub(in crate::calculation) fn helper_scalar_with_trace(
     }
 }
 
-fn lambda_closure(
+fn callable_value(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     expr: &Expr,
-) -> Result<LambdaClosure, ErrorKind> {
+) -> Result<CallableValue, ErrorKind> {
     match engine.eval_scope_value(context, expr) {
-        ScopeValue::Callable(closure) => Ok((*closure).clone()),
+        ScopeValue::Callable(callable) => Ok(callable),
         value => Err(value.engine_issue().unwrap_or(ErrorKind::Value)),
     }
 }
@@ -313,8 +368,8 @@ fn byrow(
         return Err(ErrorKind::Value);
     }
     let input = engine.eval_array_with_trace(context, &args[0])?;
-    let closure = lambda_closure(engine, context, &args[1])?;
-    if closure.parameters.len() != 1 {
+    let callable = callable_value(engine, context, &args[1])?;
+    if !callable_accepts_argument_count(&callable, 1) {
         return Err(ErrorKind::Value);
     }
     engine.ensure_array_cells(u64::from(input.array.rows))?;
@@ -338,7 +393,7 @@ fn byrow(
                 .map(|col| input.decimal_at(row, col))
                 .collect(),
         }));
-        let result = invoke_lambda_values(engine, context, &closure, vec![row_value]);
+        let result = invoke_callable_values(engine, context, &callable, vec![row_value]);
         let scalar = lambda_result_scalar(engine, context, &result)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
@@ -365,8 +420,8 @@ fn bycol(
         return Err(ErrorKind::Value);
     }
     let input = engine.eval_array_with_trace(context, &args[0])?;
-    let closure = lambda_closure(engine, context, &args[1])?;
-    if closure.parameters.len() != 1 {
+    let callable = callable_value(engine, context, &args[1])?;
+    if !callable_accepts_argument_count(&callable, 1) {
         return Err(ErrorKind::Value);
     }
     engine.ensure_array_cells(u64::from(input.array.cols))?;
@@ -390,7 +445,7 @@ fn bycol(
                 .map(|row| input.decimal_at(row, col))
                 .collect(),
         }));
-        let result = invoke_lambda_values(engine, context, &closure, vec![col_value]);
+        let result = invoke_callable_values(engine, context, &callable, vec![col_value]);
         let scalar = lambda_result_scalar(engine, context, &result)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
@@ -422,8 +477,8 @@ fn reduce(
         return Err(ErrorKind::Value);
     }
     let input = engine.eval_array_with_trace(context, &args[1])?;
-    let closure = lambda_closure(engine, context, &args[2])?;
-    if closure.parameters.len() != 2 {
+    let callable = callable_value(engine, context, &args[2])?;
+    if !callable_accepts_argument_count(&callable, 2) {
         return Err(ErrorKind::Value);
     }
     let cells = u64::from(input.array.rows) * u64::from(input.array.cols);
@@ -461,10 +516,10 @@ fn reduce(
         decimal_traces.push(scalar.decimal_trace);
     }
     for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
-        accumulator = invoke_lambda_values(
+        accumulator = invoke_callable_values(
             engine,
             context,
-            &closure,
+            &callable,
             vec![
                 accumulator,
                 ScopeValue::Scalar(ScalarEvaluation {
@@ -507,8 +562,8 @@ pub(in crate::calculation) fn reduce_scope_value(
         return Err(ErrorKind::Value);
     }
     let input = engine.eval_array_with_trace(context, &args[1])?;
-    let closure = lambda_closure(engine, context, &args[2])?;
-    if closure.parameters.len() != 2 {
+    let callable = callable_value(engine, context, &args[2])?;
+    if !callable_accepts_argument_count(&callable, 2) {
         return Err(ErrorKind::Value);
     }
     let cells = u64::from(input.array.rows) * u64::from(input.array.cols);
@@ -537,10 +592,10 @@ pub(in crate::calculation) fn reduce_scope_value(
         return Err(kind);
     }
     for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
-        accumulator = invoke_lambda_values(
+        accumulator = invoke_callable_values(
             engine,
             context,
-            &closure,
+            &callable,
             vec![
                 accumulator,
                 ScopeValue::Scalar(ScalarEvaluation {
@@ -574,18 +629,18 @@ fn makearray(
     let cells = u64::from(rows) * u64::from(cols);
     engine.ensure_array_cells(cells)?;
     engine.charge_function_iterations(context, cells)?;
-    let closure = lambda_closure(engine, context, &args[2])?;
-    if closure.parameters.len() != 2 {
+    let callable = callable_value(engine, context, &args[2])?;
+    if !callable_accepts_argument_count(&callable, 2) {
         return Err(ErrorKind::Value);
     }
     let mut data = Vec::with_capacity(cells as usize);
     let mut decimal_traces = Vec::with_capacity(cells as usize);
     for row in 1..=rows {
         for col in 1..=cols {
-            let result = invoke_lambda_values(
+            let result = invoke_callable_values(
                 engine,
                 context,
-                &closure,
+                &callable,
                 vec![
                     scalar_scope(Value::Number(f64::from(row))),
                     scalar_scope(Value::Number(f64::from(col))),
@@ -716,4 +771,47 @@ fn common_shape(arrays: &[&Array]) -> Result<(u32, u32), ErrorKind> {
         }
     }
     Ok(shape.unwrap_or((1, 1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::calculation::eval::EvaluationBudget;
+
+    #[test]
+    fn builtin_callback_preflight_polls_after_setup_and_preserves_error_classes() {
+        let cancelled = Cell::new(false);
+        let is_cancelled = || cancelled.get();
+        let budget = EvaluationBudget::default();
+        let context = EvalContext::for_cancellable((0, 1, 1), &budget, &is_cancelled);
+        let callable = CallableValue::Builtin(
+            super::super::builtin_callable("SUM").expect("SUM is a builtin callable"),
+        );
+        let ordinary_error = [scalar_scope(Value::Error(ErrorKind::NA))];
+
+        assert_eq!(
+            validate_callable_invocation(context, &callable, &ordinary_error),
+            Ok(()),
+            "ordinary Excel errors belong to the builtin kernel"
+        );
+
+        cancelled.set(true);
+        assert_eq!(
+            validate_callable_invocation(context, &callable, &ordinary_error),
+            Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::LambdaInvocations
+            )),
+            "a helper callback must poll cancellation again after setup"
+        );
+
+        cancelled.set(false);
+        let engine_issue = [scalar_scope(Value::Error(ErrorKind::Unsupported))];
+        assert_eq!(
+            validate_callable_invocation(context, &callable, &engine_issue),
+            Err(ErrorKind::Unsupported),
+            "engine issues must never reach or be hidden by a builtin kernel"
+        );
+    }
 }

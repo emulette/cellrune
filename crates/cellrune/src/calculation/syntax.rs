@@ -104,6 +104,7 @@ impl NodeSpanTree {
             | Expr::ExternalReference(_)
             | Expr::QualifiedName { .. }
             | Expr::Name(_)
+            | Expr::BuiltinCallable(_)
             | Expr::Missing => Vec::new(),
         };
         children.reverse();

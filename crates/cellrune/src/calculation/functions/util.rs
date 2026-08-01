@@ -65,14 +65,14 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut values = Vec::new();
     for arg in args {
-        if let Some(let_args) = let_arguments(engine, context, arg) {
-            let scoped = let_scope_value(engine, context, let_args);
+        if let Some(scoped) = collection_preserving_scope_value(engine, context, arg) {
             collect_scope_values(
                 engine,
                 context,
                 scoped,
                 visited_cells,
                 sheet_span_policy,
+                true,
                 &mut values,
             )?;
             continue;
@@ -116,13 +116,16 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
     Ok(values)
 }
 
-fn let_arguments<'expr>(
+fn collection_preserving_scope_value(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    expr: &'expr Expr,
-) -> Option<&'expr [Expr]> {
+    expr: &Expr,
+) -> Option<ScopeValue> {
     match expr {
-        Expr::Paren(inner) => let_arguments(engine, context, inner),
+        Expr::Paren(inner) => collection_preserving_scope_value(engine, context, inner),
+        Expr::Array(_) | Expr::Name(_) | Expr::BuiltinCallable(_) => {
+            Some(engine.eval_scope_value(context, expr))
+        }
         Expr::Call { name, args }
             if context.binding(name).is_none()
                 && engine
@@ -130,10 +133,31 @@ fn let_arguments<'expr>(
                     .is_none()
                 && function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Let)) =>
         {
-            Some(args)
+            Some(let_scope_value(engine, context, args))
         }
         _ => None,
     }
+}
+
+pub(super) fn collect_callable_argument_values(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[ScopeValue],
+) -> Result<Vec<ArgumentValue>, ErrorKind> {
+    let mut visited_cells = 0_u64;
+    let mut values = Vec::new();
+    for value in args {
+        collect_scope_values(
+            engine,
+            context,
+            value.clone(),
+            &mut visited_cells,
+            SheetSpanPolicy::CollectAcrossSheets,
+            true,
+            &mut values,
+        )?;
+    }
+    Ok(values)
 }
 
 fn collect_scope_values(
@@ -142,6 +166,7 @@ fn collect_scope_values(
     scoped: ScopeValue,
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
+    arrays_are_collections: bool,
     values: &mut Vec<ArgumentValue>,
 ) -> Result<(), ErrorKind> {
     match scoped {
@@ -165,7 +190,7 @@ fn collect_scope_values(
         }
         ScopeValue::Array(evaluated) => {
             charge_array_cells(engine, visited_cells, evaluated.array.data.len() as u64)?;
-            let from_collection = !evaluated.array.is_scalar();
+            let from_collection = arrays_are_collections || !evaluated.array.is_scalar();
             values.extend(
                 evaluated
                     .array

@@ -6,9 +6,10 @@ use super::error::parse_error_detail;
 use super::eval::{CompiledWorkbook, Engine, public_to_internal};
 use super::functions::descriptor::{DependencyKind, ReferenceMetadataKind, Volatility};
 use super::functions::{
-    DynamicFunction, Evaluator, canonical_name_for_evaluator, descriptor_sheet_span_policy,
-    function_arguments_are_reachable, function_dependency_kind, function_evaluator,
-    function_volatility, is_supported_function, normalize_name,
+    CallableShadow, DynamicFunction, Evaluator, builtin_invocation_arguments_are_reachable,
+    callable_shadow_arguments_are_reachable, classify_callable_value, descriptor_sheet_span_policy,
+    direct_builtin_callable, function_arguments_are_reachable, function_dependency_kind,
+    function_evaluator, function_volatility, is_supported_function, normalize_name,
 };
 use super::lambda::definition;
 use super::scope::DefinedLambdaId;
@@ -50,6 +51,59 @@ impl NameScanContext {
             ..self
         }
     }
+}
+
+fn typed_invocation_arguments_are_reachable(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
+    callee: &Expr,
+    args: &[Expr],
+    local_scope: &CapabilityScope,
+) -> bool {
+    builtin_invocation_arguments_are_reachable(callee, args, |name| {
+        if let Some(shadow) = local_scope.callable_shadow(name) {
+            return shadow;
+        }
+        engine.callable_shadow_for_name(sheet.sheet, sheet.defined_name_scope, name)
+    })
+}
+
+fn typed_invocation_shadow(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
+    callee: &Expr,
+    local_scope: &CapabilityScope,
+) -> Option<(super::functions::BuiltinCallable, CallableShadow)> {
+    let callable = direct_builtin_callable(callee)?;
+    let name = callable.canonical_name();
+    let shadow = local_scope.callable_shadow(name).unwrap_or_else(|| {
+        engine.callable_shadow_for_name(sheet.sheet, sheet.defined_name_scope, name)
+    });
+    Some((callable, shadow))
+}
+
+fn call_shadow_arguments_are_reachable(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
+    name: &str,
+    args: &[Expr],
+    local_scope: &CapabilityScope,
+) -> Option<bool> {
+    call_shadow(engine, sheet, name, local_scope)
+        .map(|shadow| callable_shadow_arguments_are_reachable(shadow, None, args.len()))
+}
+
+fn call_shadow(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
+    name: &str,
+    local_scope: &CapabilityScope,
+) -> Option<CallableShadow> {
+    local_scope.callable_shadow(name).or_else(|| {
+        engine
+            .resolve_name_expr_with_id_for_scope(sheet.sheet, sheet.defined_name_scope, name)
+            .map(|_| engine.callable_shadow_for_name(sheet.sheet, sheet.defined_name_scope, name))
+    })
 }
 
 pub(super) fn scan_formula_capabilities(
@@ -155,27 +209,30 @@ fn collect_function_calls_in_scope(
     match expr {
         Expr::Call { name, args } => {
             let normalized = normalize_name(name);
-            if local_scope.lookup(name).is_some() {
-                if !local_scope.call_is_definitely_non_callable(name) {
-                    for arg in args {
-                        collect_function_calls_in_scope(
-                            engine,
-                            sheet,
-                            arg,
-                            output,
-                            local_scope,
-                            active_names,
-                        );
-                    }
+            if let Some(arguments_are_reachable) =
+                call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
+            {
+                let shadow = call_shadow(engine, sheet, name, local_scope)
+                    .expect("shadow reachability implies a shadow state");
+                if shadow != CallableShadow::CyclicNonCallable
+                    && let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                        sheet.sheet,
+                        sheet.defined_name_scope,
+                        name,
+                    )
+                    && active_names.insert(id.clone())
+                {
+                    collect_function_calls_in_scope(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        named,
+                        output,
+                        &mut CapabilityScope::default(),
+                        active_names,
+                    );
+                    active_names.remove(&id);
                 }
-                return;
-            }
-            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
-                sheet.sheet,
-                sheet.defined_name_scope,
-                name,
-            ) {
-                if let Some(lambda) = definition(named) {
+                if arguments_are_reachable {
                     for arg in args {
                         collect_function_calls_in_scope(
                             engine,
@@ -185,28 +242,6 @@ fn collect_function_calls_in_scope(
                             local_scope,
                             active_names,
                         );
-                    }
-                    if active_names.insert(id.clone()) {
-                        output.push(
-                            canonical_name_for_evaluator(Evaluator::Dynamic(
-                                DynamicFunction::Lambda,
-                            ))
-                            .expect("the LAMBDA evaluator is registered")
-                            .to_owned(),
-                        );
-                        let mut lambda_scope = CapabilityScope::default();
-                        for parameter in lambda.parameters() {
-                            lambda_scope.push_parameter(parameter.clone());
-                        }
-                        collect_function_calls_in_scope(
-                            engine,
-                            sheet.for_definition(id.scope()),
-                            lambda.body(),
-                            output,
-                            &mut lambda_scope,
-                            active_names,
-                        );
-                        active_names.remove(&id);
                     }
                 }
                 return;
@@ -234,7 +269,7 @@ fn collect_function_calls_in_scope(
                             active_names,
                         );
                         if let Expr::Name(binding_name) = &pair[0] {
-                            local_scope.push_expression(binding_name, &pair[1]);
+                            local_scope.push_expression(engine, sheet, binding_name, &pair[1]);
                         }
                     }
                     collect_function_calls_in_scope(
@@ -287,14 +322,21 @@ fn collect_function_calls_in_scope(
             }
         }
         Expr::Invoke { callee, args } => {
-            collect_function_calls_in_scope(
-                engine,
-                sheet,
-                callee,
-                output,
-                local_scope,
-                active_names,
-            );
+            let cyclic_callee = typed_invocation_shadow(engine, sheet, callee, local_scope)
+                .is_some_and(|(_, shadow)| shadow == CallableShadow::CyclicNonCallable);
+            if !cyclic_callee {
+                collect_function_calls_in_scope(
+                    engine,
+                    sheet,
+                    callee,
+                    output,
+                    local_scope,
+                    active_names,
+                );
+            }
+            if !typed_invocation_arguments_are_reachable(engine, sheet, callee, args, local_scope) {
+                return;
+            }
             for arg in args {
                 collect_function_calls_in_scope(
                     engine,
@@ -369,6 +411,32 @@ fn collect_function_calls_in_scope(
                 );
                 active_names.remove(&id);
             }
+        }
+        Expr::BuiltinCallable(callable) => {
+            let name = callable.canonical_name();
+            if local_scope.lookup(name).is_some() {
+                return;
+            }
+            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) {
+                if active_names.insert(id.clone()) {
+                    let mut defined_scope = CapabilityScope::default();
+                    collect_function_calls_in_scope(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        named,
+                        output,
+                        &mut defined_scope,
+                        active_names,
+                    );
+                    active_names.remove(&id);
+                }
+                return;
+            }
+            output.push(name.to_owned());
         }
         Expr::Number(_)
         | Expr::Text(_)
@@ -783,41 +851,41 @@ fn expr_contains_volatility(
 ) -> bool {
     match expr {
         Expr::Call { name, args } => {
-            if local_scope.lookup(name).is_some() {
-                if local_scope.call_is_definitely_non_callable(name) {
-                    return false;
-                }
-                return args.iter().any(|arg| {
-                    expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
-                });
-            }
-            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
-                sheet.sheet,
-                sheet.defined_name_scope,
-                name,
-            ) {
-                let Some(lambda) = definition(named) else {
-                    return false;
-                };
+            if let Some(arguments_are_reachable) =
+                call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
+            {
                 let mut found = false;
-                if names.insert(id.clone()) {
-                    let mut lambda_scope = CapabilityScope::default();
-                    for parameter in lambda.parameters() {
-                        lambda_scope.push_parameter(parameter.clone());
-                    }
+                let shadow = call_shadow(engine, sheet, name, local_scope)
+                    .expect("shadow reachability implies a shadow state");
+                if shadow != CallableShadow::CyclicNonCallable
+                    && let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                        sheet.sheet,
+                        sheet.defined_name_scope,
+                        name,
+                    )
+                    && names.insert(id.clone())
+                {
                     found |= expr_contains_volatility(
                         engine,
                         sheet.for_definition(id.scope()),
-                        lambda.body(),
+                        named,
                         expected,
                         names,
-                        &mut lambda_scope,
+                        &mut CapabilityScope::default(),
                     );
                 }
                 return found
-                    || args.iter().any(|arg| {
-                        expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
-                    });
+                    || (arguments_are_reachable
+                        && args.iter().any(|arg| {
+                            expr_contains_volatility(
+                                engine,
+                                sheet,
+                                arg,
+                                expected,
+                                names,
+                                local_scope,
+                            )
+                        }));
             }
             if is_supported_function(name)
                 && !function_arguments_are_reachable(
@@ -846,7 +914,7 @@ fn expr_contains_volatility(
                                 local_scope,
                             );
                             if let Expr::Name(binding_name) = &pair[0] {
-                                local_scope.push_expression(binding_name, &pair[1]);
+                                local_scope.push_expression(engine, sheet, binding_name, &pair[1]);
                             }
                         }
                         found |= expr_contains_volatility(
@@ -912,10 +980,20 @@ fn expr_contains_volatility(
             })
         }
         Expr::Invoke { callee, args } => {
-            expr_contains_volatility(engine, sheet, callee, expected, names, local_scope)
-                || args.iter().any(|arg| {
+            let cyclic_callee = typed_invocation_shadow(engine, sheet, callee, local_scope)
+                .is_some_and(|(_, shadow)| shadow == CallableShadow::CyclicNonCallable);
+            let callee_is_volatile = !cyclic_callee
+                && expr_contains_volatility(engine, sheet, callee, expected, names, local_scope);
+            callee_is_volatile
+                || (typed_invocation_arguments_are_reachable(
+                    engine,
+                    sheet,
+                    callee,
+                    args,
+                    local_scope,
+                ) && args.iter().any(|arg| {
                     expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
-                })
+                }))
         }
         Expr::ImplicitIntersection(inner)
         | Expr::SpillRef(inner)
@@ -956,6 +1034,27 @@ fn expr_contains_volatility(
                     )
                 })
         }
+        Expr::BuiltinCallable(callable) => {
+            let name = callable.canonical_name();
+            if local_scope.lookup(name).is_some() {
+                return false;
+            }
+            engine
+                .resolve_name_expr_with_id_for_scope(sheet.sheet, sheet.defined_name_scope, name)
+                .is_some_and(|(id, named)| {
+                    if !names.insert(id.clone()) {
+                        return false;
+                    }
+                    expr_contains_volatility(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        named,
+                        expected,
+                        names,
+                        &mut CapabilityScope::default(),
+                    )
+                })
+        }
         Expr::Number(_)
         | Expr::Text(_)
         | Expr::Logical(_)
@@ -968,9 +1067,16 @@ fn expr_contains_volatility(
     }
 }
 
+#[derive(Clone)]
+struct CapabilityBinding {
+    name: String,
+    expression: Option<Expr>,
+    callable_shadow: CallableShadow,
+}
+
 #[derive(Default)]
 struct CapabilityScope {
-    entries: Vec<(String, Option<Expr>)>,
+    entries: Vec<CapabilityBinding>,
 }
 
 impl CapabilityScope {
@@ -983,12 +1089,40 @@ impl CapabilityScope {
     }
 
     fn push_parameter(&mut self, name: String) {
-        self.entries.push((name, None));
+        self.entries.push(CapabilityBinding {
+            name,
+            expression: None,
+            callable_shadow: CallableShadow::Unknown,
+        });
     }
 
-    fn push_expression(&mut self, name: &str, value: &Expr) {
-        self.entries
-            .push((canonical_local_name(name), Some(value.clone())));
+    fn push_expression(
+        &mut self,
+        engine: &Engine<'_>,
+        sheet: NameScanContext,
+        name: &str,
+        value: &Expr,
+    ) {
+        let locals = self
+            .entries
+            .iter()
+            .map(|entry| (entry.name.clone(), entry.callable_shadow))
+            .collect::<Vec<_>>();
+        let mut resolve = |name: &str| -> Result<CallableShadow, std::convert::Infallible> {
+            Ok(engine.callable_shadow_for_name(sheet.sheet, sheet.defined_name_scope, name))
+        };
+        let callable_shadow = classify_callable_value(
+            value,
+            &locals,
+            engine.calculation_limits().max_let_bindings(),
+            &mut resolve,
+        )
+        .expect("static callable classification is infallible");
+        self.entries.push(CapabilityBinding {
+            name: canonical_local_name(name),
+            expression: Some(value.clone()),
+            callable_shadow,
+        });
     }
 
     fn lookup(&self, name: &str) -> Option<Option<Expr>> {
@@ -996,39 +1130,17 @@ impl CapabilityScope {
         self.entries
             .iter()
             .rev()
-            .find(|(entry, _)| entry == &key)
-            .map(|(_, value)| value.clone())
+            .find(|entry| entry.name == key)
+            .map(|entry| entry.expression.clone())
     }
 
-    fn call_is_definitely_non_callable(&self, name: &str) -> bool {
-        self.lookup(name)
-            .flatten()
-            .as_ref()
-            .is_some_and(expr_is_definitely_non_callable)
-    }
-}
-
-fn expr_is_definitely_non_callable(expr: &Expr) -> bool {
-    match expr {
-        Expr::Paren(inner) => expr_is_definitely_non_callable(inner),
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Logical(_)
-        | Expr::ErrorLit(_)
-        | Expr::StructuredRef(_)
-        | Expr::ExternalReference(_)
-        | Expr::QualifiedName { .. }
-        | Expr::Missing
-        | Expr::Ref(_)
-        | Expr::Range { .. }
-        | Expr::ImplicitIntersection(_)
-        | Expr::SpillRef(_)
-        | Expr::ReferenceUnion { .. }
-        | Expr::ReferenceIntersection { .. }
-        | Expr::Array(_)
-        | Expr::Unary { .. }
-        | Expr::Binary { .. } => true,
-        Expr::Name(_) | Expr::Call { .. } | Expr::Invoke { .. } => false,
+    fn callable_shadow(&self, name: &str) -> Option<CallableShadow> {
+        let key = canonical_local_name(name);
+        self.entries
+            .iter()
+            .rev()
+            .find(|entry| entry.name == key)
+            .map(|entry| entry.callable_shadow)
     }
 }
 
@@ -1068,51 +1180,48 @@ fn inspect_expr(
     match expr {
         Expr::Call { name, args } => {
             let normalized = normalize_name(name);
-            if local_scope.lookup(name).is_some() {
-                if !local_scope.call_is_definitely_non_callable(name) {
-                    for arg in args {
-                        inspect_expr(
-                            engine,
-                            sheet,
-                            arg,
-                            policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                            names,
-                            local_scope,
-                            issues,
-                        );
-                    }
+            if let Some(arguments_are_reachable) =
+                call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
+            {
+                if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                    sheet.sheet,
+                    sheet.defined_name_scope,
+                    name,
+                ) && names.insert((id.clone(), policy))
+                {
+                    inspect_expr(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        named,
+                        policy,
+                        names,
+                        &mut CapabilityScope::default(),
+                        issues,
+                    );
                 }
-                return;
-            }
-            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
-                sheet.sheet,
-                sheet.defined_name_scope,
-                name,
-            ) {
-                if let Some(lambda) = definition(named) {
+                if arguments_are_reachable {
+                    let shadow = call_shadow(engine, sheet, name, local_scope)
+                        .expect("shadow reachability implies a shadow state");
+                    let sheet_span = match shadow {
+                        CallableShadow::Callable(super::functions::CallableArity::Builtin(
+                            callable,
+                        )) => descriptor_sheet_span_policy(callable.canonical_name())
+                            .unwrap_or(ARRAY_EXPRESSION_POLICY),
+                        CallableShadow::Unshadowed
+                        | CallableShadow::Callable(_)
+                        | CallableShadow::Unknown
+                        | CallableShadow::DefinitelyNonCallable
+                        | CallableShadow::CyclicNonCallable => ARRAY_EXPRESSION_POLICY,
+                    };
+                    let argument_policy = policy.with_sheet_span(sheet_span);
                     for arg in args {
                         inspect_expr(
                             engine,
                             sheet,
                             arg,
-                            policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                            argument_policy,
                             names,
                             local_scope,
-                            issues,
-                        );
-                    }
-                    if names.insert((id.clone(), policy)) {
-                        let mut lambda_scope = CapabilityScope::default();
-                        for parameter in lambda.parameters() {
-                            lambda_scope.push_parameter(parameter.clone());
-                        }
-                        inspect_expr(
-                            engine,
-                            sheet.for_definition(id.scope()),
-                            lambda.body(),
-                            policy,
-                            names,
-                            &mut lambda_scope,
                             issues,
                         );
                     }
@@ -1216,9 +1325,38 @@ fn inspect_expr(
             }
         }
         Expr::Invoke { callee, args } => {
-            inspect_expr(engine, sheet, callee, policy, names, local_scope, issues);
+            let cyclic_callee = typed_invocation_shadow(engine, sheet, callee, local_scope)
+                .is_some_and(|(_, shadow)| shadow == CallableShadow::CyclicNonCallable);
+            if !cyclic_callee {
+                inspect_expr(engine, sheet, callee, policy, names, local_scope, issues);
+            }
+            if !typed_invocation_arguments_are_reachable(engine, sheet, callee, args, local_scope) {
+                return;
+            }
+            let argument_policy = typed_invocation_shadow(engine, sheet, callee, local_scope)
+                .and_then(|(callable, shadow)| match shadow {
+                    CallableShadow::Unshadowed => Some(callable),
+                    CallableShadow::Callable(super::functions::CallableArity::Builtin(
+                        callable,
+                    )) => Some(callable),
+                    CallableShadow::Callable(_)
+                    | CallableShadow::Unknown
+                    | CallableShadow::DefinitelyNonCallable
+                    | CallableShadow::CyclicNonCallable => None,
+                })
+                .and_then(|callable| descriptor_sheet_span_policy(callable.canonical_name()))
+                .unwrap_or(ARRAY_EXPRESSION_POLICY);
+            let argument_policy = policy.with_sheet_span(argument_policy);
             for arg in args {
-                inspect_expr(engine, sheet, arg, policy, names, local_scope, issues);
+                inspect_expr(
+                    engine,
+                    sheet,
+                    arg,
+                    argument_policy,
+                    names,
+                    local_scope,
+                    issues,
+                );
             }
         }
         Expr::Name(name) => {
@@ -1252,6 +1390,32 @@ fn inspect_expr(
                     CalculationIssueCode::UnsupportedName,
                     Some(name.clone()),
                 )),
+            }
+        }
+        Expr::BuiltinCallable(callable) => {
+            let name = callable.canonical_name();
+            if let Some(binding) = local_scope.lookup(name) {
+                if let Some(binding) = binding {
+                    inspect_expr(engine, sheet, &binding, policy, names, local_scope, issues);
+                }
+                return;
+            }
+            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                sheet.sheet,
+                sheet.defined_name_scope,
+                name,
+            ) && names.insert((id.clone(), policy))
+            {
+                let mut defined_scope = CapabilityScope::default();
+                inspect_expr(
+                    engine,
+                    sheet.for_definition(id.scope()),
+                    named,
+                    policy,
+                    names,
+                    &mut defined_scope,
+                    issues,
+                );
             }
         }
         Expr::Array(rows) => {
@@ -1412,7 +1576,7 @@ fn inspect_let(
             issues,
         );
         if let Expr::Name(name) = &pair[0] {
-            local_scope.push_expression(name, &pair[1]);
+            local_scope.push_expression(engine, sheet, name, &pair[1]);
         }
     }
     inspect_expr(

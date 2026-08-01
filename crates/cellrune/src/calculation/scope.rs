@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::decimal::DecimalTrace;
+use super::functions::BuiltinCallable;
 use super::operators::broadcast_index;
 use super::runtime::{Array, ReferenceValue};
 use super::value::{ErrorKind, Value};
@@ -87,7 +88,7 @@ pub(super) enum ScopeValue {
     Scalar(ScalarEvaluation),
     Array(Arc<ArrayEvaluation>),
     Reference(ReferenceValue),
-    Callable(Arc<LambdaClosure>),
+    Callable(CallableValue),
 }
 
 impl ScopeValue {
@@ -98,6 +99,12 @@ impl ScopeValue {
             Self::Missing | Self::Reference(_) | Self::Callable(_) => None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum CallableValue {
+    Lambda(Arc<LambdaClosure>),
+    Builtin(BuiltinCallable),
 }
 
 #[derive(Debug, Clone, PartialEq)]

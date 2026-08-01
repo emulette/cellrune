@@ -385,6 +385,7 @@ fn push_children<'a>(
         | Expr::ExternalReference(_)
         | Expr::QualifiedName { .. }
         | Expr::Name(_)
+        | Expr::BuiltinCallable(_)
         | Expr::Missing => Vec::new(),
     };
     debug_assert_eq!(expressions.len(), source_node.children().len());

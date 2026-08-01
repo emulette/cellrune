@@ -23,6 +23,15 @@ impl FunctionId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(in crate::calculation) struct BuiltinCallable(FunctionId);
+
+impl BuiltinCallable {
+    pub(in crate::calculation) const fn canonical_name(self) -> &'static str {
+        self.0.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::calculation) enum FunctionResultKind {
     Scalar,
@@ -129,6 +138,7 @@ pub(super) struct FunctionDescriptor {
     catalog_array_result: bool,
     public_catalog: bool,
     official: bool,
+    builtin_callable: Option<BuiltinCallable>,
 }
 
 impl FunctionDescriptor {
@@ -149,6 +159,7 @@ impl FunctionDescriptor {
             catalog_array_result: false,
             public_catalog: true,
             official: true,
+            builtin_callable: None,
         }
     }
 
@@ -219,6 +230,11 @@ impl FunctionDescriptor {
         self
     }
 
+    const fn with_builtin_callable(mut self) -> Self {
+        self.builtin_callable = Some(BuiltinCallable(self.id));
+        self
+    }
+
     pub(super) const fn id(self) -> FunctionId {
         self.id
     }
@@ -277,6 +293,10 @@ impl FunctionDescriptor {
 
     pub(super) const fn is_official(self) -> bool {
         self.official
+    }
+
+    pub(super) const fn builtin_callable(self) -> Option<BuiltinCallable> {
+        self.builtin_callable
     }
 }
 
@@ -399,14 +419,28 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(IfNa, "IFNA", Logical),
     function!(Ifs, "IFS", Logical),
     function!(Switch, "SWITCH", Logical),
-    function!(Sum, "SUM", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!(Average, "AVERAGE", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!(Min, "MIN", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!(Max, "MAX", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!(Count, "COUNT", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
-    function!(CountA, "COUNTA", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Sum, "SUM", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
+    function!(Average, "AVERAGE", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
+    function!(Min, "MIN", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
+    function!(Max, "MAX", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
+    function!(Count, "COUNT", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
+    function!(CountA, "COUNTA", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
     function!(CountBlank, "COUNTBLANK", Aggregate),
-    function!(Product, "PRODUCT", Aggregate).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Product, "PRODUCT", Aggregate)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_builtin_callable(),
     function!(Subtotal, "SUBTOTAL", Aggregate),
     function!(SumIf, "SUMIF", Aggregate)
         .with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
@@ -763,6 +797,16 @@ fn registry_index() -> &'static RegistryIndex {
     })
 }
 
+pub(super) fn callable_descriptor(callable: BuiltinCallable) -> FunctionDescriptor {
+    let index = registry_index();
+    let descriptor = *index
+        .descriptors
+        .get(&callable.0)
+        .expect("BuiltinCallable descriptor ID must resolve");
+    assert_eq!(descriptor.builtin_callable(), Some(callable));
+    descriptor
+}
+
 pub(super) fn descriptors() -> &'static [FunctionDescriptor] {
     DESCRIPTORS
 }
@@ -888,7 +932,29 @@ mod tests {
     }
 
     #[test]
-    fn migrated_v0_1_9_semantic_registry_is_byte_exact() {
+    fn builtin_callable_descriptors_are_total_unique_and_canonical() {
+        let registered = DESCRIPTORS
+            .iter()
+            .filter(|descriptor| descriptor.builtin_callable().is_some())
+            .copied()
+            .collect::<Vec<_>>();
+        let callables = registered
+            .iter()
+            .filter_map(|descriptor| descriptor.builtin_callable())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(registered.len(), 7);
+        assert_eq!(callables.len(), registered.len());
+
+        for descriptor in registered {
+            let callable = descriptor.builtin_callable().expect("callable descriptor");
+            assert_eq!(callable_descriptor(callable), descriptor);
+            assert_eq!(descriptor.canonical_name(), callable.canonical_name());
+            assert!(matches!(descriptor.evaluator(), Evaluator::Aggregate(_)));
+        }
+    }
+
+    #[test]
+    fn v0_1_10_typed_callable_semantic_registry_is_byte_exact() {
         let mut digest = Sha256::new();
         for descriptor in DESCRIPTORS {
             digest.update(format!("{descriptor:?}\n").as_bytes());
@@ -900,7 +966,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "c396e3d1ff50d13e0c5771c52e18a2e00d9399664be154eda0adbc677f5e4853"
+            "1ee5038f19906c186c7d7903aaeec6991aadbe159cef7806f8e74af2151b2bb8"
         );
     }
 

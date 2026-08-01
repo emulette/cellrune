@@ -11,10 +11,11 @@ use crate::calculation::error::parse_error_detail;
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
 use crate::calculation::functions::kernel::LegacyFunction;
 use crate::calculation::functions::{
-    DynamicFunction, Evaluator, function_arguments_are_reachable, function_dependency_kind,
-    function_evaluator,
+    CallableShadow, DynamicFunction, Evaluator, builtin_invocation_arguments_are_reachable,
+    callable_shadow_arguments_are_reachable, classify_callable_value, direct_builtin_callable,
+    function_arguments_are_reachable, function_dependency_kind, function_evaluator,
 };
-use crate::calculation::lambda::{definition, definition_from_args, is_local_name};
+use crate::calculation::lambda::{definition, definition_from_args};
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::{ParseError, parse_formula_with_limits};
 use crate::calculation::reference_resolution::{
@@ -134,9 +135,23 @@ enum ValidationTask {
         expr: Expr,
         context_sheet: Option<usize>,
         lookup_scope: DefinedNameScope,
-        local_names: Vec<String>,
+        local_names: Vec<ValidationLocalName>,
         chain_depth: u64,
     },
+}
+
+#[derive(Clone)]
+struct ValidationLocalName {
+    name: String,
+    callable_shadow: CallableShadow,
+}
+
+fn validation_local_name<'scope>(
+    name: &str,
+    local_names: &'scope [ValidationLocalName],
+) -> Option<&'scope ValidationLocalName> {
+    let key = canonical_local_name(name);
+    local_names.iter().rev().find(|local| local.name == key)
 }
 
 enum ClassificationTask {
@@ -380,7 +395,15 @@ impl Analyzer<'_, '_> {
                         self.validating_callables.remove(&key);
                         continue;
                     };
-                    let parameters = lambda.parameters().to_vec();
+                    let parameters = lambda
+                        .parameters()
+                        .iter()
+                        .cloned()
+                        .map(|name| ValidationLocalName {
+                            name,
+                            callable_shadow: CallableShadow::Unknown,
+                        })
+                        .collect::<Vec<_>>();
                     let body = lambda.body().clone();
                     self.charge_scan_nodes(
                         u64::try_from(parameters.len())
@@ -429,12 +452,12 @@ impl Analyzer<'_, '_> {
         expr: Expr,
         context_sheet: Option<usize>,
         lookup_scope: DefinedNameScope,
-        local_names: Vec<String>,
+        local_names: Vec<ValidationLocalName>,
         chain_depth: u64,
         tasks: &mut Vec<ValidationTask>,
     ) -> Result<Option<DefinedNameAnalysis>, DefinedNameAnalysisError> {
         match expr {
-            Expr::Name(name) if !is_local_name(&name, &local_names) => {
+            Expr::Name(name) if validation_local_name(&name, &local_names).is_none() => {
                 let Some((index, _)) = self.lookup_name(context_sheet, Some(lookup_scope), &name)
                 else {
                     return Ok(Some(DefinedNameAnalysis::Invalid {
@@ -442,27 +465,18 @@ impl Analyzer<'_, '_> {
                         detail: Some(name.into_boxed_str()),
                     }));
                 };
-                let callable = match self.parsed_is_callable(index)? {
-                    Ok(callable) => callable,
-                    Err(Outcome::Invalid { reason, detail }) => {
-                        return Ok(Some(DefinedNameAnalysis::Invalid { reason, detail }));
-                    }
-                    Err(_) => unreachable!("parsing produces only invalid outcomes"),
-                };
-                if callable {
-                    tasks.push(ValidationTask::EnterCallable {
-                        index,
-                        context_sheet,
-                        chain_depth: chain_depth + 1,
-                    });
-                } else {
-                    tasks.push(ValidationTask::EnterDefinition {
-                        index,
-                        context_sheet,
-                        chain_depth: chain_depth + 1,
-                    });
+                self.push_named_validation_task(index, context_sheet, chain_depth, tasks)
+            }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                if validation_local_name(name, &local_names).is_some() {
+                    return Ok(None);
                 }
-                Ok(None)
+                let Some((index, _)) = self.lookup_name(context_sheet, Some(lookup_scope), name)
+                else {
+                    return Ok(None);
+                };
+                self.push_named_validation_task(index, context_sheet, chain_depth, tasks)
             }
             Expr::QualifiedName { sheet, name } => {
                 if sheet.end_name.is_some() {
@@ -509,49 +523,52 @@ impl Analyzer<'_, '_> {
             }
             Expr::Call { name, args } => {
                 let evaluator = function_evaluator(&name);
-                if !is_local_name(&name, &local_names)
-                    && let Some((index, _)) =
-                        self.lookup_name(context_sheet, Some(lookup_scope), &name)
+                if validation_local_name(&name, &local_names).is_none()
+                    && let Some(index) = self
+                        .lookup_name(context_sheet, Some(lookup_scope), &name)
+                        .map(|(index, _)| index)
                 {
-                    let callable = match self.parsed_is_callable(index)? {
-                        Ok(callable) => callable,
-                        Err(Outcome::Invalid { reason, detail }) => {
-                            return Ok(Some(DefinedNameAnalysis::Invalid { reason, detail }));
-                        }
-                        Err(_) => unreachable!("parsing produces only invalid outcomes"),
-                    };
-                    Self::push_validation_exprs(
-                        tasks,
-                        args,
+                    let shadow = self.callable_shadow_for_name(
                         context_sheet,
                         lookup_scope,
-                        &local_names,
-                        chain_depth,
-                    );
-                    if callable {
-                        tasks.push(ValidationTask::EnterCallable {
-                            index,
+                        &name,
+                        &mut BTreeSet::new(),
+                    )?;
+                    if callable_shadow_arguments_are_reachable(shadow, None, args.len()) {
+                        Self::push_validation_exprs(
+                            tasks,
+                            args,
                             context_sheet,
-                            chain_depth: chain_depth + 1,
-                        });
-                    } else {
-                        tasks.push(ValidationTask::EnterDefinition {
-                            index,
-                            context_sheet,
-                            chain_depth: chain_depth + 1,
-                        });
+                            lookup_scope,
+                            &local_names,
+                            chain_depth,
+                        );
                     }
-                    return Ok(None);
-                }
-                if is_local_name(&name, &local_names) {
-                    Self::push_validation_exprs(
-                        tasks,
-                        args,
+                    if shadow == CallableShadow::CyclicNonCallable {
+                        return Ok(None);
+                    }
+                    return self.push_named_validation_task(
+                        index,
                         context_sheet,
-                        lookup_scope,
-                        &local_names,
                         chain_depth,
+                        tasks,
                     );
+                }
+                if let Some(local) = validation_local_name(&name, &local_names) {
+                    if callable_shadow_arguments_are_reachable(
+                        local.callable_shadow,
+                        None,
+                        args.len(),
+                    ) {
+                        Self::push_validation_exprs(
+                            tasks,
+                            args,
+                            context_sheet,
+                            lookup_scope,
+                            &local_names,
+                            chain_depth,
+                        );
+                    }
                     return Ok(None);
                 }
                 if evaluator.is_some()
@@ -566,7 +583,12 @@ impl Analyzer<'_, '_> {
                 if evaluator == Some(Evaluator::Dynamic(DynamicFunction::Lambda)) {
                     if let Some(lambda) = definition_from_args(&args) {
                         let mut lambda_locals = local_names;
-                        lambda_locals.extend(lambda.parameters().iter().cloned());
+                        lambda_locals.extend(lambda.parameters().iter().cloned().map(|name| {
+                            ValidationLocalName {
+                                name,
+                                callable_shadow: CallableShadow::Unknown,
+                            }
+                        }));
                         self.charge_scan_nodes(
                             u64::try_from(lambda.parameters().len()).unwrap_or(u64::MAX),
                         )?;
@@ -590,14 +612,14 @@ impl Analyzer<'_, '_> {
                     return Ok(None);
                 }
                 if evaluator == Some(Evaluator::Dynamic(DynamicFunction::Let)) {
-                    Self::push_let_validation(
+                    self.push_let_validation(
                         tasks,
                         args,
                         context_sheet,
                         lookup_scope,
                         local_names,
                         chain_depth,
-                    );
+                    )?;
                     return Ok(None);
                 }
                 Self::push_validation_exprs(
@@ -611,21 +633,42 @@ impl Analyzer<'_, '_> {
                 Ok(None)
             }
             Expr::Invoke { callee, args } => {
-                Self::push_validation_exprs(
-                    tasks,
-                    args,
-                    context_sheet,
-                    lookup_scope,
-                    &local_names,
-                    chain_depth,
-                );
-                tasks.push(ValidationTask::Expr {
-                    expr: *callee,
-                    context_sheet,
-                    lookup_scope,
-                    local_names,
-                    chain_depth,
-                });
+                let shadow = if let Some(callable) = direct_builtin_callable(&callee) {
+                    let name = callable.canonical_name();
+                    if let Some(local) = validation_local_name(name, &local_names) {
+                        local.callable_shadow
+                    } else {
+                        self.callable_shadow_for_name(
+                            context_sheet,
+                            lookup_scope,
+                            name,
+                            &mut BTreeSet::new(),
+                        )?
+                    }
+                } else {
+                    CallableShadow::Unshadowed
+                };
+                let arguments_are_reachable =
+                    builtin_invocation_arguments_are_reachable(&callee, &args, |_| shadow);
+                if arguments_are_reachable {
+                    Self::push_validation_exprs(
+                        tasks,
+                        args,
+                        context_sheet,
+                        lookup_scope,
+                        &local_names,
+                        chain_depth,
+                    );
+                }
+                if shadow != CallableShadow::CyclicNonCallable {
+                    tasks.push(ValidationTask::Expr {
+                        expr: *callee,
+                        context_sheet,
+                        lookup_scope,
+                        local_names,
+                        chain_depth,
+                    });
+                }
                 Ok(None)
             }
             Expr::ReferenceUnion { left, right }
@@ -729,12 +772,42 @@ impl Analyzer<'_, '_> {
         }
     }
 
+    fn push_named_validation_task(
+        &mut self,
+        index: usize,
+        context_sheet: Option<usize>,
+        chain_depth: u64,
+        tasks: &mut Vec<ValidationTask>,
+    ) -> Result<Option<DefinedNameAnalysis>, DefinedNameAnalysisError> {
+        let callable = match self.parsed_is_callable(index)? {
+            Ok(callable) => callable,
+            Err(Outcome::Invalid { reason, detail }) => {
+                return Ok(Some(DefinedNameAnalysis::Invalid { reason, detail }));
+            }
+            Err(_) => unreachable!("parsing produces only invalid outcomes"),
+        };
+        if callable {
+            tasks.push(ValidationTask::EnterCallable {
+                index,
+                context_sheet,
+                chain_depth: chain_depth + 1,
+            });
+        } else {
+            tasks.push(ValidationTask::EnterDefinition {
+                index,
+                context_sheet,
+                chain_depth: chain_depth + 1,
+            });
+        }
+        Ok(None)
+    }
+
     fn push_validation_exprs(
         tasks: &mut Vec<ValidationTask>,
         exprs: Vec<Expr>,
         context_sheet: Option<usize>,
         lookup_scope: DefinedNameScope,
-        local_names: &[String],
+        local_names: &[ValidationLocalName],
         chain_depth: u64,
     ) {
         for expr in exprs.into_iter().rev() {
@@ -748,22 +821,97 @@ impl Analyzer<'_, '_> {
         }
     }
 
+    fn callable_shadow_for_name(
+        &mut self,
+        context_sheet: Option<usize>,
+        lookup_scope: DefinedNameScope,
+        name: &str,
+        active: &mut BTreeSet<usize>,
+    ) -> Result<CallableShadow, DefinedNameAnalysisError> {
+        let Some(index) = self
+            .lookup_name(context_sheet, Some(lookup_scope), name)
+            .map(|(index, _)| index)
+        else {
+            return Ok(CallableShadow::Unshadowed);
+        };
+        if !active.insert(index) {
+            return Ok(CallableShadow::CyclicNonCallable);
+        }
+        let definition_scope = self.definition(index).scope();
+        let state = match self.parsed_expr(index)? {
+            Ok(expr) => self.classify_callable_expr_with_active(
+                &expr,
+                context_sheet,
+                definition_scope,
+                &[],
+                active,
+            )?,
+            Err(_) => CallableShadow::Unknown,
+        };
+        active.remove(&index);
+        Ok(state)
+    }
+
+    fn classify_callable_expr(
+        &mut self,
+        expr: &Expr,
+        context_sheet: Option<usize>,
+        lookup_scope: DefinedNameScope,
+        local_names: &[ValidationLocalName],
+    ) -> Result<CallableShadow, DefinedNameAnalysisError> {
+        self.classify_callable_expr_with_active(
+            expr,
+            context_sheet,
+            lookup_scope,
+            local_names,
+            &mut BTreeSet::new(),
+        )
+    }
+
+    fn classify_callable_expr_with_active(
+        &mut self,
+        expr: &Expr,
+        context_sheet: Option<usize>,
+        lookup_scope: DefinedNameScope,
+        local_names: &[ValidationLocalName],
+        active: &mut BTreeSet<usize>,
+    ) -> Result<CallableShadow, DefinedNameAnalysisError> {
+        let locals = local_names
+            .iter()
+            .map(|local| (local.name.clone(), local.callable_shadow))
+            .collect::<Vec<_>>();
+        let max_let_bindings = self.options.calculation().limits().max_let_bindings();
+        let mut resolve =
+            |name: &str| self.callable_shadow_for_name(context_sheet, lookup_scope, name, active);
+        classify_callable_value(expr, &locals, max_let_bindings, &mut resolve)
+    }
+
     fn push_let_validation(
+        &mut self,
         tasks: &mut Vec<ValidationTask>,
         args: Vec<Expr>,
         context_sheet: Option<usize>,
         lookup_scope: DefinedNameScope,
-        mut local_names: Vec<String>,
+        mut local_names: Vec<ValidationLocalName>,
         chain_depth: u64,
-    ) {
+    ) -> Result<(), DefinedNameAnalysisError> {
         let Some((final_expr, pairs)) = args.split_last() else {
-            return;
+            return Ok(());
         };
         let mut exprs = Vec::new();
         for pair in pairs.chunks_exact(2) {
             exprs.push((pair[1].clone(), local_names.clone()));
             if let Expr::Name(name) = &pair[0] {
-                local_names.push(canonical_local_name(name));
+                let callable_shadow = self.classify_callable_expr(
+                    &pair[1],
+                    context_sheet,
+                    lookup_scope,
+                    &local_names,
+                )?;
+                local_names.push(ValidationLocalName {
+                    name: canonical_local_name(name),
+                    callable_shadow,
+                });
             }
         }
         exprs.push((final_expr.clone(), local_names));
@@ -776,6 +924,7 @@ impl Analyzer<'_, '_> {
                 chain_depth,
             });
         }
+        Ok(())
     }
 
     fn classify_definition(
@@ -1051,6 +1200,19 @@ impl Analyzer<'_, '_> {
                         reason: DefinedNameInvalidReason::UnresolvedName,
                         detail: Some(name.into_boxed_str()),
                     });
+                    return Ok(());
+                };
+                tasks.push(ClassificationTask::EnterDefinition {
+                    index,
+                    context_sheet,
+                    chain_depth: chain_depth + 1,
+                });
+            }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                let Some((index, _)) = self.lookup_name(context_sheet, Some(lookup_scope), name)
+                else {
+                    outcomes.push(non_reference(&formula));
                     return Ok(());
                 };
                 tasks.push(ClassificationTask::EnterDefinition {

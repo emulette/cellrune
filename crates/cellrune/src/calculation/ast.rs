@@ -1,6 +1,7 @@
 use std::fmt;
 
 use super::decimal::DecimalTrace;
+use super::functions::BuiltinCallable;
 use super::value::ErrorKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +226,7 @@ pub enum Expr {
         end: Box<Expr>,
     },
     Name(String),
+    BuiltinCallable(BuiltinCallable),
     Call {
         name: String,
         args: Vec<Expr>,
@@ -632,6 +634,13 @@ impl Expr {
                 end.fmt_mode(formatter, mode)
             }
             Expr::Name(name) => formatter.write_str(name),
+            Expr::BuiltinCallable(callable) => match mode {
+                FormulaDisplayMode::Authored => formatter.write_str(callable.canonical_name()),
+                FormulaDisplayMode::Storage => {
+                    formatter.write_str("_xleta.")?;
+                    formatter.write_str(callable.canonical_name())
+                }
+            },
             Expr::Call { name, args } => {
                 formatter.write_str(name)?;
                 formatter.write_str("(")?;

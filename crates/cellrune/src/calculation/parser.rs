@@ -5,6 +5,7 @@ use super::ast::{
     Reference, RowRef, SheetPrefix, UnaryOp, column_number,
 };
 use super::error::ParseErrorCode;
+use super::functions::{builtin_callable, function_argument_is_callable, storage_builtin_callable};
 use super::lexer::{LexError, SpannedToken, Token, lex_spanned};
 use super::limits::SAFE_FORMULA_NESTING_DEPTH;
 use super::structured_reference::parse_structured_reference;
@@ -150,6 +151,7 @@ fn validate_ast_limits(
             | Expr::ErrorLit(_)
             | Expr::Ref(_)
             | Expr::Name(_)
+            | Expr::BuiltinCallable(_)
             | Expr::StructuredRef(_)
             | Expr::ExternalReference(_)
             | Expr::QualifiedName { .. }
@@ -232,6 +234,7 @@ fn can_be_reference_expression(expr: &Expr) -> bool {
         Expr::Number(_)
         | Expr::Text(_)
         | Expr::Logical(_)
+        | Expr::BuiltinCallable(_)
         | Expr::ErrorLit(_)
         | Expr::Unary { .. }
         | Expr::Binary { .. }
@@ -261,6 +264,7 @@ fn direct_child_count(expr: &Expr) -> usize {
         | Expr::ExternalReference(_)
         | Expr::QualifiedName { .. }
         | Expr::Name(_)
+        | Expr::BuiltinCallable(_)
         | Expr::Missing => 0,
     }
 }
@@ -440,16 +444,7 @@ impl Parser<'_> {
                 continue;
             }
             if self.token(0) == Some(&Token::LParen) && 90 >= min_bp {
-                if !matches!(&left.expr, Expr::Call { name, .. } if is_lambda_name(name))
-                    && !matches!(&left.expr, Expr::QualifiedName { .. })
-                    && !matches!(
-                        &left.expr,
-                        Expr::ExternalReference(ExternalWorkbookReference {
-                            target: ExternalReferenceTarget::DefinedName(_),
-                            ..
-                        })
-                    )
-                {
+                if !can_be_postfix_invoked(&left.expr) {
                     break;
                 }
                 self.cursor += 1;
@@ -767,6 +762,10 @@ impl Parser<'_> {
                 ],
             );
         }
+        if let Some(callable) = storage_builtin_callable(&ident) {
+            self.cursor += 1;
+            return self.track(Expr::BuiltinCallable(callable), start);
+        }
         if self.token(1) == Some(&Token::LParen) {
             self.cursor += 2;
             let (mut args, end) = self.parse_call_args()?;
@@ -785,6 +784,13 @@ impl Parser<'_> {
                     });
                 }
                 return self.track(Expr::SpillRef(Box::new(anchor)), span);
+            }
+            let argument_count = args.len();
+            for (index, arg) in args.iter_mut().enumerate() {
+                if !function_argument_is_callable(&ident, index, argument_count) {
+                    continue;
+                }
+                normalize_callable_argument(arg);
             }
             return self.track(Expr::Call { name: ident, args }, span);
         }
@@ -1275,6 +1281,31 @@ impl Parser<'_> {
     }
 }
 
+fn normalize_callable_argument(expr: &mut Expr) {
+    match expr {
+        Expr::Name(name) => {
+            if let Some(callable) = builtin_callable(name) {
+                *expr = Expr::BuiltinCallable(callable);
+            }
+        }
+        Expr::Paren(inner) => normalize_callable_argument(inner),
+        _ => {}
+    }
+}
+
+fn can_be_postfix_invoked(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { name, .. } => is_lambda_name(name),
+        Expr::BuiltinCallable(_) | Expr::QualifiedName { .. } => true,
+        Expr::ExternalReference(ExternalWorkbookReference {
+            target: ExternalReferenceTarget::DefinedName(_),
+            ..
+        }) => true,
+        Expr::Paren(inner) => can_be_postfix_invoked(inner),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_formula_with_limits;
@@ -1471,6 +1502,57 @@ mod tests {
         };
         assert!(matches!(args[0], Expr::Paren(_)));
         assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn builtin_callable_names_normalize_only_in_callable_positions() {
+        let authored = parse("BYROW({1,2;3,4},SUM)");
+        let Expr::Call { args, .. } = authored.root() else {
+            panic!("BYROW call expected");
+        };
+        assert!(matches!(args[1], Expr::BuiltinCallable(_)));
+        assert_eq!(authored.root().to_string(), "BYROW({1,2;3,4},SUM)");
+
+        let storage = authored
+            .display_with_mode(FormulaDisplayMode::Storage)
+            .to_string();
+        assert_eq!(storage, "BYROW({1,2;3,4},_xleta.SUM)");
+        assert_eq!(authored.root(), parse(&storage).root());
+
+        assert!(matches!(parse("SUM").root(), Expr::Name(_)));
+        assert!(matches!(
+            parse("_xleta.SUM").root(),
+            Expr::BuiltinCallable(_)
+        ));
+        assert!(matches!(parse("SUM(1)").root(), Expr::Call { .. }));
+        assert!(matches!(parse("BYROW({1},ABS)").root(), Expr::Call { .. }));
+
+        let parenthesized = parse("BYROW({1},(SUM))");
+        let Expr::Call { args, .. } = parenthesized.root() else {
+            panic!("BYROW call expected");
+        };
+        assert!(matches!(
+            args[1],
+            Expr::Paren(ref inner) if matches!(inner.as_ref(), Expr::BuiltinCallable(_))
+        ));
+
+        let invoked = parse("_xleta.SUM(1,2)");
+        assert!(matches!(invoked.root(), Expr::Invoke { .. }));
+        assert_eq!(invoked.root().to_string(), "SUM(1,2)");
+        assert_eq!(
+            invoked
+                .display_with_mode(FormulaDisplayMode::Storage)
+                .to_string(),
+            "_xleta.SUM(1,2)"
+        );
+
+        let prefixed = parse("_xlfn._xlws.BYROW({1},_xleta.SUM)");
+        assert_eq!(
+            prefixed
+                .display_with_mode(FormulaDisplayMode::Storage)
+                .to_string(),
+            "_xlfn._xlws.BYROW({1},_xleta.SUM)"
+        );
     }
 
     #[test]

@@ -6,10 +6,10 @@ use super::eval::{Engine, EvalContext};
 use super::lambda::{LocalNamePolicy, definition_from_args, validate_local_name};
 use super::operators::element_at;
 use super::runtime::Array;
-use super::scope::ArrayEvaluation;
+use super::scope::{ArrayEvaluation, canonical_local_name};
 use super::sheet_span::SheetSpanPolicy;
 use super::value::{ErrorKind, Value};
-pub(in crate::calculation) use descriptor::FunctionResultKind;
+pub(in crate::calculation) use descriptor::{BuiltinCallable, FunctionResultKind};
 use descriptor::{CompatibilityVersion, DependencyKind, FunctionDescriptor};
 use kernel::ArrayEvaluator;
 pub(in crate::calculation) use kernel::{DynamicFunction, Evaluator};
@@ -42,7 +42,7 @@ mod trigonometry;
 mod util;
 
 pub(super) use dynamic::{
-    helper_array_with_trace, helper_scalar_with_trace, invoke_lambda, lambda_scope_value,
+    helper_array_with_trace, helper_scalar_with_trace, invoke_callable, lambda_scope_value,
     let_reference, let_scope_value, map_scalar_with_trace, reduce_scope_value, with_let_scope,
 };
 
@@ -225,19 +225,8 @@ pub(super) fn callable_call_scope(
     name: &str,
     args: &[Expr],
 ) -> Option<super::scope::ScopeValue> {
-    if let Some(value) = context.binding(name) {
-        return Some(invoke_scope_value(engine, context, value.clone(), args));
-    }
-    let (id, named) = engine.resolve_name_expr_with_id_in_context(context, name)?;
-    Some(match super::lambda::definition(named) {
-        Some(_) => {
-            let closure = lambda_scope_value(context, &named_lambda_args(named), Some(id));
-            invoke_scope_value(engine, context, closure, args)
-        }
-        None => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
-            Value::Error(ErrorKind::Value),
-        )),
-    })
+    let value = engine.eval_callable_name_shadow_scope_value(context, name)?;
+    Some(invoke_scope_value(engine, context, value, args))
 }
 
 pub(in crate::calculation) fn intrinsic_scope_value(
@@ -272,22 +261,25 @@ pub(super) fn uses_reference_metadata_only(normalized_name: &str) -> bool {
     })
 }
 
-fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
-    let Expr::Call { args, .. } = expr else {
-        return Vec::new();
-    };
-    args.clone()
-}
-
-fn invoke_scope_value(
+pub(in crate::calculation) fn invoke_scope_value(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     value: super::scope::ScopeValue,
     args: &[Expr],
 ) -> super::scope::ScopeValue {
+    if let Some(kind) = value.engine_issue() {
+        return super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
+            Value::Error(kind),
+        ));
+    }
     match value {
-        super::scope::ScopeValue::Callable(closure) => {
-            invoke_lambda(engine, context, &closure, args)
+        super::scope::ScopeValue::Callable(callable) => {
+            invoke_callable(engine, context, &callable, args)
+        }
+        super::scope::ScopeValue::Scalar(evaluated)
+            if matches!(evaluated.value, Value::Error(_)) =>
+        {
+            super::scope::ScopeValue::Scalar(evaluated)
         }
         _ => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
             Value::Error(ErrorKind::Value),
@@ -450,6 +442,243 @@ pub(in crate::calculation) fn function_arguments_are_reachable(
     }
 }
 
+pub(in crate::calculation) fn builtin_callable(name: &str) -> Option<BuiltinCallable> {
+    descriptor::resolve(name).and_then(FunctionDescriptor::builtin_callable)
+}
+
+pub(in crate::calculation) fn storage_builtin_callable(name: &str) -> Option<BuiltinCallable> {
+    let upper = name.to_ascii_uppercase();
+    let mut spelling = upper.as_str();
+    while let Some(stripped) = spelling
+        .strip_prefix("_XLFN.")
+        .or_else(|| spelling.strip_prefix("_XLUDF."))
+        .or_else(|| spelling.strip_prefix("_XLWS."))
+    {
+        spelling = stripped;
+    }
+    let canonical = spelling.strip_prefix("_XLETA.")?;
+    builtin_callable(canonical)
+}
+
+pub(in crate::calculation) fn function_argument_is_callable(
+    name: &str,
+    index: usize,
+    argument_count: usize,
+) -> bool {
+    descriptor::resolve(name).is_some_and(|descriptor| {
+        descriptor
+            .call_contract()
+            .layout()
+            .mode_at(index, argument_count)
+            == Some(contract::ArgumentMode::Callable)
+    })
+}
+
+pub(in crate::calculation) fn builtin_callable_accepts(
+    callable: BuiltinCallable,
+    argument_count: usize,
+) -> bool {
+    descriptor::callable_descriptor(callable)
+        .call_contract()
+        .arity()
+        .accepts(argument_count)
+}
+
+pub(in crate::calculation) fn builtin_invocation_arguments_are_reachable(
+    callee: &Expr,
+    args: &[Expr],
+    resolve_shadow: impl FnOnce(&str) -> CallableShadow,
+) -> bool {
+    let Some(callable) = direct_builtin_callable(callee) else {
+        return true;
+    };
+    let shadow = resolve_shadow(callable.canonical_name());
+    callable_shadow_arguments_are_reachable(shadow, Some(callable), args.len())
+}
+
+pub(in crate::calculation) fn callable_shadow_arguments_are_reachable(
+    shadow: CallableShadow,
+    unshadowed_builtin: Option<BuiltinCallable>,
+    argument_count: usize,
+) -> bool {
+    match shadow {
+        CallableShadow::Unshadowed => unshadowed_builtin
+            .is_none_or(|callable| builtin_callable_accepts(callable, argument_count)),
+        CallableShadow::Callable(arity) => arity.accepts(argument_count),
+        CallableShadow::Unknown => true,
+        CallableShadow::DefinitelyNonCallable | CallableShadow::CyclicNonCallable => false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::calculation) enum CallableShadow {
+    Unshadowed,
+    Callable(CallableArity),
+    Unknown,
+    DefinitelyNonCallable,
+    CyclicNonCallable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::calculation) enum CallableArity {
+    Exact(usize),
+    Builtin(BuiltinCallable),
+}
+
+impl CallableArity {
+    fn accepts(self, argument_count: usize) -> bool {
+        match self {
+            Self::Exact(expected) => expected == argument_count,
+            Self::Builtin(callable) => builtin_callable_accepts(callable, argument_count),
+        }
+    }
+}
+
+pub(in crate::calculation) fn classify_callable_value<E>(
+    expr: &Expr,
+    locals: &[(String, CallableShadow)],
+    max_let_bindings: u64,
+    resolve_name: &mut impl FnMut(&str) -> Result<CallableShadow, E>,
+) -> Result<CallableShadow, E> {
+    match expr {
+        Expr::Paren(inner) => {
+            classify_callable_value(inner, locals, max_let_bindings, resolve_name)
+        }
+        Expr::Name(name) => {
+            let key = canonical_local_name(name);
+            if let Some((_, state)) = locals.iter().rev().find(|(local, _)| local == &key) {
+                return Ok(*state);
+            }
+            resolve_name(name).map(|state| match state {
+                CallableShadow::Unshadowed => CallableShadow::DefinitelyNonCallable,
+                state => state,
+            })
+        }
+        Expr::BuiltinCallable(callable) => {
+            let name = callable.canonical_name();
+            let key = canonical_local_name(name);
+            if let Some((_, state)) = locals.iter().rev().find(|(local, _)| local == &key) {
+                return Ok(*state);
+            }
+            resolve_name(name).map(|state| match state {
+                CallableShadow::Unshadowed => {
+                    CallableShadow::Callable(CallableArity::Builtin(*callable))
+                }
+                state => state,
+            })
+        }
+        Expr::Call { name, args } => {
+            let key = canonical_local_name(name);
+            let shadow =
+                if let Some((_, state)) = locals.iter().rev().find(|(local, _)| local == &key) {
+                    *state
+                } else {
+                    resolve_name(name)?
+                };
+            match shadow {
+                CallableShadow::DefinitelyNonCallable | CallableShadow::CyclicNonCallable => {
+                    return Ok(CallableShadow::DefinitelyNonCallable);
+                }
+                CallableShadow::Callable(_) | CallableShadow::Unknown => {
+                    return Ok(CallableShadow::Unknown);
+                }
+                CallableShadow::Unshadowed => {}
+            }
+            match function_evaluator(name) {
+                Some(Evaluator::Dynamic(DynamicFunction::Lambda)) => Ok(definition_from_args(args)
+                    .map_or(CallableShadow::DefinitelyNonCallable, |definition| {
+                        CallableShadow::Callable(CallableArity::Exact(
+                            definition.parameters().len(),
+                        ))
+                    })),
+                Some(Evaluator::Dynamic(DynamicFunction::Let))
+                    if function_arguments_are_reachable(name, args, max_let_bindings) =>
+                {
+                    let (final_expr, pairs) = args
+                        .split_last()
+                        .expect("reachable LET has a final expression");
+                    let mut let_locals = locals.to_vec();
+                    for pair in pairs.chunks_exact(2) {
+                        let state = classify_callable_value(
+                            &pair[1],
+                            &let_locals,
+                            max_let_bindings,
+                            resolve_name,
+                        )?;
+                        let Expr::Name(binding_name) = &pair[0] else {
+                            return Ok(CallableShadow::DefinitelyNonCallable);
+                        };
+                        let_locals.push((canonical_local_name(binding_name), state));
+                    }
+                    classify_callable_value(final_expr, &let_locals, max_let_bindings, resolve_name)
+                }
+                Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
+                    Ok(CallableShadow::DefinitelyNonCallable)
+                }
+                _ if matches!(
+                    function_result_kind(name),
+                    Some(FunctionResultKind::Callable | FunctionResultKind::Contextual)
+                ) =>
+                {
+                    Ok(CallableShadow::Unknown)
+                }
+                _ => Ok(CallableShadow::DefinitelyNonCallable),
+            }
+        }
+        Expr::Invoke { callee, .. } => {
+            let callee = classify_callable_value(callee, locals, max_let_bindings, resolve_name)?;
+            Ok(match callee {
+                CallableShadow::DefinitelyNonCallable | CallableShadow::CyclicNonCallable => {
+                    CallableShadow::DefinitelyNonCallable
+                }
+                CallableShadow::Unshadowed
+                | CallableShadow::Callable(_)
+                | CallableShadow::Unknown => CallableShadow::Unknown,
+            })
+        }
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Logical(_)
+        | Expr::ErrorLit(_)
+        | Expr::Ref(_)
+        | Expr::StructuredRef(_)
+        | Expr::ReferenceUnion { .. }
+        | Expr::ReferenceIntersection { .. }
+        | Expr::SpillRef(_)
+        | Expr::ExternalReference(_)
+        | Expr::QualifiedName { .. }
+        | Expr::Range { .. }
+        | Expr::ImplicitIntersection(_)
+        | Expr::Unary { .. }
+        | Expr::Binary { .. }
+        | Expr::Array(_)
+        | Expr::Missing => Ok(CallableShadow::DefinitelyNonCallable),
+    }
+}
+
+pub(in crate::calculation) fn direct_builtin_callable(expr: &Expr) -> Option<BuiltinCallable> {
+    match expr {
+        Expr::BuiltinCallable(callable) => Some(*callable),
+        Expr::Paren(inner) => direct_builtin_callable(inner),
+        _ => None,
+    }
+}
+
+fn call_builtin_callable(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    callable: BuiltinCallable,
+    args: &[super::scope::ScopeValue],
+) -> Value {
+    let descriptor = descriptor::callable_descriptor(callable);
+    match descriptor.evaluator() {
+        Evaluator::Aggregate(function) => {
+            aggregate::call_scope_values(engine, context, function, args)
+        }
+        _ => unreachable!("BuiltinCallable descriptor must use a callable evaluator"),
+    }
+}
+
 pub(in crate::calculation) fn prepare_evaluator_arguments<'formula>(
     evaluator: Evaluator,
     args: &'formula [Expr],
@@ -472,15 +701,6 @@ pub(in crate::calculation) fn function_evaluator(name: &str) -> Option<Evaluator
 
 pub(in crate::calculation) fn function_result_kind(name: &str) -> Option<FunctionResultKind> {
     descriptor::resolve(name).map(FunctionDescriptor::result_kind)
-}
-
-pub(in crate::calculation) fn canonical_name_for_evaluator(
-    evaluator: Evaluator,
-) -> Option<&'static str> {
-    descriptor::descriptors()
-        .iter()
-        .find(|descriptor| descriptor.evaluator() == evaluator)
-        .map(|descriptor| descriptor.canonical_name())
 }
 
 pub(super) fn is_reference_returning_function(name: &str) -> bool {

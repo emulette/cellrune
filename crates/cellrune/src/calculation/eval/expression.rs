@@ -6,15 +6,18 @@ use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr, UnaryOp};
 use crate::calculation::decimal::{DecimalTrace, is_excel_near_zero_cancellation};
 use crate::calculation::functions::{
-    DynamicFunction, Evaluator, FunctionResultKind, call_function_array, call_function_with_trace,
-    callable_call_scope, function_call_shape_is_valid, function_evaluator, function_result_kind,
-    intrinsic_scope_value, invoke_lambda, is_reference_returning_function, lambda_scope_value,
-    let_scope_value, reduce_scope_value,
+    BuiltinCallable, CallableShadow, DynamicFunction, Evaluator, FunctionResultKind,
+    call_function_array, call_function_with_trace, callable_call_scope, direct_builtin_callable,
+    function_call_shape_is_valid, function_evaluator, function_result_kind, intrinsic_scope_value,
+    invoke_scope_value, is_reference_returning_function, lambda_scope_value, let_scope_value,
+    reduce_scope_value,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
 use crate::calculation::runtime::{Array, ArrayExtent, Rect, ReferenceValue};
-use crate::calculation::scope::{ArrayEvaluation, DefinedLambdaId, ScalarEvaluation, ScopeValue};
+use crate::calculation::scope::{
+    ArrayEvaluation, CallableValue, DefinedLambdaId, ScalarEvaluation, ScopeValue,
+};
 use crate::calculation::value::{ErrorKind, Value};
 
 struct ArrayEvaluationContext {
@@ -113,24 +116,9 @@ impl Engine<'_> {
         match expr {
             Expr::Missing => ScopeValue::Missing,
             Expr::Paren(inner) => self.eval_scope_value(context, inner),
-            Expr::Name(name) => {
-                if let Some(value) = context.binding(name) {
-                    return value.clone();
-                }
-                match self.resolve_name_expr_with_id_in_context(context, name) {
-                    Some((id, named))
-                        if crate::calculation::lambda::definition(named).is_some() =>
-                    {
-                        lambda_scope_value(context, &named_lambda_args(named), Some(id))
-                    }
-                    Some((id, named)) => self.eval_scope_value(
-                        context
-                            .without_bindings()
-                            .with_defined_name_scope(Some(id.scope())),
-                        named,
-                    ),
-                    None => scope_error(ErrorKind::Name),
-                }
+            Expr::Name(name) => self.eval_name_scope_value(context, name, None),
+            Expr::BuiltinCallable(callable) => {
+                self.eval_name_scope_value(context, callable.canonical_name(), Some(*callable))
             }
             Expr::Ref(_)
             | Expr::StructuredRef(_)
@@ -165,10 +153,16 @@ impl Engine<'_> {
                         .map_or_else(scope_error, scope_from_array),
                 }
             }
-            Expr::Invoke { callee, args } => invoke_scope_value(self, context, callee, args),
+            Expr::Invoke { callee, args } => invoke_expr_scope_value(self, context, callee, args),
             _ => self
                 .eval_array_with_trace(context, expr)
-                .map_or_else(scope_error, scope_from_array),
+                .map_or_else(scope_error, |evaluated| {
+                    if matches!(expr, Expr::Array(_)) {
+                        ScopeValue::Array(Arc::new(evaluated))
+                    } else {
+                        scope_from_array(evaluated)
+                    }
+                }),
         }
     }
 
@@ -205,16 +199,17 @@ impl Engine<'_> {
             return self.eval_final_scalar_with_trace(context, inner);
         }
         let may_return_callable = match expr {
-            Expr::Name(_) | Expr::Invoke { .. } => true,
+            Expr::Name(_) | Expr::BuiltinCallable(_) | Expr::Invoke { .. } => true,
             Expr::Call { name, .. } => {
                 function_result_kind(name).is_some_and(|kind| {
                     matches!(
                         kind,
                         FunctionResultKind::Callable | FunctionResultKind::Contextual
                     )
-                }) || self
-                    .resolve_defined_lambda_in_context(context, name)
-                    .is_some()
+                }) || context.binding(name).is_some()
+                    || self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .is_some()
             }
             _ => false,
         };
@@ -246,6 +241,92 @@ impl Engine<'_> {
         };
         self.scalar_reference_cell(context, rect)
             .unwrap_or_else(|kind| ScalarEvaluation::untracked(Value::Error(kind)))
+    }
+
+    fn eval_name_scope_value(
+        &self,
+        context: EvalContext<'_>,
+        name: &str,
+        builtin: Option<BuiltinCallable>,
+    ) -> ScopeValue {
+        if let Some(value) = self.eval_name_shadow_scope_value(context, name) {
+            return value;
+        }
+        builtin.map_or_else(
+            || scope_error(ErrorKind::Name),
+            |callable| ScopeValue::Callable(CallableValue::Builtin(callable)),
+        )
+    }
+
+    pub(in crate::calculation) fn eval_name_shadow_scope_value(
+        &self,
+        context: EvalContext<'_>,
+        name: &str,
+    ) -> Option<ScopeValue> {
+        if let Some(value) = context.binding(name) {
+            return Some(value.clone());
+        }
+        match self.resolve_name_expr_with_id_in_context(context, name) {
+            Some((id, named)) if crate::calculation::lambda::definition(named).is_some() => Some(
+                lambda_scope_value(context, &named_lambda_args(named), Some(id)),
+            ),
+            Some((id, named)) => Some(
+                self.eval_scope_value(
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
+                ),
+            ),
+            None => None,
+        }
+    }
+
+    pub(in crate::calculation) fn eval_callable_name_shadow_scope_value(
+        &self,
+        context: EvalContext<'_>,
+        name: &str,
+    ) -> Option<ScopeValue> {
+        if let Some(value) = context.binding(name) {
+            return Some(value.clone());
+        }
+        self.resolve_name_expr_with_id_in_context(context, name)?;
+        match self.callable_shadow_for_name(context.sheet(), context.defined_name_scope(), name) {
+            CallableShadow::CyclicNonCallable => Some(scope_error(ErrorKind::Value)),
+            CallableShadow::DefinitelyNonCallable
+            | CallableShadow::Callable(_)
+            | CallableShadow::Unknown => self.eval_name_shadow_scope_value(context, name),
+            CallableShadow::Unshadowed => None,
+        }
+    }
+
+    pub(in crate::calculation) fn eval_callable_argument_scope_value(
+        &self,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> Result<ScopeValue, ErrorKind> {
+        match expr {
+            Expr::Paren(inner) => self.eval_callable_argument_scope_value(context, inner),
+            Expr::Ref(_)
+            | Expr::StructuredRef(_)
+            | Expr::SpillRef(_)
+            | Expr::ReferenceUnion { .. }
+            | Expr::ReferenceIntersection { .. }
+            | Expr::Range { .. } => self
+                .resolve_reference_value_expr(context, expr)
+                .map(ScopeValue::Reference),
+            Expr::Call { name, .. }
+                if context.binding(name).is_none()
+                    && self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .is_none()
+                    && is_reference_returning_function(name) =>
+            {
+                self.resolve_reference_value_expr(context, expr)
+                    .map(ScopeValue::Reference)
+            }
+            _ => Ok(self.eval_scope_value(context, expr)),
+        }
     }
 
     fn eval_implicit_intersection(&self, context: EvalContext<'_>, expr: &Expr) -> Value {
@@ -357,6 +438,10 @@ impl Engine<'_> {
                     None => ScalarEvaluation::untracked(Value::Error(ErrorKind::Name)),
                 },
             },
+            Expr::BuiltinCallable(_) => {
+                let scoped = self.eval_scope_value(context, expr);
+                self.scalar_from_scope(context, &scoped)
+            }
             Expr::Ref(_)
             | Expr::StructuredRef(_)
             | Expr::SpillRef(_)
@@ -373,9 +458,10 @@ impl Engine<'_> {
                     call_function_with_trace(self, context, name, args)
                 }
             }
-            Expr::Invoke { callee, args } => {
-                self.scalar_from_scope(context, &invoke_scope_value(self, context, callee, args))
-            }
+            Expr::Invoke { callee, args } => self.scalar_from_scope(
+                context,
+                &invoke_expr_scope_value(self, context, callee, args),
+            ),
             Expr::Unary { op, operand } => {
                 evaluate_unary(*op, self.eval_scalar_with_trace(context, operand))
             }
@@ -635,7 +721,7 @@ impl Engine<'_> {
                 })
             }
             Expr::Invoke { callee, args } => {
-                let scoped = invoke_scope_value(self, context, callee, args);
+                let scoped = invoke_expr_scope_value(self, context, callee, args);
                 let evaluated = self.array_from_scope(context, &scoped, evaluation)?;
                 if evaluation.extent.is_some() {
                     let cells = u64::from(evaluated.array.rows)
@@ -714,19 +800,23 @@ impl Engine<'_> {
             return self.eval_final_array_with_trace(context, inner);
         }
         let may_return_callable = match expr {
-            Expr::Invoke { .. } => true,
-            Expr::Name(name) => self
-                .resolve_defined_lambda_in_context(context, name)
-                .is_some(),
+            Expr::BuiltinCallable(_) | Expr::Invoke { .. } => true,
+            Expr::Name(name) => {
+                context.binding(name).is_some()
+                    || self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .is_some()
+            }
             Expr::Call { name, .. } => {
                 function_result_kind(name).is_some_and(|kind| {
                     matches!(
                         kind,
                         FunctionResultKind::Callable | FunctionResultKind::Contextual
                     )
-                }) || self
-                    .resolve_defined_lambda_in_context(context, name)
-                    .is_some()
+                }) || context.binding(name).is_some()
+                    || self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .is_some()
             }
             _ => false,
         };
@@ -861,6 +951,31 @@ impl Engine<'_> {
                     names,
                 )
             }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                if let Some(binding) = context.binding(name) {
+                    return match binding {
+                        ScopeValue::Reference(reference) => {
+                            self.array_extent_from_reference(reference)
+                        }
+                        ScopeValue::Missing
+                        | ScopeValue::Scalar(_)
+                        | ScopeValue::Array(_)
+                        | ScopeValue::Callable(_) => None,
+                    };
+                }
+                let (id, named) = self.resolve_name_expr_with_id_in_context(context, name)?;
+                if !names.insert(id.clone()) {
+                    return None;
+                }
+                self.array_extent(
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
+                    names,
+                )
+            }
             Expr::Call { name, .. }
                 if context.binding(name).is_none()
                     && self
@@ -902,17 +1017,19 @@ fn named_lambda_args(expr: &Expr) -> Vec<Expr> {
     args.clone()
 }
 
-fn invoke_scope_value(
+fn invoke_expr_scope_value(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     callee: &Expr,
     args: &[Expr],
 ) -> ScopeValue {
-    match engine.eval_scope_value(context, callee) {
-        ScopeValue::Callable(closure) => invoke_lambda(engine, context, &closure, args),
-        ScopeValue::Scalar(evaluated) if matches!(evaluated.value, Value::Error(_)) => {
-            ScopeValue::Scalar(evaluated)
-        }
-        _ => ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value))),
-    }
+    let value = direct_builtin_callable(callee).map_or_else(
+        || engine.eval_scope_value(context, callee),
+        |callable| {
+            engine
+                .eval_callable_name_shadow_scope_value(context, callable.canonical_name())
+                .unwrap_or(ScopeValue::Callable(CallableValue::Builtin(callable)))
+        },
+    );
+    invoke_scope_value(engine, context, value, args)
 }

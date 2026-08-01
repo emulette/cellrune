@@ -8,13 +8,15 @@ use crate::CellContent;
 use crate::calculation::ast::{Expr, StructuredReference};
 use crate::calculation::functions::descriptor::DependencyKind;
 use crate::calculation::functions::{
-    DynamicFunction, Evaluator, function_arguments_are_reachable, function_dependency_kind,
+    CallableArity, CallableShadow, DynamicFunction, Evaluator,
+    builtin_invocation_arguments_are_reachable, callable_shadow_arguments_are_reachable,
+    direct_builtin_callable, function_arguments_are_reachable, function_dependency_kind,
     function_evaluator, normalize_name, with_let_scope,
 };
 use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan};
-use crate::calculation::scope::{DefinedLambdaId, ScopeValue};
+use crate::calculation::scope::{CallableValue, DefinedLambdaId, ScopeValue};
 use crate::{SheetId, Table, TableId, WorkbookSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,7 +220,21 @@ pub(super) fn table_topologies(
 #[derive(Default)]
 struct VisitedDefinitions {
     values: BTreeSet<DefinedLambdaId>,
-    lambdas: BTreeSet<DefinedLambdaId>,
+}
+
+fn callable_shadow_from_scope_value(value: &ScopeValue) -> CallableShadow {
+    match value {
+        ScopeValue::Callable(CallableValue::Lambda(closure)) => {
+            CallableShadow::Callable(CallableArity::Exact(closure.parameters.len()))
+        }
+        ScopeValue::Callable(CallableValue::Builtin(callable)) => {
+            CallableShadow::Callable(CallableArity::Builtin(*callable))
+        }
+        ScopeValue::Missing
+        | ScopeValue::Scalar(_)
+        | ScopeValue::Array(_)
+        | ScopeValue::Reference(_) => CallableShadow::DefinitelyNonCallable,
+    }
 }
 
 impl Engine<'_> {
@@ -229,6 +245,86 @@ impl Engine<'_> {
                 args,
                 self.calculation_limits().max_let_bindings(),
             )
+    }
+
+    fn builtin_invocation_arguments_are_reachable(
+        &self,
+        context: EvalContext<'_>,
+        callee: &Expr,
+        args: &[Expr],
+        local_names: &[String],
+    ) -> bool {
+        builtin_invocation_arguments_are_reachable(callee, args, |name| {
+            if let Some(value) = context.binding(name) {
+                return match value {
+                    ScopeValue::Callable(CallableValue::Lambda(closure)) => {
+                        CallableShadow::Callable(CallableArity::Exact(closure.parameters.len()))
+                    }
+                    ScopeValue::Callable(CallableValue::Builtin(callable)) => {
+                        CallableShadow::Callable(CallableArity::Builtin(*callable))
+                    }
+                    ScopeValue::Missing
+                    | ScopeValue::Scalar(_)
+                    | ScopeValue::Array(_)
+                    | ScopeValue::Reference(_) => CallableShadow::DefinitelyNonCallable,
+                };
+            }
+            if is_local_name(name, local_names) {
+                return CallableShadow::Unknown;
+            }
+            self.callable_shadow_for_name(context.sheet(), context.defined_name_scope(), name)
+        })
+    }
+
+    fn builtin_invocation_callee_is_reachable(
+        &self,
+        context: EvalContext<'_>,
+        callee: &Expr,
+        local_names: &[String],
+    ) -> bool {
+        let Some(callable) = direct_builtin_callable(callee) else {
+            return true;
+        };
+        let name = callable.canonical_name();
+        let shadow = if let Some(value) = context.binding(name) {
+            callable_shadow_from_scope_value(value)
+        } else if is_local_name(name, local_names) {
+            CallableShadow::Unknown
+        } else {
+            self.callable_shadow_for_name(context.sheet(), context.defined_name_scope(), name)
+        };
+        shadow != CallableShadow::CyclicNonCallable
+    }
+
+    fn shadowed_call_arguments_are_reachable(
+        &self,
+        context: EvalContext<'_>,
+        name: &str,
+        argument_count: usize,
+        local_names: &[String],
+    ) -> Option<(CallableShadow, bool)> {
+        if let Some(value) = context.binding(name) {
+            let shadow = callable_shadow_from_scope_value(value);
+            return Some((
+                shadow,
+                callable_shadow_arguments_are_reachable(shadow, None, argument_count),
+            ));
+        }
+        if is_local_name(name, local_names) {
+            return Some((CallableShadow::Unknown, true));
+        }
+        self.resolve_name_expr_with_id_in_context(context, name)
+            .map(|_| {
+                let shadow = self.callable_shadow_for_name(
+                    context.sheet(),
+                    context.defined_name_scope(),
+                    name,
+                );
+                (
+                    shadow,
+                    callable_shadow_arguments_are_reachable(shadow, None, argument_count),
+                )
+            })
     }
 
     pub(super) fn dependencies_cancellable(
@@ -382,55 +478,34 @@ impl Engine<'_> {
         }
         match expr {
             Expr::Call { name, args } => {
-                if let Some(binding) = context.binding(name) {
-                    if !matches!(binding, ScopeValue::Callable(_)) {
-                        return false;
-                    }
-                    return args.iter().any(|arg| {
-                        self.expr_has_unresolved_dynamic_dependency(
-                            context,
-                            arg,
-                            visited,
-                            local_names,
-                        )
-                    });
-                }
-                if is_local_name(name, local_names) {
-                    return args.iter().any(|arg| {
-                        self.expr_has_unresolved_dynamic_dependency(
-                            context,
-                            arg,
-                            visited,
-                            local_names,
-                        )
-                    });
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
+                if let Some((shadow, arguments_are_reachable)) = self
+                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
                 {
-                    let Some(lambda) = crate::calculation::lambda::definition(named) else {
-                        return false;
-                    };
                     let mut found = false;
-                    if visited.lambdas.insert(id.clone()) {
-                        let mut lambda_names = lambda.parameters().to_vec();
+                    if shadow != CallableShadow::CyclicNonCallable
+                        && let Some((id, named)) =
+                            self.resolve_name_expr_with_id_in_context(context, name)
+                        && visited.values.insert(id.clone())
+                    {
                         found |= self.expr_has_unresolved_dynamic_dependency(
                             context
                                 .without_bindings()
                                 .with_defined_name_scope(Some(id.scope())),
-                            lambda.body(),
+                            named,
                             visited,
-                            &mut lambda_names,
+                            &mut Vec::new(),
                         );
                     }
                     return found
-                        || args.iter().any(|arg| {
-                            self.expr_has_unresolved_dynamic_dependency(
-                                context,
-                                arg,
-                                visited,
-                                local_names,
-                            )
-                        });
+                        || (arguments_are_reachable
+                            && args.iter().any(|arg| {
+                                self.expr_has_unresolved_dynamic_dependency(
+                                    context,
+                                    arg,
+                                    visited,
+                                    local_names,
+                                )
+                            }));
                 }
                 if !self.builtin_arguments_are_reachable(name, args) {
                     return false;
@@ -474,17 +549,51 @@ impl Engine<'_> {
                 })
             }
             Expr::Invoke { callee, args } => {
-                self.expr_has_unresolved_dynamic_dependency(context, callee, visited, local_names)
-                    || args.iter().any(|arg| {
+                let callee_has_dependency =
+                    self.builtin_invocation_callee_is_reachable(context, callee, local_names)
+                        && self.expr_has_unresolved_dynamic_dependency(
+                            context,
+                            callee,
+                            visited,
+                            local_names,
+                        );
+                callee_has_dependency
+                    || (self.builtin_invocation_arguments_are_reachable(
+                        context,
+                        callee,
+                        args,
+                        local_names,
+                    ) && args.iter().any(|arg| {
                         self.expr_has_unresolved_dynamic_dependency(
                             context,
                             arg,
                             visited,
                             local_names,
                         )
-                    })
+                    }))
             }
             Expr::Name(name) => {
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                    return false;
+                }
+                self.resolve_name_expr_with_id_in_context(context, name)
+                    .is_some_and(|(id, named)| {
+                        if !visited.values.insert(id.clone()) {
+                            return false;
+                        }
+                        let mut defined_locals = Vec::new();
+                        self.expr_has_unresolved_dynamic_dependency(
+                            context
+                                .without_bindings()
+                                .with_defined_name_scope(Some(id.scope())),
+                            named,
+                            visited,
+                            &mut defined_locals,
+                        )
+                    })
+            }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
                 if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return false;
                 }
@@ -790,6 +899,25 @@ impl Engine<'_> {
                     );
                 }
             }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                    return;
+                }
+                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
+                    && visited.values.insert(id.clone())
+                {
+                    self.collect_dependency_targets(
+                        context
+                            .without_bindings()
+                            .with_defined_name_scope(Some(id.scope())),
+                        named,
+                        visited,
+                        &mut Vec::new(),
+                        output,
+                    );
+                }
+            }
             Expr::ImplicitIntersection(inner) => {
                 if let Ok(rect) = self.resolve_rect_expr(context, expr) {
                     output.push(DependencyTarget::from_span(RectSpan::single(rect)));
@@ -813,36 +941,25 @@ impl Engine<'_> {
                 self.collect_dependency_targets(context, right, visited, local_names, output);
             }
             Expr::Call { name, args } => {
-                if let Some(binding) = context.binding(name) {
-                    if !matches!(binding, ScopeValue::Callable(_)) {
-                        return;
-                    }
-                    for arg in args {
-                        self.collect_dependency_targets(context, arg, visited, local_names, output);
-                    }
-                    return;
-                }
-                if is_local_name(name, local_names) {
-                    for arg in args {
-                        self.collect_dependency_targets(context, arg, visited, local_names, output);
-                    }
-                    return;
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
+                if let Some((shadow, arguments_are_reachable)) = self
+                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
                 {
-                    if let Some(lambda) = crate::calculation::lambda::definition(named) {
-                        if visited.lambdas.insert(id.clone()) {
-                            let mut lambda_names = lambda.parameters().to_vec();
-                            self.collect_dependency_targets(
-                                context
-                                    .without_bindings()
-                                    .with_defined_name_scope(Some(id.scope())),
-                                lambda.body(),
-                                visited,
-                                &mut lambda_names,
-                                output,
-                            );
-                        }
+                    if shadow != CallableShadow::CyclicNonCallable
+                        && let Some((id, named)) =
+                            self.resolve_name_expr_with_id_in_context(context, name)
+                        && visited.values.insert(id.clone())
+                    {
+                        self.collect_dependency_targets(
+                            context
+                                .without_bindings()
+                                .with_defined_name_scope(Some(id.scope())),
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                            output,
+                        );
+                    }
+                    if arguments_are_reachable {
                         for arg in args {
                             self.collect_dependency_targets(
                                 context,
@@ -921,7 +1038,17 @@ impl Engine<'_> {
                 }
             }
             Expr::Invoke { callee, args } => {
-                self.collect_dependency_targets(context, callee, visited, local_names, output);
+                if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
+                    self.collect_dependency_targets(context, callee, visited, local_names, output);
+                }
+                if !self.builtin_invocation_arguments_are_reachable(
+                    context,
+                    callee,
+                    args,
+                    local_names,
+                ) {
+                    return;
+                }
                 for arg in args {
                     self.collect_dependency_targets(context, arg, visited, local_names, output);
                 }
@@ -1023,39 +1150,47 @@ impl Engine<'_> {
                     );
                 }
             }
-            Expr::Call { name, args } => {
-                if let Some(binding) = context.binding(name) {
-                    if !matches!(binding, ScopeValue::Callable(_)) {
-                        return;
-                    }
-                    for arg in args {
-                        self.collect_dependency_targets(context, arg, visited, local_names, output);
-                    }
-                    return;
-                }
-                if is_local_name(name, local_names) {
-                    for arg in args {
-                        self.collect_dependency_targets(context, arg, visited, local_names, output);
-                    }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return;
                 }
                 if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
+                    && visited.values.insert(id.clone())
                 {
-                    if let Some(lambda) = crate::calculation::lambda::definition(named) {
-                        if visited.lambdas.insert(id.clone()) {
-                            let mut lambda_names = lambda.parameters().to_vec();
-                            self.collect_dependency_targets(
-                                context
-                                    .without_bindings()
-                                    .with_defined_name_scope(Some(id.scope())),
-                                lambda.body(),
-                                visited,
-                                &mut lambda_names,
-                                output,
-                            );
-                        }
+                    self.collect_reference_selection_inputs(
+                        context
+                            .without_bindings()
+                            .with_defined_name_scope(Some(id.scope())),
+                        named,
+                        visited,
+                        &mut Vec::new(),
+                        output,
+                    );
+                }
+            }
+            Expr::Call { name, args } => {
+                if let Some((shadow, arguments_are_reachable)) = self
+                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
+                {
+                    if shadow != CallableShadow::CyclicNonCallable
+                        && let Some((id, named)) =
+                            self.resolve_name_expr_with_id_in_context(context, name)
+                        && visited.values.insert(id.clone())
+                    {
+                        self.collect_reference_selection_inputs(
+                            context
+                                .without_bindings()
+                                .with_defined_name_scope(Some(id.scope())),
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                            output,
+                        );
+                    }
+                    if arguments_are_reachable {
                         for arg in args {
-                            self.collect_dependency_targets(
+                            self.collect_reference_selection_inputs(
                                 context,
                                 arg,
                                 visited,
@@ -1109,13 +1244,23 @@ impl Engine<'_> {
                 }
             }
             Expr::Invoke { callee, args } => {
-                self.collect_reference_selection_inputs(
+                if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
+                    self.collect_reference_selection_inputs(
+                        context,
+                        callee,
+                        visited,
+                        local_names,
+                        output,
+                    );
+                }
+                if !self.builtin_invocation_arguments_are_reachable(
                     context,
                     callee,
-                    visited,
+                    args,
                     local_names,
-                    output,
-                );
+                ) {
+                    return;
+                }
                 for arg in args {
                     self.collect_reference_selection_inputs(
                         context,
@@ -1152,55 +1297,34 @@ impl Engine<'_> {
         }
         match expr {
             Expr::Call { name, args } => {
-                if let Some(binding) = context.binding(name) {
-                    if !matches!(binding, ScopeValue::Callable(_)) {
-                        return false;
-                    }
-                    return args.iter().any(|arg| {
-                        self.expr_contains_dynamic_reference_function(
-                            context,
-                            arg,
-                            visited,
-                            local_names,
-                        )
-                    });
-                }
-                if is_local_name(name, local_names) {
-                    return args.iter().any(|arg| {
-                        self.expr_contains_dynamic_reference_function(
-                            context,
-                            arg,
-                            visited,
-                            local_names,
-                        )
-                    });
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
+                if let Some((shadow, arguments_are_reachable)) = self
+                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
                 {
-                    let Some(lambda) = crate::calculation::lambda::definition(named) else {
-                        return false;
-                    };
                     let mut found = false;
-                    if visited.lambdas.insert(id.clone()) {
-                        let mut lambda_names = lambda.parameters().to_vec();
+                    if shadow != CallableShadow::CyclicNonCallable
+                        && let Some((id, named)) =
+                            self.resolve_name_expr_with_id_in_context(context, name)
+                        && visited.values.insert(id.clone())
+                    {
                         found |= self.expr_contains_dynamic_reference_function(
                             context
                                 .without_bindings()
                                 .with_defined_name_scope(Some(id.scope())),
-                            lambda.body(),
+                            named,
                             visited,
-                            &mut lambda_names,
+                            &mut Vec::new(),
                         );
                     }
                     return found
-                        || args.iter().any(|arg| {
-                            self.expr_contains_dynamic_reference_function(
-                                context,
-                                arg,
-                                visited,
-                                local_names,
-                            )
-                        });
+                        || (arguments_are_reachable
+                            && args.iter().any(|arg| {
+                                self.expr_contains_dynamic_reference_function(
+                                    context,
+                                    arg,
+                                    visited,
+                                    local_names,
+                                )
+                            }));
                 }
                 if !self.builtin_arguments_are_reachable(name, args) {
                     return false;
@@ -1234,17 +1358,51 @@ impl Engine<'_> {
                 })
             }
             Expr::Invoke { callee, args } => {
-                self.expr_contains_dynamic_reference_function(context, callee, visited, local_names)
-                    || args.iter().any(|arg| {
+                let callee_contains_dynamic =
+                    self.builtin_invocation_callee_is_reachable(context, callee, local_names)
+                        && self.expr_contains_dynamic_reference_function(
+                            context,
+                            callee,
+                            visited,
+                            local_names,
+                        );
+                callee_contains_dynamic
+                    || (self.builtin_invocation_arguments_are_reachable(
+                        context,
+                        callee,
+                        args,
+                        local_names,
+                    ) && args.iter().any(|arg| {
                         self.expr_contains_dynamic_reference_function(
                             context,
                             arg,
                             visited,
                             local_names,
                         )
-                    })
+                    }))
             }
             Expr::Name(name) => {
+                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                    return false;
+                }
+                self.resolve_name_expr_with_id_in_context(context, name)
+                    .is_some_and(|(id, named)| {
+                        if !visited.values.insert(id.clone()) {
+                            return false;
+                        }
+                        let mut defined_locals = Vec::new();
+                        self.expr_contains_dynamic_reference_function(
+                            context
+                                .without_bindings()
+                                .with_defined_name_scope(Some(id.scope())),
+                            named,
+                            visited,
+                            &mut defined_locals,
+                        )
+                    })
+            }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
                 if context.binding(name).is_some() || is_local_name(name, local_names) {
                     return false;
                 }

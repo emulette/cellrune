@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{Engine, EvalContext};
 use crate::calculation::ast::Expr;
 use crate::calculation::functions::{
-    DynamicFunction, Evaluator, function_arguments_are_reachable, function_evaluator,
+    CallableShadow, DynamicFunction, Evaluator, builtin_invocation_arguments_are_reachable,
+    callable_shadow_arguments_are_reachable, classify_callable_value, direct_builtin_callable,
+    function_arguments_are_reachable, function_evaluator,
 };
 use crate::calculation::lambda::definition;
 use crate::calculation::runtime::CellId;
@@ -27,6 +29,57 @@ fn dynamic_function(name: &str) -> Option<DynamicFunction> {
 }
 
 impl Engine<'_> {
+    pub(in crate::calculation) fn callable_shadow_for_name(
+        &self,
+        sheet: usize,
+        lookup_scope: Option<DefinedNameScope>,
+        name: &str,
+    ) -> CallableShadow {
+        self.callable_shadow_for_name_inner(sheet, lookup_scope, name, &mut BTreeSet::new())
+    }
+
+    fn callable_shadow_for_name_inner(
+        &self,
+        sheet: usize,
+        lookup_scope: Option<DefinedNameScope>,
+        name: &str,
+        active: &mut BTreeSet<DefinedLambdaId>,
+    ) -> CallableShadow {
+        let Some((index, defined_name)) =
+            self.resolve_defined_name_scoped(sheet, lookup_scope, name)
+        else {
+            return CallableShadow::Unshadowed;
+        };
+        let id = DefinedLambdaId::from_defined_name(defined_name);
+        if !active.insert(id.clone()) {
+            return CallableShadow::CyclicNonCallable;
+        }
+        let state = self
+            .defined_name_asts
+            .get(index)
+            .and_then(Option::as_ref)
+            .map_or(CallableShadow::Unknown, |parsed| {
+                let mut resolve =
+                    |nested: &str| -> Result<CallableShadow, std::convert::Infallible> {
+                        Ok(self.callable_shadow_for_name_inner(
+                            sheet,
+                            Some(id.scope()),
+                            nested,
+                            active,
+                        ))
+                    };
+                classify_callable_value(
+                    parsed.root(),
+                    &[],
+                    self.calculation_limits().max_let_bindings(),
+                    &mut resolve,
+                )
+                .expect("static callable classification is infallible")
+            });
+        active.remove(&id);
+        state
+    }
+
     pub(super) fn classify_name_graphs(&mut self, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
         for (cell, parsed) in &self.asts {
             if cancelled() {
@@ -185,15 +238,6 @@ impl Engine<'_> {
         Some((id, expr.root()))
     }
 
-    pub(in crate::calculation) fn resolve_defined_lambda_in_context(
-        &self,
-        context: EvalContext<'_>,
-        name: &str,
-    ) -> Option<(DefinedLambdaId, &Expr)> {
-        let (id, expr) = self.resolve_name_expr_with_id_in_context(context, name)?;
-        definition(expr).is_some().then_some((id, expr))
-    }
-
     fn resolve_defined_name_scoped(
         &self,
         sheet: usize,
@@ -227,9 +271,20 @@ fn collect_name_references(
                 names.push(name.clone());
             }
         }
+        Expr::BuiltinCallable(callable) => {
+            let name = callable.canonical_name();
+            if local_name_entry(name, local_names).is_none()
+                && engine
+                    .resolve_defined_name_scoped(sheet, lookup_scope, name)
+                    .is_some()
+            {
+                names.push(name.to_owned());
+            }
+        }
         Expr::Call { name, args } => {
             if let Some(local) = local_name_entry(name, local_names) {
-                if !local.definitely_non_callable {
+                if callable_shadow_arguments_are_reachable(local.callable_shadow, None, args.len())
+                {
                     for arg in args {
                         collect_name_references(
                             engine,
@@ -244,15 +299,15 @@ fn collect_name_references(
                 }
                 return Ok(());
             }
-            if let Some((index, _)) = engine.resolve_defined_name_scoped(sheet, lookup_scope, name)
+            if engine
+                .resolve_defined_name_scoped(sheet, lookup_scope, name)
+                .is_some()
             {
-                if engine
-                    .defined_name_asts
-                    .get(index)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|named| definition(named.root()).is_some())
-                {
+                let shadow = engine.callable_shadow_for_name(sheet, lookup_scope, name);
+                if shadow != CallableShadow::CyclicNonCallable {
                     names.push(name.clone());
+                }
+                if callable_shadow_arguments_are_reachable(shadow, None, args.len()) {
                     for arg in args {
                         collect_name_references(
                             engine,
@@ -293,8 +348,12 @@ fn collect_name_references(
                             if let Expr::Name(binding_name) = &pair[0] {
                                 local_names.push(LocalNameEntry {
                                     name: canonical_local_name(binding_name),
-                                    definitely_non_callable: expr_is_definitely_non_callable(
+                                    callable_shadow: classify_local_callable_value(
+                                        engine,
+                                        sheet,
+                                        lookup_scope,
                                         &pair[1],
+                                        local_names,
                                     ),
                                 });
                             }
@@ -320,7 +379,7 @@ fn collect_name_references(
                     local_names.extend(lambda.parameters().iter().map(|parameter| {
                         LocalNameEntry {
                             name: parameter.clone(),
-                            definitely_non_callable: false,
+                            callable_shadow: CallableShadow::Unknown,
                         }
                     }));
                     collect_name_references(
@@ -357,7 +416,7 @@ fn collect_name_references(
                     local_names.extend(lambda.parameters().iter().map(|parameter| {
                         LocalNameEntry {
                             name: parameter.clone(),
-                            definitely_non_callable: true,
+                            callable_shadow: CallableShadow::DefinitelyNonCallable,
                         }
                     }));
                     collect_name_references(
@@ -387,15 +446,38 @@ fn collect_name_references(
             }
         }
         Expr::Invoke { callee, args } => {
-            collect_name_references(
-                engine,
-                sheet,
-                lookup_scope,
-                callee,
-                local_names,
-                names,
-                cancelled,
-            )?;
+            let cyclic_callee = direct_builtin_callable(callee).is_some_and(|callable| {
+                let shadow = local_name_entry(callable.canonical_name(), local_names).map_or_else(
+                    || {
+                        engine.callable_shadow_for_name(
+                            sheet,
+                            lookup_scope,
+                            callable.canonical_name(),
+                        )
+                    },
+                    |local| local.callable_shadow,
+                );
+                shadow == CallableShadow::CyclicNonCallable
+            });
+            if !cyclic_callee {
+                collect_name_references(
+                    engine,
+                    sheet,
+                    lookup_scope,
+                    callee,
+                    local_names,
+                    names,
+                    cancelled,
+                )?;
+            }
+            if !builtin_invocation_arguments_are_reachable(callee, args, |name| {
+                if let Some(local) = local_name_entry(name, local_names) {
+                    return local.callable_shadow;
+                }
+                engine.callable_shadow_for_name(sheet, lookup_scope, name)
+            }) {
+                return Ok(());
+            }
             for arg in args {
                 collect_name_references(
                     engine,
@@ -493,7 +575,30 @@ fn collect_name_references(
 #[derive(Debug)]
 struct LocalNameEntry {
     name: String,
-    definitely_non_callable: bool,
+    callable_shadow: CallableShadow,
+}
+
+fn classify_local_callable_value(
+    engine: &Engine<'_>,
+    sheet: usize,
+    lookup_scope: Option<DefinedNameScope>,
+    expr: &Expr,
+    local_names: &[LocalNameEntry],
+) -> CallableShadow {
+    let locals = local_names
+        .iter()
+        .map(|local| (local.name.clone(), local.callable_shadow))
+        .collect::<Vec<_>>();
+    let mut resolve = |name: &str| -> Result<CallableShadow, std::convert::Infallible> {
+        Ok(engine.callable_shadow_for_name(sheet, lookup_scope, name))
+    };
+    classify_callable_value(
+        expr,
+        &locals,
+        engine.calculation_limits().max_let_bindings(),
+        &mut resolve,
+    )
+    .expect("static callable classification is infallible")
 }
 
 fn local_name_entry<'scope>(
@@ -502,30 +607,6 @@ fn local_name_entry<'scope>(
 ) -> Option<&'scope LocalNameEntry> {
     let key = canonical_local_name(name);
     scope.iter().rev().find(|entry| entry.name == key)
-}
-
-fn expr_is_definitely_non_callable(expr: &Expr) -> bool {
-    match expr {
-        Expr::Paren(inner) => expr_is_definitely_non_callable(inner),
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Logical(_)
-        | Expr::ErrorLit(_)
-        | Expr::StructuredRef(_)
-        | Expr::ExternalReference(_)
-        | Expr::QualifiedName { .. }
-        | Expr::Missing
-        | Expr::Ref(_)
-        | Expr::Range { .. }
-        | Expr::ImplicitIntersection(_)
-        | Expr::SpillRef(_)
-        | Expr::ReferenceUnion { .. }
-        | Expr::ReferenceIntersection { .. }
-        | Expr::Array(_)
-        | Expr::Unary { .. }
-        | Expr::Binary { .. } => true,
-        Expr::Name(_) | Expr::Call { .. } | Expr::Invoke { .. } => false,
-    }
 }
 
 #[cfg(test)]

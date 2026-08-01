@@ -4,10 +4,14 @@ use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
+use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::AggregateFunction;
-use super::util::{ArgumentValue, ExcelSum, collect_argument_values_with_policy, required_number};
+use super::util::{
+    ArgumentValue, ExcelSum, collect_argument_values_with_policy, collect_callable_argument_values,
+    required_number,
+};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -40,6 +44,38 @@ pub(super) fn call(
     }
 }
 
+pub(super) fn call_scope_values(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    function: AggregateFunction,
+    args: &[ScopeValue],
+) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let values = match collect_callable_argument_values(engine, context, args) {
+        Ok(values) => values,
+        Err(kind) => return Value::Error(kind),
+    };
+    match function {
+        AggregateFunction::Sum => aggregate_collected(engine, values, Aggregate::Sum),
+        AggregateFunction::Average => aggregate_collected(engine, values, Aggregate::Average),
+        AggregateFunction::Min => aggregate_collected(engine, values, Aggregate::Min),
+        AggregateFunction::Max => aggregate_collected(engine, values, Aggregate::Max),
+        AggregateFunction::Product => aggregate_collected(engine, values, Aggregate::Product),
+        AggregateFunction::Count => count_collected(values),
+        AggregateFunction::CountA => count_nonblank_collected(&values),
+        AggregateFunction::CountBlank
+        | AggregateFunction::Subtotal
+        | AggregateFunction::SumIf
+        | AggregateFunction::SumIfs
+        | AggregateFunction::AverageIf
+        | AggregateFunction::AverageIfs => {
+            unreachable!("non-callable aggregate was stored as BuiltinCallable")
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Aggregate {
     Sum,
@@ -67,6 +103,14 @@ fn aggregate_numbers(
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
+    aggregate_collected(engine, values, aggregate)
+}
+
+fn aggregate_collected(
+    engine: &Engine<'_>,
+    values: Vec<ArgumentValue>,
+    aggregate: Aggregate,
+) -> Value {
     let mut numbers = Vec::new();
     for ArgumentValue {
         value,
@@ -130,6 +174,10 @@ fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
+    count_collected(values)
+}
+
+fn count_collected(values: Vec<ArgumentValue>) -> Value {
     let mut count = 0_u64;
     for ArgumentValue {
         value,
@@ -159,14 +207,21 @@ fn count_nonblank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) 
         args,
         SheetSpanPolicy::CollectAcrossSheets,
     ) {
-        Ok(values) => Value::Number(
-            values
-                .iter()
-                .filter(|item| !matches!(item.value, Value::Blank))
-                .count() as f64,
-        ),
+        Ok(values) => count_nonblank_collected(&values),
         Err(kind) => Value::Error(kind),
     }
+}
+
+fn count_nonblank_collected(values: &[ArgumentValue]) -> Value {
+    let mut count = 0_u64;
+    for item in values {
+        match item.value {
+            Value::Error(kind) if kind.is_engine_issue() => return Value::Error(kind),
+            Value::Blank => {}
+            Value::Number(_) | Value::Text(_) | Value::Logical(_) | Value::Error(_) => count += 1,
+        }
+    }
+    Value::Number(count as f64)
 }
 
 fn count_blank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
