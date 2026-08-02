@@ -248,6 +248,34 @@ fn callable_shadow_from_scope_value(value: &ScopeValue) -> CallableShadow {
 }
 
 impl Engine<'_> {
+    /// Resolves one name-like expression under the dependency walk's shared scope rules.
+    ///
+    /// Each dependency pass still owns its output and short-circuit policy. This helper only
+    /// centralizes the semantic boundary that must not drift between passes: bound/local names
+    /// are opaque, defined names are followed once, their bindings are cleared, and lookup
+    /// continues in the definition's scope with a fresh local-name stack.
+    fn reachable_defined_name<'engine, 'scope>(
+        &'engine self,
+        context: EvalContext<'scope>,
+        name: &str,
+        visited: &mut VisitedDefinitions,
+        local_names: &[String],
+    ) -> Option<(EvalContext<'scope>, &'engine Expr)> {
+        if context.binding(name).is_some() || is_local_name(name, local_names) {
+            return None;
+        }
+        let (id, named) = self.resolve_name_expr_with_id_in_context(context, name)?;
+        if !visited.values.insert(id.clone()) {
+            return None;
+        }
+        Some((
+            context
+                .without_bindings()
+                .with_defined_name_scope(Some(id.scope())),
+            named,
+        ))
+    }
+
     fn builtin_arguments_are_reachable(&self, name: &str, args: &[Expr]) -> bool {
         function_evaluator(name).is_none()
             || function_arguments_are_reachable(
@@ -583,45 +611,31 @@ impl Engine<'_> {
                     }))
             }
             Expr::Name(name) => {
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
+                else {
                     return false;
-                }
-                self.resolve_name_expr_with_id_in_context(context, name)
-                    .is_some_and(|(id, named)| {
-                        if !visited.values.insert(id.clone()) {
-                            return false;
-                        }
-                        let mut defined_locals = Vec::new();
-                        self.expr_has_unresolved_dynamic_dependency(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                            visited,
-                            &mut defined_locals,
-                        )
-                    })
+                };
+                self.expr_has_unresolved_dynamic_dependency(
+                    defined_context,
+                    named,
+                    visited,
+                    &mut Vec::new(),
+                )
             }
             Expr::BuiltinCallable(callable) => {
                 let name = callable.canonical_name();
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
+                else {
                     return false;
-                }
-                self.resolve_name_expr_with_id_in_context(context, name)
-                    .is_some_and(|(id, named)| {
-                        if !visited.values.insert(id.clone()) {
-                            return false;
-                        }
-                        let mut defined_locals = Vec::new();
-                        self.expr_has_unresolved_dynamic_dependency(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                            visited,
-                            &mut defined_locals,
-                        )
-                    })
+                };
+                self.expr_has_unresolved_dynamic_dependency(
+                    defined_context,
+                    named,
+                    visited,
+                    &mut Vec::new(),
+                )
             }
             Expr::ImplicitIntersection(inner)
             | Expr::SpillRef(inner)
@@ -905,16 +919,11 @@ impl Engine<'_> {
                     }
                     return;
                 }
-                if is_local_name(name, local_names) {
-                    return;
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
-                    && visited.values.insert(id.clone())
+                if let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
                 {
                     self.collect_dependency_targets(
-                        context
-                            .without_bindings()
-                            .with_defined_name_scope(Some(id.scope())),
+                        defined_context,
                         named,
                         visited,
                         &mut Vec::new(),
@@ -924,16 +933,11 @@ impl Engine<'_> {
             }
             Expr::BuiltinCallable(callable) => {
                 let name = callable.canonical_name();
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
-                    return;
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
-                    && visited.values.insert(id.clone())
+                if let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
                 {
                     self.collect_dependency_targets(
-                        context
-                            .without_bindings()
-                            .with_defined_name_scope(Some(id.scope())),
+                        defined_context,
                         named,
                         visited,
                         &mut Vec::new(),
@@ -1184,16 +1188,11 @@ impl Engine<'_> {
                 );
             }
             Expr::Name(name) => {
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
-                    return;
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
-                    && visited.values.insert(id.clone())
+                if let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
                 {
                     self.collect_reference_selection_inputs(
-                        context
-                            .without_bindings()
-                            .with_defined_name_scope(Some(id.scope())),
+                        defined_context,
                         mode,
                         named,
                         visited,
@@ -1204,16 +1203,11 @@ impl Engine<'_> {
             }
             Expr::BuiltinCallable(callable) => {
                 let name = callable.canonical_name();
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
-                    return;
-                }
-                if let Some((id, named)) = self.resolve_name_expr_with_id_in_context(context, name)
-                    && visited.values.insert(id.clone())
+                if let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
                 {
                     self.collect_reference_selection_inputs(
-                        context
-                            .without_bindings()
-                            .with_defined_name_scope(Some(id.scope())),
+                        defined_context,
                         mode,
                         named,
                         visited,
@@ -1494,45 +1488,31 @@ impl Engine<'_> {
                     }))
             }
             Expr::Name(name) => {
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
+                else {
                     return false;
-                }
-                self.resolve_name_expr_with_id_in_context(context, name)
-                    .is_some_and(|(id, named)| {
-                        if !visited.values.insert(id.clone()) {
-                            return false;
-                        }
-                        let mut defined_locals = Vec::new();
-                        self.expr_contains_dynamic_reference_function(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                            visited,
-                            &mut defined_locals,
-                        )
-                    })
+                };
+                self.expr_contains_dynamic_reference_function(
+                    defined_context,
+                    named,
+                    visited,
+                    &mut Vec::new(),
+                )
             }
             Expr::BuiltinCallable(callable) => {
                 let name = callable.canonical_name();
-                if context.binding(name).is_some() || is_local_name(name, local_names) {
+                let Some((defined_context, named)) =
+                    self.reachable_defined_name(context, name, visited, local_names)
+                else {
                     return false;
-                }
-                self.resolve_name_expr_with_id_in_context(context, name)
-                    .is_some_and(|(id, named)| {
-                        if !visited.values.insert(id.clone()) {
-                            return false;
-                        }
-                        let mut defined_locals = Vec::new();
-                        self.expr_contains_dynamic_reference_function(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                            visited,
-                            &mut defined_locals,
-                        )
-                    })
+                };
+                self.expr_contains_dynamic_reference_function(
+                    defined_context,
+                    named,
+                    visited,
+                    &mut Vec::new(),
+                )
             }
             Expr::ImplicitIntersection(inner)
             | Expr::SpillRef(inner)

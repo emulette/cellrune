@@ -1,5 +1,5 @@
 use super::super::ast::Expr;
-use super::super::criteria::{Criteria, WildcardStepBudget, parse_criteria};
+use super::super::criteria::CompiledCriteria;
 use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
@@ -7,6 +7,7 @@ use super::super::runtime::Rect;
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::AggregateFunction;
 use super::util::{
     ArgumentValue, ExcelSum, collect_argument_values_with_policy, collect_callable_argument_values,
@@ -284,7 +285,8 @@ fn conditional_aggregate(
     args: &[Expr],
     operation: ConditionalAggregate,
 ) -> Value {
-    let parsed = match parse_conditional_arguments(engine, context, args, operation) {
+    let mut runtime = CriteriaRuntime::new(engine, context);
+    let parsed = match parse_conditional_arguments(engine, context, args, operation, &mut runtime) {
         Ok(parsed) => parsed,
         Err(kind) => return Value::Error(kind),
     };
@@ -304,7 +306,6 @@ fn conditional_aggregate(
     }
     let mut total = ExcelSum::new(engine);
     let mut count = 0_u64;
-    let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
     for row_offset in 0..iter_rows as u32 {
         for col_offset in 0..parsed.value_range.width() as u32 {
             let mut matched = true;
@@ -320,7 +321,7 @@ fn conditional_aggregate(
                     Ok(value) => value,
                     Err(kind) => return Value::Error(kind),
                 };
-                match criterion.matches(&value, &mut wildcard_budget) {
+                match runtime.matches(criterion, &value) {
                     Ok(true) => {}
                     Ok(false) => {
                         matched = false;
@@ -361,7 +362,7 @@ fn conditional_aggregate(
 
 struct ConditionalArguments {
     value_range: Rect,
-    criteria: Vec<(Rect, Criteria)>,
+    criteria: Vec<(Rect, CompiledCriteria)>,
 }
 
 fn parse_conditional_arguments(
@@ -369,6 +370,7 @@ fn parse_conditional_arguments(
     context: EvalContext<'_>,
     args: &[Expr],
     operation: ConditionalAggregate,
+    runtime: &mut CriteriaRuntime<'_, '_, '_>,
 ) -> Result<ConditionalArguments, ErrorKind> {
     if matches!(
         operation,
@@ -382,7 +384,7 @@ fn parse_conditional_arguments(
         let value_range = value_anchor
             .resized_from_anchor(criteria_range.height(), criteria_range.width())
             .ok_or(ErrorKind::Ref)?;
-        let criterion = parse_criteria(&engine.eval_scalar(context, &args[1]))?;
+        let criterion = runtime.compile_criteria(&engine.eval_scalar(context, &args[1]))?;
         return Ok(ConditionalArguments {
             value_range,
             criteria: vec![(criteria_range, criterion)],
@@ -407,7 +409,7 @@ fn parse_conditional_arguments(
         if range.height() != value_range.height() || range.width() != value_range.width() {
             return Err(ErrorKind::Value);
         }
-        let criterion = parse_criteria(&engine.eval_scalar(context, &pair[1]))?;
+        let criterion = runtime.compile_criteria(&engine.eval_scalar(context, &pair[1]))?;
         criteria.push((range, criterion));
     }
     Ok(ConditionalArguments {

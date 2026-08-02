@@ -11,6 +11,9 @@ use cellrune::{
     scan_function_usage, supported_function_catalog,
 };
 
+#[path = "calculation_behavior/criteria_matching.rs"]
+mod criteria_matching;
+
 #[test]
 fn unsupported_functions_are_not_hidden_by_iferror() {
     let workbook = workbook_with_formulas(&[
@@ -4268,47 +4271,6 @@ fn real_workbook_regressions_follow_excel_argument_and_lookup_semantics() {
         Some(&CalculationCellResult::Value(CellValue::Logical(false)))
     );
     assert_number(&calculation, 19, 0.0, 0.0);
-}
-
-#[test]
-fn conditional_aggregates_use_excel_range_rules_and_clamp_whole_columns() {
-    let workbook = workbook_with_formulas(&[
-        (2, 1, "1"),
-        (3, 1, "2"),
-        (4, 1, "3"),
-        (2, 2, "10"),
-        (3, 2, "20"),
-        (4, 2, "30"),
-        (1, 3, "SUMIF(A2:A4,\">1\",B2)"),
-        (1, 4, "AVERAGEIF(A2:A4,\">1\",B2)"),
-        (1, 5, "SUMIFS(B2:B4,A2:A4,\">1\")"),
-        (1, 6, "SUMIFS(B2:B3,A2:A4,\">1\")"),
-        (1, 7, "MODE.SNGL({1,1,2,2})"),
-        (1, 8, "VLOOKUP(1,A:B,2,FALSE)"),
-        (1, 9, "SUMIFS(B:B,A:A,1)"),
-    ]);
-    let limits = CalculationLimits::default()
-        .with_max_function_iterations(10)
-        .expect("nonzero function iteration limit");
-    let calculation =
-        calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
-
-    for (column, expected) in [
-        (3, 50.0),
-        (4, 25.0),
-        (5, 50.0),
-        (7, 1.0),
-        (8, 10.0),
-        (9, 10.0),
-    ] {
-        assert_number(&calculation, column, expected, 0.0);
-    }
-    assert_eq!(
-        calculation.cell(cell_id(6)),
-        Some(&CalculationCellResult::Value(CellValue::Error(
-            ExcelError::Value
-        )))
-    );
 }
 
 #[test]

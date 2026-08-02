@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 
 use super::super::ast::Expr;
 use super::super::coerce::to_logical;
-use super::super::criteria::{Criteria, WildcardStepBudget, parse_criteria};
+use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::criteria_runtime::CriteriaRuntime;
 use super::util::{
     collect_argument_values, excel_numeric_arguments, excel_numeric_arguments_with_policy,
     required_number,
@@ -415,7 +416,8 @@ fn conditional_extreme(
         Ok(rect) => rect,
         Err(kind) => return Value::Error(kind),
     };
-    let criteria = match parse_pairs(engine, context, &args[1..], value_range) {
+    let mut runtime = CriteriaRuntime::new(engine, context);
+    let criteria = match parse_pairs(engine, context, &args[1..], value_range, &mut runtime) {
         Ok(criteria) => criteria,
         Err(kind) => return Value::Error(kind),
     };
@@ -427,7 +429,6 @@ fn conditional_extreme(
         return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells));
     }
     let mut result: Option<f64> = None;
-    let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
     for row in 0..value_range.height() as u32 {
         for column in 0..value_range.width() as u32 {
             let mut matched = true;
@@ -439,7 +440,7 @@ fn conditional_extreme(
                     Ok(value) => value,
                     Err(kind) => return Value::Error(kind),
                 };
-                match criterion.matches(&value, &mut wildcard_budget) {
+                match runtime.matches(criterion, &value) {
                     Ok(true) => {}
                     Ok(false) => {
                         matched = false;
@@ -481,7 +482,8 @@ fn parse_pairs(
     context: EvalContext<'_>,
     args: &[Expr],
     value_range: Rect,
-) -> Result<Vec<(Rect, Criteria)>, ErrorKind> {
+    runtime: &mut CriteriaRuntime<'_, '_, '_>,
+) -> Result<Vec<(Rect, CompiledCriteria)>, ErrorKind> {
     let mut result = Vec::new();
     for pair in args.chunks_exact(2) {
         let rect = engine.resolve_rect_expr(context, &pair[0])?;
@@ -490,7 +492,7 @@ fn parse_pairs(
         }
         result.push((
             rect,
-            parse_criteria(&engine.eval_scalar(context, &pair[1]))?,
+            runtime.compile_criteria(&engine.eval_scalar(context, &pair[1]))?,
         ));
     }
     Ok(result)

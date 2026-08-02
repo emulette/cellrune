@@ -1,8 +1,6 @@
 use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_number, to_text};
-use super::super::criteria::{
-    Criteria, CriteriaOp, CriteriaRhs, WildcardStepBudget, parse_criteria,
-};
+use super::super::criteria::CompiledCriteria;
 use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
@@ -10,6 +8,7 @@ use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
+use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
 use super::util::ExcelSum;
 
@@ -352,8 +351,8 @@ fn count_matches(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     rects: &[Rect],
-    criteria: &[Criteria],
-    wildcard_budget: &mut WildcardStepBudget,
+    criteria: &[CompiledCriteria],
+    matcher: &mut CriteriaRuntime<'_, '_, '_>,
 ) -> Result<f64, ErrorKind> {
     let height = rects[0].height();
     let width = rects[0].width();
@@ -385,7 +384,7 @@ fn count_matches(
                         rect.col_start + relative_col as u32,
                     ),
                 )?;
-                if !criterion.matches(&value, wildcard_budget)? {
+                if !matcher.matches(criterion, &value)? {
                     matched = false;
                     break;
                 }
@@ -396,7 +395,7 @@ fn count_matches(
         }
     }
     let virtual_cells = (height - iter_rows) * width;
-    if virtual_cells > 0 && criteria.iter().all(Criteria::matches_blank) {
+    if virtual_cells > 0 && criteria.iter().all(CompiledCriteria::matches_blank) {
         count += virtual_cells;
     }
     Ok(count as f64)
@@ -412,22 +411,16 @@ fn kernel_countifs(
         Ok(pairs) => pairs,
         Err(kind) => return Value::Error(kind),
     };
+    let mut runtime = CriteriaRuntime::new(engine, context);
     let mut criteria = Vec::with_capacity(pairs.criteria_exprs.len());
     for expr in &pairs.criteria_exprs {
         let value = engine.eval_scalar(context, expr);
-        match parse_criteria(&value) {
+        match runtime.compile_criteria(&value) {
             Ok(criterion) => criteria.push(criterion),
             Err(kind) => return Value::Error(kind),
         }
     }
-    let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
-    match count_matches(
-        engine,
-        context,
-        &pairs.rects,
-        &criteria,
-        &mut wildcard_budget,
-    ) {
+    match count_matches(engine, context, &pairs.rects, &criteria, &mut runtime) {
         Ok(count) => Value::Number(count),
         Err(kind) => Value::Error(kind),
     }
@@ -480,13 +473,13 @@ fn countifs_broadcast(
     }
     engine.ensure_array_cells(u64::from(rows) * u64::from(cols))?;
     let mut data = Vec::with_capacity((rows * cols) as usize);
-    let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
+    let mut matcher = CriteriaRuntime::new(engine, context);
     for row in 0..rows {
         for col in 0..cols {
             let mut criteria = Vec::with_capacity(criteria_arrays.len());
             let mut element_error = None;
             for array in &criteria_arrays {
-                match parse_criteria(element_at(array, row, col)) {
+                match matcher.compile_criteria(element_at(array, row, col)) {
                     Ok(criterion) => criteria.push(criterion),
                     Err(kind) => {
                         element_error = Some(kind);
@@ -498,13 +491,7 @@ fn countifs_broadcast(
                 data.push(Value::Error(kind));
                 continue;
             }
-            match count_matches(
-                engine,
-                context,
-                &pairs.rects,
-                &criteria,
-                &mut wildcard_budget,
-            ) {
+            match count_matches(engine, context, &pairs.rects, &criteria, &mut matcher) {
                 Ok(count) => data.push(Value::Number(count)),
                 Err(kind) => data.push(Value::Error(kind)),
             }
@@ -611,20 +598,11 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     if lookup.is_blank_like() {
         return Value::Error(ErrorKind::NA);
     }
-    let criterion = match &lookup {
-        Value::Number(number) => Criteria {
-            op: CriteriaOp::Eq,
-            rhs: CriteriaRhs::Number(*number),
-        },
-        Value::Logical(logical) => Criteria {
-            op: CriteriaOp::Eq,
-            rhs: CriteriaRhs::Logical(*logical),
-        },
-        Value::Text(text) => Criteria {
-            op: CriteriaOp::Eq,
-            rhs: CriteriaRhs::Text(text.clone()),
-        },
-        _ => return Value::Error(ErrorKind::NA),
+    let mut matcher = CriteriaRuntime::new(engine, context);
+    let criterion = match matcher.compile_exact_equality(&lookup) {
+        Ok(Some(criterion)) => criterion,
+        Ok(None) => return Value::Error(ErrorKind::NA),
+        Err(kind) => return Value::Error(kind),
     };
     let vertical = rect.width() == 1;
     let clamped_row_end = engine.clamped_row_end(&rect);
@@ -641,7 +619,6 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         return Value::Error(kind);
     }
     let mut approximate = None;
-    let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
     for offset in 0..length {
         let (row, column) = if vertical {
             (rect.row_start + offset as u32, rect.col_start)
@@ -652,7 +629,7 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             Ok(value) => value,
             Err(kind) => return Value::Error(kind),
         };
-        match criterion.matches(&value, &mut wildcard_budget) {
+        match matcher.matches(&criterion, &value) {
             Ok(true) => return Value::Number((offset + 1) as f64),
             Ok(false) => {}
             Err(kind) => return Value::Error(kind),

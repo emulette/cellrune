@@ -2,10 +2,10 @@ use std::cmp::Ordering;
 
 use super::super::ast::Expr;
 use super::super::coerce::compare;
-use super::super::criteria::{WildcardStepBudget, wildcard_match_with_step};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::array_common::validate_array_input;
+use super::criteria_runtime::CriteriaRuntime;
 use super::lookup_common::VectorView;
 use super::util::required_number;
 
@@ -113,7 +113,15 @@ fn linear_match(
     match_mode: MatchMode,
     search_mode: SearchMode,
 ) -> Result<u32, ErrorKind> {
-    let mut wildcard_budget = WildcardStepBudget::new(engine.max_function_iterations());
+    let mut criteria_runtime = CriteriaRuntime::new(engine, context);
+    let wildcard_pattern = if match_mode == MatchMode::Wildcard {
+        let Value::Text(pattern) = &lookup else {
+            return Err(ErrorKind::NA);
+        };
+        Some(criteria_runtime.compile_wildcard(pattern)?)
+    } else {
+        None
+    };
     let mut best = None;
     for step in 0..values.len() {
         charge_lookup_step(engine, context)?;
@@ -125,15 +133,10 @@ fn linear_match(
             }
         };
         let candidate = values.at(offset);
-        if match_mode == MatchMode::Wildcard {
-            let Value::Text(pattern) = &lookup else {
-                return Err(ErrorKind::NA);
-            };
+        if let Some(pattern) = &wildcard_pattern {
             match candidate {
                 Value::Text(text) => {
-                    if wildcard_match_with_step(pattern, text, &mut wildcard_budget, || {
-                        charge_lookup_step(engine, context)
-                    })? {
+                    if criteria_runtime.wildcard_matches(pattern, text)? {
                         return Ok(offset);
                     }
                 }

@@ -22,6 +22,7 @@ mod array_sort;
 mod calendar;
 mod combinatorics;
 mod contract;
+mod criteria_runtime;
 mod date;
 mod date_additional;
 pub(super) mod descriptor;
