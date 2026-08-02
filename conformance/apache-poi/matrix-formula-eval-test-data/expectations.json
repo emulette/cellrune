@@ -104,25 +104,22 @@
     "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
   },
   "Sheet1!H114": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-3",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H115": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H116": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H118": {
     "classification": "match",
@@ -149,22 +146,16 @@
     "excel_rich_error": false
   },
   "Sheet1!H123": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H124": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H126": {
     "classification": "match",
@@ -221,25 +212,22 @@
     "excel_rich_error": false
   },
   "Sheet1!H14": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H15": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H16": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H18": {
     "classification": "match",
@@ -315,25 +303,22 @@
     "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
   },
   "Sheet1!H34": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H35": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H36": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H38": {
     "classification": "match",
@@ -366,22 +351,16 @@
     "excel_rich_error": false
   },
   "Sheet1!H43": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H44": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H46": {
     "classification": "match",
@@ -390,22 +369,16 @@
     "excel_rich_error": false
   },
   "Sheet1!H47": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H48": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H50": {
     "classification": "not_implemented",
@@ -415,25 +388,22 @@
     "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
   },
   "Sheet1!H54": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H55": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H56": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H58": {
     "classification": "match",
@@ -442,13 +412,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H59": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H6": {
     "classification": "match",
@@ -457,13 +424,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H60": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!H62": {
     "classification": "match",
@@ -521,25 +485,22 @@
     "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
   },
   "Sheet1!H74": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H75": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H76": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H78": {
     "classification": "match",
@@ -615,25 +576,22 @@
     "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
   },
   "Sheet1!H94": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H95": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H96": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H98": {
     "classification": "match",
@@ -690,25 +648,22 @@
     "excel_rich_error": false
   },
   "Sheet1!I114": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I115": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I116": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I118": {
     "classification": "match",
@@ -729,31 +684,22 @@
     "excel_rich_error": false
   },
   "Sheet1!I122": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I123": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I124": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I126": {
     "classification": "match",
@@ -810,25 +756,22 @@
     "excel_rich_error": false
   },
   "Sheet1!I14": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I15": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I16": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I18": {
     "classification": "match",
@@ -897,25 +840,22 @@
     "excel_rich_error": false
   },
   "Sheet1!I34": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I35": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I36": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I38": {
     "classification": "match",
@@ -942,97 +882,70 @@
     "excel_rich_error": false
   },
   "Sheet1!I42": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I43": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I44": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I46": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I47": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I48": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I54": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I55": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I56": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I58": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I59": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I6": {
     "classification": "match",
@@ -1041,13 +954,10 @@
     "excel_rich_error": false
   },
   "Sheet1!I60": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!I62": {
     "classification": "match",
@@ -1104,25 +1014,22 @@
     "excel_rich_error": false
   },
   "Sheet1!I74": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I75": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I76": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I78": {
     "classification": "match",
@@ -1197,25 +1104,22 @@
     "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "Sheet1!I94": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I95": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I96": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!I98": {
     "classification": "match",
@@ -1272,25 +1176,22 @@
     "excel_rich_error": false
   },
   "Sheet1!J114": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J115": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J116": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J118": {
     "classification": "match",
@@ -1311,31 +1212,22 @@
     "excel_rich_error": false
   },
   "Sheet1!J122": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J123": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J124": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J126": {
     "classification": "match",
@@ -1392,25 +1284,22 @@
     "excel_rich_error": false
   },
   "Sheet1!J14": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J15": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J16": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J18": {
     "classification": "match",
@@ -1479,25 +1368,22 @@
     "excel_rich_error": false
   },
   "Sheet1!J34": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J35": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J36": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J38": {
     "classification": "match",
@@ -1524,97 +1410,70 @@
     "excel_rich_error": false
   },
   "Sheet1!J42": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J43": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J44": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J46": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J47": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J48": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J54": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J55": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J56": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J58": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J59": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J6": {
     "classification": "match",
@@ -1623,13 +1482,10 @@
     "excel_rich_error": false
   },
   "Sheet1!J60": {
-    "classification": "divergent",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "cellrune_value": "#N/A",
-    "cellrune_type": "e",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "Sheet1!J62": {
     "classification": "match",
@@ -1680,25 +1536,22 @@
     "excel_rich_error": false
   },
   "Sheet1!J74": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J75": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J76": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J78": {
     "classification": "match",
@@ -1767,25 +1620,22 @@
     "excel_rich_error": false
   },
   "Sheet1!J94": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J95": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J96": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MINVERSE) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!J98": {
     "classification": "match",
