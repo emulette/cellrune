@@ -121,9 +121,8 @@ fn bounded_page(
         resources.push(resource);
         let next_cursor = (index + 1 < item_count).then(|| position.cursor());
         let candidate = ListResourcesResult {
-            meta: None,
             next_cursor,
-            resources: resources.clone(),
+            ..ListResourcesResult::with_all_items(resources.clone())
         };
         match serialized_size(&candidate) {
             Ok(actual_bytes) if actual_bytes <= maximum_bytes => accepted = Some(candidate),

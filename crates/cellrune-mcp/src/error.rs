@@ -3,7 +3,7 @@ use std::fmt;
 
 use cellrune_interop::{ErrorDetails as InteropErrorDetails, InteropError, InteropErrorKind};
 use rmcp::handler::server::tool::IntoCallToolResult;
-use rmcp::model::CallToolResult;
+use rmcp::model::{CallToolResponse, CallToolResult};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -379,10 +379,10 @@ impl fmt::Display for McpError {
 impl Error for McpError {}
 
 impl IntoCallToolResult for McpError {
-    fn into_call_tool_result(self) -> Result<CallToolResult, rmcp::ErrorData> {
+    fn into_call_tool_result(self) -> Result<CallToolResponse, rmcp::ErrorData> {
         let value = serde_json::to_value(*self.payload).map_err(|error| {
             rmcp::ErrorData::internal_error(MESSAGE_SERIALIZATION, Some(error.to_string().into()))
         })?;
-        Ok(CallToolResult::structured_error(value))
+        Ok(CallToolResult::structured_error(value).into())
     }
 }

@@ -33,30 +33,37 @@ ERROR_MESSAGES = {
 PACKAGE_PATTERN = re.compile(r"^(?P<name>[^ ]+) v(?P<version>[^ ]+)")
 HOST_PATTERN = re.compile(r"^host: (?P<target>\S+)$", re.MULTILINE)
 LICENSE_PREFIXES = ("LICENSE", "COPYING", "NOTICE", "COPYRIGHT")
+# Fallback paths are repository-relative. Each entry pins the crate's VCS revision so a new
+# release cannot silently reuse an unreviewed license text; r-efi declares Apache-2.0 as one of
+# its alternatives but does not include a license file in the published crate.
 FALLBACK_LICENSES = {
     "napi": (
         "679eb79f5cf3c7c6b2850f4ab46092126f23dc5c",
-        "napi-rs-LICENSE",
+        "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-derive": (
         "679eb79f5cf3c7c6b2850f4ab46092126f23dc5c",
-        "napi-rs-LICENSE",
+        "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-derive-backend": (
         "679eb79f5cf3c7c6b2850f4ab46092126f23dc5c",
-        "napi-rs-LICENSE",
+        "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-sys": (
         "679eb79f5cf3c7c6b2850f4ab46092126f23dc5c",
-        "napi-rs-LICENSE",
+        "bindings/licenses/napi-rs-LICENSE",
+    ),
+    "r-efi": (
+        "7e1b0322d31d625f81a5656096330934f9cd835d",
+        "LICENSE-APACHE",
     ),
     "rmcp": (
-        "519577601db3823616dbd7c4eb84ed569d8e17d4",
-        "rmcp-LICENSE",
+        "1f9358eddca42d3a510c70ae6446dd6548c7c856",
+        "bindings/licenses/rmcp-LICENSE",
     ),
     "rmcp-macros": (
-        "519577601db3823616dbd7c4eb84ed569d8e17d4",
-        "rmcp-LICENSE",
+        "1f9358eddca42d3a510c70ae6446dd6548c7c856",
+        "bindings/licenses/rmcp-LICENSE",
     ),
 }
 SUPPLEMENTAL_LICENSES = {
@@ -215,7 +222,7 @@ def component_license_files(
     )
     fallback = FALLBACK_LICENSES.get(component.name)
     if not files and fallback is not None:
-        expected_revision, filename = fallback
+        expected_revision, relative_path = fallback
         vcs_info_path = package_root / ".cargo_vcs_info.json"
         raw_vcs_info: object = json.loads(vcs_info_path.read_text(encoding="utf-8"))
         if not isinstance(raw_vcs_info, dict):
@@ -227,7 +234,7 @@ def component_license_files(
             raise generation_error(
                 "license.revision", component=component.label
             )
-        files = [repository_root / "bindings/licenses" / filename]
+        files = [repository_root / relative_path]
     supplemental = SUPPLEMENTAL_LICENSES.get(component.name)
     if supplemental is not None:
         for expected_version, filename in supplemental:

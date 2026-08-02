@@ -1,8 +1,8 @@
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::{
     Implementation, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    ProtocolVersion, ReadResourceRequestParams, ReadResourceResult, ResourceContents,
-    ServerCapabilities, ServerInfo,
+    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+    ResourceContents, ServerCapabilities, ServerInfo,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, Json, RoleServer, ServerHandler};
@@ -129,7 +129,7 @@ impl ServerHandler for CellruneMcpServer {
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         let text = self
             .resource_text(&request.uri)
             .await
@@ -138,7 +138,7 @@ impl ServerHandler for CellruneMcpServer {
             ResourceContents::text(text, request.uri).with_mime_type(JSON_MIME_TYPE),
         ]);
         self.ensure_json_size(&result).map_err(protocol_error)?;
-        Ok(result)
+        Ok(result.into())
     }
 }
 

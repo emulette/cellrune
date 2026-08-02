@@ -10,6 +10,12 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Changed
+
+- The MCP server now requires `rmcp` 3.0.1 or newer within the 3.x family and uses its typed
+  complete-response wrappers. The checked-in MCP dependency notice also covers the new
+  all-target `uuid`/`getrandom` graph.
+
 ## [0.1.11] - 2026-08-02
 
 ### Added
