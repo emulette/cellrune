@@ -390,6 +390,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install LLVM tools for Windows cross-compilation
+        if: endsWith(matrix.target, '-pc-windows-msvc')
+        run: rustup component add llvm-tools-preview
+
       - name: Configure path-remapped release builds
         run: python ../scripts/configure_reproducible_rust.py
 
@@ -432,6 +436,7 @@ jobs:
           --js native.js
           --dts native.d.ts
         env:
+          CFLAGS_aarch64_unknown_linux_gnu: -std=gnu99
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
           XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin
 
