@@ -5,6 +5,7 @@ use super::super::criteria::{
 };
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::database_criteria::CompiledDatabaseCriteria;
 use std::cmp::Ordering;
 
 /// Formula-cell criteria execution state.
@@ -29,6 +30,17 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
         let engine = self.engine;
         let context = self.context;
         compile_criteria_with_work(value, |units| {
+            Self::charge_cumulative(engine, context, units)
+        })
+    }
+
+    pub(super) fn compile_database_criteria(
+        &mut self,
+        value: &Value,
+    ) -> Result<CompiledDatabaseCriteria, ErrorKind> {
+        let engine = self.engine;
+        let context = self.context;
+        CompiledDatabaseCriteria::compile_with_work(value, |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }
@@ -58,6 +70,18 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     pub(super) fn matches(
         &mut self,
         criterion: &CompiledCriteria,
+        value: &Value,
+    ) -> Result<bool, ErrorKind> {
+        let engine = self.engine;
+        let context = self.context;
+        criterion.matches_with_work(value, |units| {
+            Self::charge_cumulative(engine, context, units)
+        })
+    }
+
+    pub(super) fn matches_database(
+        &mut self,
+        criterion: &CompiledDatabaseCriteria,
         value: &Value,
     ) -> Result<bool, ErrorKind> {
         let engine = self.engine;

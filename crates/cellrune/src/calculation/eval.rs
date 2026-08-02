@@ -412,6 +412,10 @@ impl<'scope> EvalContext<'scope> {
         }
     }
 
+    pub(super) const fn with_cell(self, cell: CellId) -> Self {
+        Self { cell, ..self }
+    }
+
     pub(super) const fn with_defined_name_scope(
         self,
         defined_name_scope: Option<DefinedNameScope>,

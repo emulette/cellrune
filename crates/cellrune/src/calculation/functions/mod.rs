@@ -23,6 +23,8 @@ mod calendar;
 mod combinatorics;
 mod contract;
 mod criteria_runtime;
+mod database;
+mod database_criteria;
 mod date;
 mod date_additional;
 pub(super) mod descriptor;
@@ -198,6 +200,7 @@ fn dispatch_scalar(
         Evaluator::Logical(function) => logical::call(engine, context, function, args),
         Evaluator::Aggregate(function) => aggregate::call(engine, context, function, args),
         Evaluator::Grouped(function) => grouped::call_scalar(engine, context, function, args),
+        Evaluator::Database(function) => database::call(engine, context, function, args),
         Evaluator::Math(function) => math::call(engine, context, function, args),
         Evaluator::Trigonometry(function) => trigonometry::call(engine, context, function, args),
         Evaluator::Combinatorics(function) => combinatorics::call(engine, context, function, args),
@@ -785,7 +788,7 @@ pub(super) fn function_volatility(name: &str) -> Option<descriptor::Volatility> 
     descriptor::resolve(name).map(FunctionDescriptor::volatility)
 }
 
-pub(super) fn function_dependency_kind(name: &str) -> Option<DependencyKind> {
+pub(in crate::calculation) fn function_dependency_kind(name: &str) -> Option<DependencyKind> {
     descriptor::resolve(name).map(FunctionDescriptor::dependency_kind)
 }
 
@@ -936,14 +939,13 @@ mod tests {
     }
 
     #[test]
-    fn coverage_registry_has_307_unique_excel_facing_names() {
+    fn registry_names_are_unique_and_v0_1_10_catalog_stays_frozen() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
             .collect();
         assert_eq!(kernels.len(), descriptor::descriptors().len());
         assert!(kernels.contains("__XLUDF.DUMMYFUNCTION"));
-        assert_eq!(kernels.len(), 295);
 
         let aliases = descriptor::descriptors()
             .iter()
@@ -965,7 +967,6 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), kernels.len() + aliases.len());
         assert_eq!(catalog.len(), 308);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),

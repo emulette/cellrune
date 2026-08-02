@@ -185,7 +185,7 @@ impl CompiledCriteria {
             }
             CompiledCriteriaRhs::OrderedText(expected) => match cell {
                 Value::Text(text) if !text.is_empty() => {
-                    charge_text_comparison(text, expected, on_work)?;
+                    charge_text_comparison_work(text, expected, on_work)?;
                     Ok(accept(compare_text_case_insensitive(text, expected)))
                 }
                 _ => Ok(false),
@@ -228,9 +228,15 @@ impl CompiledWildcardPattern {
         Ok(Self::compile_precharged(pattern))
     }
 
-    fn compile_precharged(pattern: &str) -> Self {
+    pub(in crate::calculation) fn compile_precharged(pattern: &str) -> Self {
         Self {
             tokens: compile_pattern(pattern),
+        }
+    }
+
+    pub(in crate::calculation) fn push_any_sequence(&mut self) {
+        if self.tokens.last() != Some(&PatternToken::AnySequence) {
+            self.tokens.push(PatternToken::AnySequence);
         }
     }
 
@@ -291,7 +297,9 @@ pub fn charge_value_comparison_work(
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(), ErrorKind> {
     match (left, right) {
-        (Value::Text(left), Value::Text(right)) => charge_text_comparison(left, right, on_work),
+        (Value::Text(left), Value::Text(right)) => {
+            charge_text_comparison_work(left, right, on_work)
+        }
         (Value::Text(text), Value::Blank) | (Value::Blank, Value::Text(text)) => {
             charge_preprocessing(text, on_work)
         }
@@ -299,7 +307,7 @@ pub fn charge_value_comparison_work(
     }
 }
 
-fn charge_text_comparison(
+pub(in crate::calculation) fn charge_text_comparison_work(
     left: &str,
     right: &str,
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
@@ -410,6 +418,16 @@ mod tests {
         assert_eq!(
             exact.matches_with_work(&Value::Text("alpha".to_owned()), |_| Ok(())),
             Ok(true)
+        );
+    }
+
+    #[test]
+    fn bare_text_keeps_countif_exact_semantics() {
+        let countif = compile_criteria_with_work(&Value::Text("Dav".to_owned()), |_| Ok(()))
+            .expect("valid COUNTIF criterion");
+        assert_eq!(
+            countif.matches_with_work(&Value::Text("David".to_owned()), |_| Ok(())),
+            Ok(false)
         );
     }
 

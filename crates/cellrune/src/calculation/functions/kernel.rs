@@ -66,6 +66,21 @@ function_enum!(GroupedFunction {
     PivotBy,
 });
 
+function_enum!(DatabaseFunction {
+    Average,
+    Count,
+    CountA,
+    Get,
+    Max,
+    Min,
+    Product,
+    StDev,
+    StDevP,
+    Sum,
+    Var,
+    VarP,
+});
+
 function_enum!(MathFunction {
     Abs,
     Base,
@@ -385,6 +400,7 @@ pub(in crate::calculation) enum Evaluator {
     Logical(LogicalFunction),
     Aggregate(AggregateFunction),
     Grouped(GroupedFunction),
+    Database(DatabaseFunction),
     Math(MathFunction),
     Trigonometry(TrigonometryFunction),
     Combinatorics(CombinatoricsFunction),
@@ -414,6 +430,7 @@ impl Evaluator {
             Self::Logical(value) => format!("logical:{}", value.stable_name()),
             Self::Aggregate(value) => format!("aggregate:{}", value.stable_name()),
             Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
+            Self::Database(value) => format!("database:{}", value.stable_name()),
             Self::Math(value) => format!("math:{}", value.stable_name()),
             Self::Trigonometry(value) => format!("trigonometry:{}", value.stable_name()),
             Self::Combinatorics(value) => format!("combinatorics:{}", value.stable_name()),
@@ -446,6 +463,7 @@ impl Evaluator {
         evaluators.extend(LogicalFunction::ALL.iter().copied().map(Self::Logical));
         evaluators.extend(AggregateFunction::ALL.iter().copied().map(Self::Aggregate));
         evaluators.extend(GroupedFunction::ALL.iter().copied().map(Self::Grouped));
+        evaluators.extend(DatabaseFunction::ALL.iter().copied().map(Self::Database));
         evaluators.extend(MathFunction::ALL.iter().copied().map(Self::Math));
         evaluators.extend(
             TrigonometryFunction::ALL

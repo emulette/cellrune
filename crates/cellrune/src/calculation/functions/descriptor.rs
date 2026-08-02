@@ -5,7 +5,7 @@ use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::ErrorKind;
 use super::contract::CallContract;
 use super::kernel::{
-    AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction,
+    AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
     DateAdditionalFunction, DateFunction, DynamicArrayFunction, DynamicFunction,
     ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
     FinancialFunction, GroupedArrayFunction, GroupedFunction, InformationArrayFunction,
@@ -59,7 +59,7 @@ pub(in crate::calculation) enum FunctionResultKind {
 }
 
 impl FunctionResultKind {
-    pub(super) const fn returns_reference(self) -> bool {
+    pub(in crate::calculation) const fn returns_reference(self) -> bool {
         matches!(self, Self::Reference | Self::ReferenceOrArray)
     }
 }
@@ -134,6 +134,7 @@ pub(super) enum CompatibilityVersion {
     Baseline,
     V0_1_9,
     V0_1_10,
+    V0_1_11,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -340,6 +341,9 @@ macro_rules! function {
     ($variant:ident, $name:literal, Grouped) => {
         FunctionDescriptor::new($name, Evaluator::Grouped(GroupedFunction::$variant))
     };
+    ($variant:ident, $name:literal, Database) => {
+        FunctionDescriptor::new($name, Evaluator::Database(DatabaseFunction::$variant))
+    };
     ($variant:ident, $name:literal, Math) => {
         FunctionDescriptor::new($name, Evaluator::Math(MathFunction::$variant))
     };
@@ -481,6 +485,18 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(AverageIf, "AVERAGEIF", Aggregate)
         .with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
     function!(AverageIfs, "AVERAGEIFS", Aggregate),
+    function!(Average, "DAVERAGE", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Count, "DCOUNT", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(CountA, "DCOUNTA", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Get, "DGET", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Max, "DMAX", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Min, "DMIN", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Product, "DPRODUCT", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(StDev, "DSTDEV", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(StDevP, "DSTDEVP", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Sum, "DSUM", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Var, "DVAR", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(VarP, "DVARP", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(Abs, "ABS", Math)
         .with_array_evaluator(ArrayEvaluator::Elementwise(ElementwiseArrayFunction::Abs)),
     function!(Base, "BASE", Math),

@@ -1,10 +1,10 @@
 use super::kernel::{
-    AggregateFunction, ArrayFunction, CombinatoricsFunction, DateAdditionalFunction, DateFunction,
-    DynamicFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
-    FinancialFunction, GroupedFunction, InformationFunction, LegacyFunction, LogicalFunction,
-    LookupFunction, MathFunction, ModernTextFunction, StatisticalAdditionalFunction,
-    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
-    TrigonometryFunction,
+    AggregateFunction, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
+    DateAdditionalFunction, DateFunction, DynamicFunction, EngineeringFunction, Evaluator,
+    FinancialAdditionalFunction, FinancialFunction, GroupedFunction, InformationFunction,
+    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextFunction,
+    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
+    TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[cfg(test)]
@@ -841,6 +841,7 @@ impl Evaluator {
             Self::Logical(function) => function.call_contract(),
             Self::Aggregate(function) => function.call_contract(),
             Self::Grouped(function) => function.call_contract(),
+            Self::Database(function) => function.call_contract(),
             Self::Math(function) => function.call_contract(),
             Self::Trigonometry(function) => function.call_contract(),
             Self::Combinatorics(function) => function.call_contract(),
@@ -970,6 +971,13 @@ impl GroupedFunction {
             .with_missing(MissingArgumentPolicy::Preserve)
             .with_defaults(PIVOTBY_OPTION_DEFAULTS),
         }
+    }
+}
+
+impl DatabaseFunction {
+    const fn call_contract(self) -> CallContract {
+        CallContract::positional(Arity::exact(3), &[REFERENCE, SCALAR, REFERENCE])
+            .with_missing(MissingArgumentPolicy::Preserve)
     }
 }
 

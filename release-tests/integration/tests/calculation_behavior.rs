@@ -13,6 +13,8 @@ use cellrune::{
 
 #[path = "calculation_behavior/criteria_matching.rs"]
 mod criteria_matching;
+#[path = "calculation_behavior/database.rs"]
+mod database;
 #[path = "calculation_behavior/support.rs"]
 mod support;
 
