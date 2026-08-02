@@ -226,3 +226,146 @@ fn database_scans_use_the_formula_cumulative_work_budget() {
 
     assert_issue(&calculation, 6, CalculationIssueCode::ResourceLimitExceeded);
 }
+
+#[test]
+fn database_aggregates_keep_blank_text_logical_error_and_sample_contracts() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "\"Id\""),
+        (1, 2, "\"Value\""),
+        (2, 1, "1"),
+        (2, 2, "2"),
+        (3, 1, "2"),
+        (4, 1, "3"),
+        (4, 2, "\"7\""),
+        (5, 1, "4"),
+        (5, 2, "TRUE"),
+        (6, 1, "5"),
+        (6, 2, "1/0"),
+        (1, 4, "\"Id\""),
+        (2, 4, "\"<5\""),
+        (1, 5, "\"Id\""),
+        (2, 5, "\"<6\""),
+        (1, 7, "DAVERAGE(A1:B6,\"Value\",D1:D2)"),
+        (1, 8, "DCOUNT(A1:B6,\"Value\",D1:D2)"),
+        (1, 9, "DCOUNTA(A1:B6,\"Value\",D1:D2)"),
+        (1, 10, "DMAX(A1:B6,\"Value\",D1:D2)"),
+        (1, 11, "DMIN(A1:B6,\"Value\",D1:D2)"),
+        (1, 12, "DPRODUCT(A1:B6,\"Value\",D1:D2)"),
+        (1, 13, "DSTDEV(A1:B6,\"Value\",D1:D2)"),
+        (1, 14, "DSTDEVP(A1:B6,\"Value\",D1:D2)"),
+        (1, 15, "DSUM(A1:B6,\"Value\",D1:D2)"),
+        (1, 16, "DVAR(A1:B6,\"Value\",D1:D2)"),
+        (1, 17, "DVARP(A1:B6,\"Value\",D1:D2)"),
+        (1, 19, "DCOUNT(A1:B6,\"Value\",E1:E2)"),
+        (1, 20, "DCOUNTA(A1:B6,\"Value\",E1:E2)"),
+        (1, 21, "DSUM(A1:B6,\"Value\",E1:E2)"),
+        (1, 22, "DAVERAGE(A1:B6,\"Value\",E1:E2)"),
+        (1, 23, "DPRODUCT(A1:B6,\"Value\",E1:E2)"),
+        (1, 24, "DMAX(A1:B6,\"Value\",E1:E2)"),
+        (1, 25, "DMIN(A1:B6,\"Value\",E1:E2)"),
+        (1, 26, "DSTDEV(A1:B6,\"Value\",E1:E2)"),
+        (1, 27, "DSTDEVP(A1:B6,\"Value\",E1:E2)"),
+        (1, 28, "DVAR(A1:B6,\"Value\",E1:E2)"),
+        (1, 29, "DVARP(A1:B6,\"Value\",E1:E2)"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for (column, expected) in [
+        (7, 2.0),
+        (8, 1.0),
+        (9, 3.0),
+        (10, 2.0),
+        (11, 2.0),
+        (12, 2.0),
+        (14, 0.0),
+        (15, 2.0),
+        (17, 0.0),
+        (19, 1.0),
+        (20, 4.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+    for column in [13, 16] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::DivisionByZero
+            ))),
+        );
+    }
+    for column in 21..=29 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::DivisionByZero
+            ))),
+            "expected selected field error at column {column}",
+        );
+    }
+}
+
+#[test]
+fn database_moments_are_stable_and_dget_preserves_the_selected_type() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "\"Id\""),
+        (1, 2, "\"Amount\""),
+        (2, 1, "1"),
+        (2, 2, "1000000000001"),
+        (3, 1, "2"),
+        (3, 2, "1000000000002"),
+        (4, 1, "3"),
+        (4, 2, "1000000000003"),
+        (5, 1, "4"),
+        (5, 2, "1000000000004"),
+        (6, 1, "5"),
+        (6, 2, "\"typed text\""),
+        (7, 1, "6"),
+        (7, 2, "TRUE"),
+        (8, 1, "7"),
+        (1, 4, "\"Id\""),
+        (2, 4, "\"<=4\""),
+        (1, 5, "\"Id\""),
+        (2, 5, "5"),
+        (1, 6, "\"Id\""),
+        (2, 6, "6"),
+        (1, 7, "\"Id\""),
+        (2, 7, "7"),
+        (1, 9, "DAVERAGE(A1:B8,\"Amount\",D1:D2)"),
+        (1, 10, "DVAR(A1:B8,\"Amount\",D1:D2)"),
+        (1, 11, "DVARP(A1:B8,\"Amount\",D1:D2)"),
+        (1, 12, "DSTDEV(A1:B8,\"Amount\",D1:D2)"),
+        (1, 13, "DSTDEVP(A1:B8,\"Amount\",D1:D2)"),
+        (1, 14, "DSUM(A1:B8,\"Amount\",D1:D2)"),
+        (1, 15, "DGET(A1:B8,\"Amount\",E1:E2)"),
+        (1, 16, "DGET(A1:B8,\"Amount\",F1:F2)"),
+        (1, 17, "DGET(A1:B8,\"Amount\",G1:G2)"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for (column, expected, tolerance) in [
+        (9, 1_000_000_000_002.5, 0.0),
+        (10, 5.0 / 3.0, 1.0e-15),
+        (11, 1.25, 0.0),
+        (12, (5.0_f64 / 3.0).sqrt(), 1.0e-15),
+        (13, 1.25_f64.sqrt(), 1.0e-15),
+        (14, 4_000_000_000_010.0, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, tolerance);
+    }
+    assert_eq!(
+        calculation.cell(cell_id(15)),
+        Some(&CalculationCellResult::Value(CellValue::Text(
+            "typed text".to_owned()
+        ))),
+    );
+    assert_eq!(
+        calculation.cell(cell_id(16)),
+        Some(&CalculationCellResult::Value(CellValue::Logical(true))),
+    );
+    assert_eq!(
+        calculation.cell(cell_id(17)),
+        Some(&CalculationCellResult::Value(
+            CellValue::number(0.0).expect("finite final blank materialization")
+        )),
+    );
+}

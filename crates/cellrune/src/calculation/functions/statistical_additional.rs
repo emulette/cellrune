@@ -3,7 +3,9 @@ use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::array_common::poll_cancellation;
 use super::kernel::StatisticalAdditionalFunction;
+use super::moments::{NumericMoments, VarianceKind};
 use super::statistical::{numeric_arguments, numeric_arguments_with_policy};
 use super::util::{collect_argument_values_with_policy, required_number};
 
@@ -183,17 +185,18 @@ fn population_variance(
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),
     };
-    let mean = numbers.iter().sum::<f64>() / numbers.len() as f64;
-    let variance = numbers
-        .iter()
-        .map(|number| (number - mean).powi(2))
-        .sum::<f64>()
-        / numbers.len() as f64;
-    finite(if square_root {
-        variance.sqrt()
-    } else {
-        variance
-    })
+    let moments = match NumericMoments::collect_with_work(numbers, || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    }) {
+        Ok(moments) => moments,
+        Err(kind) => return Value::Error(kind),
+    };
+    match moments.variance(VarianceKind::Population) {
+        Ok(variance) if square_root => Value::Number(variance.sqrt()),
+        Ok(variance) => Value::Number(variance),
+        Err(kind) => Value::Error(kind),
+    }
 }
 
 fn standardize(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

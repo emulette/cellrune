@@ -15,6 +15,8 @@ use cellrune::{
 mod criteria_matching;
 #[path = "calculation_behavior/database.rs"]
 mod database;
+#[path = "calculation_behavior/moments.rs"]
+mod moments;
 #[path = "calculation_behavior/support.rs"]
 mod support;
 

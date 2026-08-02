@@ -7,6 +7,7 @@ use super::super::value::{ErrorKind, Value};
 use super::criteria_runtime::CriteriaRuntime;
 use super::database_criteria::CompiledDatabaseCriteria;
 use super::kernel::DatabaseFunction;
+use super::moments::{NumericMoments, VarianceKind};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -356,8 +357,11 @@ fn aggregate_selected(
             [_, _, ..] => Value::Error(ErrorKind::Num),
         };
     }
-    let mut numbers = Vec::with_capacity(selected.len());
+    let mut numeric_count = 0_u64;
     let mut nonblank_count = 0_u64;
+    let mut moments = NumericMoments::new();
+    let mut extreme = None::<f64>;
+    let mut product = None::<f64>;
     for row in selected.iter() {
         if let Err(kind) = runtime.charge_work(1) {
             return Value::Error(kind);
@@ -368,8 +372,40 @@ fn aggregate_selected(
         };
         match value {
             Value::Number(number) => {
-                numbers.push(number);
+                numeric_count += 1;
                 nonblank_count += 1;
+                if matches!(
+                    function,
+                    DatabaseFunction::Average
+                        | DatabaseFunction::StDev
+                        | DatabaseFunction::StDevP
+                        | DatabaseFunction::Sum
+                        | DatabaseFunction::Var
+                        | DatabaseFunction::VarP
+                ) && let Err(kind) = moments.add(number)
+                {
+                    return Value::Error(kind);
+                }
+                match function {
+                    DatabaseFunction::Max => {
+                        extreme = Some(extreme.map_or(number, |current| current.max(number)));
+                    }
+                    DatabaseFunction::Min => {
+                        extreme = Some(extreme.map_or(number, |current| current.min(number)));
+                    }
+                    DatabaseFunction::Product => {
+                        product = Some(product.map_or(number, |current| current * number));
+                    }
+                    DatabaseFunction::Average
+                    | DatabaseFunction::Count
+                    | DatabaseFunction::CountA
+                    | DatabaseFunction::Get
+                    | DatabaseFunction::StDev
+                    | DatabaseFunction::StDevP
+                    | DatabaseFunction::Sum
+                    | DatabaseFunction::Var
+                    | DatabaseFunction::VarP => {}
+                }
             }
             Value::Blank => {}
             Value::Text(_) | Value::Logical(_) => {
@@ -395,39 +431,30 @@ fn aggregate_selected(
         }
     }
     let result = match function {
-        DatabaseFunction::Count => return Value::Number(numbers.len() as f64),
+        DatabaseFunction::Count => return Value::Number(numeric_count as f64),
         DatabaseFunction::CountA => return Value::Number(nonblank_count as f64),
-        DatabaseFunction::Sum => numbers.iter().sum(),
-        DatabaseFunction::Average if numbers.is_empty() => return Value::Error(ErrorKind::Div0),
-        DatabaseFunction::Average => numbers.iter().sum::<f64>() / numbers.len() as f64,
-        DatabaseFunction::Max => numbers.into_iter().reduce(f64::max).unwrap_or(0.0),
-        DatabaseFunction::Min => numbers.into_iter().reduce(f64::min).unwrap_or(0.0),
-        DatabaseFunction::Product => numbers.into_iter().reduce(|a, b| a * b).unwrap_or(0.0),
-        DatabaseFunction::StDev | DatabaseFunction::Var if numbers.len() < 2 => {
-            return Value::Error(ErrorKind::Div0);
+        DatabaseFunction::Sum => match moments.sum() {
+            Ok(sum) => sum,
+            Err(kind) => return Value::Error(kind),
+        },
+        DatabaseFunction::Average => match moments.mean() {
+            Ok(mean) => mean,
+            Err(kind) => return Value::Error(kind),
+        },
+        DatabaseFunction::Max | DatabaseFunction::Min => extreme.unwrap_or(0.0),
+        DatabaseFunction::Product => product.unwrap_or(0.0),
+        DatabaseFunction::StDev | DatabaseFunction::Var => {
+            match moments.variance(VarianceKind::Sample) {
+                Ok(variance) if function == DatabaseFunction::StDev => variance.sqrt(),
+                Ok(variance) => variance,
+                Err(kind) => return Value::Error(kind),
+            }
         }
-        DatabaseFunction::StDevP | DatabaseFunction::VarP if numbers.is_empty() => {
-            return Value::Error(ErrorKind::Div0);
-        }
-        DatabaseFunction::StDev
-        | DatabaseFunction::StDevP
-        | DatabaseFunction::Var
-        | DatabaseFunction::VarP => {
-            let mean = numbers.iter().sum::<f64>() / numbers.len() as f64;
-            let divisor = if matches!(function, DatabaseFunction::StDev | DatabaseFunction::Var) {
-                numbers.len() - 1
-            } else {
-                numbers.len()
-            };
-            let variance = numbers
-                .iter()
-                .map(|number| (number - mean) * (number - mean))
-                .sum::<f64>()
-                / divisor as f64;
-            if matches!(function, DatabaseFunction::StDev | DatabaseFunction::StDevP) {
-                variance.sqrt()
-            } else {
-                variance
+        DatabaseFunction::StDevP | DatabaseFunction::VarP => {
+            match moments.variance(VarianceKind::Population) {
+                Ok(variance) if function == DatabaseFunction::StDevP => variance.sqrt(),
+                Ok(variance) => variance,
+                Err(kind) => return Value::Error(kind),
             }
         }
         DatabaseFunction::Get => {

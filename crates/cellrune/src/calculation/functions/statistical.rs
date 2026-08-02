@@ -9,7 +9,9 @@ use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::array_common::poll_cancellation;
 use super::criteria_runtime::CriteriaRuntime;
+use super::moments::{NumericMoments, PairedMoments, VarianceKind};
 use super::util::{
     collect_argument_values, excel_numeric_arguments, excel_numeric_arguments_with_policy,
     required_number,
@@ -59,7 +61,7 @@ pub(super) fn call(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PairedStatistic {
     Correlation,
     Slope,
@@ -81,32 +83,42 @@ fn paired_statistic(
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),
     };
-    let count = pairs.len() as f64;
-    let left_mean = pairs.iter().map(|(left, _)| left).sum::<f64>() / count;
-    let right_mean = pairs.iter().map(|(_, right)| right).sum::<f64>() / count;
-    let mut cross_deviation = 0.0;
-    let mut left_deviation = 0.0;
-    let mut right_deviation = 0.0;
-    for (left, right) in pairs {
-        let left_delta = left - left_mean;
-        let right_delta = right - right_mean;
-        cross_deviation += left_delta * right_delta;
-        left_deviation += left_delta * left_delta;
-        right_deviation += right_delta * right_delta;
-    }
-    let denominator = match statistic {
-        PairedStatistic::Correlation => (left_deviation * right_deviation).sqrt(),
-        PairedStatistic::Slope | PairedStatistic::Intercept => right_deviation,
-        PairedStatistic::Covariance => count,
+    let moments = match PairedMoments::collect_with_work(pairs, || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    }) {
+        Ok(moments) => moments,
+        Err(kind) => return Value::Error(kind),
     };
-    if denominator == 0.0 {
+    if statistic == PairedStatistic::Covariance {
+        return match moments.covariance(VarianceKind::Population) {
+            Ok(covariance) => Value::Number(covariance),
+            Err(kind) => Value::Error(kind),
+        };
+    }
+    let right_deviation = moments.right_second_moment();
+    if right_deviation == 0.0
+        || statistic == PairedStatistic::Correlation && moments.left_second_moment() == 0.0
+    {
         return Value::Error(ErrorKind::Div0);
     }
     let result = match statistic {
-        PairedStatistic::Intercept => left_mean - cross_deviation / denominator * right_mean,
-        PairedStatistic::Correlation | PairedStatistic::Slope | PairedStatistic::Covariance => {
-            cross_deviation / denominator
+        PairedStatistic::Intercept => {
+            let left_mean = match moments.left_mean() {
+                Ok(mean) => mean,
+                Err(kind) => return Value::Error(kind),
+            };
+            let right_mean = match moments.right_mean() {
+                Ok(mean) => mean,
+                Err(kind) => return Value::Error(kind),
+            };
+            left_mean - moments.co_moment() / right_deviation * right_mean
         }
+        PairedStatistic::Correlation => {
+            moments.co_moment() / moments.left_second_moment().sqrt() / right_deviation.sqrt()
+        }
+        PairedStatistic::Slope => moments.co_moment() / right_deviation,
+        PairedStatistic::Covariance => unreachable!("covariance returned before finalization"),
     };
     if result.is_finite() {
         Value::Number(result)
@@ -390,17 +402,18 @@ fn sample_variance(
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),
     };
-    let mean = numbers.iter().sum::<f64>() / numbers.len() as f64;
-    let variance = numbers
-        .iter()
-        .map(|number| (number - mean).powi(2))
-        .sum::<f64>()
-        / (numbers.len() - 1) as f64;
-    Value::Number(if square_root {
-        variance.sqrt()
-    } else {
-        variance
-    })
+    let moments = match NumericMoments::collect_with_work(numbers, || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    }) {
+        Ok(moments) => moments,
+        Err(kind) => return Value::Error(kind),
+    };
+    match moments.variance(VarianceKind::Sample) {
+        Ok(variance) if square_root => Value::Number(variance.sqrt()),
+        Ok(variance) => Value::Number(variance),
+        Err(kind) => Value::Error(kind),
+    }
 }
 
 fn conditional_extreme(

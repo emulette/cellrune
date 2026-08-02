@@ -45,6 +45,7 @@ mod lookup_common;
 mod math;
 mod modern_array;
 mod modern_text;
+mod moments;
 mod reference_introspection;
 mod regex_common;
 mod regex_options;
