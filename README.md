@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.10 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.11 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.10
+cargo add cellrune@0.1.11
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.10"
+cellrune = "0.1.11"
 ```
 
 ## Features
@@ -98,16 +98,19 @@ summarize the functions used by a workbook. `scan_formula_capabilities` remains 
 optional static inventory for migration planning and user-interface reporting; calculation does
 not require it.
 
-CellRune 0.1.10 adds exactly 20 official Excel-facing functions: `EXPAND`, `SORTBY`, `TOCOL`,
-`TOROW`, `TRIMRANGE`, `WRAPCOLS`, `WRAPROWS`, `ARRAYTOTEXT`, `TEXTSPLIT`, `REGEXEXTRACT`,
-`REGEXREPLACE`, `REGEXTEST`, `FORMULATEXT`, `ISFORMULA`, `SHEET`, `SHEETS`, `XMATCH`, `GROUPBY`,
-`PERCENTOF`, and `PIVOTBY`. Array and grouped results use the normal bounded spill path and behave
-the same in full and incremental calculation. The regex functions target PCRE2 semantics with
-bounded compile, matching, capture, and output work. CellRune's prebuilt Python, Node.js, and MCP
-artifacts pin the bundled PCRE2 10.46 engine; Rust consumers use `pcre2-sys` linkage policy and can
-set `PCRE2_SYS_STATIC=1` to select its bundled source build. `GROUPBY` and `PIVOTBY` accept the
-supported built-in aggregate callables or a compatible `LAMBDA`; `PERCENTOF` can also serve as
-their relative aggregate callable.
+CellRune 0.1.11 adds exactly 20 official Excel-facing functions: `DAVERAGE`, `DCOUNT`, `DCOUNTA`,
+`DGET`, `DMAX`, `DMIN`, `DPRODUCT`, `DSTDEV`, `DSTDEVP`, `DSUM`, `DVAR`, `DVARP`, `GROWTH`,
+`LINEST`, `LOGEST`, `TREND`, `MINVERSE`, `MUNIT`, `ARABIC`, and `ROMAN`. Database formulas use
+typed field and criteria-table evaluation, including bounded formula criteria. Regression and
+matrix formulas use stable moments, rank-revealing QR, and partial-pivot LU kernels and materialize
+their complete bounded array results. Roman conversion preserves Excel's asymmetric parse and
+format domains and all five `ROMAN` forms. The implemented catalog now contains 327 official names
+and 328 accepted entries including the OOXML dummy-function marker.
+
+The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
+work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;
+Rust consumers use `pcre2-sys` linkage policy and can set `PCRE2_SYS_STATIC=1` to select its bundled
+source build.
 
 `INDEX` follows Excel's zero-index reference behavior: a zero row or column selects the complete
 corresponding column or row, and zero for both selects the complete input range. Scalar formulas
@@ -229,12 +232,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.10 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.11 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.10"
-npm install "@cellrune/node@0.1.10"
+python -m pip install "cellrune==0.1.11"
+npm install "@cellrune/node@0.1.11"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

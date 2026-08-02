@@ -19,19 +19,34 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 )
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
-CATALOG_V0_1_10_REFERENCE_SHA256 = (
+CATALOG_V0_1_11_REFERENCE_SHA256 = (
     pathlib.Path(__file__).parents[3]
     / "crates"
     / "cellrune"
     / "testdata"
-    / "function-catalog-v0.1.10.sha256"
+    / "function-catalog-v0.1.11.sha256"
 ).read_text(encoding="utf-8").strip()
 
 
 def catalog_digest() -> str:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 308
+    assert len(catalog["entries"]) == 328
+    entries = {entry["name"]: entry for entry in catalog["entries"]}
+    assert all(
+        name in entries
+        for name in (
+            "ARABIC", "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX",
+            "DMIN", "DPRODUCT", "DSTDEV", "DSTDEVP", "DSUM", "DVAR",
+            "DVARP", "GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT",
+            "ROMAN", "TREND",
+        )
+    )
+    assert all(
+        entries[name]["returns_array"]
+        for name in ("GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND")
+    )
+    assert all(entries[name]["official"] for name in entries if name != "__XLUDF.DUMMYFUNCTION")
     digest = hashlib.sha256()
     for entry in catalog["entries"]:
         row = "\0".join(
@@ -103,7 +118,7 @@ def recalculate_with_invalid_solver_semantics(
 
 
 def main() -> None:
-    assert catalog_digest() == CATALOG_V0_1_10_REFERENCE_SHA256
+    assert catalog_digest() == CATALOG_V0_1_11_REFERENCE_SHA256
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")

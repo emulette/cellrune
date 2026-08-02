@@ -1139,6 +1139,86 @@ mod tests {
     }
 
     #[test]
+    fn v0_1_11_semantic_registry_is_byte_exact() {
+        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_11);
+        let mut digest = Sha256::new();
+        digest.update(snapshot.as_bytes());
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual, "3cd26d201cee732fd556d6d8cdfc742b7de99e887ac1f1c72a4d0d67a0aee93d",
+            "stable v0.1.11 semantic snapshot changed:\n{snapshot}",
+        );
+    }
+
+    #[test]
+    fn v0_1_11_descriptors_freeze_function_families_arity_and_array_results() {
+        for name in [
+            "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX", "DMIN", "DPRODUCT", "DSTDEV",
+            "DSTDEVP", "DSUM", "DVAR", "DVARP",
+        ] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_11,
+                "{name}",
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Database(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(4), "{name}");
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
+
+        for name in ["GROWTH", "LINEST", "LOGEST", "TREND"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(descriptor.minimum_version(), CompatibilityVersion::V0_1_11);
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Regression(_)),
+                "{name}"
+            );
+            assert!((1..=4).all(|arity| descriptor.call_contract().arity().accepts(arity)));
+            assert!(!descriptor.call_contract().arity().accepts(0), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(5), "{name}");
+            assert!(descriptor.catalog_returns_array(), "{name}");
+        }
+
+        for name in ["MINVERSE", "MUNIT"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(descriptor.minimum_version(), CompatibilityVersion::V0_1_11);
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Array(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(0), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(descriptor.catalog_returns_array(), "{name}");
+        }
+
+        let arabic = descriptor("ARABIC").expect("ARABIC descriptor");
+        let roman = descriptor("ROMAN").expect("ROMAN descriptor");
+        for descriptor in [arabic, roman] {
+            assert_eq!(descriptor.minimum_version(), CompatibilityVersion::V0_1_11);
+            assert!(matches!(descriptor.evaluator(), Evaluator::Roman(_)));
+            assert!(!descriptor.catalog_returns_array());
+        }
+        assert!(arabic.call_contract().arity().accepts(1));
+        assert!(!arabic.call_contract().arity().accepts(0));
+        assert!(!arabic.call_contract().arity().accepts(2));
+        assert!(roman.call_contract().arity().accepts(1));
+        assert!(roman.call_contract().arity().accepts(2));
+        assert!(!roman.call_contract().arity().accepts(0));
+        assert!(!roman.call_contract().arity().accepts(3));
+    }
+
+    #[test]
     fn storage_and_legacy_spellings_resolve_to_canonical_descriptors() {
         assert_eq!(normalize_name("_xlfn._xlws.FILTER"), "FILTER");
         assert_eq!(normalize_name("_xludf._xlfn.COVAR"), "COVARIANCE.P");

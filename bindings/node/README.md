@@ -14,7 +14,7 @@ dependency. You do not need to select a platform package yourself.
 ## Install
 
 ```console
-npm install @cellrune/node@0.1.10
+npm install @cellrune/node@0.1.11
 ```
 
 ## CommonJS
@@ -59,9 +59,10 @@ calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and expl
 `arithmeticSemantics` / `financialSolverSemantics` compatibility policies. The latter accept
 `"ieee_754"` and `"extended_search"` when a caller needs the calculation behavior shipped through
 0.1.2; omitted fields select the Excel-compatible defaults.
-The 0.1.10 calculation surface adds `EXPAND`, `SORTBY`, `TOCOL`, `TOROW`, `TRIMRANGE`,
-`WRAPCOLS`, `WRAPROWS`, `ARRAYTOTEXT`, `TEXTSPLIT`, `REGEXEXTRACT`, `REGEXREPLACE`, `REGEXTEST`,
-`FORMULATEXT`, `ISFORMULA`, `SHEET`, `SHEETS`, `XMATCH`, `GROUPBY`, `PERCENTOF`, and `PIVOTBY`.
+The 0.1.11 calculation surface adds `DAVERAGE`, `DCOUNT`, `DCOUNTA`, `DGET`, `DMAX`, `DMIN`,
+`DPRODUCT`, `DSTDEV`, `DSTDEVP`, `DSUM`, `DVAR`, `DVARP`, `GROWTH`, `LINEST`, `LOGEST`, `TREND`,
+`MINVERSE`, `MUNIT`, `ARABIC`, and `ROMAN`. Regression and matrix formulas expose complete bounded
+array results through the same catalog and calculation contract as Rust and Python.
 `inspectDefinedName` returns typed static, dynamic, empty, external, invalid, and unsupported
 defined-name results. `applyChangesV2` retains every v1 edit shape and adds stable-ID table rename,
 table-column rename, and table-row resize operations with `changedTableIds` in its receipt.

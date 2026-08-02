@@ -2714,7 +2714,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        307
+        327
     );
     let let_entry = catalog
         .iter()

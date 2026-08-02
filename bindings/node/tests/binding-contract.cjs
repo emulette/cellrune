@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
-const CATALOG_V0_1_10_REFERENCE_SHA256 = fs
+const CATALOG_V0_1_11_REFERENCE_SHA256 = fs
   .readFileSync(
     path.join(
       __dirname,
@@ -16,7 +16,7 @@ const CATALOG_V0_1_10_REFERENCE_SHA256 = fs
       "crates",
       "cellrune",
       "testdata",
-      "function-catalog-v0.1.10.sha256",
+      "function-catalog-v0.1.11.sha256",
     ),
     "utf8",
   )
@@ -25,7 +25,21 @@ const CATALOG_V0_1_10_REFERENCE_SHA256 = fs
 function catalogDigest() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 308);
+  assert.equal(catalog.entries.length, 328);
+  const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
+  for (const name of [
+    "ARABIC", "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX", "DMIN", "DPRODUCT",
+    "DSTDEV", "DSTDEVP", "DSUM", "DVAR", "DVARP", "GROWTH", "LINEST", "LOGEST",
+    "MINVERSE", "MUNIT", "ROMAN", "TREND",
+  ]) {
+    assert.ok(entries.has(name), name);
+  }
+  for (const name of ["GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND"]) {
+    assert.equal(entries.get(name).returnsArray, true, name);
+  }
+  for (const [name, entry] of entries) {
+    assert.equal(entry.official, name !== "__XLUDF.DUMMYFUNCTION", name);
+  }
   const digest = createHash("sha256");
   for (const entry of catalog.entries) {
     digest.update(
@@ -42,7 +56,7 @@ function catalogDigest() {
 }
 
 async function main() {
-  assert.equal(catalogDigest(), CATALOG_V0_1_10_REFERENCE_SHA256);
+  assert.equal(catalogDigest(), CATALOG_V0_1_11_REFERENCE_SHA256);
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(

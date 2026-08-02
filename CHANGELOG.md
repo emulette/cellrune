@@ -10,6 +10,34 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-08-02
+
+### Added
+
+- Twelve database functions: `DAVERAGE`, `DCOUNT`, `DCOUNTA`, `DGET`, `DMAX`, `DMIN`,
+  `DPRODUCT`, `DSTDEV`, `DSTDEVP`, `DSUM`, `DVAR`, and `DVARP`. They use typed field and header
+  resolution, criteria rows with Excel AND/OR semantics, statically validated formula criteria,
+  and cumulative calculation budgets.
+- Rank-aware `LINEST` and `LOGEST` statistics plus `TREND` and `GROWTH` prediction arrays, backed by
+  normalized row/column inputs, stable moments, and column-pivoted Householder QR.
+- `MINVERSE` with partial-pivot LU, bounded `MUNIT` identity arrays, and `ARABIC`/`ROMAN`
+  conversion across Excel's distinct parser and formatter domains and all five Roman forms.
+
+### Changed
+
+- The public function catalog now contains 327 official Excel-facing names and 328 accepted
+  entries including the non-official OOXML dummy-function marker. Rust, Python, and Node.js expose
+  the same array-result flags for the new regression and matrix functions.
+- Variance, covariance, regression, and database statistics share stable mergeable moments with a
+  compensated sum and explicit sample/population boundaries.
+- Excel Oracle expectations now classify all 57 active 0.1.11 cases as matches in both frozen host
+  profiles and verify every materialized cell in the Apache POI matrix fixture.
+
+### Fixed
+
+- Legacy array formulas now broadcast a scalar result across the declared CSE range, matching
+  Excel instead of filling follower cells with `#N/A`.
+
 ## [0.1.10] - 2026-08-01
 
 ### Added
@@ -551,7 +579,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/emulette/cellrune/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/emulette/cellrune/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/emulette/cellrune/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/emulette/cellrune/compare/v0.1.7...v0.1.8

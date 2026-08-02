@@ -758,7 +758,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    function_catalog_for_version(CompatibilityVersion::V0_1_10)
+    function_catalog_for_version(CompatibilityVersion::V0_1_11)
 }
 
 fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::FunctionCatalogEntry> {
@@ -948,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_names_are_unique_and_v0_1_10_catalog_stays_frozen() {
+    fn registry_names_are_unique_and_current_catalog_is_v0_1_11() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
@@ -976,10 +976,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 308);
+        assert_eq!(catalog.len(), 328);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            307
+            327
         );
         assert!(
             catalog
@@ -1000,6 +1000,22 @@ mod tests {
                 .map(|entry| entry.canonical_name()),
             Some("COVARIANCE.P")
         );
+        for name in [
+            "ARABIC", "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX", "DMIN", "DPRODUCT",
+            "DSTDEV", "DSTDEVP", "DSUM", "DVAR", "DVARP", "GROWTH", "LINEST", "LOGEST", "MINVERSE",
+            "MUNIT", "ROMAN", "TREND",
+        ] {
+            assert!(catalog.iter().any(|entry| entry.name() == name), "{name}");
+        }
+        for name in ["GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND"] {
+            assert!(
+                catalog
+                    .iter()
+                    .find(|entry| entry.name() == name)
+                    .is_some_and(|entry| entry.returns_array()),
+                "{name}",
+            );
+        }
     }
 
     #[test]
@@ -1055,6 +1071,34 @@ mod tests {
         assert_eq!(
             actual,
             include_str!("../../../testdata/function-catalog-v0.1.10.sha256").trim()
+        );
+    }
+
+    #[test]
+    fn v0_1_11_database_regression_matrix_and_numeral_catalog_is_byte_exact() {
+        let mut digest = Sha256::new();
+        for entry in
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_11)
+        {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            include_str!("../../../testdata/function-catalog-v0.1.11.sha256").trim()
         );
     }
 }

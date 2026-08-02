@@ -18,7 +18,7 @@ capability-fs = ["cellrune/capability-fs", "dep:cap-std"]
 [dependencies]
 # The intra-workspace `cellrune` requirement stays exact because the two crates release in lockstep.
 cap-std = { workspace = true, optional = true }
-cellrune = { path = "../cellrune", version = "=0.1.10" }
+cellrune = { path = "../cellrune", version = "=0.1.11" }
 schemars.workspace = true
 serde.workspace = true
 
