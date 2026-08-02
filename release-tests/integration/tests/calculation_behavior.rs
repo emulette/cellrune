@@ -19,6 +19,8 @@ mod database;
 mod moments;
 #[path = "calculation_behavior/regression.rs"]
 mod regression;
+#[path = "calculation_behavior/roman_numeral.rs"]
+mod roman_numeral;
 #[path = "calculation_behavior/support.rs"]
 mod support;
 

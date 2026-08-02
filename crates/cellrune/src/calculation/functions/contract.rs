@@ -3,8 +3,8 @@ use super::kernel::{
     DateAdditionalFunction, DateFunction, DynamicFunction, EngineeringFunction, Evaluator,
     FinancialAdditionalFunction, FinancialFunction, GroupedFunction, InformationFunction,
     LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextFunction,
-    RegressionFunction, StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
-    TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    RegressionFunction, RomanFunction, StatisticalAdditionalFunction, StatisticalFunction,
+    SumOfSquaresFunction, TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[cfg(test)]
@@ -748,6 +748,11 @@ const REGRESSION_PREDICTION_DEFAULTS: &[ArgumentDefault] = &[
         ArgumentDefaultValue::Logical(true),
     ),
 ];
+const ROMAN_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    1,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Number(0.0),
+)];
 const SORT_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(
         1,
@@ -865,6 +870,7 @@ impl Evaluator {
             Self::Grouped(function) => function.call_contract(),
             Self::Database(function) => function.call_contract(),
             Self::Math(function) => function.call_contract(),
+            Self::Roman(function) => function.call_contract(),
             Self::Trigonometry(function) => function.call_contract(),
             Self::Combinatorics(function) => function.call_contract(),
             Self::SumOfSquares(function) => function.call_contract(),
@@ -1046,6 +1052,16 @@ impl MathFunction {
             Self::SeriesSum => {
                 CallContract::positional(Arity::exact(4), &[SCALAR, SCALAR, SCALAR, ARRAY])
             }
+        }
+    }
+}
+
+impl RomanFunction {
+    const fn call_contract(self) -> CallContract {
+        match self {
+            Self::Arabic => CallContract::uniform(Arity::exact(1), SCALAR),
+            Self::Roman => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
+                .with_defaults(ROMAN_DEFAULTS),
         }
     }
 }

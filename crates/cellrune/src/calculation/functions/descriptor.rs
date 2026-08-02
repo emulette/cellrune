@@ -10,7 +10,7 @@ use super::kernel::{
     ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
     FinancialFunction, GroupedArrayFunction, GroupedFunction, InformationArrayFunction,
     InformationFunction, LegacyArrayFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, ModernTextArrayFunction, ModernTextFunction, RegressionFunction,
+    MathFunction, ModernTextArrayFunction, ModernTextFunction, RegressionFunction, RomanFunction,
     StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
     TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
@@ -347,6 +347,9 @@ macro_rules! function {
     ($variant:ident, $name:literal, Math) => {
         FunctionDescriptor::new($name, Evaluator::Math(MathFunction::$variant))
     };
+    ($variant:ident, $name:literal, Roman) => {
+        FunctionDescriptor::new($name, Evaluator::Roman(RomanFunction::$variant))
+    };
     ($variant:ident, $name:literal, Trigonometry) => {
         FunctionDescriptor::new(
             $name,
@@ -531,6 +534,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Sqrt, "SQRT", Math),
     function!(SqrtPi, "SQRTPI", Math),
     function!(Trunc, "TRUNC", Math),
+    function!(Arabic, "ARABIC", Roman).with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Roman, "ROMAN", Roman).with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(Acos, "ACOS", Trigonometry),
     function!(Acosh, "ACOSH", Trigonometry),
     function!(Acot, "ACOT", Trigonometry),

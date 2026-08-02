@@ -53,6 +53,7 @@ mod regex_options;
 mod regex_pattern;
 mod regex_text;
 mod regression;
+mod roman_numeral;
 mod statistical;
 mod statistical_additional;
 mod sum_of_squares;
@@ -205,6 +206,7 @@ fn dispatch_scalar(
         Evaluator::Grouped(function) => grouped::call_scalar(engine, context, function, args),
         Evaluator::Database(function) => database::call(engine, context, function, args),
         Evaluator::Math(function) => math::call(engine, context, function, args),
+        Evaluator::Roman(function) => roman_numeral::call(engine, context, function, args),
         Evaluator::Trigonometry(function) => trigonometry::call(engine, context, function, args),
         Evaluator::Combinatorics(function) => combinatorics::call(engine, context, function, args),
         Evaluator::SumOfSquares(function) => sum_of_squares::call(engine, context, function, args),

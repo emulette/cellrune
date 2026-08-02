@@ -114,6 +114,8 @@ function_enum!(MathFunction {
     Trunc,
 });
 
+function_enum!(RomanFunction { Arabic, Roman });
+
 function_enum!(TrigonometryFunction {
     Acos,
     Acosh,
@@ -411,6 +413,7 @@ pub(in crate::calculation) enum Evaluator {
     Grouped(GroupedFunction),
     Database(DatabaseFunction),
     Math(MathFunction),
+    Roman(RomanFunction),
     Trigonometry(TrigonometryFunction),
     Combinatorics(CombinatoricsFunction),
     SumOfSquares(SumOfSquaresFunction),
@@ -442,6 +445,7 @@ impl Evaluator {
             Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
             Self::Database(value) => format!("database:{}", value.stable_name()),
             Self::Math(value) => format!("math:{}", value.stable_name()),
+            Self::Roman(value) => format!("roman:{}", value.stable_name()),
             Self::Trigonometry(value) => format!("trigonometry:{}", value.stable_name()),
             Self::Combinatorics(value) => format!("combinatorics:{}", value.stable_name()),
             Self::SumOfSquares(value) => format!("sum_of_squares:{}", value.stable_name()),
@@ -476,6 +480,7 @@ impl Evaluator {
         evaluators.extend(GroupedFunction::ALL.iter().copied().map(Self::Grouped));
         evaluators.extend(DatabaseFunction::ALL.iter().copied().map(Self::Database));
         evaluators.extend(MathFunction::ALL.iter().copied().map(Self::Math));
+        evaluators.extend(RomanFunction::ALL.iter().copied().map(Self::Roman));
         evaluators.extend(
             TrigonometryFunction::ALL
                 .iter()
