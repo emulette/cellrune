@@ -27,16 +27,10 @@ pub(super) fn cell_at(sheet: &Sheet, row: u32, column: u32) -> Option<&crate::Ce
     sheet.cell(address)
 }
 
-fn used_rows(sheet: &Sheet) -> u32 {
-    sheet
-        .used_range()
-        .map_or(0, |range| range.end().row().get())
-}
-
 /// The greatest populated row of each populated column on one sheet.
 ///
-/// A whole-column *array* operand clamps to the columns it actually names rather than to the
-/// sheet-wide used range. The sheet-wide range would make the materialized height depend on cells
+/// A whole-column operand clamps to the columns it actually names rather than to the sheet-wide
+/// used range. The sheet-wide range would make the traversal height depend on cells
 /// that no dependency rectangle covers, so an edit in an unreferenced column would change the
 /// correct answer without dirtying the formula and full and incremental recalculation would
 /// disagree. Clamping per column keeps the value a function of the recorded dependencies alone.
@@ -507,20 +501,10 @@ impl Engine<'_> {
         })
     }
 
-    pub fn clamped_row_end(&self, rect: &Rect) -> u32 {
-        if rect.whole_rows {
-            rect.row_end
-                .min(used_rows(&self.workbook.sheets()[rect.sheet]))
-        } else {
-            rect.row_end
-        }
-    }
-
     /// Clamps a whole-column rect to the greatest populated row inside its own columns.
     ///
-    /// Whole-column array materialization uses this instead of [`Self::clamped_row_end`] so that
-    /// the resulting height, and therefore the value, depends only on the columns the expression
-    /// references. See [`ColumnExtents`].
+    /// Whole-column operations use this so that the result depends only on columns covered by the
+    /// operation's dependency rectangles. See [`ColumnExtents`].
     pub(in crate::calculation) fn whole_column_row_end(&self, rect: &Rect) -> u32 {
         if !rect.whole_rows {
             return rect.row_end;
@@ -529,6 +513,29 @@ impl Engine<'_> {
             extents.row_end_within(rect.col_start, rect.col_end)
         });
         rect.row_end.min(used)
+    }
+
+    /// Returns the shared vertical traversal extent for one operation's participating ranges.
+    ///
+    /// Explicit ranges contribute their declared height. Whole-column ranges contribute only the
+    /// populated prefix of their own columns. Taking the maximum preserves aligned virtual blanks
+    /// in shorter participating columns without making the operation depend on unrelated columns.
+    pub(in crate::calculation) fn operation_row_count<'rect>(
+        &self,
+        rects: impl IntoIterator<Item = &'rect Rect>,
+    ) -> u64 {
+        rects
+            .into_iter()
+            .map(|rect| {
+                let row_end = self.whole_column_row_end(rect);
+                if row_end < rect.row_start {
+                    0
+                } else {
+                    u64::from(row_end - rect.row_start) + 1
+                }
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     pub(in crate::calculation) fn implicit_intersection_rect(

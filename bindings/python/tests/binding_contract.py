@@ -20,8 +20,12 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 CATALOG_V0_1_10_REFERENCE_SHA256 = (
-    "9bbdf4572e791639bc6dabdc3ac0e359a7340c186bd814898440aa3b2c6b901c"
-)
+    pathlib.Path(__file__).parents[3]
+    / "crates"
+    / "cellrune"
+    / "testdata"
+    / "function-catalog-v0.1.10.sha256"
+).read_text(encoding="utf-8").strip()
 
 
 def catalog_digest() -> str:

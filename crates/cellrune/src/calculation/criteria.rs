@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 
 use super::coerce::compare_text_case_insensitive;
-use super::limits::CalculationLimitKind;
 use super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,37 +29,8 @@ pub struct CompiledCriteria {
     rhs: CompiledCriteriaRhs,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WildcardStepBudget {
-    used: u64,
-    limit: u64,
-}
-
-impl WildcardStepBudget {
-    pub const fn new(limit: u64) -> Self {
-        Self { used: 0, limit }
-    }
-
-    fn charge(&mut self, units: u64) -> Result<(), ErrorKind> {
-        self.used = self
-            .used
-            .checked_add(units)
-            .ok_or(ErrorKind::ResourceLimit(
-                CalculationLimitKind::FunctionIterations,
-            ))?;
-        if self.used > self.limit {
-            Err(ErrorKind::ResourceLimit(
-                CalculationLimitKind::FunctionIterations,
-            ))
-        } else {
-            Ok(())
-        }
-    }
-}
-
 pub fn compile_criteria_with_work(
     value: &Value,
-    budget: &mut WildcardStepBudget,
     mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<CompiledCriteria, ErrorKind> {
     match value {
@@ -82,7 +52,7 @@ pub fn compile_criteria_with_work(
             rhs: CompiledCriteriaRhs::Blank,
         }),
         Value::Text(text) => {
-            charge_preprocessing(text, budget, &mut on_work)?;
+            charge_preprocessing(text, &mut on_work)?;
             let (op, rest) = if let Some(rest) = text.strip_prefix("<>") {
                 (CriteriaOp::Ne, rest)
             } else if let Some(rest) = text.strip_prefix("<=") {
@@ -119,14 +89,13 @@ pub fn compile_criteria_with_work(
 impl CompiledCriteria {
     pub fn exact_equality_with_work(
         value: &Value,
-        budget: &mut WildcardStepBudget,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<Option<Self>, ErrorKind> {
         let rhs = match value {
             Value::Number(number) => CompiledCriteriaRhs::Number(*number),
             Value::Logical(logical) => CompiledCriteriaRhs::Logical(*logical),
             Value::Text(text) => {
-                charge_preprocessing(text, budget, &mut on_work)?;
+                charge_preprocessing(text, &mut on_work)?;
                 CompiledCriteriaRhs::EqualityText(CompiledWildcardPattern::compile_precharged(text))
             }
             Value::Blank | Value::Error(_) => return Ok(None),
@@ -137,46 +106,49 @@ impl CompiledCriteria {
         }))
     }
 
-    fn matches(&self, cell: &Value, budget: &mut WildcardStepBudget) -> Result<bool, ErrorKind> {
-        self.matches_with_work(cell, budget, |_| Ok(()))
-    }
-
     pub fn matches_with_work(
         &self,
         cell: &Value,
-        budget: &mut WildcardStepBudget,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<bool, ErrorKind> {
         match self.op {
-            CriteriaOp::Eq => self.eq_matches(cell, budget, &mut on_work),
-            CriteriaOp::Ne => Ok(!self.eq_matches(cell, budget, &mut on_work)?),
-            CriteriaOp::Lt => self.ord_matches(cell, |ordering| ordering == Ordering::Less),
-            CriteriaOp::Le => self.ord_matches(cell, |ordering| ordering != Ordering::Greater),
-            CriteriaOp::Gt => self.ord_matches(cell, |ordering| ordering == Ordering::Greater),
-            CriteriaOp::Ge => self.ord_matches(cell, |ordering| ordering != Ordering::Less),
+            CriteriaOp::Eq => self.eq_matches(cell, &mut on_work),
+            CriteriaOp::Ne => Ok(!self.eq_matches(cell, &mut on_work)?),
+            CriteriaOp::Lt => {
+                self.ord_matches(cell, &mut on_work, |ordering| ordering == Ordering::Less)
+            }
+            CriteriaOp::Le => {
+                self.ord_matches(cell, &mut on_work, |ordering| ordering != Ordering::Greater)
+            }
+            CriteriaOp::Gt => {
+                self.ord_matches(cell, &mut on_work, |ordering| ordering == Ordering::Greater)
+            }
+            CriteriaOp::Ge => {
+                self.ord_matches(cell, &mut on_work, |ordering| ordering != Ordering::Less)
+            }
         }
     }
 
     fn eq_matches(
         &self,
         cell: &Value,
-        budget: &mut WildcardStepBudget,
         on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<bool, ErrorKind> {
         match &self.rhs {
             CompiledCriteriaRhs::Blank => Ok(cell.is_blank_like()),
-            CompiledCriteriaRhs::Number(expected) => Ok(match cell {
-                Value::Number(actual) => actual == expected,
-                Value::Text(text) => text
-                    .trim()
-                    .parse::<f64>()
-                    .is_ok_and(|actual| actual == *expected),
-                _ => false,
-            }),
-            CompiledCriteriaRhs::EqualityText(pattern) => match cell {
-                Value::Text(text) if !text.is_empty() => {
-                    pattern.matches_with_work(text, budget, on_work)
+            CompiledCriteriaRhs::Number(expected) => match cell {
+                Value::Number(actual) => Ok(actual == expected),
+                Value::Text(text) => {
+                    charge_preprocessing(text, on_work)?;
+                    Ok(text
+                        .trim()
+                        .parse::<f64>()
+                        .is_ok_and(|actual| actual == *expected))
                 }
+                _ => Ok(false),
+            },
+            CompiledCriteriaRhs::EqualityText(pattern) => match cell {
+                Value::Text(text) if !text.is_empty() => pattern.matches_with_work(text, on_work),
                 _ => Ok(false),
             },
             CompiledCriteriaRhs::OrderedText(_) => {
@@ -194,39 +166,43 @@ impl CompiledCriteria {
     fn ord_matches(
         &self,
         cell: &Value,
+        on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
         accept: impl Fn(Ordering) -> bool,
     ) -> Result<bool, ErrorKind> {
-        Ok(match &self.rhs {
+        match &self.rhs {
             CompiledCriteriaRhs::Number(expected) => {
                 let actual = match cell {
                     Value::Number(number) => Some(*number),
-                    Value::Text(text) => text.trim().parse::<f64>().ok(),
+                    Value::Text(text) => {
+                        charge_preprocessing(text, on_work)?;
+                        text.trim().parse::<f64>().ok()
+                    }
                     _ => None,
                 };
-                actual
+                Ok(actual
                     .and_then(|actual| actual.partial_cmp(expected))
-                    .is_some_and(accept)
+                    .is_some_and(accept))
             }
             CompiledCriteriaRhs::OrderedText(expected) => match cell {
                 Value::Text(text) if !text.is_empty() => {
-                    accept(compare_text_case_insensitive(text, expected))
+                    charge_text_comparison(text, expected, on_work)?;
+                    Ok(accept(compare_text_case_insensitive(text, expected)))
                 }
-                _ => false,
+                _ => Ok(false),
             },
             CompiledCriteriaRhs::EqualityText(_) => {
                 unreachable!("equality text is constructed only for equality operators")
             }
-            CompiledCriteriaRhs::Logical(expected) => {
-                matches!(cell, Value::Logical(actual) if accept(actual.cmp(expected)))
-            }
-            CompiledCriteriaRhs::Blank => false,
-            CompiledCriteriaRhs::Error(_) => false,
-        })
+            CompiledCriteriaRhs::Logical(expected) => Ok(matches!(
+                cell,
+                Value::Logical(actual) if accept(actual.cmp(expected))
+            )),
+            CompiledCriteriaRhs::Blank | CompiledCriteriaRhs::Error(_) => Ok(false),
+        }
     }
 
     pub fn matches_blank(&self) -> bool {
-        let mut budget = WildcardStepBudget::new(u64::MAX);
-        self.matches(&Value::Blank, &mut budget)
+        self.matches_with_work(&Value::Blank, |_| Ok(()))
             .expect("blank matching does not consume wildcard steps")
     }
 }
@@ -246,10 +222,9 @@ pub struct CompiledWildcardPattern {
 impl CompiledWildcardPattern {
     pub fn compile_with_work(
         pattern: &str,
-        budget: &mut WildcardStepBudget,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<Self, ErrorKind> {
-        charge_preprocessing(pattern, budget, &mut on_work)?;
+        charge_preprocessing(pattern, &mut on_work)?;
         Ok(Self::compile_precharged(pattern))
     }
 
@@ -262,17 +237,16 @@ impl CompiledWildcardPattern {
     pub fn matches_with_work(
         &self,
         text: &str,
-        budget: &mut WildcardStepBudget,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<bool, ErrorKind> {
-        charge_preprocessing(text, budget, &mut on_work)?;
+        charge_preprocessing(text, &mut on_work)?;
         let characters: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
         let mut token_index = 0_usize;
         let mut char_index = 0_usize;
         let mut star_token: Option<usize> = None;
         let mut star_char = 0_usize;
         while char_index < characters.len() {
-            charge_work(1, budget, &mut on_work)?;
+            on_work(1)?;
             let matched = match self.tokens.get(token_index) {
                 Some(PatternToken::AnyOne) => true,
                 Some(PatternToken::Literal(literal)) => *literal == characters[char_index],
@@ -294,7 +268,7 @@ impl CompiledWildcardPattern {
             }
         }
         while self.tokens.get(token_index) == Some(&PatternToken::AnySequence) {
-            charge_work(1, budget, &mut on_work)?;
+            on_work(1)?;
             token_index += 1;
         }
         Ok(token_index == self.tokens.len())
@@ -306,20 +280,36 @@ impl CompiledWildcardPattern {
 /// is followed by separate charges for wildcard state transitions.
 fn charge_preprocessing(
     input: &str,
-    budget: &mut WildcardStepBudget,
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(), ErrorKind> {
-    let units = u64::try_from(input.len())
-        .map_err(|_| ErrorKind::ResourceLimit(CalculationLimitKind::FunctionIterations))?;
-    charge_work(units, budget, on_work)
+    on_work(input.len() as u64)
 }
 
-fn charge_work(
-    units: u64,
-    budget: &mut WildcardStepBudget,
+pub fn charge_value_comparison_work(
+    left: &Value,
+    right: &Value,
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(), ErrorKind> {
-    budget.charge(units)?;
+    match (left, right) {
+        (Value::Text(left), Value::Text(right)) => charge_text_comparison(left, right, on_work),
+        (Value::Text(text), Value::Blank) | (Value::Blank, Value::Text(text)) => {
+            charge_preprocessing(text, on_work)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn charge_text_comparison(
+    left: &str,
+    right: &str,
+    on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
+) -> Result<(), ErrorKind> {
+    let units =
+        (left.len() as u64)
+            .checked_add(right.len() as u64)
+            .ok_or(ErrorKind::ResourceLimit(
+                super::limits::CalculationLimitKind::FunctionIterations,
+            ))?;
     on_work(units)
 }
 
@@ -348,28 +338,38 @@ fn compile_pattern(pattern: &str) -> Vec<PatternToken> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompiledCriteria, CompiledCriteriaRhs, CompiledWildcardPattern, WildcardStepBudget,
-        compile_criteria_with_work,
+        CompiledCriteria, CompiledCriteriaRhs, CompiledWildcardPattern,
+        charge_value_comparison_work, compile_criteria_with_work,
     };
     use crate::calculation::limits::CalculationLimitKind;
     use crate::calculation::session::CancellationToken;
     use crate::calculation::value::ErrorKind;
     use crate::calculation::value::Value;
 
-    fn compiled_pattern(
-        pattern: &str,
-        budget: &mut WildcardStepBudget,
-    ) -> Result<CompiledWildcardPattern, ErrorKind> {
-        CompiledWildcardPattern::compile_with_work(pattern, budget, |_| Ok(()))
+    fn charge(used: &mut u64, limit: u64, units: u64) -> Result<(), ErrorKind> {
+        *used = used.checked_add(units).ok_or(ErrorKind::ResourceLimit(
+            CalculationLimitKind::FunctionIterations,
+        ))?;
+        if *used > limit {
+            Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn compiled_pattern(pattern: &str) -> CompiledWildcardPattern {
+        CompiledWildcardPattern::compile_with_work(pattern, |_| Ok(()))
+            .expect("unlimited pattern work")
     }
 
     #[test]
     fn wildcard_matching_is_case_insensitive_and_bounded() {
         for (pattern, text) in [("a*?~*", "Axx*"), ("~a", "~a"), ("a~", "a~"), ("a~~", "a~")] {
-            let mut budget = WildcardStepBudget::new(100);
-            let compiled = compiled_pattern(pattern, &mut budget).expect("pattern budget");
+            let compiled = compiled_pattern(pattern);
             assert_eq!(
-                compiled.matches_with_work(text, &mut budget, |_| Ok(())),
+                compiled.matches_with_work(text, |_| Ok(())),
                 Ok(true),
                 "pattern={pattern}, text={text}",
             );
@@ -378,17 +378,14 @@ mod tests {
 
     #[test]
     fn compiled_criteria_reuses_one_equality_pattern_and_keeps_ordered_text_raw() {
-        let mut budget = WildcardStepBudget::new(100);
-        let criterion =
-            compile_criteria_with_work(&Value::Text("a*".to_owned()), &mut budget, |_| Ok(()))
-                .expect("valid criterion");
+        let criterion = compile_criteria_with_work(&Value::Text("a*".to_owned()), |_| Ok(()))
+            .expect("valid criterion");
         assert!(matches!(
             criterion.rhs,
             CompiledCriteriaRhs::EqualityText(_)
         ));
-        let ordered =
-            compile_criteria_with_work(&Value::Text(">a*".to_owned()), &mut budget, |_| Ok(()))
-                .expect("valid ordered criterion");
+        let ordered = compile_criteria_with_work(&Value::Text(">a*".to_owned()), |_| Ok(()))
+            .expect("valid ordered criterion");
         assert_eq!(
             ordered.rhs,
             CompiledCriteriaRhs::OrderedText("a*".to_owned())
@@ -397,7 +394,7 @@ mod tests {
         let mut charged = 0_u64;
         for value in ["alpha", "amber"] {
             assert_eq!(
-                criterion.matches_with_work(&Value::Text(value.to_owned()), &mut budget, |units| {
+                criterion.matches_with_work(&Value::Text(value.to_owned()), |units| {
                     charged += units;
                     Ok(())
                 },),
@@ -406,18 +403,12 @@ mod tests {
         }
         assert!(charged >= "alpha".len() as u64 + "amber".len() as u64);
 
-        let exact = CompiledCriteria::exact_equality_with_work(
-            &Value::Text("a*".to_owned()),
-            &mut budget,
-            |_| Ok(()),
-        )
-        .expect("within budget")
-        .expect("text criterion");
+        let exact =
+            CompiledCriteria::exact_equality_with_work(&Value::Text("a*".to_owned()), |_| Ok(()))
+                .expect("within budget")
+                .expect("text criterion");
         assert_eq!(
-            exact.matches(
-                &Value::Text("alpha".to_owned()),
-                &mut WildcardStepBudget::new(1000),
-            ),
+            exact.matches_with_work(&Value::Text("alpha".to_owned()), |_| Ok(())),
             Ok(true)
         );
     }
@@ -425,31 +416,32 @@ mod tests {
     #[test]
     fn preprocessing_is_precharged_and_observes_the_real_cancellation_token() {
         let long_pattern = "a".repeat(128);
-        let mut pattern_budget = WildcardStepBudget::new(16);
+        let mut pattern_work = 0_u64;
         assert_eq!(
-            CompiledWildcardPattern::compile_with_work(&long_pattern, &mut pattern_budget, |_| Ok(
-                ()
-            )),
+            CompiledWildcardPattern::compile_with_work(&long_pattern, |units| {
+                charge(&mut pattern_work, 16, units)
+            }),
             Err(ErrorKind::ResourceLimit(
                 CalculationLimitKind::FunctionIterations
             ))
         );
 
-        let mut text_budget = WildcardStepBudget::new(32);
-        let pattern = compiled_pattern("a*", &mut text_budget).expect("short pattern");
+        let mut text_work = 0_u64;
+        let pattern = compiled_pattern("a*");
         assert_eq!(
-            pattern.matches_with_work(&"a".repeat(64), &mut text_budget, |_| Ok(())),
+            pattern.matches_with_work(&"a".repeat(64), |units| {
+                charge(&mut text_work, 32, units)
+            }),
             Err(ErrorKind::ResourceLimit(
                 CalculationLimitKind::FunctionIterations
             ))
         );
 
         let token = CancellationToken::new();
-        let mut cancellable_budget = WildcardStepBudget::new(1_000);
-        let pattern = compiled_pattern("a*", &mut cancellable_budget).expect("short pattern");
+        let pattern = compiled_pattern("a*");
         let mut polls = 0_u64;
         assert_eq!(
-            pattern.matches_with_work(&"a".repeat(128), &mut cancellable_budget, |_| {
+            pattern.matches_with_work(&"a".repeat(128), |_| {
                 polls += 1;
                 token.cancel();
                 if token.is_cancelled() {
@@ -465,5 +457,44 @@ mod tests {
             ))
         );
         assert_eq!(polls, 1, "cancellation stops before lowercase allocation");
+    }
+
+    #[test]
+    fn numeric_and_ordered_text_work_is_charged_before_comparison() {
+        let numeric = compile_criteria_with_work(&Value::Number(12.0), |_| Ok(()))
+            .expect("numeric criterion");
+        let mut numeric_work = 0_u64;
+        assert_eq!(
+            numeric.matches_with_work(&Value::Text(" 12 ".to_owned()), |units| {
+                numeric_work += units;
+                Ok(())
+            }),
+            Ok(true)
+        );
+        assert_eq!(numeric_work, 4);
+
+        let ordered = compile_criteria_with_work(&Value::Text(">alpha".to_owned()), |_| Ok(()))
+            .expect("ordered criterion");
+        let mut ordered_work = 0_u64;
+        assert_eq!(
+            ordered.matches_with_work(&Value::Text("Beta".to_owned()), |units| {
+                ordered_work += units;
+                Ok(())
+            }),
+            Ok(true)
+        );
+        assert_eq!(ordered_work, ("Beta".len() + "alpha".len()) as u64);
+
+        let mut comparison_work = 0_u64;
+        charge_value_comparison_work(
+            &Value::Text("left".to_owned()),
+            &Value::Text("right".to_owned()),
+            &mut |units| {
+                comparison_work += units;
+                Ok(())
+            },
+        )
+        .expect("comparison work");
+        assert_eq!(comparison_work, 9);
     }
 }

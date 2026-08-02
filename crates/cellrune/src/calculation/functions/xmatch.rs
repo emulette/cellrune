@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 
 use super::super::ast::Expr;
-use super::super::coerce::compare;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::array_common::validate_array_input;
@@ -124,7 +123,7 @@ fn linear_match(
     };
     let mut best = None;
     for step in 0..values.len() {
-        charge_lookup_step(engine, context)?;
+        criteria_runtime.charge_work(1)?;
         let offset = match search_mode {
             SearchMode::Forward => step,
             SearchMode::Reverse => values.len() - step - 1,
@@ -145,11 +144,18 @@ fn linear_match(
             }
             continue;
         }
-        let ordering = compare(candidate, &lookup)?;
+        let ordering = criteria_runtime.compare(candidate, &lookup)?;
         if ordering == Ordering::Equal {
             return Ok(offset);
         }
-        if is_better_approximate(engine, context, values, best, offset, ordering, match_mode)? {
+        if is_better_approximate(
+            &mut criteria_runtime,
+            values,
+            best,
+            offset,
+            ordering,
+            match_mode,
+        )? {
             best = Some(offset);
         }
     }
@@ -157,8 +163,7 @@ fn linear_match(
 }
 
 fn is_better_approximate(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
+    criteria_runtime: &mut CriteriaRuntime<'_, '_, '_>,
     values: VectorView<'_>,
     best: Option<u32>,
     candidate: u32,
@@ -175,8 +180,8 @@ fn is_better_approximate(
     let Some(best) = best else {
         return Ok(true);
     };
-    charge_lookup_step(engine, context)?;
-    let ordering = compare(values.at(candidate), values.at(best))?;
+    criteria_runtime.charge_work(1)?;
+    let ordering = criteria_runtime.compare(values.at(candidate), values.at(best))?;
     Ok(match mode {
         MatchMode::NextSmaller => ordering == Ordering::Greater,
         MatchMode::NextLarger => ordering == Ordering::Less,
@@ -204,10 +209,11 @@ fn binary_match(
     };
     let mut low = 0_u32;
     let mut high = values.len();
+    let mut criteria_runtime = CriteriaRuntime::new(engine, context);
     while low < high {
-        charge_lookup_step(engine, context)?;
+        criteria_runtime.charge_work(1)?;
         let middle = low + (high - low) / 2;
-        let ordering = compare(values.at(middle), lookup)?;
+        let ordering = criteria_runtime.compare(values.at(middle), lookup)?;
         if ordering == Ordering::Equal {
             return Ok(middle);
         }
@@ -231,13 +237,4 @@ fn binary_match(
         (_, MatchMode::Wildcard) => unreachable!("wildcard returned before binary search"),
     };
     candidate.ok_or(ErrorKind::NA)
-}
-
-fn charge_lookup_step(engine: &Engine<'_>, context: EvalContext<'_>) -> Result<(), ErrorKind> {
-    if context.is_cancelled() {
-        return Err(ErrorKind::ResourceLimit(
-            super::super::limits::CalculationLimitKind::FunctionIterations,
-        ));
-    }
-    engine.charge_function_iterations(context, 1)
 }

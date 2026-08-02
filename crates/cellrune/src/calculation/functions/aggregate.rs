@@ -290,14 +290,13 @@ fn conditional_aggregate(
         Ok(parsed) => parsed,
         Err(kind) => return Value::Error(kind),
     };
-    let iter_rows = parsed
-        .criteria
-        .iter()
-        .map(|(range, _)| available_rows(engine, range))
-        .chain(std::iter::once(available_rows(engine, &parsed.value_range)))
-        .max()
-        .unwrap_or(0)
-        .min(parsed.value_range.height());
+    let iter_rows = engine.operation_row_count(
+        parsed
+            .criteria
+            .iter()
+            .map(|(range, _)| range)
+            .chain(std::iter::once(&parsed.value_range)),
+    );
     let visits = iter_rows
         .checked_mul(parsed.value_range.width())
         .and_then(|cells| cells.checked_mul(parsed.criteria.len() as u64 + 1));
@@ -416,15 +415,6 @@ fn parse_conditional_arguments(
         value_range,
         criteria,
     })
-}
-
-fn available_rows(engine: &Engine<'_>, rect: &Rect) -> u64 {
-    let row_end = engine.clamped_row_end(rect);
-    if row_end < rect.row_start {
-        0
-    } else {
-        u64::from(row_end - rect.row_start) + 1
-    }
 }
 
 fn finite_number(number: f64) -> Value {

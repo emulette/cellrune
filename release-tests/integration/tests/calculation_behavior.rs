@@ -13,6 +13,10 @@ use cellrune::{
 
 #[path = "calculation_behavior/criteria_matching.rs"]
 mod criteria_matching;
+#[path = "calculation_behavior/support.rs"]
+mod support;
+
+use support::{assert_issue, assert_number, cell_id, workbook_with_formulas};
 
 #[test]
 fn unsupported_functions_are_not_hidden_by_iferror() {
@@ -5789,17 +5793,6 @@ fn assert_materialized_number(
     );
 }
 
-fn assert_issue(
-    calculation: &cellrune::CalculationSnapshot,
-    column: u32,
-    expected: CalculationIssueCode,
-) {
-    let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(cell_id(column)) else {
-        panic!("expected unavailable calculation result in column {column}");
-    };
-    assert_eq!(issue.code(), expected);
-}
-
 fn assert_positive_zero(calculation: &cellrune::CalculationSnapshot, column: u32) {
     let Some(CalculationCellResult::Value(CellValue::Number(number))) =
         calculation.cell(cell_id(column))
@@ -5810,27 +5803,6 @@ fn assert_positive_zero(calculation: &cellrune::CalculationSnapshot, column: u32
     assert!(
         !number.get().is_sign_negative(),
         "column {column} produced negative zero, which Excel reports as 0",
-    );
-}
-
-fn assert_number(
-    calculation: &cellrune::CalculationSnapshot,
-    column: u32,
-    expected: f64,
-    tolerance: f64,
-) {
-    let Some(CalculationCellResult::Value(CellValue::Number(actual))) =
-        calculation.cell(cell_id(column))
-    else {
-        panic!(
-            "expected numeric calculation result in column {column}, got {:?}",
-            calculation.cell(cell_id(column))
-        );
-    };
-    assert!(
-        (actual.get() - expected).abs() <= tolerance,
-        "unexpected result in column {column}: expected {expected}, got {}",
-        actual.get(),
     );
 }
 
@@ -5962,19 +5934,11 @@ fn assert_capability_issue_count(
     );
 }
 
-fn cell_id(column: u32) -> CalculationCellId {
-    calculation_cell_id(1, column)
-}
-
 fn calculation_cell_id(row: u32, column: u32) -> CalculationCellId {
     CalculationCellId::new(
         SheetId::new(1).expect("valid sheet ID"),
         CellAddress::from_indices(row, column).expect("valid test address"),
     )
-}
-
-fn workbook_with_formulas(formulas: &[(u32, u32, &str)]) -> WorkbookSnapshot {
-    workbook_with_formulas_and_names(formulas, &[])
 }
 
 fn formula_sheet(id: u32, name: &str, formulas: &[(u32, u32, &str)]) -> Sheet {

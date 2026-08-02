@@ -1023,7 +1023,9 @@ mod tests {
     #[test]
     fn v0_1_10_grouped_checkpoint_catalog_is_byte_exact() {
         let mut digest = Sha256::new();
-        for entry in super::function_catalog() {
+        for entry in
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_10)
+        {
             digest.update(entry.name().as_bytes());
             digest.update([0]);
             digest.update(entry.canonical_name().as_bytes());
@@ -1042,7 +1044,7 @@ mod tests {
             .collect::<String>();
         assert_eq!(
             actual,
-            "9bbdf4572e791639bc6dabdc3ac0e359a7340c186bd814898440aa3b2c6b901c"
+            include_str!("../../../testdata/function-catalog-v0.1.10.sha256").trim()
         );
     }
 }

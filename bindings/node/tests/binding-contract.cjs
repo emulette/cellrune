@@ -6,8 +6,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
-const CATALOG_V0_1_10_REFERENCE_SHA256 =
-  "9bbdf4572e791639bc6dabdc3ac0e359a7340c186bd814898440aa3b2c6b901c";
+const CATALOG_V0_1_10_REFERENCE_SHA256 = fs
+  .readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "crates",
+      "cellrune",
+      "testdata",
+      "function-catalog-v0.1.10.sha256",
+    ),
+    "utf8",
+  )
+  .trim();
 
 function catalogDigest() {
   const catalog = functionCatalog();

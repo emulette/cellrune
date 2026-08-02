@@ -1,4 +1,9 @@
-use super::*;
+use cellrune::{
+    CalculationCellResult, CalculationIssueCode, CalculationLimits, CalculationOptions, CellValue,
+    ExcelError, calculate_workbook,
+};
+
+use super::support::{assert_issue, assert_number, cell_id, workbook_with_formulas};
 
 #[test]
 fn conditional_aggregates_use_excel_range_rules_and_clamp_whole_columns() {
@@ -42,7 +47,7 @@ fn conditional_aggregates_use_excel_range_rules_and_clamp_whole_columns() {
 }
 
 #[test]
-fn wildcard_local_and_formula_cumulative_limits_are_both_observable() {
+fn wildcard_work_uses_the_formula_cumulative_limit() {
     let limits = CalculationLimits::default()
         .with_max_function_iterations(20)
         .expect("nonzero function iteration limit");
@@ -63,14 +68,75 @@ fn wildcard_local_and_formula_cumulative_limits_are_both_observable() {
     );
     assert_issue(&cumulative, 1, CalculationIssueCode::ResourceLimitExceeded);
 
-    let local_limits = CalculationLimits::default()
+    let tight_limits = CalculationLimits::default()
         .with_max_function_iterations(10)
-        .expect("nonzero local wildcard limit");
-    let local = calculate_workbook(
+        .expect("nonzero cumulative wildcard limit");
+    let tight = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, "COUNTIF(A2,\"a*\")"), (2, 1, "\"alpha\"")]),
-        CalculationOptions::default().with_limits(local_limits),
+        CalculationOptions::default().with_limits(tight_limits),
     );
-    assert_issue(&local, 1, CalculationIssueCode::ResourceLimitExceeded);
+    assert_issue(&tight, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn criteria_and_match_text_scans_are_charged_before_comparison() {
+    let candidate = "a".repeat(64);
+    let lookup = "z".repeat(64);
+    let quoted_candidate = format!("\"{candidate}\"");
+    let countif = format!("COUNTIF(A2,\">{lookup}\")");
+    let legacy_match = format!("MATCH(\"{lookup}\",A2,1)");
+    let xmatch = format!("XMATCH(\"{lookup}\",A2,0)");
+    let workbook = workbook_with_formulas(&[
+        (2, 1, quoted_candidate.as_str()),
+        (1, 2, countif.as_str()),
+        (1, 3, legacy_match.as_str()),
+        (1, 4, xmatch.as_str()),
+    ]);
+    let limits = CalculationLimits::default()
+        .with_max_function_iterations(100)
+        .expect("nonzero function work limit");
+    let calculation =
+        calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+
+    for column in 2..=4 {
+        assert_issue(
+            &calculation,
+            column,
+            CalculationIssueCode::ResourceLimitExceeded,
+        );
+    }
+}
+
+#[test]
+fn whole_column_operations_ignore_unrelated_column_extents() {
+    let workbook = workbook_with_formulas(&[
+        (2, 1, "1"),
+        (2, 2, "10"),
+        (200, 26, "1"),
+        (1, 3, "COUNTIF(A:A,1)"),
+        (1, 4, "COUNTIF(A:A,\"\")"),
+        (1, 5, "SUMIFS(B:B,A:A,1)"),
+        (1, 6, "MAXIFS(B:B,A:A,1)"),
+        (1, 7, "MATCH(99,A:A,0)"),
+        (1, 8, "XLOOKUP(99,A:A,B:B,,0,-1)"),
+    ]);
+    let limits = CalculationLimits::default()
+        .with_max_array_cells(20)
+        .expect("nonzero array cell limit");
+    let calculation =
+        calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+
+    for (column, expected) in [(3, 1.0), (4, 1_048_575.0), (5, 10.0), (6, 10.0)] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+    for column in [7, 8] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::NotAvailable,
+            ))),
+        );
+    }
 }
 
 #[test]

@@ -171,9 +171,9 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
     let mut visited_cells = 0_u64;
     for arg in args {
         if let Some(rect) = multi_cell_rect(engine, context, arg) {
-            let row_end = engine.clamped_row_end(&rect);
-            if row_end >= rect.row_start {
-                let cells = (u64::from(row_end - rect.row_start) + 1).checked_mul(rect.width());
+            let rows = engine.operation_row_count([&rect]);
+            if rows > 0 {
+                let cells = rows.checked_mul(rect.width());
                 visited_cells = match cells.and_then(|cells| visited_cells.checked_add(cells)) {
                     Some(total) => total,
                     None => {
@@ -186,7 +186,8 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
                     return Value::Error(kind);
                 }
             }
-            for row in rect.row_start..=row_end {
+            for row_offset in 0..rows as u32 {
+                let row = rect.row_start + row_offset;
                 for column in rect.col_start..=rect.col_end {
                     match engine.read_reference_cell(context, (rect.sheet, row, column)) {
                         Err(kind) => return Value::Error(kind),
@@ -356,16 +357,7 @@ fn count_matches(
 ) -> Result<f64, ErrorKind> {
     let height = rects[0].height();
     let width = rects[0].width();
-    let mut iter_rows = 0_u64;
-    for rect in rects {
-        let clamped = engine.clamped_row_end(rect);
-        let available = if clamped >= rect.row_start {
-            u64::from(clamped - rect.row_start) + 1
-        } else {
-            0
-        };
-        iter_rows = iter_rows.max(available.min(height));
-    }
+    let iter_rows = engine.operation_row_count(rects);
     let visits = iter_rows
         .checked_mul(width)
         .and_then(|cells| cells.checked_mul(rects.len() as u64))
@@ -599,19 +591,18 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         return Value::Error(ErrorKind::NA);
     }
     let mut matcher = CriteriaRuntime::new(engine, context);
-    let criterion = match matcher.compile_exact_equality(&lookup) {
-        Ok(Some(criterion)) => criterion,
-        Ok(None) => return Value::Error(ErrorKind::NA),
-        Err(kind) => return Value::Error(kind),
+    let criterion = if match_type == 0.0 {
+        match matcher.compile_exact_equality(&lookup) {
+            Ok(Some(criterion)) => Some(criterion),
+            Ok(None) => return Value::Error(ErrorKind::NA),
+            Err(kind) => return Value::Error(kind),
+        }
+    } else {
+        None
     };
     let vertical = rect.width() == 1;
-    let clamped_row_end = engine.clamped_row_end(&rect);
     let length = if vertical {
-        if clamped_row_end >= rect.row_start {
-            u64::from(clamped_row_end - rect.row_start) + 1
-        } else {
-            0
-        }
+        engine.operation_row_count([&rect])
     } else {
         rect.width()
     };
@@ -629,16 +620,20 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             Ok(value) => value,
             Err(kind) => return Value::Error(kind),
         };
-        match matcher.matches(&criterion, &value) {
-            Ok(true) => return Value::Number((offset + 1) as f64),
-            Ok(false) => {}
-            Err(kind) => return Value::Error(kind),
-        }
-        if match_type != 0.0 {
-            let ordering = match super::super::coerce::compare(&value, &lookup) {
+        if let Some(criterion) = &criterion {
+            match matcher.matches(criterion, &value) {
+                Ok(true) => return Value::Number((offset + 1) as f64),
+                Ok(false) => continue,
+                Err(kind) => return Value::Error(kind),
+            }
+        } else {
+            let ordering = match matcher.compare(&value, &lookup) {
                 Ok(ordering) => ordering,
                 Err(kind) => return Value::Error(kind),
             };
+            if ordering == std::cmp::Ordering::Equal {
+                return Value::Number((offset + 1) as f64);
+            }
             if (match_type == 1.0 && ordering == std::cmp::Ordering::Less)
                 || (match_type == -1.0 && ordering == std::cmp::Ordering::Greater)
             {

@@ -78,13 +78,10 @@ impl CalculationLimits {
         self.max_text_bytes
     }
 
-    /// Returns the function-work limit used by both cumulative and local boundaries.
+    /// Returns the cumulative function-work limit for one formula-cell evaluation.
     ///
-    /// Charged function work accumulates across every function evaluated for one formula cell.
-    /// Selected kernels that can amplify work internally, including wildcard criteria and lookup
-    /// matching, also enforce this value as a local hard cap for each function call. Therefore two
-    /// individually valid calls can still exceed the cumulative per-cell boundary when composed
-    /// in one formula.
+    /// Kernels charge bounded preprocessing, comparisons, and loop work to one shared cell budget,
+    /// so composing individually small function calls cannot evade the limit.
     pub const fn max_function_iterations(self) -> u64 {
         self.max_function_iterations
     }
@@ -199,12 +196,7 @@ impl CalculationLimits {
         Ok(self)
     }
 
-    /// Replaces the cumulative per-cell and selected per-function work limit.
-    ///
-    /// Function work is accumulated across a formula cell evaluation. Wildcard criteria and
-    /// lookup kernels additionally apply the same value as a per-call local hard cap. This dual
-    /// boundary prevents one call from monopolizing the budget without allowing multiple calls to
-    /// evade the cell-wide limit.
+    /// Replaces the cumulative function-work limit for one formula-cell evaluation.
     ///
     /// # Errors
     ///

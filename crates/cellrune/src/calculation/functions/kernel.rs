@@ -8,6 +8,13 @@ macro_rules! function_enum {
         impl $name {
             #[cfg(test)]
             pub(super) const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            #[cfg(test)]
+            pub(super) const fn stable_name(self) -> &'static str {
+                match self {
+                    $(Self::$variant => stringify!($variant)),+
+                }
+            }
         }
     };
 }
@@ -401,6 +408,38 @@ pub(in crate::calculation) enum Evaluator {
 
 #[cfg(test)]
 impl Evaluator {
+    pub(super) fn stable_name(self) -> String {
+        match self {
+            Self::Legacy(value) => format!("legacy:{}", value.stable_name()),
+            Self::Logical(value) => format!("logical:{}", value.stable_name()),
+            Self::Aggregate(value) => format!("aggregate:{}", value.stable_name()),
+            Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
+            Self::Math(value) => format!("math:{}", value.stable_name()),
+            Self::Trigonometry(value) => format!("trigonometry:{}", value.stable_name()),
+            Self::Combinatorics(value) => format!("combinatorics:{}", value.stable_name()),
+            Self::SumOfSquares(value) => format!("sum_of_squares:{}", value.stable_name()),
+            Self::Engineering(value) => format!("engineering:{}", value.stable_name()),
+            Self::Lookup(value) => format!("lookup:{}", value.stable_name()),
+            Self::Information(value) => format!("information:{}", value.stable_name()),
+            Self::Text(value) => format!("text:{}", value.stable_name()),
+            Self::TextAdditional(value) => format!("text_additional:{}", value.stable_name()),
+            Self::ModernText(value) => format!("modern_text:{}", value.stable_name()),
+            Self::Date(value) => format!("date:{}", value.stable_name()),
+            Self::DateAdditional(value) => format!("date_additional:{}", value.stable_name()),
+            Self::Dynamic(value) => format!("dynamic:{}", value.stable_name()),
+            Self::Array(value) => format!("array:{}", value.stable_name()),
+            Self::Statistical(value) => format!("statistical:{}", value.stable_name()),
+            Self::StatisticalAdditional(value) => {
+                format!("statistical_additional:{}", value.stable_name())
+            }
+            Self::Financial(value) => format!("financial:{}", value.stable_name()),
+            Self::FinancialAdditional(value) => {
+                format!("financial_additional:{}", value.stable_name())
+            }
+            Self::Areas => "areas".to_owned(),
+        }
+    }
+
     pub(super) fn all() -> Vec<Self> {
         let mut evaluators = Vec::new();
         evaluators.extend(LegacyFunction::ALL.iter().copied().map(Self::Legacy));
@@ -569,6 +608,19 @@ pub(in crate::calculation) enum ArrayEvaluator {
 
 #[cfg(test)]
 impl ArrayEvaluator {
+    pub(super) fn stable_name(self) -> String {
+        match self {
+            Self::Legacy(value) => format!("legacy:{}", value.stable_name()),
+            Self::Information(value) => format!("information:{}", value.stable_name()),
+            Self::Elementwise(value) => format!("elementwise:{}", value.stable_name()),
+            Self::Dynamic(value) => format!("dynamic:{}", value.stable_name()),
+            Self::Map => "map".to_owned(),
+            Self::Array(value) => format!("array:{}", value.stable_name()),
+            Self::ModernText(value) => format!("modern_text:{}", value.stable_name()),
+            Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
+        }
+    }
+
     pub(super) fn all() -> Vec<Self> {
         let mut evaluators = Vec::new();
         evaluators.extend(LegacyArrayFunction::ALL.iter().copied().map(Self::Legacy));

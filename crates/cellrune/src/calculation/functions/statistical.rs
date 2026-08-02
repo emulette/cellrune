@@ -421,15 +421,20 @@ fn conditional_extreme(
         Ok(criteria) => criteria,
         Err(kind) => return Value::Error(kind),
     };
-    let visits = value_range
-        .height()
+    let iter_rows = engine.operation_row_count(
+        criteria
+            .iter()
+            .map(|(range, _)| range)
+            .chain(std::iter::once(&value_range)),
+    );
+    let visits = iter_rows
         .checked_mul(value_range.width())
         .and_then(|cells| cells.checked_mul(criteria.len() as u64 + 1));
     if visits.is_none_or(|cells| engine.ensure_array_cells(cells).is_err()) {
         return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells));
     }
     let mut result: Option<f64> = None;
-    for row in 0..value_range.height() as u32 {
+    for row in 0..iter_rows as u32 {
         for column in 0..value_range.width() as u32 {
             let mut matched = true;
             for (rect, criterion) in &criteria {

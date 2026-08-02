@@ -244,11 +244,10 @@ fn collect_rect_values(
     visited_cells: &mut u64,
     values: &mut Vec<ArgumentValue>,
 ) -> Result<(), ErrorKind> {
-    let row_end = engine.clamped_row_end(&rect);
-    if row_end < rect.row_start {
+    let rows = engine.operation_row_count([&rect]);
+    if rows == 0 {
         return Ok(());
     }
-    let rows = u64::from(row_end - rect.row_start) + 1;
     let cells = rows
         .checked_mul(rect.width())
         .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
@@ -256,7 +255,8 @@ fn collect_rect_values(
         .checked_add(cells)
         .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
     engine.ensure_array_cells(*visited_cells)?;
-    for row in rect.row_start..=row_end {
+    for row_offset in 0..rows as u32 {
+        let row = rect.row_start + row_offset;
         for column in rect.col_start..=rect.col_end {
             let cell = (rect.sheet, row, column);
             let value = engine.read_reference_cell(context, cell)?;

@@ -329,31 +329,21 @@ fn xlookup(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Valu
     if !vertical && !horizontal {
         return Value::Error(ErrorKind::Value);
     }
+    let aligned = if vertical && return_rect.width() == 1 {
+        lookup_rect.height() == return_rect.height()
+    } else if horizontal && return_rect.height() == 1 {
+        lookup_rect.width() == return_rect.width()
+    } else {
+        false
+    };
+    if !aligned {
+        return Value::Error(ErrorKind::Value);
+    }
     let length = if vertical {
-        let row_end = engine.clamped_row_end(&lookup_rect);
-        if row_end < lookup_rect.row_start {
-            0
-        } else {
-            u64::from(row_end - lookup_rect.row_start) + 1
-        }
+        engine.operation_row_count([&lookup_rect, &return_rect])
     } else {
         lookup_rect.width()
     };
-    let return_length = if vertical && return_rect.width() == 1 {
-        let row_end = engine.clamped_row_end(&return_rect);
-        if row_end < return_rect.row_start {
-            0
-        } else {
-            u64::from(row_end - return_rect.row_start) + 1
-        }
-    } else if horizontal && return_rect.height() == 1 {
-        return_rect.width()
-    } else {
-        return Value::Error(ErrorKind::Value);
-    };
-    if length != return_length {
-        return Value::Error(ErrorKind::Value);
-    }
     if let Err(kind) = engine.ensure_array_cells(length) {
         return Value::Error(kind);
     }
@@ -477,10 +467,8 @@ fn find_lookup_offset(
 ) -> Result<u32, ErrorKind> {
     let length = if horizontal {
         rect.width()
-    } else if engine.clamped_row_end(&rect) < rect.row_start {
-        0
     } else {
-        u64::from(engine.clamped_row_end(&rect) - rect.row_start) + 1
+        engine.operation_row_count([&rect])
     };
     engine.ensure_array_cells(length)?;
 

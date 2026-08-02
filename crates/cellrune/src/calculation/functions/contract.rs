@@ -7,6 +7,9 @@ use super::kernel::{
     TrigonometryFunction,
 };
 
+#[cfg(test)]
+mod snapshot;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Arity {
     minimum: u16,

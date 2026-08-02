@@ -974,6 +974,9 @@ fn strip_storage_prefixes(mut name: &str) -> &str {
 }
 
 #[cfg(test)]
+mod snapshot;
+
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
@@ -1079,18 +1082,17 @@ mod tests {
 
     #[test]
     fn v0_1_10_semantic_registry_is_byte_exact() {
+        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_10);
         let mut digest = Sha256::new();
-        for descriptor in DESCRIPTORS {
-            digest.update(format!("{descriptor:?}\n").as_bytes());
-        }
+        digest.update(snapshot.as_bytes());
         let actual = digest
             .finalize()
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual,
-            "6fce7ef5bfcd8b6fe13370d5dbfa8cb692c4805b039d0db0ae5b61970d3b30cd"
+            actual, "2aad3e6874cde2c1de382dd5ef321d4b4c29684daf1981d7a6a1c5590a0cc045",
+            "stable v0.1.10 semantic snapshot changed:\n{snapshot}",
         );
     }
 

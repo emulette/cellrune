@@ -1,28 +1,25 @@
+use super::super::coerce::compare;
 use super::super::criteria::{
-    CompiledCriteria, CompiledWildcardPattern, WildcardStepBudget, compile_criteria_with_work,
+    CompiledCriteria, CompiledWildcardPattern, charge_value_comparison_work,
+    compile_criteria_with_work,
 };
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use std::cmp::Ordering;
 
-/// Per-function-call criteria execution state.
+/// Formula-cell criteria execution state.
 ///
-/// Wildcard matching has two deliberately independent limits: `wildcard_budget` preserves the
-/// hard cap for one criteria/lookup function call, while `EvalContext` accumulates the same work
-/// across every function nested in the formula cell. Preprocessing and each state transition go
-/// through this owner so neither boundary can be bypassed.
+/// Preprocessing, text comparison, and wildcard state transitions all charge the formula cell's
+/// cumulative function-work budget through this owner, which also polls cancellation before any
+/// bounded allocation or linear text pass.
 pub(super) struct CriteriaRuntime<'engine, 'workbook, 'scope> {
     engine: &'engine Engine<'workbook>,
     context: EvalContext<'scope>,
-    wildcard_budget: WildcardStepBudget,
 }
 
 impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     pub(super) fn new(engine: &'engine Engine<'workbook>, context: EvalContext<'scope>) -> Self {
-        Self {
-            engine,
-            context,
-            wildcard_budget: WildcardStepBudget::new(engine.max_function_iterations()),
-        }
+        Self { engine, context }
     }
 
     pub(super) fn compile_criteria(
@@ -31,7 +28,7 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<CompiledCriteria, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        compile_criteria_with_work(value, &mut self.wildcard_budget, |units| {
+        compile_criteria_with_work(value, |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }
@@ -42,7 +39,7 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<Option<CompiledCriteria>, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        CompiledCriteria::exact_equality_with_work(value, &mut self.wildcard_budget, |units| {
+        CompiledCriteria::exact_equality_with_work(value, |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }
@@ -53,7 +50,7 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<CompiledWildcardPattern, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        CompiledWildcardPattern::compile_with_work(pattern, &mut self.wildcard_budget, |units| {
+        CompiledWildcardPattern::compile_with_work(pattern, |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }
@@ -65,7 +62,7 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<bool, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        criterion.matches_with_work(value, &mut self.wildcard_budget, |units| {
+        criterion.matches_with_work(value, |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }
@@ -77,9 +74,22 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<bool, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        pattern.matches_with_work(value, &mut self.wildcard_budget, |units| {
+        pattern.matches_with_work(value, |units| {
             Self::charge_cumulative(engine, context, units)
         })
+    }
+
+    pub(super) fn compare(&mut self, left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
+        let engine = self.engine;
+        let context = self.context;
+        charge_value_comparison_work(left, right, &mut |units| {
+            Self::charge_cumulative(engine, context, units)
+        })?;
+        compare(left, right)
+    }
+
+    pub(super) fn charge_work(&mut self, units: u64) -> Result<(), ErrorKind> {
+        Self::charge_cumulative(self.engine, self.context, units)
     }
 
     fn charge_cumulative(
