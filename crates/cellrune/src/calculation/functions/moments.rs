@@ -161,6 +161,19 @@ impl NumericMoments {
         }
     }
 
+    pub(super) const fn second_moment(self) -> f64 {
+        self.second_moment
+    }
+
+    pub(super) fn sum_squares_about_zero(self) -> Result<f64, ErrorKind> {
+        let value = self.second_moment + self.count as f64 * self.mean * self.mean;
+        if value.is_finite() {
+            Ok(value.max(0.0))
+        } else {
+            Err(ErrorKind::Num)
+        }
+    }
+
     pub(super) fn variance(self, kind: VarianceKind) -> Result<f64, ErrorKind> {
         let divisor = match kind {
             VarianceKind::Sample if self.count < 2 => return Err(ErrorKind::Div0),

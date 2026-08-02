@@ -148,7 +148,9 @@ impl Engine<'_> {
                 }
                 let array_row = row - range.row_start;
                 let array_column = column - range.col_start;
-                let value = if array_row < array.rows && array_column < array.cols {
+                let value = if array.is_scalar() {
+                    array.at(0, 0).clone()
+                } else if array_row < array.rows && array_column < array.cols {
                     array.at(array_row, array_column).clone()
                 } else {
                     Value::Error(ErrorKind::NA)
@@ -161,10 +163,13 @@ impl Engine<'_> {
                         value
                     },
                 );
-                let trace_index = array_row as usize * array.cols as usize + array_column as usize;
+                let trace_index = if array.is_scalar() {
+                    0
+                } else {
+                    array_row as usize * array.cols as usize + array_column as usize
+                };
                 if let Some(Some(trace)) = evaluated.decimal_traces.get(trace_index)
-                    && array_row < array.rows
-                    && array_column < array.cols
+                    && (array.is_scalar() || (array_row < array.rows && array_column < array.cols))
                 {
                     self.numeric_decimal_traces
                         .insert((range.sheet, row, column), *trace);

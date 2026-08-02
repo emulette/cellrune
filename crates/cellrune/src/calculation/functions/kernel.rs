@@ -310,7 +310,9 @@ function_enum!(ArrayFunction {
     Expand,
     Filter,
     HStack,
+    MInverse,
     MMult,
+    MUnit,
     Sequence,
     Sort,
     SortBy,
@@ -323,6 +325,13 @@ function_enum!(ArrayFunction {
     VStack,
     WrapCols,
     WrapRows,
+});
+
+function_enum!(RegressionFunction {
+    Growth,
+    LinEst,
+    LogEst,
+    Trend,
 });
 
 function_enum!(StatisticalFunction {
@@ -415,6 +424,7 @@ pub(in crate::calculation) enum Evaluator {
     DateAdditional(DateAdditionalFunction),
     Dynamic(DynamicFunction),
     Array(ArrayFunction),
+    Regression(RegressionFunction),
     Statistical(StatisticalFunction),
     StatisticalAdditional(StatisticalAdditionalFunction),
     Financial(FinancialFunction),
@@ -445,6 +455,7 @@ impl Evaluator {
             Self::DateAdditional(value) => format!("date_additional:{}", value.stable_name()),
             Self::Dynamic(value) => format!("dynamic:{}", value.stable_name()),
             Self::Array(value) => format!("array:{}", value.stable_name()),
+            Self::Regression(value) => format!("regression:{}", value.stable_name()),
             Self::Statistical(value) => format!("statistical:{}", value.stable_name()),
             Self::StatisticalAdditional(value) => {
                 format!("statistical_additional:{}", value.stable_name())
@@ -518,6 +529,12 @@ impl Evaluator {
         );
         evaluators.extend(DynamicFunction::ALL.iter().copied().map(Self::Dynamic));
         evaluators.extend(ArrayFunction::ALL.iter().copied().map(Self::Array));
+        evaluators.extend(
+            RegressionFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::Regression),
+        );
         evaluators.extend(
             StatisticalFunction::ALL
                 .iter()
@@ -620,6 +637,7 @@ pub(in crate::calculation) enum ArrayEvaluator {
     Dynamic(DynamicArrayFunction),
     Map,
     Array(ArrayFunction),
+    Regression(RegressionFunction),
     ModernText(ModernTextArrayFunction),
     Grouped(GroupedArrayFunction),
 }
@@ -634,6 +652,7 @@ impl ArrayEvaluator {
             Self::Dynamic(value) => format!("dynamic:{}", value.stable_name()),
             Self::Map => "map".to_owned(),
             Self::Array(value) => format!("array:{}", value.stable_name()),
+            Self::Regression(value) => format!("regression:{}", value.stable_name()),
             Self::ModernText(value) => format!("modern_text:{}", value.stable_name()),
             Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
         }
@@ -657,6 +676,12 @@ impl ArrayEvaluator {
         evaluators.extend(DynamicArrayFunction::ALL.iter().copied().map(Self::Dynamic));
         evaluators.push(Self::Map);
         evaluators.extend(ArrayFunction::ALL.iter().copied().map(Self::Array));
+        evaluators.extend(
+            RegressionFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::Regression),
+        );
         evaluators.extend(
             ModernTextArrayFunction::ALL
                 .iter()

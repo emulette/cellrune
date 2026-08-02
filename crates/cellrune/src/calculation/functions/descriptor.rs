@@ -10,9 +10,9 @@ use super::kernel::{
     ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
     FinancialFunction, GroupedArrayFunction, GroupedFunction, InformationArrayFunction,
     InformationFunction, LegacyArrayFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, ModernTextArrayFunction, ModernTextFunction, StatisticalAdditionalFunction,
-    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
-    TrigonometryFunction,
+    MathFunction, ModernTextArrayFunction, ModernTextFunction, RegressionFunction,
+    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
+    TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -401,6 +401,9 @@ macro_rules! function {
     ($variant:ident, $name:literal, Array) => {
         FunctionDescriptor::new($name, Evaluator::Array(ArrayFunction::$variant))
     };
+    ($variant:ident, $name:literal, Regression) => {
+        FunctionDescriptor::new($name, Evaluator::Regression(RegressionFunction::$variant))
+    };
     ($variant:ident, $name:literal, Statistical) => {
         FunctionDescriptor::new($name, Evaluator::Statistical(StatisticalFunction::$variant))
     };
@@ -773,8 +776,14 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Filter)),
     function!(HStack, "HSTACK", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::HStack)),
+    function!(MInverse, "MINVERSE", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MInverse))
+        .with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(MMult, "MMULT", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MMult)),
+    function!(MUnit, "MUNIT", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MUnit))
+        .with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(Sequence, "SEQUENCE", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sequence)),
     function!(Sort, "SORT", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sort)),
@@ -803,6 +812,18 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(WrapRows, "WRAPROWS", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::WrapRows))
         .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(Growth, "GROWTH", Regression)
+        .with_array_evaluator(ArrayEvaluator::Regression(RegressionFunction::Growth))
+        .with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(LinEst, "LINEST", Regression)
+        .with_array_evaluator(ArrayEvaluator::Regression(RegressionFunction::LinEst))
+        .with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(LogEst, "LOGEST", Regression)
+        .with_array_evaluator(ArrayEvaluator::Regression(RegressionFunction::LogEst))
+        .with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(Trend, "TREND", Regression)
+        .with_array_evaluator(ArrayEvaluator::Regression(RegressionFunction::Trend))
+        .with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(Correl, "CORREL", Statistical),
     function!(CovarianceP, "COVARIANCE.P", Statistical)
         .with_aliases(&[FunctionAlias::official("COVAR")]),

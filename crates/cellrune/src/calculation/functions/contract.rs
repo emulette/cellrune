@@ -3,7 +3,7 @@ use super::kernel::{
     DateAdditionalFunction, DateFunction, DynamicFunction, EngineeringFunction, Evaluator,
     FinancialAdditionalFunction, FinancialFunction, GroupedFunction, InformationFunction,
     LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextFunction,
-    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
+    RegressionFunction, StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
     TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
@@ -726,6 +726,28 @@ const SEQUENCE_DEFAULTS: &[ArgumentDefault] = &[
         ArgumentDefaultValue::Number(1.0),
     ),
 ];
+const REGRESSION_STATISTICS_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(1, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::Absent,
+        ArgumentDefaultValue::Logical(true),
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::Absent,
+        ArgumentDefaultValue::Logical(false),
+    ),
+];
+const REGRESSION_PREDICTION_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(1, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(2, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::Absent,
+        ArgumentDefaultValue::Logical(true),
+    ),
+];
 const SORT_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(
         1,
@@ -856,6 +878,7 @@ impl Evaluator {
             Self::DateAdditional(function) => function.call_contract(),
             Self::Dynamic(function) => function.call_contract(),
             Self::Array(function) => function.call_contract(),
+            Self::Regression(function) => function.call_contract(),
             Self::Statistical(function) => function.call_contract(),
             Self::StatisticalAdditional(function) => function.call_contract(),
             Self::Financial(function) => function.call_contract(),
@@ -1337,7 +1360,9 @@ impl ArrayFunction {
             Self::HStack | Self::VStack => {
                 CallContract::uniform(Arity::range(1, MAX_EXCEL_ARGUMENTS), ARRAY)
             }
+            Self::MInverse => CallContract::uniform(Arity::exact(1), ARRAY),
             Self::MMult => CallContract::uniform(Arity::exact(2), ARRAY),
+            Self::MUnit => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::Sequence => {
                 CallContract::positional(Arity::range(1, 4), &[SCALAR, SCALAR, SCALAR, SCALAR])
                     .with_defaults(SEQUENCE_DEFAULTS)
@@ -1367,6 +1392,23 @@ impl ArrayFunction {
             Self::WrapCols | Self::WrapRows => {
                 CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
                     .with_defaults(WRAP_DEFAULTS)
+            }
+        }
+    }
+}
+
+impl RegressionFunction {
+    const fn call_contract(self) -> CallContract {
+        match self {
+            Self::LinEst | Self::LogEst => {
+                CallContract::positional(Arity::range(1, 4), &[ARRAY, ARRAY, SCALAR, SCALAR])
+                    .with_missing(MissingArgumentPolicy::Preserve)
+                    .with_defaults(REGRESSION_STATISTICS_DEFAULTS)
+            }
+            Self::Growth | Self::Trend => {
+                CallContract::positional(Arity::range(1, 4), &[ARRAY, ARRAY, ARRAY, SCALAR])
+                    .with_missing(MissingArgumentPolicy::Preserve)
+                    .with_defaults(REGRESSION_PREDICTION_DEFAULTS)
             }
         }
     }

@@ -39,6 +39,7 @@ mod grouping_output;
 mod information;
 pub(in crate::calculation) mod kernel;
 mod legacy;
+mod linear_algebra;
 mod logical;
 mod lookup;
 mod lookup_common;
@@ -51,6 +52,7 @@ mod regex_common;
 mod regex_options;
 mod regex_pattern;
 mod regex_text;
+mod regression;
 mod statistical;
 mod statistical_additional;
 mod sum_of_squares;
@@ -222,6 +224,7 @@ fn dispatch_scalar(
         }
         Evaluator::Dynamic(function) => dynamic::call(engine, context, function, args),
         Evaluator::Array(function) => array::call_scalar(engine, context, function, args),
+        Evaluator::Regression(function) => regression::call_scalar(engine, context, function, args),
         Evaluator::Statistical(function) => statistical::call(engine, context, function, args),
         Evaluator::StatisticalAdditional(function) => {
             statistical_additional::call(engine, context, function, args)
@@ -398,6 +401,9 @@ pub(super) fn call_function_array(
         ArrayEvaluator::Array(function) => {
             Some(array::call_array(engine, context, function, args).map(ArrayEvaluation::untracked))
         }
+        ArrayEvaluator::Regression(function) => Some(
+            regression::call_array(engine, context, function, args).map(ArrayEvaluation::untracked),
+        ),
         ArrayEvaluator::ModernText(function) => Some(
             modern_text::call_array(engine, context, function, args)
                 .map(ArrayEvaluation::untracked),

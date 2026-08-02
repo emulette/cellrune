@@ -18,6 +18,7 @@ pub(super) fn call_array(
         ArrayFunction::Expand => super::array_reshape::expand(engine, context, args),
         ArrayFunction::Filter => super::modern_array::filter_array(engine, context, args),
         ArrayFunction::HStack => super::modern_array::hstack(engine, context, args),
+        ArrayFunction::MInverse => minverse(engine, context, args),
         ArrayFunction::Sort => super::modern_array::sort_array(engine, context, args),
         ArrayFunction::SortBy => super::array_sort::sort_by(engine, context, args),
         ArrayFunction::Take => super::modern_array::take(engine, context, args),
@@ -29,9 +30,73 @@ pub(super) fn call_array(
         ArrayFunction::WrapCols => super::array_reshape::wrap_cols(engine, context, args),
         ArrayFunction::WrapRows => super::array_reshape::wrap_rows(engine, context, args),
         ArrayFunction::MMult => mmult(engine, context, args),
+        ArrayFunction::MUnit => munit(engine, context, args),
         ArrayFunction::Sequence => sequence(engine, context, args),
         ArrayFunction::Transpose => transpose(engine, context, args),
     }
+}
+
+fn minverse(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    let [argument] = args else {
+        return Err(ErrorKind::Value);
+    };
+    let source = engine.eval_array(context, argument)?;
+    if source.rows != source.cols {
+        return Err(ErrorKind::Value);
+    }
+    let dimension = u64::from(source.rows);
+    let cells = dimension.checked_mul(dimension).ok_or(ErrorKind::Num)?;
+    let workspace = cells
+        .checked_mul(3)
+        .and_then(|value| value.checked_add(dimension.checked_mul(2)?))
+        .ok_or(ErrorKind::Num)?;
+    engine.ensure_array_cells(workspace)?;
+    let numbers = strict_numbers(source.data)?;
+    let matrix = super::linear_algebra::DenseMatrix::new(
+        source.rows as usize,
+        source.cols as usize,
+        numbers,
+    )?;
+    let inverse = super::linear_algebra::invert(matrix, |work| {
+        engine.charge_function_iterations(context, work)
+    })?;
+    Ok(Array {
+        rows: source.rows,
+        cols: source.cols,
+        data: inverse.into_data().into_iter().map(Value::Number).collect(),
+    })
+}
+
+fn munit(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Result<Array, ErrorKind> {
+    let [argument] = args else {
+        return Err(ErrorKind::Value);
+    };
+    let dimension = required_number(engine, context, argument)?.trunc();
+    if !dimension.is_finite() || dimension < 1.0 || dimension > f64::from(u32::MAX) {
+        return Err(ErrorKind::Value);
+    }
+    let dimension = dimension as u32;
+    let cells = u64::from(dimension)
+        .checked_mul(u64::from(dimension))
+        .ok_or(ErrorKind::Num)?;
+    engine.ensure_array_cells(cells)?;
+    engine.charge_function_iterations(context, cells)?;
+    let capacity = usize::try_from(cells).map_err(|_| ErrorKind::Num)?;
+    let mut data = Vec::with_capacity(capacity);
+    for row in 0..dimension {
+        for col in 0..dimension {
+            data.push(Value::Number(if row == col { 1.0 } else { 0.0 }));
+        }
+    }
+    Ok(Array {
+        rows: dimension,
+        cols: dimension,
+        data,
+    })
 }
 
 pub(super) fn call_scalar(

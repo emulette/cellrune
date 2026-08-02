@@ -17,6 +17,8 @@ mod criteria_matching;
 mod database;
 #[path = "calculation_behavior/moments.rs"]
 mod moments;
+#[path = "calculation_behavior/regression.rs"]
+mod regression;
 #[path = "calculation_behavior/support.rs"]
 mod support;
 
