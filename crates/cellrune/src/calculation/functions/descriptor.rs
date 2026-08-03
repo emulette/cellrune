@@ -6,13 +6,13 @@ use super::super::value::ErrorKind;
 use super::contract::CallContract;
 use super::kernel::{
     AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
-    DateAdditionalFunction, DateFunction, DynamicArrayFunction, DynamicFunction,
-    ElementwiseArrayFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
-    FinancialFunction, GroupedArrayFunction, GroupedFunction, InformationArrayFunction,
-    InformationFunction, LegacyArrayFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, ModernTextArrayFunction, ModernTextFunction, RegressionFunction, RomanFunction,
-    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
-    TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    DateAdditionalFunction, DateFunction, DistributionFunction, DynamicArrayFunction,
+    DynamicFunction, ElementwiseArrayFunction, EngineeringFunction, Evaluator,
+    FinancialAdditionalFunction, FinancialFunction, GroupedArrayFunction, GroupedFunction,
+    InformationArrayFunction, InformationFunction, LegacyArrayFunction, LegacyFunction,
+    LogicalFunction, LookupFunction, MathFunction, ModernTextArrayFunction, ModernTextFunction,
+    RegressionFunction, RomanFunction, StatisticalAdditionalFunction, StatisticalFunction,
+    SumOfSquaresFunction, TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -135,6 +135,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_9,
     V0_1_10,
     V0_1_11,
+    V0_1_12,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -414,6 +415,12 @@ macro_rules! function {
         FunctionDescriptor::new(
             $name,
             Evaluator::StatisticalAdditional(StatisticalAdditionalFunction::$variant),
+        )
+    };
+    ($variant:ident, $name:literal, Distribution) => {
+        FunctionDescriptor::new(
+            $name,
+            Evaluator::Distribution(DistributionFunction::$variant),
         )
     };
     ($variant:ident, $name:literal, Financial) => {
@@ -881,6 +888,16 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(VarP, "VAR.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("VARP")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Gamma, "GAMMA", Distribution).with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(GammaDist, "GAMMA.DIST", Distribution)
+        .with_aliases(&[FunctionAlias::official("GAMMADIST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(GammaInv, "GAMMA.INV", Distribution)
+        .with_aliases(&[FunctionAlias::official("GAMMAINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(GammaLnPrecise, "GAMMALN.PRECISE", Distribution)
+        .with_aliases(&[FunctionAlias::official("GAMMALN")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(Db, "DB", Financial),
     function!(Fv, "FV", Financial),
     function!(Ipmt, "IPMT", Financial),

@@ -1,10 +1,11 @@
 use super::kernel::{
     AggregateFunction, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
-    DateAdditionalFunction, DateFunction, DynamicFunction, EngineeringFunction, Evaluator,
-    FinancialAdditionalFunction, FinancialFunction, GroupedFunction, InformationFunction,
-    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextFunction,
-    RegressionFunction, RomanFunction, StatisticalAdditionalFunction, StatisticalFunction,
-    SumOfSquaresFunction, TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    DateAdditionalFunction, DateFunction, DistributionFunction, DynamicFunction,
+    EngineeringFunction, Evaluator, FinancialAdditionalFunction, FinancialFunction,
+    GroupedFunction, InformationFunction, LegacyFunction, LogicalFunction, LookupFunction,
+    MathFunction, ModernTextFunction, RegressionFunction, RomanFunction,
+    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
+    TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[cfg(test)]
@@ -887,6 +888,7 @@ impl Evaluator {
             Self::Regression(function) => function.call_contract(),
             Self::Statistical(function) => function.call_contract(),
             Self::StatisticalAdditional(function) => function.call_contract(),
+            Self::Distribution(function) => function.call_contract(),
             Self::Financial(function) => function.call_contract(),
             Self::FinancialAdditional(function) => function.call_contract(),
             Self::Areas => CallContract::uniform(Arity::exact(1), REFERENCE),
@@ -1480,6 +1482,16 @@ impl StatisticalAdditionalFunction {
                 CallContract::uniform(Arity::exact(3), SCALAR)
             }
             Self::NormDist => CallContract::uniform(Arity::exact(4), SCALAR),
+        }
+    }
+}
+
+impl DistributionFunction {
+    const fn call_contract(self) -> CallContract {
+        match self {
+            Self::Gamma | Self::GammaLnPrecise => CallContract::uniform(Arity::exact(1), SCALAR),
+            Self::GammaDist => CallContract::uniform(Arity::exact(4), SCALAR),
+            Self::GammaInv => CallContract::uniform(Arity::exact(3), SCALAR),
         }
     }
 }

@@ -28,6 +28,7 @@ mod database_criteria;
 mod date;
 mod date_additional;
 pub(super) mod descriptor;
+mod distribution;
 mod dynamic;
 mod engineering;
 mod financial;
@@ -54,6 +55,7 @@ mod regex_pattern;
 mod regex_text;
 mod regression;
 mod roman_numeral;
+mod special_functions;
 mod statistical;
 mod statistical_additional;
 mod sum_of_squares;
@@ -231,6 +233,7 @@ fn dispatch_scalar(
         Evaluator::StatisticalAdditional(function) => {
             statistical_additional::call(engine, context, function, args)
         }
+        Evaluator::Distribution(function) => distribution::call(engine, context, function, args),
         Evaluator::Financial(function) => financial::call(engine, context, function, args),
         Evaluator::FinancialAdditional(function) => {
             financial_additional::call(engine, context, function, args)
@@ -966,7 +969,7 @@ mod tests {
             .map(|descriptor| descriptor.aliases().len())
             .sum::<usize>();
         assert_eq!(aliases.len(), alias_count);
-        assert_eq!(aliases.len(), 13);
+        assert_eq!(aliases.len(), 16);
         assert!(aliases.is_disjoint(&kernels));
         assert!(
             descriptor::descriptors()

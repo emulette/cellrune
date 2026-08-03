@@ -385,6 +385,46 @@ fn second_expansion_wave_rejects_invalid_domains_and_widths() {
 }
 
 #[test]
+fn gamma_distribution_family_matches_documented_examples() {
+    let cases = [
+        number("GAMMA(2.5)", 1.329_340_388_179_137, 1e-12),
+        number("GAMMA(-3.75)", 0.267_866_128_861_416_6, 1e-12),
+        number(
+            "GAMMA.DIST(10.00001131,9,2,FALSE)",
+            0.032_639_130_418_294,
+            1e-12,
+        ),
+        number(
+            "GAMMA.DIST(10.00001131,9,2,TRUE)",
+            0.068_094_003_869_787_33,
+            1e-12,
+        ),
+        number("GAMMA.INV(0.068094,9,2)", 10.000_011_191_437_178, 1e-8),
+        number("GAMMALN(4)", 1.791_759_469_228_055, 1e-12),
+        number("GAMMALN.PRECISE(4)", 1.791_759_469_228_055, 1e-12),
+        number(
+            "GAMMADIST(10.00001131,9,2,TRUE)",
+            0.068_094_003_869_787_33,
+            1e-12,
+        ),
+        number("GAMMAINV(0.068094,9,2)", 10.000_011_191_437_178, 1e-8),
+        error("GAMMA(0)", ExcelError::Number),
+        error("GAMMA(-2)", ExcelError::Number),
+        error("GAMMA.DIST(-1,9,2,TRUE)", ExcelError::Number),
+        error("GAMMA.INV(1,9,2)", ExcelError::Number),
+        error("GAMMALN(0)", ExcelError::Number),
+        error("GAMMALN.PRECISE(-1)", ExcelError::Number),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn corpus_driven_functions_match_excel_scalar_contracts() {
     let cases = [
         text("ADDRESS(2,3)", "$C$2"),

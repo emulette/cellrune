@@ -377,6 +377,13 @@ function_enum!(StatisticalAdditionalFunction {
     VarP,
 });
 
+function_enum!(DistributionFunction {
+    Gamma,
+    GammaDist,
+    GammaInv,
+    GammaLnPrecise,
+});
+
 function_enum!(FinancialFunction {
     Db,
     Fv,
@@ -430,6 +437,7 @@ pub(in crate::calculation) enum Evaluator {
     Regression(RegressionFunction),
     Statistical(StatisticalFunction),
     StatisticalAdditional(StatisticalAdditionalFunction),
+    Distribution(DistributionFunction),
     Financial(FinancialFunction),
     FinancialAdditional(FinancialAdditionalFunction),
     Areas,
@@ -464,6 +472,7 @@ impl Evaluator {
             Self::StatisticalAdditional(value) => {
                 format!("statistical_additional:{}", value.stable_name())
             }
+            Self::Distribution(value) => format!("distribution:{}", value.stable_name()),
             Self::Financial(value) => format!("financial:{}", value.stable_name()),
             Self::FinancialAdditional(value) => {
                 format!("financial_additional:{}", value.stable_name())
@@ -551,6 +560,12 @@ impl Evaluator {
                 .iter()
                 .copied()
                 .map(Self::StatisticalAdditional),
+        );
+        evaluators.extend(
+            DistributionFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::Distribution),
         );
         evaluators.extend(FinancialFunction::ALL.iter().copied().map(Self::Financial));
         evaluators.extend(
