@@ -1664,88 +1664,76 @@
     "note": "CellRune reports calculation.unsupported_function (BESSELY) for this oracle case."
   },
   "function:beta-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.90810074582876155",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:beta-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:beta-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:beta-inv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.4725265938468981",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:beta-inv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:beta-inv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BETA.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:betadist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.6875",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BETADIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:betadist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BETADIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:betadist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BETADIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:betainv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.38572756813238951",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BETAINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:betainv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BETAINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:betainv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BETAINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:bin2dec": {
     "classification": "match",
@@ -1796,88 +1784,76 @@
     "excel_rich_error": false
   },
   "function:binom-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.21499084800000007",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-dist-range": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.77794836480000018",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST.RANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-dist-range:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST.RANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-dist-range:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST.RANGE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.12093235200000005",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-inv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-inv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binom-inv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.BINOM.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binomdist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.21499084800000007",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BINOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binomdist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.12093235200000005",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BINOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:binomdist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BINOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:bitand": {
     "classification": "match",
@@ -2871,25 +2847,22 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.COVARIANCE.S) for this oracle case."
   },
   "function:critbinom": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CRITBINOM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:critbinom:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CRITBINOM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:critbinom:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CRITBINOM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:csc": {
     "classification": "match",
@@ -4328,151 +4301,130 @@
     "excel_rich_error": false
   },
   "function:gamma": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.329340388179137",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.15063144384932486",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.15063144384932486",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma-inv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5.4233514987989846",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma-inv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma-inv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gamma:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammadist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.15063144384932486",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMADIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammadist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.15063144384932486",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMADIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammadist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMADIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammainv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5.4233514987989846",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMAINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammainv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMAINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammainv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMAINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammaln": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2.4537365708424423",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMALN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammaln-precise": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2.4537365708424423",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMALN.PRECISE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammaln-precise:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMALN.PRECISE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammaln-precise:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.GAMMALN.PRECISE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammaln:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMALN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gammaln:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (GAMMALN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:gauss": {
     "classification": "match",
@@ -4709,46 +4661,40 @@
     "excel_rich_error": false
   },
   "function:hypgeom-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.46542827657378727",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.HYPGEOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:hypgeom-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.84685242518059867",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.HYPGEOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:hypgeom-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.HYPGEOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:hypgeomdist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.36326109391124861",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (HYPGEOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:hypgeomdist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.38142414860681101",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (HYPGEOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:hypgeomdist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (HYPGEOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:if": {
     "classification": "match",
@@ -6082,46 +6028,40 @@
     "excel_rich_error": false
   },
   "function:negbinom-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.61771939840000012",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.NEGBINOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:negbinom-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.17920000000000005",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.NEGBINOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:negbinom-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.NEGBINOM.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:negbinomdist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.10032906240000003",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (NEGBINOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:negbinomdist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "9.2159999999999992E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (NEGBINOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:negbinomdist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (NEGBINOMDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:networkdays": {
     "classification": "match",
