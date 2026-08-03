@@ -425,6 +425,50 @@ fn gamma_distribution_family_matches_documented_examples() {
 }
 
 #[test]
+fn binomial_distribution_family_matches_documented_examples() {
+    let cases = [
+        number("BINOM.DIST(6,10,0.5,FALSE)", 0.205_078_125, 1e-12),
+        number("BINOM.DIST(6,10,0.5,TRUE)", 0.828_125, 1e-12),
+        number("BINOMDIST(6,10,0.5,FALSE)", 0.205_078_125, 1e-12),
+        number(
+            "BINOM.DIST.RANGE(60,0.75,48)",
+            0.083_974_967_429_047_5,
+            1e-12,
+        ),
+        number(
+            "BINOM.DIST.RANGE(60,0.75,45,50)",
+            0.523_629_793_471_887_2,
+            1e-12,
+        ),
+        number("BINOM.INV(6,0.5,0.75)", 4.0, 0.0),
+        number("CRITBINOM(6,0.5,0.75)", 4.0, 0.0),
+        number(
+            "NEGBINOM.DIST(10,5,0.25,TRUE)",
+            0.313_514_058_478_176_6,
+            1e-12,
+        ),
+        number(
+            "NEGBINOM.DIST(10,5,0.25,FALSE)",
+            0.055_048_660_375_177_86,
+            1e-12,
+        ),
+        number("NEGBINOMDIST(10,5,0.25)", 0.055_048_660_375_177_86, 1e-12),
+        error("BINOM.DIST(-1,10,0.4,FALSE)", ExcelError::Number),
+        error("BINOM.DIST.RANGE(10,0.4,3,11)", ExcelError::Number),
+        error("BINOM.INV(10,0.4,2)", ExcelError::Number),
+        error("NEGBINOM.DIST(-1,4,0.4,TRUE)", ExcelError::Number),
+        error("NEGBINOMDIST(6,0,0.4)", ExcelError::Number),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn corpus_driven_functions_match_excel_scalar_contracts() {
     let cases = [
         text("ADDRESS(2,3)", "$C$2"),

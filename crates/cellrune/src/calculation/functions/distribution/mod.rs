@@ -3,6 +3,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::kernel::DistributionFunction;
 
+mod binomial;
 mod gamma;
 
 pub(super) fn call(
@@ -12,10 +13,21 @@ pub(super) fn call(
     args: &[Expr],
 ) -> Value {
     match function {
+        DistributionFunction::BinomDist => binomial::binomial_distribution(engine, context, args),
+        DistributionFunction::BinomDistRange => {
+            binomial::binomial_distribution_range(engine, context, args)
+        }
+        DistributionFunction::BinomInv => binomial::binomial_inverse(engine, context, args),
         DistributionFunction::Gamma => gamma::gamma(engine, context, args),
         DistributionFunction::GammaDist => gamma::gamma_distribution(engine, context, args),
         DistributionFunction::GammaInv => gamma::gamma_inverse(engine, context, args),
         DistributionFunction::GammaLnPrecise => gamma::log_gamma_precise(engine, context, args),
+        DistributionFunction::NegBinomDist => {
+            binomial::negative_binomial_distribution(engine, context, args)
+        }
+        DistributionFunction::NegBinomDistLegacy => {
+            binomial::negative_binomial_distribution_legacy(engine, context, args)
+        }
     }
 }
 

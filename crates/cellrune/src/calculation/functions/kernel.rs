@@ -378,10 +378,15 @@ function_enum!(StatisticalAdditionalFunction {
 });
 
 function_enum!(DistributionFunction {
+    BinomDist,
+    BinomDistRange,
+    BinomInv,
     Gamma,
     GammaDist,
     GammaInv,
     GammaLnPrecise,
+    NegBinomDist,
+    NegBinomDistLegacy,
 });
 
 function_enum!(FinancialFunction {

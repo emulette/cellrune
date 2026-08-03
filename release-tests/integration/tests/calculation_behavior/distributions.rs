@@ -162,3 +162,226 @@ fn gamma_cumulative_distribution_respects_the_function_iteration_budget() {
     );
     assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
+
+#[test]
+fn binomial_family_matches_the_excel_oracle() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "BINOM.DIST(3,10,0.4,FALSE)"),
+        (1, 2, "BINOM.DIST(\"2\",10,0.4,FALSE)"),
+        (1, 3, "BINOMDIST(3,10,0.4,FALSE)"),
+        (1, 4, "BINOMDIST(\"2\",10,0.4,FALSE)"),
+        (1, 5, "BINOM.DIST.RANGE(10,0.4,3,6)"),
+        (1, 6, "BINOM.INV(10,0.4,0.6)"),
+        (1, 7, "BINOM.INV(\"2\",0.4,0.6)"),
+        (1, 8, "CRITBINOM(10,0.4,0.6)"),
+        (1, 9, "CRITBINOM(\"2\",0.4,0.6)"),
+        (1, 10, "NEGBINOM.DIST(6,4,0.4,TRUE)"),
+        (1, 11, "NEGBINOM.DIST(\"2\",4,0.4,TRUE)"),
+        (1, 12, "NEGBINOMDIST(6,4,0.4)"),
+        (1, 13, "NEGBINOMDIST(\"2\",4,0.4)"),
+        (1, 14, "BINOM.DIST(3,10,0.4,TRUE)"),
+        (1, 15, "BINOM.DIST.RANGE(10,0.4,4)"),
+        // Aliases and the legacy adapter share kernels bit for bit.
+        (
+            1,
+            16,
+            "BINOMDIST(3,10,0.4,FALSE)=BINOM.DIST(3,10,0.4,FALSE)",
+        ),
+        (
+            1,
+            17,
+            "BINOMDIST(\"2\",10,0.4,FALSE)=BINOM.DIST(\"2\",10,0.4,FALSE)",
+        ),
+        (1, 18, "CRITBINOM(10,0.4,0.6)=BINOM.INV(10,0.4,0.6)"),
+        (1, 19, "NEGBINOMDIST(6,4,0.4)=NEGBINOM.DIST(6,4,0.4,FALSE)"),
+        // Excel truncates the counts before the domain rules apply.
+        (
+            1,
+            20,
+            "BINOM.DIST(3.9,10.9,0.4,FALSE)=BINOM.DIST(3,10,0.4,FALSE)",
+        ),
+        (
+            1,
+            21,
+            "BINOM.DIST.RANGE(10.9,0.4,3.9,6.9)=BINOM.DIST.RANGE(10,0.4,3,6)",
+        ),
+        (
+            1,
+            22,
+            "NEGBINOM.DIST(6.9,4.9,0.4,TRUE)=NEGBINOM.DIST(6,4,0.4,TRUE)",
+        ),
+        (1, 23, "BINOM.INV(10.9,0.4,0.6)=BINOM.INV(10,0.4,0.6)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    // Oracle-pinned values (both Excel profiles agree) within ~1e-9 relative.
+    for (column, expected, tolerance) in [
+        (1, 0.21499084800000007, 2.2e-10),
+        (2, 0.12093235200000005, 1.3e-10),
+        (3, 0.21499084800000007, 2.2e-10),
+        (4, 0.12093235200000005, 1.3e-10),
+        // Oracle prints 0.77794836480000018, 0.61771939840000012 and
+        // 0.092159999999999992; the same f64s as these shortest forms.
+        (5, 0.777_948_364_800_000_2, 7.8e-10),
+        (6, 4.0, 0.0),
+        (7, 1.0, 0.0),
+        (8, 4.0, 0.0),
+        (9, 1.0, 0.0),
+        (10, 0.617_719_398_400_000_1, 6.2e-10),
+        (11, 0.17920000000000005, 1.8e-10),
+        (12, 0.10032906240000003, 1.1e-10),
+        (13, 0.092_159_999_999_999_99, 1e-10),
+        // reference: mpmath 1.4.1, mp.dps = 30.
+        (14, 0.38228060159999994, 3.9e-10),
+        (15, 0.250822656, 2.6e-10),
+    ] {
+        assert_number(&calculation, column, expected, tolerance);
+    }
+    for column in 16..=23 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Logical(true))),
+            "expected a bit-identical pair in column {column}",
+        );
+    }
+}
+
+#[test]
+fn binomial_family_rejects_domain_violations_with_excel_errors() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "BINOM.DIST(-1,10,0.4,FALSE)"),
+        (1, 2, "BINOMDIST(-1,10,0.4,FALSE)"),
+        (1, 3, "BINOM.DIST(11,10,0.4,FALSE)"),
+        (1, 4, "BINOM.DIST(3,10,-0.1,FALSE)"),
+        (1, 5, "BINOM.DIST(3,10,1.1,FALSE)"),
+        // Coerced trials 2 sits below number_s 3 — the oracle's #NUM! pin.
+        (1, 6, "BINOM.DIST.RANGE(\"2\",0.4,3,6)"),
+        (1, 7, "BINOM.DIST.RANGE(-1,0.4,3,6)"),
+        (1, 8, "BINOM.DIST.RANGE(10,0.4,-1,6)"),
+        (1, 9, "BINOM.DIST.RANGE(10,0.4,3,2)"),
+        (1, 10, "BINOM.DIST.RANGE(10,0.4,3,11)"),
+        (1, 11, "BINOM.DIST.RANGE(10,1.5,3,6)"),
+        (1, 12, "BINOM.INV(10,0.4,2)"),
+        (1, 13, "CRITBINOM(10,0.4,2)"),
+        (1, 14, "BINOM.INV(10,0.4,-0.1)"),
+        (1, 15, "BINOM.INV(-1,0.4,0.6)"),
+        (1, 16, "BINOM.INV(10,-0.1,0.6)"),
+        (1, 17, "BINOM.INV(10,1.1,0.6)"),
+        (1, 18, "NEGBINOM.DIST(-1,4,0.4,TRUE)"),
+        (1, 19, "NEGBINOM.DIST(6,0,0.4,TRUE)"),
+        (1, 20, "NEGBINOM.DIST(6,4,-0.1,TRUE)"),
+        (1, 21, "NEGBINOM.DIST(6,4,1.1,TRUE)"),
+        (1, 22, "NEGBINOMDIST(-1,4,0.4)"),
+        (1, 23, "NEGBINOMDIST(6,0.9,0.4)"),
+        (1, 24, "BINOM.DIST(\"abc\",10,0.4,FALSE)"),
+        (1, 25, "BINOM.DIST(3,10,0.4,\"abc\")"),
+        (1, 26, "NEGBINOMDIST(\"abc\",4,0.4)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for column in 1..=23 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Number
+            ))),
+            "unexpected domain result in column {column}",
+        );
+    }
+    for column in [24, 25, 26] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "unexpected coercion result in column {column}",
+        );
+    }
+}
+
+#[test]
+fn binomial_inverse_pins_the_interoperable_unit_interval_boundaries() {
+    // Microsoft's worksheet page claims #NUM! at the alpha and probability_s
+    // boundaries; its own VBA documentation, ODF OpenFormula 1.3 §6.18.19 and
+    // interoperating engines accept them, and CellRune pins that policy.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "BINOM.INV(10,0.4,0)"),
+        (1, 2, "BINOM.INV(10,0.4,1)"),
+        (1, 3, "BINOM.INV(10,0,0.6)"),
+        (1, 4, "BINOM.INV(10,1,0.6)"),
+        (1, 5, "BINOM.INV(10,1,0)"),
+        (1, 6, "BINOM.INV(0,0.4,0.6)"),
+        (1, 7, "BINOM.DIST(0,10,0,FALSE)"),
+        (1, 8, "BINOM.DIST(10,10,1,FALSE)"),
+        (1, 9, "BINOM.DIST(3,10,0,FALSE)"),
+        (1, 10, "BINOM.DIST(3,10,0,TRUE)"),
+        (1, 11, "BINOM.DIST(3,10,1,TRUE)"),
+        (1, 12, "NEGBINOM.DIST(0,4,1,FALSE)"),
+        (1, 13, "NEGBINOM.DIST(3,4,0,TRUE)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for (column, expected) in [
+        (1, 0.0),
+        (2, 10.0),
+        (3, 0.0),
+        (4, 10.0),
+        (5, 0.0),
+        (6, 0.0),
+        (7, 1.0),
+        (8, 1.0),
+        (9, 0.0),
+        (10, 1.0),
+        (11, 0.0),
+        (12, 1.0),
+        (13, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+}
+
+#[test]
+fn binomial_cumulative_distribution_respects_the_function_iteration_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "BINOM.DIST(900000,1000000,0.5,TRUE)")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(10)
+                .expect("positive summation work limit"),
+        ),
+    );
+    // The budgeted summation must fail closed: no partial mass is installed.
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn binomial_inverse_respects_the_function_iteration_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "BINOM.INV(1000000,0.5,0.6)")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(10)
+                .expect("positive search work limit"),
+        ),
+    );
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn negative_binomial_cumulative_respects_the_function_iteration_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "NEGBINOM.DIST(1000000,4,0.4,TRUE)")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(10)
+                .expect("positive summation work limit"),
+        ),
+    );
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}

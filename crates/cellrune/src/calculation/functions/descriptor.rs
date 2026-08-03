@@ -888,6 +888,14 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(VarP, "VAR.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("VARP")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(BinomDist, "BINOM.DIST", Distribution)
+        .with_aliases(&[FunctionAlias::official("BINOMDIST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(BinomDistRange, "BINOM.DIST.RANGE", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(BinomInv, "BINOM.INV", Distribution)
+        .with_aliases(&[FunctionAlias::official("CRITBINOM")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(Gamma, "GAMMA", Distribution).with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(GammaDist, "GAMMA.DIST", Distribution)
         .with_aliases(&[FunctionAlias::official("GAMMADIST")])
@@ -897,6 +905,12 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(GammaLnPrecise, "GAMMALN.PRECISE", Distribution)
         .with_aliases(&[FunctionAlias::official("GAMMALN")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(NegBinomDist, "NEGBINOM.DIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    // Legacy arity (3, mass only) makes NEGBINOMDIST a distinct adapter
+    // kernel rather than an alias of NEGBINOM.DIST.
+    function!(NegBinomDistLegacy, "NEGBINOMDIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(Db, "DB", Financial),
     function!(Fv, "FV", Financial),

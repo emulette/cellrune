@@ -1490,8 +1490,13 @@ impl DistributionFunction {
     const fn call_contract(self) -> CallContract {
         match self {
             Self::Gamma | Self::GammaLnPrecise => CallContract::uniform(Arity::exact(1), SCALAR),
-            Self::GammaDist => CallContract::uniform(Arity::exact(4), SCALAR),
-            Self::GammaInv => CallContract::uniform(Arity::exact(3), SCALAR),
+            Self::BinomDist | Self::GammaDist | Self::NegBinomDist => {
+                CallContract::uniform(Arity::exact(4), SCALAR)
+            }
+            Self::BinomInv | Self::GammaInv | Self::NegBinomDistLegacy => {
+                CallContract::uniform(Arity::exact(3), SCALAR)
+            }
+            Self::BinomDistRange => CallContract::uniform(Arity::range(3, 4), SCALAR),
         }
     }
 }

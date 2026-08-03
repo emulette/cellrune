@@ -5,10 +5,16 @@
 //! apart. Each unbounded loop charges work through a caller-supplied callback
 //! before it runs another step.
 
+mod binomial;
 mod incomplete_gamma;
 mod inverse;
+mod log_binomial;
 mod log_gamma;
 
+pub(super) use binomial::{
+    binomial_pmf, binomial_pmf_sum, negative_binomial_cdf, negative_binomial_pmf,
+    smallest_binomial_quantile,
+};
 pub(super) use incomplete_gamma::regularized_gamma_p;
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
