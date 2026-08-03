@@ -529,8 +529,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   array.
 - All four families share one first-party special-function foundation: a
   Lanczos `ln_gamma`, regularized incomplete gamma and beta kernels, and a
-  safeguarded inverse solver. A family's density, cumulative, and quantile
-  forms are evaluated through the same kernel.
+  safeguarded inverse solver. A family's cumulative and quantile forms are
+  evaluated through the same tail kernel; the density forms are built on the
+  same primitives.
 - The inverse solver brackets and then refines with alternating bisection and
   secant steps, and charges the calculation budget for every step. A search
   that cannot converge returns `#N/A` from `GAMMA.INV` and `BETA.INV`, which is

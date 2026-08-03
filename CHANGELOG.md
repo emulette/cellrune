@@ -15,11 +15,12 @@ inventories, and measurements belong in the linked documentation rather than in 
 ### Added
 
 - Seven gamma functions: `GAMMA`, `GAMMA.DIST`, `GAMMADIST`, `GAMMA.INV`, `GAMMAINV`, `GAMMALN`,
-  and `GAMMALN.PRECISE`. The density, cumulative, and quantile forms share one regularized
-  incomplete-gamma kernel, and the origin follows Excel's documented pole, limit, and zero cases.
+  and `GAMMALN.PRECISE`. The cumulative and quantile forms share one regularized
+  incomplete-gamma kernel, the density is built on the same `ln_gamma` primitive, and the origin
+  follows Excel's documented pole, limit, and zero cases.
 - Four beta functions: `BETA.DIST`, `BETADIST`, `BETA.INV`, and `BETAINV`, including the optional
   `A`/`B` interval bounds with the `1 / (B - A)` density Jacobian. The legacy `BETADIST` spelling
-  keeps its own kernel because it has no cumulative flag.
+  keeps its own typed adapter entry because it has no cumulative flag.
 - Seven binomial functions: `BINOM.DIST`, `BINOMDIST`, `BINOM.DIST.RANGE`, `BINOM.INV`,
   `CRITBINOM`, `NEGBINOM.DIST`, and `NEGBINOMDIST`. `BINOM.INV` bisects over the integer support
   and verifies the minimal-`k` contract against recomputed cumulative sums before returning.

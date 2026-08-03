@@ -23,8 +23,9 @@ pub(in crate::calculation::functions) fn regularized_gamma_p(
 }
 
 /// Complement Q(a, x) = 1 − P(a, x), computed on the same branch policy.
-/// The beta and binomial steps of the 0.1.12 wave consume this entry point;
-/// until then the branch tests below exercise it directly.
+/// Test-gated until a production consumer lands — the statistical wave's
+/// right-tail distributions are the planned first consumer. The branch tests
+/// below exercise it directly.
 #[cfg(test)]
 pub(super) fn regularized_gamma_q(
     a: f64,

@@ -52,6 +52,54 @@ fn typed_reference_formula_fixture_survives_preserved_write_and_reopen() {
 }
 
 #[test]
+fn generated_distribution_formulas_calculate_before_and_after_preserved_reopen() {
+    let formulas = [
+        "GAMMA.DIST(2,3,1.5,TRUE)",
+        "BETA.DIST(0.6,8,10,TRUE,0,1)",
+        "BINOM.DIST.RANGE(10,0.4,3,6)",
+        "CRITBINOM(10,0.4,0.6)",
+        "HYPGEOM.DIST(1,4,8,20,TRUE)",
+    ];
+    let bytes = generated_formula_fixture(&formulas);
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("distribution document");
+    assert!(scan_formula_capabilities(document.workbook()).is_supported());
+    let before = calculate_workbook(document.workbook(), CalculationOptions::default());
+
+    let output = write_preserved_xlsx_bytes(&document, WriteOptions::default())
+        .expect("preserved distribution output");
+    let reopened =
+        read_xlsx_bytes(&output, ReadOptions::default()).expect("reopened distribution output");
+    assert!(scan_formula_capabilities(&reopened).is_supported());
+    let after = calculate_workbook(&reopened, CalculationOptions::default());
+
+    let source_sheet = document
+        .workbook()
+        .sheet_by_name("Calculations")
+        .expect("source Calculations sheet")
+        .id();
+    let reopened_sheet = reopened
+        .sheet_by_name("Calculations")
+        .expect("reopened Calculations sheet")
+        .id();
+    for index in 0..formulas.len() {
+        let address =
+            CellAddress::from_a1(&format!("B{}", index + 2)).expect("valid formula address");
+        let before_cell = before.cell(CalculationCellId::new(source_sheet, address));
+        let after_cell = after.cell(CalculationCellId::new(reopened_sheet, address));
+        assert!(
+            matches!(
+                before_cell,
+                Some(CalculationCellResult::Value(CellValue::Number(_)))
+            ),
+            "expected a numeric distribution result at B{}",
+            index + 2
+        );
+        assert_eq!(before_cell, after_cell, "mismatch at B{}", index + 2);
+    }
+}
+
+#[test]
 fn generated_table_references_calculate_before_and_after_preserved_reopen() {
     let bytes = generated_table_reference_fixture();
     let document =

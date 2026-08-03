@@ -104,8 +104,9 @@ CellRune 0.1.12 adds exactly 20 official Excel-facing functions: `GAMMA`, `GAMMA
 `NEGBINOM.DIST`, `NEGBINOMDIST`, `HYPGEOM.DIST`, and `HYPGEOMDIST`. All four families share one
 first-party special-function foundation: a Lanczos `ln_gamma`, regularized incomplete gamma and
 beta kernels, and a safeguarded inverse solver that charges the calculation budget for every step
-it takes. Density, cumulative, and quantile forms of a family are evaluated through the same
-kernel, so they cannot drift apart. The implemented catalog now contains 347 official names and
+it takes. A family's cumulative and quantile forms are evaluated through the same tail kernel, so
+they cannot drift apart; the density forms are built on the same `ln_gamma` and `ln_beta`
+primitives. The implemented catalog now contains 347 official names and
 348 accepted entries including the OOXML dummy-function marker.
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output

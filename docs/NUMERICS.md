@@ -191,9 +191,9 @@ frozen two-profile oracle rather than against documentation alone. The suite hol
 for the twenty names, three per name, and all 60 are classified `match` in both
 `excel-online-free-en-ui-ko-kr` and `excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`.
 
-A family's density, cumulative, and quantile forms are evaluated through one shared kernel, so
-they cannot drift apart from each other. Every kernel is first-party; no external special-function
-crate is linked.
+A family's cumulative and quantile forms are evaluated through one shared tail kernel, so they
+cannot drift apart from each other; the density forms are built on the same `ln_gamma` and
+`ln_beta` primitives. Every kernel is first-party; no external special-function crate is linked.
 
 ### Deliberate difference: probability-distribution numeric policies
 
@@ -204,9 +204,10 @@ error over a number the engine cannot stand behind.
 Its relative error stays below `1e-13` across the representable domain, degrading to a few ULP of
 absolute error near the zeros at `x = 1` and `x = 2`. Every other kernel here inherits that floor.
 
-At extreme equal shapes, `a = b` at roughly `5e6` and above, the incomplete-beta symmetry seam is
-floored by the ULP of those `lnΓ` terms, so the two branches can disagree — and order — by that
-margin. This is accepted fail-closed policy: a quantile refinement that cannot meet both the
+At extreme equal shapes, `a = b` on the order of `5e6` and above — a bound that follows from the
+kernel's `lnΓ` ULP error model rather than from an in-repo fixture — the incomplete-beta symmetry
+seam is floored by the ULP of those `lnΓ` terms, so the two branches can disagree — and order — by
+that margin. This is accepted fail-closed policy: a quantile refinement that cannot meet both the
 bracket-width and probability-residual tolerances returns `#N/A` from `GAMMA.INV` and `BETA.INV`,
 the error Microsoft documents for a failed inverse-distribution search. It never returns an
 unconverged number.
@@ -221,7 +222,8 @@ every sample size a spreadsheet realistically draws.
 against recomputed sums before returning; a failed verification is `#NUM!`. Minimality is exact
 against this module's own `f64` CDF. When `alpha` falls within that CDF's own log-space noise, on
 the order of the ULP of the `lnΓ` magnitude per term, of an exact-arithmetic CDF value, the
-returned `k` can differ by one from the infinite-precision minimal `k`.
+returned `k` can differ from the infinite-precision minimal `k` by one step for each CDF value the
+noise crosses — usually one, occasionally more at extreme `alpha`.
 
 A tail whose log-space prefactor falls below `ln(f64::MIN_POSITIVE)`, about `-708.396`, underflows
 `exp()`, so the incomplete gamma, incomplete beta, and binomial kernels report it as exactly zero

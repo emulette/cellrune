@@ -59,7 +59,8 @@ pub(in crate::calculation::functions) fn binomial_pmf_sum(
 /// `on_iteration` first. Minimality is exact against this module's f64 CDF;
 /// when alpha sits within the CDF's own log-space noise (~ULP of the lnΓ
 /// magnitude per term) of an exact-arithmetic CDF value, the returned k can
-/// differ by one from the infinite-precision minimal k.
+/// differ from the infinite-precision minimal k by one step for each
+/// noise-crossed CDF value — usually one, occasionally more at extreme alpha.
 pub(in crate::calculation::functions) fn smallest_binomial_quantile(
     trials: f64,
     probability: f64,
