@@ -184,6 +184,61 @@ alone, so the two passes agree by construction.
 Aggregates that walk a whole-column reference directly, such as `SUM(A:A)`, are unaffected either
 way: they skip blank cells, so a wider clamp cannot change their result.
 
+### Matching: probability distributions
+
+The gamma, beta, binomial, and hypergeometric families added in 0.1.12 are measured against the
+frozen two-profile oracle rather than against documentation alone. The suite holds 60 active cases
+for the twenty names, three per name, and all 60 are classified `match` in both
+`excel-online-free-en-ui-ko-kr` and `excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`.
+
+A family's density, cumulative, and quantile forms are evaluated through one shared kernel, so
+they cannot drift apart from each other. Every kernel is first-party; no external special-function
+crate is linked.
+
+### Deliberate difference: probability-distribution numeric policies
+
+The policies below are chosen, documented, and pinned by tests. Each one prefers a typed Excel
+error over a number the engine cannot stand behind.
+
+`ln_gamma` is a Lanczos approximation with `g = 607/128` and the 14-term Godfrey coefficient set.
+Its relative error stays below `1e-13` across the representable domain, degrading to a few ULP of
+absolute error near the zeros at `x = 1` and `x = 2`. Every other kernel here inherits that floor.
+
+At extreme equal shapes, `a = b` at roughly `5e6` and above, the incomplete-beta symmetry seam is
+floored by the ULP of those `lnΓ` terms, so the two branches can disagree — and order — by that
+margin. This is accepted fail-closed policy: a quantile refinement that cannot meet both the
+bracket-width and probability-residual tolerances returns `#N/A` from `GAMMA.INV` and `BETA.INV`,
+the error Microsoft documents for a failed inverse-distribution search. It never returns an
+unconverged number.
+
+`HYPGEOM.DIST` and `HYPGEOMDIST` evaluate sample sizes through 10,000 as a falling-factorial
+product whose factors are individually moderate, so no two large `lnΓ` values are ever differenced.
+Above that sample size the kernel uses the `lnΓ` form, whose relative error grows with the
+population as `N·ln(N)·f64::EPSILON`. The threshold caps the per-evaluation cost while covering
+every sample size a spreadsheet realistically draws.
+
+`BINOM.INV` and `CRITBINOM` bisect over the integer support and verify `CDF(k-1) < alpha ≤ CDF(k)`
+against recomputed sums before returning; a failed verification is `#NUM!`. Minimality is exact
+against this module's own `f64` CDF. When `alpha` falls within that CDF's own log-space noise, on
+the order of the ULP of the `lnΓ` magnitude per term, of an exact-arithmetic CDF value, the
+returned `k` can differ by one from the infinite-precision minimal `k`.
+
+A tail whose log-space prefactor falls below `ln(f64::MIN_POSITIVE)`, about `-708.396`, underflows
+`exp()`, so the incomplete gamma, incomplete beta, and binomial kernels report it as exactly zero
+and its complement as exactly one, even where a subnormal would still be representable.
+
+Density endpoints follow Excel's documented pole, limit, and zero cases rather than the IEEE
+result of the formula:
+
+| Function | Endpoint | Shape < 1 | Shape = 1 | Shape > 1 |
+| --- | --- | --- | --- | --- |
+| `GAMMA.DIST` | `x = 0` | `#NUM!` | `1 / beta` | `0` |
+| `BETA.DIST` | `x = A` | `#NUM!` | `beta / (B - A)` | `0` |
+| `BETA.DIST` | `x = B` | `#NUM!` | `alpha / (B - A)` | `0` |
+
+Interior `BETA.DIST` densities carry the `1 / (B - A)` Jacobian, matching Microsoft's own
+documented example.
+
 ### Measured agreement
 
 The 0.1.8 audit records:
@@ -214,7 +269,8 @@ The following families have unit and golden tests derived from Microsoft's prima
 but no recorded tolerance against the reference oracle. Do not read their absence from the verified
 section as a claim of exactness in either direction.
 
-- statistical distributions and inverse distributions
+- statistical distributions and inverse distributions outside the gamma, beta, binomial, and
+  hypergeometric families measured in 0.1.12
 - closed-form financial functions
 - transcendental math and trigonometric functions, which are evaluated through `libm`
 - engineering and Bessel functions

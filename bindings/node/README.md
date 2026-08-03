@@ -14,7 +14,7 @@ dependency. You do not need to select a platform package yourself.
 ## Install
 
 ```console
-npm install @cellrune/node@0.1.11
+npm install @cellrune/node@0.1.12
 ```
 
 ## CommonJS
@@ -59,10 +59,11 @@ calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and expl
 `arithmeticSemantics` / `financialSolverSemantics` compatibility policies. The latter accept
 `"ieee_754"` and `"extended_search"` when a caller needs the calculation behavior shipped through
 0.1.2; omitted fields select the Excel-compatible defaults.
-The 0.1.11 calculation surface adds `DAVERAGE`, `DCOUNT`, `DCOUNTA`, `DGET`, `DMAX`, `DMIN`,
-`DPRODUCT`, `DSTDEV`, `DSTDEVP`, `DSUM`, `DVAR`, `DVARP`, `GROWTH`, `LINEST`, `LOGEST`, `TREND`,
-`MINVERSE`, `MUNIT`, `ARABIC`, and `ROMAN`. Regression and matrix formulas expose complete bounded
-array results through the same catalog and calculation contract as Rust and Python.
+The 0.1.12 calculation surface adds `GAMMA`, `GAMMA.DIST`, `GAMMADIST`, `GAMMA.INV`, `GAMMAINV`,
+`GAMMALN`, `GAMMALN.PRECISE`, `BETA.DIST`, `BETADIST`, `BETA.INV`, `BETAINV`, `BINOM.DIST`,
+`BINOMDIST`, `BINOM.DIST.RANGE`, `BINOM.INV`, `CRITBINOM`, `NEGBINOM.DIST`, `NEGBINOMDIST`,
+`HYPGEOM.DIST`, and `HYPGEOMDIST`. These distribution functions return scalars and expose the same
+catalog and calculation contract as Rust and Python.
 `inspectDefinedName` returns typed static, dynamic, empty, external, invalid, and unsupported
 defined-name results. `applyChangesV2` retains every v1 edit shape and adds stable-ID table rename,
 table-column rename, and table-row resize operations with `changedTableIds` in its receipt.

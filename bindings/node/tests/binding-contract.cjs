@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
-const CATALOG_V0_1_11_REFERENCE_SHA256 = fs
+const CATALOG_V0_1_12_REFERENCE_SHA256 = fs
   .readFileSync(
     path.join(
       __dirname,
@@ -16,7 +16,7 @@ const CATALOG_V0_1_11_REFERENCE_SHA256 = fs
       "crates",
       "cellrune",
       "testdata",
-      "function-catalog-v0.1.11.sha256",
+      "function-catalog-v0.1.12.sha256",
     ),
     "utf8",
   )
@@ -25,12 +25,13 @@ const CATALOG_V0_1_11_REFERENCE_SHA256 = fs
 function catalogDigest() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 328);
+  assert.equal(catalog.entries.length, 348);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [
-    "ARABIC", "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX", "DMIN", "DPRODUCT",
-    "DSTDEV", "DSTDEVP", "DSUM", "DVAR", "DVARP", "GROWTH", "LINEST", "LOGEST",
-    "MINVERSE", "MUNIT", "ROMAN", "TREND",
+    "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST", "BINOM.DIST.RANGE",
+    "BINOM.INV", "BINOMDIST", "CRITBINOM", "GAMMA", "GAMMA.DIST", "GAMMA.INV",
+    "GAMMADIST", "GAMMAINV", "GAMMALN", "GAMMALN.PRECISE", "HYPGEOM.DIST",
+    "HYPGEOMDIST", "NEGBINOM.DIST", "NEGBINOMDIST",
   ]) {
     assert.ok(entries.has(name), name);
   }
@@ -56,7 +57,7 @@ function catalogDigest() {
 }
 
 async function main() {
-  assert.equal(catalogDigest(), CATALOG_V0_1_11_REFERENCE_SHA256);
+  assert.equal(catalogDigest(), CATALOG_V0_1_12_REFERENCE_SHA256);
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(

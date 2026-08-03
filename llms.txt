@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.11, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.12, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -518,22 +518,28 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.11 catalog contains 327 official Excel-facing names
-  and one non-official compatibility entry for the OOXML dummy-function marker.
-- The 20 official names added in 0.1.11 are `DAVERAGE`, `DCOUNT`, `DCOUNTA`,
-  `DGET`, `DMAX`, `DMIN`, `DPRODUCT`, `DSTDEV`, `DSTDEVP`, `DSUM`, `DVAR`,
-  `DVARP`, `GROWTH`, `LINEST`, `LOGEST`, `TREND`, `MINVERSE`, `MUNIT`,
-  `ARABIC`, and `ROMAN`.
-- Database functions consume a header row, field selector, and criteria table.
-  Criteria rows are OR groups whose populated columns are AND conditions;
-  formula criteria are statically validated before the bounded record scan.
-- `LINEST`, `LOGEST`, `TREND`, and `GROWTH` share one normalized,
-  rank-revealing regression path. `MINVERSE` uses partial-pivot LU and `MUNIT`
-  creates bounded identity arrays. All six report array results in the Rust,
-  Python, and Node.js catalogs.
-- `ARABIC` accepts Roman text across Excel's wider signed parse domain, while
-  `ROMAN` formats only truncated values from 0 through 3,999 and supports forms
-  0 through 4. `ROMAN(0,0)` returns an empty string.
+  `.is_official()`. The 0.1.12 catalog contains 347 official Excel-facing names
+  and one non-official compatibility entry for the OOXML dummy-function marker,
+  for 348 accepted entries.
+- The 20 official names added in 0.1.12 are `GAMMA`, `GAMMA.DIST`,
+  `GAMMADIST`, `GAMMA.INV`, `GAMMAINV`, `GAMMALN`, `GAMMALN.PRECISE`,
+  `BETA.DIST`, `BETADIST`, `BETA.INV`, `BETAINV`, `BINOM.DIST`, `BINOMDIST`,
+  `BINOM.DIST.RANGE`, `BINOM.INV`, `CRITBINOM`, `NEGBINOM.DIST`,
+  `NEGBINOMDIST`, `HYPGEOM.DIST`, and `HYPGEOMDIST`. None of them returns an
+  array.
+- All four families share one first-party special-function foundation: a
+  Lanczos `ln_gamma`, regularized incomplete gamma and beta kernels, and a
+  safeguarded inverse solver. A family's density, cumulative, and quantile
+  forms are evaluated through the same kernel.
+- The inverse solver brackets and then refines with alternating bisection and
+  secant steps, and charges the calculation budget for every step. A search
+  that cannot converge returns `#N/A` from `GAMMA.INV` and `BETA.INV`, which is
+  the error Microsoft documents; it never returns an unconverged number.
+- `BINOM.INV` and `CRITBINOM` bisect over the integer support instead, and
+  verify `CDF(k-1) < alpha <= CDF(k)` against recomputed sums before returning.
+- `HYPGEOM.DIST` and `HYPGEOMDIST` evaluate sample sizes through 10,000 as a
+  falling-factorial product that never differences two large `lnGamma` values,
+  which is what keeps very large populations accurate.
 - `scan_function_usage(&WorkbookSnapshot) -> FunctionUsageReport` and
   `scan_function_usage_with_options(&WorkbookSnapshot, CalculationOptions)`
   count normalized function calls without calculating the workbook.

@@ -1265,6 +1265,121 @@ mod tests {
     }
 
     #[test]
+    fn v0_1_12_semantic_registry_is_byte_exact() {
+        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_12);
+        let mut digest = Sha256::new();
+        digest.update(snapshot.as_bytes());
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual, "8f9e63dcadbd7b7839f1fcb22471519cb9dafa696925f3fc6e1ee68d9377c4d0",
+            "stable v0.1.12 semantic snapshot changed:\n{snapshot}",
+        );
+    }
+
+    #[test]
+    fn v0_1_12_descriptors_freeze_function_families_arity_and_array_results() {
+        // Six of the twenty names are aliases, so the lookup resolves accepted spellings rather
+        // than canonical ones only.
+        for name in [
+            "BETA.DIST",
+            "BETA.INV",
+            "BETADIST",
+            "BETAINV",
+            "BINOM.DIST",
+            "BINOM.DIST.RANGE",
+            "BINOM.INV",
+            "BINOMDIST",
+            "CRITBINOM",
+            "GAMMA",
+            "GAMMA.DIST",
+            "GAMMA.INV",
+            "GAMMADIST",
+            "GAMMAINV",
+            "GAMMALN",
+            "GAMMALN.PRECISE",
+            "HYPGEOM.DIST",
+            "HYPGEOMDIST",
+            "NEGBINOM.DIST",
+            "NEGBINOMDIST",
+        ] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_12,
+                "{name}",
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Distribution(_)),
+                "{name}"
+            );
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
+
+        for name in ["GAMMA", "GAMMALN", "GAMMALN.PRECISE"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(0), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+        }
+
+        for name in [
+            "GAMMA.INV",
+            "GAMMAINV",
+            "BINOM.INV",
+            "CRITBINOM",
+            "NEGBINOMDIST",
+        ] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(4), "{name}");
+        }
+
+        for name in [
+            "GAMMA.DIST",
+            "GAMMADIST",
+            "BINOM.DIST",
+            "BINOMDIST",
+            "NEGBINOM.DIST",
+            "HYPGEOMDIST",
+        ] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(4), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(5), "{name}");
+        }
+
+        let binom_dist_range = resolve("BINOM.DIST.RANGE").expect("BINOM.DIST.RANGE descriptor");
+        assert!((3..=4).all(|arity| binom_dist_range.call_contract().arity().accepts(arity)));
+        assert!(!binom_dist_range.call_contract().arity().accepts(2));
+        assert!(!binom_dist_range.call_contract().arity().accepts(5));
+
+        let beta_dist = resolve("BETA.DIST").expect("BETA.DIST descriptor");
+        assert!((4..=6).all(|arity| beta_dist.call_contract().arity().accepts(arity)));
+        assert!(!beta_dist.call_contract().arity().accepts(3));
+        assert!(!beta_dist.call_contract().arity().accepts(7));
+
+        for name in ["BETA.INV", "BETAINV", "BETADIST"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(
+                (3..=5).all(|arity| descriptor.call_contract().arity().accepts(arity)),
+                "{name}",
+            );
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(6), "{name}");
+        }
+
+        let hypgeom_dist = resolve("HYPGEOM.DIST").expect("HYPGEOM.DIST descriptor");
+        assert!(hypgeom_dist.call_contract().arity().accepts(5));
+        assert!(!hypgeom_dist.call_contract().arity().accepts(4));
+        assert!(!hypgeom_dist.call_contract().arity().accepts(6));
+    }
+
+    #[test]
     fn storage_and_legacy_spellings_resolve_to_canonical_descriptors() {
         assert_eq!(normalize_name("_xlfn._xlws.FILTER"), "FILTER");
         assert_eq!(normalize_name("_xludf._xlfn.COVAR"), "COVARIANCE.P");

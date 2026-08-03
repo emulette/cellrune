@@ -10,11 +10,33 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-08-03
+
+### Added
+
+- Seven gamma functions: `GAMMA`, `GAMMA.DIST`, `GAMMADIST`, `GAMMA.INV`, `GAMMAINV`, `GAMMALN`,
+  and `GAMMALN.PRECISE`. The density, cumulative, and quantile forms share one regularized
+  incomplete-gamma kernel, and the origin follows Excel's documented pole, limit, and zero cases.
+- Four beta functions: `BETA.DIST`, `BETADIST`, `BETA.INV`, and `BETAINV`, including the optional
+  `A`/`B` interval bounds with the `1 / (B - A)` density Jacobian. The legacy `BETADIST` spelling
+  keeps its own kernel because it has no cumulative flag.
+- Seven binomial functions: `BINOM.DIST`, `BINOMDIST`, `BINOM.DIST.RANGE`, `BINOM.INV`,
+  `CRITBINOM`, `NEGBINOM.DIST`, and `NEGBINOMDIST`. `BINOM.INV` bisects over the integer support
+  and verifies the minimal-`k` contract against recomputed cumulative sums before returning.
+- Two hypergeometric functions: `HYPGEOM.DIST` and `HYPGEOMDIST`. Sample sizes through 10,000 use
+  a falling-factorial product that never differences two large `lnΓ` values, which keeps very
+  large populations accurate.
+- A shared first-party special-function foundation behind all four families: a Lanczos `ln_gamma`,
+  regularized incomplete gamma and beta kernels, and a budget-aware safeguarded inverse solver
+  whose every bracket and refinement step charges the calculation budget.
+
 ### Changed
 
-- The MCP server now requires `rmcp` 3.0.1 or newer within the 3.x family and uses its typed
-  complete-response wrappers. The checked-in MCP dependency notice also covers the new
-  all-target `uuid`/`getrandom` graph.
+- The public function catalog now contains 347 official Excel-facing names and 348 accepted
+  entries including the non-official OOXML dummy-function marker. Rust, Python, and Node.js report
+  the same catalog; none of the twenty new names returns an array.
+- Excel Oracle expectations now classify all 60 active 0.1.12 distribution cases as matches in
+  both frozen host profiles.
 
 ## [0.1.11] - 2026-08-02
 
@@ -38,6 +60,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   compensated sum and explicit sample/population boundaries.
 - Excel Oracle expectations now classify all 57 active 0.1.11 cases as matches in both frozen host
   profiles and verify every materialized cell in the Apache POI matrix fixture.
+- The MCP server now requires `rmcp` 3.0.1 or newer within the 3.x family and uses its typed
+  complete-response wrappers. The checked-in MCP dependency notice also covers the new
+  all-target `uuid`/`getrandom` graph. The `v0.1.11` release artifacts were built from the
+  tagged commit that includes this upgrade.
 
 ### Fixed
 
@@ -585,7 +611,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/emulette/cellrune/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/emulette/cellrune/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/emulette/cellrune/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/emulette/cellrune/compare/v0.1.8...v0.1.9
