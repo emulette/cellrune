@@ -21,6 +21,19 @@ pub(super) use incomplete_gamma::regularized_gamma_p;
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
 
+use super::super::value::ErrorKind;
+
+/// Log-space rounding can leave a probability a few ULP outside [0, 1];
+/// clamping keeps every reported value a probability. Shared by all
+/// distribution kernels so the policy cannot drift apart.
+pub(super) fn bounded_probability(value: f64) -> Result<f64, ErrorKind> {
+    if value.is_finite() {
+        Ok(value.clamp(0.0, 1.0))
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
 /// Relative termination threshold for the incomplete-gamma series and
 /// continued-fraction refinements.
 const CONVERGENCE_EPSILON: f64 = f64::EPSILON;

@@ -7,6 +7,7 @@
 //! callback before it does more work.
 
 use super::super::super::super::value::ErrorKind;
+use super::super::super::special_functions::bounded_probability;
 use super::super::super::special_functions::ln_gamma;
 use super::{Parameters, support_floor};
 
@@ -122,17 +123,6 @@ fn log_gamma_log_mass(parameters: Parameters) -> Result<f64, ErrorKind> {
 /// ln C(n, k). Callers validate 0 ≤ k ≤ n, so all three lnΓ arguments are ≥ 1.
 fn ln_binomial(n: f64, k: f64) -> Result<f64, ErrorKind> {
     Ok(ln_gamma(n + 1.0)? - ln_gamma(k + 1.0)? - ln_gamma(n - k + 1.0)?)
-}
-
-/// Log-space rounding can leave a probability a few ULP outside [0, 1];
-/// clamping keeps the reported value a probability, as the incomplete-gamma
-/// kernel does.
-fn bounded_probability(value: f64) -> Result<f64, ErrorKind> {
-    if value.is_finite() {
-        Ok(value.clamp(0.0, 1.0))
-    } else {
-        Err(ErrorKind::Num)
-    }
 }
 
 #[cfg(test)]

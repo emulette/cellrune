@@ -1,5 +1,6 @@
 use super::super::super::value::ErrorKind;
 use super::LN_UNDERFLOW_LIMIT;
+use super::bounded_probability;
 use super::log_binomial::ln_binomial;
 
 /// Probability mass of Binomial(trials, probability) at `successes`.
@@ -223,14 +224,6 @@ fn validate_failure_success_pair(failures: f64, successes: f64) -> Result<(), Er
 fn validate_probability(probability: f64) -> Result<(), ErrorKind> {
     if (0.0..=1.0).contains(&probability) {
         Ok(())
-    } else {
-        Err(ErrorKind::Num)
-    }
-}
-
-fn bounded_probability(value: f64) -> Result<f64, ErrorKind> {
-    if value.is_finite() {
-        Ok(value.clamp(0.0, 1.0))
     } else {
         Err(ErrorKind::Num)
     }

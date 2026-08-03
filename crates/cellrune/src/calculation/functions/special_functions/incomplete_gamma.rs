@@ -1,4 +1,5 @@
 use super::super::super::value::ErrorKind;
+use super::bounded_probability;
 use super::log_gamma::ln_gamma;
 use super::{CONVERGENCE_EPSILON, LENTZ_TINY, LN_UNDERFLOW_LIMIT, MAX_REFINEMENT_ITERATIONS};
 
@@ -131,14 +132,6 @@ fn log_prefactor(a: f64, x: f64) -> Result<f64, ErrorKind> {
         Err(ErrorKind::Num)
     } else {
         Ok(value)
-    }
-}
-
-fn bounded_probability(value: f64) -> Result<f64, ErrorKind> {
-    if value.is_finite() {
-        Ok(value.clamp(0.0, 1.0))
-    } else {
-        Err(ErrorKind::Num)
     }
 }
 
