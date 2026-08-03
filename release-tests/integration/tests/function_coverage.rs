@@ -499,6 +499,37 @@ fn beta_distribution_family_matches_documented_examples() {
 }
 
 #[test]
+fn hypergeometric_distribution_family_matches_documented_examples() {
+    // Microsoft documents 1 success drawn from a sample of 4, taken from a
+    // population of 20 holding 8 successes: 0.4654 cumulative, 0.3633 mass.
+    let cases = [
+        number(
+            "HYPGEOM.DIST(1,4,8,20,TRUE)",
+            0.465_428_276_573_787_44,
+            1e-12,
+        ),
+        number(
+            "HYPGEOM.DIST(1,4,8,20,FALSE)",
+            0.363_261_093_911_248_7,
+            1e-12,
+        ),
+        number("HYPGEOMDIST(1,4,8,20)", 0.363_261_093_911_248_7, 1e-12),
+        error("HYPGEOM.DIST(-1,4,8,20,TRUE)", ExcelError::Number),
+        error("HYPGEOM.DIST(5,4,8,20,TRUE)", ExcelError::Number),
+        error("HYPGEOM.DIST(1,4,8,0,TRUE)", ExcelError::Number),
+        error("HYPGEOMDIST(-1,4,8,20)", ExcelError::Number),
+        error("HYPGEOMDIST(1,21,8,20)", ExcelError::Number),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn corpus_driven_functions_match_excel_scalar_contracts() {
     let cases = [
         text("ADDRESS(2,3)", "$C$2"),

@@ -1510,13 +1510,14 @@ impl DistributionFunction {
             )
             .with_defaults(BETA_FIVE_ARGUMENT_INTERVAL_DEFAULTS),
             Self::Gamma | Self::GammaLnPrecise => CallContract::uniform(Arity::exact(1), SCALAR),
-            Self::BinomDist | Self::GammaDist | Self::NegBinomDist => {
+            Self::BinomDist | Self::GammaDist | Self::HypgeomDistLegacy | Self::NegBinomDist => {
                 CallContract::uniform(Arity::exact(4), SCALAR)
             }
             Self::BinomInv | Self::GammaInv | Self::NegBinomDistLegacy => {
                 CallContract::uniform(Arity::exact(3), SCALAR)
             }
             Self::BinomDistRange => CallContract::uniform(Arity::range(3, 4), SCALAR),
+            Self::HypgeomDist => CallContract::uniform(Arity::exact(5), SCALAR),
         }
     }
 }

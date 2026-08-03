@@ -6,6 +6,7 @@ use super::kernel::DistributionFunction;
 mod beta;
 mod binomial;
 mod gamma;
+mod hypergeometric;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -28,6 +29,12 @@ pub(super) fn call(
         DistributionFunction::GammaDist => gamma::gamma_distribution(engine, context, args),
         DistributionFunction::GammaInv => gamma::gamma_inverse(engine, context, args),
         DistributionFunction::GammaLnPrecise => gamma::log_gamma_precise(engine, context, args),
+        DistributionFunction::HypgeomDist => {
+            hypergeometric::hypergeometric_distribution(engine, context, args)
+        }
+        DistributionFunction::HypgeomDistLegacy => {
+            hypergeometric::hypergeometric_distribution_legacy(engine, context, args)
+        }
         DistributionFunction::NegBinomDist => {
             binomial::negative_binomial_distribution(engine, context, args)
         }

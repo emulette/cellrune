@@ -578,3 +578,118 @@ fn negative_binomial_cumulative_respects_the_function_iteration_budget() {
     );
     assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
+
+#[test]
+fn hypergeometric_family_matches_the_excel_oracle() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "HYPGEOM.DIST(1,4,8,20,TRUE)"),
+        (1, 2, "HYPGEOM.DIST(\"2\",4,8,20,TRUE)"),
+        (1, 3, "HYPGEOM.DIST(-1,4,8,20,TRUE)"),
+        (1, 4, "HYPGEOMDIST(1,4,8,20)"),
+        (1, 5, "HYPGEOMDIST(\"2\",4,8,20)"),
+        (1, 6, "HYPGEOMDIST(-1,4,8,20)"),
+        // Every argument is truncated to an integer before the mass is taken.
+        (1, 7, "HYPGEOM.DIST(1.9,4,8,20,FALSE)"),
+        // The legacy four-argument name adapts onto the same kernel, so its
+        // results are bit-identical to the mass branch of the modern name.
+        (1, 8, "HYPGEOMDIST(1,4,8,20)=HYPGEOM.DIST(1,4,8,20,FALSE)"),
+        (1, 9, "HYPGEOMDIST(2,4,8,20)=HYPGEOM.DIST(2,4,8,20,FALSE)"),
+        (1, 10, "HYPGEOMDIST(4,6,8,10)=HYPGEOM.DIST(4,6,8,10,FALSE)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    // Oracle-pinned values (both Excel profiles agree) within ~1e-9 relative.
+    // The oracle prints 0.84685242518059867, 0.36326109391124861 and
+    // 0.38142414860681101; each is the same f64 as the shortest form below.
+    for (column, expected, tolerance) in [
+        (1, 0.465_428_276_573_787_27, 4.7e-10),
+        (2, 0.846_852_425_180_598_7, 8.5e-10),
+        (4, 0.363_261_093_911_248_6, 3.7e-10),
+        (5, 0.381_424_148_606_811, 3.9e-10),
+        (7, 0.363_261_093_911_248_6, 3.7e-10),
+    ] {
+        assert_number(&calculation, column, expected, tolerance);
+    }
+    for column in [3, 6] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Number
+            ))),
+            "sample_s below the support must be #NUM! in column {column}",
+        );
+    }
+    for column in [8, 9, 10] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Logical(true))),
+            "HYPGEOMDIST must be bit-identical to the mass branch in column {column}",
+        );
+    }
+}
+
+#[test]
+fn hypergeometric_family_rejects_domain_violations_with_excel_errors() {
+    let workbook = workbook_with_formulas(&[
+        // sample_s above the lesser of number_sample and population_s.
+        (1, 1, "HYPGEOM.DIST(5,4,8,20,TRUE)"),
+        (1, 2, "HYPGEOM.DIST(9,20,8,20,FALSE)"),
+        // sample_s below max(0, number_sample - number_pop + population_s).
+        (1, 3, "HYPGEOM.DIST(3,6,8,10,FALSE)"),
+        // number_sample outside (0, number_pop].
+        (1, 4, "HYPGEOM.DIST(1,0,8,20,TRUE)"),
+        (1, 5, "HYPGEOM.DIST(1,21,8,20,TRUE)"),
+        // population_s outside (0, number_pop].
+        (1, 6, "HYPGEOM.DIST(1,4,0,20,TRUE)"),
+        (1, 7, "HYPGEOM.DIST(1,4,21,20,TRUE)"),
+        // number_pop at or below zero.
+        (1, 8, "HYPGEOM.DIST(1,4,8,0,TRUE)"),
+        (1, 9, "HYPGEOM.DIST(1,4,8,-20,TRUE)"),
+        // The legacy name enforces the identical conditions.
+        (1, 10, "HYPGEOMDIST(5,4,8,20)"),
+        (1, 11, "HYPGEOMDIST(3,6,8,10)"),
+        (1, 12, "HYPGEOMDIST(1,4,8,0)"),
+        // Non-numeric arguments are coercion failures, not domain failures.
+        (1, 13, "HYPGEOM.DIST(\"abc\",4,8,20,TRUE)"),
+        (1, 14, "HYPGEOM.DIST(1,4,8,20,\"abc\")"),
+        (1, 15, "HYPGEOMDIST(\"abc\",4,8,20)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for column in 1..=12 {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Number
+            ))),
+            "unexpected domain result in column {column}",
+        );
+    }
+    for column in [13, 14, 15] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "unexpected coercion result in column {column}",
+        );
+    }
+}
+
+#[test]
+fn hypergeometric_cumulative_distribution_respects_the_function_iteration_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "HYPGEOM.DIST(400,1000,40000,100000,TRUE)")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(2)
+                .expect("positive summation work limit"),
+        ),
+    );
+    // The 401-term summation must fail closed: no partial sum is installed.
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}

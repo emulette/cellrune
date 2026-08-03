@@ -915,6 +915,12 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(GammaLnPrecise, "GAMMALN.PRECISE", Distribution)
         .with_aliases(&[FunctionAlias::official("GAMMALN")])
         .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(HypgeomDist, "HYPGEOM.DIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    // HYPGEOMDIST takes four arguments to HYPGEOM.DIST's five, so it is a
+    // distinct function rather than an alias.
+    function!(HypgeomDistLegacy, "HYPGEOMDIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(NegBinomDist, "NEGBINOM.DIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
     // Legacy arity (3, mass only) makes NEGBINOMDIST a distinct adapter

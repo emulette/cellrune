@@ -388,6 +388,8 @@ function_enum!(DistributionFunction {
     GammaDist,
     GammaInv,
     GammaLnPrecise,
+    HypgeomDist,
+    HypgeomDistLegacy,
     NegBinomDist,
     NegBinomDistLegacy,
 });
