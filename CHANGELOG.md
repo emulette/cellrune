@@ -17,13 +17,17 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Seven gamma functions: `GAMMA`, `GAMMA.DIST`, `GAMMADIST`, `GAMMA.INV`, `GAMMAINV`, `GAMMALN`,
   and `GAMMALN.PRECISE`. The cumulative and quantile forms share one regularized
   incomplete-gamma kernel, the density is built on the same `ln_gamma` primitive, and the origin
-  follows Excel's documented pole, limit, and zero cases.
+  follows Excel's documented pole, limit, and zero cases. Scale ratios and the Lanczos
+  normalization stay in log space, preserving valid extreme finite inputs.
 - Four beta functions: `BETA.DIST`, `BETADIST`, `BETA.INV`, and `BETAINV`, including the optional
   `A`/`B` interval bounds with the `1 / (B - A)` density Jacobian. The legacy `BETADIST` spelling
-  keeps its own typed adapter entry because it has no cumulative flag.
+  keeps its own typed adapter entry because it has no cumulative flag. Normalized coordinates,
+  Jacobians, and inverse interpolation remain finite even when `B - A` itself overflows.
 - Seven binomial functions: `BINOM.DIST`, `BINOMDIST`, `BINOM.DIST.RANGE`, `BINOM.INV`,
   `CRITBINOM`, `NEGBINOM.DIST`, and `NEGBINOMDIST`. `BINOM.INV` bisects over the integer support
-  and verifies the minimal-`k` contract against recomputed cumulative sums before returning.
+  and verifies the minimal-`k` contract against regularized incomplete-beta CDF evaluations before
+  returning; full-support and degenerate cases resolve exactly without enumerating the support,
+  and probability complements stay in `ln1p` form at extreme inputs.
 - Two hypergeometric functions: `HYPGEOM.DIST` and `HYPGEOMDIST`. Sample sizes through 10,000 use
   a falling-factorial product that never differences two large `lnΓ` values, which keeps very
   large populations accurate.

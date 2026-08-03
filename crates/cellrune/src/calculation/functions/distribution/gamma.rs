@@ -4,7 +4,8 @@ use super::super::super::eval::{Engine, EvalContext};
 use super::super::super::value::{ErrorKind, Value};
 use super::super::array_common::poll_cancellation;
 use super::super::special_functions::{
-    DomainPolicy, invert_monotone_cdf, ln_gamma, regularized_gamma_p, signed_gamma,
+    DomainPolicy, invert_monotone_cdf, ln_gamma, regularized_gamma_p, regularized_gamma_p_from_log,
+    signed_gamma,
 };
 use super::super::util::required_number;
 use super::{finite, quantile_solver_error};
@@ -69,7 +70,11 @@ pub(super) fn gamma_distribution(
         Err(kind) => return Value::Error(kind),
     };
     if cumulative {
-        match regularized_gamma_p(alpha, x / beta, || {
+        if x == 0.0 {
+            return Value::Number(0.0);
+        }
+        let log_scaled = x.ln() - beta.ln();
+        match regularized_gamma_p_from_log(alpha, log_scaled, || {
             poll_cancellation(context)?;
             engine.charge_function_iterations(context, 1)
         }) {
@@ -82,8 +87,7 @@ pub(super) fn gamma_distribution(
 }
 
 fn density(x: f64, alpha: f64, beta: f64) -> Value {
-    let scaled = x / beta;
-    if scaled == 0.0 {
+    if x == 0.0 {
         // Microsoft's GAMMA.DIST contract at the origin: the density is a pole
         // for alpha < 1, 1/beta for alpha = 1, and zero for alpha > 1.
         return if alpha < 1.0 {
@@ -94,11 +98,18 @@ fn density(x: f64, alpha: f64, beta: f64) -> Value {
             Value::Number(0.0)
         };
     }
+    let log_scaled = x.ln() - beta.ln();
+    if log_scaled > f64::MAX.ln() {
+        // A scaled point beyond the largest finite double is also beyond every
+        // finite shape parameter; its density is below the representable tail.
+        return Value::Number(0.0);
+    }
+    let scaled = log_scaled.exp();
     let ln_gamma_alpha = match ln_gamma(alpha) {
         Ok(value) => value,
         Err(kind) => return Value::Error(kind),
     };
-    let log_density = (alpha - 1.0) * scaled.ln() - scaled - ln_gamma_alpha - beta.ln();
+    let log_density = (alpha - 1.0) * log_scaled - scaled - ln_gamma_alpha - beta.ln();
     finite(log_density.exp())
 }
 
@@ -147,5 +158,23 @@ pub(super) fn gamma_inverse(engine: &Engine<'_>, context: EvalContext<'_>, args:
     match solved {
         Ok(value) => finite(beta * value),
         Err(kind) => Value::Error(quantile_solver_error(kind)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::density;
+    use crate::calculation::value::Value;
+
+    #[test]
+    fn positive_x_is_not_mistaken_for_the_origin_when_scale_division_underflows() {
+        let Value::Number(actual) = density(1e-308, 0.5, 1e308) else {
+            panic!("finite density must stay numeric");
+        };
+        let expected = 0.564_189_583_547_784_1;
+        assert!(
+            (actual - expected).abs() <= 1e-12 * expected,
+            "underflow-scale density: {actual} vs {expected}",
+        );
     }
 }

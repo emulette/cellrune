@@ -1,7 +1,14 @@
 use super::super::super::value::ErrorKind;
 use super::LN_UNDERFLOW_LIMIT;
 use super::bounded_probability;
+use super::incomplete_beta::regularized_incomplete_beta;
 use super::log_binomial::ln_binomial;
+
+/// Largest integer for which every preceding integer is represented exactly by
+/// `f64`. Paths that enumerate a support may convert only values at or below
+/// this boundary; endpoint and degenerate paths stay in `f64` and do not need
+/// that restriction.
+const MAX_CONSECUTIVE_F64_INTEGER: f64 = 9_007_199_254_740_992.0;
 
 /// Probability mass of Binomial(trials, probability) at `successes`.
 ///
@@ -21,10 +28,11 @@ pub(in crate::calculation::functions) fn binomial_pmf(
     pmf_unchecked(trials, successes, probability)
 }
 
-/// Sum of Binomial(trials, probability) masses for successes in
-/// [first, last]. `on_iteration` is charged before every added term, so the
-/// engine budget and cancellation govern long summations; each term is an
-/// independent log-space evaluation, keeping the sum stable for large trials.
+/// Probability of Binomial(trials, probability) successes in [first, last].
+/// A range beginning at zero uses the incomplete-beta CDF instead of summing
+/// one mass per support point. Full-support and degenerate ranges are exact
+/// constant-time branches. Interior ranges retain independent log-space mass
+/// evaluation, with `on_iteration` charged before every added term.
 pub(in crate::calculation::functions) fn binomial_pmf_sum(
     trials: f64,
     probability: f64,
@@ -38,8 +46,34 @@ pub(in crate::calculation::functions) fn binomial_pmf_sum(
         return Err(ErrorKind::Num);
     }
     validate_probability(probability)?;
+
+    if first == 0.0 && last == trials {
+        return Ok(1.0);
+    }
+    if probability == 0.0 {
+        return Ok(if first == 0.0 { 1.0 } else { 0.0 });
+    }
+    if probability == 1.0 {
+        return Ok(if first <= trials && trials <= last {
+            1.0
+        } else {
+            0.0
+        });
+    }
+    if first == last {
+        return pmf_unchecked(trials, first, probability);
+    }
+    if first == 0.0 {
+        return lower_cdf(trials, last, probability, &mut on_iteration);
+    }
+
+    // Rust's float-to-integer cast saturates above u64::MAX. Reject an
+    // interior range that cannot be enumerated exactly instead of silently
+    // changing its endpoints (and therefore its probability).
+    let first = exact_support_index(first)?;
+    let last = exact_support_index(last)?;
     let mut total = 0.0;
-    for successes in (first as u64)..=(last as u64) {
+    for successes in first..=last {
         on_iteration()?;
         total += pmf_unchecked(trials, successes as f64, probability)?;
     }
@@ -53,14 +87,13 @@ pub(in crate::calculation::functions) fn binomial_pmf_sum(
 /// which keeps targets near alpha = 1 out of floating-point rounding traps,
 /// and the accepted k is verified explicitly against
 /// CDF(k−1) < alpha ≤ CDF(k) before it is returned (k = 0 needs only the
-/// upper half). Degenerate corners resolve without summation: alpha = 0 and
+/// upper half). Each interior CDF is one regularized incomplete-beta
+/// evaluation, so the search grows logarithmically with the support rather
+/// than re-summing O(k) masses at every probe. Degenerate corners resolve
+/// without refinement: alpha = 0 and
 /// p = 0 pin k = 0, while alpha = 1 and p = 1 (with alpha > 0) pin
-/// k = trials. Every bisection step and every summed CDF term charges
-/// `on_iteration` first. Minimality is exact against this module's f64 CDF;
-/// when alpha sits within the CDF's own log-space noise (~ULP of the lnΓ
-/// magnitude per term) of an exact-arithmetic CDF value, the returned k can
-/// differ from the infinite-precision minimal k by one step for each
-/// noise-crossed CDF value — usually one, occasionally more at extreme alpha.
+/// k = trials. Every bisection and continued-fraction refinement step charges
+/// `on_iteration` first. Minimality is exact against this module's f64 CDF.
 pub(in crate::calculation::functions) fn smallest_binomial_quantile(
     trials: f64,
     probability: f64,
@@ -76,32 +109,24 @@ pub(in crate::calculation::functions) fn smallest_binomial_quantile(
     if probability == 1.0 || alpha == 1.0 {
         return Ok(trials);
     }
-    let support_end = trials as u64;
+    let support_end = exact_support_index(trials)?;
     let mut low = 0_u64;
     let mut high = support_end;
     while low < high {
         on_iteration()?;
         let midpoint = low + (high - low) / 2;
-        if lower_cdf(
-            trials,
-            midpoint,
-            support_end,
-            probability,
-            &mut on_iteration,
-        )? >= alpha
-        {
+        if lower_cdf(trials, midpoint as f64, probability, &mut on_iteration)? >= alpha {
             high = midpoint;
         } else {
             low = midpoint + 1;
         }
     }
     // Final explicit verification of the minimal-k contract. Both halves are
-    // recomputed sums, not values remembered from the search.
-    if lower_cdf(trials, low, support_end, probability, &mut on_iteration)? < alpha {
+    // recomputed CDFs, not values remembered from the search.
+    if lower_cdf(trials, low as f64, probability, &mut on_iteration)? < alpha {
         return Err(ErrorKind::Num);
     }
-    if low > 0 && lower_cdf(trials, low - 1, support_end, probability, &mut on_iteration)? >= alpha
-    {
+    if low > 0 && lower_cdf(trials, (low - 1) as f64, probability, &mut on_iteration)? >= alpha {
         return Err(ErrorKind::Num);
     }
     Ok(low as f64)
@@ -121,8 +146,10 @@ pub(in crate::calculation::functions) fn negative_binomial_pmf(
     negative_binomial_pmf_unchecked(failures, successes, probability)
 }
 
-/// Lower CDF of NegativeBinomial(successes, probability) at `failures`,
-/// summed term by term with `on_iteration` charged before every term.
+/// Lower CDF of NegativeBinomial(successes, probability) at `failures`.
+/// The identity CDF(f) = I_p(successes, f + 1) replaces a support-width
+/// summation with one incomplete-beta evaluation. Degenerate probabilities
+/// resolve exactly without invoking `on_iteration`.
 pub(in crate::calculation::functions) fn negative_binomial_cdf(
     failures: f64,
     successes: f64,
@@ -131,32 +158,55 @@ pub(in crate::calculation::functions) fn negative_binomial_cdf(
 ) -> Result<f64, ErrorKind> {
     validate_failure_success_pair(failures, successes)?;
     validate_probability(probability)?;
-    let mut total = 0.0;
-    for index in 0..=(failures as u64) {
-        on_iteration()?;
-        total += negative_binomial_pmf_unchecked(index as f64, successes, probability)?;
+    if probability == 0.0 {
+        return Ok(0.0);
     }
-    bounded_probability(total)
+    if probability == 1.0 {
+        return Ok(1.0);
+    }
+    regularized_incomplete_beta(successes, failures + 1.0, probability, &mut on_iteration)
 }
 
-/// Lower binomial CDF used by the quantile search; the full support returns
-/// exactly 1 by definition instead of a rounded floating-point sum.
+/// Lower binomial CDF. For an interior support point k,
+/// P(X ≤ k) = I_(1−p)(trials−k, k+1). The full support and degenerate
+/// probabilities return exact endpoints without running a refinement.
 fn lower_cdf(
     trials: f64,
-    successes: u64,
-    support_end: u64,
+    successes: f64,
     probability: f64,
     on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
-    if successes >= support_end {
+    if successes >= trials || probability == 0.0 {
         return Ok(1.0);
     }
-    let mut total = 0.0;
-    for index in 0..=successes {
-        on_iteration()?;
-        total += pmf_unchecked(trials, index as f64, probability)?;
+    if probability == 1.0 {
+        return Ok(0.0);
     }
-    bounded_probability(total)
+    if successes == 0.0 {
+        // P(X = 0) = (1-p)^n. Evaluating the mass through ln1p preserves
+        // probabilities below half an ULP of 1, where materializing `1-p`
+        // would round to one before the exponent is applied.
+        return pmf_unchecked(trials, 0.0, probability);
+    }
+    if successes == trials - 1.0 {
+        // P(X <= n-1) = 1-p^n. exp_m1 keeps the small complement when p is
+        // close to one instead of cancelling two nearly equal numbers.
+        return bounded_probability(-(trials * probability.ln()).exp_m1());
+    }
+    regularized_incomplete_beta(
+        trials - successes,
+        successes + 1.0,
+        1.0 - probability,
+        on_iteration,
+    )
+}
+
+fn exact_support_index(value: f64) -> Result<u64, ErrorKind> {
+    if value <= MAX_CONSECUTIVE_F64_INTEGER {
+        Ok(value as u64)
+    } else {
+        Err(ErrorKind::Num)
+    }
 }
 
 fn pmf_unchecked(trials: f64, successes: f64, probability: f64) -> Result<f64, ErrorKind> {
@@ -168,7 +218,7 @@ fn pmf_unchecked(trials: f64, successes: f64, probability: f64) -> Result<f64, E
     }
     let log_mass = ln_binomial(trials, successes)?
         + successes * probability.ln()
-        + (trials - successes) * (1.0 - probability).ln();
+        + (trials - successes) * (-probability).ln_1p();
     if log_mass < LN_UNDERFLOW_LIMIT {
         return Ok(0.0);
     }
@@ -188,7 +238,7 @@ fn negative_binomial_pmf_unchecked(
     }
     let log_mass = ln_binomial(failures + successes - 1.0, failures)?
         + successes * probability.ln()
-        + failures * (1.0 - probability).ln();
+        + failures * (-probability).ln_1p();
     if log_mass < LN_UNDERFLOW_LIMIT {
         return Ok(0.0);
     }
@@ -327,6 +377,36 @@ mod tests {
     }
 
     #[test]
+    fn extreme_probability_complements_do_not_round_away_before_exponentiation() {
+        // References: 80-digit Decimal arithmetic using the exact binary64
+        // values of p. The first two cases would become exp(-1), not one, even
+        // though directly forming 1-p loses the decrement at p = 1e-20.
+        for (trials, probability, expected) in [
+            (1e16, 1e-16, 0.367_879_441_171_442_3),
+            (1e20, 1e-20, 0.367_879_441_171_442_33),
+        ] {
+            let mass = binomial_pmf(trials, 0.0, probability).expect("valid extreme mass");
+            assert!(
+                (mass - expected).abs() <= 2e-15 * expected,
+                "pmf({trials}, 0, {probability}): {mass} vs {expected}",
+            );
+            let cumulative = cdf(trials, 0.0, probability);
+            assert!(
+                (cumulative - expected).abs() <= 2e-15 * expected,
+                "cdf({trials}, 0, {probability}): {cumulative} vs {expected}",
+            );
+        }
+
+        let probability = f64::from_bits(1.0_f64.to_bits() - 1);
+        let upper_edge = cdf(1_000_000.0, 999_999.0, probability);
+        let expected_upper_edge = 1.110_223_024_563_526_8e-10;
+        assert!(
+            (upper_edge - expected_upper_edge).abs() <= 2e-15 * expected_upper_edge,
+            "upper-edge CDF: {upper_edge} vs {expected_upper_edge}",
+        );
+    }
+
+    #[test]
     fn degenerate_probabilities_follow_excel_conventions_exactly() {
         assert_eq!(binomial_pmf(10.0, 0.0, 0.0), Ok(1.0));
         assert_eq!(binomial_pmf(10.0, 3.0, 0.0), Ok(0.0));
@@ -344,7 +424,32 @@ mod tests {
     }
 
     #[test]
-    fn pmf_sums_to_one_across_the_support() {
+    fn full_support_and_degenerate_cdfs_do_not_iterate() {
+        let unexpected_iteration = || Err(ErrorKind::Num);
+        assert_eq!(
+            binomial_pmf_sum(10.0, 0.4, 0.0, 10.0, unexpected_iteration),
+            Ok(1.0),
+        );
+        assert_eq!(
+            binomial_pmf_sum(1e20, 1.0, 1e20, 1e20, unexpected_iteration),
+            Ok(1.0),
+        );
+        assert_eq!(
+            binomial_pmf_sum(1e20, 0.0, 1e20, 1e20, unexpected_iteration),
+            Ok(0.0),
+        );
+        assert_eq!(
+            negative_binomial_cdf(1e20, 4.0, 1.0, unexpected_iteration),
+            Ok(1.0),
+        );
+        assert_eq!(
+            negative_binomial_cdf(1e20, 4.0, 0.0, unexpected_iteration),
+            Ok(0.0),
+        );
+    }
+
+    #[test]
+    fn pmf_values_sum_to_one_across_the_support() {
         for (trials, probability) in [
             (0.0, 0.4),
             (1.0, 0.25),
@@ -354,8 +459,11 @@ mod tests {
             (100.0, 0.99),
             (500.0, 0.5),
         ] {
-            let total = binomial_pmf_sum(trials, probability, 0.0, trials, || Ok(()))
-                .expect("valid domain");
+            let mut total = 0.0;
+            for successes in 0..=(trials as u64) {
+                total += binomial_pmf(trials, successes as f64, probability)
+                    .expect("valid support point");
+            }
             assert!(
                 (total - 1.0).abs() <= 1e-12,
                 "n={trials} p={probability}: total mass {total}",
@@ -426,6 +534,32 @@ mod tests {
             let k = smallest_binomial_quantile(10.0, 0.4, alpha, || Ok(())).expect("valid domain");
             assert_eq!(k, successes, "alpha={alpha}");
         }
+    }
+
+    #[test]
+    fn large_quantile_uses_sublinear_work() {
+        // Reference: exact C(200000,100000)/2^200000 followed by an 80-digit
+        // Decimal PMF recurrence gives CDF(100056) = 0.59974054111915585 and
+        // CDF(100057) = 0.60146762870635096.
+        let mut calls = 0_u64;
+        let quantile = smallest_binomial_quantile(200_000.0, 0.5, 0.6, || {
+            calls += 1;
+            if calls > 1_000_000 {
+                Err(ErrorKind::ResourceLimit(
+                    CalculationLimitKind::FunctionIterations,
+                ))
+            } else {
+                Ok(())
+            }
+        })
+        .expect("default function-iteration budget");
+        assert_eq!(quantile, 100_057.0);
+        assert!(
+            calls < 10_000,
+            "incomplete-beta bisection used {calls} steps"
+        );
+        assert!(cdf(200_000.0, quantile - 1.0, 0.5) < 0.6);
+        assert!(cdf(200_000.0, quantile, 0.5) >= 0.6);
     }
 
     #[test]
@@ -507,6 +641,16 @@ mod tests {
             binomial_pmf_sum(10.0, 0.4, 4.0, 3.0, || Ok(())),
             Err(ErrorKind::Num),
         );
+        assert_eq!(
+            binomial_pmf_sum(
+                9_007_199_254_741_000.0,
+                0.4,
+                9_007_199_254_740_994.0,
+                9_007_199_254_740_996.0,
+                || Ok(()),
+            ),
+            Err(ErrorKind::Num),
+        );
         for (trials, probability, alpha) in [
             (-1.0, 0.4, 0.6),
             (10.0, 1.5, 0.6),
@@ -539,12 +683,12 @@ mod tests {
     fn summations_and_the_search_charge_work_and_stop_on_callback_errors() {
         let budget_error = ErrorKind::ResourceLimit(CalculationLimitKind::FunctionIterations);
         let mut sum_calls = 0_u32;
-        binomial_pmf_sum(10.0, 0.4, 0.0, 10.0, || {
+        binomial_pmf_sum(10.0, 0.4, 2.0, 8.0, || {
             sum_calls += 1;
             Ok(())
         })
         .expect("valid domain");
-        assert_eq!(sum_calls, 11);
+        assert_eq!(sum_calls, 7);
 
         let mut search_calls = 0_u32;
         smallest_binomial_quantile(10.0, 0.4, 0.6, || {
@@ -554,7 +698,7 @@ mod tests {
         .expect("valid domain");
         assert!(search_calls > 0);
 
-        for budget in [0_u32, 3] {
+        for budget in [0_u32, 1] {
             let mut remaining = budget;
             let charge = |remaining: &mut u32| {
                 if *remaining == 0 {
@@ -564,7 +708,7 @@ mod tests {
                 Ok(())
             };
             assert_eq!(
-                binomial_pmf_sum(10.0, 0.4, 0.0, 10.0, || charge(&mut remaining)),
+                binomial_pmf_sum(10.0, 0.4, 2.0, 8.0, || charge(&mut remaining)),
                 Err(budget_error),
             );
             let mut remaining = budget;

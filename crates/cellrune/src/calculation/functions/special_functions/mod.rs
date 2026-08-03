@@ -17,7 +17,7 @@ pub(super) use binomial::{
     smallest_binomial_quantile,
 };
 pub(super) use incomplete_beta::{ln_beta, regularized_incomplete_beta};
-pub(super) use incomplete_gamma::regularized_gamma_p;
+pub(super) use incomplete_gamma::{regularized_gamma_p, regularized_gamma_p_from_log};
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
 

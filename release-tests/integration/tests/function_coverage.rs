@@ -429,6 +429,18 @@ fn binomial_distribution_family_matches_documented_examples() {
     let cases = [
         number("BINOM.DIST(6,10,0.5,FALSE)", 0.205_078_125, 1e-12),
         number("BINOM.DIST(6,10,0.5,TRUE)", 0.828_125, 1e-12),
+        // Forming 1-p directly would round away p before raising the
+        // complement to this large trial count.
+        number(
+            "BINOM.DIST(0,1E20,1E-20,FALSE)",
+            0.367_879_441_171_442_33,
+            1e-15,
+        ),
+        number(
+            "BINOM.DIST(0,1E20,1E-20,TRUE)",
+            0.367_879_441_171_442_33,
+            1e-15,
+        ),
         number("BINOMDIST(6,10,0.5,FALSE)", 0.205_078_125, 1e-12),
         number(
             "BINOM.DIST.RANGE(60,0.75,48)",
@@ -441,7 +453,12 @@ fn binomial_distribution_family_matches_documented_examples() {
             1e-12,
         ),
         number("BINOM.INV(6,0.5,0.75)", 4.0, 0.0),
+        // Large-support CDF probes use the incomplete-beta identity, keeping
+        // the integer quantile search inside the default work budget.
+        number("BINOM.INV(200000,0.5,0.6)", 100_057.0, 0.0),
         number("CRITBINOM(6,0.5,0.75)", 4.0, 0.0),
+        // The p = 1 point mass is resolved before any f64-to-u64 conversion.
+        number("BINOM.DIST.RANGE(1E20,1,1E20)", 1.0, 0.0),
         number(
             "NEGBINOM.DIST(10,5,0.25,TRUE)",
             0.313_514_058_478_176_6,

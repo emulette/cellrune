@@ -41,6 +41,13 @@ pub(super) fn cumulative_probability(
     mut on_iteration: impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
     let floor = support_floor(parameters);
+    let ceiling = parameters.sample.min(parameters.population_successes);
+    // The CDF over the complete finite support is exactly one. This also
+    // covers every one-point (degenerate) support without evaluating a mass or
+    // converting its potentially huge f64 count into a loop index.
+    if parameters.sample_successes == ceiling {
+        return Ok(1.0);
+    }
     let span = parameters.sample_successes - floor;
     let mut total = 0.0;
     // An integer step counter always advances; adding 1.0 to the success count
@@ -264,11 +271,10 @@ mod tests {
     }
 
     #[test]
-    fn the_cumulative_loop_advances_past_the_f64_integer_limit() {
-        // 2^53 + 1 truncates onto 2^53, where adding 1.0 to the success count is
-        // a no-op. The support is the single point k = 2^53, so the sum must
-        // finish in one charged term instead of re-adding it until the budget
-        // runs out.
+    fn full_and_degenerate_supports_bypass_the_cumulative_loop() {
+        // 2^53 + 1 truncates onto 2^53. The support is the single point at that
+        // value, so the exact full-support result must not depend on a lossy
+        // float-to-integer conversion or consume iteration budget.
         let limit = 9_007_199_254_740_993.0;
         let degenerate = validated([limit, limit, limit, limit]).expect("documented domain");
         let mut calls = 0_u32;
@@ -277,8 +283,14 @@ mod tests {
             Ok(())
         })
         .expect("valid domain");
-        assert_eq!(calls, 1, "a one-point support must charge exactly one term");
+        assert_eq!(calls, 0, "a full support must not enter the summation");
         assert!((total - 1.0).abs() <= 1e-12, "one-point support: {total}");
+
+        let ordinary = validated([4.0, 4.0, 8.0, 20.0]).expect("documented domain");
+        assert_eq!(
+            cumulative_probability(ordinary, || Err(ErrorKind::Num)),
+            Ok(1.0),
+        );
     }
 
     #[test]

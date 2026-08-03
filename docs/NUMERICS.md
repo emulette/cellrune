@@ -202,7 +202,15 @@ error over a number the engine cannot stand behind.
 
 `ln_gamma` is a Lanczos approximation with `g = 607/128` and the 14-term Godfrey coefficient set.
 Its relative error stays below `1e-13` across the representable domain, degrading to a few ULP of
-absolute error near the zeros at `x = 1` and `x = 2`. Every other kernel here inherits that floor.
+absolute error near the zeros at `x = 1` and `x = 2`. Its normalization is assembled in log space,
+so small positive arguments do not overflow an otherwise representable result. Every other kernel
+here inherits that accuracy floor.
+
+`GAMMA.DIST` forms `ln(x) - ln(beta)` before materializing the scaled coordinate. This preserves
+finite lower tails when direct division would underflow and resolves ratios above the largest
+finite double at their limiting CDF or density. `BETA.DIST` and `BETA.INV` normalize finite support
+coordinates before subtraction when `B - A` overflows; density Jacobians use the resulting log
+width, and inverse interpolation uses a finite convex combination.
 
 At extreme equal shapes, `a = b` on the order of `5e6` and above — a bound that follows from the
 kernel's `lnΓ` ULP error model rather than from an in-repo fixture — the incomplete-beta symmetry
@@ -218,12 +226,16 @@ Above that sample size the kernel uses the `lnΓ` form, whose relative error gro
 population as `N·ln(N)·f64::EPSILON`. The threshold caps the per-evaluation cost while covering
 every sample size a spreadsheet realistically draws.
 
-`BINOM.INV` and `CRITBINOM` bisect over the integer support and verify `CDF(k-1) < alpha ≤ CDF(k)`
-against recomputed sums before returning; a failed verification is `#NUM!`. Minimality is exact
-against this module's own `f64` CDF. When `alpha` falls within that CDF's own log-space noise, on
-the order of the ULP of the `lnΓ` magnitude per term, of an exact-arithmetic CDF value, the
-returned `k` can differ from the infinite-precision minimal `k` by one step for each CDF value the
-noise crosses — usually one, occasionally more at extreme `alpha`.
+`BINOM.DIST` lower CDFs, cumulative `NEGBINOM.DIST`, and the CDF probes used by `BINOM.INV` and
+`CRITBINOM` use regularized incomplete-beta identities instead of enumerating the support.
+Binomial and negative-binomial masses form `ln(1-p)` with `ln1p`, and the two one-term binomial
+CDF edges use stable closed forms, so a tiny probability is not rounded away before exponentiation.
+`BINOM.INV` and `CRITBINOM` still bisect over integer results and verify
+`CDF(k-1) < alpha ≤ CDF(k)` before returning; a failed verification is `#NUM!`. Minimality is exact
+against this module's own `f64` incomplete-beta CDF. Full-support and degenerate-probability cases
+return their exact endpoint without entering an iterative kernel. Interior `BINOM.DIST.RANGE`
+summations and non-degenerate binomial quantiles reject support indices above `2^53` with `#NUM!`,
+rather than silently saturating or aliasing a lossy `f64`-to-integer conversion.
 
 A tail whose log-space prefactor falls below `ln(f64::MIN_POSITIVE)`, about `-708.396`, underflows
 `exp()`, so the incomplete gamma, incomplete beta, and binomial kernels report it as exactly zero

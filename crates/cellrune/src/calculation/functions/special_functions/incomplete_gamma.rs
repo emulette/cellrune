@@ -22,6 +22,29 @@ pub(in crate::calculation::functions) fn regularized_gamma_p(
     })
 }
 
+/// Regularized lower incomplete gamma P(a, x) when the caller has x in log
+/// space. This preserves meaningful lower tails when a finite ratio such as
+/// `value / scale` lies below the smallest subnormal, and resolves ratios
+/// above f64::MAX to the exact limiting CDF without materializing infinity.
+pub(in crate::calculation::functions) fn regularized_gamma_p_from_log(
+    a: f64,
+    log_x: f64,
+    mut on_iteration: impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<f64, ErrorKind> {
+    if !a.is_finite() || a <= 0.0 || !log_x.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+    if log_x > f64::MAX.ln() {
+        return Ok(1.0);
+    }
+    let x = log_x.exp();
+    let (value, branch) = regularized_gamma_positive(a, x, log_x, &mut on_iteration)?;
+    Ok(match branch {
+        Branch::LowerSeries => value,
+        Branch::UpperContinuedFraction => 1.0 - value,
+    })
+}
+
 /// Complement Q(a, x) = 1 − P(a, x), computed on the same branch policy.
 /// Test-gated until a production consumer lands — the statistical wave's
 /// right-tail distributions are the planned first consumer. The branch tests
@@ -56,11 +79,23 @@ fn regularized_gamma(
     if x == 0.0 {
         return Ok((0.0, Branch::LowerSeries));
     }
+    regularized_gamma_positive(a, x, x.ln(), &mut on_iteration)
+}
+
+fn regularized_gamma_positive(
+    a: f64,
+    x: f64,
+    log_x: f64,
+    on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<(f64, Branch), ErrorKind> {
     if x < a + 1.0 {
-        Ok((lower_series(a, x, &mut on_iteration)?, Branch::LowerSeries))
+        Ok((
+            lower_series(a, x, log_x, on_iteration)?,
+            Branch::LowerSeries,
+        ))
     } else {
         Ok((
-            upper_continued_fraction(a, x, &mut on_iteration)?,
+            upper_continued_fraction(a, x, log_x, on_iteration)?,
             Branch::UpperContinuedFraction,
         ))
     }
@@ -69,14 +104,19 @@ fn regularized_gamma(
 fn lower_series(
     a: f64,
     x: f64,
+    log_x: f64,
     on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
-    let prefactor = log_prefactor(a, x)?;
+    // Factor 1/a out of the conventional series and fold it into
+    // Gamma(a + 1) = a*Gamma(a). Besides avoiding `1/a` overflow, this lets
+    // the leading lower tail be evaluated from log_x even when x itself is
+    // below the smallest representable subnormal.
+    let prefactor = a * log_x - x - ln_gamma(a + 1.0)?;
     if prefactor < LN_UNDERFLOW_LIMIT {
         return Ok(0.0);
     }
     let mut denominator = a;
-    let mut term = 1.0 / a;
+    let mut term = 1.0;
     let mut sum = term;
     for _ in 0..MAX_REFINEMENT_ITERATIONS {
         on_iteration()?;
@@ -93,9 +133,10 @@ fn lower_series(
 fn upper_continued_fraction(
     a: f64,
     x: f64,
+    log_x: f64,
     on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
-    let prefactor = log_prefactor(a, x)?;
+    let prefactor = log_prefactor(a, x, log_x)?;
     if prefactor < LN_UNDERFLOW_LIMIT {
         return Ok(0.0);
     }
@@ -127,8 +168,8 @@ fn upper_continued_fraction(
 
 /// ln of the shared prefactor exp(a·ln x − x − lnΓ(a)); keeping it in log
 /// space is what protects both branches from spurious overflow.
-fn log_prefactor(a: f64, x: f64) -> Result<f64, ErrorKind> {
-    let value = a * x.ln() - x - ln_gamma(a)?;
+fn log_prefactor(a: f64, x: f64, log_x: f64) -> Result<f64, ErrorKind> {
+    let value = a * log_x - x - ln_gamma(a)?;
     if value.is_nan() {
         Err(ErrorKind::Num)
     } else {
@@ -138,7 +179,7 @@ fn log_prefactor(a: f64, x: f64) -> Result<f64, ErrorKind> {
 
 #[cfg(test)]
 mod tests {
-    use super::{regularized_gamma_p, regularized_gamma_q};
+    use super::{regularized_gamma_p, regularized_gamma_p_from_log, regularized_gamma_q};
     use crate::calculation::limits::CalculationLimitKind;
     use crate::calculation::value::ErrorKind;
 
@@ -167,6 +208,24 @@ mod tests {
         (200.0, 180.0, 0.07485803498415958, 0.9251419650158405),
         (200.0, 220.0, 0.9181943116110617, 0.08180568838893833),
     ];
+
+    #[test]
+    fn log_scale_input_preserves_unrepresentable_ratios_and_upper_limits() {
+        let log_x = 1e-308_f64.ln() - 1e308_f64.ln();
+        let lower_tail =
+            regularized_gamma_p_from_log(0.001, log_x, || Ok(())).expect("log-space lower tail");
+        let expected = 0.242_242_491_462_598_63;
+        assert!(
+            (lower_tail - expected).abs() <= 1e-12 * expected,
+            "P(0.001, exp({log_x})): {lower_tail} vs {expected}",
+        );
+
+        let log_overflow = 1e308_f64.ln() - 1e-308_f64.ln();
+        assert_eq!(
+            regularized_gamma_p_from_log(1.0, log_overflow, || Ok(())),
+            Ok(1.0),
+        );
+    }
 
     #[test]
     fn regularized_gamma_matches_mpmath_on_both_branches() {

@@ -34,6 +34,12 @@ pub(in crate::calculation::functions) fn regularized_incomplete_beta(
     if x == 1.0 {
         return Ok(1.0);
     }
+    if a == 1.0 && b == 1.0 {
+        // The uniform beta CDF is exactly the identity. Avoiding the generic
+        // lnGamma path matters when a unit-coordinate ULP would later be
+        // magnified by a very wide custom support interval.
+        return Ok(x);
+    }
     if x < (a + 1.0) / (a + b + 2.0) {
         direct_tail(a, b, x, &mut on_iteration)
     } else {
@@ -166,6 +172,13 @@ mod tests {
                 (actual - expected).abs() <= tolerance,
                 "I_{x}({a}, {b}): {actual} vs {expected}",
             );
+        }
+    }
+
+    #[test]
+    fn uniform_beta_cdf_is_the_exact_identity() {
+        for x in [f64::MIN_POSITIVE, 0.25, 0.5, 0.75, 1.0 - f64::EPSILON] {
+            assert_eq!(incomplete_beta(1.0, 1.0, x), x);
         }
     }
 

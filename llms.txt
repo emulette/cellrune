@@ -537,7 +537,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   that cannot converge returns `#N/A` from `GAMMA.INV` and `BETA.INV`, which is
   the error Microsoft documents; it never returns an unconverged number.
 - `BINOM.INV` and `CRITBINOM` bisect over the integer support instead, and
-  verify `CDF(k-1) < alpha <= CDF(k)` against recomputed sums before returning.
+  verify `CDF(k-1) < alpha <= CDF(k)` against regularized incomplete-beta CDF
+  evaluations before returning. Full-support and degenerate CDFs resolve exactly
+  without enumerating the support; paths that require exact integer indexing
+  reject support indices above `2^53` instead of using a lossy conversion.
+  Binomial and negative-binomial mass complements use `ln1p(-p)` so tiny
+  probabilities survive exponentiation over large counts.
 - `HYPGEOM.DIST` and `HYPGEOMDIST` evaluate sample sizes through 10,000 as a
   falling-factorial product that never differences two large `lnGamma` values,
   which is what keeps very large populations accurate.

@@ -171,6 +171,16 @@ fn refine(
         let residual_converged = candidate_residual.abs()
             <= SOLVER_P_ABSOLUTE_TOLERANCE + SOLVER_P_RELATIVE_TOLERANCE * probability;
         if width_converged && residual_converged {
+            // Preserve an exactly attained CDF value that remains in the
+            // converged bracket. Returning the adjacent candidate instead can
+            // magnify one unit-interval ULP by an enormous custom support
+            // width, while this still honors both convergence conditions.
+            if low_residual == 0.0 {
+                return Ok(low);
+            }
+            if high_residual == 0.0 {
+                return Ok(high);
+            }
             return Ok(candidate);
         }
     }
@@ -301,6 +311,29 @@ mod tests {
                 "p={probability}: round trip gave {cdf}",
             );
         }
+    }
+
+    #[test]
+    fn exact_root_is_retained_only_after_the_bracket_width_converges() {
+        let mut iterations = 0_u32;
+        let actual = invert_monotone_cdf(
+            Ok,
+            0.5,
+            DomainPolicy::FiniteInterval {
+                low: 0.0,
+                high: 1.0,
+            },
+            || {
+                iterations += 1;
+                Ok(())
+            },
+        )
+        .expect("identity CDF has an exact midpoint root");
+        assert_eq!(actual, 0.5);
+        assert!(
+            iterations > 3,
+            "the exact residual must not bypass bracket-width convergence",
+        );
     }
 
     #[test]

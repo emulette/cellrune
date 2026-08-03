@@ -542,15 +542,55 @@ fn binomial_inverse_pins_the_interoperable_unit_interval_boundaries() {
 #[test]
 fn binomial_cumulative_distribution_respects_the_function_iteration_budget() {
     let calculation = calculate_workbook(
-        &workbook_with_formulas(&[(1, 1, "BINOM.DIST(900000,1000000,0.5,TRUE)")]),
+        &workbook_with_formulas(&[(1, 1, "BINOM.DIST(500000,1000000,0.5,TRUE)")]),
         CalculationOptions::default().with_limits(
             CalculationLimits::default()
-                .with_max_function_iterations(10)
-                .expect("positive summation work limit"),
+                .with_max_function_iterations(2)
+                .expect("positive incomplete-beta work limit"),
         ),
     );
-    // The budgeted summation must fail closed: no partial mass is installed.
+    // The budgeted continued fraction must fail closed: no partial CDF is installed.
     assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn binomial_inverse_large_support_completes_with_the_default_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "BINOM.INV(200000,0.5,0.6)")]),
+        CalculationOptions::default(),
+    );
+    assert_number(&calculation, 1, 100_057.0, 0.0);
+}
+
+#[test]
+fn discrete_cdf_endpoints_bypass_the_iteration_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[
+            (1, 1, "BINOM.DIST(1000000,1000000,0.5,TRUE)"),
+            (1, 2, "BINOM.DIST(3,1000000,0,TRUE)"),
+            (1, 3, "BINOM.DIST.RANGE(1E20,1,1E20)"),
+            (1, 4, "NEGBINOM.DIST(1E20,4,0,TRUE)"),
+            (1, 5, "NEGBINOM.DIST(1000000,4,1,TRUE)"),
+            (1, 6, "HYPGEOM.DIST(1000,1000,1000,2000,TRUE)"),
+            (1, 7, "HYPGEOM.DIST(1E20,1E20,1E20,1E20,TRUE)"),
+        ]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(1)
+                .expect("positive endpoint work limit"),
+        ),
+    );
+    for (column, expected) in [
+        (1, 1.0),
+        (2, 1.0),
+        (3, 1.0),
+        (4, 0.0),
+        (5, 1.0),
+        (6, 1.0),
+        (7, 1.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
 }
 
 #[test]
@@ -569,11 +609,11 @@ fn binomial_inverse_respects_the_function_iteration_budget() {
 #[test]
 fn negative_binomial_cumulative_respects_the_function_iteration_budget() {
     let calculation = calculate_workbook(
-        &workbook_with_formulas(&[(1, 1, "NEGBINOM.DIST(1000000,4,0.4,TRUE)")]),
+        &workbook_with_formulas(&[(1, 1, "NEGBINOM.DIST(6,4,0.4,TRUE)")]),
         CalculationOptions::default().with_limits(
             CalculationLimits::default()
-                .with_max_function_iterations(10)
-                .expect("positive summation work limit"),
+                .with_max_function_iterations(1)
+                .expect("positive incomplete-beta work limit"),
         ),
     );
     assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);

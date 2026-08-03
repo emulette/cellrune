@@ -38,7 +38,10 @@ pub(in crate::calculation::functions) fn ln_gamma(x: f64) -> Result<f64, ErrorKi
         series += coefficient / denominator;
     }
     let shifted = x + LANCZOS_G_PLUS_HALF;
-    Ok((x + 0.5) * shifted.ln() - shifted + (SQRT_TWO_PI * series / x).ln())
+    // Keep the normalization in log space. Forming `series / x` first
+    // overflows for small positive x even when both lnGamma(x) and Gamma(x)
+    // are representable (for example x = 1e-307).
+    Ok((x + 0.5) * shifted.ln() - shifted + SQRT_TWO_PI.ln() + series.ln() - x.ln())
 }
 
 /// Gamma function with sign, for finite non-pole arguments.
@@ -107,6 +110,24 @@ mod tests {
         (170.0, 701.437263808737),
         (171.5, 709.1431630309282),
     ];
+
+    #[test]
+    fn small_positive_arguments_keep_the_lanczos_normalization_in_log_space() {
+        let x = 1e-307_f64;
+        let expected_log = -x.ln();
+        let actual_log = ln_gamma(x).expect("finite logarithm");
+        assert!(
+            (actual_log - expected_log).abs() <= 1e-12,
+            "ln_gamma({x}): {actual_log} vs {expected_log}",
+        );
+
+        let actual_gamma = signed_gamma(x).expect("representable gamma value");
+        let expected_gamma = 1.0 / x;
+        assert!(
+            (actual_gamma - expected_gamma).abs() <= 1e-12 * expected_gamma,
+            "gamma({x}): {actual_gamma} vs {expected_gamma}",
+        );
+    }
 
     // reference: mpmath 1.4.1, mp.dps = 30
     const SIGNED_GAMMA_REFERENCES: [(f64, f64); 8] = [
