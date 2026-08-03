@@ -5,13 +5,17 @@ use super::{
 };
 
 /// Bracketing policy for [`invert_monotone_cdf`]. Each distribution support
-/// keeps its own transform: the beta step adds a finite-interval variant
-/// beside this one instead of widening it.
+/// keeps its own transform: the variants stay separate by design instead of
+/// merging into one generalized domain.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::calculation::functions) enum DomainPolicy {
     /// Support (0, ∞): grow or shrink a bracket geometrically from a positive
     /// initial guess until the target probability is enclosed.
     PositiveHalfLine { initial_guess: f64 },
+    /// Support [low, high]: the endpoints themselves are the bracket. The CDF
+    /// is evaluated once at each end and a residual on the wrong side is a
+    /// typed failure, not the start of a search.
+    FiniteInterval { low: f64, high: f64 },
 }
 
 /// Solves cdf(x) = probability for a non-decreasing CDF on the policy domain.
@@ -36,6 +40,9 @@ pub(in crate::calculation::functions) fn invert_monotone_cdf(
     let bracket = match domain {
         DomainPolicy::PositiveHalfLine { initial_guess } => {
             bracket_positive_half_line(&mut cdf, probability, initial_guess, &mut on_iteration)?
+        }
+        DomainPolicy::FiniteInterval { low, high } => {
+            bracket_finite_interval(&mut cdf, probability, low, high, &mut on_iteration)?
         }
     };
     refine(&mut cdf, probability, bracket, &mut on_iteration)
@@ -105,6 +112,31 @@ fn bracket_positive_half_line(
     Err(ErrorKind::Num)
 }
 
+fn bracket_finite_interval(
+    cdf: &mut impl FnMut(f64) -> Result<f64, ErrorKind>,
+    probability: f64,
+    low: f64,
+    high: f64,
+    on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<Bracket, ErrorKind> {
+    if !low.is_finite() || !high.is_finite() || low >= high {
+        return Err(ErrorKind::Num);
+    }
+    on_iteration()?;
+    let low_residual = residual_at(cdf, low, probability)?;
+    on_iteration()?;
+    let high_residual = residual_at(cdf, high, probability)?;
+    if low_residual > 0.0 || high_residual < 0.0 {
+        return Err(ErrorKind::Num);
+    }
+    Ok(Bracket {
+        low,
+        low_residual,
+        high,
+        high_residual,
+    })
+}
+
 fn refine(
     cdf: &mut impl FnMut(f64) -> Result<f64, ErrorKind>,
     probability: f64,
@@ -169,7 +201,7 @@ fn residual_at(
 
 #[cfg(test)]
 mod tests {
-    use super::super::regularized_gamma_p;
+    use super::super::{regularized_gamma_p, regularized_incomplete_beta};
     use super::{DomainPolicy, invert_monotone_cdf};
     use crate::calculation::limits::CalculationLimitKind;
     use crate::calculation::value::ErrorKind;
@@ -179,6 +211,18 @@ mod tests {
             |x| regularized_gamma_p(a, x, || Ok(())),
             probability,
             DomainPolicy::PositiveHalfLine { initial_guess: a },
+            || Ok(()),
+        )
+    }
+
+    fn beta_inverse(a: f64, b: f64, probability: f64) -> Result<f64, ErrorKind> {
+        invert_monotone_cdf(
+            |x| regularized_incomplete_beta(a, b, x, || Ok(())),
+            probability,
+            DomainPolicy::FiniteInterval {
+                low: 0.0,
+                high: 1.0,
+            },
             || Ok(()),
         )
     }
@@ -219,6 +263,112 @@ mod tests {
                 "p={probability}: round trip gave {cdf}",
             );
         }
+    }
+
+    // reference: mpmath 1.4.1, mp.dps = 30 — bisected to ~1e-45 on the
+    // regularized incomplete beta for the binary value of each p, independent
+    // of the Rust kernel. Tolerances are 1e-9 relative except the p → 1 row:
+    // inverting through I quantizes the upper tail at half an ULP of 1, and
+    // 5.6e-17 / pdf(x*) ≈ 2.4e-9 of x-noise is irreducible there, so that row
+    // carries twice this bound as an absolute tolerance.
+    const BETA_INVERSE_REFERENCES: [(f64, f64, f64, f64, f64); 6] = [
+        (8.0, 10.0, 0.6, 0.47252659384689816, 4.8e-10),
+        (2.0, 3.0, 1e-12, 4.082484015750327e-7, 4.1e-16),
+        (2.0, 3.0, 0.999999999999, 0.9999370034198778, 4.7e-9),
+        (0.5, 0.5, 0.25, 0.14644660940672624, 1.5e-10),
+        (0.001, 0.001, 0.5, 0.5, 1e-11),
+        (500.0, 700.0, 0.975, 0.44467544064622405, 4.5e-10),
+    ];
+
+    #[test]
+    fn finite_interval_inverse_matches_mpmath_including_extreme_tails() {
+        for (a, b, probability, expected, tolerance) in BETA_INVERSE_REFERENCES {
+            let actual = beta_inverse(a, b, probability).expect("convergent target");
+            assert!(
+                (actual - expected).abs() <= tolerance,
+                "a={a} b={b} p={probability}: {actual} vs {expected}",
+            );
+        }
+    }
+
+    #[test]
+    fn finite_interval_inverse_round_trips_through_the_cdf_as_a_consistency_check() {
+        for probability in [1e-6, 0.1, 0.5, 0.9, 1.0 - 1e-6] {
+            let x = beta_inverse(3.0, 5.0, probability).expect("convergent target");
+            let cdf = regularized_incomplete_beta(3.0, 5.0, x, || Ok(())).expect("valid domain");
+            assert!(
+                (cdf - probability).abs() <= 1e-16 + 1e-9 * probability,
+                "p={probability}: round trip gave {cdf}",
+            );
+        }
+    }
+
+    #[test]
+    fn degenerate_or_non_finite_finite_intervals_are_rejected() {
+        for (low, high) in [
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (f64::NAN, 1.0),
+            (0.0, f64::NAN),
+            (f64::NEG_INFINITY, 1.0),
+            (0.0, f64::INFINITY),
+        ] {
+            let result = invert_monotone_cdf(
+                |x| regularized_incomplete_beta(2.0, 3.0, x, || Ok(())),
+                0.5,
+                DomainPolicy::FiniteInterval { low, high },
+                || Ok(()),
+            );
+            assert_eq!(result, Err(ErrorKind::Num), "low={low} high={high}");
+        }
+    }
+
+    #[test]
+    fn finite_interval_endpoints_that_do_not_enclose_the_target_are_typed_errors() {
+        // A CDF already above the target at the lower endpoint…
+        let stuck_high = invert_monotone_cdf(
+            |_| Ok(0.75),
+            0.5,
+            DomainPolicy::FiniteInterval {
+                low: 0.0,
+                high: 1.0,
+            },
+            || Ok(()),
+        );
+        assert_eq!(stuck_high, Err(ErrorKind::Num));
+        // …and one still below it at the upper endpoint both fail closed.
+        let stuck_low = invert_monotone_cdf(
+            |_| Ok(0.25),
+            0.5,
+            DomainPolicy::FiniteInterval {
+                low: 0.0,
+                high: 1.0,
+            },
+            || Ok(()),
+        );
+        assert_eq!(stuck_low, Err(ErrorKind::Num));
+    }
+
+    #[test]
+    fn exhausted_iteration_budget_stops_the_finite_interval_solver_mid_flight() {
+        let budget_error = ErrorKind::ResourceLimit(CalculationLimitKind::FunctionIterations);
+        let mut remaining = 3_u32;
+        let result = invert_monotone_cdf(
+            |x| regularized_incomplete_beta(8.0, 10.0, x, || Ok(())),
+            0.999,
+            DomainPolicy::FiniteInterval {
+                low: 0.0,
+                high: 1.0,
+            },
+            || {
+                if remaining == 0 {
+                    return Err(budget_error);
+                }
+                remaining -= 1;
+                Ok(())
+            },
+        );
+        assert_eq!(result, Err(budget_error));
     }
 
     #[test]

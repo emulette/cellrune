@@ -888,6 +888,15 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(VarP, "VAR.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("VARP")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(BetaDist, "BETA.DIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    // BETADIST keeps its own kernel entry: the legacy signature drops the
+    // cumulative flag, so it cannot be a canonical-adapter alias.
+    function!(BetaDistLegacy, "BETADIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(BetaInv, "BETA.INV", Distribution)
+        .with_aliases(&[FunctionAlias::official("BETAINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(BinomDist, "BINOM.DIST", Distribution)
         .with_aliases(&[FunctionAlias::official("BINOMDIST")])
         .with_minimum_version(CompatibilityVersion::V0_1_12),

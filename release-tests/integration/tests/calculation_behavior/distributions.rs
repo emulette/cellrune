@@ -151,6 +151,199 @@ fn gamma_inverse_respects_the_function_iteration_budget() {
 }
 
 #[test]
+fn beta_family_matches_the_excel_oracle() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "BETA.DIST(0.6,8,10,TRUE,0,1)"),
+        (1, 2, "BETA.INV(0.6,8,10,0,1)"),
+        (1, 3, "BETADIST(0.5,2,3,0,1)"),
+        (1, 4, "BETAINV(0.5,2,3,0,1)"),
+        // Omitted bounds must be bit-identical to the explicit [0, 1] pair.
+        (
+            1,
+            5,
+            "BETA.DIST(0.6,8,10,TRUE)=BETA.DIST(0.6,8,10,TRUE,0,1)",
+        ),
+        (1, 6, "BETA.INV(0.6,8,10)=BETA.INV(0.6,8,10,0,1)"),
+        (1, 7, "BETADIST(0.5,2,3)=BETADIST(0.5,2,3,0,1)"),
+        (1, 8, "BETAINV(0.5,2,3)=BETAINV(0.5,2,3,0,1)"),
+        // Legacy names share the canonical kernels, so results are
+        // bit-identical.
+        (1, 9, "BETADIST(0.5,2,3,0,1)=BETA.DIST(0.5,2,3,TRUE,0,1)"),
+        (1, 10, "BETAINV(0.5,2,3,0,1)=BETA.INV(0.5,2,3,0,1)"),
+        // Custom interval [1, 5]: u = (3 − 1)/4 = 0.5; reference: mpmath
+        // 1.4.1, dps = 30 — I_0.5(2,3) = 0.6875 and pdf(0.5;2,3)/4 = 0.375
+        // (the density carries the documented 1/(B − A) Jacobian).
+        (1, 11, "BETA.DIST(3,2,3,TRUE,1,5)"),
+        (1, 12, "BETA.DIST(3,2,3,FALSE,1,5)"),
+        (1, 13, "BETA.INV(0.6875,2,3,1,5)"),
+        // p = 1 is inside BETA.INV's documented domain; the quantile is B.
+        (1, 14, "BETA.INV(1,2,3,1,5)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    // Oracle-pinned values (both Excel profiles agree) within ~1e-9 relative.
+    for (column, expected, tolerance) in [
+        // Oracle prints 0.90810074582876155 and 0.38572756813238951; each is
+        // the same f64 as its shortest form below.
+        (1, 0.908_100_745_828_761_5, 1e-12),
+        (2, 0.4725265938468981, 4.8e-10),
+        (3, 0.6875, 1e-14),
+        (4, 0.385_727_568_132_389_5, 3.9e-10),
+        (11, 0.6875, 1e-14),
+        (12, 0.375, 1e-14),
+        (13, 3.0, 3.0e-9),
+        (14, 5.0, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, tolerance);
+    }
+    for column in [5, 6, 7, 8, 9, 10] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Logical(true))),
+            "spelling must be bit-identical to its canonical form in column {column}",
+        );
+    }
+}
+
+#[test]
+fn beta_family_rejects_domain_violations_with_excel_errors() {
+    let workbook = workbook_with_formulas(&[
+        // "2" coerces to 2, which then falls outside [0, 1]: the oracle pins
+        // these coercion probes to #NUM!, not #VALUE!.
+        (1, 1, "BETA.DIST(\"2\",8,10,TRUE,0,1)"),
+        (1, 2, "BETA.DIST(-1,8,10,TRUE,0,1)"),
+        (1, 3, "BETA.DIST(0.5,0,10,TRUE,0,1)"),
+        (1, 4, "BETA.DIST(0.5,8,-1,TRUE,0,1)"),
+        (1, 5, "BETA.DIST(1,8,10,TRUE,1,1)"),
+        (1, 6, "BETA.DIST(0.5,8,10,TRUE,2,4)"),
+        (1, 7, "BETA.INV(\"2\",8,10,0,1)"),
+        (1, 8, "BETA.INV(2,8,10,0,1)"),
+        // p = 0 is documented #NUM! for BETA.INV, unlike GAMMA.INV.
+        (1, 9, "BETA.INV(0,8,10,0,1)"),
+        (1, 10, "BETA.INV(-0.5,8,10,0,1)"),
+        (1, 11, "BETA.INV(0.5,0,10,0,1)"),
+        (1, 12, "BETA.INV(0.5,8,0,0,1)"),
+        (1, 13, "BETA.INV(0.5,8,10,1,1)"),
+        (1, 14, "BETADIST(\"2\",2,3,0,1)"),
+        (1, 15, "BETADIST(-1,2,3,0,1)"),
+        (1, 16, "BETAINV(\"2\",2,3,0,1)"),
+        (1, 17, "BETAINV(2,2,3,0,1)"),
+        (1, 18, "BETA.DIST(0.5,8,10,\"abc\",0,1)"),
+        (1, 19, "BETA.DIST(\"abc\",8,10,TRUE,0,1)"),
+        (1, 20, "BETA.INV(\"abc\",8,10,0,1)"),
+        // A reversed interval A > B is invalid for every beta-family name —
+        // including BETA.INV, whose quantile would otherwise be a point its
+        // own distribution rejects, and even for x inside [B, A] or p = 1.
+        (1, 21, "BETA.INV(0.5,2,3,5,1)"),
+        (1, 22, "BETA.DIST(4,2,3,TRUE,5,1)"),
+        (1, 23, "BETADIST(4,2,3,5,1)"),
+        (1, 24, "BETAINV(0.5,2,3,5,1)"),
+        (1, 25, "BETA.INV(1,2,3,5,1)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for column in [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25,
+    ] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Number
+            ))),
+            "unexpected domain result in column {column}",
+        );
+    }
+    for column in [18, 19, 20] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "unexpected coercion result in column {column}",
+        );
+    }
+}
+
+#[test]
+fn beta_density_endpoints_mirror_the_gamma_origin_contract() {
+    let workbook = workbook_with_formulas(&[
+        // Lower endpoint u = 0: pole below alpha = 1, exact limit at 1,
+        // zero above; the upper endpoint mirrors it in beta.
+        (1, 1, "BETA.DIST(0,0.5,3,FALSE,0,1)"),
+        (1, 2, "BETA.DIST(0,1,3,FALSE,0,1)"),
+        (1, 3, "BETA.DIST(0,2,3,FALSE,0,1)"),
+        (1, 4, "BETA.DIST(1,3,0.5,FALSE,0,1)"),
+        (1, 5, "BETA.DIST(1,3,1,FALSE,0,1)"),
+        (1, 6, "BETA.DIST(1,3,2,FALSE,0,1)"),
+        // The endpoint limits scale by the same 1/(B − A) Jacobian.
+        (1, 7, "BETA.DIST(1,1,3,FALSE,1,3)"),
+        // The cumulative form stays exact at both endpoints.
+        (1, 8, "BETA.DIST(0,2,3,TRUE,0,1)"),
+        (1, 9, "BETA.DIST(1,2,3,TRUE,0,1)"),
+    ]);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    for column in [1, 4] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Number
+            ))),
+            "unexpected endpoint pole result in column {column}",
+        );
+    }
+    for (column, expected) in [
+        (2, 3.0),
+        (3, 0.0),
+        (5, 3.0),
+        (6, 0.0),
+        (7, 1.5),
+        (8, 0.0),
+        (9, 1.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+}
+
+#[test]
+fn beta_inverse_reports_na_when_the_quantile_search_cannot_converge() {
+    // Beta(1e-8, 1e-8) concentrates half its mass at each endpoint: the
+    // p = 0.25 quantile satisfies ln u* ≈ −5e7, far below the smallest
+    // positive double (the CDF is already ≈ 0.4999963 at 5e-324), so no
+    // representable bracket can meet the residual tolerance and Microsoft
+    // documents #N/A for the failed search.
+    let workbook = workbook_with_formulas(&[(1, 1, "BETA.INV(0.25,0.00000001,0.00000001)")]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_eq!(
+        calculation.cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::NotAvailable
+        ))),
+    );
+}
+
+#[test]
+fn beta_inverse_respects_the_function_iteration_budget() {
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "BETA.INV(0.6,8,10,0,1)")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(10)
+                .expect("positive inverse-solver work limit"),
+        ),
+    );
+    // The budgeted solver must fail closed: no partial quantile is installed.
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
 fn gamma_cumulative_distribution_respects_the_function_iteration_budget() {
     let calculation = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, "GAMMA.DIST(2,3,1.5,TRUE)")]),

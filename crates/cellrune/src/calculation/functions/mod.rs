@@ -969,7 +969,7 @@ mod tests {
             .map(|descriptor| descriptor.aliases().len())
             .sum::<usize>();
         assert_eq!(aliases.len(), alias_count);
-        assert_eq!(aliases.len(), 18);
+        assert_eq!(aliases.len(), 19);
         assert!(aliases.is_disjoint(&kernels));
         assert!(
             descriptor::descriptors()

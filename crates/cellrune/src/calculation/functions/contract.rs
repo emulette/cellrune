@@ -754,6 +754,16 @@ const ROMAN_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::Absent,
     ArgumentDefaultValue::Number(0.0),
 )];
+// The beta family's documented interval defaults are A = 0 and B = 1, on the
+// two trailing optional positions of each signature.
+const BETA_SIX_ARGUMENT_INTERVAL_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(4, DefaultTrigger::Absent, ArgumentDefaultValue::Number(0.0)),
+    ArgumentDefault::new(5, DefaultTrigger::Absent, ArgumentDefaultValue::Number(1.0)),
+];
+const BETA_FIVE_ARGUMENT_INTERVAL_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(3, DefaultTrigger::Absent, ArgumentDefaultValue::Number(0.0)),
+    ArgumentDefault::new(4, DefaultTrigger::Absent, ArgumentDefaultValue::Number(1.0)),
+];
 const SORT_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(
         1,
@@ -1489,6 +1499,16 @@ impl StatisticalAdditionalFunction {
 impl DistributionFunction {
     const fn call_contract(self) -> CallContract {
         match self {
+            Self::BetaDist => CallContract::positional(
+                Arity::range(4, 6),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(BETA_SIX_ARGUMENT_INTERVAL_DEFAULTS),
+            Self::BetaDistLegacy | Self::BetaInv => CallContract::positional(
+                Arity::range(3, 5),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(BETA_FIVE_ARGUMENT_INTERVAL_DEFAULTS),
             Self::Gamma | Self::GammaLnPrecise => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::BinomDist | Self::GammaDist | Self::NegBinomDist => {
                 CallContract::uniform(Arity::exact(4), SCALAR)

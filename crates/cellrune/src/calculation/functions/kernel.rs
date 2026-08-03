@@ -378,6 +378,9 @@ function_enum!(StatisticalAdditionalFunction {
 });
 
 function_enum!(DistributionFunction {
+    BetaDist,
+    BetaDistLegacy,
+    BetaInv,
     BinomDist,
     BinomDistRange,
     BinomInv,

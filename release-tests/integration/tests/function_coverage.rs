@@ -460,6 +460,36 @@ fn binomial_distribution_family_matches_documented_examples() {
         error("NEGBINOMDIST(6,0,0.4)", ExcelError::Number),
     ];
     let workbook = workbook_with_formula_cases(&cases);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn beta_distribution_family_matches_documented_examples() {
+    // Microsoft's documented example uses x = 2, alpha = 8, beta = 10 on the
+    // interval [1, 3]; the docs round the results to 0.6854706 and 1.4837646.
+    let cases = [
+        number("BETA.DIST(2,8,10,TRUE,1,3)", 0.685_470_581_054_687_5, 1e-12),
+        number("BETA.DIST(2,8,10,FALSE,1,3)", 1.483_764_648_437_5, 1e-12),
+        number("BETA.INV(0.685470581,8,10,1,3)", 2.0, 1e-9),
+        number("BETADIST(2,8,10,1,3)", 0.685_470_581_054_687_5, 1e-12),
+        number("BETAINV(0.685470581,8,10,1,3)", 2.0, 1e-9),
+        number("BETA.DIST(0.6,8,10,TRUE)", 0.908_100_745_828_761_5, 1e-12),
+        number("BETA.INV(1,2,3)", 1.0, 0.0),
+        error("BETA.DIST(2,8,10,TRUE,1,1)", ExcelError::Number),
+        error("BETA.DIST(0.5,0,3,TRUE)", ExcelError::Number),
+        error("BETA.DIST(0.5,2,-1,TRUE)", ExcelError::Number),
+        error("BETA.DIST(-1,8,10,TRUE)", ExcelError::Number),
+        error("BETA.INV(0,2,3)", ExcelError::Number),
+        error("BETA.INV(1.5,2,3)", ExcelError::Number),
+        error("BETADIST(-1,2,3)", ExcelError::Number),
+        error("BETAINV(0,2,3)", ExcelError::Number),
+        error("BETA.DIST(\"abc\",8,10,TRUE)", ExcelError::Value),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
 
     assert!(scan_formula_capabilities(&workbook).is_supported());
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
