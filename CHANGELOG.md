@@ -10,6 +10,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-08-09
+
 ### Added
 
 - Eight F-distribution and variance-test names: `F.DIST`, `F.DIST.RT`, `F.INV`, `F.INV.RT`,
@@ -645,7 +647,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/emulette/cellrune/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/emulette/cellrune/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/emulette/cellrune/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/emulette/cellrune/compare/v0.1.9...v0.1.10

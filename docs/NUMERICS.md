@@ -191,7 +191,7 @@ frozen two-profile oracle rather than against documentation alone. The suite hol
 for the twenty names, three per name, and all 60 are classified `match` in both
 `excel-online-free-en-ui-ko-kr` and `excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`.
 
-The F, t, Z-test, and sample-covariance names added in the current unreleased source are measured
+The F, t, Z-test, and sample-covariance names added in 0.1.13 are measured
 the same way. Their 60 active cases, again three per official name, are all classified `match` in
 both frozen host profiles. The distribution grid additionally pins large degrees of freedom,
 inverse round trips, and lower, upper, and two-tailed probabilities. Dedicated regression tests
@@ -303,7 +303,7 @@ but no recorded tolerance against the reference oracle. Do not read their absenc
 section as a claim of exactness in either direction.
 
 - statistical distributions and inverse distributions outside the gamma, beta, binomial,
-  hypergeometric, F, and t families measured in 0.1.12 and the current unreleased source
+  hypergeometric, F, and t families measured in 0.1.12 and 0.1.13
 - closed-form financial functions
 - transcendental math and trigonometric functions, which are evaluated through `libm`
 - engineering and Bessel functions
