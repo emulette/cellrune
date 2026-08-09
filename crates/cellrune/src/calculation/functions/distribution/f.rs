@@ -101,8 +101,7 @@ pub(super) fn f_inverse(engine: &Engine<'_>, context: EvalContext<'_>, args: &[E
         return Value::Error(ErrorKind::Value);
     }
     let probability = match required_number(engine, context, &args[0]) {
-        Ok(0.0) => return finite(0.0),
-        Ok(value) if value > 0.0 && value < 1.0 => value,
+        Ok(value) if (0.0..1.0).contains(&value) => value,
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
     };
@@ -114,6 +113,9 @@ pub(super) fn f_inverse(engine: &Engine<'_>, context: EvalContext<'_>, args: &[E
         Ok(value) => value,
         Err(kind) => return Value::Error(kind),
     };
+    if probability == 0.0 {
+        return finite(0.0);
+    }
     match beta_pair(df1 / 2.0, df2 / 2.0, probability, || {
         poll_cancellation(context)?;
         engine.charge_function_iterations(context, 1)
@@ -131,8 +133,7 @@ pub(super) fn f_inverse_rt(engine: &Engine<'_>, context: EvalContext<'_>, args: 
         return Value::Error(ErrorKind::Value);
     }
     let probability = match required_number(engine, context, &args[0]) {
-        Ok(1.0) => return finite(0.0),
-        Ok(value) if value > 0.0 && value < 1.0 => value,
+        Ok(value) if value > 0.0 && value <= 1.0 => value,
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
     };
@@ -144,6 +145,9 @@ pub(super) fn f_inverse_rt(engine: &Engine<'_>, context: EvalContext<'_>, args: 
         Ok(value) => value,
         Err(kind) => return Value::Error(kind),
     };
+    if probability == 1.0 {
+        return finite(0.0);
+    }
     match beta_pair(df2 / 2.0, df1 / 2.0, probability, || {
         poll_cancellation(context)?;
         engine.charge_function_iterations(context, 1)
@@ -185,9 +189,9 @@ pub(in crate::calculation::functions) fn f_test(
     if left_variance == 0.0 || right_variance == 0.0 {
         return Value::Error(ErrorKind::Div0);
     }
-    let (ratio, df1, df2) =
-        variance_ratio(left_variance, right_variance, left.count(), right.count());
-    match upper_tail(ratio, df1, df2, || {
+    let (log_ratio, df1, df2) =
+        variance_ratio_log(left_variance, right_variance, left.count(), right.count());
+    match upper_tail_from_log_ratio(log_ratio, df1, df2, || {
         poll_cancellation(context)?;
         engine.charge_function_iterations(context, 1)
     }) {
@@ -198,7 +202,7 @@ pub(in crate::calculation::functions) fn f_test(
 
 /// The larger variance is always the numerator, and the degrees of freedom
 /// travel with their variances.
-fn variance_ratio(
+fn variance_ratio_log(
     left_variance: f64,
     right_variance: f64,
     left_count: u64,
@@ -206,13 +210,13 @@ fn variance_ratio(
 ) -> (f64, f64, f64) {
     if left_variance >= right_variance {
         (
-            left_variance / right_variance,
+            left_variance.ln() - right_variance.ln(),
             (left_count - 1) as f64,
             (right_count - 1) as f64,
         )
     } else {
         (
-            right_variance / left_variance,
+            right_variance.ln() - left_variance.ln(),
             (right_count - 1) as f64,
             (left_count - 1) as f64,
         )
@@ -259,8 +263,8 @@ fn f_coordinates(x: f64, df1: f64, df2: f64) -> (f64, f64) {
     }
     let scaled = df1 * x;
     if scaled.is_finite() {
-        let z = scaled / (scaled + df2);
-        (z, 1.0 - z)
+        let denominator = scaled + df2;
+        (scaled / denominator, df2 / denominator)
     } else {
         let threshold = df2 / df1;
         if x <= threshold {
@@ -279,7 +283,10 @@ fn f_log_coordinates(x: f64, df1: f64, df2: f64) -> (f64, f64) {
     if x == 0.0 {
         return (f64::NEG_INFINITY, 0.0);
     }
-    let log_ratio = x.ln() + df1.ln() - df2.ln();
+    f_log_coordinates_from_ratio(x.ln() + df1.ln() - df2.ln())
+}
+
+fn f_log_coordinates_from_ratio(log_ratio: f64) -> (f64, f64) {
     if log_ratio <= 0.0 {
         let log_w = -log_ratio.exp().ln_1p();
         (log_ratio + log_w, log_w)
@@ -326,10 +333,33 @@ fn upper_tail(
     df2: f64,
     on_iteration: impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
-    let (z, w) = f_coordinates(x, df1, df2);
+    let (z, _) = f_coordinates(x, df1, df2);
     let (log_z, log_w) = f_log_coordinates(x, df1, df2);
-    let (log_z, log_w) = coordinate_logs(x, z, w, log_z, log_w);
-    regularized_incomplete_beta_upper(df1 / 2.0, df2 / 2.0, z, log_z, log_w, on_iteration)
+    regularized_incomplete_beta_upper(
+        df1 / 2.0,
+        df2 / 2.0,
+        z,
+        Some(log_z),
+        Some(log_w),
+        on_iteration,
+    )
+}
+
+fn upper_tail_from_log_ratio(
+    log_ratio: f64,
+    df1: f64,
+    df2: f64,
+    on_iteration: impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<f64, ErrorKind> {
+    let (log_z, log_w) = f_log_coordinates_from_ratio(log_ratio);
+    regularized_incomplete_beta_lower(
+        df2 / 2.0,
+        df1 / 2.0,
+        log_w.exp(),
+        Some(log_w),
+        Some(log_z),
+        on_iteration,
+    )
 }
 
 /// F density in log space: a·ln z + b·ln w − ln x − lnB(a, b). The endpoint
@@ -367,6 +397,7 @@ pub(in crate::calculation::functions) fn sample_moments(
     let values = engine.eval_array(context, argument)?;
     let mut numbers = Vec::new();
     for item in values.data {
+        poll_cancellation(context)?;
         match item {
             Value::Error(kind) => return Err(kind),
             Value::Number(number) => numbers.push(number),
@@ -383,7 +414,7 @@ pub(in crate::calculation::functions) fn sample_moments(
 mod tests {
     use super::{
         coordinate_logs, density, f_coordinates, f_log_coordinates, lower_tail,
-        restore_f_coordinate, upper_tail, variance_ratio,
+        restore_f_coordinate, upper_tail, upper_tail_from_log_ratio, variance_ratio_log,
     };
     use crate::calculation::functions::moments::{NumericMoments, VarianceKind};
     use crate::calculation::functions::special_functions::beta_pair;
@@ -463,6 +494,7 @@ mod tests {
         (2.0, 1.0, 2.0, 0.7071067811865476, 0.2928932188134525),
         (10.0, 1.0, 2.0, 0.9128709291752769, 0.08712907082472313),
         (1000000.0, 1.0, 2.0, 0.9999990000015, 9.99998500015988e-07),
+        (1e13, 1.0, 2.0, 0.9999999999999, 9.9999999999985e-14),
         (1e+300, 1.0, 2.0, 1.0, 9.999999999999687e-301),
         (1e+307, 1.0, 2.0, 1.0, 9.999999999999218e-308),
         (0.0, 2.0, 5.0, 0.0, 1.0),
@@ -1104,30 +1136,39 @@ mod tests {
             1.0324313445360633e-05,
         ),
         (&[1.0, 2.0], &[3.0, 4.0], 1.0),
+        (
+            &[-7e153, 7e153],
+            &[-1e-154, 1e-154],
+            1.8189136353359467e-308,
+        ),
     ];
 
     #[test]
     fn f_test_p_values_match_the_decimal_reference() {
         for &(left, right, expected_p) in F_TEST_GRID {
-            let (ratio, df1, df2) = variance_ratio(
+            let (log_ratio, df1, df2) = variance_ratio_log(
                 sample_variance(left),
                 sample_variance(right),
                 left.len() as u64,
                 right.len() as u64,
             );
-            let tail = upper_tail(ratio, df1, df2, || Ok(())).expect("finite tail");
+            let tail =
+                upper_tail_from_log_ratio(log_ratio, df1, df2, || Ok(())).expect("finite tail");
             let actual_p = (2.0 * tail).min(1.0);
             let label = format!("F.TEST({left:?}, {right:?})");
             assert_tail(actual_p, expected_p, &label);
             // The larger variance is always the numerator, so swapping the
             // samples cannot change the p-value.
-            let (swapped_ratio, swapped_df1, swapped_df2) = variance_ratio(
+            let (swapped_log_ratio, swapped_df1, swapped_df2) = variance_ratio_log(
                 sample_variance(right),
                 sample_variance(left),
                 right.len() as u64,
                 left.len() as u64,
             );
-            assert_eq!((swapped_ratio, swapped_df1, swapped_df2), (ratio, df1, df2));
+            assert_eq!(
+                (swapped_log_ratio, swapped_df1, swapped_df2),
+                (log_ratio, df1, df2),
+            );
         }
     }
 
@@ -1138,12 +1179,11 @@ mod tests {
     #[test]
     fn coordinates_and_log_coordinates_survive_extreme_x() {
         // The direct transform never overflows when d1·x is finite; at
-        // x = 1e300 the coordinate rounds to the endpoint (z = 1.0, w = 0.0),
-        // and coordinate_logs hands the kernels the exact complement logs
-        // (log_z = ln(1 − w) = −1e-300), so tails never lose the subnormal w.
+        // x = 1e300 the lower coordinate rounds to the endpoint while the
+        // upper coordinate is formed directly and remains 1e-300.
         let (z, w) = f_coordinates(1e300, 1.0, 1.0);
         assert_eq!(z, 1.0);
-        assert_eq!(w, 0.0);
+        assert_eq!(w, 1e-300);
         let (log_z, log_w) = f_log_coordinates(1e300, 1.0, 1.0);
         assert_within(log_z, -1e-300, 1e-315, 1e-12, "log_z at x = 1e300");
         assert_within(

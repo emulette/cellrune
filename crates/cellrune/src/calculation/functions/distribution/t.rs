@@ -554,30 +554,47 @@ fn two_sample_statistic(
     let left_size = left.count() as f64;
     let right_size = right.count() as f64;
     let (standard_error, df) = if pooled {
-        let pooled_variance = ((left_size - 1.0) * left_variance
-            + (right_size - 1.0) * right_variance)
-            / (left_size + right_size - 2.0);
-        if pooled_variance == 0.0 {
+        let left_m2 = left.second_moment();
+        let right_m2 = right.second_moment();
+        let scale = left_m2.max(right_m2);
+        if scale == 0.0 {
             return Err(ErrorKind::Div0);
         }
-        (
-            (pooled_variance * (1.0 / left_size + 1.0 / right_size)).sqrt(),
-            left_size + right_size - 2.0,
-        )
+        let df = left_size + right_size - 2.0;
+        let pooled_variance = scale * ((left_m2 / scale + right_m2 / scale) / df);
+        let standard_error = pooled_variance.sqrt() * (1.0 / left_size + 1.0 / right_size).sqrt();
+        (standard_error, df)
     } else {
         let left_error = left_variance / left_size;
         let right_error = right_variance / right_size;
-        let standard_error = (left_error + right_error).sqrt();
-        if standard_error == 0.0 {
+        let scale = left_error.max(right_error);
+        if scale == 0.0 {
             return Err(ErrorKind::Div0);
         }
-        let numerator = left_error + right_error;
-        let df = numerator * numerator
-            / (left_error * left_error / (left_size - 1.0)
-                + right_error * right_error / (right_size - 1.0));
+        let left_ratio = left_error / scale;
+        let right_ratio = right_error / scale;
+        let ratio_sum = left_ratio + right_ratio;
+        let standard_error = scale.sqrt() * ratio_sum.sqrt();
+        let df = ratio_sum * ratio_sum
+            / (left_ratio * left_ratio / (left_size - 1.0)
+                + right_ratio * right_ratio / (right_size - 1.0));
         (standard_error, df)
     };
-    Ok(((left.mean()? - right.mean()?) / standard_error, df))
+    if standard_error == 0.0 {
+        return Err(ErrorKind::Div0);
+    }
+    let left_mean = left.mean()?;
+    let right_mean = right.mean()?;
+    let difference = left_mean - right_mean;
+    let statistic = if difference.is_finite() {
+        difference / standard_error
+    } else {
+        left_mean / standard_error - right_mean / standard_error
+    };
+    if statistic.is_nan() || !df.is_finite() || df <= 0.0 {
+        return Err(ErrorKind::Num);
+    }
+    Ok((statistic, df))
 }
 
 #[cfg(test)]
@@ -1556,6 +1573,27 @@ mod tests {
                 &format!("T.TEST({left:?}, {right:?}, {tails}, {kind})"),
             );
         }
+    }
+
+    #[test]
+    fn two_sample_statistics_scale_before_summing_or_squaring() {
+        let pooled_left =
+            NumericMoments::collect_with_work([-7e153, 7e153], || Ok(())).expect("finite sample");
+        let pooled_right =
+            NumericMoments::collect_with_work([-7e153, 7e153], || Ok(())).expect("finite sample");
+        let (pooled_statistic, pooled_df) =
+            two_sample_statistic(&pooled_left, &pooled_right, true).expect("stable pooled test");
+        assert_eq!(pooled_statistic, 0.0);
+        assert_eq!(pooled_df, 2.0);
+
+        let welch_left =
+            NumericMoments::collect_with_work([-1e100, 1e100], || Ok(())).expect("finite sample");
+        let welch_right =
+            NumericMoments::collect_with_work([-2e100, 2e100], || Ok(())).expect("finite sample");
+        let (welch_statistic, welch_df) =
+            two_sample_statistic(&welch_left, &welch_right, false).expect("stable Welch test");
+        assert_eq!(welch_statistic, 0.0);
+        assert_within(welch_df, 25.0 / 17.0, 2e-15, 2e-15, "extreme Welch df");
     }
 
     #[test]

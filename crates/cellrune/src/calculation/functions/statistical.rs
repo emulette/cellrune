@@ -168,15 +168,24 @@ fn z_test_p_value(
         }
     };
     let difference = mean - x;
-    let z = if difference.is_finite() {
+    if difference.is_nan() {
+        return Err(ErrorKind::Num);
+    }
+    let z = if se == 0.0 {
+        if difference == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY.copysign(difference)
+        }
+    } else if difference.is_finite() {
         difference / se
     } else {
         mean / se - x / se
     };
-    if z.is_finite() {
-        Ok(standard_normal_upper(z))
-    } else {
+    if z.is_nan() {
         Err(ErrorKind::Num)
+    } else {
+        Ok(standard_normal_upper(z))
     }
 }
 
@@ -321,6 +330,7 @@ pub(super) fn numeric_pairs(
     }
     let mut pairs = Vec::new();
     for (left, right) in left.data.into_iter().zip(right.data) {
+        poll_cancellation(context)?;
         match (left, right) {
             (Value::Error(kind), _) | (_, Value::Error(kind)) => return Err(kind),
             (Value::Number(left), Value::Number(right)) => pairs.push((left, right)),
@@ -799,6 +809,47 @@ mod tests {
             z_test_p_value(mean, m2, 5, f64::NAN, None),
             Err(ErrorKind::Num),
             "NaN x"
+        );
+    }
+
+    #[test]
+    fn z_test_maps_overflowed_internal_scores_to_exact_tails() {
+        let moments =
+            NumericMoments::collect_with_work([1.0, 2.0], || Ok(())).expect("finite sample");
+        let mean = moments.mean().expect("finite mean");
+        assert_eq!(
+            z_test_p_value(
+                mean,
+                moments.second_moment(),
+                moments.count(),
+                -1e308,
+                Some(1e-308),
+            ),
+            Ok(0.0),
+        );
+        assert_eq!(
+            z_test_p_value(
+                mean,
+                moments.second_moment(),
+                moments.count(),
+                1e308,
+                Some(1e-308),
+            ),
+            Ok(1.0),
+        );
+
+        let minimum_subnormal = f64::from_bits(1);
+        assert_eq!(
+            z_test_p_value(1.5, 1.0, 4, 1.5, Some(minimum_subnormal)),
+            Ok(0.5),
+        );
+        assert_eq!(
+            z_test_p_value(1.5, 1.0, 4, 1.0, Some(minimum_subnormal)),
+            Ok(0.0),
+        );
+        assert_eq!(
+            z_test_p_value(1.5, 1.0, 4, 2.0, Some(minimum_subnormal)),
+            Ok(1.0),
         );
     }
 

@@ -10,6 +10,35 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- Eight F-distribution and variance-test names: `F.DIST`, `F.DIST.RT`, `F.INV`, `F.INV.RT`,
+  `F.TEST`, `FDIST`, `FINV`, and `FTEST`, with direct upper-tail evaluation and scaled variance
+  ratios that preserve representable subnormal probabilities.
+- Nine t-distribution and t-test names: `T.DIST`, `T.DIST.2T`, `T.DIST.RT`, `T.INV`, `T.INV.2T`,
+  `T.TEST`, `TDIST`, `TINV`, and `TTEST`; plus `Z.TEST`, `ZTEST`, and `COVARIANCE.S`. Stable online
+  moments and scaled test standard errors protect extreme finite inputs from avoidable
+  intermediate overflow.
+- A direct upper regularized incomplete-beta kernel, a uniform central expansion for large shapes,
+  and compensated continued-fraction arithmetic outside the central region. Every iterative step
+  observes cancellation and the calculation resource budget.
+
+### Changed
+
+- The public function catalog now contains 367 official Excel-facing names and 368 accepted
+  entries including the non-official OOXML dummy-function marker.
+- Excel Oracle expectations classify all 60 active cases for the twenty new names as matches in
+  both frozen host profiles.
+
+### Fixed
+
+- Preserved accurate direct F upper tails and subnormal `F.TEST` probabilities instead of losing
+  them through complementary subtraction or an overflowing materialized variance ratio.
+- Scaled pooled and Welch `T.TEST` intermediates, validated F inverse degrees of freedom before
+  endpoint shortcuts, mapped overflowed or underflowed internal Z scores to exact tails, charged
+  the large-shape beta expansion to the configured function-iteration limit, and observed
+  cancellation while filtering long sample arrays.
+
 ## [0.1.12] - 2026-08-03
 
 ### Added

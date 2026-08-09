@@ -191,6 +191,13 @@ frozen two-profile oracle rather than against documentation alone. The suite hol
 for the twenty names, three per name, and all 60 are classified `match` in both
 `excel-online-free-en-ui-ko-kr` and `excel-mac-2021-home-student-en-ui-ko-kr-no-euro-tools`.
 
+The F, t, Z-test, and sample-covariance names added in the current unreleased source are measured
+the same way. Their 60 active cases, again three per official name, are all classified `match` in
+both frozen host profiles. The distribution grid additionally pins large degrees of freedom,
+inverse round trips, and lower, upper, and two-tailed probabilities. Dedicated regression tests
+cover representable subnormal F tails and extreme finite samples whose intermediate variances or
+variance ratios would overflow without scaling.
+
 A family's cumulative and quantile forms are evaluated through one shared tail kernel, so they
 cannot drift apart from each other; the density forms are built on the same `ln_gamma` and
 `ln_beta` primitives. Every kernel is first-party; no external special-function crate is linked.
@@ -211,6 +218,16 @@ finite lower tails when direct division would underflow and resolves ratios abov
 finite double at their limiting CDF or density. `BETA.DIST` and `BETA.INV` normalize finite support
 coordinates before subtraction when `B - A` overflows; density Jacobians use the resulting log
 width, and inverse interpolation uses a finite convex combination.
+
+F and t probabilities evaluate the needed incomplete-beta tail directly instead of subtracting
+it from one. The kernel carries both coordinate logarithms, so an F ratio that overflows or a
+coordinate that underflows can still produce a representable subnormal answer. For shapes of at
+least `1e6` within twelve standard deviations of the mean, it uses a uniform central expansion;
+outside that region a compensated continued fraction avoids cancellation between a large
+normalization term and the fraction. Every central-series and continued-fraction step charges the
+function-iteration budget and observes cancellation. F and t inverse functions refine against
+those same tails, and the covariance and test functions compute sample moments and standard
+errors with explicit scaling before squaring or summing.
 
 At extreme equal shapes, `a = b` on the order of `5e6` and above — a bound that follows from the
 kernel's `lnΓ` ULP error model rather than from an in-repo fixture — the incomplete-beta symmetry
@@ -237,9 +254,11 @@ return their exact endpoint without entering an iterative kernel. Interior `BINO
 summations and non-degenerate binomial quantiles reject support indices above `2^53` with `#NUM!`,
 rather than silently saturating or aliasing a lossy `f64`-to-integer conversion.
 
-A tail whose log-space prefactor falls below `ln(f64::MIN_POSITIVE)`, about `-708.396`, underflows
-`exp()`, so the incomplete gamma, incomplete beta, and binomial kernels report it as exactly zero
-and its complement as exactly one, even where a subnormal would still be representable.
+The incomplete-gamma kernel deliberately resolves a tail below `ln(f64::MIN_POSITIVE)`, about
+`-708.396`, to zero. The incomplete-beta kernel instead keeps the direct tail in log space through
+its final exponentiation, preserving subnormal F, t, beta, binomial, and negative-binomial
+probabilities when `f64` can represent them. Values below the smallest `f64` subnormal still
+resolve to zero and their complements to one.
 
 Density endpoints follow Excel's documented pole, limit, and zero cases rather than the IEEE
 result of the formula:
@@ -283,8 +302,8 @@ The following families have unit and golden tests derived from Microsoft's prima
 but no recorded tolerance against the reference oracle. Do not read their absence from the verified
 section as a claim of exactness in either direction.
 
-- statistical distributions and inverse distributions outside the gamma, beta, binomial, and
-  hypergeometric families measured in 0.1.12
+- statistical distributions and inverse distributions outside the gamma, beta, binomial,
+  hypergeometric, F, and t families measured in 0.1.12 and the current unreleased source
 - closed-form financial functions
 - transcendental math and trigonometric functions, which are evaluated through `libm`
 - engineering and Bessel functions

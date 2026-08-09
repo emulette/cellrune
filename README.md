@@ -106,8 +106,18 @@ first-party special-function foundation: a Lanczos `ln_gamma`, regularized incom
 beta kernels, and a safeguarded inverse solver that charges the calculation budget for every step
 it takes. A family's cumulative and quantile forms are evaluated through the same tail kernel, so
 they cannot drift apart; the density forms are built on the same `ln_gamma` and `ln_beta`
-primitives. The implemented catalog now contains 347 official names and
-348 accepted entries including the OOXML dummy-function marker.
+primitives. The 0.1.12 catalog contains 347 official names and 348 accepted entries including the
+OOXML dummy-function marker.
+
+The current unreleased source adds exactly 20 more official names: `F.DIST`, `F.DIST.RT`, `F.INV`,
+`F.INV.RT`, `F.TEST`, `FDIST`, `FINV`, `FTEST`, `T.DIST`, `T.DIST.2T`, `T.DIST.RT`, `T.INV`,
+`T.INV.2T`, `T.TEST`, `TDIST`, `TINV`, `TTEST`, `Z.TEST`, `ZTEST`, and `COVARIANCE.S`. The shared
+incomplete-beta kernel evaluates lower and upper tails directly, including representable
+subnormal tails, and uses a uniform large-shape expansion near the distribution center. Stable
+online sample moments, together with scaled variance and standard-error combinations in the
+hypothesis tests, protect extreme finite inputs from avoidable intermediate overflow. The source
+catalog therefore contains 367 official names and 368 accepted entries including the OOXML
+dummy-function marker.
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;

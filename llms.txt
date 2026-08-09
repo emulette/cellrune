@@ -518,15 +518,28 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.12 catalog contains 347 official Excel-facing names
-  and one non-official compatibility entry for the OOXML dummy-function marker,
-  for 348 accepted entries.
+  `.is_official()`. The current source catalog contains 367 official
+  Excel-facing names and one non-official compatibility entry for the OOXML
+  dummy-function marker, for 368 accepted entries.
 - The 20 official names added in 0.1.12 are `GAMMA`, `GAMMA.DIST`,
   `GAMMADIST`, `GAMMA.INV`, `GAMMAINV`, `GAMMALN`, `GAMMALN.PRECISE`,
   `BETA.DIST`, `BETADIST`, `BETA.INV`, `BETAINV`, `BINOM.DIST`, `BINOMDIST`,
   `BINOM.DIST.RANGE`, `BINOM.INV`, `CRITBINOM`, `NEGBINOM.DIST`,
   `NEGBINOMDIST`, `HYPGEOM.DIST`, and `HYPGEOMDIST`. None of them returns an
-  array.
+  array. The 0.1.12 catalog contains 347 official names and 348 accepted
+  entries including the OOXML dummy-function marker.
+- The 20 official names added in the current unreleased source are `F.DIST`,
+  `F.DIST.RT`, `F.INV`, `F.INV.RT`, `F.TEST`, `FDIST`, `FINV`, `FTEST`,
+  `T.DIST`, `T.DIST.2T`, `T.DIST.RT`, `T.INV`, `T.INV.2T`, `T.TEST`, `TDIST`,
+  `TINV`, `TTEST`, `Z.TEST`, `ZTEST`, and `COVARIANCE.S`. None of them returns
+  an array.
+- F and t probabilities share direct incomplete-beta lower and upper tails;
+  representable subnormal tails do not pass through `1 - CDF`. A uniform
+  large-shape expansion covers central probabilities, while a double-double
+  continued fraction protects cancellation outside that region. Sample
+  covariance uses stable online paired moments, while hypothesis tests scale
+  variance ratios and standard-error combinations to avoid intermediate
+  overflow on extreme finite inputs.
 - All four families share one first-party special-function foundation: a
   Lanczos `ln_gamma`, regularized incomplete gamma and beta kernels, and a
   safeguarded inverse solver. A family's cumulative and quantile forms are

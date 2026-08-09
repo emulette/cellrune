@@ -68,7 +68,7 @@ pub(in crate::calculation::functions) fn regularized_incomplete_beta_lower(
         return Ok(0.5);
     }
     if in_central_band(a, b, x) {
-        return Ok(central_lower_upper(a, b, x)?.0);
+        return Ok(central_lower_upper(a, b, x, &mut on_iteration)?.0);
     }
     if x < (a + 1.0) / (a + b + 2.0) {
         // Direct evaluation at the rounded coordinate itself: the caller's
@@ -115,12 +115,13 @@ pub(in crate::calculation::functions) fn regularized_incomplete_beta_upper(
         return Ok(0.5);
     }
     if in_central_band(a, b, x) {
-        return Ok(central_lower_upper(a, b, x)?.1);
+        return Ok(central_lower_upper(a, b, x, &mut on_iteration)?.1);
     }
     if x < (a + 1.0) / (a + b + 2.0) {
         Ok(1.0 - direct_tail(a, b, x, log_x, log_w, &mut on_iteration)?)
     } else {
-        direct_tail(b, a, 1.0 - x, log_w, log_x, &mut on_iteration)
+        let w = log_w.map_or(1.0 - x, f64::exp);
+        direct_tail(b, a, w, log_w, log_x, &mut on_iteration)
     }
 }
 
@@ -306,7 +307,12 @@ fn in_central_band(a: f64, b: f64, x: f64) -> bool {
 /// central band (DESIGN.md). Returns the (lower, upper) pair computed from
 /// the same leading erfc term and correction, so the pair is consistent by
 /// construction.
-fn central_lower_upper(a: f64, b: f64, x: f64) -> Result<(f64, f64), ErrorKind> {
+fn central_lower_upper(
+    a: f64,
+    b: f64,
+    x: f64,
+    on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<(f64, f64), ErrorKind> {
     let total = a + b;
     let p = a / total;
     // p = a/total rounds to f64 up to 0.5 ulp away from the exact mean; the
@@ -318,7 +324,7 @@ fn central_lower_upper(a: f64, b: f64, x: f64) -> Result<(f64, f64), ErrorKind> 
     let p_low = f64::mul_add(-p, total, a) / total;
     let delta = (x - p) - p_low;
     let t = 1.0 / total;
-    let g = central_g(p, delta);
+    let g = central_g(p, delta, on_iteration)?;
     // Round-off can push g a few ULP above 0 when δ is tiny; u = 0 there is
     // the exact δ → 0 limit.
     let u = ((-total * g).max(0.0)).sqrt().copysign(delta);
@@ -346,7 +352,11 @@ fn central_lower_upper(a: f64, b: f64, x: f64) -> Result<(f64, f64), ErrorKind> 
 /// (DESIGN.md evaluation appendix). The log1p form p·log1p(δ/p) +
 /// q·log1p(−δ/q) loses ~10 digits to cancellation when |δ| is small
 /// (g ≈ −δ²/(2pq)).
-fn central_g(p: f64, delta: f64) -> f64 {
+fn central_g(
+    p: f64,
+    delta: f64,
+    on_iteration: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<f64, ErrorKind> {
     let q = 1.0 - p;
     let t = delta / p;
     let s = delta / q;
@@ -354,13 +364,14 @@ fn central_g(p: f64, delta: f64) -> f64 {
     let mut t_power = t * t;
     let mut s_power = s * s;
     for k in 2..=CENTRAL_SERIES_TERMS {
+        on_iteration()?;
         let sign = if k % 2 == 0 { -1.0 } else { 1.0 };
         let inner = p * t_power + (if k % 2 == 0 { 1.0 } else { -1.0 }) * q * s_power;
         total += sign * inner / f64::from(k);
         t_power *= t;
         s_power *= s;
     }
-    total
+    Ok(total)
 }
 
 /// The δ-expansion coefficients evaluated at x0 = p. The forms are taken
@@ -1283,6 +1294,28 @@ mod tests {
                 "a={a} b={b} x={x}",
             );
         }
+    }
+
+    #[test]
+    fn central_asymptotic_series_charges_work_and_stops_on_callback_errors() {
+        let mut calls = 0_u32;
+        regularized_incomplete_beta(1_000_000.0, 1_000_000.0, 0.5001, || {
+            calls += 1;
+            Ok(())
+        })
+        .expect("central-band input");
+        assert_eq!(calls, 23);
+
+        let budget_error = ErrorKind::ResourceLimit(CalculationLimitKind::FunctionIterations);
+        let mut remaining = 1_u32;
+        let result = regularized_incomplete_beta(1_000_000.0, 1_000_000.0, 0.5001, || {
+            if remaining == 0 {
+                return Err(budget_error);
+            }
+            remaining -= 1;
+            Ok(())
+        });
+        assert_eq!(result, Err(budget_error));
     }
 
     #[test]
