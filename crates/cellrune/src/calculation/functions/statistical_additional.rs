@@ -6,6 +6,7 @@ use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
 use super::kernel::StatisticalAdditionalFunction;
 use super::moments::{NumericMoments, VarianceKind};
+use super::special_functions::{standard_normal_density, standard_normal_lower};
 use super::statistical::{numeric_arguments, numeric_arguments_with_policy};
 use super::util::{collect_argument_values_with_policy, required_number};
 
@@ -239,7 +240,7 @@ fn normal_helper(
     };
     Value::Number(match helper {
         NormalHelper::Density => standard_normal_density(value),
-        NormalHelper::Gauss => standard_normal_cumulative(value) - 0.5,
+        NormalHelper::Gauss => standard_normal_lower(value) - 0.5,
     })
 }
 
@@ -266,7 +267,7 @@ fn normal_distribution(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Ex
     };
     let standardized = (x - mean) / deviation;
     Value::Number(if cumulative {
-        standard_normal_cumulative(standardized)
+        standard_normal_lower(standardized)
     } else {
         standard_normal_density(standardized) / deviation
     })
@@ -325,14 +326,6 @@ fn poisson_distribution(engine: &Engine<'_>, context: EvalContext<'_>, args: &[E
         total += probability;
     }
     finite(if cumulative { total } else { probability })
-}
-
-fn standard_normal_density(value: f64) -> f64 {
-    (-0.5 * value * value).exp() / (2.0 * std::f64::consts::PI).sqrt()
-}
-
-fn standard_normal_cumulative(value: f64) -> f64 {
-    0.5 * libm::erfc(-value / std::f64::consts::SQRT_2)
 }
 
 fn finite(number: f64) -> Value {

@@ -6,20 +6,26 @@
 //! before it runs another step.
 
 mod binomial;
+mod double_double;
 mod incomplete_beta;
 mod incomplete_gamma;
 mod inverse;
 mod log_binomial;
 mod log_gamma;
+mod normal;
 
 pub(super) use binomial::{
     binomial_pmf, binomial_pmf_sum, negative_binomial_cdf, negative_binomial_pmf,
     smallest_binomial_quantile,
 };
-pub(super) use incomplete_beta::{ln_beta, regularized_incomplete_beta};
+pub(super) use incomplete_beta::{
+    beta_density_exponent, beta_pair, ln_beta, regularized_incomplete_beta,
+    regularized_incomplete_beta_lower, regularized_incomplete_beta_upper,
+};
 pub(super) use incomplete_gamma::{regularized_gamma_p, regularized_gamma_p_from_log};
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
+pub(super) use normal::{standard_normal_density, standard_normal_lower, standard_normal_upper};
 
 use super::super::value::ErrorKind;
 
@@ -69,3 +75,15 @@ const SOLVER_X_ABSOLUTE_TOLERANCE: f64 = 1e-300;
 const SOLVER_X_RELATIVE_TOLERANCE: f64 = 4.0 * f64::EPSILON;
 const SOLVER_P_ABSOLUTE_TOLERANCE: f64 = 1e-16;
 const SOLVER_P_RELATIVE_TOLERANCE: f64 = 1e-9;
+
+/// A quantile bracket locked on the f64 grid (adjacent floats) accepts the
+/// closer endpoint only while its probability residual stays under this
+/// ceiling. Legitimate grid locks carry residuals bounded by the CDF
+/// quantization span f·2⁻⁵³, which grows ~1e-16·df with the shape: the
+/// verified t grid reaches 5.2e-7 at df = 1e10. A residual of ~0.5 instead
+/// means the CDF steps across the whole probability range within one ULP —
+/// e.g. GAMMA.INV with an alpha so small the quantile underflows to zero —
+/// where the target is not resolved by the grid at all and the solve must
+/// fail like Excel's #N/A. The ceiling sits a wide margin above the largest
+/// verified lock and far below the step-residual scale.
+const SOLVER_P_GRID_CEILING: f64 = 1e-4;

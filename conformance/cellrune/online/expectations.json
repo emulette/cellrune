@@ -2978,25 +2978,22 @@
     "excel_rich_error": false
   },
   "function:covariance-s": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "70",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.COVARIANCE.S) for this oracle case."
+    "excel_rich_error": false
   },
   "function:covariance-s:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.COVARIANCE.S) for this oracle case."
+    "excel_rich_error": false
   },
   "function:covariance-s:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.COVARIANCE.S) for this oracle case."
+    "excel_rich_error": false
   },
   "function:critbinom": {
     "classification": "match",
@@ -3930,109 +3927,94 @@
     "excel_rich_error": false
   },
   "function:f-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.6381079093869263",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-dist-rt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.3618920906130737",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-dist-rt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.26171875",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-dist-rt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.73828125",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-inv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4.0097493126739456",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-inv-rt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4.0097493126739447",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-inv-rt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-inv-rt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-inv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-inv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-test": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4.0987363455882598E-9",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-test:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:f-test:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.F.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fact": {
     "classification": "match",
@@ -4077,25 +4059,22 @@
     "excel_rich_error": false
   },
   "function:fdist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.3618920906130737",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fdist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.26171875",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fdist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:filter": {
     "classification": "match",
@@ -4155,25 +4134,22 @@
     "note": "CellRune reports calculation.unsupported_function (FINDB) for this oracle case."
   },
   "function:finv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4.0097493126739447",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:finv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:finv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fisher": {
     "classification": "not_implemented",
@@ -4396,25 +4372,22 @@
     "note": "CellRune reports calculation.unsupported_function (FREQUENCY) for this oracle case."
   },
   "function:ftest": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4.0987363455882598E-9",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ftest:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ftest:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fv": {
     "classification": "match",
@@ -8495,130 +8468,112 @@
     "excel_rich_error": false
   },
   "function:t-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.95148366102743565",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist-2t": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "9.7032677945128765E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.2T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist-2t:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "6.8655014038085938E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.2T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist-2t:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.2T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist-rt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4.8516338972564382E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist-rt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3.4327507019042969E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist-rt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.96567249298095703",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-inv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.3562173340232055",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-inv-2t": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.7822875556493194",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.INV.2T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-inv-2t:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.INV.2T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-inv-2t:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.INV.2T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-inv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-inv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-test": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-test:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t-test:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.T.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:t:coercion": {
     "classification": "match",
@@ -8744,25 +8699,22 @@
     "note": "CellRune reports calculation.unsupported_function (TBILLYIELD) for this oracle case."
   },
   "function:tdist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "9.7032677945128765E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tdist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "6.8655014038085938E-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tdist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:text": {
     "classification": "not_implemented",
@@ -8877,25 +8829,22 @@
     "note": "CellRune reports calculation.unsupported_function (TIMEVALUE) for this oracle case."
   },
   "function:tinv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.7822875556493194",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tinv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tinv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tocol": {
     "classification": "match",
@@ -9045,25 +8994,22 @@
     "excel_rich_error": false
   },
   "function:ttest": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ttest:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ttest:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:type": {
     "classification": "match",
@@ -9679,46 +9625,40 @@
     "note": "CellRune reports calculation.unsupported_function (YIELDMAT) for this oracle case."
   },
   "function:z-test": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.35272849305563669",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.Z.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:z-test:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3.4563338330252051E-15",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.Z.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:z-test:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.Z.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ztest": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.35272849305563669",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (ZTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ztest:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3.4563338330252051E-15",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (ZTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ztest:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (ZTEST) for this oracle case."
+    "excel_rich_error": false
   },
   "let:decimal-trace:array-cancellation": {
     "classification": "match",

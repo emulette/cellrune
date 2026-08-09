@@ -12,6 +12,9 @@ use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
 use super::criteria_runtime::CriteriaRuntime;
 use super::moments::{NumericMoments, PairedMoments, VarianceKind};
+use super::special_functions::{
+    standard_normal_density, standard_normal_lower, standard_normal_upper,
+};
 use super::util::{
     collect_argument_values, excel_numeric_arguments, excel_numeric_arguments_with_policy,
     required_number,
@@ -55,9 +58,21 @@ pub(super) fn call(
         StatisticalFunction::Intercept => {
             paired_statistic(engine, context, args, PairedStatistic::Intercept)
         }
-        StatisticalFunction::CovarianceP => {
-            paired_statistic(engine, context, args, PairedStatistic::Covariance)
-        }
+        StatisticalFunction::CovarianceP => paired_statistic(
+            engine,
+            context,
+            args,
+            PairedStatistic::Covariance(VarianceKind::Population),
+        ),
+        StatisticalFunction::CovarianceS => paired_statistic(
+            engine,
+            context,
+            args,
+            PairedStatistic::Covariance(VarianceKind::Sample),
+        ),
+        StatisticalFunction::FTest => super::distribution::f::f_test(engine, context, args),
+        StatisticalFunction::TTest => super::distribution::t::t_test(engine, context, args),
+        StatisticalFunction::ZTest => z_test(engine, context, args),
     }
 }
 
@@ -66,7 +81,7 @@ enum PairedStatistic {
     Correlation,
     Slope,
     Intercept,
-    Covariance,
+    Covariance(VarianceKind),
 }
 
 fn paired_statistic(
@@ -90,8 +105,8 @@ fn paired_statistic(
         Ok(moments) => moments,
         Err(kind) => return Value::Error(kind),
     };
-    if statistic == PairedStatistic::Covariance {
-        return match moments.covariance(VarianceKind::Population) {
+    if let PairedStatistic::Covariance(kind) = statistic {
+        return match moments.covariance(kind) {
             Ok(covariance) => Value::Number(covariance),
             Err(kind) => Value::Error(kind),
         };
@@ -118,12 +133,82 @@ fn paired_statistic(
             moments.co_moment() / moments.left_second_moment().sqrt() / right_deviation.sqrt()
         }
         PairedStatistic::Slope => moments.co_moment() / right_deviation,
-        PairedStatistic::Covariance => unreachable!("covariance returned before finalization"),
+        PairedStatistic::Covariance(_) => unreachable!("covariance returned before finalization"),
     };
     if result.is_finite() {
         Value::Number(result)
     } else {
         Value::Error(ErrorKind::Num)
+    }
+}
+
+/// Pure Z.TEST core (plan §6.5): p = Q((mean − x)/se) from the sample
+/// moments. An explicit sigma uses se = sigma/√n and needs sigma > 0; an
+/// omitted sigma falls back to the sample standard error √(M2/(n·(n−1))),
+/// which requires n ≥ 2 and M2 > 0. The p-value is the direct
+/// standard-normal upper tail — small p-values are never formed as 1 − lower.
+/// Divide first only when the difference overflows; the direct quotient
+/// preserves the cancellation structure of the Welford mean.
+fn z_test_p_value(
+    mean: f64,
+    m2: f64,
+    n: u64,
+    x: f64,
+    sigma: Option<f64>,
+) -> Result<f64, ErrorKind> {
+    let se = match sigma {
+        Some(sigma) if sigma.is_finite() && sigma > 0.0 => sigma / (n as f64).sqrt(),
+        Some(_) => return Err(ErrorKind::Num),
+        None => {
+            if n < 2 || m2 == 0.0 {
+                return Err(ErrorKind::Div0);
+            }
+            let nf = n as f64;
+            (m2 / (nf * (nf - 1.0))).sqrt()
+        }
+    };
+    let difference = mean - x;
+    let z = if difference.is_finite() {
+        difference / se
+    } else {
+        mean / se - x / se
+    };
+    if z.is_finite() {
+        Ok(standard_normal_upper(z))
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+/// Z.TEST(array, x, [sigma]): sample moments from the array (the empty sample
+/// is #N/A), then the §6.5 p-value.
+fn z_test(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    if args.len() < 2 || args.len() > 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let moments = match super::distribution::f::sample_moments(engine, context, &args[0]) {
+        Ok(moments) if moments.count() > 0 => moments,
+        Ok(_) => return Value::Error(ErrorKind::NA),
+        Err(kind) => return Value::Error(kind),
+    };
+    let x = match required_number(engine, context, &args[1]) {
+        Ok(number) => number,
+        Err(kind) => return Value::Error(kind),
+    };
+    let sigma = match args.get(2) {
+        Some(expr) => match required_number(engine, context, expr) {
+            Ok(number) => Some(number),
+            Err(kind) => return Value::Error(kind),
+        },
+        None => None,
+    };
+    let mean = match moments.mean() {
+        Ok(mean) => mean,
+        Err(kind) => return Value::Error(kind),
+    };
+    match z_test_p_value(mean, moments.second_moment(), moments.count(), x, sigma) {
+        Ok(p_value) => Value::Number(p_value),
+        Err(kind) => Value::Error(kind),
     }
 }
 
@@ -201,9 +286,9 @@ fn standard_normal_distribution(
         }
     };
     if cumulative {
-        Value::Number(0.5 * libm::erfc(-z / std::f64::consts::SQRT_2))
+        Value::Number(standard_normal_lower(z))
     } else {
-        Value::Number((-0.5 * z * z).exp() / (2.0 * std::f64::consts::PI).sqrt())
+        Value::Number(standard_normal_density(z))
     }
 }
 
@@ -224,7 +309,7 @@ pub(super) fn numeric_arguments_with_policy(
     excel_numeric_arguments_with_policy(engine, context, args, sheet_span_policy)
 }
 
-fn numeric_pairs(
+pub(super) fn numeric_pairs(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     args: &[Expr],
@@ -514,4 +599,267 @@ fn parse_pairs(
         ));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::z_test_p_value;
+    use crate::calculation::functions::moments::{NumericMoments, PairedMoments, VarianceKind};
+    use crate::calculation::value::ErrorKind;
+
+    fn assert_within(actual: f64, expected: f64, abs_tol: f64, rel_tol: f64, what: &str) {
+        let diff = (actual - expected).abs();
+        let limit = abs_tol + rel_tol * expected.abs();
+        assert!(
+            actual.is_finite() && expected.is_finite() && diff <= limit,
+            "{what}: {actual} vs {expected} (diff {diff:e} > {limit:e})",
+        );
+    }
+
+    /// Plan §6.5 tolerance policy: p-values use the direct-tail table
+    /// (abs = 2e-14, rel = 2e-12 in [1e-12, 1]; abs = 2 ULP, rel = 5e-9
+    /// below), mirroring T.TEST/F.TEST.
+    fn assert_tail(actual: f64, expected: f64, what: &str) {
+        if expected >= 1e-12 {
+            assert_within(actual, expected, 2e-14, 2e-12, what);
+        } else {
+            assert_within(actual, expected, 2.0 * f64::from_bits(1), 5e-9, what);
+        }
+    }
+
+    #[test]
+    fn z_test_p_values_match_the_decimal_reference() {
+        // Z.TEST grid. Reference: plan §6.5, mpmath 1.3.0 erfc at mp.dps=100,
+        // z from Decimal-110 Welford moments of the exact f64 literals.
+        // Fields: (sample, x, sigma, p). The offset rows verify the Welford
+        // mean stays exact at 1e9 scale (kernel result is bit-identical to
+        // the reference on the paired grid below).
+        const Z_TEST_GRID: &[(&[f64], f64, Option<f64>, f64)] = &[
+            (&[1.0, 2.0, 3.0, 4.0, 5.0], 3.0, None, 0.5),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0],
+                3.0,
+                Some(1.5811388300841898),
+                0.5,
+            ),
+            (&[1.0, 2.0, 3.0, 4.0, 5.0], 10.0, None, 1.0),
+            (&[1.0, 2.0, 3.0, 4.0, 5.0], 5.25, None, 0.9992686417066594),
+            (&[1.0, 2.0, 3.0, 4.0, 5.0], -1000000.0, None, 0.0),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0],
+                -2.3033008588991066,
+                None,
+                3.1908916729108894e-14,
+            ),
+            (&[1.0, 2.0, 3.0, 4.0, 5.0], 2.5, None, 0.23975006109347674),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0],
+                2.5,
+                Some(1.5811388300841898),
+                0.23975006109347674,
+            ),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0],
+                3.0,
+                None,
+                0.1396861721364197,
+            ),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0],
+                3.0,
+                Some(1.5811388300841898),
+                9.892192793507626e-137,
+            ),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0],
+                10.0,
+                None,
+                0.2836376293013515,
+            ),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0],
+                100.25,
+                None,
+                0.9999999990068481,
+            ),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0],
+                -1000000.0,
+                None,
+                0.0,
+            ),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0],
+                -2.3033008588991066,
+                None,
+                0.07107150279647395,
+            ),
+            (
+                &[1000000000.1, 1000000000.2, 1000000000.3, 1000000000.4],
+                3.0,
+                None,
+                0.0,
+            ),
+            (
+                &[1000000000.1, 1000000000.2, 1000000000.3, 1000000000.4],
+                1000000000.65,
+                None,
+                0.9999999997118401,
+            ),
+        ];
+        for &(sample, x, sigma, expected_p) in Z_TEST_GRID {
+            let moments = NumericMoments::collect_with_work(sample.iter().copied(), || Ok(()))
+                .expect("finite sample");
+            let mean = moments.mean().expect("finite mean");
+            let actual_p = z_test_p_value(mean, moments.second_moment(), moments.count(), x, sigma)
+                .expect("valid z test input");
+            let label = format!("Z.TEST({sample:?}, {x}, {sigma:?})");
+            assert_tail(actual_p, expected_p, &label);
+        }
+    }
+
+    #[test]
+    fn z_test_omitted_sigma_matches_explicit_sigma() {
+        // Plan fixture: on [1..5] the omitted path √(M2/(n·(n−1))) and the
+        // explicit path with sigma = STDEV.S([1..5]) both round se to the
+        // same f64 (0.7071067811865476), so the p-values agree to well below
+        // the ~3.5e-15 the plan documents for this pair.
+        let moments = NumericMoments::collect_with_work([1.0, 2.0, 3.0, 4.0, 5.0], || Ok(()))
+            .expect("finite sample");
+        let mean = moments.mean().expect("finite mean");
+        let omitted = z_test_p_value(mean, moments.second_moment(), moments.count(), 2.5, None)
+            .expect("omitted sigma valid");
+        let explicit = z_test_p_value(
+            mean,
+            moments.second_moment(),
+            moments.count(),
+            2.5,
+            Some(1.5811388300841898),
+        )
+        .expect("explicit sigma valid");
+        let label = "Z.TEST([1,2,3,4,5], 2.5): omitted vs explicit sigma";
+        assert_within(omitted, explicit, 3.5e-15, 0.0, label);
+        assert_tail(omitted, 0.23975006109347674, label);
+    }
+
+    #[test]
+    fn z_test_rejects_bad_sigma_and_undersized_samples() {
+        // Explicit sigma <= 0 (or NaN) is #NUM!; the empty sample is #N/A at
+        // the engine level, and the omitted path needs n >= 2 with M2 > 0.
+        let moments = NumericMoments::collect_with_work([1.0, 2.0, 3.0, 4.0, 5.0], || Ok(()))
+            .expect("finite sample");
+        let (mean, m2) = (moments.mean().expect("mean"), moments.second_moment());
+        for sigma in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                z_test_p_value(mean, m2, 5, 2.5, Some(sigma)),
+                Err(ErrorKind::Num),
+                "sigma = {sigma}"
+            );
+        }
+        assert_eq!(
+            z_test_p_value(mean, m2, 1, 2.5, None),
+            Err(ErrorKind::Div0),
+            "single-element sample needs explicit sigma"
+        );
+        assert_eq!(
+            z_test_p_value(mean, 0.0, 5, 2.5, None),
+            Err(ErrorKind::Div0),
+            "zero sample variance with omitted sigma"
+        );
+        // A constant sample also has M2 == 0 through the collector.
+        let constant =
+            NumericMoments::collect_with_work([2.0, 2.0, 2.0], || Ok(())).expect("finite");
+        assert_eq!(
+            z_test_p_value(
+                constant.mean().expect("mean"),
+                constant.second_moment(),
+                constant.count(),
+                2.0,
+                None,
+            ),
+            Err(ErrorKind::Div0),
+            "constant sample with omitted sigma"
+        );
+        // Explicit sigma works on a single-element sample (n >= 1).
+        let single = NumericMoments::collect_with_work([2.0], || Ok(())).expect("finite");
+        assert_tail(
+            z_test_p_value(
+                single.mean().expect("mean"),
+                single.second_moment(),
+                single.count(),
+                2.5,
+                Some(1.0),
+            )
+            .expect("single-element sample with explicit sigma"),
+            0.6914624612740131,
+            "Z.TEST([2], 2.5, 1)",
+        );
+        // Non-finite x makes z non-finite.
+        assert_eq!(
+            z_test_p_value(mean, m2, 5, f64::NAN, None),
+            Err(ErrorKind::Num),
+            "NaN x"
+        );
+    }
+
+    #[test]
+    fn covariance_s_matches_the_decimal_reference() {
+        // COVARIANCE.S grid. Reference: plan §6.2, Decimal-110 paired
+        // Welford, C/(n-1) at the exact f64 literals. The offset rows verify
+        // the compensated paired moments stay exact beside 1e9-scale values
+        // (the kernel result is bit-identical to the reference here).
+        // Fields: (left, right, covariance).
+        const COVARIANCE_S_GRID: &[(&[f64], &[f64], f64)] = &[
+            (&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 3.0, 4.0, 5.0, 7.0], 3.0),
+            (
+                &[1.0, 2.0, 3.0, 4.0, 5.0],
+                &[10.0, 11.0, 12.0, 13.0, 15.0],
+                3.0,
+            ),
+            (
+                &[1000000000.1, 1000000000.2, 1000000000.3, 1000000000.4],
+                &[-999999999.5, -999999999.4, -999999999.3, -999999999.2],
+                0.01666666070620219,
+            ),
+        ];
+        for &(left, right, expected) in COVARIANCE_S_GRID {
+            let moments = PairedMoments::collect_with_work(
+                left.iter().copied().zip(right.iter().copied()),
+                || Ok(()),
+            )
+            .expect("finite paired input");
+            let actual = moments
+                .covariance(VarianceKind::Sample)
+                .expect("at least two accepted pairs");
+            let label = format!("COVARIANCE.S({left:?}, {right:?})");
+            assert_within(actual, expected, 2e-12, 2e-12, &label);
+        }
+    }
+
+    #[test]
+    fn covariance_s_requires_two_pairs() {
+        // One accepted pair (or none) is #DIV/0!; the length mismatch is
+        // #N/A at the engine level (numeric_pairs).
+        let one =
+            PairedMoments::collect_with_work([(1.0, 2.0)], || Ok(())).expect("finite paired input");
+        assert_eq!(
+            one.covariance(VarianceKind::Sample),
+            Err(ErrorKind::Div0),
+            "single pair"
+        );
+        let empty = PairedMoments::collect_with_work(std::iter::empty(), || Ok(()))
+            .expect("finite paired input");
+        assert_eq!(
+            empty.covariance(VarianceKind::Sample),
+            Err(ErrorKind::Div0),
+            "no pairs"
+        );
+        // The population denominator still works on the single pair
+        // (COVARIANCE.P semantics unchanged).
+        assert_eq!(
+            one.covariance(VarianceKind::Population),
+            Ok(0.0),
+            "COVARIANCE.P on one pair"
+        );
+    }
 }

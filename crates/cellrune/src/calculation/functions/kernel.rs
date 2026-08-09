@@ -339,6 +339,10 @@ function_enum!(RegressionFunction {
 function_enum!(StatisticalFunction {
     Correl,
     CovarianceP,
+    CovarianceS,
+    FTest,
+    TTest,
+    ZTest,
     Intercept,
     Large,
     MaxIfs,
@@ -384,6 +388,10 @@ function_enum!(DistributionFunction {
     BinomDist,
     BinomDistRange,
     BinomInv,
+    FDist,
+    FDistRt,
+    FInv,
+    FInvRt,
     Gamma,
     GammaDist,
     GammaInv,
@@ -392,6 +400,12 @@ function_enum!(DistributionFunction {
     HypgeomDistLegacy,
     NegBinomDist,
     NegBinomDistLegacy,
+    TDist,
+    TDist2T,
+    TDistRt,
+    TInv,
+    TInv2T,
+    TDists,
 });
 
 function_enum!(FinancialFunction {

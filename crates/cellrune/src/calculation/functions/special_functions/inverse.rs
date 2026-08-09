@@ -1,6 +1,6 @@
 use super::super::super::value::ErrorKind;
 use super::{
-    MAX_BRACKET_STEPS, MAX_SOLVER_ITERATIONS, SOLVER_P_ABSOLUTE_TOLERANCE,
+    MAX_BRACKET_STEPS, MAX_SOLVER_ITERATIONS, SOLVER_P_ABSOLUTE_TOLERANCE, SOLVER_P_GRID_CEILING,
     SOLVER_P_RELATIVE_TOLERANCE, SOLVER_X_ABSOLUTE_TOLERANCE, SOLVER_X_RELATIVE_TOLERANCE,
 };
 
@@ -67,6 +67,17 @@ fn bracket_positive_half_line(
     }
     let mut point = initial_guess;
     let mut residual = residual_at(cdf, point, probability)?;
+    if residual == 0.0 {
+        // The initial guess already attains the probability exactly (e.g. the
+        // t(1) median at x = 1). A zero-width bracket satisfies both refine
+        // convergence conditions and returns the point unchanged.
+        return Ok(Bracket {
+            low: point,
+            low_residual: residual,
+            high: point,
+            high_residual: residual,
+        });
+    }
     if residual < 0.0 {
         for _ in 0..MAX_BRACKET_STEPS {
             on_iteration()?;
@@ -157,6 +168,35 @@ fn refine(
         } else {
             secant_step(low, low_residual, high, high_residual).unwrap_or(midpoint)
         };
+        // f64 grid floor: once the bracket spans adjacent floats, the
+        // midpoint (and any secant step) rounds onto an endpoint and the
+        // interval can no longer shrink. The CDF value is quantized on that
+        // same grid — it changes by f·2⁻⁵³ per unit ULP, which can sit above
+        // the residual budget for steep densities (e.g. the t solve near its
+        // endpoints) — so the target may lie between the endpoint values with
+        // neither residual within tolerance. Return the closer endpoint
+        // instead of exhausting the iteration cap — but only while that
+        // residual stays within the grid ceiling. A target that lies below
+        // (or above) the entire grid — e.g. GAMMA.INV(0.5, 1e-8, 1), whose
+        // quantile underflows to zero while the CDF steps from 0 to 1 within
+        // one ULP of the boundary — leaves the endpoint residuals near 0.5,
+        // and fabricating an endpoint value there would mask the convergence
+        // failure that Excel reports as #N/A. (An exact root is caught here
+        // too: the zero-residual endpoint wins the closer comparison.)
+        if candidate == low || candidate == high {
+            let closer = if low_residual.abs() <= high_residual.abs() {
+                low_residual.abs()
+            } else {
+                high_residual.abs()
+            };
+            if closer <= SOLVER_P_GRID_CEILING {
+                return Ok(if low_residual.abs() <= high_residual.abs() {
+                    low
+                } else {
+                    high
+                });
+            }
+        }
         let candidate_residual = residual_at(cdf, candidate, probability)?;
         if candidate_residual <= 0.0 {
             low = candidate;
@@ -201,7 +241,8 @@ fn residual_at(
     x: f64,
     probability: f64,
 ) -> Result<f64, ErrorKind> {
-    let residual = cdf(x)? - probability;
+    let cdf_value = cdf(x)?;
+    let residual = cdf_value - probability;
     if residual.is_finite() {
         Ok(residual)
     } else {

@@ -5,8 +5,10 @@ use super::kernel::DistributionFunction;
 
 mod beta;
 mod binomial;
+pub(in crate::calculation::functions) mod f;
 mod gamma;
 mod hypergeometric;
+pub(in crate::calculation::functions) mod t;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -25,6 +27,10 @@ pub(super) fn call(
             binomial::binomial_distribution_range(engine, context, args)
         }
         DistributionFunction::BinomInv => binomial::binomial_inverse(engine, context, args),
+        DistributionFunction::FDist => f::f_distribution(engine, context, args),
+        DistributionFunction::FDistRt => f::f_distribution_rt(engine, context, args),
+        DistributionFunction::FInv => f::f_inverse(engine, context, args),
+        DistributionFunction::FInvRt => f::f_inverse_rt(engine, context, args),
         DistributionFunction::Gamma => gamma::gamma(engine, context, args),
         DistributionFunction::GammaDist => gamma::gamma_distribution(engine, context, args),
         DistributionFunction::GammaInv => gamma::gamma_inverse(engine, context, args),
@@ -41,6 +47,12 @@ pub(super) fn call(
         DistributionFunction::NegBinomDistLegacy => {
             binomial::negative_binomial_distribution_legacy(engine, context, args)
         }
+        DistributionFunction::TDist => t::t_distribution(engine, context, args),
+        DistributionFunction::TDistRt => t::t_distribution_rt(engine, context, args),
+        DistributionFunction::TDist2T => t::t_distribution_two_tail(engine, context, args),
+        DistributionFunction::TInv => t::t_inverse(engine, context, args),
+        DistributionFunction::TInv2T => t::t_inverse_two_tail(engine, context, args),
+        DistributionFunction::TDists => t::tdist(engine, context, args),
     }
 }
 

@@ -146,6 +146,11 @@ impl NumericMoments {
         Ok(())
     }
 
+    /// Accepted value count; F.TEST derives its degrees of freedom from it.
+    pub(super) const fn count(self) -> u64 {
+        self.count
+    }
+
     pub(super) fn sum(self) -> Result<f64, ErrorKind> {
         self.sum.total()
     }

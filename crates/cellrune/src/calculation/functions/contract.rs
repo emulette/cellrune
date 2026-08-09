@@ -855,6 +855,11 @@ const DB_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::Absent,
     ArgumentDefaultValue::Number(12.0),
 )];
+const Z_TEST_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    2,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Omitted,
+)];
 const GROUPBY_OPTION_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(3, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
     ArgumentDefault::new(4, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
@@ -1447,10 +1452,18 @@ impl StatisticalFunction {
         match self {
             Self::Correl
             | Self::CovarianceP
+            | Self::CovarianceS
+            | Self::FTest
             | Self::Intercept
             | Self::Pearson
             | Self::Rsq
             | Self::Slope => CallContract::uniform(Arity::exact(2), ARRAY),
+            // T.TEST carries the tails and type selectors after its two
+            // arrays, so it is positional four-argument like the F-family
+            // hypothesis tests rather than a paired-statistic pair.
+            Self::TTest => {
+                CallContract::positional(Arity::exact(4), &[ARRAY, ARRAY, SCALAR, SCALAR])
+            }
             Self::Large | Self::PercentileInc | Self::QuartileInc | Self::Small => {
                 CallContract::positional(Arity::exact(2), &[ARRAY, SCALAR])
             }
@@ -1471,6 +1484,8 @@ impl StatisticalFunction {
             }
             Self::RankEq => CallContract::positional(Arity::range(2, 3), &[SCALAR, ARRAY, SCALAR])
                 .with_defaults(RANK_DEFAULTS),
+            Self::ZTest => CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
+                .with_defaults(Z_TEST_DEFAULTS),
         }
     }
 }
@@ -1510,11 +1525,20 @@ impl DistributionFunction {
             )
             .with_defaults(BETA_FIVE_ARGUMENT_INTERVAL_DEFAULTS),
             Self::Gamma | Self::GammaLnPrecise => CallContract::uniform(Arity::exact(1), SCALAR),
-            Self::BinomDist | Self::GammaDist | Self::HypgeomDistLegacy | Self::NegBinomDist => {
-                CallContract::uniform(Arity::exact(4), SCALAR)
-            }
-            Self::BinomInv | Self::GammaInv | Self::NegBinomDistLegacy => {
-                CallContract::uniform(Arity::exact(3), SCALAR)
+            Self::BinomDist
+            | Self::FDist
+            | Self::GammaDist
+            | Self::HypgeomDistLegacy
+            | Self::NegBinomDist => CallContract::uniform(Arity::exact(4), SCALAR),
+            Self::BinomInv
+            | Self::FDistRt
+            | Self::FInv
+            | Self::FInvRt
+            | Self::GammaInv
+            | Self::NegBinomDistLegacy => CallContract::uniform(Arity::exact(3), SCALAR),
+            Self::TDist | Self::TDists => CallContract::uniform(Arity::exact(3), SCALAR),
+            Self::TDistRt | Self::TDist2T | Self::TInv | Self::TInv2T => {
+                CallContract::uniform(Arity::exact(2), SCALAR)
             }
             Self::BinomDistRange => CallContract::uniform(Arity::range(3, 4), SCALAR),
             Self::HypgeomDist => CallContract::uniform(Arity::exact(5), SCALAR),

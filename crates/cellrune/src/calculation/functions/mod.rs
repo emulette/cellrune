@@ -761,7 +761,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    function_catalog_for_version(CompatibilityVersion::V0_1_12)
+    function_catalog_for_version(CompatibilityVersion::V0_1_13)
 }
 
 fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::FunctionCatalogEntry> {
@@ -951,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_names_are_unique_and_current_catalog_is_v0_1_12() {
+    fn registry_names_are_unique_and_current_catalog_is_v0_1_13() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
@@ -969,7 +969,7 @@ mod tests {
             .map(|descriptor| descriptor.aliases().len())
             .sum::<usize>();
         assert_eq!(aliases.len(), alias_count);
-        assert_eq!(aliases.len(), 19);
+        assert_eq!(aliases.len(), 25);
         assert!(aliases.is_disjoint(&kernels));
         assert!(
             descriptor::descriptors()
@@ -979,10 +979,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 348);
+        assert_eq!(catalog.len(), 368);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            347
+            367
         );
         assert!(
             catalog
@@ -1161,6 +1161,34 @@ mod tests {
         assert_eq!(
             actual,
             include_str!("../../../testdata/function-catalog-v0.1.12.sha256").trim()
+        );
+    }
+
+    #[test]
+    fn v0_1_13_t_family_and_sample_test_catalog_is_byte_exact() {
+        let mut digest = Sha256::new();
+        for entry in
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_13)
+        {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            include_str!("../../../testdata/function-catalog-v0.1.13.sha256").trim()
         );
     }
 }

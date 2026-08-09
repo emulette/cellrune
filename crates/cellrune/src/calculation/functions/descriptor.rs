@@ -136,6 +136,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_10,
     V0_1_11,
     V0_1_12,
+    V0_1_13,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -839,6 +840,17 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Correl, "CORREL", Statistical),
     function!(CovarianceP, "COVARIANCE.P", Statistical)
         .with_aliases(&[FunctionAlias::official("COVAR")]),
+    function!(CovarianceS, "COVARIANCE.S", Statistical)
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(FTest, "F.TEST", Statistical)
+        .with_aliases(&[FunctionAlias::official("FTEST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(TTest, "T.TEST", Statistical)
+        .with_aliases(&[FunctionAlias::official("TTEST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(ZTest, "Z.TEST", Statistical)
+        .with_aliases(&[FunctionAlias::official("ZTEST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
     function!(Intercept, "INTERCEPT", Statistical),
     function!(Large, "LARGE", Statistical),
     function!(MaxIfs, "MAXIFS", Statistical),
@@ -890,6 +902,27 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
     function!(BetaDist, "BETA.DIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(FDist, "F.DIST", Distribution).with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(FDistRt, "F.DIST.RT", Distribution)
+        .with_aliases(&[FunctionAlias::official("FDIST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(FInv, "F.INV", Distribution).with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(FInvRt, "F.INV.RT", Distribution)
+        .with_aliases(&[FunctionAlias::official("FINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(TDist, "T.DIST", Distribution).with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(TDistRt, "T.DIST.RT", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(TDist2T, "T.DIST.2T", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(TInv, "T.INV", Distribution).with_minimum_version(CompatibilityVersion::V0_1_13),
+    function!(TInv2T, "T.INV.2T", Distribution)
+        .with_aliases(&[FunctionAlias::official("TINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_13),
+    // TDIST keeps its own kernel entry: the legacy signature carries a tails
+    // argument the modern names lack, so it cannot be a canonical-adapter
+    // alias (mirroring BETADIST's separation).
+    function!(TDists, "TDIST", Distribution).with_minimum_version(CompatibilityVersion::V0_1_13),
     // BETADIST keeps its own kernel entry: the legacy signature drops the
     // cumulative flag, so it cannot be a canonical-adapter alias.
     function!(BetaDistLegacy, "BETADIST", Distribution)
@@ -1377,6 +1410,128 @@ mod tests {
         assert!(hypgeom_dist.call_contract().arity().accepts(5));
         assert!(!hypgeom_dist.call_contract().arity().accepts(4));
         assert!(!hypgeom_dist.call_contract().arity().accepts(6));
+    }
+
+    #[test]
+    fn v0_1_13_semantic_registry_is_byte_exact() {
+        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_13);
+        let mut digest = Sha256::new();
+        digest.update(snapshot.as_bytes());
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual, "881849f24d58c69772f41a2507159277dae6f0d9d42589d93720428c6742de95",
+            "stable v0.1.13 semantic snapshot changed:\n{snapshot}",
+        );
+    }
+
+    #[test]
+    fn v0_1_13_descriptors_freeze_function_families_arity_and_array_results() {
+        // Six of the twenty names are aliases (FDIST, FINV, FTEST, TINV, TTEST,
+        // ZTEST), so the lookup resolves accepted spellings rather than
+        // canonical ones only. TDIST is a kernel with its own tails argument,
+        // not an alias (mirroring BETADIST's separation).
+        for name in [
+            "F.DIST",
+            "F.DIST.RT",
+            "FDIST",
+            "F.INV",
+            "F.INV.RT",
+            "FINV",
+            "F.TEST",
+            "FTEST",
+            "T.DIST",
+            "T.DIST.RT",
+            "T.DIST.2T",
+            "T.INV",
+            "T.INV.2T",
+            "TINV",
+            "T.TEST",
+            "TTEST",
+            "TDIST",
+            "Z.TEST",
+            "ZTEST",
+            "COVARIANCE.S",
+        ] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_13,
+                "{name}",
+            );
+            assert!(
+                matches!(
+                    descriptor.evaluator(),
+                    Evaluator::Distribution(_) | Evaluator::Statistical(_)
+                ),
+                "{name}"
+            );
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
+
+        for name in ["COVARIANCE.S", "F.TEST", "FTEST"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Statistical(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(3), "{name}");
+        }
+
+        // T.TEST takes its tails and type selectors after the two arrays.
+        for name in ["T.TEST", "TTEST"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Statistical(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(4), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(5), "{name}");
+        }
+
+        for name in ["Z.TEST", "ZTEST"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Statistical(_)),
+                "{name}"
+            );
+            assert!((2..=3).all(|arity| descriptor.call_contract().arity().accepts(arity)));
+            assert!(!descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(4), "{name}");
+        }
+
+        let f_dist = resolve("F.DIST").expect("F.DIST descriptor");
+        assert!(matches!(f_dist.evaluator(), Evaluator::Distribution(_)));
+        assert!(f_dist.call_contract().arity().accepts(4));
+        assert!(!f_dist.call_contract().arity().accepts(3));
+        assert!(!f_dist.call_contract().arity().accepts(5));
+
+        for name in ["F.DIST.RT", "FDIST", "F.INV", "FINV"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(4), "{name}");
+        }
+
+        for name in ["T.DIST", "TDIST"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(4), "{name}");
+        }
+
+        for name in ["T.DIST.RT", "T.DIST.2T", "T.INV", "T.INV.2T", "TINV"] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(3), "{name}");
+        }
     }
 
     #[test]
