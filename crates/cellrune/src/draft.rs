@@ -23,13 +23,64 @@ pub(crate) enum DraftCellMutation {
     Remove,
 }
 
+const DRAFT_MUTATION_ROW_CHUNK_SIZE: u32 = 256;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DraftCellMutationStore {
+    chunks: BTreeMap<(SheetId, u32), Arc<BTreeMap<CalculationCellId, DraftCellMutation>>>,
+    len: usize,
+}
+
+impl DraftCellMutationStore {
+    fn chunk(id: CalculationCellId) -> (SheetId, u32) {
+        (
+            id.sheet_id(),
+            (id.address().row().get() - 1) / DRAFT_MUTATION_ROW_CHUNK_SIZE,
+        )
+    }
+
+    pub(crate) fn get(&self, id: &CalculationCellId) -> Option<&DraftCellMutation> {
+        self.chunks
+            .get(&Self::chunk(*id))
+            .and_then(|chunk| chunk.get(id))
+    }
+
+    pub(crate) fn insert(
+        &mut self,
+        id: CalculationCellId,
+        mutation: DraftCellMutation,
+    ) -> Option<DraftCellMutation> {
+        let chunk = self
+            .chunks
+            .entry(Self::chunk(id))
+            .or_insert_with(|| Arc::new(BTreeMap::new()));
+        let previous = Arc::make_mut(chunk).insert(id, mutation);
+        if previous.is_none() {
+            self.len += 1;
+        }
+        previous
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&CalculationCellId, &DraftCellMutation)> {
+        self.chunks.values().flat_map(|chunk| chunk.iter())
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &CalculationCellId> {
+        self.iter().map(|(id, _)| id)
+    }
+
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
 /// An owned, mutable workbook editing session with monotonic semantic revisions.
 #[derive(Debug, Clone)]
 pub struct WorkbookDraft {
-    workbook: WorkbookSnapshot,
+    workbook: Arc<WorkbookSnapshot>,
     presentation: DocumentPresentation,
     source_document: Option<Arc<XlsxDocument>>,
-    cell_mutations: BTreeMap<CalculationCellId, DraftCellMutation>,
+    cell_mutations: DraftCellMutationStore,
     presentation_cell_mutations: BTreeSet<CalculationCellId>,
     presentation_sheet_mutations: BTreeSet<SheetId>,
     added_sheets: BTreeSet<SheetId>,
@@ -41,10 +92,10 @@ impl WorkbookDraft {
     /// Creates a new XLSX workbook containing one visible sheet named `Sheet1`.
     pub fn new() -> Self {
         Self {
-            workbook: WorkbookSnapshot::new_draft(),
+            workbook: Arc::new(WorkbookSnapshot::new_draft()),
             presentation: DocumentPresentation::default(),
             source_document: None,
-            cell_mutations: BTreeMap::new(),
+            cell_mutations: DraftCellMutationStore::default(),
             presentation_cell_mutations: BTreeSet::new(),
             presentation_sheet_mutations: BTreeSet::new(),
             added_sheets: BTreeSet::new(),
@@ -56,10 +107,10 @@ impl WorkbookDraft {
     /// Creates an owned editing session from a package-backed document.
     pub fn from_document(document: &XlsxDocument) -> Self {
         Self {
-            workbook: document.workbook().clone(),
+            workbook: Arc::new(document.workbook().clone()),
             presentation: document.presentation().clone(),
             source_document: Some(Arc::new(document.clone())),
-            cell_mutations: BTreeMap::new(),
+            cell_mutations: DraftCellMutationStore::default(),
             presentation_cell_mutations: BTreeSet::new(),
             presentation_sheet_mutations: BTreeSet::new(),
             added_sheets: BTreeSet::new(),
@@ -69,8 +120,12 @@ impl WorkbookDraft {
     }
 
     /// Returns the current immutable semantic snapshot.
-    pub const fn workbook(&self) -> &WorkbookSnapshot {
-        &self.workbook
+    pub fn workbook(&self) -> &WorkbookSnapshot {
+        self.workbook.as_ref()
+    }
+
+    pub(crate) fn shared_workbook(&self) -> Arc<WorkbookSnapshot> {
+        Arc::clone(&self.workbook)
     }
 
     /// Returns immutable presentation metadata for the current draft.
@@ -79,7 +134,7 @@ impl WorkbookDraft {
     }
 
     /// Returns the monotonic semantic revision.
-    pub const fn semantic_revision(&self) -> u64 {
+    pub fn semantic_revision(&self) -> u64 {
         self.workbook.semantic_revision()
     }
 
@@ -99,7 +154,7 @@ impl WorkbookDraft {
     }
 
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        let workbook = self.workbook.clone_cancellable(cancelled)?;
+        let workbook = Arc::clone(&self.workbook);
         let presentation = self.presentation.clone_cancellable(cancelled)?;
         if cancelled() {
             return Err(());
@@ -109,7 +164,7 @@ impl WorkbookDraft {
             workbook,
             presentation,
             source_document,
-            cell_mutations: clone_map_cancellable(&self.cell_mutations, cancelled)?,
+            cell_mutations: self.cell_mutations.clone(),
             presentation_cell_mutations: clone_set_cancellable(
                 &self.presentation_cell_mutations,
                 cancelled,
@@ -127,10 +182,10 @@ impl WorkbookDraft {
     #[cfg(test)]
     pub(crate) fn from_snapshot_for_test(workbook: WorkbookSnapshot) -> Self {
         Self {
-            workbook,
+            workbook: Arc::new(workbook),
             presentation: DocumentPresentation::default(),
             source_document: None,
-            cell_mutations: BTreeMap::new(),
+            cell_mutations: DraftCellMutationStore::default(),
             presentation_cell_mutations: BTreeSet::new(),
             presentation_sheet_mutations: BTreeSet::new(),
             added_sheets: BTreeSet::new(),
@@ -162,24 +217,6 @@ fn next_revision(revision: u64) -> Result<u64, ValidationError> {
 
 fn case_insensitive_key(value: &str) -> String {
     value.chars().flat_map(char::to_lowercase).collect()
-}
-
-fn clone_map_cancellable<K, V>(
-    source: &BTreeMap<K, V>,
-    cancelled: &impl Fn() -> bool,
-) -> Result<BTreeMap<K, V>, ()>
-where
-    K: Clone + Ord,
-    V: Clone,
-{
-    let mut cloned = BTreeMap::new();
-    for (key, value) in source {
-        if cancelled() {
-            return Err(());
-        }
-        cloned.insert(key.clone(), value.clone());
-    }
-    Ok(cloned)
 }
 
 fn clone_set_cancellable<T>(

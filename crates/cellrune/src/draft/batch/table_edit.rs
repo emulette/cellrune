@@ -20,7 +20,7 @@ use crate::{
 pub(super) type TableLocations = BTreeMap<TableId, (usize, usize)>;
 
 pub(super) struct TableEditState<'a> {
-    pub(super) mutations: &'a mut BTreeMap<CalculationCellId, super::super::DraftCellMutation>,
+    pub(super) mutations: &'a mut super::super::DraftCellMutationStore,
     pub(super) changed_cells: &'a mut BTreeSet<CalculationCellId>,
     pub(super) calculation_changed_cells: &'a mut BTreeSet<CalculationCellId>,
     pub(super) touched_sheets: &'a mut BTreeSet<SheetId>,

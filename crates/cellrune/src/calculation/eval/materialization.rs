@@ -1,11 +1,11 @@
+use super::Engine;
 use super::reference::cell_at;
-use super::{Engine, public_to_internal, value_from_calculation_result};
 use crate::CellContent;
+use crate::calculation::MaterializedResultOrigin;
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::runtime::{CellId, Rect};
 use crate::calculation::scope::ArrayEvaluation;
 use crate::calculation::value::{ErrorKind, Value};
-use crate::calculation::{CalculationSnapshot, MaterializedResultOrigin};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ArrayRegion {
@@ -15,74 +15,6 @@ pub(super) struct ArrayRegion {
 }
 
 impl Engine<'_> {
-    pub(super) fn seed_previous_results(
-        &mut self,
-        previous: &CalculationSnapshot,
-        dirty: Option<&BTreeSet<CellId>>,
-        cancelled: &impl Fn() -> bool,
-    ) -> Result<(), ()> {
-        for (public_id, result) in previous.cells() {
-            if cancelled() {
-                return Err(());
-            }
-            let Some(internal_id) = public_to_internal(self.workbook, public_id) else {
-                continue;
-            };
-            if dirty.is_some_and(|cells| cells.contains(&internal_id)) {
-                continue;
-            }
-            self.retained_results.insert(internal_id, result.clone());
-        }
-        for (public_id, materialized) in previous.materialized_cells() {
-            if cancelled() {
-                return Err(());
-            }
-            let Some(internal_id) = public_to_internal(self.workbook, public_id) else {
-                continue;
-            };
-            let owner = match materialized.origin() {
-                MaterializedResultOrigin::DirectFormula => internal_id,
-                MaterializedResultOrigin::LegacyArray { anchor, .. }
-                | MaterializedResultOrigin::DynamicSpill { anchor, .. } => {
-                    let Some(owner) = public_to_internal(self.workbook, anchor) else {
-                        continue;
-                    };
-                    owner
-                }
-            };
-            if dirty.is_some_and(|cells| cells.contains(&owner)) {
-                continue;
-            }
-            self.results.insert(
-                internal_id,
-                value_from_calculation_result(materialized.result()),
-            );
-            if let Some(trace) = previous.numeric_decimal_trace(public_id) {
-                self.numeric_decimal_traces.insert(internal_id, trace);
-            }
-            if let MaterializedResultOrigin::DynamicSpill { anchor, range } = materialized.origin()
-                && public_id == anchor
-                && let Some(internal_anchor) = public_to_internal(self.workbook, anchor)
-            {
-                let rect = Rect {
-                    sheet: internal_anchor.0,
-                    row_start: range.start().row().get(),
-                    col_start: range.start().column().get(),
-                    row_end: range.end().row().get(),
-                    col_end: range.end().column().get(),
-                    whole_rows: false,
-                };
-                self.dynamic_spills.insert(internal_anchor, rect);
-                self.array_regions.push(ArrayRegion {
-                    anchor: internal_anchor,
-                    rect,
-                    provisional: true,
-                });
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn legacy_array_range(&self, cell: CellId) -> Option<Rect> {
         let sheet = self.workbook.sheets().get(cell.0)?;
         let source = cell_at(sheet, cell.1, cell.2)?;
@@ -266,6 +198,9 @@ impl Engine<'_> {
                 if self.results.contains_key(&target) {
                     return Ok(true);
                 }
+                if self.previous_materialized(target).is_some() {
+                    return Ok(true);
+                }
                 let occupied = self
                     .workbook
                     .sheets()
@@ -298,7 +233,28 @@ impl Engine<'_> {
     }
 
     pub(in crate::calculation) fn dynamic_spill(&self, anchor: CellId) -> Option<Rect> {
-        self.dynamic_spills.get(&anchor).copied()
+        self.dynamic_spills.get(&anchor).copied().or_else(|| {
+            let public = super::internal_to_public(self.workbook, anchor)?;
+            let materialized = self.previous_materialized(anchor)?;
+            let MaterializedResultOrigin::DynamicSpill {
+                anchor: spill_anchor,
+                range,
+            } = materialized.origin()
+            else {
+                return None;
+            };
+            if spill_anchor != public {
+                return None;
+            }
+            Some(Rect {
+                sheet: anchor.0,
+                row_start: range.start().row().get(),
+                col_start: range.start().column().get(),
+                row_end: range.end().row().get(),
+                col_end: range.end().column().get(),
+                whole_rows: false,
+            })
+        })
     }
 
     pub(super) fn array_owner(&self, cell: CellId) -> Option<CellId> {
@@ -320,5 +276,3 @@ fn rects_intersect(left: &Rect, right: &Rect) -> bool {
         && left.col_start <= right.col_end
         && right.col_start <= left.col_end
 }
-
-use std::collections::BTreeSet;

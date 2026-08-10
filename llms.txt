@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.13, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.14, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -518,21 +518,18 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.13 catalog contains 367 official
+  `.is_official()`. The 0.1.14 catalog contains 386 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 368 accepted entries.
-- The 20 official names added in 0.1.13 are `F.DIST`,
-  `F.DIST.RT`, `F.INV`, `F.INV.RT`, `F.TEST`, `FDIST`, `FINV`, `FTEST`,
-  `T.DIST`, `T.DIST.2T`, `T.DIST.RT`, `T.INV`, `T.INV.2T`, `T.TEST`, `TDIST`,
-  `TINV`, `TTEST`, `Z.TEST`, `ZTEST`, and `COVARIANCE.S`. None of them returns
-  an array.
-- F and t probabilities share direct incomplete-beta lower and upper tails;
-  representable subnormal tails do not pass through `1 - CDF`. A uniform
-  large-shape expansion covers central probabilities, while a double-double
-  continued fraction protects cancellation outside that region. Sample
-  covariance uses stable online paired moments, while hypothesis tests scale
-  variance ratios and standard-error combinations to avoid intermediate
-  overflow on extreme finite inputs.
+  dummy-function marker, for 387 accepted entries.
+- The 19 official names added in 0.1.14 are `CONVERT`, `BESSELI`, `BESSELJ`,
+  `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`,
+  `IMCONJUGATE`, `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`,
+  `IMEXP`, `IMLN`, and `IMSQRT`. None returns an array.
+- `CONVERT` uses a case-sensitive typed unit registry with explicit decimal and
+  binary prefix policies. Complex functions share one finite internal value,
+  parser, suffix policy, canonical text formatter, and scaled arithmetic.
+  Bessel J/Y and I/K use separate first-party numerical families; their
+  iterative work consumes the calculation budget and observes cancellation.
 - All four families share one first-party special-function foundation: a
   Lanczos `ln_gamma`, regularized incomplete gamma and beta kernels, and a
   safeguarded inverse solver. A family's cumulative and quantile forms are

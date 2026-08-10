@@ -1,10 +1,11 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use super::ast::Expr;
 use super::convert::value_from_cell;
 use super::decimal::DecimalTrace;
-use super::graph::DependencyGraph;
+use super::graph::{DependencyGraph, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
 use super::runtime::{CellId, Rect};
@@ -13,7 +14,7 @@ use super::syntax::ParsedFormula;
 use super::value::{ErrorKind, Value};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
-    CalculationOptions,
+    CalculationOptions, CalculationSnapshot,
 };
 use crate::{
     CellContent, CellValue, DefinedNameScope, FiniteNumber, FormulaMetadata, WorkbookSnapshot,
@@ -31,49 +32,6 @@ use dependency::{TableTopologyRevision, table_dependency_by_id_cancellable};
 use materialization::ArrayRegion;
 use reference::{ColumnExtents, cell_at};
 
-pub(super) fn clone_map_cancellable<K, V>(
-    source: &BTreeMap<K, V>,
-    cancelled: &impl Fn() -> bool,
-) -> Result<BTreeMap<K, V>, ()>
-where
-    K: Clone + Ord,
-    V: Clone,
-{
-    let mut cloned = BTreeMap::new();
-    for (key, value) in source {
-        if cancelled() {
-            return Err(());
-        }
-        cloned.insert(key.clone(), value.clone());
-    }
-    Ok(cloned)
-}
-
-pub(super) fn clone_vec_map_cancellable<K, V>(
-    source: &BTreeMap<K, Vec<V>>,
-    cancelled: &impl Fn() -> bool,
-) -> Result<BTreeMap<K, Vec<V>>, ()>
-where
-    K: Clone + Ord,
-    V: Clone,
-{
-    let mut cloned = BTreeMap::new();
-    for (key, values) in source {
-        if cancelled() {
-            return Err(());
-        }
-        let mut cloned_values = Vec::with_capacity(values.len());
-        for value in values {
-            if cancelled() {
-                return Err(());
-            }
-            cloned_values.push(value.clone());
-        }
-        cloned.insert(key.clone(), cloned_values);
-    }
-    Ok(cloned)
-}
-
 pub(super) fn clone_set_cancellable<T>(
     source: &BTreeSet<T>,
     cancelled: &impl Fn() -> bool,
@@ -87,23 +45,6 @@ where
             return Err(());
         }
         cloned.insert(value.clone());
-    }
-    Ok(cloned)
-}
-
-pub(super) fn clone_vec_cancellable<T>(
-    source: &[T],
-    cancelled: &impl Fn() -> bool,
-) -> Result<Vec<T>, ()>
-where
-    T: Clone,
-{
-    let mut cloned = Vec::with_capacity(source.len());
-    for value in source {
-        if cancelled() {
-            return Err(());
-        }
-        cloned.push(value.clone());
     }
     Ok(cloned)
 }
@@ -159,50 +100,48 @@ fn collect_workbook_layout(
     Ok((array_regions, column_extents))
 }
 
+fn collect_column_extents(
+    workbook: &WorkbookSnapshot,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<ColumnExtents>, ()> {
+    let mut extents = Vec::with_capacity(workbook.sheets().len());
+    for sheet in workbook.sheets() {
+        if cancelled() {
+            return Err(());
+        }
+        let mut sheet_extents = ColumnExtents::default();
+        for (column, row) in sheet.column_max_rows() {
+            if cancelled() {
+                return Err(());
+            }
+            sheet_extents.record(*column, *row);
+        }
+        extents.push(sheet_extents);
+    }
+    Ok(extents)
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct CompiledWorkbook {
-    asts: BTreeMap<CellId, ParsedFormula>,
-    defined_name_asts: Vec<Option<ParsedFormula>>,
-    dependencies: DependencyGraph,
-    dependency_targets: BTreeMap<CellId, Vec<DependencyTarget>>,
+    asts: Arc<BTreeMap<CellId, Arc<ParsedFormula>>>,
+    defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
+    dependencies: Arc<DependencyGraph>,
+    static_array_regions: Arc<Vec<ArrayRegion>>,
     table_topologies: BTreeMap<crate::TableId, TableTopologyRevision>,
-    parse_failures: BTreeMap<CellId, ParseError>,
-    name_cycle_cells: BTreeSet<CellId>,
-    name_limit_cells: BTreeSet<CellId>,
+    parse_failures: Arc<BTreeMap<CellId, ParseError>>,
+    name_cycle_cells: Arc<BTreeSet<CellId>>,
+    name_limit_cells: Arc<BTreeSet<CellId>>,
     dependency_limit_exceeded: bool,
-    cycle_cells: BTreeSet<CellId>,
-    blocked_cells: BTreeSet<CellId>,
+    cycle_cells: Arc<BTreeSet<CellId>>,
+    blocked_cells: Arc<BTreeSet<CellId>>,
+    impact_index: DependencyImpactIndex,
+    schedule: Schedule,
+    topological_rank: BTreeMap<CellId, usize>,
     limits: CalculationLimits,
     incremental_safe: bool,
 }
 
 impl CompiledWorkbook {
-    pub(super) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        Ok(Self {
-            asts: clone_map_cancellable(&self.asts, cancelled)?,
-            defined_name_asts: clone_vec_cancellable(&self.defined_name_asts, cancelled)?,
-            dependencies: clone_vec_map_cancellable(&self.dependencies, cancelled)?,
-            dependency_targets: clone_vec_map_cancellable(&self.dependency_targets, cancelled)?,
-            table_topologies: clone_map_cancellable(&self.table_topologies, cancelled)?,
-            parse_failures: clone_map_cancellable(&self.parse_failures, cancelled)?,
-            name_cycle_cells: clone_set_cancellable(&self.name_cycle_cells, cancelled)?,
-            name_limit_cells: clone_set_cancellable(&self.name_limit_cells, cancelled)?,
-            dependency_limit_exceeded: self.dependency_limit_exceeded,
-            cycle_cells: clone_set_cancellable(&self.cycle_cells, cancelled)?,
-            blocked_cells: clone_set_cancellable(&self.blocked_cells, cancelled)?,
-            limits: self.limits,
-            incremental_safe: self.incremental_safe,
-        })
-    }
-
-    pub(super) fn dependencies(&self) -> &DependencyGraph {
-        &self.dependencies
-    }
-
-    pub(super) fn dependency_targets(&self) -> &BTreeMap<CellId, Vec<DependencyTarget>> {
-        &self.dependency_targets
-    }
-
     pub(super) fn table_topology_matches(
         &self,
         workbook: &WorkbookSnapshot,
@@ -231,6 +170,320 @@ impl CompiledWorkbook {
 
     pub(super) fn formula_count(&self) -> usize {
         self.asts.len() + self.parse_failures.len()
+    }
+
+    pub(super) fn formula_cells(&self) -> impl Iterator<Item = CellId> + '_ {
+        self.asts.keys().chain(self.parse_failures.keys()).copied()
+    }
+
+    pub(super) fn direct_affected_formulas(&self, changed: CellId) -> impl Iterator<Item = CellId> {
+        self.impact_index.formulas_for_cell(changed).into_iter()
+    }
+
+    pub(super) fn dependents(&self, cell: CellId) -> &[CellId] {
+        self.impact_index
+            .reverse_dependents
+            .get(&cell)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    pub(super) fn schedule(&self) -> &Schedule {
+        &self.schedule
+    }
+
+    pub(super) fn topological_rank(&self, cell: CellId) -> Option<usize> {
+        self.topological_rank.get(&cell).copied()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct IndexedAreaDependency {
+    rect: Rect,
+    formula: CellId,
+}
+
+const AREA_COLUMN_LEAF_COUNT: usize = super::EXCEL_MAX_COLUMNS as usize;
+
+#[derive(Debug, Clone, Default)]
+struct AreaSpatialIndex {
+    rows_by_column_node: BTreeMap<usize, AreaRowIntervalIndex>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AreaRowIntervalIndex {
+    root: Option<Box<AreaRowIntervalNode>>,
+}
+
+#[derive(Debug, Clone)]
+struct AreaRowIntervalNode {
+    center: u32,
+    crossing_by_start: Vec<IndexedAreaDependency>,
+    crossing_by_end: Vec<IndexedAreaDependency>,
+    left: Option<Box<Self>>,
+    right: Option<Box<Self>>,
+}
+
+impl AreaSpatialIndex {
+    fn build(areas: Vec<IndexedAreaDependency>, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut areas_by_column_node = BTreeMap::<usize, Vec<IndexedAreaDependency>>::new();
+        for area in areas {
+            if cancelled() {
+                return Err(());
+            }
+            let mut left = AREA_COLUMN_LEAF_COUNT + area.rect.col_start as usize - 1;
+            let mut right = AREA_COLUMN_LEAF_COUNT + area.rect.col_end as usize - 1;
+            while left <= right {
+                if cancelled() {
+                    return Err(());
+                }
+                if !left.is_multiple_of(2) {
+                    areas_by_column_node
+                        .entry(left)
+                        .or_default()
+                        .push(area.clone());
+                    left += 1;
+                }
+                if right.is_multiple_of(2) {
+                    areas_by_column_node
+                        .entry(right)
+                        .or_default()
+                        .push(area.clone());
+                    right -= 1;
+                }
+                left /= 2;
+                right /= 2;
+            }
+        }
+        let mut rows_by_column_node = BTreeMap::new();
+        for (node, node_areas) in areas_by_column_node {
+            if cancelled() {
+                return Err(());
+            }
+            rows_by_column_node.insert(node, AreaRowIntervalIndex::build(node_areas, cancelled)?);
+        }
+        Ok(Self {
+            rows_by_column_node,
+        })
+    }
+
+    fn formulas_for_cell(&self, row: u32, column: u32, output: &mut Vec<CellId>) {
+        if column == 0 || column as usize > AREA_COLUMN_LEAF_COUNT {
+            return;
+        }
+        let mut node = AREA_COLUMN_LEAF_COUNT + column as usize - 1;
+        while node > 0 {
+            if let Some(rows) = self.rows_by_column_node.get(&node) {
+                rows.formulas_for_row(row, output);
+            }
+            node /= 2;
+        }
+    }
+}
+
+impl AreaRowIntervalIndex {
+    fn build(areas: Vec<IndexedAreaDependency>, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        Ok(Self {
+            root: AreaRowIntervalNode::build(areas, cancelled)?,
+        })
+    }
+
+    fn formulas_for_row(&self, row: u32, output: &mut Vec<CellId>) {
+        if let Some(root) = &self.root {
+            root.formulas_for_row(row, output);
+        }
+    }
+}
+
+impl AreaRowIntervalNode {
+    fn build(
+        areas: Vec<IndexedAreaDependency>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Option<Box<Self>>, ()> {
+        if areas.is_empty() {
+            return Ok(None);
+        }
+        if cancelled() {
+            return Err(());
+        }
+        let mut midpoints = areas
+            .iter()
+            .map(|area| area.rect.row_start + (area.rect.row_end - area.rect.row_start) / 2)
+            .collect::<Vec<_>>();
+        midpoints.sort_unstable();
+        let center = midpoints[midpoints.len() / 2];
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        let mut crossing = Vec::new();
+        for area in areas {
+            if cancelled() {
+                return Err(());
+            }
+            if area.rect.row_end < center {
+                left.push(area);
+            } else if area.rect.row_start > center {
+                right.push(area);
+            } else {
+                crossing.push(area);
+            }
+        }
+        crossing.sort_by_key(|area| (area.rect.row_start, area.formula));
+        let mut crossing_by_end = crossing.clone();
+        crossing_by_end.sort_by_key(|area| (std::cmp::Reverse(area.rect.row_end), area.formula));
+        Ok(Some(Box::new(Self {
+            center,
+            crossing_by_start: crossing,
+            crossing_by_end,
+            left: Self::build(left, cancelled)?,
+            right: Self::build(right, cancelled)?,
+        })))
+    }
+
+    fn formulas_for_row(&self, row: u32, output: &mut Vec<CellId>) {
+        match row.cmp(&self.center) {
+            std::cmp::Ordering::Less => {
+                for area in self
+                    .crossing_by_start
+                    .iter()
+                    .take_while(|area| area.rect.row_start <= row)
+                {
+                    #[cfg(test)]
+                    super::work_counter::area_dependency_visit();
+                    output.push(area.formula);
+                }
+                if let Some(left) = &self.left {
+                    left.formulas_for_row(row, output);
+                }
+            }
+            std::cmp::Ordering::Greater => {
+                for area in self
+                    .crossing_by_end
+                    .iter()
+                    .take_while(|area| area.rect.row_end >= row)
+                {
+                    #[cfg(test)]
+                    super::work_counter::area_dependency_visit();
+                    output.push(area.formula);
+                }
+                if let Some(right) = &self.right {
+                    right.formulas_for_row(row, output);
+                }
+            }
+            std::cmp::Ordering::Equal => {
+                for area in &self.crossing_by_start {
+                    #[cfg(test)]
+                    super::work_counter::area_dependency_visit();
+                    output.push(area.formula);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct DependencyImpactIndex {
+    exact: BTreeMap<CellId, Vec<CellId>>,
+    areas_by_sheet: BTreeMap<usize, AreaSpatialIndex>,
+    reverse_dependents: BTreeMap<CellId, Vec<CellId>>,
+}
+
+impl DependencyImpactIndex {
+    fn build(
+        targets: &BTreeMap<CellId, Vec<DependencyTarget>>,
+        dependencies: &DependencyGraph,
+        array_regions: &[ArrayRegion],
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
+        let mut index = Self::default();
+        let mut area_lists = BTreeMap::<usize, Vec<IndexedAreaDependency>>::new();
+        for (formula, formula_targets) in targets {
+            if cancelled() {
+                return Err(());
+            }
+            for target in formula_targets {
+                #[cfg(test)]
+                super::work_counter::dependency_target_scan();
+                if cancelled() {
+                    return Err(());
+                }
+                match target {
+                    DependencyTarget::Cell(cell)
+                    | DependencyTarget::SpillAnchor(cell)
+                    | DependencyTarget::FormulaContent(cell) => {
+                        index.exact.entry(*cell).or_default().push(*formula);
+                    }
+                    DependencyTarget::Area(span) => {
+                        for rect in span.rects() {
+                            area_lists
+                                .entry(rect.sheet)
+                                .or_default()
+                                .push(IndexedAreaDependency {
+                                    rect,
+                                    formula: *formula,
+                                });
+                        }
+                    }
+                    DependencyTarget::TableIdentity(_) => {}
+                }
+            }
+        }
+        for region in array_regions {
+            if cancelled() {
+                return Err(());
+            }
+            area_lists
+                .entry(region.rect.sheet)
+                .or_default()
+                .push(IndexedAreaDependency {
+                    rect: region.rect,
+                    formula: region.anchor,
+                });
+        }
+        for (formula, formula_dependencies) in dependencies {
+            if cancelled() {
+                return Err(());
+            }
+            for dependency in formula_dependencies {
+                index
+                    .reverse_dependents
+                    .entry(*dependency)
+                    .or_default()
+                    .push(*formula);
+            }
+        }
+        for formulas in index.exact.values_mut() {
+            formulas.sort_unstable();
+            formulas.dedup();
+        }
+        for (sheet, mut areas) in area_lists {
+            areas.sort_by_key(|area| {
+                (
+                    area.rect.row_start,
+                    area.rect.row_end,
+                    area.rect.col_start,
+                    area.rect.col_end,
+                    area.formula,
+                )
+            });
+            areas.dedup_by(|left, right| left.rect == right.rect && left.formula == right.formula);
+            index
+                .areas_by_sheet
+                .insert(sheet, AreaSpatialIndex::build(areas, cancelled)?);
+        }
+        for formulas in index.reverse_dependents.values_mut() {
+            formulas.sort_unstable();
+            formulas.dedup();
+        }
+        Ok(index)
+    }
+
+    fn formulas_for_cell(&self, cell: CellId) -> Vec<CellId> {
+        let mut formulas = self.exact.get(&cell).cloned().unwrap_or_default();
+        if let Some(areas) = self.areas_by_sheet.get(&cell.0) {
+            areas.formulas_for_cell(cell.1, cell.2, &mut formulas);
+        }
+        formulas.sort_unstable();
+        formulas.dedup();
+        formulas
     }
 }
 
@@ -468,6 +721,7 @@ impl<'scope> EvalContext<'scope> {
 /// Which of a cell's competing sources `Engine::value_source` selected.
 enum ValueSource<'engine> {
     Calculated(&'engine Value),
+    Previous(&'engine CalculationCellResult),
     Literal(&'engine CellValue),
     Blank,
     Error(ErrorKind),
@@ -476,23 +730,25 @@ enum ValueSource<'engine> {
 #[derive(Debug)]
 pub struct Engine<'workbook> {
     workbook: &'workbook WorkbookSnapshot,
+    previous: Option<&'workbook CalculationSnapshot>,
+    dirty: Option<BTreeSet<CellId>>,
     options: CalculationOptions,
     table_topologies: BTreeMap<crate::TableId, TableTopologyRevision>,
-    asts: BTreeMap<CellId, ParsedFormula>,
-    defined_name_asts: Vec<Option<ParsedFormula>>,
-    dependencies: DependencyGraph,
+    asts: Arc<BTreeMap<CellId, Arc<ParsedFormula>>>,
+    defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
+    dependencies: Arc<DependencyGraph>,
     results: BTreeMap<CellId, Value>,
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
     column_extents: Vec<ColumnExtents>,
     dynamic_spills: BTreeMap<CellId, Rect>,
-    parse_failures: BTreeMap<CellId, ParseError>,
-    name_cycle_cells: BTreeSet<CellId>,
-    name_limit_cells: BTreeSet<CellId>,
+    parse_failures: Arc<BTreeMap<CellId, ParseError>>,
+    name_cycle_cells: Arc<BTreeSet<CellId>>,
+    name_limit_cells: Arc<BTreeSet<CellId>>,
     dependency_limit_exceeded: bool,
-    pub(super) cycle_cells: BTreeSet<CellId>,
-    pub(super) blocked_cells: BTreeSet<CellId>,
+    pub(super) cycle_cells: Arc<BTreeSet<CellId>>,
+    pub(super) blocked_cells: Arc<BTreeSet<CellId>>,
     evaluated_cell_count: usize,
 }
 
@@ -507,6 +763,9 @@ impl<'workbook> Engine<'workbook> {
     fn value_source(&self, cell: CellId) -> ValueSource<'_> {
         if let Some(value) = self.results.get(&cell) {
             return ValueSource::Calculated(value);
+        }
+        if let Some(materialized) = self.previous_materialized(cell) {
+            return ValueSource::Previous(materialized.result());
         }
         if self.cycle_cells.contains(&cell) {
             return ValueSource::Error(ErrorKind::Ref);
@@ -540,6 +799,7 @@ impl<'workbook> Engine<'workbook> {
     pub fn cell_value(&self, cell: CellId) -> Value {
         match self.value_source(cell) {
             ValueSource::Calculated(value) => value.clone(),
+            ValueSource::Previous(result) => value_from_calculation_result(result),
             ValueSource::Literal(value) => value_from_cell(value),
             ValueSource::Blank => Value::Blank,
             ValueSource::Error(kind) => Value::Error(kind),
@@ -560,6 +820,7 @@ impl<'workbook> Engine<'workbook> {
         }
         match self.value_source(cell) {
             ValueSource::Calculated(_) => self.numeric_decimal_traces.get(&cell).copied(),
+            ValueSource::Previous(_) => self.previous_numeric_decimal_trace(cell),
             ValueSource::Literal(CellValue::Number(number)) => {
                 DecimalTrace::from_number(number.get())
             }
@@ -568,7 +829,39 @@ impl<'workbook> Engine<'workbook> {
     }
 
     pub(super) fn calculated_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
-        self.numeric_decimal_traces.get(&cell).copied()
+        self.numeric_decimal_traces
+            .get(&cell)
+            .copied()
+            .or_else(|| self.previous_numeric_decimal_trace(cell))
+    }
+
+    fn previous_materialized(&self, cell: CellId) -> Option<&crate::MaterializedCalculationCell> {
+        let previous = self.previous?;
+        let public = internal_to_public(self.workbook, cell)?;
+        let materialized = previous.materialized_cell(public)?;
+        let owner = match materialized.origin() {
+            crate::MaterializedResultOrigin::DirectFormula => cell,
+            crate::MaterializedResultOrigin::LegacyArray { anchor, .. }
+            | crate::MaterializedResultOrigin::DynamicSpill { anchor, .. } => {
+                public_to_internal(self.workbook, anchor)?
+            }
+        };
+        if self
+            .dirty
+            .as_ref()
+            .is_some_and(|dirty| dirty.contains(&owner))
+        {
+            None
+        } else {
+            Some(materialized)
+        }
+    }
+
+    fn previous_numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
+        let previous = self.previous?;
+        let public = internal_to_public(self.workbook, cell)?;
+        self.previous_materialized(cell)?;
+        previous.numeric_decimal_trace(public)
     }
 
     pub(super) fn has_unavailable_dependency(
@@ -582,8 +875,8 @@ impl<'workbook> Engine<'workbook> {
                     || self.cycle_cells.contains(dependency)
                     || self.blocked_cells.contains(dependency)
                     || matches!(
-                        self.results.get(dependency),
-                        Some(Value::Error(kind)) if kind.is_engine_issue()
+                        self.cell_value(*dependency),
+                        Value::Error(kind) if kind.is_engine_issue()
                     )
             })
         })
@@ -598,7 +891,7 @@ impl<'workbook> Engine<'workbook> {
     }
 
     pub(super) fn parsed_expr(&self, cell: CellId) -> Option<&Expr> {
-        self.asts.get(&cell).map(ParsedFormula::root)
+        self.asts.get(&cell).map(|parsed| parsed.root())
     }
 
     pub(super) fn cell_has_formula(&self, cell: CellId) -> bool {
@@ -741,6 +1034,15 @@ pub(super) fn public_to_internal(
     ))
 }
 
+pub(super) fn internal_to_public(
+    workbook: &WorkbookSnapshot,
+    cell: CellId,
+) -> Option<CalculationCellId> {
+    let sheet = workbook.sheets().get(cell.0)?;
+    let address = crate::CellAddress::from_indices(cell.1, cell.2).ok()?;
+    Some(CalculationCellId::new(sheet.id(), address))
+}
+
 fn value_from_calculation_result(result: &CalculationCellResult) -> Value {
     match result {
         CalculationCellResult::Value(value) => value_from_cell(value),
@@ -794,20 +1096,6 @@ mod tests {
         };
 
         assert!(collect_workbook_layout(&workbook, &cancelled).is_err());
-        assert_eq!(polls.get(), 3);
-    }
-
-    #[test]
-    fn nested_vector_map_clone_polls_cancellation_between_values() {
-        let source = BTreeMap::from([("dependencies", vec![1_u32, 2, 3])]);
-        let polls = Cell::new(0_u32);
-        let cancelled = || {
-            let next = polls.get() + 1;
-            polls.set(next);
-            next >= 3
-        };
-
-        assert!(clone_vec_map_cancellable(&source, &cancelled).is_err());
         assert_eq!(polls.get(), 3);
     }
 

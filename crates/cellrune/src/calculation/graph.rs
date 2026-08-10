@@ -4,6 +4,7 @@ use super::runtime::CellId;
 
 pub(super) type DependencyGraph = BTreeMap<CellId, Vec<CellId>>;
 
+#[derive(Debug, Clone)]
 pub(super) struct Schedule {
     pub(super) order: Vec<CellId>,
     pub(super) cycle_cells: BTreeSet<CellId>,
@@ -20,6 +21,8 @@ pub(super) fn schedule_cancellable(
     dependencies: &DependencyGraph,
     cancelled: &impl Fn() -> bool,
 ) -> Result<Schedule, ()> {
+    #[cfg(test)]
+    super::work_counter::schedule_build();
     let mut dependents: BTreeMap<CellId, Vec<CellId>> = BTreeMap::new();
     let mut indegree = BTreeMap::new();
     for (cell, cell_dependencies) in dependencies {

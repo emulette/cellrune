@@ -14,7 +14,7 @@ dependency. You do not need to select a platform package yourself.
 ## Install
 
 ```console
-npm install @cellrune/node@0.1.13
+npm install @cellrune/node@0.1.14
 ```
 
 ## CommonJS
@@ -59,10 +59,9 @@ calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and expl
 `arithmeticSemantics` / `financialSolverSemantics` compatibility policies. The latter accept
 `"ieee_754"` and `"extended_search"` when a caller needs the calculation behavior shipped through
 0.1.2; omitted fields select the Excel-compatible defaults.
-The 0.1.13 calculation surface adds `F.DIST`, `F.DIST.RT`, `F.INV`, `F.INV.RT`, `F.TEST`, `FDIST`,
-`FINV`, `FTEST`, `T.DIST`, `T.DIST.2T`, `T.DIST.RT`, `T.INV`, `T.INV.2T`, `T.TEST`, `TDIST`,
-`TINV`, `TTEST`, `Z.TEST`, `ZTEST`, and `COVARIANCE.S`. These statistical functions return scalars
-and expose the same catalog and calculation contract as Rust and Python.
+The 0.1.14 calculation surface adds `CONVERT`, the four `BESSEL*` functions, and fourteen
+`COMPLEX`/`IM*` functions. They return scalar numbers or Excel-compatible complex text and expose
+the same catalog and calculation contract as Rust and Python.
 `inspectDefinedName` returns typed static, dynamic, empty, external, invalid, and unsupported
 defined-name results. `applyChangesV2` retains every v1 edit shape and adds stable-ID table rename,
 table-column rename, and table-row resize operations with `changedTableIds` in its receipt.

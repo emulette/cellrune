@@ -162,6 +162,10 @@ function_enum!(SumOfSquaresFunction {
 });
 
 function_enum!(EngineeringFunction {
+    BesselI,
+    BesselJ,
+    BesselK,
+    BesselY,
     Bin2Dec,
     Bin2Hex,
     Bin2Oct,
@@ -185,6 +189,21 @@ function_enum!(EngineeringFunction {
     Oct2Bin,
     Oct2Dec,
     Oct2Hex,
+    Convert,
+    Complex,
+    ImAbs,
+    ImArgument,
+    ImConjugate,
+    ImDiv,
+    ImExp,
+    ImImaginary,
+    ImLn,
+    ImPower,
+    ImProduct,
+    ImReal,
+    ImSqrt,
+    ImSub,
+    ImSum,
 });
 
 function_enum!(LookupFunction {

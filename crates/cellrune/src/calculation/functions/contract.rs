@@ -437,6 +437,11 @@ const ERF_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::Absent,
     ArgumentDefaultValue::NoUpperBound,
 )];
+const COMPLEX_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    2,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Omitted,
+)];
 const TABLE_LOOKUP_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     3,
     DefaultTrigger::AbsentOrMissing,
@@ -1120,6 +1125,13 @@ impl SumOfSquaresFunction {
 impl EngineeringFunction {
     const fn call_contract(self) -> CallContract {
         match self {
+            Self::BesselI | Self::BesselJ | Self::BesselK | Self::BesselY => {
+                CallContract::uniform(Arity::exact(2), SCALAR)
+            }
+            Self::Complex => {
+                CallContract::positional(Arity::range(2, 3), &[SCALAR, SCALAR, SCALAR])
+                    .with_defaults(COMPLEX_DEFAULTS)
+            }
             Self::BitAnd | Self::BitLShift | Self::BitOr | Self::BitRShift | Self::BitXor => {
                 CallContract::uniform(Arity::exact(2), SCALAR)
             }
@@ -1128,7 +1140,21 @@ impl EngineeringFunction {
             | Self::Oct2Dec
             | Self::ErfPrecise
             | Self::Erfc
-            | Self::ErfcPrecise => CallContract::uniform(Arity::exact(1), SCALAR),
+            | Self::ErfcPrecise
+            | Self::ImAbs
+            | Self::ImArgument
+            | Self::ImConjugate
+            | Self::ImExp
+            | Self::ImImaginary
+            | Self::ImLn
+            | Self::ImReal
+            | Self::ImSqrt => CallContract::uniform(Arity::exact(1), SCALAR),
+            Self::ImDiv | Self::ImPower | Self::ImSub => {
+                CallContract::uniform(Arity::exact(2), SCALAR)
+            }
+            Self::ImProduct | Self::ImSum => {
+                CallContract::uniform(Arity::range(1, MAX_EXCEL_ARGUMENTS), ARRAY)
+            }
             Self::Bin2Hex
             | Self::Bin2Oct
             | Self::Dec2Bin
@@ -1145,6 +1171,7 @@ impl EngineeringFunction {
             }
             Self::Erf => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                 .with_defaults(ERF_DEFAULTS),
+            Self::Convert => CallContract::uniform(Arity::exact(3), SCALAR),
         }
     }
 }

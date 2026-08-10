@@ -588,8 +588,192 @@ pub(super) fn calculate_from_compiled(
     let engine =
         Engine::evaluate_compiled(workbook, options, compiled, previous, dirty, &cancelled)?;
     let evaluated = engine.evaluated_cell_count();
-    let snapshot = snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?;
+    let snapshot = match (previous, dirty) {
+        (Some(previous), Some(dirty)) => snapshot_from_incremental_engine_cancellable(
+            workbook, options, &engine, previous, dirty, &cancelled,
+        )?,
+        _ => snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?,
+    };
     Ok((snapshot, evaluated))
+}
+
+fn snapshot_from_incremental_engine_cancellable(
+    workbook: &WorkbookSnapshot,
+    options: CalculationOptions,
+    engine: &Engine<'_>,
+    previous: &CalculationSnapshot,
+    dirty: &BTreeSet<CalculationCellId>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<CalculationSnapshot, ()> {
+    let mut cells = BTreeMap::new();
+    for public_id in dirty {
+        if cancelled() {
+            return Err(());
+        }
+        let Some(internal_id) = public_to_internal(workbook, *public_id) else {
+            continue;
+        };
+        let result = if engine.cycle_cells.contains(&internal_id) {
+            CalculationCellResult::Unavailable(CalculationIssue::new(
+                CalculationIssueCode::CircularReference,
+                None,
+            ))
+        } else if engine.blocked_cells.contains(&internal_id) {
+            CalculationCellResult::Unavailable(CalculationIssue::new(
+                CalculationIssueCode::BlockedByUpstream,
+                None,
+            ))
+        } else {
+            match engine.cell_value(internal_id) {
+                Value::Error(ErrorKind::ResourceLimit(limit)) => {
+                    CalculationCellResult::Unavailable(resource_limit_issue(limit))
+                }
+                Value::Error(ErrorKind::Unsupported) => {
+                    let missing_volatile_input =
+                        engine.parsed_expr(internal_id).is_some_and(|expr| {
+                            (options.today_serial().is_none()
+                                && contains_volatility(
+                                    engine,
+                                    internal_id.0,
+                                    expr,
+                                    Volatility::Today,
+                                ))
+                                || (options.now_serial().is_none()
+                                    && contains_volatility(
+                                        engine,
+                                        internal_id.0,
+                                        expr,
+                                        Volatility::Now,
+                                    ))
+                        });
+                    let code = if missing_volatile_input {
+                        CalculationIssueCode::VolatileInputMissing
+                    } else if engine.has_unavailable_dependency(internal_id, &BTreeSet::new()) {
+                        CalculationIssueCode::BlockedByUpstream
+                    } else {
+                        CalculationIssueCode::UnsupportedExpression
+                    };
+                    CalculationCellResult::Unavailable(CalculationIssue::new(code, None))
+                }
+                value => CalculationCellResult::Value(cell_from_value(value)),
+            }
+        };
+        cells.insert(*public_id, result);
+    }
+    let materialized =
+        build_incremental_materialization_cancellable(workbook, engine, &cells, cancelled)?;
+    let mut traces = BTreeMap::new();
+    for public_id in materialized.keys() {
+        if cancelled() {
+            return Err(());
+        }
+        let Some(internal_id) = public_to_internal(workbook, *public_id) else {
+            continue;
+        };
+        if let Some(trace) = engine.calculated_decimal_trace(internal_id) {
+            traces.insert(*public_id, trace);
+        }
+    }
+    previous.apply_incremental_patch_cancellable(
+        super::IncrementalCalculationPatch::new(
+            dirty,
+            cells,
+            materialized,
+            traces,
+            workbook,
+            options,
+        ),
+        cancelled,
+    )
+}
+
+fn build_incremental_materialization_cancellable(
+    workbook: &WorkbookSnapshot,
+    engine: &Engine<'_>,
+    cells: &BTreeMap<CalculationCellId, CalculationCellResult>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<CalculationCellId, MaterializedCalculationCell>, ()> {
+    let mut materialized = BTreeMap::new();
+    for (anchor, anchor_result) in cells {
+        if cancelled() {
+            return Err(());
+        }
+        materialized.insert(
+            *anchor,
+            MaterializedCalculationCell::new(
+                MaterializedResultOrigin::DirectFormula,
+                anchor_result.clone(),
+            ),
+        );
+        let Some(internal_anchor) = public_to_internal(workbook, *anchor) else {
+            continue;
+        };
+        let Some(sheet) = workbook.sheets().get(internal_anchor.0) else {
+            continue;
+        };
+        let Some(cell) = sheet.cell(anchor.address()) else {
+            continue;
+        };
+        let CellContent::Formula(formula) = cell.content() else {
+            continue;
+        };
+        let (range, origin) = match formula.metadata() {
+            FormulaMetadata::Array { range, .. } if range.start() == anchor.address() => (
+                *range,
+                MaterializedResultOrigin::LegacyArray {
+                    anchor: *anchor,
+                    range: *range,
+                },
+            ),
+            FormulaMetadata::DynamicArray { .. } => {
+                let Some(resolved) = engine.dynamic_spill(internal_anchor) else {
+                    continue;
+                };
+                let range = crate::CellRange::new(
+                    CellAddress::from_indices(resolved.row_start, resolved.col_start)
+                        .expect("resolved dynamic start is valid"),
+                    CellAddress::from_indices(resolved.row_end, resolved.col_end)
+                        .expect("resolved dynamic end is valid"),
+                )
+                .expect("resolved dynamic range is ordered");
+                (
+                    range,
+                    MaterializedResultOrigin::DynamicSpill {
+                        anchor: *anchor,
+                        range,
+                    },
+                )
+            }
+            FormulaMetadata::Normal
+            | FormulaMetadata::Shared { .. }
+            | FormulaMetadata::Array { .. }
+            | FormulaMetadata::DataTable { .. } => continue,
+        };
+        for row in range.start().row().get()..=range.end().row().get() {
+            for column in range.start().column().get()..=range.end().column().get() {
+                if cancelled() {
+                    return Err(());
+                }
+                let address = CellAddress::from_indices(row, column)
+                    .expect("validated array range produces valid addresses");
+                let id = CalculationCellId::new(sheet.id(), address);
+                let result = if id == *anchor {
+                    anchor_result.clone()
+                } else {
+                    match anchor_result {
+                        CalculationCellResult::Unavailable(issue) => {
+                            CalculationCellResult::Unavailable(issue.clone())
+                        }
+                        CalculationCellResult::Value(_) => CalculationCellResult::Value(
+                            cell_from_value(engine.cell_value((internal_anchor.0, row, column))),
+                        ),
+                    }
+                };
+                materialized.insert(id, MaterializedCalculationCell::new(origin, result));
+            }
+        }
+    }
+    Ok(materialized)
 }
 
 fn snapshot_from_engine(
@@ -637,6 +821,8 @@ fn snapshot_from_engine_cancellable(
             let CellContent::Formula(_) = cell.content() else {
                 continue;
             };
+            #[cfg(test)]
+            super::work_counter::formula_snapshot_scan();
             let public_id = CalculationCellId::new(sheet.id(), cell.address());
             let internal_id = (
                 sheet_index,

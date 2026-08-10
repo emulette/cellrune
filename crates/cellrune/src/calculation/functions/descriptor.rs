@@ -137,6 +137,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_11,
     V0_1_12,
     V0_1_13,
+    V0_1_14,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -580,6 +581,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(SumX2My2, "SUMX2MY2", SumOfSquares),
     function!(SumX2Py2, "SUMX2PY2", SumOfSquares),
     function!(SumXMy2, "SUMXMY2", SumOfSquares),
+    function!(BesselI, "BESSELI", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(BesselJ, "BESSELJ", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(BesselK, "BESSELK", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(BesselY, "BESSELY", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(Bin2Dec, "BIN2DEC", Engineering),
     function!(Bin2Hex, "BIN2HEX", Engineering),
     function!(Bin2Oct, "BIN2OCT", Engineering),
@@ -603,6 +608,25 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Oct2Bin, "OCT2BIN", Engineering),
     function!(Oct2Dec, "OCT2DEC", Engineering),
     function!(Oct2Hex, "OCT2HEX", Engineering),
+    function!(Convert, "CONVERT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(Complex, "COMPLEX", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImAbs, "IMABS", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImArgument, "IMARGUMENT", Engineering)
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImConjugate, "IMCONJUGATE", Engineering)
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImDiv, "IMDIV", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImExp, "IMEXP", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImImaginary, "IMAGINARY", Engineering)
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImLn, "IMLN", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImPower, "IMPOWER", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImProduct, "IMPRODUCT", Engineering)
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImReal, "IMREAL", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImSqrt, "IMSQRT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImSub, "IMSUB", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImSum, "IMSUM", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(Address, "ADDRESS", Lookup),
     function!(Choose, "CHOOSE", Lookup),
     function!(Column, "COLUMN", Lookup),
@@ -1425,6 +1449,22 @@ mod tests {
         assert_eq!(
             actual, "881849f24d58c69772f41a2507159277dae6f0d9d42589d93720428c6742de95",
             "stable v0.1.13 semantic snapshot changed:\n{snapshot}",
+        );
+    }
+
+    #[test]
+    fn v0_1_14_semantic_registry_is_byte_exact() {
+        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_14);
+        let mut digest = Sha256::new();
+        digest.update(snapshot.as_bytes());
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual, "e554fd48342e8e88b0c9200f211f626c02dc0454baec4b00c8fbaf9007ac6379",
+            "stable v0.1.14 semantic snapshot changed:\n{snapshot}",
         );
     }
 

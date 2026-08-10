@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use super::super::DraftCellMutation;
+use super::super::{DraftCellMutation, DraftCellMutationStore};
 use crate::{CalculationCellId, CellAddress, Sheet, SheetId, ValidationError};
 
 pub(super) fn sheet_by_id_mut(
@@ -16,7 +14,7 @@ pub(super) fn sheet_by_id_mut(
 }
 
 pub(super) fn mark_upsert(
-    mutations: &mut BTreeMap<CalculationCellId, DraftCellMutation>,
+    mutations: &mut DraftCellMutationStore,
     sheet_id: SheetId,
     address: CellAddress,
     number_format_changed: bool,

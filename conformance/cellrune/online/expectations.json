@@ -1734,88 +1734,116 @@
     "excel_rich_error": false
   },
   "function:besseli": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.33783462087443816",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELI) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:besseli:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.68894844919776332",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELI) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:besseli:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELI) for this oracle case."
+    "excel_rich_error": false
   },
   "function:besselj": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.23208767901744795",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELJ) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:besselj:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.3528342075141756",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELJ) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:besselj:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELJ) for this oracle case."
+    "excel_rich_error": false
   },
   "function:besselk": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.58365597416666559",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELK) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:besselk:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.25375976",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELK) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:besselk:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELK) for this oracle case."
+    "excel_rich_error": false
   },
   "function:bessely": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.93219376062623394",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELY) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:bessely:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.61740809838505117",
     "excel_type": "n",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELY) for this oracle case."
+    "comparator": {
+      "mode": "abs_rel",
+      "abs": 2e-7,
+      "rel": 5e-13
+    }
   },
   "function:bessely:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BESSELY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:beta-dist": {
     "classification": "match",
@@ -2495,25 +2523,22 @@
     "excel_rich_error": false
   },
   "function:complex": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3+4i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:complex:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2+4i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:complex:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:concat": {
     "classification": "match",
@@ -2615,25 +2640,22 @@
     "note": "CellRune reports calculation.unsupported_function (CONFIDENCE) for this oracle case."
   },
   "function:convert": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "6.2137119223733395",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CONVERT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:convert:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.2427423844746679",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CONVERT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:convert:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CONVERT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:correl": {
     "classification": "match",
@@ -4921,193 +4943,178 @@
     "excel_rich_error": false
   },
   "function:imabs": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imaginary": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imargument": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.92729521800161219",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imconjugate": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3-4i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imcos": {
     "classification": "not_implemented",
     "excel_value": "-27.0349456030742-3.85115333481178i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (IMCOS) for this oracle case."
   },
   "function:imcosh": {
     "classification": "not_implemented",
     "excel_value": "-6.58066304055116-7.58155274274654i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCOSH) for this oracle case."
   },
   "function:imcot": {
     "classification": "not_implemented",
     "excel_value": "-0.000187587737983659-1.00064439247156i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCOT) for this oracle case."
   },
   "function:imcsc": {
     "classification": "not_implemented",
     "excel_value": "0.0051744731840194+0.036275889628626i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCSC) for this oracle case."
   },
   "function:imcsch": {
     "classification": "not_implemented",
     "excel_value": "-0.0648774713706355+0.0754898329158637i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCSCH) for this oracle case."
   },
   "function:imdiv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-1+2i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imexp": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-13.1287830814622-15.200784463068i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imln": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.6094379124341+0.927295218001612i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imlog10": {
     "classification": "not_implemented",
     "excel_value": "0.698970004336019+0.402719196273373i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (IMLOG10) for this oracle case."
   },
   "function:imlog2": {
     "classification": "not_implemented",
     "excel_value": "2.32192809488736+1.33780421245098i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (IMLOG2) for this oracle case."
   },
   "function:impower": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-117+44i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:impower:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-7+24i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:impower:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:improduct": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "11-2i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imreal": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsec": {
     "classification": "not_implemented",
     "excel_value": "-0.0362534969158689+0.00516434460775318i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMSEC) for this oracle case."
   },
   "function:imsech": {
     "classification": "not_implemented",
     "excel_value": "-0.065294027857947+0.0752249603027732i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMSECH) for this oracle case."
   },
   "function:imsin": {
     "classification": "not_implemented",
     "excel_value": "3.85373803791938-27.0168132580039i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (IMSIN) for this oracle case."
   },
   "function:imsinh": {
     "classification": "not_implemented",
     "excel_value": "-6.548120040911-7.61923172032141i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMSINH) for this oracle case."
   },
   "function:imsqrt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2+i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsub": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2+6i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsum": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "4+2i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imtan": {
     "classification": "not_implemented",
     "excel_value": "-0.000187346204629478+0.999355987381473i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (COMPLEX) for this oracle case."
+    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMTAN) for this oracle case."
   },
   "function:index": {
     "classification": "match",

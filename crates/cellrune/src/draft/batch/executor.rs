@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use super::super::{
     DraftCellMutation, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
@@ -72,7 +72,7 @@ impl WorkbookDraft {
         let mut defined_names = clone_slice(self.workbook.defined_names(), rewrite_budget)?;
         let mut date_system = self.workbook.date_system();
         let mut calculation_hints = self.workbook.calculation_hints();
-        let mut cell_mutations = clone_map(&self.cell_mutations, rewrite_budget)?;
+        let mut cell_mutations = self.cell_mutations.clone();
         let mut presentation = self
             .presentation
             .clone_cancellable(&|| rewrite_budget.check_cancelled().is_err())
@@ -505,7 +505,7 @@ impl WorkbookDraft {
         })?
         .with_semantic_revision(result_revision);
 
-        self.workbook = workbook;
+        self.workbook = std::sync::Arc::new(workbook);
         self.cell_mutations = cell_mutations;
         self.presentation = presentation;
         self.presentation_cell_mutations = presentation_cell_mutations;
@@ -554,22 +554,6 @@ fn clone_slice<T: Clone>(
     for value in source {
         budget.check_cancelled()?;
         cloned.push(value.clone());
-    }
-    Ok(cloned)
-}
-
-fn clone_map<K, V>(
-    source: &BTreeMap<K, V>,
-    budget: &FormulaRewriteBudget<'_>,
-) -> Result<BTreeMap<K, V>, FormulaRewriteError>
-where
-    K: Clone + Ord,
-    V: Clone,
-{
-    let mut cloned = BTreeMap::new();
-    for (key, value) in source {
-        budget.check_cancelled()?;
-        cloned.insert(key.clone(), value.clone());
     }
     Ok(cloned)
 }

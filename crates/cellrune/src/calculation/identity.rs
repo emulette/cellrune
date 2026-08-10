@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CalculationHints, CalculationMode, CellContent, CellValue, DateSystem, DefinedNameScope,
+    CalculationHints, CalculationMode, Cell, CellContent, CellValue, DateSystem, DefinedNameScope,
     FormulaMetadata, NumberFormatKind, SharedFormulaRole, SheetVisibility, WorkbookSnapshot,
 };
 
@@ -15,9 +15,9 @@ pub(crate) fn workbook_fingerprint_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 3: 0.1.9 folds the complete persisted table metadata model.
-    // Bumping it deliberately invalidates every fingerprint persisted under schema 2.
-    hash.u8(3);
+    // Schema byte 4: cell payloads are folded through immutable row-chunk digests. The Merkle-like
+    // layout lets an edited workbook reuse every unchanged chunk while retaining exact identity.
+    hash.u8(4);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());
@@ -29,25 +29,13 @@ pub(crate) fn workbook_fingerprint_cancellable(
         hash.string(sheet.name().as_str());
         hash.sheet_visibility(sheet.visibility());
         hash.usize(sheet.len());
-        for cell in sheet.cells() {
+        let cell_chunks = sheet.semantic_cell_chunk_fingerprints_cancellable(cancelled)?;
+        hash.usize(cell_chunks.len());
+        for chunk in cell_chunks {
             if cancelled() {
                 return Err(());
             }
-            hash.u32(cell.address().row().get());
-            hash.u32(cell.address().column().get());
-            hash.number_format(cell.number_format());
-            match cell.content() {
-                CellContent::Literal(value) => {
-                    hash.u8(0);
-                    hash.cell_value(value);
-                }
-                CellContent::Formula(formula) => {
-                    hash.u8(1);
-                    hash.optional_string(formula.text().map(|text| text.as_str()));
-                    hash.formula_metadata(formula.metadata());
-                    hash.boolean(formula.recalculate_always());
-                }
-            }
+            hash.bytes(&chunk);
         }
         hash.usize(sheet.merged_ranges().len());
         for range in sheet.merged_ranges() {
@@ -125,6 +113,23 @@ pub(crate) fn workbook_fingerprint_cancellable(
     Ok(hash.finish())
 }
 
+pub(crate) fn cell_chunk_fingerprint_cancellable<'a>(
+    cells: impl Iterator<Item = &'a Cell>,
+    len: usize,
+    cancelled: &impl Fn() -> bool,
+) -> Result<[u8; 32], ()> {
+    let mut hash = SemanticHash::new();
+    hash.u8(1);
+    hash.usize(len);
+    for cell in cells {
+        if cancelled() {
+            return Err(());
+        }
+        hash.cell(cell);
+    }
+    Ok(hash.finish())
+}
+
 struct SemanticHash(Sha256);
 
 impl SemanticHash {
@@ -152,6 +157,24 @@ impl SemanticHash {
                 self.string(value);
             }
             None => self.u8(0),
+        }
+    }
+
+    fn cell(&mut self, cell: &Cell) {
+        self.u32(cell.address().row().get());
+        self.u32(cell.address().column().get());
+        self.number_format(cell.number_format());
+        match cell.content() {
+            CellContent::Literal(value) => {
+                self.u8(0);
+                self.cell_value(value);
+            }
+            CellContent::Formula(formula) => {
+                self.u8(1);
+                self.optional_string(formula.text().map(|text| text.as_str()));
+                self.formula_metadata(formula.metadata());
+                self.boolean(formula.recalculate_always());
+            }
         }
     }
 

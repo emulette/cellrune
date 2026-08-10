@@ -1,7 +1,10 @@
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::convert;
+use super::engineering_complex;
 use super::kernel::EngineeringFunction;
+use super::special_functions::bessel::{BesselFamily, worksheet_bessel};
 use super::util::{required_number, required_text};
 
 const MAX_BIT_VALUE: u64 = (1_u64 << 48) - 1;
@@ -13,6 +16,12 @@ pub(super) fn call(
     args: &[Expr],
 ) -> Value {
     match function {
+        EngineeringFunction::BesselI => worksheet_bessel(engine, context, args, BesselFamily::I),
+        EngineeringFunction::BesselJ => worksheet_bessel(engine, context, args, BesselFamily::J),
+        EngineeringFunction::BesselK => worksheet_bessel(engine, context, args, BesselFamily::K),
+        EngineeringFunction::BesselY => worksheet_bessel(engine, context, args, BesselFamily::Y),
+        EngineeringFunction::Convert => convert::call(engine, context, args),
+        EngineeringFunction::Complex => engineering_complex::construct(engine, context, args),
         EngineeringFunction::BitAnd => {
             bit_binary(engine, context, args, |left, right| left & right)
         }
@@ -81,6 +90,19 @@ pub(super) fn call(
         EngineeringFunction::Erf => erf(engine, context, args, false),
         EngineeringFunction::ErfPrecise => erf(engine, context, args, true),
         EngineeringFunction::Erfc | EngineeringFunction::ErfcPrecise => erfc(engine, context, args),
+        EngineeringFunction::ImAbs => engineering_complex::magnitude(engine, context, args),
+        EngineeringFunction::ImArgument => engineering_complex::argument(engine, context, args),
+        EngineeringFunction::ImConjugate => engineering_complex::conjugate(engine, context, args),
+        EngineeringFunction::ImDiv => engineering_complex::divide(engine, context, args),
+        EngineeringFunction::ImExp => engineering_complex::exponential(engine, context, args),
+        EngineeringFunction::ImImaginary => engineering_complex::imaginary(engine, context, args),
+        EngineeringFunction::ImLn => engineering_complex::logarithm(engine, context, args),
+        EngineeringFunction::ImPower => engineering_complex::power(engine, context, args),
+        EngineeringFunction::ImProduct => engineering_complex::product(engine, context, args),
+        EngineeringFunction::ImReal => engineering_complex::real(engine, context, args),
+        EngineeringFunction::ImSqrt => engineering_complex::square_root(engine, context, args),
+        EngineeringFunction::ImSub => engineering_complex::subtract(engine, context, args),
+        EngineeringFunction::ImSum => engineering_complex::sum(engine, context, args),
     }
 }
 

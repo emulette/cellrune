@@ -21,7 +21,9 @@ mod array_reshape;
 mod array_sort;
 mod calendar;
 mod combinatorics;
+mod complex;
 mod contract;
+mod convert;
 mod criteria_runtime;
 mod database;
 mod database_criteria;
@@ -31,6 +33,7 @@ pub(super) mod descriptor;
 mod distribution;
 mod dynamic;
 mod engineering;
+mod engineering_complex;
 mod financial;
 mod financial_additional;
 mod grouped;
@@ -761,7 +764,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    function_catalog_for_version(CompatibilityVersion::V0_1_13)
+    function_catalog_for_version(CompatibilityVersion::V0_1_14)
 }
 
 fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::FunctionCatalogEntry> {
@@ -951,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_names_are_unique_and_current_catalog_is_v0_1_13() {
+    fn registry_names_are_unique_and_current_catalog_is_v0_1_14() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
@@ -979,10 +982,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 368);
+        assert_eq!(catalog.len(), 387);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            367
+            386
         );
         assert!(
             catalog
@@ -1007,6 +1010,29 @@ mod tests {
             "ARABIC", "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX", "DMIN", "DPRODUCT",
             "DSTDEV", "DSTDEVP", "DSUM", "DVAR", "DVARP", "GROWTH", "LINEST", "LOGEST", "MINVERSE",
             "MUNIT", "ROMAN", "TREND",
+        ] {
+            assert!(catalog.iter().any(|entry| entry.name() == name), "{name}");
+        }
+        for name in [
+            "BESSELI",
+            "BESSELJ",
+            "BESSELK",
+            "BESSELY",
+            "CONVERT",
+            "COMPLEX",
+            "IMABS",
+            "IMARGUMENT",
+            "IMCONJUGATE",
+            "IMDIV",
+            "IMEXP",
+            "IMAGINARY",
+            "IMLN",
+            "IMPOWER",
+            "IMPRODUCT",
+            "IMREAL",
+            "IMSQRT",
+            "IMSUB",
+            "IMSUM",
         ] {
             assert!(catalog.iter().any(|entry| entry.name() == name), "{name}");
         }
@@ -1189,6 +1215,34 @@ mod tests {
         assert_eq!(
             actual,
             include_str!("../../../testdata/function-catalog-v0.1.13.sha256").trim()
+        );
+    }
+
+    #[test]
+    fn v0_1_14_engineering_catalog_is_byte_exact() {
+        let mut digest = Sha256::new();
+        for entry in
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_14)
+        {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            include_str!("../../../testdata/function-catalog-v0.1.14.sha256").trim()
         );
     }
 }

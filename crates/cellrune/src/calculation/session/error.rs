@@ -8,7 +8,7 @@ const MESSAGE_STATE_REVISION_MISMATCH: &str =
     "calculation state does not match the current workbook revision";
 const MESSAGE_INCREMENTAL_UNSAFE: &str =
     "the requested workbook change cannot be recalculated incrementally";
-const MESSAGE_STALE_RESULT: &str = "calculation completed for a stale workbook revision";
+const MESSAGE_STALE_RESULT: &str = "calculation completed for stale session state";
 const MESSAGE_INVALID_LIMITS: &str = "session limits must be greater than zero";
 const MESSAGE_EMPTY_BATCH: &str = "edit batch must contain at least one operation";
 const MESSAGE_BATCH_LIMIT: &str = "edit batch exceeds the configured operation limit";
@@ -20,6 +20,13 @@ const MESSAGE_CANCELLATION: &str = "calculation was cancelled";
 const MESSAGE_REWRITE_LIMIT: &str = "formula rewrite exceeds the configured whole-workbook limit";
 const MESSAGE_TABLE_MATERIALIZATION_LIMIT: &str =
     "table resize exceeds the configured materialization-cell limit";
+
+pub(super) fn stale_calculation_cursor_detail(
+    calculation_cursor: u64,
+    current_cursor: u64,
+) -> String {
+    format!("calculation_cursor={calculation_cursor}, current={current_cursor}")
+}
 
 /// Stable machine-readable failure produced by a stateful calculation session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,7 +40,7 @@ pub enum SessionErrorCode {
     StateRevisionMismatch,
     /// Forced incremental calculation cannot prove a safe impact boundary.
     IncrementalUnsafe,
-    /// A completed calculation belongs to an older revision and was not installed.
+    /// A completed calculation belongs to older workbook or calculation state and was not installed.
     StaleResult,
     /// One or more session resource limits were configured as zero.
     InvalidLimits,

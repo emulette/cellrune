@@ -5,6 +5,9 @@
 //! apart. Each unbounded loop charges work through a caller-supplied callback
 //! before it runs another step.
 
+pub(in crate::calculation::functions) mod bessel;
+#[cfg(test)]
+mod bessel_reference_tests;
 mod binomial;
 mod double_double;
 mod incomplete_beta;

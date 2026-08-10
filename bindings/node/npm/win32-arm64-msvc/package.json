@@ -1,6 +1,6 @@
 {
   "name": "@cellrune/node-win32-arm64-msvc",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "cpu": [
     "arm64"
   ],

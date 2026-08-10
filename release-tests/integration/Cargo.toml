@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 calamine.workspace = true
-cellrune = { version = "=0.1.13", path = "../../crates/cellrune" }
+cellrune = { version = "=0.1.14", path = "../../crates/cellrune" }
 libm.workspace = true
 serde.workspace = true
 serde_json.workspace = true

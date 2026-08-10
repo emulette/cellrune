@@ -228,11 +228,23 @@ impl FormulaSourceMap {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct ParsedFormula {
     original: Arc<str>,
     root: Expr,
     source_map: FormulaSourceMap,
+}
+
+impl Clone for ParsedFormula {
+    fn clone(&self) -> Self {
+        #[cfg(test)]
+        super::work_counter::deep_cloned_asts(1);
+        Self {
+            original: Arc::clone(&self.original),
+            root: self.root.clone(),
+            source_map: self.source_map.clone(),
+        }
+    }
 }
 
 impl ParsedFormula {

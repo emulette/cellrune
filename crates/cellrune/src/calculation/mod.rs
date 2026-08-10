@@ -1,6 +1,8 @@
 //! Deterministic workbook formula capability scanning and calculation.
 
-use std::collections::BTreeMap;
+use std::collections::btree_map;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use crate::{
     CellAddress, CellValue, FiniteNumber, Provenance, ProviderIdentity, SheetId, WorkbookSnapshot,
@@ -19,7 +21,7 @@ mod formula_rebase;
 pub(crate) mod formula_rewrite;
 mod functions;
 mod graph;
-mod identity;
+pub(crate) mod identity;
 mod lambda;
 mod lexer;
 mod limits;
@@ -35,6 +37,8 @@ mod structured_reference;
 mod syntax;
 mod textfmt;
 mod value;
+#[cfg(test)]
+pub(crate) mod work_counter;
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
@@ -584,37 +588,279 @@ impl MaterializedCalculationCell {
     }
 }
 
+const CALCULATION_ROW_CHUNK_SIZE: u32 = 256;
+
+#[derive(Debug)]
+struct CalculationStore<V> {
+    chunks: BTreeMap<(SheetId, u32), Arc<BTreeMap<CalculationCellId, V>>>,
+    len: usize,
+}
+
+type CalculationChunkIter<'a, V> = btree_map::Iter<'a, CalculationCellId, V>;
+type CalculationChunkMapIter<'a, V> =
+    btree_map::Values<'a, (SheetId, u32), Arc<BTreeMap<CalculationCellId, V>>>;
+type FlatCalculationIter<'a, V> = std::iter::FlatMap<
+    CalculationChunkMapIter<'a, V>,
+    CalculationChunkIter<'a, V>,
+    fn(&'a Arc<BTreeMap<CalculationCellId, V>>) -> CalculationChunkIter<'a, V>,
+>;
+
+struct CalculationStoreIter<'a, V> {
+    inner: FlatCalculationIter<'a, V>,
+    remaining: usize,
+}
+
+impl<'a, V> Iterator for CalculationStoreIter<'a, V> {
+    type Item = (CalculationCellId, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (cell, value) = self.inner.next()?;
+        self.remaining -= 1;
+        Some((*cell, value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<V> ExactSizeIterator for CalculationStoreIter<'_, V> {}
+
+fn calculation_chunk_iter<V>(
+    chunk: &Arc<BTreeMap<CalculationCellId, V>>,
+) -> CalculationChunkIter<'_, V> {
+    chunk.iter()
+}
+
+impl<V> CalculationStore<V> {
+    fn chunk(cell: CalculationCellId) -> (SheetId, u32) {
+        (
+            cell.sheet_id(),
+            (cell.address().row().get() - 1) / CALCULATION_ROW_CHUNK_SIZE,
+        )
+    }
+
+    fn from_map(values: BTreeMap<CalculationCellId, V>) -> Self {
+        let len = values.len();
+        let mut chunks = BTreeMap::<(SheetId, u32), BTreeMap<CalculationCellId, V>>::new();
+        for (cell, value) in values {
+            chunks
+                .entry(Self::chunk(cell))
+                .or_default()
+                .insert(cell, value);
+        }
+        Self {
+            chunks: chunks
+                .into_iter()
+                .map(|(key, chunk)| (key, Arc::new(chunk)))
+                .collect(),
+            len,
+        }
+    }
+
+    fn get(&self, cell: &CalculationCellId) -> Option<&V> {
+        self.chunks
+            .get(&Self::chunk(*cell))
+            .and_then(|chunk| chunk.get(cell))
+    }
+
+    fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut chunks = BTreeMap::new();
+        for (key, chunk) in &self.chunks {
+            if cancelled() {
+                return Err(());
+            }
+            chunks.insert(*key, Arc::clone(chunk));
+        }
+        Ok(Self {
+            chunks,
+            len: self.len,
+        })
+    }
+
+    fn insert_cancellable(
+        &mut self,
+        cell: CalculationCellId,
+        value: V,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Option<V>, ()>
+    where
+        V: Clone,
+    {
+        let chunk = self
+            .chunks
+            .entry(Self::chunk(cell))
+            .or_insert_with(|| Arc::new(BTreeMap::new()));
+        if Arc::get_mut(chunk).is_none() {
+            let mut cloned = BTreeMap::new();
+            for (cloned_cell, cloned_value) in chunk.iter() {
+                if cancelled() {
+                    return Err(());
+                }
+                let cloned_value = cloned_value.clone();
+                #[cfg(test)]
+                work_counter::deep_cloned_results(1);
+                cloned.insert(*cloned_cell, cloned_value);
+            }
+            *chunk = Arc::new(cloned);
+        }
+        let previous = Arc::get_mut(chunk)
+            .expect("calculation chunk was made unique")
+            .insert(cell, value);
+        if previous.is_none() {
+            self.len += 1;
+        }
+        Ok(previous)
+    }
+
+    fn remove_cancellable(
+        &mut self,
+        cell: &CalculationCellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Option<V>, ()>
+    where
+        V: Clone,
+    {
+        let chunk_key = Self::chunk(*cell);
+        let Some(chunk) = self.chunks.get_mut(&chunk_key) else {
+            return Ok(None);
+        };
+        if Arc::get_mut(chunk).is_none() {
+            let mut cloned = BTreeMap::new();
+            for (cloned_cell, cloned_value) in chunk.iter() {
+                if cancelled() {
+                    return Err(());
+                }
+                let cloned_value = cloned_value.clone();
+                #[cfg(test)]
+                work_counter::deep_cloned_results(1);
+                cloned.insert(*cloned_cell, cloned_value);
+            }
+            *chunk = Arc::new(cloned);
+        }
+        let unique_chunk = Arc::get_mut(chunk).expect("calculation chunk was made unique");
+        let removed = unique_chunk.remove(cell);
+        if removed.is_some() {
+            self.len -= 1;
+        }
+        if unique_chunk.is_empty() {
+            self.chunks.remove(&chunk_key);
+        }
+        Ok(removed)
+    }
+
+    fn iter(&self) -> CalculationStoreIter<'_, V> {
+        CalculationStoreIter {
+            inner: self.chunks.values().flat_map(
+                calculation_chunk_iter::<V>
+                    as fn(&Arc<BTreeMap<CalculationCellId, V>>) -> CalculationChunkIter<'_, V>,
+            ),
+            remaining: self.len,
+        }
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+fn calculation_store_mut_cancellable<'a, V: Clone>(
+    store: &'a mut Arc<CalculationStore<V>>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<&'a mut CalculationStore<V>, ()> {
+    if Arc::get_mut(store).is_none() {
+        *store = Arc::new(store.clone_cancellable(cancelled)?);
+    }
+    Ok(Arc::get_mut(store).expect("calculation store was made unique"))
+}
+
+#[cfg(test)]
+mod calculation_store_tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn copy_on_write_store_and_chunk_clones_poll_cancellation() {
+        let sheet = SheetId::new(1).expect("valid test sheet");
+        let first = CalculationCellId::new(
+            sheet,
+            CellAddress::from_indices(1, 1).expect("valid first address"),
+        );
+        let second = CalculationCellId::new(
+            sheet,
+            CellAddress::from_indices(2, 1).expect("valid second address"),
+        );
+        let mut values = BTreeMap::new();
+        values.insert(first, 1_u32);
+        values.insert(second, 2_u32);
+        let mut store = Arc::new(CalculationStore::from_map(values));
+        let installed = Arc::clone(&store);
+        let polls = Cell::new(0_usize);
+        work_counter::reset();
+        let cancelled = || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            next == 3
+        };
+
+        let mutable = calculation_store_mut_cancellable(&mut store, &cancelled)
+            .expect("outer store clone completes before cancellation");
+        assert_eq!(mutable.insert_cancellable(first, 3, &cancelled), Err(()),);
+        assert_eq!(polls.get(), 3);
+        assert_eq!(work_counter::snapshot().deep_cloned_results, 1);
+        assert_eq!(installed.get(&first), Some(&1));
+        assert_eq!(installed.get(&second), Some(&2));
+    }
+}
+
 /// Immutable formula results, separate from source literals and saved XLSX values.
 #[derive(Debug, Clone)]
 pub struct CalculationSnapshot {
-    cells: BTreeMap<CalculationCellId, CalculationCellResult>,
-    materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
-    numeric_decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
+    cells: Arc<CalculationStore<CalculationCellResult>>,
+    materialized_cells: Arc<CalculationStore<MaterializedCalculationCell>>,
+    materialized_cells_by_owner: Arc<CalculationStore<Vec<CalculationCellId>>>,
+    numeric_decimal_traces: Arc<CalculationStore<DecimalTrace>>,
     options: CalculationOptions,
     provenance: Provenance,
     source_revision: u64,
     source_fingerprint: [u8; 32],
 }
 
-impl CalculationSnapshot {
-    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        if cancelled() {
-            return Err(());
-        }
-        Ok(Self {
-            cells: eval::clone_map_cancellable(&self.cells, cancelled)?,
-            materialized_cells: eval::clone_map_cancellable(&self.materialized_cells, cancelled)?,
-            numeric_decimal_traces: eval::clone_map_cancellable(
-                &self.numeric_decimal_traces,
-                cancelled,
-            )?,
-            options: self.options,
-            provenance: self.provenance.clone(),
-            source_revision: self.source_revision,
-            source_fingerprint: self.source_fingerprint,
-        })
-    }
+pub(crate) struct IncrementalCalculationPatch<'a> {
+    dirty: &'a BTreeSet<CalculationCellId>,
+    cell_results: BTreeMap<CalculationCellId, CalculationCellResult>,
+    materialized_results: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
+    decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
+    source: &'a WorkbookSnapshot,
+    options: CalculationOptions,
+}
 
+impl<'a> IncrementalCalculationPatch<'a> {
+    pub(crate) const fn new(
+        dirty: &'a BTreeSet<CalculationCellId>,
+        cell_results: BTreeMap<CalculationCellId, CalculationCellResult>,
+        materialized_results: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
+        decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
+        source: &'a WorkbookSnapshot,
+        options: CalculationOptions,
+    ) -> Self {
+        Self {
+            dirty,
+            cell_results,
+            materialized_results,
+            decimal_traces,
+            source,
+            options,
+        }
+    }
+}
+
+impl CalculationSnapshot {
     #[cfg(test)]
     pub(crate) fn new(
         cells: BTreeMap<CalculationCellId, CalculationCellResult>,
@@ -646,14 +892,128 @@ impl CalculationSnapshot {
             ProviderIdentity::calculator(),
             source.provenance().input_hash(),
         );
+        let materialized_cells_by_owner =
+            build_materialized_owner_index(&materialized_cells, cancelled)?;
         Ok(Self {
-            cells,
-            materialized_cells,
-            numeric_decimal_traces,
+            cells: Arc::new(CalculationStore::from_map(cells)),
+            materialized_cells: Arc::new(CalculationStore::from_map(materialized_cells)),
+            materialized_cells_by_owner: Arc::new(CalculationStore::from_map(
+                materialized_cells_by_owner,
+            )),
+            numeric_decimal_traces: Arc::new(CalculationStore::from_map(numeric_decimal_traces)),
             options,
             provenance,
             source_revision: source.semantic_revision(),
-            source_fingerprint: identity::workbook_fingerprint_cancellable(source, cancelled)?,
+            source_fingerprint: source.semantic_fingerprint_cancellable(cancelled)?,
+        })
+    }
+
+    pub(crate) fn rebase_source_cancellable(
+        &self,
+        source: &WorkbookSnapshot,
+        options: CalculationOptions,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
+        if cancelled() {
+            return Err(());
+        }
+        Ok(Self {
+            cells: Arc::clone(&self.cells),
+            materialized_cells: Arc::clone(&self.materialized_cells),
+            materialized_cells_by_owner: Arc::clone(&self.materialized_cells_by_owner),
+            numeric_decimal_traces: Arc::clone(&self.numeric_decimal_traces),
+            options,
+            provenance: Provenance::new(
+                ProviderIdentity::calculator(),
+                source.provenance().input_hash(),
+            ),
+            source_revision: source.semantic_revision(),
+            source_fingerprint: source.semantic_fingerprint_cancellable(cancelled)?,
+        })
+    }
+
+    pub(crate) fn apply_incremental_patch_cancellable(
+        &self,
+        patch: IncrementalCalculationPatch<'_>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
+        let IncrementalCalculationPatch {
+            dirty,
+            cell_results,
+            materialized_results,
+            decimal_traces,
+            source,
+            options,
+        } = patch;
+        if cancelled() {
+            return Err(());
+        }
+        let mut cells = Arc::clone(&self.cells);
+        let mut materialized_cells = Arc::clone(&self.materialized_cells);
+        let mut materialized_cells_by_owner = Arc::clone(&self.materialized_cells_by_owner);
+        let mut numeric_decimal_traces = Arc::clone(&self.numeric_decimal_traces);
+
+        let cells_mut = calculation_store_mut_cancellable(&mut cells, cancelled)?;
+        for (cell, result) in cell_results {
+            if cancelled() {
+                return Err(());
+            }
+            cells_mut.insert_cancellable(cell, result, cancelled)?;
+        }
+
+        let owners_mut =
+            calculation_store_mut_cancellable(&mut materialized_cells_by_owner, cancelled)?;
+        let mut removed = Vec::new();
+        for owner in dirty {
+            if let Some(cells) = owners_mut.remove_cancellable(owner, cancelled)? {
+                removed.extend(cells);
+            }
+        }
+        let materialized_mut =
+            calculation_store_mut_cancellable(&mut materialized_cells, cancelled)?;
+        for cell in &removed {
+            if cancelled() {
+                return Err(());
+            }
+            materialized_mut.remove_cancellable(cell, cancelled)?;
+        }
+        let mut added_by_owner = BTreeMap::<CalculationCellId, Vec<CalculationCellId>>::new();
+        for (cell, result) in materialized_results {
+            if cancelled() {
+                return Err(());
+            }
+            let owner = materialized_owner(cell, &result);
+            added_by_owner.entry(owner).or_default().push(cell);
+            materialized_mut.insert_cancellable(cell, result, cancelled)?;
+        }
+        for (owner, mut cells) in added_by_owner {
+            cells.sort_unstable();
+            owners_mut.insert_cancellable(owner, cells, cancelled)?;
+        }
+
+        let traces_mut = calculation_store_mut_cancellable(&mut numeric_decimal_traces, cancelled)?;
+        for cell in removed {
+            traces_mut.remove_cancellable(&cell, cancelled)?;
+        }
+        for (cell, trace) in decimal_traces {
+            if cancelled() {
+                return Err(());
+            }
+            traces_mut.insert_cancellable(cell, trace, cancelled)?;
+        }
+
+        Ok(Self {
+            cells,
+            materialized_cells,
+            materialized_cells_by_owner,
+            numeric_decimal_traces,
+            options,
+            provenance: Provenance::new(
+                ProviderIdentity::calculator(),
+                source.provenance().input_hash(),
+            ),
+            source_revision: source.semantic_revision(),
+            source_fingerprint: source.semantic_fingerprint_cancellable(cancelled)?,
         })
     }
 
@@ -666,7 +1026,7 @@ impl CalculationSnapshot {
     pub fn cells(
         &self,
     ) -> impl ExactSizeIterator<Item = (CalculationCellId, &CalculationCellResult)> {
-        self.cells.iter().map(|(cell, result)| (*cell, result))
+        self.cells.iter()
     }
 
     /// Returns one result from the complete formula and array materialization view.
@@ -677,13 +1037,20 @@ impl CalculationSnapshot {
         self.materialized_cells.get(&cell)
     }
 
+    pub(in crate::calculation) fn materialized_cells_owned_by(
+        &self,
+        owner: CalculationCellId,
+    ) -> &[CalculationCellId] {
+        self.materialized_cells_by_owner
+            .get(&owner)
+            .map_or(&[], Vec::as_slice)
+    }
+
     /// Iterates the complete materialization view in sheet-ID and row-major address order.
     pub fn materialized_cells(
         &self,
     ) -> impl ExactSizeIterator<Item = (CalculationCellId, &MaterializedCalculationCell)> {
-        self.materialized_cells
-            .iter()
-            .map(|(cell, result)| (*cell, result))
+        self.materialized_cells.iter()
     }
 
     pub(in crate::calculation) fn numeric_decimal_trace(
@@ -724,9 +1091,40 @@ impl CalculationSnapshot {
 
     pub(crate) fn matches_workbook(&self, workbook: &WorkbookSnapshot) -> bool {
         self.source_revision == workbook.semantic_revision()
-            && self.source_fingerprint == identity::workbook_fingerprint(workbook)
+            && self.source_fingerprint
+                == workbook
+                    .semantic_fingerprint_cancellable(&|| false)
+                    .expect("non-cancellable fingerprinting cannot be cancelled")
             && self.provenance.input_hash() == workbook.provenance().input_hash()
     }
+}
+
+fn materialized_owner(
+    cell: CalculationCellId,
+    materialized: &MaterializedCalculationCell,
+) -> CalculationCellId {
+    match materialized.origin() {
+        MaterializedResultOrigin::DirectFormula => cell,
+        MaterializedResultOrigin::LegacyArray { anchor, .. }
+        | MaterializedResultOrigin::DynamicSpill { anchor, .. } => anchor,
+    }
+}
+
+fn build_materialized_owner_index(
+    materialized_cells: &BTreeMap<CalculationCellId, MaterializedCalculationCell>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeMap<CalculationCellId, Vec<CalculationCellId>>, ()> {
+    let mut owners = BTreeMap::<CalculationCellId, Vec<CalculationCellId>>::new();
+    for (cell, materialized) in materialized_cells {
+        if cancelled() {
+            return Err(());
+        }
+        owners
+            .entry(materialized_owner(*cell, materialized))
+            .or_default()
+            .push(*cell);
+    }
+    Ok(owners)
 }
 
 pub(crate) use identity::workbook_fingerprint;

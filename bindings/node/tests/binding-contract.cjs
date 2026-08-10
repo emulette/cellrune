@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
-const CATALOG_V0_1_13_REFERENCE_SHA256 = fs
+const CATALOG_V0_1_14_REFERENCE_SHA256 = fs
   .readFileSync(
     path.join(
       __dirname,
@@ -16,7 +16,7 @@ const CATALOG_V0_1_13_REFERENCE_SHA256 = fs
       "crates",
       "cellrune",
       "testdata",
-      "function-catalog-v0.1.13.sha256",
+      "function-catalog-v0.1.14.sha256",
     ),
     "utf8",
   )
@@ -25,7 +25,7 @@ const CATALOG_V0_1_13_REFERENCE_SHA256 = fs
 function catalogDigest() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 368);
+  assert.equal(catalog.entries.length, 387);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [
     "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST", "BINOM.DIST.RANGE",
@@ -37,6 +37,9 @@ function catalogDigest() {
     "T.DIST", "T.DIST.2T", "T.DIST.RT", "T.INV", "T.INV.2T", "T.TEST", "TDIST",
     "TINV", "TTEST",
     "Z.TEST", "ZTEST", "COVARIANCE.S",
+    "CONVERT", "BESSELI", "BESSELJ", "BESSELK", "BESSELY", "COMPLEX",
+    "IMABS", "IMAGINARY", "IMARGUMENT", "IMCONJUGATE", "IMREAL", "IMDIV",
+    "IMPOWER", "IMPRODUCT", "IMSUB", "IMSUM", "IMEXP", "IMLN", "IMSQRT",
   ]) {
     assert.ok(entries.has(name), name);
   }
@@ -62,7 +65,7 @@ function catalogDigest() {
 }
 
 async function main() {
-  assert.equal(catalogDigest(), CATALOG_V0_1_13_REFERENCE_SHA256);
+  assert.equal(catalogDigest(), CATALOG_V0_1_14_REFERENCE_SHA256);
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(

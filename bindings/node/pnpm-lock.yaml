@@ -19,28 +19,28 @@ importers:
         version: 7.0.2
     optionalDependencies:
       '@cellrune/node-darwin-arm64':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/darwin-arm64
       '@cellrune/node-darwin-x64':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/darwin-x64
       '@cellrune/node-linux-arm64-gnu':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/linux-arm64-gnu
       '@cellrune/node-linux-arm64-musl':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/linux-arm64-musl
       '@cellrune/node-linux-x64-gnu':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/linux-x64-gnu
       '@cellrune/node-linux-x64-musl':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/linux-x64-musl
       '@cellrune/node-win32-arm64-msvc':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/win32-arm64-msvc
       '@cellrune/node-win32-x64-msvc':
-        specifier: 0.1.13
+        specifier: 0.1.14
         version: link:npm/win32-x64-msvc
 
   npm/darwin-arm64: {}
@@ -776,8 +776,8 @@ packages:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
 
-  js-yaml@4.3.0:
-    resolution: {integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==}
+  js-yaml@4.3.1:
+    resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
     hasBin: true
 
   json-with-bigint@3.5.10:
@@ -970,7 +970,7 @@ snapshots:
       colorette: 2.0.20
       emnapi: 1.11.2
       es-toolkit: 1.49.0
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       obug: 2.1.4
       semver: 7.8.5
       typanion: 3.14.0
@@ -1386,7 +1386,7 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
-  js-yaml@4.3.0:
+  js-yaml@4.3.1:
     dependencies:
       argparse: 2.0.1
 

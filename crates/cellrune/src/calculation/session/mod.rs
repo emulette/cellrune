@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, VecDeque};
+use std::sync::Arc;
 
 use super::eval::{CompiledWorkbook, clone_set_cancellable};
 use super::formula_rewrite::{FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits};
@@ -17,10 +18,11 @@ mod error;
 mod impact;
 mod limits;
 
-use delta::build_delta;
 pub use delta::{CalculationDelta, CalculationDeltaCell, CalculationDeltaPage};
+use delta::{DeltaMetadata, build_delta, build_empty_delta, build_incremental_delta};
+use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
-use impact::{affected_formulas, formula_cells};
+use impact::{affected_formulas, formula_cells, formula_cells_from_workbook};
 pub use limits::{CancellationToken, SessionLimits};
 
 /// Caller-selected recalculation policy.
@@ -72,8 +74,8 @@ pub enum CalculationDecisionReason {
 #[derive(Debug)]
 pub struct WorkbookCalculationSession {
     draft: WorkbookDraft,
-    compiled: Option<CompiledWorkbook>,
-    calculation: Option<CalculationSnapshot>,
+    compiled: Option<Arc<CompiledWorkbook>>,
+    calculation: Option<Arc<CalculationSnapshot>>,
     calculation_options: Option<CalculationOptions>,
     dirty: BTreeSet<CalculationCellId>,
     calculation_changes_pending: bool,
@@ -111,7 +113,7 @@ impl WorkbookCalculationSession {
     }
 
     /// Returns the current immutable workbook snapshot.
-    pub const fn workbook(&self) -> &WorkbookSnapshot {
+    pub fn workbook(&self) -> &WorkbookSnapshot {
         self.draft.workbook()
     }
 
@@ -121,8 +123,8 @@ impl WorkbookCalculationSession {
     }
 
     /// Returns the installed complete calculation, when available.
-    pub const fn calculation(&self) -> Option<&CalculationSnapshot> {
-        self.calculation.as_ref()
+    pub fn calculation(&self) -> Option<&CalculationSnapshot> {
+        self.calculation.as_deref()
     }
 
     /// Returns the configured session limits.
@@ -268,7 +270,7 @@ impl WorkbookCalculationSession {
             self.dirty.extend(affected_formulas(
                 prepared.draft.workbook(),
                 compiled,
-                self.calculation.as_ref(),
+                self.calculation.as_deref(),
                 prepared.receipt.calculation_changed_cells(),
             ));
         }
@@ -297,7 +299,9 @@ impl WorkbookCalculationSession {
         let previous_revision = self
             .calculation
             .as_ref()
-            .map_or(current_revision, CalculationSnapshot::source_revision);
+            .map_or(current_revision, |calculation| {
+                calculation.source_revision()
+            });
         if let Some(previous) = &self.calculation
             && previous.source_revision() > current_revision
         {
@@ -332,7 +336,8 @@ impl WorkbookCalculationSession {
         let compile_required = no_state
             || self.requires_full_rebuild
             || compiled_limit_changed
-            || table_topology_changed;
+            || table_topology_changed
+            || unsafe_dynamic;
 
         let (execution_mode, reason) = match mode {
             RecalculationMode::Full => (
@@ -402,33 +407,26 @@ impl WorkbookCalculationSession {
         };
 
         let dirty = if execution_mode == CalculationExecutionMode::Full {
-            formula_cells(self.workbook(), &cancelled)
+            match self.compiled.as_deref() {
+                Some(compiled) if !compile_required => {
+                    formula_cells(self.workbook(), compiled, &cancelled)
+                }
+                _ => formula_cells_from_workbook(self.workbook(), &cancelled),
+            }
         } else {
             clone_set_cancellable(&self.dirty, &cancelled)
         }
         .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-        let workbook = self
-            .workbook()
-            .clone_cancellable(&cancelled)
-            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-        let compiled = self
-            .compiled
-            .as_ref()
-            .map(|compiled| compiled.clone_cancellable(&cancelled))
-            .transpose()
-            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-        let previous = self
-            .calculation
-            .as_ref()
-            .map(|calculation| calculation.clone_cancellable(&cancelled))
-            .transpose()
-            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        let workbook = self.draft.shared_workbook();
+        let compiled = self.compiled.as_ref().map(Arc::clone);
+        let previous = self.calculation.as_ref().map(Arc::clone);
         if cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
         Ok(PreparedCalculation {
             workbook,
             expected_revision: current_revision,
+            base_cursor: self.next_cursor,
             base_revision: previous_revision,
             options,
             execution_mode,
@@ -442,7 +440,7 @@ impl WorkbookCalculationSession {
         })
     }
 
-    /// Installs a completed calculation only if the workbook revision is still current.
+    /// Installs a completed calculation only if its workbook and calculation state are current.
     ///
     /// # Errors
     ///
@@ -500,6 +498,15 @@ impl WorkbookCalculationSession {
                 Some(format!(
                     "calculated={}, current={current_revision}",
                     completed.expected_revision
+                )),
+            ));
+        }
+        if completed.base_cursor != self.next_cursor {
+            return Err(SessionError::new(
+                SessionErrorCode::StaleResult,
+                Some(stale_calculation_cursor_detail(
+                    completed.base_cursor,
+                    self.next_cursor,
                 )),
             ));
         }
@@ -605,7 +612,7 @@ pub struct PreparedEditBatch {
 
 impl PreparedEditBatch {
     /// Returns the workbook state that would be installed.
-    pub const fn workbook(&self) -> &WorkbookSnapshot {
+    pub fn workbook(&self) -> &WorkbookSnapshot {
         self.draft.workbook()
     }
 
@@ -618,15 +625,16 @@ impl PreparedEditBatch {
 /// An immutable calculation job safe to execute outside a session lock.
 #[derive(Debug)]
 pub struct PreparedCalculation {
-    workbook: WorkbookSnapshot,
+    workbook: Arc<WorkbookSnapshot>,
     expected_revision: u64,
+    base_cursor: u64,
     base_revision: u64,
     options: CalculationOptions,
     execution_mode: CalculationExecutionMode,
     reason: CalculationDecisionReason,
     compile_required: bool,
-    compiled: Option<CompiledWorkbook>,
-    previous: Option<CalculationSnapshot>,
+    compiled: Option<Arc<CompiledWorkbook>>,
+    previous: Option<Arc<CalculationSnapshot>>,
     dirty: BTreeSet<CalculationCellId>,
     cancellation: CancellationToken,
     limits: SessionLimits,
@@ -664,6 +672,39 @@ impl PreparedCalculation {
         }
         let dirty =
             (self.execution_mode == CalculationExecutionMode::Incremental).then_some(&self.dirty);
+        if !self.compile_required && self.reason == CalculationDecisionReason::NoDirtyFormulas {
+            let previous = self.previous.as_ref().ok_or_else(|| {
+                SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+            })?;
+            let compiled = self.compiled.as_ref().map(Arc::clone).ok_or_else(|| {
+                SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+            })?;
+            let calculation = Arc::new(
+                previous
+                    .rebase_source_cancellable(&self.workbook, self.options, &|| {
+                        self.cancellation.is_cancelled()
+                    })
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
+            );
+            let delta = build_empty_delta(DeltaMetadata {
+                base_revision: self.base_revision,
+                result_revision: self.expected_revision,
+                mode: self.execution_mode,
+                reason: self.reason,
+                dirty_count: 0,
+                evaluated_count: 0,
+                parsed_formula_count: 0,
+            });
+            return Ok(CompletedCalculation {
+                expected_revision: self.expected_revision,
+                base_cursor: self.base_cursor,
+                options: self.options,
+                compiled,
+                calculation,
+                delta,
+                cancellation: self.cancellation,
+            });
+        }
         let (calculation, compiled, evaluated_count, parsed_formula_count) =
             if self.compile_required {
                 let (calculation, compiled, evaluated) =
@@ -672,13 +713,13 @@ impl PreparedCalculation {
                     })
                     .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
                 let parsed = compiled.formula_count();
-                (calculation, compiled, evaluated, parsed)
+                (Arc::new(calculation), Arc::new(compiled), evaluated, parsed)
             } else {
                 let compiled = self.compiled.as_ref().ok_or_else(|| {
                     SessionError::new(SessionErrorCode::CalculationUninitialized, None)
                 })?;
                 let previous = (self.execution_mode == CalculationExecutionMode::Incremental)
-                    .then_some(self.previous.as_ref())
+                    .then_some(self.previous.as_deref())
                     .flatten();
                 let (calculation, evaluated) = calculate_from_compiled(
                     &self.workbook,
@@ -689,10 +730,10 @@ impl PreparedCalculation {
                     || self.cancellation.is_cancelled(),
                 )
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                let compiled = compiled
-                    .clone_cancellable(&|| self.cancellation.is_cancelled())
-                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                (calculation, compiled, evaluated, 0)
+                let compiled = self.compiled.as_ref().map(Arc::clone).ok_or_else(|| {
+                    SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+                })?;
+                (Arc::new(calculation), compiled, evaluated, 0)
             };
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
@@ -706,24 +747,49 @@ impl PreparedCalculation {
                 )),
             ));
         }
-        let delta = build_delta(
-            self.previous.as_ref(),
-            &calculation,
-            self.base_revision,
-            self.expected_revision,
-            self.execution_mode,
-            self.reason,
-            self.dirty.len(),
-            evaluated_count,
-            parsed_formula_count,
-            self.limits.max_delta_cells,
-            &|| self.cancellation.is_cancelled(),
-        )?;
+        let delta = if self.execution_mode == CalculationExecutionMode::Incremental {
+            let previous = self.previous.as_deref().ok_or_else(|| {
+                SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+            })?;
+            build_incremental_delta(
+                previous,
+                &calculation,
+                &self.dirty,
+                DeltaMetadata {
+                    base_revision: self.base_revision,
+                    result_revision: self.expected_revision,
+                    mode: self.execution_mode,
+                    reason: self.reason,
+                    dirty_count: self.dirty.len(),
+                    evaluated_count,
+                    parsed_formula_count: 0,
+                },
+                self.limits.max_delta_cells,
+                &|| self.cancellation.is_cancelled(),
+            )?
+        } else {
+            build_delta(
+                self.previous.as_deref(),
+                &calculation,
+                DeltaMetadata {
+                    base_revision: self.base_revision,
+                    result_revision: self.expected_revision,
+                    mode: self.execution_mode,
+                    reason: self.reason,
+                    dirty_count: self.dirty.len(),
+                    evaluated_count,
+                    parsed_formula_count,
+                },
+                self.limits.max_delta_cells,
+                &|| self.cancellation.is_cancelled(),
+            )?
+        };
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
         Ok(CompletedCalculation {
             expected_revision: self.expected_revision,
+            base_cursor: self.base_cursor,
             options: self.options,
             compiled,
             calculation,
@@ -737,9 +803,10 @@ impl PreparedCalculation {
 #[derive(Debug)]
 pub struct CompletedCalculation {
     expected_revision: u64,
+    base_cursor: u64,
     options: CalculationOptions,
-    compiled: CompiledWorkbook,
-    calculation: CalculationSnapshot,
+    compiled: Arc<CompiledWorkbook>,
+    calculation: Arc<CalculationSnapshot>,
     delta: CalculationDelta,
     cancellation: CancellationToken,
 }
@@ -825,5 +892,177 @@ fn incremental_unsafe_detail(
         "dynamic dependency or spill topology requires full recalculation".to_owned()
     } else {
         "incremental state is unavailable".to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calculation::work_counter;
+    use crate::{CellAddress, CellValue, FiniteNumber, FormulaText, SheetId, WorkbookChange};
+
+    fn address(value: &str) -> CellAddress {
+        CellAddress::from_a1(value).expect("valid test address")
+    }
+
+    fn number(value: f64) -> CellValue {
+        CellValue::Number(FiniteNumber::new(value).expect("finite test number"))
+    }
+
+    #[test]
+    fn stable_incremental_work_reuses_compiled_indexes_and_snapshot_chunks() {
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(
+                0,
+                EditBatch::new([
+                    WorkbookChange::set_cell_value(sheet, address("A1"), number(1.0)),
+                    WorkbookChange::set_cell_formula(
+                        sheet,
+                        address("B1"),
+                        FormulaText::from_xlsx("A1+1").expect("valid test formula"),
+                    ),
+                    WorkbookChange::set_cell_value(sheet, address("A2"), number(1.0)),
+                    WorkbookChange::set_cell_formula(
+                        sheet,
+                        address("B2"),
+                        FormulaText::from_xlsx("A2+1").expect("valid test formula"),
+                    ),
+                ]),
+            )
+            .expect("initial test workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial calculation");
+
+        work_counter::reset();
+        let no_dirty = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("no-dirty calculation");
+        assert_eq!(no_dirty.evaluated_count(), 0);
+        assert_eq!(
+            work_counter::snapshot(),
+            work_counter::WorkCounters {
+                deep_cloned_cells: 0,
+                deep_cloned_asts: 0,
+                deep_cloned_results: 0,
+                dependency_target_scans: 0,
+                schedule_builds: 0,
+                schedule_visits: 0,
+                formula_snapshot_scans: 0,
+                area_dependency_visits: 0,
+            }
+        );
+
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet,
+                    address("A1"),
+                    number(2.0),
+                )]),
+            )
+            .expect("one-cell test edit");
+        work_counter::reset();
+        let one_dirty = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("one-dirty calculation");
+        assert_eq!(one_dirty.evaluated_count(), 1);
+        assert_eq!(
+            work_counter::snapshot(),
+            work_counter::WorkCounters {
+                deep_cloned_cells: 0,
+                deep_cloned_asts: 0,
+                deep_cloned_results: 8,
+                dependency_target_scans: 0,
+                schedule_builds: 0,
+                schedule_visits: 1,
+                formula_snapshot_scans: 0,
+                area_dependency_visits: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn range_impact_index_visits_only_the_matching_sheet_local_intervals() {
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        let mut changes = Vec::with_capacity(10_400);
+        for column in 1..=10 {
+            for row in 1..=1_000 {
+                changes.push(WorkbookChange::set_cell_value(
+                    sheet,
+                    CellAddress::from_indices(row, column).expect("valid range input"),
+                    number(1.0),
+                ));
+            }
+            let column_name =
+                char::from_u32(u32::from(b'A') + column - 1).expect("generated A:J column");
+            for row in 1_002..=1_041 {
+                changes.push(WorkbookChange::set_cell_formula(
+                    sheet,
+                    CellAddress::from_indices(row, column).expect("valid range formula"),
+                    FormulaText::from_xlsx(format!("SUM({column_name}1:{column_name}1000)"))
+                        .expect("valid generated range formula"),
+                ));
+            }
+        }
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("range-index test workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial range calculation");
+
+        work_counter::reset();
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet,
+                    address("A500"),
+                    number(2.0),
+                )]),
+            )
+            .expect("one range input edit");
+        let delta = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("range-index incremental calculation");
+        assert_eq!(delta.evaluated_count(), 40);
+        assert_eq!(
+            work_counter::snapshot(),
+            work_counter::WorkCounters {
+                deep_cloned_cells: 2_560,
+                deep_cloned_asts: 0,
+                deep_cloned_results: 1_200,
+                dependency_target_scans: 0,
+                schedule_builds: 0,
+                schedule_visits: 40,
+                formula_snapshot_scans: 0,
+                area_dependency_visits: 40,
+            }
+        );
     }
 }
