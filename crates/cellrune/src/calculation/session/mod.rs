@@ -19,7 +19,8 @@ mod impact;
 mod limits;
 
 pub use delta::{CalculationDelta, CalculationDeltaCell, CalculationDeltaPage};
-use delta::{build_delta, build_empty_delta, build_incremental_delta};
+use delta::{DeltaMetadata, build_delta, build_empty_delta, build_incremental_delta};
+use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{affected_formulas, formula_cells, formula_cells_from_workbook};
 pub use limits::{CancellationToken, SessionLimits};
@@ -335,7 +336,8 @@ impl WorkbookCalculationSession {
         let compile_required = no_state
             || self.requires_full_rebuild
             || compiled_limit_changed
-            || table_topology_changed;
+            || table_topology_changed
+            || unsafe_dynamic;
 
         let (execution_mode, reason) = match mode {
             RecalculationMode::Full => (
@@ -424,6 +426,7 @@ impl WorkbookCalculationSession {
         Ok(PreparedCalculation {
             workbook,
             expected_revision: current_revision,
+            base_cursor: self.next_cursor,
             base_revision: previous_revision,
             options,
             execution_mode,
@@ -437,7 +440,7 @@ impl WorkbookCalculationSession {
         })
     }
 
-    /// Installs a completed calculation only if the workbook revision is still current.
+    /// Installs a completed calculation only if its workbook and calculation state are current.
     ///
     /// # Errors
     ///
@@ -495,6 +498,15 @@ impl WorkbookCalculationSession {
                 Some(format!(
                     "calculated={}, current={current_revision}",
                     completed.expected_revision
+                )),
+            ));
+        }
+        if completed.base_cursor != self.next_cursor {
+            return Err(SessionError::new(
+                SessionErrorCode::StaleResult,
+                Some(stale_calculation_cursor_detail(
+                    completed.base_cursor,
+                    self.next_cursor,
                 )),
             ));
         }
@@ -615,6 +627,7 @@ impl PreparedEditBatch {
 pub struct PreparedCalculation {
     workbook: Arc<WorkbookSnapshot>,
     expected_revision: u64,
+    base_cursor: u64,
     base_revision: u64,
     options: CalculationOptions,
     execution_mode: CalculationExecutionMode,
@@ -673,14 +686,18 @@ impl PreparedCalculation {
                     })
                     .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
             );
-            let delta = build_empty_delta(
-                self.base_revision,
-                self.expected_revision,
-                self.execution_mode,
-                self.reason,
-            );
+            let delta = build_empty_delta(DeltaMetadata {
+                base_revision: self.base_revision,
+                result_revision: self.expected_revision,
+                mode: self.execution_mode,
+                reason: self.reason,
+                dirty_count: 0,
+                evaluated_count: 0,
+                parsed_formula_count: 0,
+            });
             return Ok(CompletedCalculation {
                 expected_revision: self.expected_revision,
+                base_cursor: self.base_cursor,
                 options: self.options,
                 compiled,
                 calculation,
@@ -738,11 +755,15 @@ impl PreparedCalculation {
                 previous,
                 &calculation,
                 &self.dirty,
-                self.base_revision,
-                self.expected_revision,
-                self.execution_mode,
-                self.reason,
-                evaluated_count,
+                DeltaMetadata {
+                    base_revision: self.base_revision,
+                    result_revision: self.expected_revision,
+                    mode: self.execution_mode,
+                    reason: self.reason,
+                    dirty_count: self.dirty.len(),
+                    evaluated_count,
+                    parsed_formula_count: 0,
+                },
                 self.limits.max_delta_cells,
                 &|| self.cancellation.is_cancelled(),
             )?
@@ -750,13 +771,15 @@ impl PreparedCalculation {
             build_delta(
                 self.previous.as_deref(),
                 &calculation,
-                self.base_revision,
-                self.expected_revision,
-                self.execution_mode,
-                self.reason,
-                self.dirty.len(),
-                evaluated_count,
-                parsed_formula_count,
+                DeltaMetadata {
+                    base_revision: self.base_revision,
+                    result_revision: self.expected_revision,
+                    mode: self.execution_mode,
+                    reason: self.reason,
+                    dirty_count: self.dirty.len(),
+                    evaluated_count,
+                    parsed_formula_count,
+                },
                 self.limits.max_delta_cells,
                 &|| self.cancellation.is_cancelled(),
             )?
@@ -766,6 +789,7 @@ impl PreparedCalculation {
         }
         Ok(CompletedCalculation {
             expected_revision: self.expected_revision,
+            base_cursor: self.base_cursor,
             options: self.options,
             compiled,
             calculation,
@@ -779,6 +803,7 @@ impl PreparedCalculation {
 #[derive(Debug)]
 pub struct CompletedCalculation {
     expected_revision: u64,
+    base_cursor: u64,
     options: CalculationOptions,
     compiled: Arc<CompiledWorkbook>,
     calculation: Arc<CalculationSnapshot>,
@@ -934,6 +959,7 @@ mod tests {
                 schedule_builds: 0,
                 schedule_visits: 0,
                 formula_snapshot_scans: 0,
+                area_dependency_visits: 0,
             }
         );
 
@@ -961,11 +987,12 @@ mod tests {
             work_counter::WorkCounters {
                 deep_cloned_cells: 0,
                 deep_cloned_asts: 0,
-                deep_cloned_results: 0,
+                deep_cloned_results: 8,
                 dependency_target_scans: 0,
                 schedule_builds: 0,
                 schedule_visits: 1,
                 formula_snapshot_scans: 0,
+                area_dependency_visits: 0,
             }
         );
     }
@@ -1005,6 +1032,7 @@ mod tests {
             )
             .expect("initial range calculation");
 
+        work_counter::reset();
         session
             .apply_changes(
                 session.workbook().semantic_revision(),
@@ -1015,7 +1043,6 @@ mod tests {
                 )]),
             )
             .expect("one range input edit");
-        work_counter::reset();
         let delta = session
             .recalculate(
                 RecalculationMode::Auto,
@@ -1027,13 +1054,14 @@ mod tests {
         assert_eq!(
             work_counter::snapshot(),
             work_counter::WorkCounters {
-                deep_cloned_cells: 0,
+                deep_cloned_cells: 2_560,
                 deep_cloned_asts: 0,
-                deep_cloned_results: 0,
+                deep_cloned_results: 1_200,
                 dependency_target_scans: 0,
                 schedule_builds: 0,
                 schedule_visits: 40,
                 formula_snapshot_scans: 0,
+                area_dependency_visits: 40,
             }
         );
     }

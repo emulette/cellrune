@@ -72,17 +72,46 @@ fn bessel_worksheet_functions_enforce_their_domains() {
         ("A6", "=BESSELJ(1.5,-1)"),
         ("A7", "=BESSELK(1.5,-1)"),
         ("A8", "=BESSELY(1.5,-1)"),
-        ("A9", "=BESSELI(1.5,-0.9)=BESSELI(1.5,0)"),
-        ("A10", "=BESSELJ(1.5,\"2\")"),
+        ("A9", "=BESSELI(1.5,-0.9)"),
+        ("A10", "=BESSELJ(1.5,-0.9)"),
+        ("A11", "=BESSELK(1.5,-0.9)"),
+        ("A12", "=BESSELY(1.5,-0.9)"),
+        ("A13", "=BESSELJ(1.5,\"2\")"),
     ]);
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
 
-    for address in ["A1", "A2", "A3", "A4", "A6", "A7", "A8"] {
+    for address in [
+        "A1", "A2", "A3", "A4", "A6", "A7", "A8", "A9", "A10", "A11", "A12",
+    ] {
         assert_error(&calculation, sheet, address, ExcelError::Number);
     }
     assert_error(&calculation, sheet, "A5", ExcelError::Value);
-    assert_logical(&calculation, sheet, "A9", true);
-    assert_number(&calculation, sheet, "A10", 0.232_087_672_144_214_72, 2e-13);
+    assert_number(&calculation, sheet, "A13", 0.232_087_672_144_214_72, 2e-13);
+}
+
+#[test]
+fn bessel_worksheet_functions_preserve_extreme_finite_results() {
+    let (sheet, workbook) =
+        workbook_with_formulas(&[("A1", "=BESSELK(100,500)"), ("A2", "=BESSELY(9E307,0)")]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    // mpmath 1.3.0 at 120 dps, using the exact binary64 worksheet inputs.
+    assert_number_abs_rel(
+        &calculation,
+        sheet,
+        "A1",
+        2.731_383_171_990_178_5e279,
+        0.0,
+        2e-11,
+    );
+    assert_number_abs_rel(
+        &calculation,
+        sheet,
+        "A2",
+        4.066_895_414_404_214e-155,
+        0.0,
+        2e-11,
+    );
 }
 
 #[test]

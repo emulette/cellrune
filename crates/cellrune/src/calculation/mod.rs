@@ -38,7 +38,7 @@ mod syntax;
 mod textfmt;
 mod value;
 #[cfg(test)]
-mod work_counter;
+pub(crate) mod work_counter;
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
@@ -590,7 +590,7 @@ impl MaterializedCalculationCell {
 
 const CALCULATION_ROW_CHUNK_SIZE: u32 = 256;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CalculationStore<V> {
     chunks: BTreeMap<(SheetId, u32), Arc<BTreeMap<CalculationCellId, V>>>,
     len: usize,
@@ -664,7 +664,26 @@ impl<V> CalculationStore<V> {
             .and_then(|chunk| chunk.get(cell))
     }
 
-    fn insert(&mut self, cell: CalculationCellId, value: V) -> Option<V>
+    fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut chunks = BTreeMap::new();
+        for (key, chunk) in &self.chunks {
+            if cancelled() {
+                return Err(());
+            }
+            chunks.insert(*key, Arc::clone(chunk));
+        }
+        Ok(Self {
+            chunks,
+            len: self.len,
+        })
+    }
+
+    fn insert_cancellable(
+        &mut self,
+        cell: CalculationCellId,
+        value: V,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Option<V>, ()>
     where
         V: Clone,
     {
@@ -672,27 +691,62 @@ impl<V> CalculationStore<V> {
             .chunks
             .entry(Self::chunk(cell))
             .or_insert_with(|| Arc::new(BTreeMap::new()));
-        let previous = Arc::make_mut(chunk).insert(cell, value);
+        if Arc::get_mut(chunk).is_none() {
+            let mut cloned = BTreeMap::new();
+            for (cloned_cell, cloned_value) in chunk.iter() {
+                if cancelled() {
+                    return Err(());
+                }
+                let cloned_value = cloned_value.clone();
+                #[cfg(test)]
+                work_counter::deep_cloned_results(1);
+                cloned.insert(*cloned_cell, cloned_value);
+            }
+            *chunk = Arc::new(cloned);
+        }
+        let previous = Arc::get_mut(chunk)
+            .expect("calculation chunk was made unique")
+            .insert(cell, value);
         if previous.is_none() {
             self.len += 1;
         }
-        previous
+        Ok(previous)
     }
 
-    fn remove(&mut self, cell: &CalculationCellId) -> Option<V>
+    fn remove_cancellable(
+        &mut self,
+        cell: &CalculationCellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Option<V>, ()>
     where
         V: Clone,
     {
         let chunk_key = Self::chunk(*cell);
-        let chunk = self.chunks.get_mut(&chunk_key)?;
-        let removed = Arc::make_mut(chunk).remove(cell);
+        let Some(chunk) = self.chunks.get_mut(&chunk_key) else {
+            return Ok(None);
+        };
+        if Arc::get_mut(chunk).is_none() {
+            let mut cloned = BTreeMap::new();
+            for (cloned_cell, cloned_value) in chunk.iter() {
+                if cancelled() {
+                    return Err(());
+                }
+                let cloned_value = cloned_value.clone();
+                #[cfg(test)]
+                work_counter::deep_cloned_results(1);
+                cloned.insert(*cloned_cell, cloned_value);
+            }
+            *chunk = Arc::new(cloned);
+        }
+        let unique_chunk = Arc::get_mut(chunk).expect("calculation chunk was made unique");
+        let removed = unique_chunk.remove(cell);
         if removed.is_some() {
             self.len -= 1;
         }
-        if chunk.is_empty() {
+        if unique_chunk.is_empty() {
             self.chunks.remove(&chunk_key);
         }
-        removed
+        Ok(removed)
     }
 
     fn iter(&self) -> CalculationStoreIter<'_, V> {
@@ -711,6 +765,56 @@ impl<V> CalculationStore<V> {
 
     const fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+fn calculation_store_mut_cancellable<'a, V: Clone>(
+    store: &'a mut Arc<CalculationStore<V>>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<&'a mut CalculationStore<V>, ()> {
+    if Arc::get_mut(store).is_none() {
+        *store = Arc::new(store.clone_cancellable(cancelled)?);
+    }
+    Ok(Arc::get_mut(store).expect("calculation store was made unique"))
+}
+
+#[cfg(test)]
+mod calculation_store_tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn copy_on_write_store_and_chunk_clones_poll_cancellation() {
+        let sheet = SheetId::new(1).expect("valid test sheet");
+        let first = CalculationCellId::new(
+            sheet,
+            CellAddress::from_indices(1, 1).expect("valid first address"),
+        );
+        let second = CalculationCellId::new(
+            sheet,
+            CellAddress::from_indices(2, 1).expect("valid second address"),
+        );
+        let mut values = BTreeMap::new();
+        values.insert(first, 1_u32);
+        values.insert(second, 2_u32);
+        let mut store = Arc::new(CalculationStore::from_map(values));
+        let installed = Arc::clone(&store);
+        let polls = Cell::new(0_usize);
+        work_counter::reset();
+        let cancelled = || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            next == 3
+        };
+
+        let mutable = calculation_store_mut_cancellable(&mut store, &cancelled)
+            .expect("outer store clone completes before cancellation");
+        assert_eq!(mutable.insert_cancellable(first, 3, &cancelled), Err(()),);
+        assert_eq!(polls.get(), 3);
+        assert_eq!(work_counter::snapshot().deep_cloned_results, 1);
+        assert_eq!(installed.get(&first), Some(&1));
+        assert_eq!(installed.get(&second), Some(&2));
     }
 }
 
@@ -849,27 +953,29 @@ impl CalculationSnapshot {
         let mut materialized_cells_by_owner = Arc::clone(&self.materialized_cells_by_owner);
         let mut numeric_decimal_traces = Arc::clone(&self.numeric_decimal_traces);
 
-        let cells_mut = Arc::make_mut(&mut cells);
+        let cells_mut = calculation_store_mut_cancellable(&mut cells, cancelled)?;
         for (cell, result) in cell_results {
             if cancelled() {
                 return Err(());
             }
-            cells_mut.insert(cell, result);
+            cells_mut.insert_cancellable(cell, result, cancelled)?;
         }
 
-        let owners_mut = Arc::make_mut(&mut materialized_cells_by_owner);
+        let owners_mut =
+            calculation_store_mut_cancellable(&mut materialized_cells_by_owner, cancelled)?;
         let mut removed = Vec::new();
         for owner in dirty {
-            if let Some(cells) = owners_mut.remove(owner) {
+            if let Some(cells) = owners_mut.remove_cancellable(owner, cancelled)? {
                 removed.extend(cells);
             }
         }
-        let materialized_mut = Arc::make_mut(&mut materialized_cells);
+        let materialized_mut =
+            calculation_store_mut_cancellable(&mut materialized_cells, cancelled)?;
         for cell in &removed {
             if cancelled() {
                 return Err(());
             }
-            materialized_mut.remove(cell);
+            materialized_mut.remove_cancellable(cell, cancelled)?;
         }
         let mut added_by_owner = BTreeMap::<CalculationCellId, Vec<CalculationCellId>>::new();
         for (cell, result) in materialized_results {
@@ -878,22 +984,22 @@ impl CalculationSnapshot {
             }
             let owner = materialized_owner(cell, &result);
             added_by_owner.entry(owner).or_default().push(cell);
-            materialized_mut.insert(cell, result);
+            materialized_mut.insert_cancellable(cell, result, cancelled)?;
         }
         for (owner, mut cells) in added_by_owner {
             cells.sort_unstable();
-            owners_mut.insert(owner, cells);
+            owners_mut.insert_cancellable(owner, cells, cancelled)?;
         }
 
-        let traces_mut = Arc::make_mut(&mut numeric_decimal_traces);
+        let traces_mut = calculation_store_mut_cancellable(&mut numeric_decimal_traces, cancelled)?;
         for cell in removed {
-            traces_mut.remove(&cell);
+            traces_mut.remove_cancellable(&cell, cancelled)?;
         }
         for (cell, trace) in decimal_traces {
             if cancelled() {
                 return Err(());
             }
-            traces_mut.insert(cell, trace);
+            traces_mut.insert_cancellable(cell, trace, cancelled)?;
         }
 
         Ok(Self {

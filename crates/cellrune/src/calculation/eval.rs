@@ -123,7 +123,7 @@ fn collect_column_extents(
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledWorkbook {
-    asts: Arc<BTreeMap<CellId, ParsedFormula>>,
+    asts: Arc<BTreeMap<CellId, Arc<ParsedFormula>>>,
     defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
     dependencies: Arc<DependencyGraph>,
     static_array_regions: Arc<Vec<ArrayRegion>>,
@@ -202,13 +202,20 @@ struct IndexedAreaDependency {
     formula: CellId,
 }
 
+const AREA_COLUMN_LEAF_COUNT: usize = super::EXCEL_MAX_COLUMNS as usize;
+
 #[derive(Debug, Clone, Default)]
-struct AreaIntervalIndex {
-    root: Option<Box<AreaIntervalNode>>,
+struct AreaSpatialIndex {
+    rows_by_column_node: BTreeMap<usize, AreaRowIntervalIndex>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AreaRowIntervalIndex {
+    root: Option<Box<AreaRowIntervalNode>>,
 }
 
 #[derive(Debug, Clone)]
-struct AreaIntervalNode {
+struct AreaRowIntervalNode {
     center: u32,
     crossing_by_start: Vec<IndexedAreaDependency>,
     crossing_by_end: Vec<IndexedAreaDependency>,
@@ -216,21 +223,78 @@ struct AreaIntervalNode {
     right: Option<Box<Self>>,
 }
 
-impl AreaIntervalIndex {
+impl AreaSpatialIndex {
     fn build(areas: Vec<IndexedAreaDependency>, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let mut areas_by_column_node = BTreeMap::<usize, Vec<IndexedAreaDependency>>::new();
+        for area in areas {
+            if cancelled() {
+                return Err(());
+            }
+            let mut left = AREA_COLUMN_LEAF_COUNT + area.rect.col_start as usize - 1;
+            let mut right = AREA_COLUMN_LEAF_COUNT + area.rect.col_end as usize - 1;
+            while left <= right {
+                if cancelled() {
+                    return Err(());
+                }
+                if !left.is_multiple_of(2) {
+                    areas_by_column_node
+                        .entry(left)
+                        .or_default()
+                        .push(area.clone());
+                    left += 1;
+                }
+                if right.is_multiple_of(2) {
+                    areas_by_column_node
+                        .entry(right)
+                        .or_default()
+                        .push(area.clone());
+                    right -= 1;
+                }
+                left /= 2;
+                right /= 2;
+            }
+        }
+        let mut rows_by_column_node = BTreeMap::new();
+        for (node, node_areas) in areas_by_column_node {
+            if cancelled() {
+                return Err(());
+            }
+            rows_by_column_node.insert(node, AreaRowIntervalIndex::build(node_areas, cancelled)?);
+        }
         Ok(Self {
-            root: AreaIntervalNode::build(areas, cancelled)?,
+            rows_by_column_node,
         })
     }
 
     fn formulas_for_cell(&self, row: u32, column: u32, output: &mut Vec<CellId>) {
-        if let Some(root) = &self.root {
-            root.formulas_for_cell(row, column, output);
+        if column == 0 || column as usize > AREA_COLUMN_LEAF_COUNT {
+            return;
+        }
+        let mut node = AREA_COLUMN_LEAF_COUNT + column as usize - 1;
+        while node > 0 {
+            if let Some(rows) = self.rows_by_column_node.get(&node) {
+                rows.formulas_for_row(row, output);
+            }
+            node /= 2;
         }
     }
 }
 
-impl AreaIntervalNode {
+impl AreaRowIntervalIndex {
+    fn build(areas: Vec<IndexedAreaDependency>, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        Ok(Self {
+            root: AreaRowIntervalNode::build(areas, cancelled)?,
+        })
+    }
+
+    fn formulas_for_row(&self, row: u32, output: &mut Vec<CellId>) {
+        if let Some(root) = &self.root {
+            root.formulas_for_row(row, output);
+        }
+    }
+}
+
+impl AreaRowIntervalNode {
     fn build(
         areas: Vec<IndexedAreaDependency>,
         cancelled: &impl Fn() -> bool,
@@ -274,42 +338,42 @@ impl AreaIntervalNode {
         })))
     }
 
-    fn formulas_for_cell(&self, row: u32, column: u32, output: &mut Vec<CellId>) {
-        let matches_column = |area: &&IndexedAreaDependency| {
-            (area.rect.col_start..=area.rect.col_end).contains(&column)
-        };
+    fn formulas_for_row(&self, row: u32, output: &mut Vec<CellId>) {
         match row.cmp(&self.center) {
             std::cmp::Ordering::Less => {
-                output.extend(
-                    self.crossing_by_start
-                        .iter()
-                        .take_while(|area| area.rect.row_start <= row)
-                        .filter(matches_column)
-                        .map(|area| area.formula),
-                );
+                for area in self
+                    .crossing_by_start
+                    .iter()
+                    .take_while(|area| area.rect.row_start <= row)
+                {
+                    #[cfg(test)]
+                    super::work_counter::area_dependency_visit();
+                    output.push(area.formula);
+                }
                 if let Some(left) = &self.left {
-                    left.formulas_for_cell(row, column, output);
+                    left.formulas_for_row(row, output);
                 }
             }
             std::cmp::Ordering::Greater => {
-                output.extend(
-                    self.crossing_by_end
-                        .iter()
-                        .take_while(|area| area.rect.row_end >= row)
-                        .filter(matches_column)
-                        .map(|area| area.formula),
-                );
+                for area in self
+                    .crossing_by_end
+                    .iter()
+                    .take_while(|area| area.rect.row_end >= row)
+                {
+                    #[cfg(test)]
+                    super::work_counter::area_dependency_visit();
+                    output.push(area.formula);
+                }
                 if let Some(right) = &self.right {
-                    right.formulas_for_cell(row, column, output);
+                    right.formulas_for_row(row, output);
                 }
             }
             std::cmp::Ordering::Equal => {
-                output.extend(
-                    self.crossing_by_start
-                        .iter()
-                        .filter(matches_column)
-                        .map(|area| area.formula),
-                );
+                for area in &self.crossing_by_start {
+                    #[cfg(test)]
+                    super::work_counter::area_dependency_visit();
+                    output.push(area.formula);
+                }
             }
         }
     }
@@ -318,7 +382,7 @@ impl AreaIntervalNode {
 #[derive(Debug, Clone, Default)]
 struct DependencyImpactIndex {
     exact: BTreeMap<CellId, Vec<CellId>>,
-    areas_by_sheet: BTreeMap<usize, AreaIntervalIndex>,
+    areas_by_sheet: BTreeMap<usize, AreaSpatialIndex>,
     reverse_dependents: BTreeMap<CellId, Vec<CellId>>,
 }
 
@@ -403,7 +467,7 @@ impl DependencyImpactIndex {
             areas.dedup_by(|left, right| left.rect == right.rect && left.formula == right.formula);
             index
                 .areas_by_sheet
-                .insert(sheet, AreaIntervalIndex::build(areas, cancelled)?);
+                .insert(sheet, AreaSpatialIndex::build(areas, cancelled)?);
         }
         for formulas in index.reverse_dependents.values_mut() {
             formulas.sort_unstable();
@@ -417,6 +481,8 @@ impl DependencyImpactIndex {
         if let Some(areas) = self.areas_by_sheet.get(&cell.0) {
             areas.formulas_for_cell(cell.1, cell.2, &mut formulas);
         }
+        formulas.sort_unstable();
+        formulas.dedup();
         formulas
     }
 }
@@ -668,7 +734,7 @@ pub struct Engine<'workbook> {
     dirty: Option<BTreeSet<CellId>>,
     options: CalculationOptions,
     table_topologies: BTreeMap<crate::TableId, TableTopologyRevision>,
-    asts: Arc<BTreeMap<CellId, ParsedFormula>>,
+    asts: Arc<BTreeMap<CellId, Arc<ParsedFormula>>>,
     defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
     dependencies: Arc<DependencyGraph>,
     results: BTreeMap<CellId, Value>,
@@ -825,7 +891,7 @@ impl<'workbook> Engine<'workbook> {
     }
 
     pub(super) fn parsed_expr(&self, cell: CellId) -> Option<&Expr> {
-        self.asts.get(&cell).map(ParsedFormula::root)
+        self.asts.get(&cell).map(|parsed| parsed.root())
     }
 
     pub(super) fn cell_has_formula(&self, cell: CellId) -> bool {

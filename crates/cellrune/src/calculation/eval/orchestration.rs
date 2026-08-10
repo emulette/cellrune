@@ -392,7 +392,7 @@ impl<'workbook> Engine<'workbook> {
                 };
                 match parse_formula_with_limits(text.as_str(), self.options.limits()) {
                     Ok(expr) => {
-                        Arc::make_mut(&mut self.asts).insert(id, expr);
+                        Arc::make_mut(&mut self.asts).insert(id, Arc::new(expr));
                     }
                     Err(error) => {
                         Arc::make_mut(&mut self.parse_failures).insert(id, error);

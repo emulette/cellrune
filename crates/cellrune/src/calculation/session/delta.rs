@@ -174,17 +174,21 @@ impl CalculationDeltaPage {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DeltaMetadata {
+    pub(super) base_revision: u64,
+    pub(super) result_revision: u64,
+    pub(super) mode: CalculationExecutionMode,
+    pub(super) reason: CalculationDecisionReason,
+    pub(super) dirty_count: usize,
+    pub(super) evaluated_count: usize,
+    pub(super) parsed_formula_count: usize,
+}
+
 pub(super) fn build_delta(
     previous: Option<&CalculationSnapshot>,
     current: &CalculationSnapshot,
-    base_revision: u64,
-    result_revision: u64,
-    mode: CalculationExecutionMode,
-    reason: CalculationDecisionReason,
-    dirty_count: usize,
-    evaluated_count: usize,
-    parsed_formula_count: usize,
+    metadata: DeltaMetadata,
     max_delta_cells: usize,
     cancelled: &impl Fn() -> bool,
 ) -> Result<CalculationDelta, SessionError> {
@@ -226,28 +230,23 @@ pub(super) fn build_delta(
     }
     Ok(CalculationDelta {
         cursor: 0,
-        base_revision,
-        result_revision,
-        mode,
-        reason,
-        dirty_count,
-        evaluated_count,
-        parsed_formula_count,
+        base_revision: metadata.base_revision,
+        result_revision: metadata.result_revision,
+        mode: metadata.mode,
+        reason: metadata.reason,
+        dirty_count: metadata.dirty_count,
+        evaluated_count: metadata.evaluated_count,
+        parsed_formula_count: metadata.parsed_formula_count,
         changed_cells,
         removed_materialized_cells,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn build_incremental_delta(
     previous: &CalculationSnapshot,
     current: &CalculationSnapshot,
     dirty: &BTreeSet<CalculationCellId>,
-    base_revision: u64,
-    result_revision: u64,
-    mode: CalculationExecutionMode,
-    reason: CalculationDecisionReason,
-    evaluated_count: usize,
+    metadata: DeltaMetadata,
     max_delta_cells: usize,
     cancelled: &impl Fn() -> bool,
 ) -> Result<CalculationDelta, SessionError> {
@@ -295,33 +294,28 @@ pub(super) fn build_incremental_delta(
     }
     Ok(CalculationDelta {
         cursor: 0,
-        base_revision,
-        result_revision,
-        mode,
-        reason,
-        dirty_count: dirty.len(),
-        evaluated_count,
-        parsed_formula_count: 0,
+        base_revision: metadata.base_revision,
+        result_revision: metadata.result_revision,
+        mode: metadata.mode,
+        reason: metadata.reason,
+        dirty_count: metadata.dirty_count,
+        evaluated_count: metadata.evaluated_count,
+        parsed_formula_count: metadata.parsed_formula_count,
         changed_cells,
         removed_materialized_cells,
     })
 }
 
-pub(super) fn build_empty_delta(
-    base_revision: u64,
-    result_revision: u64,
-    mode: CalculationExecutionMode,
-    reason: CalculationDecisionReason,
-) -> CalculationDelta {
+pub(super) fn build_empty_delta(metadata: DeltaMetadata) -> CalculationDelta {
     CalculationDelta {
         cursor: 0,
-        base_revision,
-        result_revision,
-        mode,
-        reason,
-        dirty_count: 0,
-        evaluated_count: 0,
-        parsed_formula_count: 0,
+        base_revision: metadata.base_revision,
+        result_revision: metadata.result_revision,
+        mode: metadata.mode,
+        reason: metadata.reason,
+        dirty_count: metadata.dirty_count,
+        evaluated_count: metadata.evaluated_count,
+        parsed_formula_count: metadata.parsed_formula_count,
         changed_cells: Vec::new(),
         removed_materialized_cells: Vec::new(),
     }

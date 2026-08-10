@@ -227,6 +227,10 @@ impl CellStore {
             .chunks
             .entry(Self::chunk(address))
             .or_insert_with(|| Arc::new(CellChunk::default()));
+        #[cfg(test)]
+        if Arc::strong_count(chunk) > 1 {
+            crate::calculation::work_counter::deep_cloned_cells(chunk.cells.len());
+        }
         let previous = Arc::make_mut(chunk).insert(address, cell);
         if previous.is_none() {
             self.len += 1;
@@ -237,6 +241,10 @@ impl CellStore {
     fn remove(&mut self, address: &CellAddress) -> Option<Cell> {
         let chunk_key = Self::chunk(*address);
         let chunk = self.chunks.get_mut(&chunk_key)?;
+        #[cfg(test)]
+        if Arc::strong_count(chunk) > 1 {
+            crate::calculation::work_counter::deep_cloned_cells(chunk.cells.len());
+        }
         let removed = Arc::make_mut(chunk).remove(address);
         if removed.is_some() {
             self.len -= 1;

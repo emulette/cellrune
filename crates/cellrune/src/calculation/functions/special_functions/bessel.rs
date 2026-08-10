@@ -88,11 +88,11 @@ pub(in crate::calculation::functions) fn worksheet_bessel(
 }
 
 fn normalized_order(value: f64) -> Result<u32, ErrorKind> {
-    if !value.is_finite() {
+    if !value.is_finite() || value < 0.0 {
         return Err(ErrorKind::Num);
     }
     let truncated = value.trunc();
-    if truncated < 0.0 || truncated > f64::from(MAX_ORDER) {
+    if truncated > f64::from(MAX_ORDER) {
         return Err(ErrorKind::Num);
     }
     Ok(truncated as u32)
@@ -181,40 +181,58 @@ pub(in crate::calculation::functions) fn bessel_k(
     x: f64,
     on_iteration: impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
-    let scaled = scaled_bessel_k(order, x, on_iteration)?;
-    if scaled == 0.0 {
-        return Ok(0.0);
-    }
-    if scaled.is_infinite() {
-        return Ok(f64::INFINITY);
-    }
-    Ok(exp_from_log(scaled.ln() - x))
+    Ok(exp_from_log(
+        log_scaled_bessel_k(order, x, on_iteration)? - x,
+    ))
 }
 
 /// exp(x) K_n(x), the stable coordinate used before the final K conversion.
+#[cfg(test)]
 pub(in crate::calculation::functions) fn scaled_bessel_k(
+    order: u32,
+    x: f64,
+    on_iteration: impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<f64, ErrorKind> {
+    Ok(exp_from_log(log_scaled_bessel_k(order, x, on_iteration)?))
+}
+
+fn log_scaled_bessel_k(
     order: u32,
     x: f64,
     mut on_iteration: impl FnMut() -> Result<(), ErrorKind>,
 ) -> Result<f64, ErrorKind> {
     validate_positive_argument(x)?;
-    let (mut previous, mut current) = scaled_k_seeds(x, &mut on_iteration)?;
+    let (previous, current) = scaled_k_seeds(x, &mut on_iteration)?;
+    if previous <= 0.0 || current <= 0.0 {
+        return Err(ErrorKind::Num);
+    }
+    let mut log_previous = previous.ln();
+    let mut log_current = current.ln();
     if order == 0 {
-        return Ok(previous);
+        return Ok(log_previous);
     }
     if order == 1 {
-        return Ok(current);
+        return Ok(log_current);
     }
     for index in 1..order {
         on_iteration()?;
-        let next = previous + (2.0 * f64::from(index) / x) * current;
-        previous = current;
-        current = next;
-        if current.is_infinite() {
-            break;
-        }
+        let coefficient = 2.0 * f64::from(index) / x;
+        let log_recurrence_term = coefficient.ln() + log_current;
+        let log_next = log_add_exp(log_previous, log_recurrence_term);
+        log_previous = log_current;
+        log_current = log_next;
     }
-    Ok(current)
+    Ok(log_current)
+}
+
+fn log_add_exp(left: f64, right: f64) -> f64 {
+    let high = left.max(right);
+    let low = left.min(right);
+    if high.is_infinite() {
+        high
+    } else {
+        high + (low - high).exp().ln_1p()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -476,7 +494,7 @@ fn hankel_seed(
     };
     let cosine = cosine_x * cosine_shift + sine_x * sine_shift;
     let sine = sine_x * cosine_shift - cosine_x * sine_shift;
-    let scale = (2.0 / (std::f64::consts::PI * x)).sqrt();
+    let scale = std::f64::consts::FRAC_2_PI.sqrt() / x.sqrt();
     Ok((
         scale * (cosine * even_sum - sine * odd_sum),
         scale * (sine * even_sum + cosine * odd_sum),
@@ -719,6 +737,14 @@ mod tests {
             5e-14,
             2e-11,
         );
+        // mpmath 1.3.0 at 120 dps. exp(x) K_n(x) overflows here even though
+        // the worksheet-visible K_n(x) remains finite.
+        assert_close(
+            bessel_k(500, 100.0, never).unwrap(),
+            2.731_383_171_990_178_5e279,
+            0.0,
+            2e-11,
+        );
         assert_close(
             bessel_j(0, 2.404_825_557_695_773, never).unwrap(),
             0.0,
@@ -767,12 +793,20 @@ mod tests {
             5e-14,
             2e-11,
         );
+        // Computing PI*x before the division used to overflow the finite
+        // Hankel amplitude to zero.
+        assert_close(
+            bessel_y(0, 9e307, never).unwrap(),
+            4.066_895_414_404_214e-155,
+            0.0,
+            2e-11,
+        );
     }
 
     #[test]
-    fn order_truncates_toward_zero_before_domain_validation() {
+    fn order_rejects_negative_inputs_before_truncating_toward_zero() {
         assert_eq!(normalized_order(2.9), Ok(2));
-        assert_eq!(normalized_order(-0.9), Ok(0));
+        assert_eq!(normalized_order(-0.9), Err(ErrorKind::Num));
         assert_eq!(normalized_order(-1.0), Err(ErrorKind::Num));
     }
 

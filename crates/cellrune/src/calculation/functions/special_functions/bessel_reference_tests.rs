@@ -2643,6 +2643,19 @@ fn matches_the_generated_high_precision_reference_grid() {
             actual,
             tolerance
         );
+        if case.expected != 0.0 && case.expected.abs() < case.absolute && case.relative > 0.0 {
+            let relative_error = ((actual - case.expected) / case.expected).abs();
+            assert!(
+                relative_error <= case.relative,
+                "{}({}, {}): tiny nonzero reference expected {:.17e}, got {:.17e}, relative error {:.17e}",
+                family_name(case.family),
+                case.order,
+                case.x,
+                case.expected,
+                actual,
+                relative_error,
+            );
+        }
     }
 }
 

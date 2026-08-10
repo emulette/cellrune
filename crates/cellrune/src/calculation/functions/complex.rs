@@ -1,5 +1,9 @@
 use super::super::value::ErrorKind;
 
+pub(super) const EXCEL_COMPLEX_NUMBER_BOUNDARY: f64 = 1e308;
+const LN_MAX_FINITE: f64 = 709.782_712_893_384;
+const LN_MIN_SUBNORMAL: f64 = -744.440_071_921_381_2;
+
 /// The imaginary-unit spelling used by Excel engineering functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ComplexSuffix {
@@ -36,6 +40,14 @@ pub(super) struct ComplexValue {
 }
 
 impl ComplexValue {
+    pub(super) const fn zero(suffix: ComplexSuffix) -> Self {
+        Self {
+            real: 0.0,
+            imaginary: 0.0,
+            suffix,
+        }
+    }
+
     pub(super) fn new(real: f64, imaginary: f64, suffix: ComplexSuffix) -> Result<Self, ErrorKind> {
         if !real.is_finite() || !imaginary.is_finite() {
             return Err(ErrorKind::Num);
@@ -88,7 +100,6 @@ impl ComplexValue {
         self.imaginary
     }
 
-    #[cfg(test)]
     pub(super) const fn suffix(self) -> ComplexSuffix {
         self.suffix
     }
@@ -164,23 +175,10 @@ impl ComplexValue {
             return Err(ErrorKind::Div0);
         }
 
-        // Scaling every component by the denominator's dominant component keeps the Smith
-        // denominator below four and avoids the otherwise spurious c*c+d*d overflow.
-        let scale = other.real.abs().max(other.imaginary.abs());
-        let a = self.real / scale;
-        let b = self.imaginary / scale;
-        let c = other.real / scale;
-        let d = other.imaginary / scale;
-        let (real, imaginary) = if c.abs() >= d.abs() {
-            let ratio = d / c;
-            let denominator = c + d * ratio;
-            ((a + b * ratio) / denominator, (b - a * ratio) / denominator)
-        } else {
-            let ratio = c / d;
-            let denominator = d + c * ratio;
-            ((a * ratio + b) / denominator, (b * ratio - a) / denominator)
-        };
-        Self::new(real, imaginary, self.suffix)
+        let reciprocal = ScaledComplex::from_value(other).reciprocal()?;
+        ScaledComplex::from_value(self)
+            .multiply(reciprocal)
+            .finish(self.suffix)
     }
 
     pub(super) fn product(values: &[Self]) -> Result<Self, ErrorKind> {
@@ -282,14 +280,18 @@ impl ComplexValue {
             }
             return Self::new(0.0, 0.0, self.suffix);
         }
-        if exponent.fract() == 0.0 && exponent.abs() <= i64::MAX as f64 {
+        if exponent.fract() == 0.0 && exponent.abs() < i64::MAX as f64 {
             return self.integer_power(exponent as i64, &mut work);
         }
         work()?;
         let log_magnitude = self.log_magnitude().ok_or(ErrorKind::Num)?;
-        let scale = (exponent * log_magnitude).exp();
+        let log_scale = exponent * log_magnitude;
         let angle = scaled_angle(exponent, self.argument());
-        Self::new(scale * angle.cos(), scale * angle.sin(), self.suffix)
+        Self::new(
+            component_from_log_scale(log_scale, angle.cos()),
+            component_from_log_scale(log_scale, angle.sin()),
+            self.suffix,
+        )
     }
 
     fn integer_power(
@@ -503,12 +505,27 @@ fn scaled_angle(exponent: f64, argument: f64) -> f64 {
     }
 }
 
+fn component_from_log_scale(log_scale: f64, direction: f64) -> f64 {
+    if direction == 0.0 {
+        return direction;
+    }
+    let log_component = log_scale + direction.abs().ln();
+    let magnitude = if log_component > LN_MAX_FINITE {
+        f64::INFINITY
+    } else if log_component < LN_MIN_SUBNORMAL {
+        0.0
+    } else {
+        log_component.exp()
+    };
+    magnitude.copysign(direction)
+}
+
 fn format_component(value: f64) -> String {
     if value == 0.0 {
         return "0".to_owned();
     }
     let exponent = value.abs().log10().floor() as i32;
-    if (-9..=14).contains(&exponent) {
+    if (-15..=15).contains(&exponent) {
         let precision = (14 - exponent).max(0) as usize;
         trim_decimal(format!("{value:.precision$}"))
     } else {
@@ -516,7 +533,12 @@ fn format_component(value: f64) -> String {
         let Some((mantissa, exponent)) = scientific.split_once('e') else {
             return scientific;
         };
-        format!("{}E{}", trim_decimal(mantissa.to_owned()), exponent)
+        let exponent = if exponent.starts_with('-') {
+            exponent.to_owned()
+        } else {
+            format!("+{}", exponent.trim_start_matches('+'))
+        };
+        format!("{}E{exponent}", trim_decimal(mantissa.to_owned()))
     }
 }
 
@@ -575,10 +597,32 @@ mod tests {
         assert_eq!(complex(0.0, 1.0).format(), "i");
         assert_eq!(complex(0.0, -1.0).format(), "-i");
         assert_eq!(complex(-0.0, -0.0).format(), "0");
+        assert_eq!(complex(1e15, 0.0).format(), "1000000000000000");
+        assert_eq!(complex(1e16, 0.0).format(), "1E+16");
+        assert_eq!(complex(1e-10, 0.0).format(), "0.0000000001");
+        assert_eq!(complex(1e-16, 0.0).format(), "1E-16");
+        assert_eq!(
+            complex(1e15, 1e-15).format(),
+            "1000000000000000+0.000000000000001i"
+        );
+        assert_eq!(complex(1e99, 1e-99).format(), "1E+99+1E-99i");
         assert_eq!(
             complex(-13.128_783_081_462_158, -15.200_784_463_067_954).format(),
             "-13.1287830814622-15.200784463068i"
         );
+        for value in [
+            f64::from_bits(1),
+            1e-300,
+            1e-10,
+            1e15,
+            1e16,
+            9.999_999_999_999_99e307,
+        ] {
+            let formatted = complex(value, -value).format();
+            let reparsed = ComplexValue::parse(&formatted).expect("formatter output must parse");
+            assert!(reparsed.real().is_finite(), "{formatted}");
+            assert!(reparsed.imaginary().is_finite(), "{formatted}");
+        }
         for input in ["1 + 2i", "1+-2i", "1e", "iI", "NaNi", "1+2I"] {
             assert_eq!(ComplexValue::parse(input), Err(ErrorKind::Num), "{input}");
         }
@@ -632,6 +676,11 @@ mod tests {
             .expect("scaled division");
         assert_close(quotient.real(), 0.5, 5e-14, 2e-12);
         assert_close(quotient.imaginary(), 0.5, 5e-14, 2e-12);
+        let small_denominator = complex(9e307, 0.0)
+            .divide(complex(0.5, 0.5))
+            .expect("small-denominator scaled division");
+        assert_close(small_denominator.real(), 9e307, 0.0, 2e-12);
+        assert_close(small_denominator.imaginary(), -9e307, 0.0, 2e-12);
         assert_eq!(
             ComplexValue::sum(&[
                 complex(1e50, -1e50),
@@ -663,6 +712,21 @@ mod tests {
             .expect("fractional power");
         assert_close(fractional.real(), 2.5e-41, 2e-13, 0.0);
         assert_close(fractional.imaginary(), 2.0, 2e-13, 0.0);
+        let finite_components_above_max_radius = complex(1e308, 1e308)
+            .power(1.00034, || Ok(()))
+            .expect("fractional power with finite Cartesian components");
+        assert_close(
+            finite_components_above_max_radius.real(),
+            1.272_492_326_619_526_4e308,
+            0.0,
+            2e-12,
+        );
+        assert_close(
+            finite_components_above_max_radius.imaginary(),
+            1.273_172_109_094_312_5e308,
+            0.0,
+            2e-12,
+        );
         assert_eq!(
             complex(1e200, 0.0)
                 .power(-2.0, || Ok(()))
@@ -765,6 +829,19 @@ mod tests {
                 "A15",
                 "=IMABS(\"1.7976931348623157E308+1.7976931348623157E308i\")",
             ),
+            ("A16", "=COMPLEX(1000000000000000,0)"),
+            ("A17", "=COMPLEX(1E16,0)"),
+            ("A18", "=COMPLEX(1E308,0)"),
+            ("A19", "=IMPOWER(\"0.6+0.8i\",1E19)"),
+            ("A20", "=IMDIV(\"9E307\",\"0.5+0.5i\")"),
+            ("A21", "=IMREAL(IMPOWER(\"1E308+1E308i\",1.00034))"),
+            ("A22", "=IMAGINARY(IMPOWER(\"1E308+1E308i\",1.00034))"),
+            ("A23", "=IMSUM(C1:C2)"),
+            ("A24", "=IMPRODUCT(C1:C2)"),
+            ("A25", "=IMSUM(C1)"),
+            ("A26", "=IMPRODUCT(C1)"),
+            ("A27", "=COMPLEX(9E307,0)"),
+            ("A28", "=COMPLEX(1E15,1E-15)"),
         ] {
             draft
                 .set_cell_formula(
@@ -774,6 +851,13 @@ mod tests {
                 )
                 .expect("formula edit");
         }
+        draft
+            .set_cell_value(
+                sheet,
+                CellAddress::from_a1("C2").expect("valid collection value address"),
+                CellValue::Text("3+4j".to_owned()),
+            )
+            .expect("collection value edit");
         let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
         let result = |address: &str| {
             calculation.cell(CalculationCellId::new(
@@ -792,6 +876,13 @@ mod tests {
             ("A12", "-13.1287830814622-15.200784463068i"),
             ("A13", "1.6094379124341+0.927295218001612i"),
             ("A14", "2+i"),
+            ("A16", "1000000000000000"),
+            ("A17", "1E+16"),
+            ("A20", "9E+307-9E+307i"),
+            ("A23", "3+4j"),
+            ("A24", "0"),
+            ("A27", "9E+307"),
+            ("A28", "1000000000000000+0.000000000000001i"),
         ] {
             assert_eq!(
                 result(address),
@@ -806,6 +897,8 @@ mod tests {
             ("A3", 4.0),
             ("A4", 0.927_295_218_001_612_2),
             ("A6", 3.0),
+            ("A21", 1.272_492_326_619_526_4e308),
+            ("A22", 1.273_172_109_094_312_5e308),
         ] {
             let Some(CalculationCellResult::Value(CellValue::Number(value))) = result(address)
             else {
@@ -814,13 +907,16 @@ mod tests {
                     result(address)
                 );
             };
-            assert_close(value.get(), expected, 5e-15, 5e-13);
+            assert_close(value.get(), expected, 5e-15, 2e-12);
         }
-        assert_eq!(
-            result("A15"),
-            Some(&CalculationCellResult::Value(CellValue::Error(
-                ExcelError::Number,
-            )))
-        );
+        for address in ["A15", "A18", "A19", "A25", "A26"] {
+            assert_eq!(
+                result(address),
+                Some(&CalculationCellResult::Value(CellValue::Error(
+                    ExcelError::Number,
+                ))),
+                "{address}"
+            );
+        }
     }
 }

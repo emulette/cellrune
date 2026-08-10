@@ -1432,6 +1432,70 @@ fn stale_and_cancelled_jobs_never_replace_current_results() {
 }
 
 #[test]
+fn same_revision_older_job_cannot_replace_a_newer_calculation() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([WorkbookChange::set_cell_formula(
+                sheet_id,
+                address("A1"),
+                formula("TODAY()"),
+            )]),
+        )
+        .expect("TODAY workbook");
+    let first_options = CalculationOptions::default()
+        .with_today_serial(FiniteNumber::new(1.0).expect("finite first TODAY serial"));
+    let second_options = CalculationOptions::default()
+        .with_today_serial(FiniteNumber::new(2.0).expect("finite second TODAY serial"));
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            first_options,
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    let older = session
+        .prepare_recalculation(
+            RecalculationMode::Auto,
+            first_options,
+            CancellationToken::new(),
+        )
+        .expect("older no-dirty job")
+        .run()
+        .expect("older job completes");
+    let newer = session
+        .prepare_recalculation(
+            RecalculationMode::Auto,
+            second_options,
+            CancellationToken::new(),
+        )
+        .expect("newer options job")
+        .run()
+        .expect("newer job completes");
+
+    session.install(newer).expect("newer job installs");
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("A1")))),
+        Some(&CalculationCellResult::Value(number(2.0))),
+    );
+    let error = session
+        .install(older)
+        .expect_err("older same-revision job must be stale");
+    assert_eq!(error.code(), SessionErrorCode::StaleResult);
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("A1")))),
+        Some(&CalculationCellResult::Value(number(2.0))),
+    );
+}
+
+#[test]
 fn cursor_history_is_stable_and_revision_conflicts_are_explicit() {
     let mut session = chain_session();
     let first = session
@@ -1914,6 +1978,65 @@ fn dynamic_references_hidden_in_defined_names_reject_incremental_recalculation()
         .expect("auto full calculation");
     assert_eq!(delta.mode(), CalculationExecutionMode::Full);
     assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+    assert_calculations_equal(
+        session.calculation().expect("installed dynamic result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
+fn dynamic_reference_target_switch_recompiles_and_matches_fresh_full() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address("A1"),
+                    CellValue::Text("C1".to_owned()),
+                ),
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("INDIRECT(A1)")),
+                WorkbookChange::set_cell_value(sheet_id, address("C1"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("C1+1")),
+            ]),
+        )
+        .expect("dynamic-reference workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                CellValue::Text("D1".to_owned()),
+            )]),
+        )
+        .expect("switch INDIRECT target");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("dynamic full fallback");
+
+    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("B1")))),
+        Some(&CalculationCellResult::Value(number(2.0))),
+    );
     assert_calculations_equal(
         session.calculation().expect("installed dynamic result"),
         &calculate_workbook(session.workbook(), CalculationOptions::default()),
