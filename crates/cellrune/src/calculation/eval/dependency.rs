@@ -399,7 +399,7 @@ impl Engine<'_> {
                 }
             }
         }
-        for (cell, parsed) in &self.asts {
+        for (cell, parsed) in self.asts.iter() {
             if cancelled() {
                 return Err(());
             }
@@ -441,7 +441,7 @@ impl Engine<'_> {
                 }
             }
         }
-        for (cell, parsed) in &self.asts {
+        for (cell, parsed) in self.asts.iter() {
             if cancelled() {
                 return Err(());
             }
@@ -481,7 +481,7 @@ impl Engine<'_> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<BTreeMap<super::CellId, Vec<DependencyTarget>>, ()> {
         let mut result = BTreeMap::new();
-        for (cell, parsed) in &self.asts {
+        for (cell, parsed) in self.asts.iter() {
             if cancelled() {
                 return Err(());
             }
@@ -696,7 +696,7 @@ impl Engine<'_> {
             formula_cells.push(cells);
         }
         let mut edge_count = 0_u64;
-        for (cell, parsed) in &self.asts {
+        for (cell, parsed) in self.asts.iter() {
             if cancelled() {
                 return Err(());
             }

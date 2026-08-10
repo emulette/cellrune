@@ -1,5 +1,7 @@
+use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
+use std::sync::{Arc, OnceLock};
 
 mod table_index;
 
@@ -11,6 +13,7 @@ use crate::{
     NumberFormat, Provenance, Row, Table, TableColumn, TableColumnId, TableId, ValidationError,
 };
 
+#[cfg(test)]
 fn clone_map_cancellable<K, V>(
     source: &BTreeMap<K, V>,
     cancelled: &impl Fn() -> bool,
@@ -118,58 +121,202 @@ pub enum SheetVisibility {
     VeryHidden,
 }
 
+const CELL_ROW_CHUNK_SIZE: u32 = 256;
+
+#[derive(Debug, Clone, Default)]
+struct CellChunk {
+    cells: BTreeMap<CellAddress, Cell>,
+    semantic_fingerprint: OnceLock<[u8; 32]>,
+}
+
+impl CellChunk {
+    fn insert(&mut self, address: CellAddress, cell: Cell) -> Option<Cell> {
+        self.semantic_fingerprint = OnceLock::new();
+        self.cells.insert(address, cell)
+    }
+
+    fn remove(&mut self, address: &CellAddress) -> Option<Cell> {
+        self.semantic_fingerprint = OnceLock::new();
+        self.cells.remove(address)
+    }
+
+    fn semantic_fingerprint_cancellable(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<[u8; 32], ()> {
+        if let Some(fingerprint) = self.semantic_fingerprint.get() {
+            return Ok(*fingerprint);
+        }
+        let fingerprint = crate::calculation::identity::cell_chunk_fingerprint_cancellable(
+            self.cells.values(),
+            self.cells.len(),
+            cancelled,
+        )?;
+        let _ = self.semantic_fingerprint.set(fingerprint);
+        Ok(*self
+            .semantic_fingerprint
+            .get()
+            .expect("cell chunk fingerprint was initialized"))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct CellStore {
+    chunks: BTreeMap<u32, Arc<CellChunk>>,
+    len: usize,
+}
+
+type ChunkValueIter<'a> = btree_map::Values<'a, CellAddress, Cell>;
+type ChunkMapValueIter<'a> = btree_map::Values<'a, u32, Arc<CellChunk>>;
+type FlatCellValues<'a> = std::iter::FlatMap<
+    ChunkMapValueIter<'a>,
+    ChunkValueIter<'a>,
+    fn(&'a Arc<CellChunk>) -> ChunkValueIter<'a>,
+>;
+
+struct CellStoreValues<'a> {
+    inner: FlatCellValues<'a>,
+    remaining: usize,
+}
+
+impl<'a> Iterator for CellStoreValues<'a> {
+    type Item = &'a Cell;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = self.inner.next()?;
+        self.remaining -= 1;
+        Some(value)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl DoubleEndedIterator for CellStoreValues<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let value = self.inner.next_back()?;
+        self.remaining -= 1;
+        Some(value)
+    }
+}
+
+impl ExactSizeIterator for CellStoreValues<'_> {}
+
+fn cell_chunk_values(chunk: &Arc<CellChunk>) -> ChunkValueIter<'_> {
+    chunk.cells.values()
+}
+
+impl CellStore {
+    fn chunk(address: CellAddress) -> u32 {
+        (address.row().get() - 1) / CELL_ROW_CHUNK_SIZE
+    }
+
+    fn contains_key(&self, address: &CellAddress) -> bool {
+        self.get(address).is_some()
+    }
+
+    fn get(&self, address: &CellAddress) -> Option<&Cell> {
+        self.chunks
+            .get(&Self::chunk(*address))
+            .and_then(|chunk| chunk.cells.get(address))
+    }
+
+    fn insert(&mut self, address: CellAddress, cell: Cell) -> Option<Cell> {
+        let chunk = self
+            .chunks
+            .entry(Self::chunk(address))
+            .or_insert_with(|| Arc::new(CellChunk::default()));
+        let previous = Arc::make_mut(chunk).insert(address, cell);
+        if previous.is_none() {
+            self.len += 1;
+        }
+        previous
+    }
+
+    fn remove(&mut self, address: &CellAddress) -> Option<Cell> {
+        let chunk_key = Self::chunk(*address);
+        let chunk = self.chunks.get_mut(&chunk_key)?;
+        let removed = Arc::make_mut(chunk).remove(address);
+        if removed.is_some() {
+            self.len -= 1;
+        }
+        if chunk.cells.is_empty() {
+            self.chunks.remove(&chunk_key);
+        }
+        removed
+    }
+
+    fn values(&self) -> CellStoreValues<'_> {
+        CellStoreValues {
+            inner: self
+                .chunks
+                .values()
+                .flat_map(cell_chunk_values as fn(&Arc<CellChunk>) -> ChunkValueIter<'_>),
+            remaining: self.len,
+        }
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn semantic_fingerprints_cancellable(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<[u8; 32]>, ()> {
+        let mut fingerprints = Vec::with_capacity(self.chunks.len());
+        for chunk in self.chunks.values() {
+            if cancelled() {
+                return Err(());
+            }
+            fingerprints.push(chunk.semantic_fingerprint_cancellable(cancelled)?);
+        }
+        Ok(fingerprints)
+    }
+}
+
 /// A sparse, format-neutral worksheet.
 #[derive(Debug, Clone)]
 pub struct Sheet {
     id: SheetId,
     name: SheetName,
     visibility: SheetVisibility,
-    cells: BTreeMap<CellAddress, Cell>,
-    formula_addresses: BTreeSet<CellAddress>,
+    cells: CellStore,
+    formula_addresses: Arc<BTreeSet<CellAddress>>,
+    column_max_rows: Arc<BTreeMap<u32, u32>>,
+    bounds_dirty: bool,
     min_row: Option<Row>,
     min_column: Option<Column>,
     max_row: Option<Row>,
     max_column: Option<Column>,
-    merged_ranges: Vec<CellRange>,
-    tables: Vec<Table>,
+    merged_ranges: Arc<Vec<CellRange>>,
+    tables: Arc<Vec<Table>>,
 }
 
 impl Sheet {
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        let cells = clone_map_cancellable(&self.cells, cancelled)?;
-        let mut formula_addresses = BTreeSet::new();
-        for address in &self.formula_addresses {
-            if cancelled() {
-                return Err(());
-            }
-            formula_addresses.insert(*address);
-        }
-        let mut merged_ranges = Vec::with_capacity(self.merged_ranges.len());
-        for range in &self.merged_ranges {
-            if cancelled() {
-                return Err(());
-            }
-            merged_ranges.push(*range);
-        }
-        let mut tables = Vec::with_capacity(self.tables.len());
-        for table in &self.tables {
-            if cancelled() {
-                return Err(());
-            }
-            tables.push(table.clone_cancellable(cancelled)?);
+        if cancelled() {
+            return Err(());
         }
         Ok(Self {
             id: self.id,
             name: self.name.clone(),
             visibility: self.visibility,
-            cells,
-            formula_addresses,
+            cells: self.cells.clone(),
+            formula_addresses: Arc::clone(&self.formula_addresses),
+            column_max_rows: Arc::clone(&self.column_max_rows),
+            bounds_dirty: self.bounds_dirty,
             min_row: self.min_row,
             min_column: self.min_column,
             max_row: self.max_row,
             max_column: self.max_column,
-            merged_ranges,
-            tables,
+            merged_ranges: Arc::clone(&self.merged_ranges),
+            tables: Arc::clone(&self.tables),
         })
     }
 
@@ -179,14 +326,16 @@ impl Sheet {
             id,
             name,
             visibility,
-            cells: BTreeMap::new(),
-            formula_addresses: BTreeSet::new(),
+            cells: CellStore::default(),
+            formula_addresses: Arc::new(BTreeSet::new()),
+            column_max_rows: Arc::new(BTreeMap::new()),
+            bounds_dirty: false,
             min_row: None,
             min_column: None,
             max_row: None,
             max_column: None,
-            merged_ranges: Vec::new(),
-            tables: Vec::new(),
+            merged_ranges: Arc::new(Vec::new()),
+            tables: Arc::new(Vec::new()),
         }
     }
 
@@ -232,12 +381,13 @@ impl Sheet {
         }
         let is_formula = matches!(content, CellContent::Formula(_));
         self.update_bounds(address);
+        self.update_column_extent(address);
         self.cells.insert(
             address,
             Cell::with_number_format(address, content, number_format),
         );
         if is_formula {
-            self.formula_addresses.insert(address);
+            Arc::make_mut(&mut self.formula_addresses).insert(address);
         }
         Ok(())
     }
@@ -259,6 +409,17 @@ impl Sheet {
     /// Iterates sparse cells in deterministic row-major order.
     pub fn cells(&self) -> impl ExactSizeIterator<Item = &Cell> + DoubleEndedIterator {
         self.cells.values()
+    }
+
+    pub(crate) fn column_max_rows(&self) -> &BTreeMap<u32, u32> {
+        &self.column_max_rows
+    }
+
+    pub(crate) fn semantic_cell_chunk_fingerprints_cancellable(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<[u8; 32]>, ()> {
+        self.cells.semantic_fingerprints_cancellable(cancelled)
     }
 
     pub(crate) fn next_formula_cell_after(&self, after: Option<CellAddress>) -> Option<Cell> {
@@ -287,7 +448,7 @@ impl Sheet {
     /// The reader stores only validated, pairwise non-overlapping, multi-cell ranges; entries
     /// that fail those checks are reported as diagnostics and dropped.
     pub fn merged_ranges(&self) -> &[CellRange] {
-        &self.merged_ranges
+        self.merged_ranges.as_slice()
     }
 
     /// Stores the validated merged ranges for this sheet.
@@ -295,23 +456,23 @@ impl Sheet {
     /// Callers must pass ranges already sorted by `(start, end)` and pairwise non-overlapping;
     /// the reader's merge parser is the only producer of that order.
     pub(crate) fn set_merged_ranges(&mut self, merged_ranges: Vec<CellRange>) {
-        self.merged_ranges = merged_ranges;
+        self.merged_ranges = Arc::new(merged_ranges);
     }
 
     /// Returns this sheet's tables in XLSX declaration order.
     pub fn tables(&self) -> &[Table] {
-        &self.tables
+        self.tables.as_slice()
     }
 
     /// Stores the validated tables for this sheet.
     ///
     /// Workbook-wide name uniqueness is enforced when the snapshot is constructed, not here.
     pub(crate) fn set_tables(&mut self, tables: Vec<Table>) {
-        self.tables = tables;
+        self.tables = Arc::new(tables);
     }
 
     pub(crate) fn tables_mut(&mut self) -> &mut [Table] {
-        &mut self.tables
+        Arc::make_mut(&mut self.tables).as_mut_slice()
     }
 
     /// Returns the smallest bounding rectangle containing all sparse cells.
@@ -340,18 +501,21 @@ impl Sheet {
         );
     }
 
+    fn update_column_extent(&mut self, address: CellAddress) {
+        Arc::make_mut(&mut self.column_max_rows)
+            .entry(address.column().get())
+            .and_modify(|row| *row = (*row).max(address.row().get()))
+            .or_insert(address.row().get());
+    }
+
     pub(crate) fn upsert_cell(
         &mut self,
         address: CellAddress,
         content: CellContent,
         number_format: NumberFormat,
     ) {
-        self.track_formula_address(address, &content);
-        self.cells.insert(
-            address,
-            Cell::with_content_and_number_format(address, content, number_format),
-        );
-        self.rebuild_bounds();
+        self.upsert_cell_deferred(address, content, number_format);
+        self.finish_deferred_cell_edits();
     }
 
     pub(crate) fn upsert_cell_deferred(
@@ -361,19 +525,40 @@ impl Sheet {
         number_format: NumberFormat,
     ) {
         self.track_formula_address(address, &content);
-        self.cells.insert(
+        let previous = self.cells.insert(
             address,
             Cell::with_content_and_number_format(address, content, number_format),
         );
+        if previous.is_none() {
+            self.update_bounds(address);
+            self.update_column_extent(address);
+        }
     }
 
     pub(crate) fn remove_cell_deferred(&mut self, address: CellAddress) -> bool {
-        self.formula_addresses.remove(&address);
-        self.cells.remove(&address).is_some()
+        if self.formula_addresses.contains(&address) {
+            Arc::make_mut(&mut self.formula_addresses).remove(&address);
+        }
+        let removed = self.cells.remove(&address).is_some();
+        if removed
+            && (self.min_row == Some(address.row())
+                || self.max_row == Some(address.row())
+                || self.min_column == Some(address.column())
+                || self.max_column == Some(address.column())
+                || self
+                    .column_max_rows
+                    .get(&address.column().get())
+                    .is_some_and(|row| *row == address.row().get()))
+        {
+            self.bounds_dirty = true;
+        }
+        removed
     }
 
     pub(crate) fn finish_deferred_cell_edits(&mut self) {
-        self.rebuild_bounds();
+        if self.bounds_dirty {
+            self.rebuild_bounds();
+        }
     }
 
     pub(crate) fn rename(&mut self, name: SheetName) {
@@ -389,17 +574,22 @@ impl Sheet {
         self.min_column = None;
         self.max_row = None;
         self.max_column = None;
-        let addresses = self.cells.keys().copied().collect::<Vec<_>>();
+        self.column_max_rows = Arc::new(BTreeMap::new());
+        let addresses = self.cells.values().map(Cell::address).collect::<Vec<_>>();
         for address in addresses {
             self.update_bounds(address);
+            self.update_column_extent(address);
         }
+        self.bounds_dirty = false;
     }
 
     fn track_formula_address(&mut self, address: CellAddress, content: &CellContent) {
         if matches!(content, CellContent::Formula(_)) {
-            self.formula_addresses.insert(address);
-        } else {
-            self.formula_addresses.remove(&address);
+            if !self.formula_addresses.contains(&address) {
+                Arc::make_mut(&mut self.formula_addresses).insert(address);
+            }
+        } else if self.formula_addresses.contains(&address) {
+            Arc::make_mut(&mut self.formula_addresses).remove(&address);
         }
     }
 }
@@ -537,6 +727,7 @@ pub struct WorkbookSnapshot {
     source: WorkbookSource,
     provenance: Provenance,
     semantic_revision: u64,
+    semantic_fingerprint: OnceLock<[u8; 32]>,
 }
 
 pub(crate) enum WorkbookBuildError {
@@ -561,6 +752,7 @@ impl From<ValidationError> for WorkbookBuildError {
 }
 
 impl WorkbookSnapshot {
+    #[cfg(test)]
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut sheets = Vec::with_capacity(self.sheets.len());
         for sheet in &self.sheets {
@@ -606,6 +798,7 @@ impl WorkbookSnapshot {
             source: self.source,
             provenance: self.provenance.clone(),
             semantic_revision: self.semantic_revision,
+            semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
     }
 
@@ -633,6 +826,7 @@ impl WorkbookSnapshot {
             source: WorkbookSource::default(),
             provenance: Provenance::new(crate::ProviderIdentity::writer(), None),
             semantic_revision: 0,
+            semantic_fingerprint: OnceLock::new(),
         }
     }
 
@@ -774,6 +968,7 @@ impl WorkbookSnapshot {
             source,
             provenance,
             semantic_revision: 0,
+            semantic_fingerprint: OnceLock::new(),
         })
     }
 
@@ -918,6 +1113,22 @@ impl WorkbookSnapshot {
     /// Returns the monotonic semantic revision associated with this snapshot.
     pub const fn semantic_revision(&self) -> u64 {
         self.semantic_revision
+    }
+
+    pub(crate) fn semantic_fingerprint_cancellable(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<[u8; 32], ()> {
+        if let Some(fingerprint) = self.semantic_fingerprint.get() {
+            return Ok(*fingerprint);
+        }
+        let fingerprint =
+            crate::calculation::identity::workbook_fingerprint_cancellable(self, cancelled)?;
+        let _ = self.semantic_fingerprint.set(fingerprint);
+        Ok(*self
+            .semantic_fingerprint
+            .get()
+            .expect("semantic fingerprint was initialized"))
     }
 
     pub(crate) const fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {

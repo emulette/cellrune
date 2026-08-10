@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use super::super::DraftCellMutation;
+use super::super::DraftCellMutationStore;
 use super::BatchExecutionError;
 use super::staged::{mark_upsert, sheet_by_id_mut};
 use crate::calculation::formula_rewrite::{
@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub(super) struct FormulaEditState<'a> {
-    pub(super) mutations: &'a mut BTreeMap<CalculationCellId, DraftCellMutation>,
+    pub(super) mutations: &'a mut DraftCellMutationStore,
     pub(super) changed_cells: &'a mut BTreeSet<CalculationCellId>,
     pub(super) calculation_changed_cells: &'a mut BTreeSet<CalculationCellId>,
     pub(super) touched_sheets: &'a mut BTreeSet<SheetId>,

@@ -10,6 +10,40 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-08-10
+
+### Added
+
+- `CONVERT` with a typed, case-sensitive registry covering 102 unit entries and 152 accepted unit
+  spellings across mass, distance, time, pressure, force, energy, power, magnetism, temperature,
+  volume, area, information, and speed, including explicit decimal and binary prefix policies.
+- Four budgeted first-party Bessel functions: `BESSELI`, `BESSELJ`, `BESSELK`, and `BESSELY`,
+  with family-specific domain, parity, recurrence, series, and asymptotic handling.
+- Fourteen complex-text functions: `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`, `IMCONJUGATE`,
+  `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`, `IMEXP`, `IMLN`, and `IMSQRT`,
+  sharing one finite parser, canonical formatter, suffix policy, and scaled arithmetic layer.
+
+### Changed
+
+- The public function catalog now contains 386 official Excel-facing names and 387 accepted
+  entries including the non-official OOXML dummy-function marker. The versioned 0.1.13 catalog
+  and semantic snapshots remain byte-exact.
+- Topology-stable recalculation now shares immutable workbook, compiled topology, and installed
+  result roots; reuses persistent impact indexes and topological ranks; and patches only dirty
+  result, spill, trace, and delta chunks. No-dirty calculation bypasses evaluator setup, graph
+  scheduling, formula snapshot scans, and result-map comparison.
+- Excel Oracle expectations classify all 33 active nominal and boundary cases for the nineteen new
+  functions as matches in both frozen host profiles. Eight Bessel numeric cases use their reviewed
+  worksheet-compatibility tolerance while independent high-precision kernel tests remain stricter.
+
+### Fixed
+
+- Avoided intermediate overflow in extreme finite unit identity conversions and complex power,
+  square-root, magnitude, and exponential calculations.
+- Preserved out-of-lock cancellation, resource accounting, stale-result rejection, source
+  identity, decimal traces, and dynamic-dependency full-recalculation fallbacks on the optimized
+  session path.
+
 ## [0.1.13] - 2026-08-09
 
 ### Added
@@ -647,7 +681,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/emulette/cellrune/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/emulette/cellrune/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/emulette/cellrune/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/emulette/cellrune/compare/v0.1.10...v0.1.11

@@ -524,6 +524,7 @@ impl TableColumn {
         self.totals_row_formula.as_ref()
     }
 
+    #[cfg(test)]
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         if cancelled() {
             return Err(());
@@ -584,6 +585,7 @@ pub struct Table {
 }
 
 impl Table {
+    #[cfg(test)]
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut columns = Vec::with_capacity(self.columns.len());
         for column in &self.columns {

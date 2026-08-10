@@ -5,7 +5,9 @@ use crate::{
     CellAddress, CellRange, EXCEL_MAX_ROWS, Sheet, SheetId, TableColumnId, TableId, ValidationError,
 };
 
-use super::{case_insensitive_key, clone_map_cancellable};
+use super::case_insensitive_key;
+#[cfg(test)]
+use super::clone_map_cancellable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TableLocation {
@@ -143,6 +145,7 @@ impl<T: Copy> TableRangeIndex<T> {
             || self.intersects_at(node * 2 + 1, middle + 1, node_end, range)
     }
 
+    #[cfg(test)]
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut nodes = BTreeMap::new();
         for (node, columns) in &self.nodes {
@@ -306,6 +309,7 @@ impl TableIndex {
         Ok(index)
     }
 
+    #[cfg(test)]
     pub(super) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut column_names = BTreeMap::new();
         for (table_id, names) in &self.column_names {

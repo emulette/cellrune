@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.13 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.14 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.13
+cargo add cellrune@0.1.14
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.13"
+cellrune = "0.1.14"
 ```
 
 ## Features
@@ -98,15 +98,13 @@ summarize the functions used by a workbook. `scan_formula_capabilities` remains 
 optional static inventory for migration planning and user-interface reporting; calculation does
 not require it.
 
-CellRune 0.1.13 adds exactly 20 official Excel-facing names: `F.DIST`, `F.DIST.RT`, `F.INV`,
-`F.INV.RT`, `F.TEST`, `FDIST`, `FINV`, `FTEST`, `T.DIST`, `T.DIST.2T`, `T.DIST.RT`, `T.INV`,
-`T.INV.2T`, `T.TEST`, `TDIST`, `TINV`, `TTEST`, `Z.TEST`, `ZTEST`, and `COVARIANCE.S`. The shared
-incomplete-beta kernel evaluates lower and upper tails directly, including representable
-subnormal tails, and uses a uniform large-shape expansion near the distribution center. Stable
-online sample moments, together with scaled variance and standard-error combinations in the
-hypothesis tests, protect extreme finite inputs from avoidable intermediate overflow. The source
-catalog contains 367 official names and 368 accepted entries including the OOXML dummy-function
-marker.
+CellRune 0.1.14 adds exactly 19 official Excel-facing engineering names: `CONVERT`, `BESSELI`,
+`BESSELJ`, `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`, `IMCONJUGATE`,
+`IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`, `IMEXP`, `IMLN`, and `IMSQRT`.
+`CONVERT` uses a typed, case-sensitive unit registry; the complex family shares one finite parser
+and canonical formatter; and the four Bessel functions use budgeted first-party kernels. The
+source catalog contains 386 official names and 387 accepted entries including the OOXML
+dummy-function marker.
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;
@@ -233,12 +231,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.13 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.14 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.13"
-npm install "@cellrune/node@0.1.13"
+python -m pip install "cellrune==0.1.14"
+npm install "@cellrune/node@0.1.14"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

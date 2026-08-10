@@ -202,6 +202,26 @@ A family's cumulative and quantile forms are evaluated through one shared tail k
 cannot drift apart from each other; the density forms are built on the same `ln_gamma` and
 `ln_beta` primitives. Every kernel is first-party; no external special-function crate is linked.
 
+### Matching: 0.1.14 engineering functions
+
+The nineteen `CONVERT`, Bessel, and complex-text names added in 0.1.14 are measured against 33
+active nominal and coercion/domain cases in both frozen host profiles. All 33 are classified
+`match`. Complex worksheet results are compared as exact canonical text, including the `i`/`j`
+suffix, sign, and omitted unit coefficient.
+
+The eight finite Bessel worksheet cases use an absolute-plus-relative comparator of
+`2e-7 + 5e-13 * max(abs(actual), abs(expected))`. This records compatibility with Excel's saved
+values, some of which carry fewer significant digits or differ from the high-precision
+mathematical function. It does not set the kernel accuracy target: independent 100-decimal-digit
+reference literals cover 324 origin, transition, order-dominant, large-argument, near-root, and
+parity cases under stricter magnitude-specific tolerances.
+
+`CONVERT` preserves Excel's case-sensitive unit spelling and its documented affine temperature
+semantics. The complex exponential, logarithm, power, division, product, magnitude, and square
+root use scaled intermediate forms so a finite result is not lost solely because an intermediate
+overflows. Non-finite worksheet results fail with the function's typed Excel error instead of
+materializing NaN or infinity.
+
 ### Deliberate difference: probability-distribution numeric policies
 
 The policies below are chosen, documented, and pinned by tests. Each one prefers a typed Excel
@@ -306,7 +326,7 @@ section as a claim of exactness in either direction.
   hypergeometric, F, and t families measured in 0.1.12 and 0.1.13
 - closed-form financial functions
 - transcendental math and trigonometric functions, which are evaluated through `libm`
-- engineering and Bessel functions
+- engineering functions outside the measured 0.1.14 `CONVERT`, Bessel, and complex-text families
 
 Priority for measurement is statistical, then closed-form financial, then math.
 

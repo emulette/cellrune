@@ -11,7 +11,7 @@ const DEFAULT_BATCH_CELLS: u32 = 10_000;
 
 fn main() {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let test_mode = cfg!(test) || arguments.iter().any(|argument| argument == "--test");
+    let test_mode = arguments.iter().any(|argument| argument == "--test");
     let formulas = numeric_argument(&arguments, 0, if test_mode { 20 } else { DEFAULT_FORMULAS });
     let batch_cells = numeric_argument(
         &arguments,
@@ -20,6 +20,17 @@ fn main() {
     );
     assert!(formulas > 0, "formula count must be greater than zero");
     assert!(batch_cells > 0, "batch size must be greater than zero");
+
+    let independent_only = arguments
+        .iter()
+        .any(|argument| argument == "--independent-only");
+    let dirty_rss_only = arguments
+        .iter()
+        .any(|argument| argument == "--dirty-rss-only");
+    if independent_only || dirty_rss_only {
+        run_independent_benchmark(formulas, !dirty_rss_only);
+        return;
+    }
 
     let mut session = chain_session(formulas);
     let cold_started = Instant::now();
@@ -81,6 +92,97 @@ fn main() {
     }
     let repeated_elapsed = repeated_started.elapsed();
 
+    drop(session);
+    drop(wide_session);
+    drop(batch_session);
+    drop(repeated_session);
+
+    let mut independent = independent_session(formulas);
+    recalculate(&mut independent);
+    let independent_full_started = Instant::now();
+    let independent_full = recalculate_mode(&mut independent, RecalculationMode::Full);
+    let independent_full_elapsed = independent_full_started.elapsed();
+    let independent_no_dirty_started = Instant::now();
+    let independent_no_dirty = recalculate(&mut independent);
+    let independent_no_dirty_elapsed = independent_no_dirty_started.elapsed();
+    let one_dirty = measure_edit_and_recalculate(
+        &mut independent,
+        EditBatch::new([WorkbookChange::set_cell_value(
+            sheet_id(),
+            address("A1"),
+            number(2.0),
+        )]),
+    );
+    drop(independent);
+
+    let mut percent_session = independent_session(formulas);
+    recalculate(&mut percent_session);
+    let percent_count = (formulas / 100).max(1);
+    let percent_changes = (1..=percent_count).map(|row| {
+        WorkbookChange::set_cell_value(
+            sheet_id(),
+            CellAddress::from_indices(row, 1).expect("valid generated percent cell"),
+            number(2.0),
+        )
+    });
+    let percent_dirty = measure_edit_and_recalculate(
+        &mut percent_session,
+        EditBatch::new(percent_changes.collect::<Vec<_>>()),
+    );
+    drop(percent_session);
+
+    let unique_count = if test_mode { 50 } else { 5_000 };
+    let mut unique = unique_ast_session(unique_count);
+    recalculate(&mut unique);
+    let unique_full_started = Instant::now();
+    let unique_full = recalculate_mode(&mut unique, RecalculationMode::Full);
+    let unique_full_elapsed = unique_full_started.elapsed();
+    let unique_dirty_row = unique_count / 2;
+    let unique_dirty = measure_edit_and_recalculate(
+        &mut unique,
+        EditBatch::new([WorkbookChange::set_cell_value(
+            sheet_id(),
+            CellAddress::from_indices(unique_dirty_row, 1).expect("valid unique-AST input"),
+            number(2.0),
+        )]),
+    );
+    drop(unique);
+
+    let range_source_rows = if test_mode { 10 } else { 1_000 };
+    let range_formula_count = if test_mode { 4 } else { 40 };
+    let mut ranges = range_fanout_session(range_source_rows, range_formula_count);
+    recalculate(&mut ranges);
+    let range_full_started = Instant::now();
+    let range_full = recalculate_mode(&mut ranges, RecalculationMode::Full);
+    let range_full_elapsed = range_full_started.elapsed();
+    let range_dirty = measure_edit_and_recalculate(
+        &mut ranges,
+        EditBatch::new([WorkbookChange::set_cell_value(
+            sheet_id(),
+            CellAddress::from_indices(range_source_rows / 2, 1).expect("valid range-fanout input"),
+            number(2.0),
+        )]),
+    );
+    drop(ranges);
+
+    let reverse_count = if test_mode { 50 } else { 50_000 };
+    let mut reverse = reverse_chain_session(reverse_count);
+    let reverse_cold_started = Instant::now();
+    let reverse_cold = recalculate(&mut reverse);
+    let reverse_cold_elapsed = reverse_cold_started.elapsed();
+    let reverse_dirty_started = Instant::now();
+    apply_one(
+        &mut reverse,
+        WorkbookChange::set_cell_value(
+            sheet_id(),
+            CellAddress::from_indices(reverse_count, 1).expect("valid reverse-chain tail"),
+            number(2.0),
+        ),
+    );
+    let reverse_dirty = recalculate(&mut reverse);
+    let reverse_dirty_elapsed = reverse_dirty_started.elapsed();
+    drop(reverse);
+
     println!("cellrune_interactive_benchmark_v1");
     println!("formulas\t{formulas}");
     println!("batch_cells\t{batch_cells}");
@@ -108,6 +210,266 @@ fn main() {
         "batch_speedup_ratio\t{:.3}",
         repeated_elapsed.as_secs_f64() / batch_elapsed.as_secs_f64()
     );
+    metric("independent_warm_full_ms", independent_full_elapsed);
+    println!(
+        "independent_warm_full_evaluated\t{}",
+        independent_full.evaluated_count()
+    );
+    metric("independent_no_dirty_ms", independent_no_dirty_elapsed);
+    println!(
+        "independent_no_dirty_evaluated\t{}",
+        independent_no_dirty.evaluated_count()
+    );
+    phase_metrics("independent_one_dirty", &one_dirty);
+    phase_metrics("independent_one_percent_dirty", &percent_dirty);
+    metric("unique_ast_warm_full_ms", unique_full_elapsed);
+    println!(
+        "unique_ast_warm_full_evaluated\t{}",
+        unique_full.evaluated_count()
+    );
+    phase_metrics("unique_ast_one_dirty", &unique_dirty);
+    metric("range_fanout_warm_full_ms", range_full_elapsed);
+    println!(
+        "range_fanout_warm_full_evaluated\t{}",
+        range_full.evaluated_count()
+    );
+    phase_metrics("range_fanout_one_range_dirty", &range_dirty);
+    metric("reverse_chain_cold_full_ms", reverse_cold_elapsed);
+    println!(
+        "reverse_chain_cold_full_evaluated\t{}",
+        reverse_cold.evaluated_count()
+    );
+    metric("reverse_chain_tail_dirty_ms", reverse_dirty_elapsed);
+    println!(
+        "reverse_chain_tail_dirty_evaluated\t{}",
+        reverse_dirty.evaluated_count()
+    );
+}
+
+fn run_independent_benchmark(formulas: u32, include_percent_dirty: bool) {
+    let mut independent = independent_session(formulas);
+    recalculate(&mut independent);
+
+    let full_started = Instant::now();
+    let full = recalculate_mode(&mut independent, RecalculationMode::Full);
+    let full_elapsed = full_started.elapsed();
+
+    let no_dirty_started = Instant::now();
+    let no_dirty = recalculate(&mut independent);
+    let no_dirty_elapsed = no_dirty_started.elapsed();
+
+    let one_dirty = measure_edit_and_recalculate(
+        &mut independent,
+        EditBatch::new([WorkbookChange::set_cell_value(
+            sheet_id(),
+            address("A1"),
+            number(2.0),
+        )]),
+    );
+    drop(independent);
+
+    let percent_dirty = include_percent_dirty.then(|| {
+        let mut percent_session = independent_session(formulas);
+        recalculate(&mut percent_session);
+        let percent_count = (formulas / 100).max(1);
+        let percent_changes = (1..=percent_count).map(|row| {
+            WorkbookChange::set_cell_value(
+                sheet_id(),
+                CellAddress::from_indices(row, 1).expect("valid generated percent cell"),
+                number(2.0),
+            )
+        });
+        measure_edit_and_recalculate(
+            &mut percent_session,
+            EditBatch::new(percent_changes.collect::<Vec<_>>()),
+        )
+    });
+
+    println!("cellrune_independent_benchmark_v1");
+    println!("formulas\t{formulas}");
+    metric("independent_warm_full_ms", full_elapsed);
+    println!(
+        "independent_warm_full_evaluated\t{}",
+        full.evaluated_count()
+    );
+    metric("independent_no_dirty_ms", no_dirty_elapsed);
+    println!(
+        "independent_no_dirty_evaluated\t{}",
+        no_dirty.evaluated_count()
+    );
+    phase_metrics("independent_one_dirty", &one_dirty);
+    if let Some(percent_dirty) = percent_dirty {
+        phase_metrics("independent_one_percent_dirty", &percent_dirty);
+    }
+}
+
+struct IncrementalMeasurement {
+    edit_prepare: Duration,
+    impact_install: Duration,
+    calculation_prepare: Duration,
+    run: Duration,
+    install: Duration,
+    delta: cellrune::CalculationDelta,
+}
+
+fn measure_edit_and_recalculate(
+    session: &mut WorkbookCalculationSession,
+    batch: EditBatch,
+) -> IncrementalMeasurement {
+    let edit_prepare_started = Instant::now();
+    let prepared = session
+        .prepare_changes(session.workbook().semantic_revision(), batch)
+        .expect("generated benchmark edit preparation");
+    let edit_prepare = edit_prepare_started.elapsed();
+
+    let impact_started = Instant::now();
+    session
+        .install_changes(prepared)
+        .expect("generated benchmark edit installation");
+    let impact_install = impact_started.elapsed();
+
+    let calculation_prepare_started = Instant::now();
+    let prepared = session
+        .prepare_recalculation(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("generated benchmark calculation preparation");
+    let calculation_prepare = calculation_prepare_started.elapsed();
+
+    let run_started = Instant::now();
+    let completed = prepared
+        .run()
+        .expect("generated benchmark calculation execution");
+    let run = run_started.elapsed();
+
+    let install_started = Instant::now();
+    let delta = session
+        .install(completed)
+        .expect("generated benchmark calculation installation");
+    let install = install_started.elapsed();
+    IncrementalMeasurement {
+        edit_prepare,
+        impact_install,
+        calculation_prepare,
+        run,
+        install,
+        delta,
+    }
+}
+
+fn phase_metrics(prefix: &str, measurement: &IncrementalMeasurement) {
+    metric(
+        &format!("{prefix}_edit_prepare_ms"),
+        measurement.edit_prepare,
+    );
+    metric(
+        &format!("{prefix}_impact_install_ms"),
+        measurement.impact_install,
+    );
+    metric(
+        &format!("{prefix}_calculation_prepare_ms"),
+        measurement.calculation_prepare,
+    );
+    metric(&format!("{prefix}_run_ms"), measurement.run);
+    metric(&format!("{prefix}_install_ms"), measurement.install);
+    println!(
+        "{prefix}_evaluated\t{}",
+        measurement.delta.evaluated_count()
+    );
+    println!("{prefix}_reason\t{:?}", measurement.delta.reason());
+}
+
+fn independent_session(formulas: u32) -> WorkbookCalculationSession {
+    let mut session = WorkbookCalculationSession::create();
+    let mut changes = Vec::with_capacity(formulas as usize * 2);
+    for row in 1..=formulas {
+        changes.push(WorkbookChange::set_cell_value(
+            sheet_id(),
+            CellAddress::from_indices(row, 1).expect("valid generated independent input"),
+            number(1.0),
+        ));
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id(),
+            CellAddress::from_indices(row, 2).expect("valid generated independent formula"),
+            formula(&format!("A{row}+1")),
+        ));
+    }
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("generated independent workbook");
+    session
+}
+
+fn unique_ast_session(formulas: u32) -> WorkbookCalculationSession {
+    let mut session = WorkbookCalculationSession::create();
+    let mut changes = Vec::with_capacity(formulas as usize * 2);
+    for row in 1..=formulas {
+        changes.push(WorkbookChange::set_cell_value(
+            sheet_id(),
+            CellAddress::from_indices(row, 1).expect("valid generated unique-AST input"),
+            number(1.0),
+        ));
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id(),
+            CellAddress::from_indices(row, 2).expect("valid generated unique-AST formula"),
+            formula(&format!("A{row}+{row}")),
+        ));
+    }
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("generated unique-AST workbook");
+    session
+}
+
+fn range_fanout_session(source_rows: u32, formulas_per_column: u32) -> WorkbookCalculationSession {
+    let mut session = WorkbookCalculationSession::create();
+    let mut changes = Vec::with_capacity((10 * (source_rows + formulas_per_column)) as usize);
+    for column in 1..=10 {
+        let column_name =
+            char::from_u32(u32::from(b'A') + column - 1).expect("generated A:J range column");
+        for row in 1..=source_rows {
+            changes.push(WorkbookChange::set_cell_value(
+                sheet_id(),
+                CellAddress::from_indices(row, column).expect("valid range source"),
+                number(1.0),
+            ));
+        }
+        for offset in 1..=formulas_per_column {
+            changes.push(WorkbookChange::set_cell_formula(
+                sheet_id(),
+                CellAddress::from_indices(source_rows + 1 + offset, column)
+                    .expect("valid range formula"),
+                formula(&format!("SUM({column_name}1:{column_name}{source_rows})")),
+            ));
+        }
+    }
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("generated range-fanout workbook");
+    session
+}
+
+fn reverse_chain_session(cells: u32) -> WorkbookCalculationSession {
+    let mut session = WorkbookCalculationSession::create();
+    let mut changes = Vec::with_capacity(cells as usize);
+    for row in 1..cells {
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id(),
+            CellAddress::from_indices(row, 1).expect("valid reverse-chain formula"),
+            formula(&format!("A{}+1", row + 1)),
+        ));
+    }
+    changes.push(WorkbookChange::set_cell_value(
+        sheet_id(),
+        CellAddress::from_indices(cells, 1).expect("valid reverse-chain tail"),
+        number(1.0),
+    ));
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("generated reverse-chain workbook");
+    session
 }
 
 fn wide_session(formulas: u32) -> WorkbookCalculationSession {
@@ -189,9 +551,16 @@ fn apply_one(session: &mut WorkbookCalculationSession, change: WorkbookChange) {
 }
 
 fn recalculate(session: &mut WorkbookCalculationSession) -> cellrune::CalculationDelta {
+    recalculate_mode(session, RecalculationMode::Auto)
+}
+
+fn recalculate_mode(
+    session: &mut WorkbookCalculationSession,
+    mode: RecalculationMode,
+) -> cellrune::CalculationDelta {
     session
         .recalculate(
-            RecalculationMode::Auto,
+            mode,
             CalculationOptions::default(),
             CancellationToken::new(),
         )

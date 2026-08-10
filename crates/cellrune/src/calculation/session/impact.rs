@@ -1,10 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use super::super::eval::{CompiledWorkbook, DependencyTarget};
-use super::super::runtime::{CellId, Rect};
+use super::super::eval::CompiledWorkbook;
+use super::super::runtime::CellId;
 use crate::{
-    CalculationCellId, CalculationSnapshot, CellContent, FormulaMetadata, MaterializedResultOrigin,
-    WorkbookSnapshot,
+    CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
 };
 
 pub(super) fn affected_formulas(
@@ -16,10 +15,10 @@ pub(super) fn affected_formulas(
     if changed_cells.is_empty() {
         return BTreeSet::new();
     }
-    let mut changed_by_sheet = vec![BTreeSet::<(u32, u32)>::new(); workbook.sheets().len()];
+    let mut changed_internal = Vec::with_capacity(changed_cells.len());
     for cell in changed_cells {
         if let Some(internal) = public_to_internal(workbook, *cell) {
-            changed_by_sheet[internal.0].insert((internal.1, internal.2));
+            changed_internal.push(internal);
         }
     }
     let mut dirty = BTreeSet::new();
@@ -35,67 +34,16 @@ pub(super) fn affected_formulas(
             }
         }
     }
-    for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
-        let Some(changed) = changed_by_sheet.get(sheet_index) else {
-            continue;
-        };
-        for cell in sheet.cells() {
-            let CellContent::Formula(formula) = cell.content() else {
-                continue;
-            };
-            let FormulaMetadata::DynamicArray {
-                range: Some(range), ..
-            } = formula.metadata()
-            else {
-                continue;
-            };
-            let rect = Rect {
-                sheet: sheet_index,
-                row_start: range.start().row().get(),
-                col_start: range.start().column().get(),
-                row_end: range.end().row().get(),
-                col_end: range.end().column().get(),
-                whole_rows: false,
-            };
-            if rect_contains_any(rect, changed) {
-                dirty.insert((
-                    sheet_index,
-                    cell.address().row().get(),
-                    cell.address().column().get(),
-                ));
-            }
-        }
-    }
-    for (formula, targets) in compiled.dependency_targets() {
-        if targets.iter().any(|target| match target {
-            DependencyTarget::Cell((sheet, row, column))
-            | DependencyTarget::SpillAnchor((sheet, row, column))
-            | DependencyTarget::FormulaContent((sheet, row, column)) => changed_by_sheet
-                .get(*sheet)
-                .is_some_and(|changed| changed.contains(&(*row, *column))),
-            DependencyTarget::Area(span) => span.rects().any(|rect| {
-                changed_by_sheet
-                    .get(rect.sheet)
-                    .is_some_and(|changed| rect_contains_any(rect, changed))
-            }),
-            DependencyTarget::TableIdentity(_) => false,
-        }) {
-            dirty.insert(*formula);
-        }
-    }
-    let mut dependents = BTreeMap::<CellId, Vec<CellId>>::new();
-    for (formula, dependencies) in compiled.dependencies() {
-        for dependency in dependencies {
-            dependents.entry(*dependency).or_default().push(*formula);
+    for changed in changed_internal {
+        for formula in compiled.direct_affected_formulas(changed) {
+            dirty.insert(formula);
         }
     }
     let mut pending = dirty.iter().copied().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
-        if let Some(children) = dependents.get(&cell) {
-            for child in children {
-                if dirty.insert(*child) {
-                    pending.push(*child);
-                }
+        for child in compiled.dependents(cell) {
+            if dirty.insert(*child) {
+                pending.push(*child);
             }
         }
     }
@@ -103,12 +51,6 @@ pub(super) fn affected_formulas(
         .into_iter()
         .filter_map(|cell| internal_to_public(workbook, cell))
         .collect()
-}
-
-fn rect_contains_any(rect: Rect, cells: &BTreeSet<(u32, u32)>) -> bool {
-    cells
-        .range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
-        .any(|(_, column)| (rect.col_start..=rect.col_end).contains(column))
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {
@@ -130,6 +72,23 @@ fn internal_to_public(workbook: &WorkbookSnapshot, cell: CellId) -> Option<Calcu
 }
 
 pub(super) fn formula_cells(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<CalculationCellId>, ()> {
+    let mut formulas = BTreeSet::new();
+    for cell in compiled.formula_cells() {
+        if cancelled() {
+            return Err(());
+        }
+        if let Some(cell) = internal_to_public(workbook, cell) {
+            formulas.insert(cell);
+        }
+    }
+    Ok(formulas)
+}
+
+pub(super) fn formula_cells_from_workbook(
     workbook: &WorkbookSnapshot,
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<CalculationCellId>, ()> {

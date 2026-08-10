@@ -204,7 +204,7 @@ pub(crate) fn write_document_draft(
         .unwrap_or(&generated_styles_part)
         .clone();
     let mut style_requests = BTreeMap::<CalculationCellId, StyleRequest>::new();
-    for (id, mutation) in draft.cell_mutations() {
+    for (id, mutation) in draft.cell_mutations().iter() {
         let DraftCellMutation::Upsert {
             number_format_changed: true,
         } = mutation
@@ -490,7 +490,7 @@ fn validate_dynamic_formula_edits(
     draft: &WorkbookDraft,
     document: &crate::XlsxDocument,
 ) -> Result<(), XlsxWriteError> {
-    for (id, mutation) in draft.cell_mutations() {
+    for (id, mutation) in draft.cell_mutations().iter() {
         if !matches!(mutation, DraftCellMutation::Upsert { .. }) {
             continue;
         }

@@ -81,17 +81,17 @@ impl Engine<'_> {
     }
 
     pub(super) fn classify_name_graphs(&mut self, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
-        for (cell, parsed) in &self.asts {
+        for (cell, parsed) in self.asts.iter() {
             if cancelled() {
                 return Err(());
             }
             match self.inspect_name_graph(cell.0, parsed.root(), cancelled)? {
                 NameGraphStatus::Supported => {}
                 NameGraphStatus::Cycle => {
-                    self.name_cycle_cells.insert(*cell);
+                    std::sync::Arc::make_mut(&mut self.name_cycle_cells).insert(*cell);
                 }
                 NameGraphStatus::LimitExceeded => {
-                    self.name_limit_cells.insert(*cell);
+                    std::sync::Arc::make_mut(&mut self.name_limit_cells).insert(*cell);
                 }
             }
         }

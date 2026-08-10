@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use super::{DraftCellMutation, WorkbookDraft, next_revision};
+use super::{DraftCellMutation, DraftCellMutationStore, WorkbookDraft, next_revision};
 use crate::{
     CalculationCellId, CellAddress, DefinedName, Sheet, SheetId, TableId, ValidationError,
     WorkbookSnapshot, XlsxDocument,
@@ -11,7 +11,7 @@ impl WorkbookDraft {
         self.source_document.as_deref()
     }
 
-    pub(crate) const fn cell_mutations(&self) -> &BTreeMap<CalculationCellId, DraftCellMutation> {
+    pub(crate) const fn cell_mutations(&self) -> &DraftCellMutationStore {
         &self.cell_mutations
     }
 
@@ -73,16 +73,18 @@ impl WorkbookDraft {
         defined_names: Vec<DefinedName>,
     ) -> Result<(), ValidationError> {
         let revision = next_revision(self.semantic_revision())?;
-        self.workbook = WorkbookSnapshot::new_with_metadata(
-            sheets,
-            defined_names,
-            self.workbook.diagnostics().to_vec(),
-            self.workbook.date_system(),
-            self.workbook.calculation_hints(),
-            self.workbook.source(),
-            self.workbook.provenance().clone(),
-        )?
-        .with_semantic_revision(revision);
+        self.workbook = std::sync::Arc::new(
+            WorkbookSnapshot::new_with_metadata(
+                sheets,
+                defined_names,
+                self.workbook.diagnostics().to_vec(),
+                self.workbook.date_system(),
+                self.workbook.calculation_hints(),
+                self.workbook.source(),
+                self.workbook.provenance().clone(),
+            )?
+            .with_semantic_revision(revision),
+        );
         Ok(())
     }
 }

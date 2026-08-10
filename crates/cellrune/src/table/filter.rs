@@ -608,6 +608,7 @@ impl TableValueFilters {
         self.items.push(item);
     }
 
+    #[cfg(test)]
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut items = Vec::with_capacity(self.items.len());
         for item in &self.items {
@@ -679,6 +680,7 @@ impl TableCustomFilters {
         self.filters.push(filter);
     }
 
+    #[cfg(test)]
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut filters = Vec::with_capacity(self.filters.len());
         for filter in &self.filters {
@@ -860,6 +862,7 @@ pub enum TableFilterCriteria {
 }
 
 impl TableFilterCriteria {
+    #[cfg(test)]
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         match self {
             Self::Values(filters) => Ok(Self::Values(filters.clone_cancellable(cancelled)?)),
@@ -924,6 +927,7 @@ impl TableFilterColumn {
         self.criteria.as_mut()
     }
 
+    #[cfg(test)]
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         Ok(Self {
             column_id: self.column_id,
@@ -1123,6 +1127,7 @@ impl TableSortState {
         &self.conditions
     }
 
+    #[cfg(test)]
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut conditions = Vec::with_capacity(self.conditions.len());
         for condition in &self.conditions {
@@ -1208,6 +1213,7 @@ impl TableAutoFilter {
         self.sort_state.as_ref()
     }
 
+    #[cfg(test)]
     pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
         let mut filter_columns = Vec::with_capacity(self.filter_columns.len());
         for column in &self.filter_columns {

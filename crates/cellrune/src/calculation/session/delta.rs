@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use super::{CalculationDecisionReason, CalculationExecutionMode, SessionError, SessionErrorCode};
 use crate::{
     CalculationCellId, CalculationCellResult, CalculationSnapshot, MaterializedResultOrigin,
@@ -190,45 +188,31 @@ pub(super) fn build_delta(
     max_delta_cells: usize,
     cancelled: &impl Fn() -> bool,
 ) -> Result<CalculationDelta, SessionError> {
-    let mut previous_cells = BTreeMap::new();
-    if let Some(previous) = previous {
-        for (cell, value) in previous.materialized_cells() {
-            if cancelled() {
-                return Err(SessionError::new(SessionErrorCode::Cancelled, None));
-            }
-            previous_cells.insert(cell, value);
-        }
-    }
-    let mut current_cells = BTreeMap::new();
+    let mut changed_cells = Vec::new();
     for (cell, value) in current.materialized_cells() {
         if cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
-        current_cells.insert(cell, value);
-    }
-    let mut changed_cells = Vec::new();
-    for (cell, value) in &current_cells {
-        if cancelled() {
-            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
-        }
-        if previous_cells
-            .get(cell)
-            .is_none_or(|previous| *previous != *value)
+        if previous
+            .and_then(|previous| previous.materialized_cell(cell))
+            .is_none_or(|previous| previous != value)
         {
             changed_cells.push(CalculationDeltaCell::new(
-                *cell,
+                cell,
                 value.origin(),
                 value.result().clone(),
             ));
         }
     }
     let mut removed_materialized_cells = Vec::new();
-    for cell in previous_cells.keys() {
-        if cancelled() {
-            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
-        }
-        if !current_cells.contains_key(cell) {
-            removed_materialized_cells.push(*cell);
+    if let Some(previous) = previous {
+        for (cell, _) in previous.materialized_cells() {
+            if cancelled() {
+                return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+            }
+            if current.materialized_cell(cell).is_none() {
+                removed_materialized_cells.push(cell);
+            }
         }
     }
     let delta_cells = changed_cells
@@ -253,3 +237,93 @@ pub(super) fn build_delta(
         removed_materialized_cells,
     })
 }
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_incremental_delta(
+    previous: &CalculationSnapshot,
+    current: &CalculationSnapshot,
+    dirty: &BTreeSet<CalculationCellId>,
+    base_revision: u64,
+    result_revision: u64,
+    mode: CalculationExecutionMode,
+    reason: CalculationDecisionReason,
+    evaluated_count: usize,
+    max_delta_cells: usize,
+    cancelled: &impl Fn() -> bool,
+) -> Result<CalculationDelta, SessionError> {
+    let mut candidates = BTreeSet::new();
+    for owner in dirty {
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
+        candidates.extend(previous.materialized_cells_owned_by(*owner));
+        candidates.extend(current.materialized_cells_owned_by(*owner));
+    }
+    let mut changed_cells = Vec::new();
+    let mut removed_materialized_cells = Vec::new();
+    for cell in candidates {
+        if cancelled() {
+            return Err(SessionError::new(SessionErrorCode::Cancelled, None));
+        }
+        match (
+            previous.materialized_cell(cell),
+            current.materialized_cell(cell),
+        ) {
+            (_, Some(current_value))
+                if previous
+                    .materialized_cell(cell)
+                    .is_none_or(|previous_value| previous_value != current_value) =>
+            {
+                changed_cells.push(CalculationDeltaCell::new(
+                    cell,
+                    current_value.origin(),
+                    current_value.result().clone(),
+                ));
+            }
+            (Some(_), None) => removed_materialized_cells.push(cell),
+            _ => {}
+        }
+    }
+    let delta_cells = changed_cells
+        .len()
+        .saturating_add(removed_materialized_cells.len());
+    if delta_cells > max_delta_cells {
+        return Err(SessionError::new(
+            SessionErrorCode::DeltaLimitExceeded,
+            Some(format!("cells={delta_cells}, limit={max_delta_cells}")),
+        ));
+    }
+    Ok(CalculationDelta {
+        cursor: 0,
+        base_revision,
+        result_revision,
+        mode,
+        reason,
+        dirty_count: dirty.len(),
+        evaluated_count,
+        parsed_formula_count: 0,
+        changed_cells,
+        removed_materialized_cells,
+    })
+}
+
+pub(super) fn build_empty_delta(
+    base_revision: u64,
+    result_revision: u64,
+    mode: CalculationExecutionMode,
+    reason: CalculationDecisionReason,
+) -> CalculationDelta {
+    CalculationDelta {
+        cursor: 0,
+        base_revision,
+        result_revision,
+        mode,
+        reason,
+        dirty_count: 0,
+        evaluated_count: 0,
+        parsed_formula_count: 0,
+        changed_cells: Vec::new(),
+        removed_materialized_cells: Vec::new(),
+    }
+}
+use std::collections::BTreeSet;
