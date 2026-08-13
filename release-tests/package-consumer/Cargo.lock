@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "cellrune"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "libm",
  "pcre2",
