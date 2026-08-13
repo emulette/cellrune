@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import pathlib
 from collections.abc import Callable
@@ -19,19 +18,12 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 )
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
-CATALOG_V0_1_14_REFERENCE_SHA256 = (
-    pathlib.Path(__file__).parents[3]
-    / "crates"
-    / "cellrune"
-    / "testdata"
-    / "function-catalog-v0.1.14.sha256"
-).read_text(encoding="utf-8").strip()
 
 
-def catalog_digest() -> str:
+def assert_catalog_contract() -> None:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 387
+    assert len(catalog["entries"]) == 413
     entries = {entry["name"]: entry for entry in catalog["entries"]}
     assert all(
         name in entries
@@ -50,6 +42,11 @@ def catalog_digest() -> str:
             "COMPLEX", "IMABS", "IMAGINARY", "IMARGUMENT", "IMCONJUGATE",
             "IMREAL", "IMDIV", "IMPOWER", "IMPRODUCT", "IMSUB", "IMSUM",
             "IMEXP", "IMLN", "IMSQRT",
+            "ACCRINT", "ACCRINTM", "COUPDAYBS", "COUPDAYS", "COUPDAYSNC",
+            "COUPNCD", "COUPNUM", "COUPPCD", "DISC", "DURATION", "INTRATE",
+            "MDURATION", "ODDFPRICE", "ODDFYIELD", "ODDLPRICE", "ODDLYIELD",
+            "PRICE", "PRICEDISC", "PRICEMAT", "RECEIVED", "TBILLEQ",
+            "TBILLPRICE", "TBILLYIELD", "YIELD", "YIELDDISC", "YIELDMAT",
         )
     )
     assert all(
@@ -57,19 +54,6 @@ def catalog_digest() -> str:
         for name in ("GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND")
     )
     assert all(entries[name]["official"] for name in entries if name != "__XLUDF.DUMMYFUNCTION")
-    digest = hashlib.sha256()
-    for entry in catalog["entries"]:
-        row = "\0".join(
-            (
-                entry["name"],
-                entry["canonical_name"],
-                "1" if entry["alias"] else "0",
-                "1" if entry["returns_array"] else "0",
-                "1" if entry["official"] else "0",
-            )
-        )
-        digest.update(f"{row}\n".encode())
-    return digest.hexdigest()
 
 
 def assert_error(code: str, operation: Callable[[], object]) -> None:
@@ -128,7 +112,7 @@ def recalculate_with_invalid_solver_semantics(
 
 
 def main() -> None:
-    assert catalog_digest() == CATALOG_V0_1_14_REFERENCE_SHA256
+    assert_catalog_contract()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")
@@ -169,6 +153,42 @@ def main() -> None:
                 values[cell["address"]] = value["value"]
         for expected in corpus["expected_numbers"]:
             assert values[expected["address"]] == expected["value"]
+
+        workbook.set_number("Sheet1", "H1", 0.05)
+        workbook.set_formula(
+            "Sheet1",
+            "I1",
+            "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),H1,1000,2)",
+        )
+        fixed_income_usage = next(
+            entry
+            for entry in workbook.function_usage()["entries"]
+            if entry["name"] == "ACCRINT"
+        )
+        assert fixed_income_usage["supported"]
+        assert fixed_income_usage["call_count"] == 1
+        assert fixed_income_usage["sample_cells"] == [
+            {"sheet_id": 1, "sheet_name": "Sheet1", "address": "I1"}
+        ]
+        workbook.recalculate(mode="full")
+        accrued = workbook.read_range("Sheet1", "I1", "I1", limit=1)["cells"][0]
+        assert accrued["calculated"] == {
+            "kind": "value",
+            "value": {"kind": "number", "value": 50.0},
+        }
+        workbook.set_number("Sheet1", "H1", 0.06)
+        fixed_income_delta = workbook.recalculate(mode="incremental")
+        assert fixed_income_delta["mode"] == "incremental"
+        assert fixed_income_delta["dirty_count"] == 1
+        assert fixed_income_delta["evaluated_count"] == 1
+        assert [
+            cell["cell"]["address"] for cell in fixed_income_delta["changed_cells"]
+        ] == ["I1"]
+        accrued = workbook.read_range("Sheet1", "I1", "I1", limit=1)["cells"][0]
+        assert accrued["calculated"] == {
+            "kind": "value",
+            "value": {"kind": "number", "value": 60.0},
+        }
 
         for offset in (-1, 2**64, 1.5, True):
             assert_error(

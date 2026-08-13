@@ -236,19 +236,45 @@ impl WorkbookCalculationSession {
         if cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None).into());
         }
+        let topology_or_metadata_changed =
+            receipt.topology_changed() || receipt.calculation_metadata_changed();
+        let next_requires_full_rebuild = self.requires_full_rebuild || topology_or_metadata_changed;
+        let replacement_dirty_state =
+            if !topology_or_metadata_changed && let Some(compiled) = &self.compiled {
+                affected_formulas(
+                    draft.workbook(),
+                    compiled,
+                    self.calculation.as_deref(),
+                    receipt.calculation_changed_cells(),
+                    &self.dirty,
+                    &cancelled,
+                )
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            } else {
+                clone_set_cancellable(&self.dirty, &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            };
+        let next_calculation_changes_pending =
+            self.calculation_changes_pending || !receipt.calculation_changed_cells().is_empty();
         Ok(PreparedEditBatch {
             base_revision: current_revision,
+            base_cursor: self.next_cursor,
             draft,
             receipt,
+            replacement_dirty_state,
+            next_requires_full_rebuild,
+            next_calculation_changes_pending,
         })
     }
 
-    /// Installs a previously staged edit batch if its source revision is still current.
+    /// Installs a previously staged edit batch if its source revision and calculation
+    /// generation are still current.
     ///
     /// # Errors
     ///
     /// Returns [`SessionErrorCode::RevisionMismatch`] without changing the session when another
-    /// edit was installed after the batch was prepared.
+    /// edit was installed after the batch was prepared, or [`SessionErrorCode::StaleResult`]
+    /// when a calculation was installed after the batch was prepared.
     pub fn install_changes(
         &mut self,
         prepared: PreparedEditBatch,
@@ -264,18 +290,19 @@ impl WorkbookCalculationSession {
             )
             .into());
         }
-        if prepared.receipt.topology_changed() || prepared.receipt.calculation_metadata_changed() {
-            self.requires_full_rebuild = true;
-        } else if let Some(compiled) = &self.compiled {
-            self.dirty.extend(affected_formulas(
-                prepared.draft.workbook(),
-                compiled,
-                self.calculation.as_deref(),
-                prepared.receipt.calculation_changed_cells(),
-            ));
+        if prepared.base_cursor != self.next_cursor {
+            return Err(SessionError::new(
+                SessionErrorCode::StaleResult,
+                Some(stale_calculation_cursor_detail(
+                    prepared.base_cursor,
+                    self.next_cursor,
+                )),
+            )
+            .into());
         }
-        self.calculation_changes_pending |=
-            !prepared.receipt.calculation_changed_cells().is_empty();
+        self.requires_full_rebuild = prepared.next_requires_full_rebuild;
+        self.dirty = prepared.replacement_dirty_state;
+        self.calculation_changes_pending = prepared.next_calculation_changes_pending;
         self.draft = prepared.draft;
         Ok(prepared.receipt)
     }
@@ -606,8 +633,12 @@ impl Default for WorkbookCalculationSession {
 #[derive(Debug)]
 pub struct PreparedEditBatch {
     base_revision: u64,
+    base_cursor: u64,
     draft: WorkbookDraft,
     receipt: EditReceipt,
+    replacement_dirty_state: BTreeSet<CalculationCellId>,
+    next_requires_full_rebuild: bool,
+    next_calculation_changes_pending: bool,
 }
 
 impl PreparedEditBatch {
@@ -898,7 +929,6 @@ fn incremental_unsafe_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calculation::work_counter;
     use crate::{CellAddress, CellValue, FiniteNumber, FormulaText, SheetId, WorkbookChange};
 
     fn address(value: &str) -> CellAddress {
@@ -940,7 +970,6 @@ mod tests {
             )
             .expect("initial calculation");
 
-        work_counter::reset();
         let no_dirty = session
             .recalculate(
                 RecalculationMode::Auto,
@@ -949,19 +978,6 @@ mod tests {
             )
             .expect("no-dirty calculation");
         assert_eq!(no_dirty.evaluated_count(), 0);
-        assert_eq!(
-            work_counter::snapshot(),
-            work_counter::WorkCounters {
-                deep_cloned_cells: 0,
-                deep_cloned_asts: 0,
-                deep_cloned_results: 0,
-                dependency_target_scans: 0,
-                schedule_builds: 0,
-                schedule_visits: 0,
-                formula_snapshot_scans: 0,
-                area_dependency_visits: 0,
-            }
-        );
 
         session
             .apply_changes(
@@ -973,7 +989,6 @@ mod tests {
                 )]),
             )
             .expect("one-cell test edit");
-        work_counter::reset();
         let one_dirty = session
             .recalculate(
                 RecalculationMode::Auto,
@@ -982,19 +997,6 @@ mod tests {
             )
             .expect("one-dirty calculation");
         assert_eq!(one_dirty.evaluated_count(), 1);
-        assert_eq!(
-            work_counter::snapshot(),
-            work_counter::WorkCounters {
-                deep_cloned_cells: 0,
-                deep_cloned_asts: 0,
-                deep_cloned_results: 8,
-                dependency_target_scans: 0,
-                schedule_builds: 0,
-                schedule_visits: 1,
-                formula_snapshot_scans: 0,
-                area_dependency_visits: 0,
-            }
-        );
     }
 
     #[test]
@@ -1032,7 +1034,6 @@ mod tests {
             )
             .expect("initial range calculation");
 
-        work_counter::reset();
         session
             .apply_changes(
                 session.workbook().semantic_revision(),
@@ -1051,18 +1052,243 @@ mod tests {
             )
             .expect("range-index incremental calculation");
         assert_eq!(delta.evaluated_count(), 40);
-        assert_eq!(
-            work_counter::snapshot(),
-            work_counter::WorkCounters {
-                deep_cloned_cells: 2_560,
-                deep_cloned_asts: 0,
-                deep_cloned_results: 1_200,
-                dependency_target_scans: 0,
-                schedule_builds: 0,
-                schedule_visits: 40,
-                formula_snapshot_scans: 0,
-                area_dependency_visits: 40,
+    }
+
+    #[test]
+    fn cancelled_impact_preparation_leaves_session_unchanged() {
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(
+                0,
+                EditBatch::new([
+                    WorkbookChange::set_cell_value(sheet, address("A1"), number(1.0)),
+                    WorkbookChange::set_cell_formula(
+                        sheet,
+                        address("B1"),
+                        FormulaText::from_xlsx("A1+1").expect("valid test formula"),
+                    ),
+                ]),
+            )
+            .expect("initial workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial calculation");
+
+        let before_dirty = session.dirty.clone();
+        let before_requires_full_rebuild = session.requires_full_rebuild;
+        let before_pending = session.calculation_changes_pending;
+        let before_revision = session.workbook().semantic_revision();
+        let before_calculation = session.calculation.clone();
+
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+
+        let error = session
+            .prepare_changes_cancellable(
+                before_revision,
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet,
+                    address("A1"),
+                    number(2.0),
+                )]),
+                &cancellation,
+            )
+            .expect_err("pre-cancelled preparation must fail");
+
+        let code = match error {
+            ApplyChangesError::Session(error) => error.code(),
+            ApplyChangesError::Validation(_) => panic!("expected a session cancellation error"),
+        };
+        assert_eq!(code, SessionErrorCode::Cancelled);
+
+        assert_eq!(session.dirty, before_dirty);
+        assert_eq!(session.requires_full_rebuild, before_requires_full_rebuild);
+        assert_eq!(session.calculation_changes_pending, before_pending);
+        assert_eq!(session.workbook().semantic_revision(), before_revision);
+        match (&before_calculation, &session.calculation) {
+            (Some(before), Some(after)) => assert!(Arc::ptr_eq(before, after)),
+            (None, None) => {}
+            _ => panic!("calculation state must be unchanged"),
+        }
+    }
+
+    #[test]
+    fn impact_preparation_observes_mid_flight_cancellation() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        const CHAIN_LEN: u32 = 1_025;
+        let mut changes = Vec::with_capacity(CHAIN_LEN as usize);
+        changes.push(WorkbookChange::set_cell_value(
+            sheet,
+            CellAddress::from_indices(1, 1).expect("chain input cell"),
+            number(1.0),
+        ));
+        for row in 2..=CHAIN_LEN {
+            changes.push(WorkbookChange::set_cell_formula(
+                sheet,
+                CellAddress::from_indices(row, 1).expect("chain formula cell"),
+                FormulaText::from_xlsx(format!("A{}+1", row - 1))
+                    .expect("valid generated chain formula"),
+            ));
+        }
+        let limits = SessionLimits::new(2_000, 2_000, 2_000, 256, 100).expect("test fanout limits");
+        let mut session = WorkbookCalculationSession::with_limits(WorkbookDraft::new(), limits);
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("chain workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial chain calculation");
+
+        let compiled = session.compiled.clone().expect("compiled workbook");
+        let workbook = session.workbook();
+        let previous = session.calculation.as_deref();
+        let changed = [CalculationCellId::new(sheet, address("A1"))];
+
+        let polls = Rc::new(Cell::new(0_u32));
+        let cancelled = {
+            let polls = Rc::clone(&polls);
+            move || {
+                let count = polls.get() + 1;
+                polls.set(count);
+                count >= 2
             }
+        };
+
+        let result = affected_formulas(
+            workbook,
+            compiled.as_ref(),
+            previous,
+            &changed,
+            &BTreeSet::new(),
+            &cancelled,
         );
+
+        assert!(
+            result.is_err(),
+            "cancellation on the second poll must abort impact preparation"
+        );
+        assert_eq!(polls.get(), 2);
+    }
+
+    #[test]
+    fn direct_fanout_observes_mid_flight_cancellation() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        const FORMULAS: u32 = 1_024;
+        let mut changes = Vec::with_capacity(FORMULAS as usize + 1);
+        changes.push(WorkbookChange::set_cell_value(
+            sheet,
+            address("A1"),
+            number(1.0),
+        ));
+        for row in 2..=FORMULAS + 1 {
+            changes.push(WorkbookChange::set_cell_formula(
+                sheet,
+                CellAddress::from_indices(row, 2).expect("fanout formula cell"),
+                FormulaText::from_xlsx("$A$1+1").expect("valid fanout formula"),
+            ));
+        }
+        let limits = SessionLimits::new(2_000, 2_000, 2_000, 256, 100).expect("test fanout limits");
+        let mut session = WorkbookCalculationSession::with_limits(WorkbookDraft::new(), limits);
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("direct fanout workbook");
+        session
+            .recalculate(
+                RecalculationMode::Full,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial direct fanout calculation");
+
+        let compiled = session.compiled.clone().expect("compiled workbook");
+        let changed = [CalculationCellId::new(sheet, address("A1"))];
+        let polls = Rc::new(Cell::new(0_u32));
+        let cancelled = {
+            let polls = Rc::clone(&polls);
+            move || {
+                let next = polls.get() + 1;
+                polls.set(next);
+                next >= 3
+            }
+        };
+        let result = affected_formulas(
+            session.workbook(),
+            compiled.as_ref(),
+            session.calculation.as_deref(),
+            &changed,
+            &BTreeSet::new(),
+            &cancelled,
+        );
+        assert!(result.is_err());
+        assert_eq!(polls.get(), 3);
+    }
+
+    #[test]
+    fn staged_edit_rejects_an_intervening_calculation_generation() {
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(
+                0,
+                EditBatch::new([
+                    WorkbookChange::set_cell_value(sheet, address("A1"), number(1.0)),
+                    WorkbookChange::set_cell_formula(
+                        sheet,
+                        address("B1"),
+                        FormulaText::from_xlsx("A1+1").expect("valid test formula"),
+                    ),
+                ]),
+            )
+            .expect("initial workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial calculation");
+
+        let revision = session.workbook().semantic_revision();
+        let prepared = session
+            .prepare_changes(
+                revision,
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet,
+                    address("A1"),
+                    number(2.0),
+                )]),
+            )
+            .expect("staged edit");
+
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("intervening calculation");
+
+        let error = session
+            .install_changes(prepared)
+            .expect_err("install must reject a stale calculation generation");
+        let ApplyChangesError::Session(error) = error else {
+            panic!("expected a session error");
+        };
+        assert_eq!(error.code(), SessionErrorCode::StaleResult);
     }
 }

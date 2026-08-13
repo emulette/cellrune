@@ -2,8 +2,8 @@ use super::kernel::{
     AggregateFunction, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
     DateAdditionalFunction, DateFunction, DistributionFunction, DynamicFunction,
     EngineeringFunction, Evaluator, FinancialAdditionalFunction, FinancialFunction,
-    GroupedFunction, InformationFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, ModernTextFunction, RegressionFunction, RomanFunction,
+    FixedIncomeFunction, GroupedFunction, InformationFunction, LegacyFunction, LogicalFunction,
+    LookupFunction, MathFunction, ModernTextFunction, RegressionFunction, RomanFunction,
     StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
     TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
@@ -911,6 +911,7 @@ impl Evaluator {
             Self::Distribution(function) => function.call_contract(),
             Self::Financial(function) => function.call_contract(),
             Self::FinancialAdditional(function) => function.call_contract(),
+            Self::FixedIncome(function) => function.call_contract(),
             Self::Areas => CallContract::uniform(Arity::exact(1), REFERENCE),
         }
     }
@@ -1612,6 +1613,129 @@ impl FinancialFunction {
     }
 }
 
+impl FixedIncomeFunction {
+    const fn call_contract(self) -> CallContract {
+        match self {
+            Self::Accrint => CallContract::positional(
+                Arity::range(6, 8),
+                &[
+                    SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR,
+                ],
+            )
+            .with_defaults(FIXED_INCOME_ACCRINT_DEFAULTS),
+            Self::Accrintm => CallContract::positional(
+                Arity::range(3, 5),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(FIXED_INCOME_ACCRINTM_DEFAULTS),
+            Self::CoupDayBs
+            | Self::CoupDays
+            | Self::CoupDaysNc
+            | Self::CoupNcd
+            | Self::CoupNum
+            | Self::CoupPcd => {
+                CallContract::positional(Arity::range(3, 4), &[SCALAR, SCALAR, SCALAR, SCALAR])
+                    .with_defaults(FIXED_INCOME_BASIS_0_AT_3)
+            }
+            Self::Disc | Self::IntRate | Self::PriceDisc | Self::Received | Self::YieldDisc => {
+                CallContract::positional(
+                    Arity::range(4, 5),
+                    &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+                )
+                .with_defaults(FIXED_INCOME_BASIS_0_AT_4)
+            }
+            Self::PriceMat | Self::YieldMat => CallContract::positional(
+                Arity::range(5, 6),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(FIXED_INCOME_BASIS_0_AT_5),
+            Self::TbillEq | Self::TbillPrice | Self::TbillYield => {
+                CallContract::uniform(Arity::exact(3), SCALAR)
+            }
+            Self::Duration | Self::MDuration => CallContract::positional(
+                Arity::range(5, 6),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(FIXED_INCOME_BASIS_0_AT_5),
+            Self::Price | Self::Yield => CallContract::positional(
+                Arity::range(6, 7),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(FIXED_INCOME_BASIS_0_AT_6),
+            Self::OddFPrice | Self::OddFYield => CallContract::positional(
+                Arity::range(8, 9),
+                &[
+                    SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR,
+                ],
+            )
+            .with_defaults(FIXED_INCOME_BASIS_0_AT_8),
+            Self::OddLPrice | Self::OddLYield => CallContract::positional(
+                Arity::range(7, 8),
+                &[
+                    SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR,
+                ],
+            )
+            .with_defaults(FIXED_INCOME_BASIS_0_AT_7),
+        }
+    }
+}
+
+const FIXED_INCOME_BASIS_0_AT_3: &[ArgumentDefault] = &[ArgumentDefault::new(
+    3,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const FIXED_INCOME_BASIS_0_AT_4: &[ArgumentDefault] = &[ArgumentDefault::new(
+    4,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const FIXED_INCOME_BASIS_0_AT_5: &[ArgumentDefault] = &[ArgumentDefault::new(
+    5,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const FIXED_INCOME_BASIS_0_AT_6: &[ArgumentDefault] = &[ArgumentDefault::new(
+    6,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const FIXED_INCOME_BASIS_0_AT_7: &[ArgumentDefault] = &[ArgumentDefault::new(
+    7,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const FIXED_INCOME_BASIS_0_AT_8: &[ArgumentDefault] = &[ArgumentDefault::new(
+    8,
+    DefaultTrigger::AbsentOrMissing,
+    ArgumentDefaultValue::Number(0.0),
+)];
+const FIXED_INCOME_ACCRINT_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        6,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        7,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Logical(true),
+    ),
+];
+const FIXED_INCOME_ACCRINTM_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(3, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::Missing,
+        ArgumentDefaultValue::Number(1000.0),
+    ),
+    ArgumentDefault::new(
+        4,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+];
+
 impl FinancialAdditionalFunction {
     const fn call_contract(self) -> CallContract {
         match self {
@@ -1741,5 +1865,18 @@ mod tests {
             assert!(arity.accepts(maximum), "{evaluator:?}");
             assert!(!arity.accepts(maximum + 1), "{evaluator:?}");
         }
+    }
+
+    #[test]
+    fn accrint_calc_method_defaults_true_when_absent_or_missing() {
+        let contract = Evaluator::FixedIncome(FixedIncomeFunction::Accrint).call_contract();
+        assert_eq!(
+            contract.default_at(7, DefaultTrigger::Absent),
+            Some(ArgumentDefaultValue::Logical(true))
+        );
+        assert_eq!(
+            contract.default_at(7, DefaultTrigger::Missing),
+            Some(ArgumentDefaultValue::Logical(true))
+        );
     }
 }

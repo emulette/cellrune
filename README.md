@@ -6,17 +6,17 @@ and can retain an exact package backing for explicit round-trip writing.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.14 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.15 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.14
+cargo add cellrune@0.1.15
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.14"
+cellrune = "0.1.15"
 ```
 
 ## Features
@@ -102,9 +102,15 @@ CellRune 0.1.14 adds exactly 19 official Excel-facing engineering names: `CONVER
 `BESSELJ`, `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`, `IMCONJUGATE`,
 `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`, `IMEXP`, `IMLN`, and `IMSQRT`.
 `CONVERT` uses a typed, case-sensitive unit registry; the complex family shares one finite parser
-and canonical formatter; and the four Bessel functions use budgeted first-party kernels. The
-source catalog contains 386 official names and 387 accepted entries including the OOXML
-dummy-function marker.
+and canonical formatter; and the four Bessel functions use budgeted first-party kernels.
+
+The fixed-income wave on top of 0.1.14 adds exactly 26 official names: `ACCRINT`, `ACCRINTM`,
+`COUPDAYBS`, `COUPDAYS`, `COUPDAYSNC`, `COUPNCD`, `COUPNUM`, `COUPPCD`, `DISC`, `DURATION`,
+`INTRATE`, `MDURATION`, `ODDFPRICE`, `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD`, `PRICE`, `PRICEDISC`,
+`PRICEMAT`, `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`, and
+`YIELDMAT`. They share a typed day-count and coupon-schedule model and a safeguarded yield root
+solver that charges the calculation budget and observes cancellation. The current source catalog
+contains 412 official names and 413 accepted entries including the OOXML dummy-function marker.
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;
@@ -231,12 +237,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.14 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.15 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.14"
-npm install "@cellrune/node@0.1.14"
+python -m pip install "cellrune==0.1.15"
+npm install "@cellrune/node@0.1.15"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

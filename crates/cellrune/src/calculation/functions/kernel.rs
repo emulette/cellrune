@@ -455,6 +455,35 @@ function_enum!(FinancialAdditionalFunction {
     Rri,
 });
 
+function_enum!(FixedIncomeFunction {
+    Accrint,
+    Accrintm,
+    CoupDayBs,
+    CoupDays,
+    CoupDaysNc,
+    CoupNcd,
+    CoupNum,
+    CoupPcd,
+    Disc,
+    Duration,
+    IntRate,
+    MDuration,
+    OddFPrice,
+    OddFYield,
+    OddLPrice,
+    OddLYield,
+    Price,
+    PriceDisc,
+    PriceMat,
+    Received,
+    TbillEq,
+    TbillPrice,
+    TbillYield,
+    Yield,
+    YieldDisc,
+    YieldMat,
+});
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(in crate::calculation) enum Evaluator {
     Legacy(LegacyFunction),
@@ -483,6 +512,7 @@ pub(in crate::calculation) enum Evaluator {
     Distribution(DistributionFunction),
     Financial(FinancialFunction),
     FinancialAdditional(FinancialAdditionalFunction),
+    FixedIncome(FixedIncomeFunction),
     Areas,
 }
 
@@ -520,6 +550,7 @@ impl Evaluator {
             Self::FinancialAdditional(value) => {
                 format!("financial_additional:{}", value.stable_name())
             }
+            Self::FixedIncome(value) => format!("fixed_income:{}", value.stable_name()),
             Self::Areas => "areas".to_owned(),
         }
     }
@@ -617,6 +648,13 @@ impl Evaluator {
                 .copied()
                 .map(Self::FinancialAdditional),
         );
+        evaluators.extend(
+            FixedIncomeFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::FixedIncome),
+        );
+
         evaluators.push(Self::Areas);
         evaluators
     }

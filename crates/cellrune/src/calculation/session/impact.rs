@@ -6,17 +6,47 @@ use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
 };
 
+const CHARGED_WORK_POLL_INTERVAL: u32 = 256;
+
+/// Tracks charged impact-preparation work and polls cancellation at bounded intervals.
+struct ImpactWorkCharger<'a> {
+    charged: u32,
+    cancelled: &'a dyn Fn() -> bool,
+}
+
+impl ImpactWorkCharger<'_> {
+    fn charge(&mut self) -> Result<(), ()> {
+        self.charged += 1;
+        if self.charged >= CHARGED_WORK_POLL_INTERVAL {
+            self.charged = 0;
+            if (self.cancelled)() {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn affected_formulas(
     workbook: &WorkbookSnapshot,
     compiled: &CompiledWorkbook,
     previous: Option<&CalculationSnapshot>,
     changed_cells: &[CalculationCellId],
-) -> BTreeSet<CalculationCellId> {
-    if changed_cells.is_empty() {
-        return BTreeSet::new();
+    existing_dirty: &BTreeSet<CalculationCellId>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<CalculationCellId>, ()> {
+    if cancelled() {
+        return Err(());
     }
+
+    let mut charger = ImpactWorkCharger {
+        charged: 0,
+        cancelled,
+    };
+
     let mut changed_internal = Vec::with_capacity(changed_cells.len());
     for cell in changed_cells {
+        charger.charge()?;
         if let Some(internal) = public_to_internal(workbook, *cell) {
             changed_internal.push(internal);
         }
@@ -24,6 +54,7 @@ pub(super) fn affected_formulas(
     let mut dirty = BTreeSet::new();
     if let Some(previous) = previous {
         for cell in changed_cells {
+            charger.charge()?;
             let Some(materialized) = previous.materialized_cell(*cell) else {
                 continue;
             };
@@ -35,29 +66,37 @@ pub(super) fn affected_formulas(
         }
     }
     for changed in changed_internal {
-        for formula in compiled.direct_affected_formulas(changed) {
+        let formulas = compiled.direct_affected_formulas(changed, &mut || charger.charge())?;
+        for formula in formulas {
+            charger.charge()?;
             dirty.insert(formula);
         }
     }
     let mut pending = dirty.iter().copied().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
         for child in compiled.dependents(cell) {
+            charger.charge()?;
             if dirty.insert(*child) {
                 pending.push(*child);
             }
         }
     }
-    dirty
-        .into_iter()
-        .filter_map(|cell| internal_to_public(workbook, cell))
-        .collect()
+    let mut replacement = BTreeSet::new();
+    for cell in existing_dirty {
+        charger.charge()?;
+        replacement.insert(*cell);
+    }
+    for cell in dirty {
+        charger.charge()?;
+        if let Some(cell) = internal_to_public(workbook, cell) {
+            replacement.insert(cell);
+        }
+    }
+    Ok(replacement)
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {
-    let sheet = workbook
-        .sheets()
-        .iter()
-        .position(|candidate| candidate.id() == cell.sheet_id())?;
+    let sheet = workbook.sheet_position(cell.sheet_id())?;
     Some((
         sheet,
         cell.address().row().get(),

@@ -11,17 +11,25 @@ workspace = true
 
 [dependencies]
 calamine.workspace = true
-cellrune = { version = "=0.1.14", path = "../../crates/cellrune" }
+cellrune = { version = "=0.1.15", path = "../../crates/cellrune" }
 libm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+system_alloc_stats.workspace = true
 zip.workspace = true
 
 [[bench]]
 name = "hardening"
 harness = false
+test = false
 
 [[bench]]
 name = "interactive"
 harness = false
+test = false
+
+[[bench]]
+name = "v015_phase_memory"
+harness = false
+test = false

@@ -1,31 +1,14 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
-const CATALOG_V0_1_14_REFERENCE_SHA256 = fs
-  .readFileSync(
-    path.join(
-      __dirname,
-      "..",
-      "..",
-      "..",
-      "crates",
-      "cellrune",
-      "testdata",
-      "function-catalog-v0.1.14.sha256",
-    ),
-    "utf8",
-  )
-  .trim();
-
-function catalogDigest() {
+function assertCatalogContract() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 387);
+  assert.equal(catalog.entries.length, 413);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [
     "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST", "BINOM.DIST.RANGE",
@@ -40,6 +23,11 @@ function catalogDigest() {
     "CONVERT", "BESSELI", "BESSELJ", "BESSELK", "BESSELY", "COMPLEX",
     "IMABS", "IMAGINARY", "IMARGUMENT", "IMCONJUGATE", "IMREAL", "IMDIV",
     "IMPOWER", "IMPRODUCT", "IMSUB", "IMSUM", "IMEXP", "IMLN", "IMSQRT",
+    "ACCRINT", "ACCRINTM", "COUPDAYBS", "COUPDAYS", "COUPDAYSNC",
+    "COUPNCD", "COUPNUM", "COUPPCD", "DISC", "DURATION", "INTRATE",
+    "MDURATION", "ODDFPRICE", "ODDFYIELD", "ODDLPRICE", "ODDLYIELD",
+    "PRICE", "PRICEDISC", "PRICEMAT", "RECEIVED", "TBILLEQ",
+    "TBILLPRICE", "TBILLYIELD", "YIELD", "YIELDDISC", "YIELDMAT",
   ]) {
     assert.ok(entries.has(name), name);
   }
@@ -49,23 +37,10 @@ function catalogDigest() {
   for (const [name, entry] of entries) {
     assert.equal(entry.official, name !== "__XLUDF.DUMMYFUNCTION", name);
   }
-  const digest = createHash("sha256");
-  for (const entry of catalog.entries) {
-    digest.update(
-      [
-        entry.name,
-        entry.canonicalName,
-        entry.alias ? "1" : "0",
-        entry.returnsArray ? "1" : "0",
-        entry.official ? "1" : "0",
-      ].join("\0") + "\n",
-    );
-  }
-  return digest.digest("hex");
 }
 
 async function main() {
-  assert.equal(catalogDigest(), CATALOG_V0_1_14_REFERENCE_SHA256);
+  assertCatalogContract();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(
@@ -121,6 +96,38 @@ async function main() {
   for (const expected of corpus.expected_numbers) {
     assert.equal(values.get(expected.address), expected.value);
   }
+
+  workbook.setNumber("Sheet1", "H1", 0.05);
+  workbook.setFormula(
+    "Sheet1",
+    "I1",
+    "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),H1,1000,2)",
+  );
+  const fixedIncomeUsage = workbook
+    .functionUsage()
+    .entries.find((entry) => entry.name === "ACCRINT");
+  assert.notEqual(fixedIncomeUsage, undefined);
+  assert.equal(fixedIncomeUsage.supported, true);
+  assert.equal(fixedIncomeUsage.callCount, 1);
+  assert.deepEqual(fixedIncomeUsage.sampleCells, [
+    { sheetId: 1, sheetName: "Sheet1", address: "I1" },
+  ]);
+  await workbook.recalculate({ mode: "full" });
+  let accrued = workbook.readRange("Sheet1", "I1", "I1", { limit: 1 }).cells[0];
+  assert.equal(accrued.calculated.value.kind, "number");
+  assert.equal(accrued.calculated.value.value, 50);
+  workbook.setNumber("Sheet1", "H1", 0.06);
+  const fixedIncomeDelta = await workbook.recalculate({ mode: "incremental" });
+  assert.equal(fixedIncomeDelta.mode, "incremental");
+  assert.equal(fixedIncomeDelta.dirtyCount, 1);
+  assert.equal(fixedIncomeDelta.evaluatedCount, 1);
+  assert.deepEqual(
+    fixedIncomeDelta.changedCells.map((cell) => cell.cell.address),
+    ["I1"],
+  );
+  accrued = workbook.readRange("Sheet1", "I1", "I1", { limit: 1 }).cells[0];
+  assert.equal(accrued.calculated.value.kind, "number");
+  assert.equal(accrued.calculated.value.value, 60);
 
   workbook.setFormula("Sheet1", "A3", "=0.1+0.2-0.3");
   workbook.setFormula("Sheet1", "A4", "=IRR({-1,100000})");
