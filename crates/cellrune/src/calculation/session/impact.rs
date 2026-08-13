@@ -2,21 +2,58 @@ use std::collections::BTreeSet;
 
 use super::super::eval::CompiledWorkbook;
 use super::super::runtime::CellId;
+use crate::calculation::performance_counters::{work_counter_add, WorkCounter};
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
 };
+
+const CHARGED_WORK_POLL_INTERVAL: u32 = 256;
+
+/// Tracks charged impact-preparation work and polls cancellation at bounded intervals.
+struct ImpactWorkCharger<'a> {
+    charged: u32,
+    cancelled: &'a dyn Fn() -> bool,
+}
+
+impl ImpactWorkCharger<'_> {
+    fn charge(&mut self) -> Result<(), ()> {
+        self.charged += 1;
+        if self.charged >= CHARGED_WORK_POLL_INTERVAL {
+            work_counter_add(WorkCounter::ImpactCancellationPolls, 1);
+            self.charged = 0;
+            if (self.cancelled)() {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+}
 
 pub(super) fn affected_formulas(
     workbook: &WorkbookSnapshot,
     compiled: &CompiledWorkbook,
     previous: Option<&CalculationSnapshot>,
     changed_cells: &[CalculationCellId],
-) -> BTreeSet<CalculationCellId> {
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<CalculationCellId>, ()> {
     if changed_cells.is_empty() {
-        return BTreeSet::new();
+        return Ok(BTreeSet::new());
     }
+
+    work_counter_add(WorkCounter::ImpactCancellationPolls, 1);
+    if cancelled() {
+        return Err(());
+    }
+
+    let mut charger = ImpactWorkCharger {
+        charged: 0,
+        cancelled,
+    };
+
     let mut changed_internal = Vec::with_capacity(changed_cells.len());
     for cell in changed_cells {
+        work_counter_add(WorkCounter::ImpactChangedCellsVisited, 1);
+        charger.charge()?;
         if let Some(internal) = public_to_internal(workbook, *cell) {
             changed_internal.push(internal);
         }
@@ -24,6 +61,8 @@ pub(super) fn affected_formulas(
     let mut dirty = BTreeSet::new();
     if let Some(previous) = previous {
         for cell in changed_cells {
+            work_counter_add(WorkCounter::ImpactChangedCellsVisited, 1);
+            charger.charge()?;
             let Some(materialized) = previous.materialized_cell(*cell) else {
                 continue;
             };
@@ -36,21 +75,28 @@ pub(super) fn affected_formulas(
     }
     for changed in changed_internal {
         for formula in compiled.direct_affected_formulas(changed) {
-            dirty.insert(formula);
+            work_counter_add(WorkCounter::ImpactDirectCandidatesVisited, 1);
+            charger.charge()?;
+            if dirty.insert(formula) {
+                work_counter_add(WorkCounter::ImpactUniqueDirtyInserted, 1);
+            }
         }
     }
     let mut pending = dirty.iter().copied().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
         for child in compiled.dependents(cell) {
+            work_counter_add(WorkCounter::ImpactReverseEdgesVisited, 1);
+            charger.charge()?;
             if dirty.insert(*child) {
+                work_counter_add(WorkCounter::ImpactUniqueDirtyInserted, 1);
                 pending.push(*child);
             }
         }
     }
-    dirty
+    Ok(dirty
         .into_iter()
         .filter_map(|cell| internal_to_public(workbook, cell))
-        .collect()
+        .collect())
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {

@@ -47,16 +47,8 @@ pub(super) fn snapshot() -> WorkCounters {
     }
 }
 
-pub(crate) fn deep_cloned_cells(count: usize) {
-    DEEP_CLONED_CELLS.set(DEEP_CLONED_CELLS.get() + count);
-}
-
 pub(crate) fn deep_cloned_asts(count: usize) {
     DEEP_CLONED_ASTS.set(DEEP_CLONED_ASTS.get() + count);
-}
-
-pub(crate) fn deep_cloned_results(count: usize) {
-    DEEP_CLONED_RESULTS.set(DEEP_CLONED_RESULTS.get() + count);
 }
 
 pub(super) fn dependency_target_scan() {

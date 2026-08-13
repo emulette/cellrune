@@ -12,6 +12,7 @@ use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
     NumberFormat, Provenance, Row, Table, TableColumn, TableColumnId, TableId, ValidationError,
 };
+use crate::calculation::performance_counters::{work_counter_add, WorkCounter};
 
 #[cfg(test)]
 fn clone_map_cancellable<K, V>(
@@ -122,20 +123,21 @@ pub enum SheetVisibility {
 }
 
 const CELL_ROW_CHUNK_SIZE: u32 = 256;
+const CELL_COL_CHUNK_SIZE: u32 = 256;
 
 #[derive(Debug, Clone, Default)]
 struct CellChunk {
-    cells: BTreeMap<CellAddress, Cell>,
+    cells: BTreeMap<CellAddress, Arc<Cell>>,
     semantic_fingerprint: OnceLock<[u8; 32]>,
 }
 
 impl CellChunk {
-    fn insert(&mut self, address: CellAddress, cell: Cell) -> Option<Cell> {
+    fn insert(&mut self, address: CellAddress, cell: Cell) -> Option<Arc<Cell>> {
         self.semantic_fingerprint = OnceLock::new();
-        self.cells.insert(address, cell)
+        self.cells.insert(address, Arc::new(cell))
     }
 
-    fn remove(&mut self, address: &CellAddress) -> Option<Cell> {
+    fn remove(&mut self, address: &CellAddress) -> Option<Arc<Cell>> {
         self.semantic_fingerprint = OnceLock::new();
         self.cells.remove(address)
     }
@@ -145,10 +147,12 @@ impl CellChunk {
         cancelled: &impl Fn() -> bool,
     ) -> Result<[u8; 32], ()> {
         if let Some(fingerprint) = self.semantic_fingerprint.get() {
+            work_counter_add(WorkCounter::FingerprintCachedNodesReused, 1);
             return Ok(*fingerprint);
         }
+        work_counter_add(WorkCounter::FingerprintPayloadLeavesHashed, 1);
         let fingerprint = crate::calculation::identity::cell_chunk_fingerprint_cancellable(
-            self.cells.values(),
+            self.cells.values().map(|cell| cell.as_ref()),
             self.cells.len(),
             cancelled,
         )?;
@@ -162,12 +166,12 @@ impl CellChunk {
 
 #[derive(Debug, Clone, Default)]
 struct CellStore {
-    chunks: BTreeMap<u32, Arc<CellChunk>>,
+    chunks: BTreeMap<(u32, u32), Arc<CellChunk>>,
     len: usize,
 }
 
-type ChunkValueIter<'a> = btree_map::Values<'a, CellAddress, Cell>;
-type ChunkMapValueIter<'a> = btree_map::Values<'a, u32, Arc<CellChunk>>;
+type ChunkValueIter<'a> = btree_map::Values<'a, CellAddress, Arc<Cell>>;
+type ChunkMapValueIter<'a> = btree_map::Values<'a, (u32, u32), Arc<CellChunk>>;
 type FlatCellValues<'a> = std::iter::FlatMap<
     ChunkMapValueIter<'a>,
     ChunkValueIter<'a>,
@@ -185,7 +189,7 @@ impl<'a> Iterator for CellStoreValues<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.inner.next()?;
         self.remaining -= 1;
-        Some(value)
+        Some(value.as_ref())
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -197,7 +201,7 @@ impl DoubleEndedIterator for CellStoreValues<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let value = self.inner.next_back()?;
         self.remaining -= 1;
-        Some(value)
+        Some(value.as_ref())
     }
 }
 
@@ -208,8 +212,11 @@ fn cell_chunk_values(chunk: &Arc<CellChunk>) -> ChunkValueIter<'_> {
 }
 
 impl CellStore {
-    fn chunk(address: CellAddress) -> u32 {
-        (address.row().get() - 1) / CELL_ROW_CHUNK_SIZE
+    fn chunk(address: CellAddress) -> (u32, u32) {
+        (
+            (address.row().get() - 1) / CELL_ROW_CHUNK_SIZE,
+            (address.column().get() - 1) / CELL_COL_CHUNK_SIZE,
+        )
     }
 
     fn contains_key(&self, address: &CellAddress) -> bool {
@@ -220,31 +227,36 @@ impl CellStore {
         self.chunks
             .get(&Self::chunk(*address))
             .and_then(|chunk| chunk.cells.get(address))
+            .map(|cell| cell.as_ref())
     }
 
-    fn insert(&mut self, address: CellAddress, cell: Cell) -> Option<Cell> {
+    fn insert(&mut self, address: CellAddress, cell: Cell) -> bool {
         let chunk = self
             .chunks
             .entry(Self::chunk(address))
             .or_insert_with(|| Arc::new(CellChunk::default()));
-        #[cfg(test)]
         if Arc::strong_count(chunk) > 1 {
-            crate::calculation::work_counter::deep_cloned_cells(chunk.cells.len());
+            work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
+            work_counter_add(WorkCounter::CellStoreEntriesReindexed, chunk.cells.len() as u64);
         }
+        work_counter_add(WorkCounter::CellStoreNodesCopied, 1);
         let previous = Arc::make_mut(chunk).insert(address, cell);
         if previous.is_none() {
             self.len += 1;
         }
-        previous
+        previous.is_some()
     }
 
-    fn remove(&mut self, address: &CellAddress) -> Option<Cell> {
+    fn remove(&mut self, address: &CellAddress) -> bool {
         let chunk_key = Self::chunk(*address);
-        let chunk = self.chunks.get_mut(&chunk_key)?;
-        #[cfg(test)]
+        let Some(chunk) = self.chunks.get_mut(&chunk_key) else {
+            return false;
+        };
         if Arc::strong_count(chunk) > 1 {
-            crate::calculation::work_counter::deep_cloned_cells(chunk.cells.len());
+            work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
+            work_counter_add(WorkCounter::CellStoreEntriesReindexed, chunk.cells.len() as u64);
         }
+        work_counter_add(WorkCounter::CellStoreNodesCopied, 1);
         let removed = Arc::make_mut(chunk).remove(address);
         if removed.is_some() {
             self.len -= 1;
@@ -252,7 +264,7 @@ impl CellStore {
         if chunk.cells.is_empty() {
             self.chunks.remove(&chunk_key);
         }
-        removed
+        removed.is_some()
     }
 
     fn values(&self) -> CellStoreValues<'_> {
@@ -533,11 +545,11 @@ impl Sheet {
         number_format: NumberFormat,
     ) {
         self.track_formula_address(address, &content);
-        let previous = self.cells.insert(
+        let is_new = !self.cells.insert(
             address,
             Cell::with_content_and_number_format(address, content, number_format),
         );
-        if previous.is_none() {
+        if is_new {
             self.update_bounds(address);
             self.update_column_extent(address);
         }
@@ -547,7 +559,7 @@ impl Sheet {
         if self.formula_addresses.contains(&address) {
             Arc::make_mut(&mut self.formula_addresses).remove(&address);
         }
-        let removed = self.cells.remove(&address).is_some();
+        let removed = self.cells.remove(&address);
         if removed
             && (self.min_row == Some(address.row())
                 || self.max_row == Some(address.row())
@@ -1128,8 +1140,10 @@ impl WorkbookSnapshot {
         cancelled: &impl Fn() -> bool,
     ) -> Result<[u8; 32], ()> {
         if let Some(fingerprint) = self.semantic_fingerprint.get() {
+            work_counter_add(WorkCounter::FingerprintRootCacheHits, 1);
             return Ok(*fingerprint);
         }
+        work_counter_add(WorkCounter::FingerprintInternalNodesHashed, 1);
         let fingerprint =
             crate::calculation::identity::workbook_fingerprint_cancellable(self, cancelled)?;
         let _ = self.semantic_fingerprint.set(fingerprint);

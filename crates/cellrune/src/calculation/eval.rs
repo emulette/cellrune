@@ -8,6 +8,7 @@ use super::decimal::DecimalTrace;
 use super::graph::{DependencyGraph, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
+use super::performance_counters::{WorkCounter, work_counter_add, work_counter_store};
 use super::runtime::{CellId, Rect};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
 use super::syntax::ParsedFormula;
@@ -202,177 +203,225 @@ struct IndexedAreaDependency {
     formula: CellId,
 }
 
-const AREA_COLUMN_LEAF_COUNT: usize = super::EXCEL_MAX_COLUMNS as usize;
+/// Branching factor of the retained-reference area BVH. Each internal node
+/// splits its rectangle set into at most this many children. The value 2 is a
+/// binary median split on the longer axis of the subtree MBR.
+const AREA_BRANCH_FACTOR: usize = 2;
 
-#[derive(Debug, Clone, Default)]
-struct AreaSpatialIndex {
-    rows_by_column_node: BTreeMap<usize, AreaRowIntervalIndex>,
+/// Maximum number of unique rectangles retained in a single leaf. Every unique
+/// rectangle is stored in exactly one leaf, so the index retains exactly A
+/// payload references for A deduplicated rectangles.
+const AREA_LEAF_CAPACITY: usize = 16;
+
+#[derive(Debug, Clone, Copy)]
+enum AreaSplitAxis {
+    Row,
+    Column,
 }
 
-#[derive(Debug, Clone, Default)]
-struct AreaRowIntervalIndex {
-    root: Option<Box<AreaRowIntervalNode>>,
+/// Axis-aligned minimum bounding rectangle of a BVH subtree. A `whole_rows`
+/// rectangle is fully encoded by its `row_start`/`row_end` bounds (the flag is
+/// defined as `row_start == 1 && row_end == EXCEL_MAX_ROWS`), so no special
+/// column handling is required for point containment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AreaMbr {
+    row_min: u32,
+    row_max: u32,
+    col_min: u32,
+    col_max: u32,
+}
+
+impl AreaMbr {
+    fn from_rect(rect: &Rect) -> Self {
+        Self {
+            row_min: rect.row_start,
+            row_max: rect.row_end,
+            col_min: rect.col_start,
+            col_max: rect.col_end,
+        }
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            row_min: self.row_min.min(other.row_min),
+            row_max: self.row_max.max(other.row_max),
+            col_min: self.col_min.min(other.col_min),
+            col_max: self.col_max.max(other.col_max),
+        }
+    }
+
+    fn contains(self, row: u32, column: u32) -> bool {
+        self.row_min <= row
+            && row <= self.row_max
+            && self.col_min <= column
+            && column <= self.col_max
+    }
+
+    fn row_extent(self) -> u64 {
+        u64::from(self.row_max - self.row_min) + 1
+    }
+
+    fn col_extent(self) -> u64 {
+        u64::from(self.col_max - self.col_min) + 1
+    }
 }
 
 #[derive(Debug, Clone)]
-struct AreaRowIntervalNode {
-    center: u32,
-    crossing_by_start: Vec<IndexedAreaDependency>,
-    crossing_by_end: Vec<IndexedAreaDependency>,
-    left: Option<Box<Self>>,
-    right: Option<Box<Self>>,
+enum AreaBvhKind {
+    Internal { children: Vec<AreaBvhNode> },
+    Leaf { areas: Vec<IndexedAreaDependency> },
+}
+
+#[derive(Debug, Clone)]
+struct AreaBvhNode {
+    mbr: AreaMbr,
+    kind: AreaBvhKind,
+}
+
+/// Point-containment for the retained-reference area index. Matches the
+/// original `AreaSpatialIndex::formulas_for_cell` semantics exactly: a rectangle
+/// matches iff `col_start <= column <= col_end` and `row_start <= row <=
+/// row_end`. `whole_rows` (`row_start == 1 && row_end == EXCEL_MAX_ROWS`) is
+/// already reflected in the row bounds and never widens the column range.
+fn area_rect_contains(rect: &Rect, row: u32, column: u32) -> bool {
+    rect.col_start <= column
+        && column <= rect.col_end
+        && rect.row_start <= row
+        && row <= rect.row_end
+}
+
+fn area_mbr_of(areas: &[IndexedAreaDependency]) -> AreaMbr {
+    let mut areas = areas.iter();
+    let first = areas.next().expect("area slice is non-empty");
+    let mut mbr = AreaMbr::from_rect(&first.rect);
+    for area in areas {
+        mbr = mbr.union(AreaMbr::from_rect(&area.rect));
+    }
+    mbr
+}
+
+fn sort_areas_for_split(areas: &mut [IndexedAreaDependency], axis: AreaSplitAxis) {
+    match axis {
+        AreaSplitAxis::Row => areas.sort_by_key(|area| {
+            (
+                (u64::from(area.rect.row_start) + u64::from(area.rect.row_end)) / 2,
+                area.rect.row_start,
+                area.rect.row_end,
+                area.rect.col_start,
+                area.rect.col_end,
+                area.formula,
+            )
+        }),
+        AreaSplitAxis::Column => areas.sort_by_key(|area| {
+            (
+                (u64::from(area.rect.col_start) + u64::from(area.rect.col_end)) / 2,
+                area.rect.col_start,
+                area.rect.col_end,
+                area.rect.row_start,
+                area.rect.row_end,
+                area.formula,
+            )
+        }),
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct AreaSpatialIndex {
+    root: Option<AreaBvhNode>,
 }
 
 impl AreaSpatialIndex {
+    /// Builds the BVH for one sheet's deduplicated rectangle list. The
+    /// `AreaSourceRectangles` / `AreaPayloadRefsRetained` / `AreaNodesRetained`
+    /// counters are `store`d per build (one build per sheet), so after a
+    /// single-sheet build they equal that sheet's counts.
     fn build(areas: Vec<IndexedAreaDependency>, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        let mut areas_by_column_node = BTreeMap::<usize, Vec<IndexedAreaDependency>>::new();
-        for area in areas {
-            if cancelled() {
-                return Err(());
-            }
-            let mut left = AREA_COLUMN_LEAF_COUNT + area.rect.col_start as usize - 1;
-            let mut right = AREA_COLUMN_LEAF_COUNT + area.rect.col_end as usize - 1;
-            while left <= right {
-                if cancelled() {
-                    return Err(());
-                }
-                if !left.is_multiple_of(2) {
-                    areas_by_column_node
-                        .entry(left)
-                        .or_default()
-                        .push(area.clone());
-                    left += 1;
-                }
-                if right.is_multiple_of(2) {
-                    areas_by_column_node
-                        .entry(right)
-                        .or_default()
-                        .push(area.clone());
-                    right -= 1;
-                }
-                left /= 2;
-                right /= 2;
-            }
+        if cancelled() {
+            return Err(());
         }
-        let mut rows_by_column_node = BTreeMap::new();
-        for (node, node_areas) in areas_by_column_node {
-            if cancelled() {
-                return Err(());
-            }
-            rows_by_column_node.insert(node, AreaRowIntervalIndex::build(node_areas, cancelled)?);
-        }
-        Ok(Self {
-            rows_by_column_node,
-        })
+        let source_rectangles = areas.len();
+        let mut node_count = 0_usize;
+        let mut payload_count = 0_usize;
+        let root = Self::build_node(areas, cancelled, &mut node_count, &mut payload_count)?;
+        work_counter_store(WorkCounter::AreaSourceRectangles, source_rectangles as u64);
+        work_counter_store(WorkCounter::AreaPayloadRefsRetained, payload_count as u64);
+        work_counter_store(WorkCounter::AreaNodesRetained, node_count as u64);
+        Ok(Self { root })
     }
 
-    fn formulas_for_cell(&self, row: u32, column: u32, output: &mut Vec<CellId>) {
-        if column == 0 || column as usize > AREA_COLUMN_LEAF_COUNT {
-            return;
-        }
-        let mut node = AREA_COLUMN_LEAF_COUNT + column as usize - 1;
-        while node > 0 {
-            if let Some(rows) = self.rows_by_column_node.get(&node) {
-                rows.formulas_for_row(row, output);
-            }
-            node /= 2;
-        }
-    }
-}
-
-impl AreaRowIntervalIndex {
-    fn build(areas: Vec<IndexedAreaDependency>, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        Ok(Self {
-            root: AreaRowIntervalNode::build(areas, cancelled)?,
-        })
-    }
-
-    fn formulas_for_row(&self, row: u32, output: &mut Vec<CellId>) {
-        if let Some(root) = &self.root {
-            root.formulas_for_row(row, output);
-        }
-    }
-}
-
-impl AreaRowIntervalNode {
-    fn build(
-        areas: Vec<IndexedAreaDependency>,
+    fn build_node(
+        mut areas: Vec<IndexedAreaDependency>,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<Box<Self>>, ()> {
+        node_count: &mut usize,
+        payload_count: &mut usize,
+    ) -> Result<Option<AreaBvhNode>, ()> {
         if areas.is_empty() {
             return Ok(None);
         }
         if cancelled() {
             return Err(());
         }
-        let mut midpoints = areas
-            .iter()
-            .map(|area| area.rect.row_start + (area.rect.row_end - area.rect.row_start) / 2)
-            .collect::<Vec<_>>();
-        midpoints.sort_unstable();
-        let center = midpoints[midpoints.len() / 2];
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        let mut crossing = Vec::new();
-        for area in areas {
-            if cancelled() {
-                return Err(());
-            }
-            if area.rect.row_end < center {
-                left.push(area);
-            } else if area.rect.row_start > center {
-                right.push(area);
-            } else {
-                crossing.push(area);
-            }
+        let mbr = area_mbr_of(&areas);
+        *node_count += 1;
+        if areas.len() <= AREA_LEAF_CAPACITY {
+            work_counter_add(WorkCounter::AreaBuildPayloadVisits, areas.len() as u64);
+            *payload_count += areas.len();
+            return Ok(Some(AreaBvhNode {
+                mbr,
+                kind: AreaBvhKind::Leaf { areas },
+            }));
         }
-        crossing.sort_by_key(|area| (area.rect.row_start, area.formula));
-        let mut crossing_by_end = crossing.clone();
-        crossing_by_end.sort_by_key(|area| (std::cmp::Reverse(area.rect.row_end), area.formula));
-        Ok(Some(Box::new(Self {
-            center,
-            crossing_by_start: crossing,
-            crossing_by_end,
-            left: Self::build(left, cancelled)?,
-            right: Self::build(right, cancelled)?,
-        })))
+        let axis = if mbr.row_extent() >= mbr.col_extent() {
+            AreaSplitAxis::Row
+        } else {
+            AreaSplitAxis::Column
+        };
+        sort_areas_for_split(&mut areas, axis);
+        let midpoint = areas.len() / 2;
+        let right = areas.split_off(midpoint);
+        let mut children = Vec::with_capacity(AREA_BRANCH_FACTOR);
+        if let Some(child) = Self::build_node(areas, cancelled, node_count, payload_count)? {
+            children.push(child);
+        }
+        if let Some(child) = Self::build_node(right, cancelled, node_count, payload_count)? {
+            children.push(child);
+        }
+        Ok(Some(AreaBvhNode {
+            mbr,
+            kind: AreaBvhKind::Internal { children },
+        }))
     }
 
-    fn formulas_for_row(&self, row: u32, output: &mut Vec<CellId>) {
-        match row.cmp(&self.center) {
-            std::cmp::Ordering::Less => {
-                for area in self
-                    .crossing_by_start
-                    .iter()
-                    .take_while(|area| area.rect.row_start <= row)
-                {
-                    #[cfg(test)]
-                    super::work_counter::area_dependency_visit();
-                    output.push(area.formula);
-                }
-                if let Some(left) = &self.left {
-                    left.formulas_for_row(row, output);
-                }
-            }
-            std::cmp::Ordering::Greater => {
-                for area in self
-                    .crossing_by_end
-                    .iter()
-                    .take_while(|area| area.rect.row_end >= row)
-                {
-                    #[cfg(test)]
-                    super::work_counter::area_dependency_visit();
-                    output.push(area.formula);
-                }
-                if let Some(right) = &self.right {
-                    right.formulas_for_row(row, output);
+    fn formulas_for_cell(&self, row: u32, column: u32, output: &mut Vec<CellId>) {
+        if let Some(root) = &self.root {
+            root.formulas_for_cell(row, column, output);
+        }
+    }
+}
+
+impl AreaBvhNode {
+    fn formulas_for_cell(&self, row: u32, column: u32, output: &mut Vec<CellId>) {
+        if !self.mbr.contains(row, column) {
+            return;
+        }
+        work_counter_add(WorkCounter::AreaQueryNodesVisited, 1);
+        match &self.kind {
+            AreaBvhKind::Leaf { areas } => {
+                for area in areas {
+                    work_counter_add(WorkCounter::AreaQueryCandidatesExamined, 1);
+                    if area_rect_contains(&area.rect, row, column) {
+                        // Counted before the caller's final sort+dedup: one
+                        // increment per matching rectangle (formula emission).
+                        work_counter_add(WorkCounter::AreaQueryMatchesEmitted, 1);
+                        #[cfg(test)]
+                        super::work_counter::area_dependency_visit();
+                        output.push(area.formula);
+                    }
                 }
             }
-            std::cmp::Ordering::Equal => {
-                for area in &self.crossing_by_start {
-                    #[cfg(test)]
-                    super::work_counter::area_dependency_visit();
-                    output.push(area.formula);
+            AreaBvhKind::Internal { children } => {
+                for child in children {
+                    child.formulas_for_cell(row, column, output);
                 }
             }
         }
@@ -1614,5 +1663,248 @@ mod tests {
             ),
         )
         .expect("valid generated workbook")
+    }
+}
+
+#[cfg(test)]
+mod area_bvh_tests {
+    use std::sync::{Mutex, OnceLock};
+
+    use super::super::runtime::{CellId, Rect};
+    use super::{
+        AREA_BRANCH_FACTOR, AREA_LEAF_CAPACITY, AreaSpatialIndex, IndexedAreaDependency,
+        area_rect_contains,
+    };
+    use crate::testing::{WorkCounter, reset_work_counters, snapshot_work_counters};
+
+    const QUERY_SHEET: usize = 0;
+
+    /// The work counters are process-global relaxed atomics, so the O2 tests
+    /// that reset and read them must not overlap. Serialize them behind one
+    /// lock instead of forcing the whole test binary onto a single thread.
+    fn counter_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// Documented O2 query-bound `height`: the leaf-count height
+    /// `ceil(A / AREA_LEAF_CAPACITY)`, where A is the number of deduplicated
+    /// rectangles. Every node whose MBR contains a query point is visited at
+    /// most once, the binary tree has at most `height` leaves and therefore at
+    /// most `2*height - 1` nodes, and each rectangle is tested at most once per
+    /// query, so the two deterministic bounds below hold for any correctly
+    /// retained-reference BVH.
+    fn leaf_count_height(area_count: usize) -> u64 {
+        (area_count as u64).div_ceil(AREA_LEAF_CAPACITY as u64)
+    }
+
+    fn rect(row_start: u32, col_start: u32, row_end: u32, col_end: u32, whole_rows: bool) -> Rect {
+        Rect {
+            sheet: QUERY_SHEET,
+            row_start,
+            col_start,
+            row_end,
+            col_end,
+            whole_rows,
+        }
+    }
+
+    fn dependency(rect: Rect, formula: CellId) -> IndexedAreaDependency {
+        IndexedAreaDependency { rect, formula }
+    }
+
+    fn formula(id: usize) -> CellId {
+        (QUERY_SHEET, id as u32, 1)
+    }
+
+    fn brute_force(areas: &[IndexedAreaDependency], row: u32, column: u32) -> Vec<CellId> {
+        let mut matches: Vec<CellId> = areas
+            .iter()
+            .filter(|area| area_rect_contains(&area.rect, row, column))
+            .map(|area| area.formula)
+            .collect();
+        matches.sort_unstable();
+        matches.dedup();
+        matches
+    }
+
+    fn raw_match_count(areas: &[IndexedAreaDependency], row: u32, column: u32) -> u64 {
+        areas
+            .iter()
+            .filter(|area| area_rect_contains(&area.rect, row, column))
+            .count() as u64
+    }
+
+    fn build_index(areas: Vec<IndexedAreaDependency>) -> AreaSpatialIndex {
+        reset_work_counters();
+        AreaSpatialIndex::build(areas, &|| false).expect("area index builds")
+    }
+
+    fn assert_exact_and_bounded(
+        name: &str,
+        areas: &[IndexedAreaDependency],
+        query_row: u32,
+        query_column: u32,
+    ) {
+        let _guard = counter_lock().lock().expect("counter lock poisoned");
+        let index = build_index(areas.to_vec());
+
+        let mut got = Vec::new();
+        index.formulas_for_cell(query_row, query_column, &mut got);
+        got.sort_unstable();
+        got.dedup();
+        let expected = brute_force(areas, query_row, query_column);
+        assert_eq!(got, expected, "{name}: exactness mismatch");
+
+        let build_snapshot = snapshot_work_counters();
+        let a = areas.len() as u64;
+        assert_eq!(
+            build_snapshot.get(WorkCounter::AreaSourceRectangles),
+            a,
+            "{name}: source rectangle count"
+        );
+        assert_eq!(
+            build_snapshot.get(WorkCounter::AreaPayloadRefsRetained),
+            a,
+            "{name}: payload references retained"
+        );
+        assert_eq!(
+            build_snapshot.get(WorkCounter::AreaBuildPayloadVisits),
+            a,
+            "{name}: build payload visits"
+        );
+        assert!(
+            build_snapshot.get(WorkCounter::AreaNodesRetained) <= 4 * a + 1,
+            "{name}: nodes retained exceeded 4A+1"
+        );
+
+        reset_work_counters();
+        let mut _ignored = Vec::new();
+        index.formulas_for_cell(query_row, query_column, &mut _ignored);
+        let query_snapshot = snapshot_work_counters();
+
+        let matches = raw_match_count(areas, query_row, query_column);
+        let leaf_capacity = AREA_LEAF_CAPACITY as u64;
+        let branch_factor = AREA_BRANCH_FACTOR as u64;
+        let height = leaf_count_height(areas.len());
+        let candidates = query_snapshot.get(WorkCounter::AreaQueryCandidatesExamined);
+        let nodes = query_snapshot.get(WorkCounter::AreaQueryNodesVisited);
+        assert_eq!(
+            query_snapshot.get(WorkCounter::AreaQueryMatchesEmitted),
+            matches,
+            "{name}: matches emitted before dedup"
+        );
+        assert!(
+            candidates <= matches + 2 * leaf_capacity * (height + 1),
+            "{name}: candidates {candidates} > {matches} + 2*{leaf_capacity}*({height}+1)"
+        );
+        assert!(
+            nodes <= 2 * branch_factor * (height + 1) + matches.div_ceil(leaf_capacity),
+            "{name}: nodes {nodes} exceeded 2*{branch_factor}*({height}+1) + ceil({matches}/{leaf_capacity})"
+        );
+    }
+
+    #[test]
+    fn o2_exactness_and_bounds_same_rows_disjoint_columns() {
+        let count = 4096;
+        let mut areas = Vec::with_capacity(count);
+        for i in 0..count {
+            let column = i as u32 + 1;
+            areas.push(dependency(rect(1, column, 100, column, false), formula(i)));
+        }
+        assert_exact_and_bounded("same-rows-disjoint-columns", &areas, 50, 2048);
+    }
+
+    #[test]
+    fn o2_exactness_and_bounds_same_columns_disjoint_rows() {
+        let count = 4096;
+        let mut areas = Vec::with_capacity(count);
+        for i in 0..count {
+            let row = i as u32 + 1;
+            areas.push(dependency(rect(row, 1, row, 100, false), formula(i)));
+        }
+        assert_exact_and_bounded("same-columns-disjoint-rows", &areas, 2048, 50);
+    }
+
+    #[test]
+    fn o2_exactness_and_bounds_all_contain_query_point_nested() {
+        let count = 4096;
+        let outer = 5000;
+        let mut areas = Vec::with_capacity(count);
+        for i in 0..count {
+            let start = i as u32 + 1;
+            areas.push(dependency(
+                rect(start, start, outer, outer, false),
+                formula(i),
+            ));
+        }
+        assert_exact_and_bounded("all-contain-query-point-nested", &areas, outer, outer);
+    }
+
+    #[test]
+    fn o2_exactness_and_bounds_full_width_rows_disjoint() {
+        let count = 4096;
+        let max_column = crate::EXCEL_MAX_COLUMNS;
+        let mut areas = Vec::with_capacity(count);
+        for i in 0..count {
+            let row = i as u32 + 1;
+            areas.push(dependency(rect(row, 1, row, max_column, false), formula(i)));
+        }
+        assert_exact_and_bounded("full-width-row-disjoint", &areas, 2048, 5000);
+    }
+
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    #[test]
+    fn o2_exactness_and_bounds_random_sparse_seed_1515() {
+        let count = 10_000;
+        let mut state = 1515_u64;
+        let mut areas = Vec::with_capacity(count);
+        for i in 0..count {
+            let row_start = (xorshift64(&mut state) % 1_000_000) as u32 + 1;
+            let row_height = (xorshift64(&mut state) % 8) as u32 + 1;
+            let col_start = (xorshift64(&mut state) % 16_000) as u32 + 1;
+            let col_width = (xorshift64(&mut state) % 8) as u32 + 1;
+            areas.push(dependency(
+                rect(
+                    row_start,
+                    col_start,
+                    row_start + row_height - 1,
+                    col_start + col_width - 1,
+                    false,
+                ),
+                formula(i),
+            ));
+        }
+        let query_row = areas[0].rect.row_start;
+        let query_column = areas[0].rect.col_start;
+        assert_exact_and_bounded("random-sparse-1515", &areas, query_row, query_column);
+    }
+
+    #[test]
+    fn o2_whole_rows_rect_matches_all_rows_within_its_declared_columns() {
+        let _guard = counter_lock().lock().expect("counter lock poisoned");
+        let areas = vec![
+            dependency(rect(1, 2, crate::EXCEL_MAX_ROWS, 2, true), formula(0)),
+            dependency(rect(10, 5, 20, 7, false), formula(1)),
+        ];
+        let index = build_index(areas.clone());
+
+        let mut got = Vec::new();
+        index.formulas_for_cell(500_000, 2, &mut got);
+        got.sort_unstable();
+        got.dedup();
+        assert_eq!(got, vec![formula(0)]);
+
+        let mut got = Vec::new();
+        index.formulas_for_cell(500_000, 3, &mut got);
+        assert!(got.is_empty());
     }
 }
