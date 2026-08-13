@@ -99,12 +99,7 @@ def extract_archive(archive_path: pathlib.Path, install_root: pathlib.Path) -> p
 
     with tarfile.open(archive_path, "r:xz") as archive:
         for member in archive.getmembers():
-            if not is_safe_member(member.name):
-                raise InstallerError(
-                    UNSAFE_ARCHIVE_MEMBER,
-                    f"archive member escapes the install root: {member.name}",
-                )
-        archive.extractall(destination, filter="data")
+            extract_member(archive, member, destination)
 
     extracted = destination / ARCHIVE_NAME.removesuffix(".tar.xz")
     if not extracted.is_dir():
@@ -117,9 +112,47 @@ def extract_archive(archive_path: pathlib.Path, install_root: pathlib.Path) -> p
 
 def is_safe_member(name: str) -> bool:
     normalized = pathlib.PurePosixPath(name)
-    if normalized.is_absolute():
+    if normalized.is_absolute() or not normalized.parts:
         return False
-    return ".." not in normalized.parts
+    return ".." not in normalized.parts and all("\\" not in part for part in normalized.parts)
+
+
+def extract_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    destination: pathlib.Path,
+) -> None:
+    """Extract one regular file or directory without relying on version-specific filters."""
+    if not is_safe_member(member.name) or not (member.isdir() or member.isfile()):
+        raise InstallerError(
+            UNSAFE_ARCHIVE_MEMBER,
+            f"archive member is unsafe or unsupported: {member.name}",
+        )
+    relative = pathlib.PurePosixPath(member.name)
+    target = destination.joinpath(*relative.parts)
+    if member.isdir():
+        if target.exists() and not target.is_dir():
+            raise InstallerError(
+                UNSAFE_ARCHIVE_MEMBER,
+                f"archive directory conflicts with an existing file: {member.name}",
+            )
+        target.mkdir(parents=True, exist_ok=True)
+        return
+    if target.exists() and not target.is_file():
+        raise InstallerError(
+            UNSAFE_ARCHIVE_MEMBER,
+            f"archive file conflicts with an existing directory: {member.name}",
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source = archive.extractfile(member)
+    if source is None:
+        raise InstallerError(
+            UNSAFE_ARCHIVE_MEMBER,
+            f"archive regular file has no payload: {member.name}",
+        )
+    with source, target.open("wb") as stream:
+        shutil.copyfileobj(source, stream)
+    target.chmod(member.mode & 0o777)
 
 
 def verify_toolchain(extract_dir: pathlib.Path) -> None:
