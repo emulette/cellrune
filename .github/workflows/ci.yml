@@ -43,6 +43,15 @@ jobs:
           key: cargo-registry-${{ runner.os }}-1.92.0-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-1.92.0-
 
+      - name: Install pinned cargo-deny
+        uses: taiki-e/install-action@cb33e69fad06166ca28a42b2575e4dadabf62ee8 # v2
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
+      - name: Check workspace dependency policy
+        run: cargo deny --all-features check licenses bans sources
+
       - name: Verify checked-in native dependency license bundles
         run: python3 bindings/scripts/generate_third_party_licenses.py --check
 

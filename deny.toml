@@ -39,7 +39,9 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
-exceptions = []
+exceptions = [
+    { allow = ["CC0-1.0"], crate = "system_alloc_stats@0.2.0" },
+]
 
 [sources]
 unknown-registry = "deny"
