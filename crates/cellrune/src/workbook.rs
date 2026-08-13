@@ -1,4 +1,3 @@
-use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
@@ -8,11 +7,12 @@ mod table_index;
 pub(crate) use table_index::TableRangeIndex;
 use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
 
+use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
+use crate::calculation::persistent_store::{PersistentRadixMap, PersistentRadixValues};
 use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
     NumberFormat, Provenance, Row, Table, TableColumn, TableColumnId, TableId, ValidationError,
 };
-use crate::calculation::performance_counters::{work_counter_add, WorkCounter};
 
 #[cfg(test)]
 fn clone_map_cancellable<K, V>(
@@ -122,64 +122,14 @@ pub enum SheetVisibility {
     VeryHidden,
 }
 
-const CELL_ROW_CHUNK_SIZE: u32 = 256;
-const CELL_COL_CHUNK_SIZE: u32 = 256;
-
-#[derive(Debug, Clone, Default)]
-struct CellChunk {
-    cells: BTreeMap<CellAddress, Arc<Cell>>,
-    semantic_fingerprint: OnceLock<[u8; 32]>,
-}
-
-impl CellChunk {
-    fn insert(&mut self, address: CellAddress, cell: Cell) -> Option<Arc<Cell>> {
-        self.semantic_fingerprint = OnceLock::new();
-        self.cells.insert(address, Arc::new(cell))
-    }
-
-    fn remove(&mut self, address: &CellAddress) -> Option<Arc<Cell>> {
-        self.semantic_fingerprint = OnceLock::new();
-        self.cells.remove(address)
-    }
-
-    fn semantic_fingerprint_cancellable(
-        &self,
-        cancelled: &impl Fn() -> bool,
-    ) -> Result<[u8; 32], ()> {
-        if let Some(fingerprint) = self.semantic_fingerprint.get() {
-            work_counter_add(WorkCounter::FingerprintCachedNodesReused, 1);
-            return Ok(*fingerprint);
-        }
-        work_counter_add(WorkCounter::FingerprintPayloadLeavesHashed, 1);
-        let fingerprint = crate::calculation::identity::cell_chunk_fingerprint_cancellable(
-            self.cells.values().map(|cell| cell.as_ref()),
-            self.cells.len(),
-            cancelled,
-        )?;
-        let _ = self.semantic_fingerprint.set(fingerprint);
-        Ok(*self
-            .semantic_fingerprint
-            .get()
-            .expect("cell chunk fingerprint was initialized"))
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 struct CellStore {
-    chunks: BTreeMap<(u32, u32), Arc<CellChunk>>,
+    cells: PersistentRadixMap<Arc<Cell>>,
     len: usize,
 }
 
-type ChunkValueIter<'a> = btree_map::Values<'a, CellAddress, Arc<Cell>>;
-type ChunkMapValueIter<'a> = btree_map::Values<'a, (u32, u32), Arc<CellChunk>>;
-type FlatCellValues<'a> = std::iter::FlatMap<
-    ChunkMapValueIter<'a>,
-    ChunkValueIter<'a>,
-    fn(&'a Arc<CellChunk>) -> ChunkValueIter<'a>,
->;
-
 struct CellStoreValues<'a> {
-    inner: FlatCellValues<'a>,
+    inner: PersistentRadixValues<'a, Arc<Cell>>,
     remaining: usize,
 }
 
@@ -207,16 +157,10 @@ impl DoubleEndedIterator for CellStoreValues<'_> {
 
 impl ExactSizeIterator for CellStoreValues<'_> {}
 
-fn cell_chunk_values(chunk: &Arc<CellChunk>) -> ChunkValueIter<'_> {
-    chunk.cells.values()
-}
-
 impl CellStore {
-    fn chunk(address: CellAddress) -> (u32, u32) {
-        (
-            (address.row().get() - 1) / CELL_ROW_CHUNK_SIZE,
-            (address.column().get() - 1) / CELL_COL_CHUNK_SIZE,
-        )
+    fn key(address: CellAddress) -> u128 {
+        u128::from(address.row().get() - 1) * u128::from(crate::EXCEL_MAX_COLUMNS)
+            + u128::from(address.column().get() - 1)
     }
 
     fn contains_key(&self, address: &CellAddress) -> bool {
@@ -224,23 +168,18 @@ impl CellStore {
     }
 
     fn get(&self, address: &CellAddress) -> Option<&Cell> {
-        self.chunks
-            .get(&Self::chunk(*address))
-            .and_then(|chunk| chunk.cells.get(address))
+        self.cells
+            .get(Self::key(*address))
             .map(|cell| cell.as_ref())
     }
 
     fn insert(&mut self, address: CellAddress, cell: Cell) -> bool {
-        let chunk = self
-            .chunks
-            .entry(Self::chunk(address))
-            .or_insert_with(|| Arc::new(CellChunk::default()));
-        if Arc::strong_count(chunk) > 1 {
+        let (previous, copied) = self.cells.insert(Self::key(address), Arc::new(cell));
+        if previous.is_some() {
             work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::CellStoreEntriesReindexed, chunk.cells.len() as u64);
+            work_counter_add(WorkCounter::CellStoreEntriesReindexed, 1);
         }
-        work_counter_add(WorkCounter::CellStoreNodesCopied, 1);
-        let previous = Arc::make_mut(chunk).insert(address, cell);
+        work_counter_add(WorkCounter::CellStoreNodesCopied, copied);
         if previous.is_none() {
             self.len += 1;
         }
@@ -248,31 +187,22 @@ impl CellStore {
     }
 
     fn remove(&mut self, address: &CellAddress) -> bool {
-        let chunk_key = Self::chunk(*address);
-        let Some(chunk) = self.chunks.get_mut(&chunk_key) else {
+        if self.cells.get(Self::key(*address)).is_none() {
             return false;
-        };
-        if Arc::strong_count(chunk) > 1 {
-            work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::CellStoreEntriesReindexed, chunk.cells.len() as u64);
         }
-        work_counter_add(WorkCounter::CellStoreNodesCopied, 1);
-        let removed = Arc::make_mut(chunk).remove(address);
+        work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
+        work_counter_add(WorkCounter::CellStoreEntriesReindexed, 1);
+        let (removed, copied) = self.cells.remove(Self::key(*address));
+        work_counter_add(WorkCounter::CellStoreNodesCopied, copied);
         if removed.is_some() {
             self.len -= 1;
-        }
-        if chunk.cells.is_empty() {
-            self.chunks.remove(&chunk_key);
         }
         removed.is_some()
     }
 
     fn values(&self) -> CellStoreValues<'_> {
         CellStoreValues {
-            inner: self
-                .chunks
-                .values()
-                .flat_map(cell_chunk_values as fn(&Arc<CellChunk>) -> ChunkValueIter<'_>),
+            inner: self.cells.ordered_values(),
             remaining: self.len,
         }
     }
@@ -285,18 +215,22 @@ impl CellStore {
         self.len == 0
     }
 
-    fn semantic_fingerprints_cancellable(
+    fn semantic_fingerprint_cancellable(
         &self,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Vec<[u8; 32]>, ()> {
-        let mut fingerprints = Vec::with_capacity(self.chunks.len());
-        for chunk in self.chunks.values() {
-            if cancelled() {
-                return Err(());
-            }
-            fingerprints.push(chunk.semantic_fingerprint_cancellable(cancelled)?);
-        }
-        Ok(fingerprints)
+    ) -> Result<[u8; 32], ()> {
+        self.cells.semantic_fingerprint_cancellable(
+            &|cell| {
+                work_counter_add(WorkCounter::FingerprintPayloadLeavesHashed, 1);
+                crate::calculation::identity::cell_chunk_fingerprint_cancellable(
+                    std::iter::once(cell.as_ref()),
+                    1,
+                    cancelled,
+                )
+            },
+            &crate::calculation::identity::cell_store_node_fingerprint,
+            cancelled,
+        )
     }
 }
 
@@ -439,11 +373,11 @@ impl Sheet {
         &self.column_max_rows
     }
 
-    pub(crate) fn semantic_cell_chunk_fingerprints_cancellable(
+    pub(crate) fn semantic_cell_store_fingerprint_cancellable(
         &self,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Vec<[u8; 32]>, ()> {
-        self.cells.semantic_fingerprints_cancellable(cancelled)
+    ) -> Result<[u8; 32], ()> {
+        self.cells.semantic_fingerprint_cancellable(cancelled)
     }
 
     pub(crate) fn semantic_fingerprint_cancellable(
@@ -575,6 +509,17 @@ impl Sheet {
             address,
             Cell::with_content_and_number_format(address, content, number_format),
         );
+        if is_new {
+            self.update_bounds(address);
+            self.update_column_extent(address);
+        }
+    }
+
+    pub(crate) fn upsert_cell_instance_deferred(&mut self, cell: Cell) {
+        let address = cell.address();
+        self.semantic_fingerprint = OnceLock::new();
+        self.track_formula_address(address, cell.content());
+        let is_new = !self.cells.insert(address, cell);
         if is_new {
             self.update_bounds(address);
             self.update_column_extent(address);
@@ -765,6 +710,7 @@ impl WorkbookSource {
 #[derive(Debug, Clone)]
 pub struct WorkbookSnapshot {
     sheets: Vec<Sheet>,
+    sheet_identity: PersistentRadixMap<Arc<Sheet>>,
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
     table_index: TableIndex,
@@ -835,6 +781,7 @@ impl WorkbookSnapshot {
             return Err(());
         }
         Ok(Self {
+            sheet_identity: self.sheet_identity.clone(),
             sheets,
             sheet_id_index: clone_map_cancellable(&self.sheet_id_index, cancelled)?,
             sheet_name_index: clone_map_cancellable(&self.sheet_name_index, cancelled)?,
@@ -863,6 +810,10 @@ impl WorkbookSnapshot {
         let mut sheet_name_index = BTreeMap::new();
         sheet_name_index.insert(Box::from("sheet1"), 0);
         Self {
+            sheet_identity: sheet_identity_store_cancellable(std::slice::from_ref(&sheet), &|| {
+                false
+            })
+            .expect("the draft identity store cannot be cancelled"),
             sheets: vec![sheet],
             sheet_id_index,
             sheet_name_index,
@@ -941,6 +892,27 @@ impl WorkbookSnapshot {
         input: WorkbookSnapshotInput,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, WorkbookBuildError> {
+        Self::new_with_metadata_cancellable_reusing_identity(input, None, cancelled)
+    }
+
+    pub(crate) fn new_with_metadata_cancellable_from_previous(
+        input: WorkbookSnapshotInput,
+        previous: &Self,
+        touched_sheets: &BTreeSet<SheetId>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, WorkbookBuildError> {
+        Self::new_with_metadata_cancellable_reusing_identity(
+            input,
+            Some((previous, touched_sheets)),
+            cancelled,
+        )
+    }
+
+    fn new_with_metadata_cancellable_reusing_identity(
+        input: WorkbookSnapshotInput,
+        identity_base: Option<(&Self, &BTreeSet<SheetId>)>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, WorkbookBuildError> {
         let WorkbookSnapshotInput {
             sheets,
             defined_names,
@@ -952,9 +924,18 @@ impl WorkbookSnapshot {
         } = input;
         let mut sheet_id_index = BTreeMap::new();
         let mut sheet_name_index = BTreeMap::new();
+        let mut identity_order_unchanged =
+            identity_base.is_some_and(|(previous, _)| previous.sheets.len() == sheets.len());
         for (index, sheet) in sheets.iter().enumerate() {
             if cancelled() {
                 return Err(WorkbookBuildError::Cancelled);
+            }
+            if identity_order_unchanged
+                && identity_base
+                    .and_then(|(previous, _)| previous.sheets.get(index))
+                    .is_none_or(|previous| previous.id() != sheet.id())
+            {
+                identity_order_unchanged = false;
             }
             if sheet_id_index.insert(sheet.id(), index).is_some() {
                 return Err(ValidationError::DuplicateSheetId {
@@ -1004,7 +985,29 @@ impl WorkbookSnapshot {
         if cancelled() {
             return Err(WorkbookBuildError::Cancelled);
         }
+        let sheet_identity = if identity_order_unchanged {
+            let (previous, touched_sheets) =
+                identity_base.expect("unchanged identity order requires a previous workbook");
+            let mut identity = previous.sheet_identity.clone();
+            for sheet_id in touched_sheets {
+                if cancelled() {
+                    return Err(WorkbookBuildError::Cancelled);
+                }
+                let Some(index) = sheet_id_index.get(sheet_id).copied() else {
+                    return Err(ValidationError::UnknownSheetId {
+                        value: sheet_id.get(),
+                    }
+                    .into());
+                };
+                identity.insert(index as u128, Arc::new(sheets[index].clone()));
+            }
+            identity
+        } else {
+            sheet_identity_store_cancellable(&sheets, cancelled)
+                .map_err(|()| WorkbookBuildError::Cancelled)?
+        };
         Ok(Self {
+            sheet_identity,
             sheets,
             sheet_id_index,
             sheet_name_index,
@@ -1051,6 +1054,10 @@ impl WorkbookSnapshot {
         self.sheet_id_index
             .get(&id)
             .map(|index| &self.sheets[*index])
+    }
+
+    pub(crate) fn sheet_position(&self, id: SheetId) -> Option<usize> {
+        self.sheet_id_index.get(&id).copied()
     }
 
     /// Returns a table by its workbook-global formula/UI display name.
@@ -1182,10 +1189,35 @@ impl WorkbookSnapshot {
             .expect("semantic fingerprint was initialized"))
     }
 
+    pub(crate) fn semantic_sheet_tree_fingerprint_cancellable(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<[u8; 32], ()> {
+        self.sheet_identity.semantic_fingerprint_cancellable(
+            &|sheet| sheet.semantic_fingerprint_cancellable(cancelled),
+            &crate::calculation::identity::sheet_tree_node_fingerprint,
+            cancelled,
+        )
+    }
+
     pub(crate) const fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {
         self.semantic_revision = semantic_revision;
         self
     }
+}
+
+fn sheet_identity_store_cancellable(
+    sheets: &[Sheet],
+    cancelled: &impl Fn() -> bool,
+) -> Result<PersistentRadixMap<Arc<Sheet>>, ()> {
+    let mut identity = PersistentRadixMap::default();
+    for (index, sheet) in sheets.iter().enumerate() {
+        if cancelled() {
+            return Err(());
+        }
+        identity.insert(index as u128, Arc::new(sheet.clone()));
+    }
+    Ok(identity)
 }
 
 fn case_insensitive_key(value: &str) -> String {

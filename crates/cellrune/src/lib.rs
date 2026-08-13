@@ -168,6 +168,7 @@ pub use xlsx::{
 #[doc(hidden)]
 pub mod testing {
     pub use crate::calculation::performance_counters::{
-        WorkCounter, WorkCounterSnapshot, reset_work_counters, snapshot_work_counters,
+        WorkCounter, WorkCounterSnapshot, lock_work_counters, reset_work_counters,
+        snapshot_work_counters,
     };
 }

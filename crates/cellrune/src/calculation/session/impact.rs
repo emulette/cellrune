@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::super::eval::CompiledWorkbook;
 use super::super::runtime::CellId;
-use crate::calculation::performance_counters::{work_counter_add, WorkCounter};
+use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
 };
@@ -34,12 +34,9 @@ pub(super) fn affected_formulas(
     compiled: &CompiledWorkbook,
     previous: Option<&CalculationSnapshot>,
     changed_cells: &[CalculationCellId],
+    existing_dirty: &BTreeSet<CalculationCellId>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<CalculationCellId>, ()> {
-    if changed_cells.is_empty() {
-        return Ok(BTreeSet::new());
-    }
-
     work_counter_add(WorkCounter::ImpactCancellationPolls, 1);
     if cancelled() {
         return Err(());
@@ -74,7 +71,8 @@ pub(super) fn affected_formulas(
         }
     }
     for changed in changed_internal {
-        for formula in compiled.direct_affected_formulas(changed) {
+        let formulas = compiled.direct_affected_formulas(changed, &mut || charger.charge())?;
+        for formula in formulas {
             work_counter_add(WorkCounter::ImpactDirectCandidatesVisited, 1);
             charger.charge()?;
             if dirty.insert(formula) {
@@ -93,17 +91,22 @@ pub(super) fn affected_formulas(
             }
         }
     }
-    Ok(dirty
-        .into_iter()
-        .filter_map(|cell| internal_to_public(workbook, cell))
-        .collect())
+    let mut replacement = BTreeSet::new();
+    for cell in existing_dirty {
+        charger.charge()?;
+        replacement.insert(*cell);
+    }
+    for cell in dirty {
+        charger.charge()?;
+        if let Some(cell) = internal_to_public(workbook, cell) {
+            replacement.insert(cell);
+        }
+    }
+    Ok(replacement)
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {
-    let sheet = workbook
-        .sheets()
-        .iter()
-        .position(|candidate| candidate.id() == cell.sheet_id())?;
+    let sheet = workbook.sheet_position(cell.sheet_id())?;
     Some((
         sheet,
         cell.address().row().get(),

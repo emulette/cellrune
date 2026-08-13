@@ -21,7 +21,7 @@ use crate::calculation::formula_rewrite::{
 use crate::workbook::{WorkbookBuildError, WorkbookSnapshotInput};
 use crate::{
     CalculationCellId, CellContent, CellValue, FormulaCell, FormulaDialect, FormulaMetadata,
-    NumberFormat, SavedResult, Sheet, SheetId, SheetVisibility, ValidationError, WorkbookSnapshot,
+    SavedResult, Sheet, SheetId, SheetVisibility, ValidationError, WorkbookSnapshot,
 };
 
 impl WorkbookDraft {
@@ -99,27 +99,22 @@ impl WorkbookDraft {
                     value,
                 } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
-                    let previous = sheet.cell(*address).cloned();
-                    let previous_was_formula = previous
-                        .as_ref()
+                    let previous_was_formula = sheet
+                        .cell(*address)
                         .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)));
+                    let content_unchanged = sheet.cell(*address).is_some_and(|cell| {
+                        matches!(cell.content(), CellContent::Literal(previous) if previous == value)
+                    });
                     if presentation.has_cell_annotation(*sheet_id, *address) {
                         if *value == CellValue::Blank {
                             if presentation.clear_cell_phonetics(*sheet_id, *address)? {
                                 presentation_cell_mutations
                                     .insert(CalculationCellId::new(*sheet_id, *address));
                             }
-                        } else {
-                            let replacement = CellContent::Literal(value.clone());
-                            if previous
-                                .as_ref()
-                                .is_none_or(|cell| cell.content() != &replacement)
-                            {
-                                return Err(annotated_text_replacement_required(
-                                    *sheet_id, *address,
-                                )
-                                .into());
-                            }
+                        } else if !content_unchanged {
+                            return Err(
+                                annotated_text_replacement_required(*sheet_id, *address).into()
+                            );
                         }
                     }
                     if *value == CellValue::Blank {
@@ -134,25 +129,19 @@ impl WorkbookDraft {
                             touched_sheets.insert(*sheet_id);
                             semantic_changed = true;
                         }
-                    } else {
-                        let number_format = previous
-                            .as_ref()
-                            .map_or_else(NumberFormat::default, |cell| {
-                                cell.number_format().clone()
-                            });
+                    } else if !content_unchanged {
                         let content = CellContent::Literal(value.clone());
-                        if previous
-                            .as_ref()
-                            .is_none_or(|cell| cell.content() != &content)
-                        {
-                            sheet.upsert_cell_deferred(*address, content, number_format);
-                            mark_upsert(&mut cell_mutations, *sheet_id, *address, false);
-                            changed_cells.insert(CalculationCellId::new(*sheet_id, *address));
-                            calculation_changed_cells
-                                .insert(CalculationCellId::new(*sheet_id, *address));
-                            touched_sheets.insert(*sheet_id);
-                            semantic_changed = true;
-                        }
+                        let replacement = match sheet.cell(*address) {
+                            Some(cell) => cell.with_replaced_content(content),
+                            None => crate::Cell::new(*address, content),
+                        };
+                        sheet.upsert_cell_instance_deferred(replacement);
+                        mark_upsert(&mut cell_mutations, *sheet_id, *address, false);
+                        changed_cells.insert(CalculationCellId::new(*sheet_id, *address));
+                        calculation_changed_cells
+                            .insert(CalculationCellId::new(*sheet_id, *address));
+                        touched_sheets.insert(*sheet_id);
+                        semantic_changed = true;
                     }
                     topology_changed |= previous_was_formula;
                 }
@@ -248,21 +237,17 @@ impl WorkbookDraft {
                     number_format,
                 } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
-                    let cell =
-                        sheet
-                            .cell(*address)
-                            .cloned()
-                            .ok_or(ValidationError::CellNotFound {
-                                sheet_id: sheet_id.get(),
-                                row: address.row().get(),
-                                column: address.column().get(),
-                            })?;
-                    if cell.number_format() != number_format {
-                        sheet.upsert_cell_deferred(
-                            *address,
-                            cell.content().clone(),
-                            number_format.clone(),
-                        );
+                    let replacement = {
+                        let cell = sheet.cell(*address).ok_or(ValidationError::CellNotFound {
+                            sheet_id: sheet_id.get(),
+                            row: address.row().get(),
+                            column: address.column().get(),
+                        })?;
+                        (cell.number_format() != number_format)
+                            .then(|| cell.with_replaced_number_format(number_format.clone()))
+                    };
+                    if let Some(replacement) = replacement {
+                        sheet.upsert_cell_instance_deferred(replacement);
                         mark_upsert(&mut cell_mutations, *sheet_id, *address, true);
                         changed_cells.insert(CalculationCellId::new(*sheet_id, *address));
                         touched_sheets.insert(*sheet_id);
@@ -314,6 +299,7 @@ impl WorkbookDraft {
                         *sheet_id,
                         name,
                     )? {
+                        touched_sheets.insert(*sheet_id);
                         workbook_changed = true;
                         topology_changed = true;
                         semantic_changed = true;
@@ -336,6 +322,7 @@ impl WorkbookDraft {
                             return Err(ValidationError::LastVisibleSheet.into());
                         }
                         sheet_by_id_mut(&mut sheets, *sheet_id)?.set_visibility(*visibility);
+                        touched_sheets.insert(*sheet_id);
                         workbook_changed = true;
                         semantic_changed = true;
                     }
@@ -476,8 +463,17 @@ impl WorkbookDraft {
             }
         }
 
-        for sheet_id in touched_sheets {
-            sheet_by_id_mut(&mut sheets, sheet_id)?.finish_deferred_cell_edits();
+        for sheet in &sheets {
+            if sheet
+                .tables()
+                .iter()
+                .any(|table| changed_table_ids.contains(&table.id()))
+            {
+                touched_sheets.insert(sheet.id());
+            }
+        }
+        for sheet_id in &touched_sheets {
+            sheet_by_id_mut(&mut sheets, *sheet_id)?.finish_deferred_cell_edits();
         }
         let result_revision = if semantic_changed {
             next_revision(base_revision)?
@@ -485,7 +481,7 @@ impl WorkbookDraft {
             base_revision
         };
         let diagnostics = clone_slice(self.workbook.diagnostics(), rewrite_budget)?;
-        let workbook = WorkbookSnapshot::new_with_metadata_cancellable(
+        let workbook = WorkbookSnapshot::new_with_metadata_cancellable_from_previous(
             WorkbookSnapshotInput {
                 sheets,
                 defined_names,
@@ -495,6 +491,8 @@ impl WorkbookDraft {
                 source: self.workbook.source(),
                 provenance: self.workbook.provenance().clone(),
             },
+            self.workbook.as_ref(),
+            &touched_sheets,
             &|| rewrite_budget.check_cancelled().is_err(),
         )
         .map_err(|error| match error {
@@ -571,4 +569,48 @@ where
         cloned.insert(value.clone());
     }
     Ok(cloned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CellAddress, NumberFormat, NumberFormatKind};
+
+    #[test]
+    fn number_format_edit_shares_existing_large_cell_content() {
+        let mut draft = WorkbookDraft::new();
+        let sheet = SheetId::new(1).expect("default sheet");
+        let address = CellAddress::from_a1("A1").expect("cell address");
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
+                sheet,
+                address,
+                CellValue::Text("x".repeat(8_192)),
+            )]))
+            .expect("large text cell");
+        let before = draft.workbook().clone();
+
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::set_cell_number_format(
+                sheet,
+                address,
+                NumberFormat::custom(164, "0.000", NumberFormatKind::Number)
+                    .expect("custom format"),
+            )]))
+            .expect("metadata-only edit");
+
+        let before_cell = before
+            .sheet_by_id(sheet)
+            .expect("sheet")
+            .cell(address)
+            .expect("cell");
+        let after_cell = draft
+            .workbook()
+            .sheet_by_id(sheet)
+            .expect("sheet")
+            .cell(address)
+            .expect("cell");
+        assert!(before_cell.shares_content_with(after_cell));
+        assert!(!before_cell.shares_number_format_with(after_cell));
+    }
 }

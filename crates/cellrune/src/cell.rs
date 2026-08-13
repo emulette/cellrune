@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use crate::{CellAddress, FormulaCell, ValidationError};
 
@@ -213,33 +214,29 @@ pub enum CellContent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
     address: CellAddress,
-    content: CellContent,
-    number_format: NumberFormat,
+    content: Arc<CellContent>,
+    number_format: Arc<NumberFormat>,
 }
 
 impl Cell {
     /// Constructs a cell from already validated parts.
-    pub const fn new(address: CellAddress, content: CellContent) -> Self {
+    pub fn new(address: CellAddress, content: CellContent) -> Self {
         Self {
             address,
-            content,
-            number_format: NumberFormat {
-                id: 0,
-                code: None,
-                kind: NumberFormatKind::General,
-            },
+            content: Arc::new(content),
+            number_format: Arc::new(NumberFormat::default()),
         }
     }
 
-    pub(crate) const fn with_number_format(
+    pub(crate) fn with_number_format(
         address: CellAddress,
         content: CellContent,
         number_format: NumberFormat,
     ) -> Self {
         Self {
             address,
-            content,
-            number_format,
+            content: Arc::new(content),
+            number_format: Arc::new(number_format),
         }
     }
 
@@ -249,24 +246,71 @@ impl Cell {
     }
 
     /// Returns the cell content.
-    pub const fn content(&self) -> &CellContent {
-        &self.content
+    pub fn content(&self) -> &CellContent {
+        self.content.as_ref()
     }
 
     /// Returns number-format metadata without converting the raw cell value.
-    pub const fn number_format(&self) -> &NumberFormat {
-        &self.number_format
+    pub fn number_format(&self) -> &NumberFormat {
+        self.number_format.as_ref()
     }
 
-    pub(crate) const fn with_content_and_number_format(
+    pub(crate) fn with_content_and_number_format(
         address: CellAddress,
         content: CellContent,
         number_format: NumberFormat,
     ) -> Self {
         Self {
             address,
-            content,
-            number_format,
+            content: Arc::new(content),
+            number_format: Arc::new(number_format),
         }
+    }
+
+    pub(crate) fn with_replaced_content(&self, content: CellContent) -> Self {
+        Self {
+            address: self.address,
+            content: Arc::new(content),
+            number_format: Arc::clone(&self.number_format),
+        }
+    }
+
+    pub(crate) fn with_replaced_number_format(&self, number_format: NumberFormat) -> Self {
+        Self {
+            address: self.address,
+            content: Arc::clone(&self.content),
+            number_format: Arc::new(number_format),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_content_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.content, &other.content)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_number_format_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.number_format, &other.number_format)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clone_and_metadata_edit_share_large_immutable_payloads() {
+        let original = Cell::with_number_format(
+            CellAddress::from_a1("A1").expect("cell address"),
+            CellContent::Literal(CellValue::Text("x".repeat(8_192))),
+            NumberFormat::custom(164, "0.000", NumberFormatKind::Number).expect("format"),
+        );
+        let cloned = original.clone();
+        assert!(original.shares_content_with(&cloned));
+        assert!(original.shares_number_format_with(&cloned));
+
+        let reformatted = original.with_replaced_number_format(NumberFormat::default());
+        assert!(original.shares_content_with(&reformatted));
+        assert!(!original.shares_number_format_with(&reformatted));
     }
 }

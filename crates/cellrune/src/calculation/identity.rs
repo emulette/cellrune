@@ -15,21 +15,15 @@ pub(crate) fn sheet_fingerprint_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 5: a sheet node digest that folds its immutable cell-chunk digests and the
-    // sheet envelope so an edited workbook reuses unchanged sheets.
-    hash.u8(5);
+    // Schema byte 6: the sheet folds one canonical radix root. The radix partition is fixed by
+    // row-major chunk key, so its digest is independent of insertion and edit history while a
+    // cell edit rehashes only the changed leaf-to-root path.
+    hash.u8(6);
     hash.u32(sheet.id().get());
     hash.string(sheet.name().as_str());
     hash.sheet_visibility(sheet.visibility());
     hash.usize(sheet.len());
-    let cell_chunks = sheet.semantic_cell_chunk_fingerprints_cancellable(cancelled)?;
-    hash.usize(cell_chunks.len());
-    for chunk in cell_chunks {
-        if cancelled() {
-            return Err(());
-        }
-        hash.bytes(&chunk);
-    }
+    hash.bytes(&sheet.semantic_cell_store_fingerprint_cancellable(cancelled)?);
     hash.usize(sheet.merged_ranges().len());
     for range in sheet.merged_ranges() {
         if cancelled() {
@@ -94,17 +88,12 @@ pub(crate) fn workbook_fingerprint_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 4: sheets are folded through their cached sheet-node digests.
-    hash.u8(4);
+    // Schema byte 6: one canonical persistent sheet tree replaces the flat sheet digest fold.
+    hash.u8(6);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());
-    for sheet in workbook.sheets() {
-        if cancelled() {
-            return Err(());
-        }
-        hash.bytes(&sheet.semantic_fingerprint_cancellable(cancelled)?);
-    }
+    hash.bytes(&workbook.semantic_sheet_tree_fingerprint_cancellable(cancelled)?);
     hash.usize(workbook.defined_names().len());
     for name in workbook.defined_names() {
         if cancelled() {
@@ -139,6 +128,30 @@ pub(crate) fn cell_chunk_fingerprint_cancellable<'a>(
         hash.cell(cell);
     }
     Ok(hash.finish())
+}
+
+pub(crate) fn cell_store_node_fingerprint(depth: usize, children: &[(u8, [u8; 32])]) -> [u8; 32] {
+    let mut hash = SemanticHash::new();
+    hash.u8(7);
+    hash.usize(depth);
+    hash.usize(children.len());
+    for (edge, fingerprint) in children {
+        hash.u8(*edge);
+        hash.bytes(fingerprint);
+    }
+    hash.finish()
+}
+
+pub(crate) fn sheet_tree_node_fingerprint(depth: usize, children: &[(u8, [u8; 32])]) -> [u8; 32] {
+    let mut hash = SemanticHash::new();
+    hash.u8(8);
+    hash.usize(depth);
+    hash.usize(children.len());
+    for (edge, fingerprint) in children {
+        hash.u8(*edge);
+        hash.bytes(fingerprint);
+    }
+    hash.finish()
 }
 
 struct SemanticHash(Sha256);
@@ -623,12 +636,13 @@ mod tests {
 
     use super::{workbook_fingerprint, workbook_fingerprint_cancellable};
     use crate::{
-        CalculationHints, CellAddress, CellContent, CellRange, CellValue, DateSystem, FormulaText,
-        Provenance, ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table,
-        TableAutoFilter, TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem,
-        TableFormula, TableId, TableName, TableSortCondition, TableSortMethod, TableSortState,
-        TableStyleInfo, TableType, TableValueFilters, TotalsRowFunction, WorkbookSnapshot,
-        WorkbookSource,
+        CalculationHints, CalculationMode, CellAddress, CellContent, CellRange, CellValue,
+        DateSystem, DefinedName, DefinedNameScope, EditBatch, FormulaText, Provenance,
+        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableAutoFilter,
+        TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula,
+        TableId, TableName, TableSortCondition, TableSortMethod, TableSortState, TableStyleInfo,
+        TableType, TableValueFilters, TotalsRowFunction, WorkbookChange, WorkbookDraft,
+        WorkbookSnapshot, WorkbookSource,
     };
 
     #[test]
@@ -639,6 +653,243 @@ mod tests {
 
         assert_eq!(workbook_fingerprint(&first), workbook_fingerprint(&same));
         assert_ne!(workbook_fingerprint(&first), workbook_fingerprint(&changed));
+    }
+
+    #[test]
+    fn fingerprint_is_insertion_history_independent_and_edit_revert_restores_root() {
+        let build = |addresses: &[&str]| {
+            let mut sheet = Sheet::new(
+                SheetId::new(1).expect("sheet id"),
+                SheetName::new("Sheet1").expect("sheet name"),
+                SheetVisibility::Visible,
+            );
+            for address in addresses {
+                sheet
+                    .insert_cell(
+                        CellAddress::from_a1(address).expect("cell address"),
+                        CellContent::Literal(CellValue::number(1.0).expect("finite")),
+                    )
+                    .expect("unique cell");
+            }
+            WorkbookSnapshot::new(
+                vec![sheet],
+                DateSystem::Excel1900,
+                CalculationHints::default(),
+                WorkbookSource::default(),
+                Provenance::new(
+                    ProviderIdentity::new("identity-test", "1").expect("provider"),
+                    None,
+                ),
+            )
+            .expect("workbook")
+        };
+        let ascending = build(&["A1", "XFD1", "A2"]);
+        let descending = build(&["A2", "XFD1", "A1"]);
+        let seeded_random = build(&["XFD1", "A1", "A2"]);
+        assert_eq!(
+            workbook_fingerprint(&ascending),
+            workbook_fingerprint(&descending)
+        );
+        assert_eq!(
+            workbook_fingerprint(&ascending),
+            workbook_fingerprint(&seeded_random)
+        );
+
+        let original = workbook_fingerprint(&ascending);
+        let mut draft = WorkbookDraft::from_snapshot_for_test(ascending);
+        let sheet = SheetId::new(1).expect("sheet id");
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
+                sheet,
+                CellAddress::from_a1("A1").expect("cell"),
+                CellValue::number(2.0).expect("finite"),
+            )]))
+            .expect("edit");
+        assert_ne!(original, workbook_fingerprint(draft.workbook()));
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
+                sheet,
+                CellAddress::from_a1("A1").expect("cell"),
+                CellValue::number(1.0).expect("finite"),
+            )]))
+            .expect("revert");
+        assert_eq!(original, workbook_fingerprint(draft.workbook()));
+    }
+
+    #[test]
+    fn fingerprint_is_sensitive_to_workbook_envelope_fields() {
+        let build = |date_system, hints| {
+            WorkbookSnapshot::new(
+                workbook_with_number(1.0).sheets().to_vec(),
+                date_system,
+                hints,
+                WorkbookSource::default(),
+                Provenance::new(
+                    ProviderIdentity::new("identity-test", "1").expect("provider"),
+                    None,
+                ),
+            )
+            .expect("workbook")
+        };
+        let base = build(DateSystem::Excel1900, CalculationHints::default());
+        let date = build(DateSystem::Excel1904, CalculationHints::default());
+        let hints = build(
+            DateSystem::Excel1900,
+            CalculationHints::new(
+                Some(CalculationMode::Manual),
+                Some(1515),
+                Some(true),
+                Some(true),
+            )
+            .with_iterative_calculation(Some(true)),
+        );
+        assert_ne!(workbook_fingerprint(&base), workbook_fingerprint(&date));
+        assert_ne!(workbook_fingerprint(&base), workbook_fingerprint(&hints));
+    }
+
+    #[test]
+    fn incremental_sheet_identity_updates_sheet_and_table_metadata() {
+        let sheet_id = SheetId::new(1).expect("sheet id");
+        let base = workbook_with_number(1.0);
+        let original = workbook_fingerprint(&base);
+        let mut draft = WorkbookDraft::from_snapshot_for_test(base);
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::rename_sheet(
+                sheet_id,
+                SheetName::new("Renamed").expect("sheet name"),
+            )]))
+            .expect("sheet rename");
+        let renamed = workbook_fingerprint(draft.workbook());
+        assert_ne!(original, renamed);
+        assert_eq!(
+            renamed,
+            workbook_fingerprint(&canonical_rebuild(draft.workbook()))
+        );
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::rename_sheet(
+                sheet_id,
+                SheetName::new("Sheet1").expect("sheet name"),
+            )]))
+            .expect("sheet rename revert");
+        assert_eq!(original, workbook_fingerprint(draft.workbook()));
+
+        let table = Table::new(
+            TableId::new(1).expect("table id"),
+            TableName::new("Sales").expect("table name"),
+            TableName::new("Sales").expect("display name"),
+            range("A1", "B3"),
+            1,
+            0,
+            vec![
+                TableColumn::new(1, "Item", None).expect("column"),
+                TableColumn::new(2, "Amount", None).expect("column"),
+            ],
+        )
+        .expect("table");
+        let base = workbook_with_extras(Vec::new(), vec![table]);
+        let original = workbook_fingerprint(&base);
+        let mut draft = WorkbookDraft::from_snapshot_for_test(base);
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::rename_table(
+                TableId::new(1).expect("table id"),
+                TableName::new("Orders").expect("table name"),
+            )]))
+            .expect("table rename");
+        let renamed = workbook_fingerprint(draft.workbook());
+        assert_ne!(original, renamed);
+        assert_eq!(
+            renamed,
+            workbook_fingerprint(&canonical_rebuild(draft.workbook()))
+        );
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::rename_table(
+                TableId::new(1).expect("table id"),
+                TableName::new("Sales").expect("table name"),
+            )]))
+            .expect("table rename revert");
+        assert_eq!(original, workbook_fingerprint(draft.workbook()));
+    }
+
+    #[test]
+    fn workbook_fingerprint_folds_every_defined_name_field() {
+        let build = |name: &str, scope, formula: &str, hidden| {
+            WorkbookSnapshot::new_with_metadata(
+                workbook_with_number(1.0).sheets().to_vec(),
+                vec![
+                    DefinedName::new(
+                        name,
+                        scope,
+                        FormulaText::from_xlsx(formula).expect("name formula"),
+                        hidden,
+                    )
+                    .expect("defined name"),
+                ],
+                Vec::new(),
+                DateSystem::Excel1900,
+                CalculationHints::default(),
+                WorkbookSource::default(),
+                Provenance::new(
+                    ProviderIdentity::new("identity-test", "1").expect("provider"),
+                    None,
+                ),
+            )
+            .expect("workbook")
+        };
+        let base = workbook_fingerprint(&build(
+            "Rate",
+            DefinedNameScope::Workbook,
+            "Sheet1!$A$1",
+            false,
+        ));
+        assert_ne!(
+            base,
+            workbook_fingerprint(&build(
+                "Rate2",
+                DefinedNameScope::Workbook,
+                "Sheet1!$A$1",
+                false
+            ))
+        );
+        assert_ne!(
+            base,
+            workbook_fingerprint(&build(
+                "Rate",
+                DefinedNameScope::Sheet(SheetId::new(1).expect("sheet id")),
+                "Sheet1!$A$1",
+                false
+            ))
+        );
+        assert_ne!(
+            base,
+            workbook_fingerprint(&build(
+                "Rate",
+                DefinedNameScope::Workbook,
+                "Sheet1!$A$2",
+                false
+            ))
+        );
+        assert_ne!(
+            base,
+            workbook_fingerprint(&build(
+                "Rate",
+                DefinedNameScope::Workbook,
+                "Sheet1!$A$1",
+                true
+            ))
+        );
+    }
+
+    fn canonical_rebuild(workbook: &WorkbookSnapshot) -> WorkbookSnapshot {
+        WorkbookSnapshot::new_with_metadata(
+            workbook.sheets().to_vec(),
+            workbook.defined_names().to_vec(),
+            workbook.diagnostics().to_vec(),
+            workbook.date_system(),
+            workbook.calculation_hints(),
+            workbook.source(),
+            workbook.provenance().clone(),
+        )
+        .expect("canonical rebuild")
     }
 
     #[test]

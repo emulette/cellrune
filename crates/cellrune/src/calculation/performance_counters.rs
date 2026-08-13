@@ -11,7 +11,8 @@
 // documentation requirement.
 #![allow(missing_docs)]
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(usize)]
@@ -60,6 +61,8 @@ struct GlobalWorkCounters {
 }
 
 static GLOBAL_WORK_COUNTERS: GlobalWorkCounters = GlobalWorkCounters::new();
+static COUNTERS_ACTIVE: AtomicBool = AtomicBool::new(false);
+static COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 impl GlobalWorkCounters {
     const fn new() -> Self {
@@ -86,15 +89,26 @@ impl GlobalWorkCounters {
 // Forward-declared mutation API wired up by the O1-O4 storage/index/impact/identity integrations.
 #[allow(dead_code)]
 pub(crate) fn work_counter_add(counter: WorkCounter, delta: u64) {
-    GLOBAL_WORK_COUNTERS.add(counter, delta);
+    if COUNTERS_ACTIVE.load(Ordering::Relaxed) {
+        GLOBAL_WORK_COUNTERS.add(counter, delta);
+    }
 }
 
 #[allow(dead_code)]
 pub(crate) fn work_counter_store(counter: WorkCounter, value: u64) {
-    GLOBAL_WORK_COUNTERS.store(counter, value);
+    if COUNTERS_ACTIVE.load(Ordering::Relaxed) {
+        GLOBAL_WORK_COUNTERS.store(counter, value);
+    }
+}
+
+pub fn lock_work_counters() -> MutexGuard<'static, ()> {
+    COUNTER_TEST_LOCK
+        .lock()
+        .expect("work-counter lock poisoned")
 }
 
 pub fn reset_work_counters() {
+    COUNTERS_ACTIVE.store(true, Ordering::Relaxed);
     for counter in ALL_COUNTERS {
         GLOBAL_WORK_COUNTERS.store(counter, 0);
     }
@@ -105,6 +119,7 @@ pub fn snapshot_work_counters() -> WorkCounterSnapshot {
     for counter in ALL_COUNTERS {
         values[counter as usize] = GLOBAL_WORK_COUNTERS.load(counter);
     }
+    COUNTERS_ACTIVE.store(false, Ordering::Relaxed);
     WorkCounterSnapshot { values }
 }
 
@@ -141,6 +156,7 @@ mod tests {
 
     #[test]
     fn counters_reset_snapshot_and_increment_independently() {
+        let _guard = lock_work_counters();
         reset_work_counters();
         work_counter_add(WorkCounter::CellStoreNodesCopied, 3);
         work_counter_add(WorkCounter::FingerprintRootCacheHits, 1);
@@ -149,6 +165,7 @@ mod tests {
         assert_eq!(snapshot.get(WorkCounter::FingerprintRootCacheHits), 1);
         assert_eq!(snapshot.get(WorkCounter::ResultStoreNodesCopied), 0);
 
+        reset_work_counters();
         work_counter_store(WorkCounter::AreaSourceRectangles, 7);
         assert_eq!(
             snapshot_work_counters().get(WorkCounter::AreaSourceRectangles),

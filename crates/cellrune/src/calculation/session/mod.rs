@@ -238,23 +238,22 @@ impl WorkbookCalculationSession {
         }
         let topology_or_metadata_changed =
             receipt.topology_changed() || receipt.calculation_metadata_changed();
-        let next_requires_full_rebuild =
-            self.requires_full_rebuild || topology_or_metadata_changed;
-        let mut replacement_dirty_state = self.dirty.clone();
-        if !topology_or_metadata_changed
-            && let Some(compiled) = &self.compiled
-        {
-            replacement_dirty_state.extend(
+        let next_requires_full_rebuild = self.requires_full_rebuild || topology_or_metadata_changed;
+        let replacement_dirty_state =
+            if !topology_or_metadata_changed && let Some(compiled) = &self.compiled {
                 affected_formulas(
                     draft.workbook(),
                     compiled,
                     self.calculation.as_deref(),
                     receipt.calculation_changed_cells(),
+                    &self.dirty,
                     &cancelled,
                 )
-                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
-            );
-        }
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            } else {
+                clone_set_cancellable(&self.dirty, &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            };
         let next_calculation_changes_pending =
             self.calculation_changes_pending || !receipt.calculation_changed_cells().is_empty();
         Ok(PreparedEditBatch {
@@ -1164,9 +1163,10 @@ mod tests {
     #[test]
     fn impact_preparation_wires_work_counters() {
         use crate::calculation::performance_counters::{
-            reset_work_counters, snapshot_work_counters, WorkCounter,
+            WorkCounter, lock_work_counters, reset_work_counters, snapshot_work_counters,
         };
 
+        let _guard = lock_work_counters();
         reset_work_counters();
         let sheet = SheetId::new(1).expect("valid default sheet ID");
         let mut session = WorkbookCalculationSession::create();
@@ -1222,12 +1222,13 @@ mod tests {
         use std::rc::Rc;
 
         use crate::calculation::performance_counters::{
-            reset_work_counters, snapshot_work_counters, WorkCounter,
+            WorkCounter, lock_work_counters, reset_work_counters, snapshot_work_counters,
         };
 
+        let _guard = lock_work_counters();
         reset_work_counters();
         let sheet = SheetId::new(1).expect("valid default sheet ID");
-        const CHAIN_LEN: u32 = 300;
+        const CHAIN_LEN: u32 = 100_001;
         let mut changes = Vec::with_capacity(CHAIN_LEN as usize);
         changes.push(WorkbookChange::set_cell_value(
             sheet,
@@ -1242,7 +1243,9 @@ mod tests {
                     .expect("valid generated chain formula"),
             ));
         }
-        let mut session = WorkbookCalculationSession::create();
+        let limits =
+            SessionLimits::new(100_001, 100_001, 100_001, 256, 100).expect("large fanout limits");
+        let mut session = WorkbookCalculationSession::with_limits(WorkbookDraft::new(), limits);
         session
             .apply_changes(0, EditBatch::new(changes))
             .expect("chain workbook");
@@ -1270,7 +1273,14 @@ mod tests {
             }
         };
 
-        let result = affected_formulas(workbook, compiled.as_ref(), previous, &changed, &cancelled);
+        let result = affected_formulas(
+            workbook,
+            compiled.as_ref(),
+            previous,
+            &changed,
+            &BTreeSet::new(),
+            &cancelled,
+        );
 
         assert!(
             result.is_err(),
@@ -1286,6 +1296,71 @@ mod tests {
             snapshot.get(WorkCounter::ImpactReverseEdgesVisited) >= 200,
             "polling must be batched rather than checked once per reverse edge"
         );
+    }
+
+    #[test]
+    fn direct_fanout_cancels_within_256_charged_work() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        use crate::calculation::performance_counters::{
+            WorkCounter, lock_work_counters, reset_work_counters, snapshot_work_counters,
+        };
+
+        let _guard = lock_work_counters();
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        const FORMULAS: u32 = 100_000;
+        let mut changes = Vec::with_capacity(FORMULAS as usize + 1);
+        changes.push(WorkbookChange::set_cell_value(
+            sheet,
+            address("A1"),
+            number(1.0),
+        ));
+        for row in 2..=FORMULAS + 1 {
+            changes.push(WorkbookChange::set_cell_formula(
+                sheet,
+                CellAddress::from_indices(row, 2).expect("fanout formula cell"),
+                FormulaText::from_xlsx("$A$1+1").expect("valid fanout formula"),
+            ));
+        }
+        let limits =
+            SessionLimits::new(100_001, 100_001, 100_001, 256, 100).expect("large fanout limits");
+        let mut session = WorkbookCalculationSession::with_limits(WorkbookDraft::new(), limits);
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("direct fanout workbook");
+        session
+            .recalculate(
+                RecalculationMode::Full,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial direct fanout calculation");
+
+        reset_work_counters();
+        let compiled = session.compiled.clone().expect("compiled workbook");
+        let changed = [CalculationCellId::new(sheet, address("A1"))];
+        let polls = Rc::new(Cell::new(0_u32));
+        let cancelled = {
+            let polls = Rc::clone(&polls);
+            move || {
+                let next = polls.get() + 1;
+                polls.set(next);
+                next >= 3
+            }
+        };
+        let result = affected_formulas(
+            session.workbook(),
+            compiled.as_ref(),
+            session.calculation.as_deref(),
+            &changed,
+            &BTreeSet::new(),
+            &cancelled,
+        );
+        assert!(result.is_err());
+        let snapshot = snapshot_work_counters();
+        assert!(snapshot.get(WorkCounter::ImpactDirectCandidatesVisited) <= 256);
+        assert!(snapshot.get(WorkCounter::ImpactCancellationPolls) >= 3);
     }
 
     #[test]

@@ -1,6 +1,5 @@
 //! Deterministic workbook formula capability scanning and calculation.
 
-use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -28,6 +27,7 @@ mod limits;
 mod operators;
 mod parser;
 pub(crate) mod performance_counters;
+pub(crate) mod persistent_store;
 mod pipeline;
 mod reference_resolution;
 mod runtime;
@@ -41,7 +41,8 @@ mod value;
 #[cfg(test)]
 pub(crate) mod work_counter;
 
-use crate::calculation::performance_counters::{work_counter_add, WorkCounter};
+use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
+use crate::calculation::persistent_store::{PersistentRadixEntries, PersistentRadixMap};
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
@@ -591,30 +592,15 @@ impl MaterializedCalculationCell {
     }
 }
 
-const CALCULATION_ROW_CHUNK_SIZE: u32 = 256;
-const CALCULATION_COL_CHUNK_SIZE: u32 = 256;
-
-type CalculationChunkKey = (SheetId, u32, u32);
-type CalculationChunk<V> = Arc<BTreeMap<CalculationCellId, Arc<V>>>;
-type CalculationChunkIndex<V> = BTreeMap<CalculationChunkKey, CalculationChunk<V>>;
-
 #[derive(Debug)]
 struct CalculationStore<V> {
-    chunks: CalculationChunkIndex<V>,
+    cells: PersistentRadixMap<Arc<V>>,
     len: usize,
+    count_result_work: bool,
 }
 
-type CalculationChunkIter<'a, V> = btree_map::Iter<'a, CalculationCellId, Arc<V>>;
-type CalculationChunkMapIter<'a, V> =
-    btree_map::Values<'a, CalculationChunkKey, CalculationChunk<V>>;
-type FlatCalculationIter<'a, V> = std::iter::FlatMap<
-    CalculationChunkMapIter<'a, V>,
-    CalculationChunkIter<'a, V>,
-    fn(&'a CalculationChunk<V>) -> CalculationChunkIter<'a, V>,
->;
-
 struct CalculationStoreIter<'a, V> {
-    inner: FlatCalculationIter<'a, V>,
+    inner: PersistentRadixEntries<'a, Arc<V>>,
     remaining: usize,
 }
 
@@ -622,9 +608,9 @@ impl<'a, V> Iterator for CalculationStoreIter<'a, V> {
     type Item = (CalculationCellId, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (cell, value) = self.inner.next()?;
+        let (key, value) = self.inner.next()?;
         self.remaining -= 1;
-        Some((*cell, value.as_ref()))
+        Some((CalculationStore::<V>::cell_from_key(key), value.as_ref()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -634,55 +620,58 @@ impl<'a, V> Iterator for CalculationStoreIter<'a, V> {
 
 impl<V> ExactSizeIterator for CalculationStoreIter<'_, V> {}
 
-fn calculation_chunk_iter<V>(chunk: &CalculationChunk<V>) -> CalculationChunkIter<'_, V> {
-    chunk.iter()
-}
-
 impl<V> CalculationStore<V> {
-    fn chunk(cell: CalculationCellId) -> (SheetId, u32, u32) {
-        (
-            cell.sheet_id(),
-            (cell.address().row().get() - 1) / CALCULATION_ROW_CHUNK_SIZE,
-            (cell.address().column().get() - 1) / CALCULATION_COL_CHUNK_SIZE,
+    fn key(cell: CalculationCellId) -> u128 {
+        let row_major_index = u128::from(cell.address().row().get() - 1)
+            * u128::from(EXCEL_MAX_COLUMNS)
+            + u128::from(cell.address().column().get() - 1);
+        (u128::from(cell.sheet_id().get()) << 34) | row_major_index
+    }
+
+    fn cell_from_key(key: u128) -> CalculationCellId {
+        let sheet = SheetId::new((key >> 34) as u32).expect("stored sheet ID is non-zero");
+        let address_key = (key & ((1_u128 << 34) - 1)) as u64;
+        let row = address_key / u64::from(EXCEL_MAX_COLUMNS) + 1;
+        let column = address_key % u64::from(EXCEL_MAX_COLUMNS) + 1;
+        CalculationCellId::new(
+            sheet,
+            CellAddress::from_indices(row as u32, column as u32)
+                .expect("stored calculation cell address is valid"),
         )
     }
 
     fn from_map(values: BTreeMap<CalculationCellId, V>) -> Self {
+        Self::from_map_with_result_work(values, false)
+    }
+
+    fn from_map_with_result_work(
+        values: BTreeMap<CalculationCellId, V>,
+        count_result_work: bool,
+    ) -> Self {
         let len = values.len();
-        let mut chunks = BTreeMap::<CalculationChunkKey, BTreeMap<CalculationCellId, Arc<V>>>::new();
+        let mut cells = PersistentRadixMap::default();
         for (cell, value) in values {
-            chunks
-                .entry(Self::chunk(cell))
-                .or_default()
-                .insert(cell, Arc::new(value));
+            cells.insert(Self::key(cell), Arc::new(value));
         }
         Self {
-            chunks: chunks
-                .into_iter()
-                .map(|(key, chunk)| (key, Arc::new(chunk)))
-                .collect(),
+            cells,
             len,
+            count_result_work,
         }
     }
 
     fn get(&self, cell: &CalculationCellId) -> Option<&V> {
-        self.chunks
-            .get(&Self::chunk(*cell))
-            .and_then(|chunk| chunk.get(cell))
-            .map(|value| value.as_ref())
+        self.cells.get(Self::key(*cell)).map(|value| value.as_ref())
     }
 
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
-        let mut chunks = BTreeMap::new();
-        for (key, chunk) in &self.chunks {
-            if cancelled() {
-                return Err(());
-            }
-            chunks.insert(*key, Arc::clone(chunk));
+        if cancelled() {
+            return Err(());
         }
         Ok(Self {
-            chunks,
+            cells: self.cells.clone(),
             len: self.len,
+            count_result_work: self.count_result_work,
         })
     }
 
@@ -691,69 +680,52 @@ impl<V> CalculationStore<V> {
         cell: CalculationCellId,
         value: V,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<V>, ()>
-    where
-        V: Clone,
-    {
+    ) -> Result<Option<Arc<V>>, ()> {
         if cancelled() {
             return Err(());
         }
-        let chunk = self
-            .chunks
-            .entry(Self::chunk(cell))
-            .or_insert_with(|| Arc::new(BTreeMap::new()));
-        if Arc::strong_count(chunk) > 1 {
+        let (previous, copied) = self.cells.insert(Self::key(cell), Arc::new(value));
+        if self.count_result_work && previous.is_some() {
             work_counter_add(WorkCounter::ResultStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::ResultStoreEntriesReindexed, chunk.len() as u64);
+            work_counter_add(WorkCounter::ResultStoreEntriesReindexed, 1);
         }
-        work_counter_add(WorkCounter::ResultStoreNodesCopied, 1);
-        let previous = Arc::make_mut(chunk).insert(cell, Arc::new(value));
+        if self.count_result_work {
+            work_counter_add(WorkCounter::ResultStoreNodesCopied, copied);
+        }
         if previous.is_none() {
             self.len += 1;
         }
-        Ok(previous.map(|arc| {
-            Arc::try_unwrap(arc).unwrap_or_else(|arc| arc.as_ref().clone())
-        }))
+        Ok(previous)
     }
 
     fn remove_cancellable(
         &mut self,
         cell: &CalculationCellId,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<V>, ()>
-    where
-        V: Clone,
-    {
+    ) -> Result<Option<Arc<V>>, ()> {
         if cancelled() {
             return Err(());
         }
-        let chunk_key = Self::chunk(*cell);
-        let Some(chunk) = self.chunks.get_mut(&chunk_key) else {
+        if self.cells.get(Self::key(*cell)).is_none() {
             return Ok(None);
-        };
-        if Arc::strong_count(chunk) > 1 {
-            work_counter_add(WorkCounter::ResultStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::ResultStoreEntriesReindexed, chunk.len() as u64);
         }
-        work_counter_add(WorkCounter::ResultStoreNodesCopied, 1);
-        let removed = Arc::make_mut(chunk).remove(cell);
+        if self.count_result_work {
+            work_counter_add(WorkCounter::ResultStoreLeavesRebuilt, 1);
+            work_counter_add(WorkCounter::ResultStoreEntriesReindexed, 1);
+        }
+        let (removed, copied) = self.cells.remove(Self::key(*cell));
+        if self.count_result_work {
+            work_counter_add(WorkCounter::ResultStoreNodesCopied, copied);
+        }
         if removed.is_some() {
             self.len -= 1;
         }
-        if chunk.is_empty() {
-            self.chunks.remove(&chunk_key);
-        }
-        Ok(removed.map(|arc| {
-            Arc::try_unwrap(arc).unwrap_or_else(|arc| arc.as_ref().clone())
-        }))
+        Ok(removed)
     }
 
     fn iter(&self) -> CalculationStoreIter<'_, V> {
         CalculationStoreIter {
-            inner: self.chunks.values().flat_map(
-                calculation_chunk_iter::<V>
-                    as fn(&CalculationChunk<V>) -> CalculationChunkIter<'_, V>,
-            ),
+            inner: self.cells.ordered_entries(),
             remaining: self.len,
         }
     }
@@ -767,7 +739,7 @@ impl<V> CalculationStore<V> {
     }
 }
 
-fn calculation_store_mut_cancellable<'a, V: Clone>(
+fn calculation_store_mut_cancellable<'a, V>(
     store: &'a mut Arc<CalculationStore<V>>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<&'a mut CalculationStore<V>, ()> {
@@ -803,7 +775,9 @@ mod calculation_store_tests {
         let mutable = calculation_store_mut_cancellable(&mut store, &cancelled)
             .expect("outer store clone completes");
         assert_eq!(
-            mutable.insert_cancellable(first, 3, &cancelled),
+            mutable
+                .insert_cancellable(first, 3, &cancelled)
+                .map(|value| value.as_deref().copied()),
             Ok(Some(1)),
             "insert returns the previous value without deep-cloning it"
         );
@@ -812,6 +786,40 @@ mod calculation_store_tests {
         assert_eq!(installed.get(&second), Some(&2));
         assert_eq!(store.get(&first), Some(&3));
         assert_eq!(store.get(&second), Some(&2));
+    }
+
+    #[test]
+    fn packed_key_preserves_sheet_and_row_major_boundaries_without_collision() {
+        let low_sheet = SheetId::new(1).expect("low sheet");
+        let high_sheet = SheetId::new(u32::MAX).expect("high sheet");
+        let cells = [
+            CalculationCellId::new(
+                low_sheet,
+                CellAddress::from_indices(1, EXCEL_MAX_COLUMNS).expect("wide first row"),
+            ),
+            CalculationCellId::new(
+                low_sheet,
+                CellAddress::from_indices(2, 1).expect("second row"),
+            ),
+            CalculationCellId::new(
+                high_sheet,
+                CellAddress::from_indices(EXCEL_MAX_ROWS, EXCEL_MAX_COLUMNS).expect("last cell"),
+            ),
+        ];
+        let store = CalculationStore::from_map(
+            cells
+                .into_iter()
+                .enumerate()
+                .map(|(index, cell)| (cell, index))
+                .collect(),
+        );
+        assert_eq!(
+            store.iter().map(|(cell, _)| cell).collect::<Vec<_>>(),
+            cells
+        );
+        for (index, cell) in cells.into_iter().enumerate() {
+            assert_eq!(store.get(&cell), Some(&index));
+        }
     }
 }
 
@@ -892,7 +900,7 @@ impl CalculationSnapshot {
         let materialized_cells_by_owner =
             build_materialized_owner_index(&materialized_cells, cancelled)?;
         Ok(Self {
-            cells: Arc::new(CalculationStore::from_map(cells)),
+            cells: Arc::new(CalculationStore::from_map_with_result_work(cells, true)),
             materialized_cells: Arc::new(CalculationStore::from_map(materialized_cells)),
             materialized_cells_by_owner: Arc::new(CalculationStore::from_map(
                 materialized_cells_by_owner,
@@ -963,7 +971,7 @@ impl CalculationSnapshot {
         let mut removed = Vec::new();
         for owner in dirty {
             if let Some(cells) = owners_mut.remove_cancellable(owner, cancelled)? {
-                removed.extend(cells);
+                removed.extend(cells.iter().copied());
             }
         }
         let materialized_mut =
