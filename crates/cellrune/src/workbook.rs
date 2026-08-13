@@ -316,6 +316,7 @@ pub struct Sheet {
     max_column: Option<Column>,
     merged_ranges: Arc<Vec<CellRange>>,
     tables: Arc<Vec<Table>>,
+    semantic_fingerprint: OnceLock<[u8; 32]>,
 }
 
 impl Sheet {
@@ -337,6 +338,7 @@ impl Sheet {
             max_column: self.max_column,
             merged_ranges: Arc::clone(&self.merged_ranges),
             tables: Arc::clone(&self.tables),
+            semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
     }
 
@@ -356,6 +358,7 @@ impl Sheet {
             max_column: None,
             merged_ranges: Arc::new(Vec::new()),
             tables: Arc::new(Vec::new()),
+            semantic_fingerprint: OnceLock::new(),
         }
     }
 
@@ -400,6 +403,7 @@ impl Sheet {
             });
         }
         let is_formula = matches!(content, CellContent::Formula(_));
+        self.semantic_fingerprint = OnceLock::new();
         self.update_bounds(address);
         self.update_column_extent(address);
         self.cells.insert(
@@ -442,6 +446,24 @@ impl Sheet {
         self.cells.semantic_fingerprints_cancellable(cancelled)
     }
 
+    pub(crate) fn semantic_fingerprint_cancellable(
+        &self,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<[u8; 32], ()> {
+        if let Some(fingerprint) = self.semantic_fingerprint.get() {
+            work_counter_add(WorkCounter::FingerprintCachedNodesReused, 1);
+            return Ok(*fingerprint);
+        }
+        work_counter_add(WorkCounter::FingerprintInternalNodesHashed, 1);
+        let fingerprint =
+            crate::calculation::identity::sheet_fingerprint_cancellable(self, cancelled)?;
+        let _ = self.semantic_fingerprint.set(fingerprint);
+        Ok(*self
+            .semantic_fingerprint
+            .get()
+            .expect("sheet fingerprint was initialized"))
+    }
+
     pub(crate) fn next_formula_cell_after(&self, after: Option<CellAddress>) -> Option<Cell> {
         let address = match after {
             Some(address) => self
@@ -476,6 +498,7 @@ impl Sheet {
     /// Callers must pass ranges already sorted by `(start, end)` and pairwise non-overlapping;
     /// the reader's merge parser is the only producer of that order.
     pub(crate) fn set_merged_ranges(&mut self, merged_ranges: Vec<CellRange>) {
+        self.semantic_fingerprint = OnceLock::new();
         self.merged_ranges = Arc::new(merged_ranges);
     }
 
@@ -488,10 +511,12 @@ impl Sheet {
     ///
     /// Workbook-wide name uniqueness is enforced when the snapshot is constructed, not here.
     pub(crate) fn set_tables(&mut self, tables: Vec<Table>) {
+        self.semantic_fingerprint = OnceLock::new();
         self.tables = Arc::new(tables);
     }
 
     pub(crate) fn tables_mut(&mut self) -> &mut [Table] {
+        self.semantic_fingerprint = OnceLock::new();
         Arc::make_mut(&mut self.tables).as_mut_slice()
     }
 
@@ -544,6 +569,7 @@ impl Sheet {
         content: CellContent,
         number_format: NumberFormat,
     ) {
+        self.semantic_fingerprint = OnceLock::new();
         self.track_formula_address(address, &content);
         let is_new = !self.cells.insert(
             address,
@@ -556,6 +582,7 @@ impl Sheet {
     }
 
     pub(crate) fn remove_cell_deferred(&mut self, address: CellAddress) -> bool {
+        self.semantic_fingerprint = OnceLock::new();
         if self.formula_addresses.contains(&address) {
             Arc::make_mut(&mut self.formula_addresses).remove(&address);
         }
@@ -582,10 +609,12 @@ impl Sheet {
     }
 
     pub(crate) fn rename(&mut self, name: SheetName) {
+        self.semantic_fingerprint = OnceLock::new();
         self.name = name;
     }
 
-    pub(crate) const fn set_visibility(&mut self, visibility: SheetVisibility) {
+    pub(crate) fn set_visibility(&mut self, visibility: SheetVisibility) {
+        self.semantic_fingerprint = OnceLock::new();
         self.visibility = visibility;
     }
 

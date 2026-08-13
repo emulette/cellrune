@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     CalculationHints, CalculationMode, Cell, CellContent, CellValue, DateSystem, DefinedNameScope,
-    FormulaMetadata, NumberFormatKind, SharedFormulaRole, SheetVisibility, WorkbookSnapshot,
+    FormulaMetadata, NumberFormatKind, SharedFormulaRole, Sheet, SheetVisibility, WorkbookSnapshot,
 };
 
 pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
@@ -10,13 +10,91 @@ pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
         .expect("non-cancellable fingerprinting cannot be cancelled")
 }
 
+pub(crate) fn sheet_fingerprint_cancellable(
+    sheet: &Sheet,
+    cancelled: &impl Fn() -> bool,
+) -> Result<[u8; 32], ()> {
+    let mut hash = SemanticHash::new();
+    // Schema byte 5: a sheet node digest that folds its immutable cell-chunk digests and the
+    // sheet envelope so an edited workbook reuses unchanged sheets.
+    hash.u8(5);
+    hash.u32(sheet.id().get());
+    hash.string(sheet.name().as_str());
+    hash.sheet_visibility(sheet.visibility());
+    hash.usize(sheet.len());
+    let cell_chunks = sheet.semantic_cell_chunk_fingerprints_cancellable(cancelled)?;
+    hash.usize(cell_chunks.len());
+    for chunk in cell_chunks {
+        if cancelled() {
+            return Err(());
+        }
+        hash.bytes(&chunk);
+    }
+    hash.usize(sheet.merged_ranges().len());
+    for range in sheet.merged_ranges() {
+        if cancelled() {
+            return Err(());
+        }
+        hash.range(*range);
+    }
+    // The whole table model is folded, including fields such as display_name that do
+    // not feed calculation today: missing a fold shows up as a stale write, folding
+    // too much only costs one extra recalculation.
+    hash.usize(sheet.tables().len());
+    for table in sheet.tables() {
+        if cancelled() {
+            return Err(());
+        }
+        hash.u32(table.id().get());
+        hash.string_cancellable(table.name().as_str(), cancelled)?;
+        hash.string_cancellable(table.display_name().as_str(), cancelled)?;
+        hash.range(table.range());
+        hash.string_cancellable(table.table_type().as_str(), cancelled)?;
+        hash.u32(table.header_row_count());
+        hash.u32(table.totals_row_count());
+        hash.boolean(table.totals_row_shown());
+        hash.usize(table.columns().len());
+        for column in table.columns() {
+            if cancelled() {
+                return Err(());
+            }
+            hash.u32(column.id());
+            hash.string_cancellable(column.name(), cancelled)?;
+            match column.totals_row_function() {
+                None => hash.u8(0),
+                Some(function) => {
+                    hash.u8(1);
+                    hash.string_cancellable(function.as_str(), cancelled)?;
+                }
+            }
+            hash.optional_string_cancellable(column.totals_row_label(), cancelled)?;
+            hash.optional_table_formula(column.calculated_column_formula(), cancelled)?;
+            hash.optional_table_formula(column.totals_row_formula(), cancelled)?;
+        }
+        hash.optional_table_auto_filter(table.auto_filter(), cancelled)?;
+        hash.optional_table_sort_state(table.sort_state(), cancelled)?;
+        match table.style_info() {
+            Some(style) => {
+                hash.u8(1);
+                hash.optional_string_cancellable(style.name(), cancelled)?;
+                hash.boolean(style.show_first_column());
+                hash.boolean(style.show_last_column());
+                hash.boolean(style.show_row_stripes());
+                hash.boolean(style.show_column_stripes());
+            }
+            None => hash.u8(0),
+        }
+        hash.optional_bytes_cancellable(table.opaque_source_xml(), cancelled)?;
+    }
+    Ok(hash.finish())
+}
+
 pub(crate) fn workbook_fingerprint_cancellable(
     workbook: &WorkbookSnapshot,
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 4: cell payloads are folded through immutable row-chunk digests. The Merkle-like
-    // layout lets an edited workbook reuse every unchanged chunk while retaining exact identity.
+    // Schema byte 4: sheets are folded through their cached sheet-node digests.
     hash.u8(4);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
@@ -25,74 +103,7 @@ pub(crate) fn workbook_fingerprint_cancellable(
         if cancelled() {
             return Err(());
         }
-        hash.u32(sheet.id().get());
-        hash.string(sheet.name().as_str());
-        hash.sheet_visibility(sheet.visibility());
-        hash.usize(sheet.len());
-        let cell_chunks = sheet.semantic_cell_chunk_fingerprints_cancellable(cancelled)?;
-        hash.usize(cell_chunks.len());
-        for chunk in cell_chunks {
-            if cancelled() {
-                return Err(());
-            }
-            hash.bytes(&chunk);
-        }
-        hash.usize(sheet.merged_ranges().len());
-        for range in sheet.merged_ranges() {
-            if cancelled() {
-                return Err(());
-            }
-            hash.range(*range);
-        }
-        // The whole table model is folded, including fields such as display_name that do
-        // not feed calculation today: missing a fold shows up as a stale write, folding
-        // too much only costs one extra recalculation.
-        hash.usize(sheet.tables().len());
-        for table in sheet.tables() {
-            if cancelled() {
-                return Err(());
-            }
-            hash.u32(table.id().get());
-            hash.string_cancellable(table.name().as_str(), cancelled)?;
-            hash.string_cancellable(table.display_name().as_str(), cancelled)?;
-            hash.range(table.range());
-            hash.string_cancellable(table.table_type().as_str(), cancelled)?;
-            hash.u32(table.header_row_count());
-            hash.u32(table.totals_row_count());
-            hash.boolean(table.totals_row_shown());
-            hash.usize(table.columns().len());
-            for column in table.columns() {
-                if cancelled() {
-                    return Err(());
-                }
-                hash.u32(column.id());
-                hash.string_cancellable(column.name(), cancelled)?;
-                match column.totals_row_function() {
-                    None => hash.u8(0),
-                    Some(function) => {
-                        hash.u8(1);
-                        hash.string_cancellable(function.as_str(), cancelled)?;
-                    }
-                }
-                hash.optional_string_cancellable(column.totals_row_label(), cancelled)?;
-                hash.optional_table_formula(column.calculated_column_formula(), cancelled)?;
-                hash.optional_table_formula(column.totals_row_formula(), cancelled)?;
-            }
-            hash.optional_table_auto_filter(table.auto_filter(), cancelled)?;
-            hash.optional_table_sort_state(table.sort_state(), cancelled)?;
-            match table.style_info() {
-                Some(style) => {
-                    hash.u8(1);
-                    hash.optional_string_cancellable(style.name(), cancelled)?;
-                    hash.boolean(style.show_first_column());
-                    hash.boolean(style.show_last_column());
-                    hash.boolean(style.show_row_stripes());
-                    hash.boolean(style.show_column_stripes());
-                }
-                None => hash.u8(0),
-            }
-            hash.optional_bytes_cancellable(table.opaque_source_xml(), cancelled)?;
-        }
+        hash.bytes(&sheet.semantic_fingerprint_cancellable(cancelled)?);
     }
     hash.usize(workbook.defined_names().len());
     for name in workbook.defined_names() {
