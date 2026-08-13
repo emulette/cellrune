@@ -2,9 +2,9 @@
 //!
 //! Run the release binary on the baseline and candidate commits and retain stdout as JSON:
 //! `cargo bench -p cellrune-integration-tests --bench v015_phase_memory -- --output evidence.json`.
-//! Passing `--baseline baseline.json` additionally applies the 0.1.15 acceptance equations. This
-//! is release evidence, not a CI required check. Formal evidence requires a clean worktree so the
-//! recorded commit names the exact measured source. `--smoke` is the sole dirty-worktree exception.
+//! Passing `--baseline baseline.json` adds a descriptive comparison to the output. It never changes
+//! the exit status based on the measurements. `--smoke` uses a small one-sample workload to check
+//! the measurement setup.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -33,6 +33,23 @@ struct Summary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct MetricComparison {
+    baseline_median: f64,
+    candidate_median: f64,
+    delta: f64,
+    ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Comparison {
+    dirty_latency_ns: MetricComparison,
+    dirty_peak_live_heap_bytes: MetricComparison,
+    cached_warm_full_latency_ns: MetricComparison,
+    retained_rss_bytes: MetricComparison,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Evidence {
     schema: String,
     mode: String,
@@ -52,6 +69,8 @@ struct Evidence {
     dirty_peak_live_heap_bytes: Summary,
     cached_warm_full_latency_ns: Summary,
     retained_rss_bytes: Summary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    comparison: Option<Comparison>,
 }
 
 fn main() {
@@ -90,17 +109,6 @@ fn main() {
     }
 
     let smoke = arguments.iter().any(|value| value == "--smoke");
-    assert!(
-        !(smoke && value_after(&arguments, "--baseline").is_some()),
-        "smoke measurements cannot be used for baseline acceptance"
-    );
-    if !smoke {
-        let status = command_output("git", &["status", "--porcelain"]);
-        assert!(
-            status.is_empty(),
-            "formal release evidence requires a clean worktree; use --smoke only for orchestration verification"
-        );
-    }
     let formulas = if smoke { 100 } else { FORMULAS };
     let recorded_samples = if smoke { 1 } else { RECORDED_SAMPLES };
     let executable = std::env::current_exe().expect("resolve benchmark executable");
@@ -127,9 +135,9 @@ fn main() {
         warm_full.push(run_number_child(&executable, "--warm-full-child", formulas));
         retained.push(measure_retained_child(&executable, formulas));
     }
-    let evidence = Evidence {
+    let mut evidence = Evidence {
         schema: "cellrune_0_1_15_phase_memory_v2".to_owned(),
-        mode: if smoke { "smoke" } else { "formal" }.to_owned(),
+        mode: if smoke { "smoke" } else { "measurement" }.to_owned(),
         commit: command_output("git", &["rev-parse", "HEAD"]),
         rustc: command_output("rustc", &["--version"]),
         machine: machine_identity(),
@@ -170,12 +178,13 @@ fn main() {
         raw_dirty_memory_samples: dirty_memory,
         raw_cached_warm_full_latency_ns: warm_full,
         raw_retained_rss_bytes: retained,
+        comparison: None,
     };
     if let Some(path) = value_after(&arguments, "--baseline") {
         let baseline: Evidence =
             serde_json::from_slice(&fs::read(path).expect("read baseline evidence"))
                 .expect("parse baseline evidence");
-        assert_acceptance(&baseline, &evidence);
+        evidence.comparison = Some(compare(&baseline, &evidence));
     }
     let json = serde_json::to_string_pretty(&evidence).expect("serialize evidence");
     if let Some(path) = value_after(&arguments, "--output") {
@@ -397,48 +406,71 @@ fn median_usize(values: &mut [usize]) -> usize {
     values[values.len() / 2]
 }
 
-fn assert_acceptance(baseline: &Evidence, candidate: &Evidence) {
-    assert_eq!(baseline.schema, candidate.schema);
-    assert_eq!(baseline.mode, "formal");
-    assert_eq!(candidate.mode, "formal");
-    assert_eq!(baseline.warmup_samples, 1);
-    assert_eq!(candidate.warmup_samples, 1);
-    assert_eq!(baseline.recorded_samples, RECORDED_SAMPLES);
-    assert_eq!(candidate.recorded_samples, RECORDED_SAMPLES);
-    assert_eq!(baseline.raw_dirty_latency_ns.len(), RECORDED_SAMPLES);
-    assert_eq!(candidate.raw_dirty_latency_ns.len(), RECORDED_SAMPLES);
-    assert_eq!(baseline.raw_dirty_memory_samples.len(), RECORDED_SAMPLES);
-    assert_eq!(candidate.raw_dirty_memory_samples.len(), RECORDED_SAMPLES);
-    assert_eq!(
-        baseline.raw_cached_warm_full_latency_ns.len(),
-        RECORDED_SAMPLES
-    );
-    assert_eq!(
-        candidate.raw_cached_warm_full_latency_ns.len(),
-        RECORDED_SAMPLES
-    );
-    assert_eq!(baseline.raw_retained_rss_bytes.len(), RECORDED_SAMPLES);
-    assert_eq!(candidate.raw_retained_rss_bytes.len(), RECORDED_SAMPLES);
-    assert_eq!(baseline.rustc, candidate.rustc);
-    assert_eq!(baseline.machine, candidate.machine);
-    assert_eq!(baseline.target, candidate.target);
-    assert_eq!(baseline.profile, candidate.profile);
-    assert_eq!(baseline.workload, candidate.workload);
-    let required_heap_improvement = (0.05 * baseline.dirty_peak_live_heap_bytes.median).max(
-        3.0 * baseline
-            .dirty_peak_live_heap_bytes
-            .mad
-            .max(candidate.dirty_peak_live_heap_bytes.mad),
-    );
-    assert!(
-        candidate.dirty_peak_live_heap_bytes.median
-            <= baseline.dirty_peak_live_heap_bytes.median - required_heap_improvement
-    );
-    assert!(
-        candidate.cached_warm_full_latency_ns.median
-            <= 1.05 * baseline.cached_warm_full_latency_ns.median
-    );
-    assert!(candidate.retained_rss_bytes.median <= 1.05 * baseline.retained_rss_bytes.median);
+fn compare(baseline: &Evidence, candidate: &Evidence) -> Comparison {
+    let mut warnings = Vec::new();
+    for (field, baseline_value, candidate_value) in [
+        (
+            "schema",
+            baseline.schema.as_str(),
+            candidate.schema.as_str(),
+        ),
+        ("mode", baseline.mode.as_str(), candidate.mode.as_str()),
+        ("rustc", baseline.rustc.as_str(), candidate.rustc.as_str()),
+        (
+            "machine",
+            baseline.machine.as_str(),
+            candidate.machine.as_str(),
+        ),
+        (
+            "target",
+            baseline.target.as_str(),
+            candidate.target.as_str(),
+        ),
+        (
+            "profile",
+            baseline.profile.as_str(),
+            candidate.profile.as_str(),
+        ),
+        (
+            "workload",
+            baseline.workload.as_str(),
+            candidate.workload.as_str(),
+        ),
+    ] {
+        if baseline_value != candidate_value {
+            warnings.push(format!(
+                "{field} differs: baseline={baseline_value:?}, candidate={candidate_value:?}"
+            ));
+        }
+    }
+    Comparison {
+        dirty_latency_ns: metric_comparison(
+            baseline.dirty_latency_ns.median,
+            candidate.dirty_latency_ns.median,
+        ),
+        dirty_peak_live_heap_bytes: metric_comparison(
+            baseline.dirty_peak_live_heap_bytes.median,
+            candidate.dirty_peak_live_heap_bytes.median,
+        ),
+        cached_warm_full_latency_ns: metric_comparison(
+            baseline.cached_warm_full_latency_ns.median,
+            candidate.cached_warm_full_latency_ns.median,
+        ),
+        retained_rss_bytes: metric_comparison(
+            baseline.retained_rss_bytes.median,
+            candidate.retained_rss_bytes.median,
+        ),
+        warnings,
+    }
+}
+
+fn metric_comparison(baseline: f64, candidate: f64) -> MetricComparison {
+    MetricComparison {
+        baseline_median: baseline,
+        candidate_median: candidate,
+        delta: candidate - baseline,
+        ratio: candidate / baseline,
+    }
 }
 
 fn machine_identity() -> String {

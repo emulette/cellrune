@@ -159,16 +159,3 @@ pub use xlsx::{
     write_preserved_xlsx_bytes, write_recalculated_xlsx, write_recalculated_xlsx_bytes,
     write_recalculated_xlsx_path, write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_path,
 };
-
-/// Test/benchmark-only access to the internal work counters.
-///
-/// These symbols are hidden from the public documentation and exist only so
-/// integration tests and benches can reset and read the deterministic
-/// performance-axis counters without exposing them as a supported API.
-#[doc(hidden)]
-pub mod testing {
-    pub use crate::calculation::performance_counters::{
-        WorkCounter, WorkCounterSnapshot, lock_work_counters, reset_work_counters,
-        snapshot_work_counters,
-    };
-}

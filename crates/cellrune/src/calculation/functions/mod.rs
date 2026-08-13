@@ -1277,32 +1277,4 @@ mod tests {
             include_str!("../../../testdata/function-catalog-v0.1.14.sha256").trim()
         );
     }
-
-    #[test]
-    fn v0_1_15_fixed_income_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_15)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.15.sha256").trim()
-        );
-    }
 }

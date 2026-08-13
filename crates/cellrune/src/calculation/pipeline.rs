@@ -821,8 +821,6 @@ fn snapshot_from_engine_cancellable(
             let CellContent::Formula(_) = cell.content() else {
                 continue;
             };
-            #[cfg(test)]
-            super::work_counter::formula_snapshot_scan();
             let public_id = CalculationCellId::new(sheet.id(), cell.address());
             let internal_id = (
                 sheet_index,

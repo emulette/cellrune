@@ -7,7 +7,6 @@ mod table_index;
 pub(crate) use table_index::TableRangeIndex;
 use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
 
-use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
 use crate::calculation::persistent_store::{PersistentRadixMap, PersistentRadixValues};
 use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
@@ -172,12 +171,7 @@ impl CellStore {
     }
 
     fn insert(&mut self, address: CellAddress, cell: Cell) -> bool {
-        let (previous, copied) = self.cells.insert(Self::key(address), cell);
-        if previous.is_some() {
-            work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::CellStoreEntriesReindexed, 1);
-        }
-        work_counter_add(WorkCounter::CellStoreNodesCopied, copied);
+        let previous = self.cells.insert(Self::key(address), cell);
         if previous.is_none() {
             self.len += 1;
         }
@@ -188,10 +182,7 @@ impl CellStore {
         if self.cells.get(Self::key(*address)).is_none() {
             return false;
         }
-        work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
-        work_counter_add(WorkCounter::CellStoreEntriesReindexed, 1);
-        let (removed, copied) = self.cells.remove(Self::key(*address));
-        work_counter_add(WorkCounter::CellStoreNodesCopied, copied);
+        let removed = self.cells.remove(Self::key(*address));
         if removed.is_some() {
             self.len -= 1;
         }
@@ -219,7 +210,6 @@ impl CellStore {
     ) -> Result<[u8; 32], ()> {
         self.cells.semantic_fingerprint_cancellable(
             &|entries| {
-                work_counter_add(WorkCounter::FingerprintPayloadLeavesHashed, 1);
                 crate::calculation::identity::cell_chunk_fingerprint_cancellable(
                     entries.entries().map(|(_, cell)| cell),
                     entries.len(),
@@ -383,10 +373,8 @@ impl Sheet {
         cancelled: &impl Fn() -> bool,
     ) -> Result<[u8; 32], ()> {
         if let Some(fingerprint) = self.semantic_fingerprint.get() {
-            work_counter_add(WorkCounter::FingerprintCachedNodesReused, 1);
             return Ok(*fingerprint);
         }
-        work_counter_add(WorkCounter::FingerprintInternalNodesHashed, 1);
         let fingerprint =
             crate::calculation::identity::sheet_fingerprint_cancellable(self, cancelled)?;
         let _ = self.semantic_fingerprint.set(fingerprint);
@@ -1174,10 +1162,8 @@ impl WorkbookSnapshot {
         cancelled: &impl Fn() -> bool,
     ) -> Result<[u8; 32], ()> {
         if let Some(fingerprint) = self.semantic_fingerprint.get() {
-            work_counter_add(WorkCounter::FingerprintRootCacheHits, 1);
             return Ok(*fingerprint);
         }
-        work_counter_add(WorkCounter::FingerprintInternalNodesHashed, 1);
         let fingerprint =
             crate::calculation::identity::workbook_fingerprint_cancellable(self, cancelled)?;
         let _ = self.semantic_fingerprint.set(fingerprint);

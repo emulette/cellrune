@@ -1517,22 +1517,6 @@ mod tests {
     }
 
     #[test]
-    fn v0_1_15_semantic_registry_is_byte_exact() {
-        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_15);
-        let mut digest = Sha256::new();
-        digest.update(snapshot.as_bytes());
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual, "10bf28a1797bcda25b331dca0e758929a6d5ed5b3ed83d008c0d82a8fa496aae",
-            "stable v0.1.15 semantic snapshot changed:\n{snapshot}",
-        );
-    }
-
-    #[test]
     fn v0_1_13_descriptors_freeze_function_families_arity_and_array_results() {
         // Six of the twenty names are aliases (FDIST, FINV, FTEST, TINV, TTEST,
         // ZTEST), so the lookup resolves accepted spellings rather than

@@ -26,7 +26,6 @@ mod lexer;
 mod limits;
 mod operators;
 mod parser;
-pub(crate) mod performance_counters;
 pub(crate) mod persistent_store;
 mod pipeline;
 mod reference_resolution;
@@ -38,10 +37,6 @@ mod structured_reference;
 mod syntax;
 mod textfmt;
 mod value;
-#[cfg(test)]
-pub(crate) mod work_counter;
-
-use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
 use crate::calculation::persistent_store::{
     PersistentRadixEntries, PersistentRadixMap, PersistentValue,
 };
@@ -598,7 +593,6 @@ impl MaterializedCalculationCell {
 struct CalculationStore<V> {
     cells: PersistentRadixMap<V>,
     len: usize,
-    count_result_work: bool,
 }
 
 struct CalculationStoreIter<'a, V> {
@@ -644,21 +638,12 @@ impl<V> CalculationStore<V> {
 
     #[cfg(test)]
     fn from_map(values: BTreeMap<CalculationCellId, V>) -> Self {
-        Self::from_map_with_result_work(values, false)
-    }
-
-    #[cfg(test)]
-    fn from_map_with_result_work(
-        values: BTreeMap<CalculationCellId, V>,
-        count_result_work: bool,
-    ) -> Self {
-        Self::from_map_with_result_work_cancellable(values, count_result_work, &|| false)
+        Self::from_map_cancellable(values, &|| false)
             .expect("non-cancellable calculation-store construction cannot be cancelled")
     }
 
-    fn from_map_with_result_work_cancellable(
+    fn from_map_cancellable(
         values: BTreeMap<CalculationCellId, V>,
-        count_result_work: bool,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
         let len = values.len();
@@ -668,11 +653,7 @@ impl<V> CalculationStore<V> {
                 .map(|(cell, value)| (Self::key(cell), value)),
             cancelled,
         )?;
-        Ok(Self {
-            cells,
-            len,
-            count_result_work,
-        })
+        Ok(Self { cells, len })
     }
 
     fn get(&self, cell: &CalculationCellId) -> Option<&V> {
@@ -686,7 +667,6 @@ impl<V> CalculationStore<V> {
         Ok(Self {
             cells: self.cells.clone(),
             len: self.len,
-            count_result_work: self.count_result_work,
         })
     }
 
@@ -699,14 +679,7 @@ impl<V> CalculationStore<V> {
         if cancelled() {
             return Err(());
         }
-        let (previous, copied) = self.cells.insert(Self::key(cell), value);
-        if self.count_result_work && previous.is_some() {
-            work_counter_add(WorkCounter::ResultStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::ResultStoreEntriesReindexed, 1);
-        }
-        if self.count_result_work {
-            work_counter_add(WorkCounter::ResultStoreNodesCopied, copied);
-        }
+        let previous = self.cells.insert(Self::key(cell), value);
         if previous.is_none() {
             self.len += 1;
         }
@@ -724,14 +697,7 @@ impl<V> CalculationStore<V> {
         if self.cells.get(Self::key(*cell)).is_none() {
             return Ok(None);
         }
-        if self.count_result_work {
-            work_counter_add(WorkCounter::ResultStoreLeavesRebuilt, 1);
-            work_counter_add(WorkCounter::ResultStoreEntriesReindexed, 1);
-        }
-        let (removed, copied) = self.cells.remove(Self::key(*cell));
-        if self.count_result_work {
-            work_counter_add(WorkCounter::ResultStoreNodesCopied, copied);
-        }
+        let removed = self.cells.remove(Self::key(*cell));
         if removed.is_some() {
             self.len -= 1;
         }
@@ -784,7 +750,6 @@ mod calculation_store_tests {
         values.insert(second, 2_u32);
         let mut store = Arc::new(CalculationStore::from_map(values));
         let installed = Arc::clone(&store);
-        work_counter::reset();
         let cancelled = || false;
 
         let mutable = calculation_store_mut_cancellable(&mut store, &cancelled)
@@ -796,7 +761,6 @@ mod calculation_store_tests {
             Ok(Some(1)),
             "insert returns the previous value without deep-cloning it"
         );
-        assert_eq!(work_counter::snapshot().deep_cloned_results, 0);
         assert_eq!(installed.get(&first), Some(&1));
         assert_eq!(installed.get(&second), Some(&2));
         assert_eq!(store.get(&first), Some(&3));
@@ -915,28 +879,19 @@ impl CalculationSnapshot {
         let materialized_cells_by_owner =
             build_materialized_owner_index(&materialized_cells, cancelled)?;
         Ok(Self {
-            cells: Arc::new(CalculationStore::from_map_with_result_work_cancellable(
-                cells, true, cancelled,
-            )?),
-            materialized_cells: Arc::new(CalculationStore::from_map_with_result_work_cancellable(
+            cells: Arc::new(CalculationStore::from_map_cancellable(cells, cancelled)?),
+            materialized_cells: Arc::new(CalculationStore::from_map_cancellable(
                 materialized_cells,
-                false,
                 cancelled,
             )?),
-            materialized_cells_by_owner: Arc::new(
-                CalculationStore::from_map_with_result_work_cancellable(
-                    materialized_cells_by_owner,
-                    false,
-                    cancelled,
-                )?,
-            ),
-            numeric_decimal_traces: Arc::new(
-                CalculationStore::from_map_with_result_work_cancellable(
-                    numeric_decimal_traces,
-                    false,
-                    cancelled,
-                )?,
-            ),
+            materialized_cells_by_owner: Arc::new(CalculationStore::from_map_cancellable(
+                materialized_cells_by_owner,
+                cancelled,
+            )?),
+            numeric_decimal_traces: Arc::new(CalculationStore::from_map_cancellable(
+                numeric_decimal_traces,
+                cancelled,
+            )?),
             options,
             provenance,
             source_revision: source.semantic_revision(),

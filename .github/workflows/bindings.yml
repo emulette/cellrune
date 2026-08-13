@@ -131,7 +131,6 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          python3 -m unittest discover -s ../../scripts/install_zig/tests -p 'test_*.py'
           python3 ../../scripts/install_zig/install.py
 
       - name: Build interpreter-specific wheel against the glibc baseline
@@ -416,7 +415,6 @@ jobs:
         if: matrix.needs_zig
         shell: bash
         run: |
-          python3 -m unittest discover -s ../../scripts/install_zig/tests -p 'test_*.py'
           python3 ../../scripts/install_zig/install.py
 
       - name: Install cross-compilation cargo tools

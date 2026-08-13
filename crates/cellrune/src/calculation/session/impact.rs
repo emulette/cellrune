@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 
 use super::super::eval::CompiledWorkbook;
 use super::super::runtime::CellId;
-use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
 };
@@ -19,7 +18,6 @@ impl ImpactWorkCharger<'_> {
     fn charge(&mut self) -> Result<(), ()> {
         self.charged += 1;
         if self.charged >= CHARGED_WORK_POLL_INTERVAL {
-            work_counter_add(WorkCounter::ImpactCancellationPolls, 1);
             self.charged = 0;
             if (self.cancelled)() {
                 return Err(());
@@ -37,7 +35,6 @@ pub(super) fn affected_formulas(
     existing_dirty: &BTreeSet<CalculationCellId>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<CalculationCellId>, ()> {
-    work_counter_add(WorkCounter::ImpactCancellationPolls, 1);
     if cancelled() {
         return Err(());
     }
@@ -49,7 +46,6 @@ pub(super) fn affected_formulas(
 
     let mut changed_internal = Vec::with_capacity(changed_cells.len());
     for cell in changed_cells {
-        work_counter_add(WorkCounter::ImpactChangedCellsVisited, 1);
         charger.charge()?;
         if let Some(internal) = public_to_internal(workbook, *cell) {
             changed_internal.push(internal);
@@ -58,7 +54,6 @@ pub(super) fn affected_formulas(
     let mut dirty = BTreeSet::new();
     if let Some(previous) = previous {
         for cell in changed_cells {
-            work_counter_add(WorkCounter::ImpactChangedCellsVisited, 1);
             charger.charge()?;
             let Some(materialized) = previous.materialized_cell(*cell) else {
                 continue;
@@ -73,20 +68,15 @@ pub(super) fn affected_formulas(
     for changed in changed_internal {
         let formulas = compiled.direct_affected_formulas(changed, &mut || charger.charge())?;
         for formula in formulas {
-            work_counter_add(WorkCounter::ImpactDirectCandidatesVisited, 1);
             charger.charge()?;
-            if dirty.insert(formula) {
-                work_counter_add(WorkCounter::ImpactUniqueDirtyInserted, 1);
-            }
+            dirty.insert(formula);
         }
     }
     let mut pending = dirty.iter().copied().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
         for child in compiled.dependents(cell) {
-            work_counter_add(WorkCounter::ImpactReverseEdgesVisited, 1);
             charger.charge()?;
             if dirty.insert(*child) {
-                work_counter_add(WorkCounter::ImpactUniqueDirtyInserted, 1);
                 pending.push(*child);
             }
         }

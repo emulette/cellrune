@@ -247,8 +247,6 @@ impl<'workbook> Engine<'workbook> {
             compiled.schedule().order.clone()
         };
         for cell in cells {
-            #[cfg(test)]
-            crate::calculation::work_counter::schedule_visit();
             if cancelled() {
                 return false;
             }

@@ -2,8 +2,6 @@ use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
-use super::performance_counters::{WorkCounter, work_counter_add};
-
 const KEY_BYTES: usize = size_of::<u128>();
 const CANCELLATION_POLL_INTERVAL: usize = 256;
 
@@ -322,22 +320,19 @@ impl<V> PersistentRadixMap<V> {
         get_node(self.root.as_ref(), key)
     }
 
-    /// Inserts a value and returns the previous shared value plus newly allocated structural nodes.
-    pub(crate) fn insert(&mut self, key: u128, value: V) -> (Option<PersistentValue<V>>, u64) {
-        let mut copied = 0;
-        let (root, previous) =
-            insert_node(&self.root, key, value, 0, leaf_capacity::<V>(), &mut copied);
+    /// Inserts a value and returns the previous shared value.
+    pub(crate) fn insert(&mut self, key: u128, value: V) -> Option<PersistentValue<V>> {
+        let (root, previous) = insert_node(&self.root, key, value, 0, leaf_capacity::<V>());
         self.root = root;
         if previous.is_none() {
             self.len += 1;
         }
-        (previous, copied)
+        previous
     }
 
-    /// Removes a value and returns its shared handle plus newly allocated structural nodes.
-    pub(crate) fn remove(&mut self, key: u128) -> (Option<PersistentValue<V>>, u64) {
-        let mut copied = 0;
-        let (root, removed) = remove_node(&self.root, key, leaf_capacity::<V>(), &mut copied);
+    /// Removes a value and returns its shared handle.
+    pub(crate) fn remove(&mut self, key: u128) -> Option<PersistentValue<V>> {
+        let (root, removed) = remove_node(&self.root, key, leaf_capacity::<V>());
         if let Some(root) = root {
             self.root = root;
         } else {
@@ -346,7 +341,7 @@ impl<V> PersistentRadixMap<V> {
         if removed.is_some() {
             self.len -= 1;
         }
-        (removed, copied)
+        removed
     }
 
     pub(crate) fn ordered_values(&self) -> PersistentRadixValues<'_, V> {
@@ -473,9 +468,7 @@ fn build_shared_node<V>(
     entries: &[LeafEntry<V>],
     depth: usize,
     capacity: usize,
-    copied: &mut u64,
 ) -> Arc<RadixNode<V>> {
-    *copied += 1;
     if entries.len() <= capacity {
         return Arc::new(RadixNode::leaf(entries.to_vec()));
     }
@@ -491,7 +484,7 @@ fn build_shared_node<V>(
         }
         children.push((
             edge,
-            build_shared_node(&entries[start..end], branch_depth + 1, capacity, copied),
+            build_shared_node(&entries[start..end], branch_depth + 1, capacity),
         ));
         start = end;
     }
@@ -504,7 +497,6 @@ fn insert_node<V>(
     value: V,
     depth: usize,
     capacity: usize,
-    copied: &mut u64,
 ) -> (Arc<RadixNode<V>>, Option<PersistentValue<V>>) {
     match &node.kind {
         RadixNodeKind::Leaf(current) => {
@@ -521,10 +513,9 @@ fn insert_node<V>(
                 }
             };
             let replacement = if entries.len() <= capacity {
-                *copied += 1;
                 Arc::new(RadixNode::leaf(entries))
             } else {
-                build_shared_node(&entries, depth, capacity, copied)
+                build_shared_node(&entries, depth, capacity)
             };
             (replacement, previous)
         }
@@ -541,7 +532,6 @@ fn insert_node<V>(
                 let new_leaf = Arc::new(RadixNode::leaf(vec![LeafEntry::singleton(key, value)]));
                 let mut children = vec![(existing_edge, Arc::clone(node)), (new_edge, new_leaf)];
                 children.sort_unstable_by_key(|(edge, _)| *edge);
-                *copied += 2;
                 return (
                     Arc::new(RadixNode::branch(split_depth, children, node.len + 1)),
                     None,
@@ -551,19 +541,12 @@ fn insert_node<V>(
             let mut children = current.clone();
             let previous = match children.binary_search_by_key(&edge, |(candidate, _)| *candidate) {
                 Ok(index) => {
-                    let (child, previous) = insert_node(
-                        &children[index].1,
-                        key,
-                        value,
-                        current_depth + 1,
-                        capacity,
-                        copied,
-                    );
+                    let (child, previous) =
+                        insert_node(&children[index].1, key, value, current_depth + 1, capacity);
                     children[index].1 = child;
                     previous
                 }
                 Err(index) => {
-                    *copied += 1;
                     children.insert(
                         index,
                         (
@@ -574,7 +557,6 @@ fn insert_node<V>(
                     None
                 }
             };
-            *copied += 1;
             (
                 Arc::new(RadixNode::branch(
                     current_depth,
@@ -591,7 +573,6 @@ fn remove_node<V>(
     node: &Arc<RadixNode<V>>,
     key: u128,
     capacity: usize,
-    copied: &mut u64,
 ) -> (Option<Arc<RadixNode<V>>>, Option<PersistentValue<V>>) {
     match &node.kind {
         RadixNodeKind::Leaf(current) => {
@@ -601,7 +582,6 @@ fn remove_node<V>(
             let mut entries = current.clone();
             let removed = entries[index].shared_value();
             entries.remove(index);
-            *copied += 1;
             if entries.is_empty() {
                 (None, Some(removed))
             } else {
@@ -617,7 +597,7 @@ fn remove_node<V>(
             let Ok(index) = current.binary_search_by_key(&edge, |(candidate, _)| *candidate) else {
                 return (Some(Arc::clone(node)), None);
             };
-            let (child, removed) = remove_node(&current[index].1, key, capacity, copied);
+            let (child, removed) = remove_node(&current[index].1, key, capacity);
             if removed.is_none() {
                 return (Some(Arc::clone(node)), None);
             }
@@ -632,12 +612,10 @@ fn remove_node<V>(
             if len <= capacity {
                 let mut entries = Vec::with_capacity(len);
                 collect_entries(&children, &mut entries);
-                *copied += 1;
                 (Some(Arc::new(RadixNode::leaf(entries))), removed)
             } else if children.len() == 1 {
                 (Some(Arc::clone(&children[0].1)), removed)
             } else {
-                *copied += 1;
                 (
                     Some(Arc::new(RadixNode::branch(current_depth, children, len))),
                     removed,
@@ -666,7 +644,6 @@ fn fingerprint_node<V>(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     if let Some(fingerprint) = node.semantic_fingerprint.get() {
-        work_counter_add(WorkCounter::FingerprintCachedNodesReused, 1);
         return Ok(*fingerprint);
     }
     if cancelled() {
@@ -690,7 +667,6 @@ fn fingerprint_node<V>(
                     )?,
                 ));
             }
-            work_counter_add(WorkCounter::FingerprintInternalNodesHashed, 1);
             internal_fingerprint(usize::from(*depth), &child_fingerprints)
         }
     };
@@ -767,7 +743,7 @@ mod tests {
         );
 
         for (key, _) in entries.iter().skip(200) {
-            assert!(incremental.remove(*key).0.is_some());
+            assert!(incremental.remove(*key).is_some());
         }
         let expected = PersistentRadixMap::from_sorted_iter(entries[..200].iter().copied());
         assert_eq!(

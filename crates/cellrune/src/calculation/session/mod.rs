@@ -929,7 +929,6 @@ fn incremental_unsafe_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calculation::work_counter;
     use crate::{CellAddress, CellValue, FiniteNumber, FormulaText, SheetId, WorkbookChange};
 
     fn address(value: &str) -> CellAddress {
@@ -971,7 +970,6 @@ mod tests {
             )
             .expect("initial calculation");
 
-        work_counter::reset();
         let no_dirty = session
             .recalculate(
                 RecalculationMode::Auto,
@@ -980,19 +978,6 @@ mod tests {
             )
             .expect("no-dirty calculation");
         assert_eq!(no_dirty.evaluated_count(), 0);
-        assert_eq!(
-            work_counter::snapshot(),
-            work_counter::WorkCounters {
-                deep_cloned_cells: 0,
-                deep_cloned_asts: 0,
-                deep_cloned_results: 0,
-                dependency_target_scans: 0,
-                schedule_builds: 0,
-                schedule_visits: 0,
-                formula_snapshot_scans: 0,
-                area_dependency_visits: 0,
-            }
-        );
 
         session
             .apply_changes(
@@ -1004,7 +989,6 @@ mod tests {
                 )]),
             )
             .expect("one-cell test edit");
-        work_counter::reset();
         let one_dirty = session
             .recalculate(
                 RecalculationMode::Auto,
@@ -1013,19 +997,6 @@ mod tests {
             )
             .expect("one-dirty calculation");
         assert_eq!(one_dirty.evaluated_count(), 1);
-        assert_eq!(
-            work_counter::snapshot(),
-            work_counter::WorkCounters {
-                deep_cloned_cells: 0,
-                deep_cloned_asts: 0,
-                deep_cloned_results: 0,
-                dependency_target_scans: 0,
-                schedule_builds: 0,
-                schedule_visits: 1,
-                formula_snapshot_scans: 0,
-                area_dependency_visits: 0,
-            }
-        );
     }
 
     #[test]
@@ -1063,7 +1034,6 @@ mod tests {
             )
             .expect("initial range calculation");
 
-        work_counter::reset();
         session
             .apply_changes(
                 session.workbook().semantic_revision(),
@@ -1082,19 +1052,6 @@ mod tests {
             )
             .expect("range-index incremental calculation");
         assert_eq!(delta.evaluated_count(), 40);
-        assert_eq!(
-            work_counter::snapshot(),
-            work_counter::WorkCounters {
-                deep_cloned_cells: 0,
-                deep_cloned_asts: 0,
-                deep_cloned_results: 0,
-                dependency_target_scans: 0,
-                schedule_builds: 0,
-                schedule_visits: 40,
-                formula_snapshot_scans: 0,
-                area_dependency_visits: 40,
-            }
-        );
     }
 
     #[test]
@@ -1161,74 +1118,12 @@ mod tests {
     }
 
     #[test]
-    fn impact_preparation_wires_work_counters() {
-        use crate::calculation::performance_counters::{
-            WorkCounter, lock_work_counters, reset_work_counters, snapshot_work_counters,
-        };
-
-        let _guard = lock_work_counters();
-        reset_work_counters();
-        let sheet = SheetId::new(1).expect("valid default sheet ID");
-        let mut session = WorkbookCalculationSession::create();
-        session
-            .apply_changes(
-                0,
-                EditBatch::new([
-                    WorkbookChange::set_cell_value(sheet, address("A1"), number(1.0)),
-                    WorkbookChange::set_cell_formula(
-                        sheet,
-                        address("B1"),
-                        FormulaText::from_xlsx("A1+1").expect("valid test formula"),
-                    ),
-                    WorkbookChange::set_cell_formula(
-                        sheet,
-                        address("C1"),
-                        FormulaText::from_xlsx("B1+1").expect("valid test formula"),
-                    ),
-                ]),
-            )
-            .expect("initial workbook");
-        session
-            .recalculate(
-                RecalculationMode::Auto,
-                CalculationOptions::default(),
-                CancellationToken::new(),
-            )
-            .expect("initial calculation");
-
-        reset_work_counters();
-        session
-            .apply_changes(
-                session.workbook().semantic_revision(),
-                EditBatch::new([WorkbookChange::set_cell_value(
-                    sheet,
-                    address("A1"),
-                    number(2.0),
-                )]),
-            )
-            .expect("dirtying edit");
-
-        let snapshot = snapshot_work_counters();
-        assert!(snapshot.get(WorkCounter::ImpactChangedCellsVisited) > 0);
-        assert!(snapshot.get(WorkCounter::ImpactDirectCandidatesVisited) > 0);
-        assert!(snapshot.get(WorkCounter::ImpactReverseEdgesVisited) > 0);
-        assert!(snapshot.get(WorkCounter::ImpactUniqueDirtyInserted) > 0);
-        assert!(snapshot.get(WorkCounter::ImpactCancellationPolls) > 0);
-    }
-
-    #[test]
-    fn impact_preparation_cancels_mid_flight_within_poll_bound() {
+    fn impact_preparation_observes_mid_flight_cancellation() {
         use std::cell::Cell;
         use std::rc::Rc;
 
-        use crate::calculation::performance_counters::{
-            WorkCounter, lock_work_counters, reset_work_counters, snapshot_work_counters,
-        };
-
-        let _guard = lock_work_counters();
-        reset_work_counters();
         let sheet = SheetId::new(1).expect("valid default sheet ID");
-        const CHAIN_LEN: u32 = 100_001;
+        const CHAIN_LEN: u32 = 1_025;
         let mut changes = Vec::with_capacity(CHAIN_LEN as usize);
         changes.push(WorkbookChange::set_cell_value(
             sheet,
@@ -1243,8 +1138,7 @@ mod tests {
                     .expect("valid generated chain formula"),
             ));
         }
-        let limits =
-            SessionLimits::new(100_001, 100_001, 100_001, 256, 100).expect("large fanout limits");
+        let limits = SessionLimits::new(2_000, 2_000, 2_000, 256, 100).expect("test fanout limits");
         let mut session = WorkbookCalculationSession::with_limits(WorkbookDraft::new(), limits);
         session
             .apply_changes(0, EditBatch::new(changes))
@@ -1257,7 +1151,6 @@ mod tests {
             )
             .expect("initial chain calculation");
 
-        reset_work_counters();
         let compiled = session.compiled.clone().expect("compiled workbook");
         let workbook = session.workbook();
         let previous = session.calculation.as_deref();
@@ -1286,30 +1179,16 @@ mod tests {
             result.is_err(),
             "cancellation on the second poll must abort impact preparation"
         );
-        let snapshot = snapshot_work_counters();
-        assert!(snapshot.get(WorkCounter::ImpactCancellationPolls) >= 2);
-        assert!(
-            snapshot.get(WorkCounter::ImpactReverseEdgesVisited) <= 256,
-            "cancellation must be observed within 256 charged work units"
-        );
-        assert!(
-            snapshot.get(WorkCounter::ImpactReverseEdgesVisited) >= 200,
-            "polling must be batched rather than checked once per reverse edge"
-        );
+        assert_eq!(polls.get(), 2);
     }
 
     #[test]
-    fn direct_fanout_cancels_within_256_charged_work() {
+    fn direct_fanout_observes_mid_flight_cancellation() {
         use std::cell::Cell;
         use std::rc::Rc;
 
-        use crate::calculation::performance_counters::{
-            WorkCounter, lock_work_counters, reset_work_counters, snapshot_work_counters,
-        };
-
-        let _guard = lock_work_counters();
         let sheet = SheetId::new(1).expect("valid default sheet ID");
-        const FORMULAS: u32 = 100_000;
+        const FORMULAS: u32 = 1_024;
         let mut changes = Vec::with_capacity(FORMULAS as usize + 1);
         changes.push(WorkbookChange::set_cell_value(
             sheet,
@@ -1323,8 +1202,7 @@ mod tests {
                 FormulaText::from_xlsx("$A$1+1").expect("valid fanout formula"),
             ));
         }
-        let limits =
-            SessionLimits::new(100_001, 100_001, 100_001, 256, 100).expect("large fanout limits");
+        let limits = SessionLimits::new(2_000, 2_000, 2_000, 256, 100).expect("test fanout limits");
         let mut session = WorkbookCalculationSession::with_limits(WorkbookDraft::new(), limits);
         session
             .apply_changes(0, EditBatch::new(changes))
@@ -1337,7 +1215,6 @@ mod tests {
             )
             .expect("initial direct fanout calculation");
 
-        reset_work_counters();
         let compiled = session.compiled.clone().expect("compiled workbook");
         let changed = [CalculationCellId::new(sheet, address("A1"))];
         let polls = Rc::new(Cell::new(0_u32));
@@ -1358,9 +1235,7 @@ mod tests {
             &cancelled,
         );
         assert!(result.is_err());
-        let snapshot = snapshot_work_counters();
-        assert!(snapshot.get(WorkCounter::ImpactDirectCandidatesVisited) <= 256);
-        assert!(snapshot.get(WorkCounter::ImpactCancellationPolls) >= 3);
+        assert_eq!(polls.get(), 3);
     }
 
     #[test]

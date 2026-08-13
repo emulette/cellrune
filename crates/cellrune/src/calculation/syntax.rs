@@ -237,8 +237,6 @@ pub struct ParsedFormula {
 
 impl Clone for ParsedFormula {
     fn clone(&self) -> Self {
-        #[cfg(test)]
-        super::work_counter::deep_cloned_asts(1);
         Self {
             original: Arc::clone(&self.original),
             root: self.root.clone(),

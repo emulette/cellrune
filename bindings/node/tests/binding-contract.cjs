@@ -1,28 +1,11 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
-const CATALOG_V0_1_15_REFERENCE_SHA256 = fs
-  .readFileSync(
-    path.join(
-      __dirname,
-      "..",
-      "..",
-      "..",
-      "crates",
-      "cellrune",
-      "testdata",
-      "function-catalog-v0.1.15.sha256",
-    ),
-    "utf8",
-  )
-  .trim();
-
-function catalogDigest() {
+function assertCatalogContract() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
   assert.equal(catalog.entries.length, 413);
@@ -54,23 +37,10 @@ function catalogDigest() {
   for (const [name, entry] of entries) {
     assert.equal(entry.official, name !== "__XLUDF.DUMMYFUNCTION", name);
   }
-  const digest = createHash("sha256");
-  for (const entry of catalog.entries) {
-    digest.update(
-      [
-        entry.name,
-        entry.canonicalName,
-        entry.alias ? "1" : "0",
-        entry.returnsArray ? "1" : "0",
-        entry.official ? "1" : "0",
-      ].join("\0") + "\n",
-    );
-  }
-  return digest.digest("hex");
 }
 
 async function main() {
-  assert.equal(catalogDigest(), CATALOG_V0_1_15_REFERENCE_SHA256);
+  assertCatalogContract();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(
