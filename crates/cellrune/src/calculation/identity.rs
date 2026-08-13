@@ -15,10 +15,9 @@ pub(crate) fn sheet_fingerprint_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 6: the sheet folds one canonical radix root. The radix partition is fixed by
-    // row-major chunk key, so its digest is independent of insertion and edit history while a
-    // cell edit rehashes only the changed leaf-to-root path.
-    hash.u8(6);
+    // Schema byte 7: the sheet folds one canonical adaptive radix root with bounded packed leaves.
+    // Its digest remains insertion-history independent while an edit rehashes only one leaf path.
+    hash.u8(7);
     hash.u32(sheet.id().get());
     hash.string(sheet.name().as_str());
     hash.sheet_visibility(sheet.visibility());
@@ -88,8 +87,8 @@ pub(crate) fn workbook_fingerprint_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
-    // Schema byte 6: one canonical persistent sheet tree replaces the flat sheet digest fold.
-    hash.u8(6);
+    // Schema byte 7: one canonical packed-leaf sheet tree replaces the flat sheet digest fold.
+    hash.u8(7);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());
@@ -142,6 +141,24 @@ pub(crate) fn cell_store_node_fingerprint(depth: usize, children: &[(u8, [u8; 32
     hash.finish()
 }
 
+pub(crate) fn sheet_tree_leaf_fingerprint_cancellable<'a>(
+    sheets: impl Iterator<Item = (u128, &'a Sheet)>,
+    len: usize,
+    cancelled: &impl Fn() -> bool,
+) -> Result<[u8; 32], ()> {
+    let mut hash = SemanticHash::new();
+    hash.u8(9);
+    hash.usize(len);
+    for (key, sheet) in sheets {
+        if cancelled() {
+            return Err(());
+        }
+        hash.u128(key);
+        hash.bytes(&sheet.semantic_fingerprint_cancellable(cancelled)?);
+    }
+    Ok(hash.finish())
+}
+
 pub(crate) fn sheet_tree_node_fingerprint(depth: usize, children: &[(u8, [u8; 32])]) -> [u8; 32] {
     let mut hash = SemanticHash::new();
     hash.u8(8);
@@ -168,6 +185,10 @@ impl SemanticHash {
     fn bytes(&mut self, value: &[u8]) {
         self.u64(value.len() as u64);
         self.0.update(value);
+    }
+
+    fn u128(&mut self, value: u128) {
+        self.0.update(value.to_be_bytes());
     }
 
     fn string(&mut self, value: &str) {

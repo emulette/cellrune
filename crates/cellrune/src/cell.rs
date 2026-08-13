@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::{CellAddress, FormulaCell, ValidationError};
 
@@ -218,13 +218,23 @@ pub struct Cell {
     number_format: Arc<NumberFormat>,
 }
 
+fn shared_number_format(number_format: NumberFormat) -> Arc<NumberFormat> {
+    static DEFAULT: OnceLock<Arc<NumberFormat>> = OnceLock::new();
+
+    if number_format == NumberFormat::default() {
+        Arc::clone(DEFAULT.get_or_init(|| Arc::new(NumberFormat::default())))
+    } else {
+        Arc::new(number_format)
+    }
+}
+
 impl Cell {
     /// Constructs a cell from already validated parts.
     pub fn new(address: CellAddress, content: CellContent) -> Self {
         Self {
             address,
             content: Arc::new(content),
-            number_format: Arc::new(NumberFormat::default()),
+            number_format: shared_number_format(NumberFormat::default()),
         }
     }
 
@@ -236,7 +246,7 @@ impl Cell {
         Self {
             address,
             content: Arc::new(content),
-            number_format: Arc::new(number_format),
+            number_format: shared_number_format(number_format),
         }
     }
 
@@ -263,7 +273,7 @@ impl Cell {
         Self {
             address,
             content: Arc::new(content),
-            number_format: Arc::new(number_format),
+            number_format: shared_number_format(number_format),
         }
     }
 
@@ -279,7 +289,7 @@ impl Cell {
         Self {
             address: self.address,
             content: Arc::clone(&self.content),
-            number_format: Arc::new(number_format),
+            number_format: shared_number_format(number_format),
         }
     }
 

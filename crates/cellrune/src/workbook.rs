@@ -124,12 +124,12 @@ pub enum SheetVisibility {
 
 #[derive(Debug, Clone, Default)]
 struct CellStore {
-    cells: PersistentRadixMap<Arc<Cell>>,
+    cells: PersistentRadixMap<Cell>,
     len: usize,
 }
 
 struct CellStoreValues<'a> {
-    inner: PersistentRadixValues<'a, Arc<Cell>>,
+    inner: PersistentRadixValues<'a, Cell>,
     remaining: usize,
 }
 
@@ -139,7 +139,7 @@ impl<'a> Iterator for CellStoreValues<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.inner.next()?;
         self.remaining -= 1;
-        Some(value.as_ref())
+        Some(value)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -151,7 +151,7 @@ impl DoubleEndedIterator for CellStoreValues<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let value = self.inner.next_back()?;
         self.remaining -= 1;
-        Some(value.as_ref())
+        Some(value)
     }
 }
 
@@ -168,13 +168,11 @@ impl CellStore {
     }
 
     fn get(&self, address: &CellAddress) -> Option<&Cell> {
-        self.cells
-            .get(Self::key(*address))
-            .map(|cell| cell.as_ref())
+        self.cells.get(Self::key(*address))
     }
 
     fn insert(&mut self, address: CellAddress, cell: Cell) -> bool {
-        let (previous, copied) = self.cells.insert(Self::key(address), Arc::new(cell));
+        let (previous, copied) = self.cells.insert(Self::key(address), cell);
         if previous.is_some() {
             work_counter_add(WorkCounter::CellStoreLeavesRebuilt, 1);
             work_counter_add(WorkCounter::CellStoreEntriesReindexed, 1);
@@ -220,11 +218,11 @@ impl CellStore {
         cancelled: &impl Fn() -> bool,
     ) -> Result<[u8; 32], ()> {
         self.cells.semantic_fingerprint_cancellable(
-            &|cell| {
+            &|entries| {
                 work_counter_add(WorkCounter::FingerprintPayloadLeavesHashed, 1);
                 crate::calculation::identity::cell_chunk_fingerprint_cancellable(
-                    std::iter::once(cell.as_ref()),
-                    1,
+                    entries.entries().map(|(_, cell)| cell),
+                    entries.len(),
                     cancelled,
                 )
             },
@@ -710,7 +708,7 @@ impl WorkbookSource {
 #[derive(Debug, Clone)]
 pub struct WorkbookSnapshot {
     sheets: Vec<Sheet>,
-    sheet_identity: PersistentRadixMap<Arc<Sheet>>,
+    sheet_identity: PersistentRadixMap<Sheet>,
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
     table_index: TableIndex,
@@ -999,7 +997,7 @@ impl WorkbookSnapshot {
                     }
                     .into());
                 };
-                identity.insert(index as u128, Arc::new(sheets[index].clone()));
+                identity.insert(index as u128, sheets[index].clone());
             }
             identity
         } else {
@@ -1194,7 +1192,13 @@ impl WorkbookSnapshot {
         cancelled: &impl Fn() -> bool,
     ) -> Result<[u8; 32], ()> {
         self.sheet_identity.semantic_fingerprint_cancellable(
-            &|sheet| sheet.semantic_fingerprint_cancellable(cancelled),
+            &|entries| {
+                crate::calculation::identity::sheet_tree_leaf_fingerprint_cancellable(
+                    entries.entries(),
+                    entries.len(),
+                    cancelled,
+                )
+            },
             &crate::calculation::identity::sheet_tree_node_fingerprint,
             cancelled,
         )
@@ -1209,15 +1213,14 @@ impl WorkbookSnapshot {
 fn sheet_identity_store_cancellable(
     sheets: &[Sheet],
     cancelled: &impl Fn() -> bool,
-) -> Result<PersistentRadixMap<Arc<Sheet>>, ()> {
-    let mut identity = PersistentRadixMap::default();
-    for (index, sheet) in sheets.iter().enumerate() {
-        if cancelled() {
-            return Err(());
-        }
-        identity.insert(index as u128, Arc::new(sheet.clone()));
-    }
-    Ok(identity)
+) -> Result<PersistentRadixMap<Sheet>, ()> {
+    PersistentRadixMap::from_sorted_iter_cancellable(
+        sheets
+            .iter()
+            .enumerate()
+            .map(|(index, sheet)| (index as u128, sheet.clone())),
+        cancelled,
+    )
 }
 
 fn case_insensitive_key(value: &str) -> String {

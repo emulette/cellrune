@@ -26,6 +26,7 @@ fn number(value: f64) -> CellValue {
 
 #[test]
 fn public_source_and_result_iteration_remain_row_major() {
+    let _guard = lock_work_counters();
     let sheet = sheet();
     let mut session = WorkbookCalculationSession::create();
     session
@@ -212,7 +213,8 @@ fn one_dirty_result_patch_copies_one_bounded_path() {
     let snapshot = snapshot_work_counters();
     assert_eq!(snapshot.get(WorkCounter::ResultStoreLeavesRebuilt), 1);
     assert_eq!(snapshot.get(WorkCounter::ResultStoreEntriesReindexed), 1);
-    assert_eq!(snapshot.get(WorkCounter::ResultStoreNodesCopied), 17);
+    // The compressed branch plus one bounded packed leaf are rebuilt.
+    assert_eq!(snapshot.get(WorkCounter::ResultStoreNodesCopied), 2);
     assert_eq!(
         snapshot.get(WorkCounter::ResultStorePayloadBytesDeepCloned),
         0
@@ -293,12 +295,9 @@ fn single_edit_hashes_one_payload_and_one_bounded_radix_path() {
     calculate_workbook(session.workbook(), CalculationOptions::default());
     let snapshot = snapshot_work_counters();
     assert_eq!(snapshot.get(WorkCounter::FingerprintPayloadLeavesHashed), 1);
-    // One changed cell rehashes sixteen cell-radix internal nodes, the sheet envelope, sixteen
-    // sheet-radix internal nodes, and the workbook envelope. No count depends on sheet width.
-    assert_eq!(
-        snapshot.get(WorkCounter::FingerprintInternalNodesHashed),
-        34
-    );
+    // One changed cell rehashes the compressed cell-radix branch, the sheet envelope, and the
+    // workbook envelope. The one-sheet identity stays in a packed leaf. No count depends on width.
+    assert_eq!(snapshot.get(WorkCounter::FingerprintInternalNodesHashed), 3);
     assert!(snapshot.get(WorkCounter::FingerprintCachedNodesReused) > 0);
 }
 
@@ -306,6 +305,7 @@ fn single_edit_hashes_one_payload_and_one_bounded_radix_path() {
 /// parity between a full calculation and an incremental recalculation after a one-cell edit.
 #[test]
 fn full_and_incremental_calculation_agree_after_an_edit() {
+    let _guard = lock_work_counters();
     let sheet = sheet();
     let mut session = WorkbookCalculationSession::create();
     session

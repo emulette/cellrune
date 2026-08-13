@@ -42,7 +42,9 @@ mod value;
 pub(crate) mod work_counter;
 
 use crate::calculation::performance_counters::{WorkCounter, work_counter_add};
-use crate::calculation::persistent_store::{PersistentRadixEntries, PersistentRadixMap};
+use crate::calculation::persistent_store::{
+    PersistentRadixEntries, PersistentRadixMap, PersistentValue,
+};
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
@@ -594,13 +596,13 @@ impl MaterializedCalculationCell {
 
 #[derive(Debug)]
 struct CalculationStore<V> {
-    cells: PersistentRadixMap<Arc<V>>,
+    cells: PersistentRadixMap<V>,
     len: usize,
     count_result_work: bool,
 }
 
 struct CalculationStoreIter<'a, V> {
-    inner: PersistentRadixEntries<'a, Arc<V>>,
+    inner: PersistentRadixEntries<'a, V>,
     remaining: usize,
 }
 
@@ -610,7 +612,7 @@ impl<'a, V> Iterator for CalculationStoreIter<'a, V> {
     fn next(&mut self) -> Option<Self::Item> {
         let (key, value) = self.inner.next()?;
         self.remaining -= 1;
-        Some((CalculationStore::<V>::cell_from_key(key), value.as_ref()))
+        Some((CalculationStore::<V>::cell_from_key(key), value))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -640,28 +642,41 @@ impl<V> CalculationStore<V> {
         )
     }
 
+    #[cfg(test)]
     fn from_map(values: BTreeMap<CalculationCellId, V>) -> Self {
         Self::from_map_with_result_work(values, false)
     }
 
+    #[cfg(test)]
     fn from_map_with_result_work(
         values: BTreeMap<CalculationCellId, V>,
         count_result_work: bool,
     ) -> Self {
+        Self::from_map_with_result_work_cancellable(values, count_result_work, &|| false)
+            .expect("non-cancellable calculation-store construction cannot be cancelled")
+    }
+
+    fn from_map_with_result_work_cancellable(
+        values: BTreeMap<CalculationCellId, V>,
+        count_result_work: bool,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
         let len = values.len();
-        let mut cells = PersistentRadixMap::default();
-        for (cell, value) in values {
-            cells.insert(Self::key(cell), Arc::new(value));
-        }
-        Self {
+        let cells = PersistentRadixMap::from_sorted_iter_cancellable(
+            values
+                .into_iter()
+                .map(|(cell, value)| (Self::key(cell), value)),
+            cancelled,
+        )?;
+        Ok(Self {
             cells,
             len,
             count_result_work,
-        }
+        })
     }
 
     fn get(&self, cell: &CalculationCellId) -> Option<&V> {
-        self.cells.get(Self::key(*cell)).map(|value| value.as_ref())
+        self.cells.get(Self::key(*cell))
     }
 
     fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
@@ -680,11 +695,11 @@ impl<V> CalculationStore<V> {
         cell: CalculationCellId,
         value: V,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<Arc<V>>, ()> {
+    ) -> Result<Option<PersistentValue<V>>, ()> {
         if cancelled() {
             return Err(());
         }
-        let (previous, copied) = self.cells.insert(Self::key(cell), Arc::new(value));
+        let (previous, copied) = self.cells.insert(Self::key(cell), value);
         if self.count_result_work && previous.is_some() {
             work_counter_add(WorkCounter::ResultStoreLeavesRebuilt, 1);
             work_counter_add(WorkCounter::ResultStoreEntriesReindexed, 1);
@@ -702,7 +717,7 @@ impl<V> CalculationStore<V> {
         &mut self,
         cell: &CalculationCellId,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<Arc<V>>, ()> {
+    ) -> Result<Option<PersistentValue<V>>, ()> {
         if cancelled() {
             return Err(());
         }
@@ -900,12 +915,28 @@ impl CalculationSnapshot {
         let materialized_cells_by_owner =
             build_materialized_owner_index(&materialized_cells, cancelled)?;
         Ok(Self {
-            cells: Arc::new(CalculationStore::from_map_with_result_work(cells, true)),
-            materialized_cells: Arc::new(CalculationStore::from_map(materialized_cells)),
-            materialized_cells_by_owner: Arc::new(CalculationStore::from_map(
-                materialized_cells_by_owner,
-            )),
-            numeric_decimal_traces: Arc::new(CalculationStore::from_map(numeric_decimal_traces)),
+            cells: Arc::new(CalculationStore::from_map_with_result_work_cancellable(
+                cells, true, cancelled,
+            )?),
+            materialized_cells: Arc::new(CalculationStore::from_map_with_result_work_cancellable(
+                materialized_cells,
+                false,
+                cancelled,
+            )?),
+            materialized_cells_by_owner: Arc::new(
+                CalculationStore::from_map_with_result_work_cancellable(
+                    materialized_cells_by_owner,
+                    false,
+                    cancelled,
+                )?,
+            ),
+            numeric_decimal_traces: Arc::new(
+                CalculationStore::from_map_with_result_work_cancellable(
+                    numeric_decimal_traces,
+                    false,
+                    cancelled,
+                )?,
+            ),
             options,
             provenance,
             source_revision: source.semantic_revision(),
