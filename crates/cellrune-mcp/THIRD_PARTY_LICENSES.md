@@ -29,8 +29,8 @@ are not part of this binary notice.
 | `cap-std` | `4.0.2` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `cfg-if` | `1.0.4` | `MIT OR Apache-2.0` |
 | `chrono` | `0.4.45` | `MIT OR Apache-2.0` |
-| `clap` | `4.6.4` | `MIT OR Apache-2.0` |
-| `clap_builder` | `4.6.2` | `MIT OR Apache-2.0` |
+| `clap` | `4.6.6` | `MIT OR Apache-2.0` |
+| `clap_builder` | `4.6.6` | `MIT OR Apache-2.0` |
 | `clap_lex` | `1.1.0` | `MIT OR Apache-2.0` |
 | `colorchoice` | `1.0.5` | `MIT OR Apache-2.0` |
 | `core-foundation-sys` | `0.8.7` | `MIT OR Apache-2.0` |
@@ -113,7 +113,6 @@ are not part of this binary notice.
 | `windows-strings` | `0.5.1` | `MIT OR Apache-2.0` |
 | `windows-sys` | `0.59.0` | `MIT OR Apache-2.0` |
 | `windows-sys` | `0.60.2` | `MIT OR Apache-2.0` |
-| `windows-sys` | `0.61.2` | `MIT OR Apache-2.0` |
 | `windows-targets` | `0.52.6` | `MIT OR Apache-2.0` |
 | `windows-targets` | `0.53.5` | `MIT OR Apache-2.0` |
 | `windows_aarch64_gnullvm` | `0.52.6` | `MIT OR Apache-2.0` |
@@ -943,7 +942,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### License text 9
 
 Components: `anstream 1.0.0`, `anstyle 1.0.14`, `anstyle-parse 1.0.0`, `anstyle-query 1.1.5`, `anstyle-wincon
-  3.0.11`, `clap 4.6.4`, `clap_builder 4.6.2`, `clap_lex 1.1.0`, `colorchoice 1.0.5`, `crc32fast
+  3.0.11`, `clap 4.6.6`, `clap_builder 4.6.6`, `clap_lex 1.1.0`, `colorchoice 1.0.5`, `crc32fast
   1.5.0`, `is_terminal_polyfill 1.70.2`, `once_cell_polyfill 1.70.2`
 
 Source filenames: `LICENSE-APACHE`
@@ -1155,7 +1154,7 @@ Apache License
 ### License text 10
 
 Components: `anstream 1.0.0`, `anstyle 1.0.14`, `anstyle-parse 1.0.0`, `anstyle-query 1.1.5`, `anstyle-wincon
-  3.0.11`, `clap 4.6.4`, `clap_builder 4.6.2`, `clap_lex 1.1.0`, `colorchoice 1.0.5`,
+  3.0.11`, `clap 4.6.6`, `clap_builder 4.6.6`, `clap_lex 1.1.0`, `colorchoice 1.0.5`,
   `is_terminal_polyfill 1.70.2`, `once_cell_polyfill 1.70.2`
 
 Source filenames: `LICENSE-MIT`
@@ -5730,13 +5729,13 @@ DEALINGS IN THE SOFTWARE.
 ### License text 77
 
 Components: `windows-core 0.62.2`, `windows-link 0.2.1`, `windows-result 0.4.1`, `windows-strings 0.5.1`,
-  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-sys 0.61.2`, `windows-targets 0.52.6`,
-  `windows-targets 0.53.5`, `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`,
-  `windows_aarch64_msvc 0.52.6`, `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`,
-  `windows_i686_gnu 0.53.1`, `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`,
-  `windows_i686_msvc 0.52.6`, `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`,
-  `windows_x86_64_gnu 0.53.1`, `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`,
-  `windows_x86_64_msvc 0.52.6`, `windows_x86_64_msvc 0.53.1`
+  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-targets 0.52.6`, `windows-targets 0.53.5`,
+  `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`, `windows_aarch64_msvc 0.52.6`,
+  `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`, `windows_i686_gnu 0.53.1`,
+  `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`, `windows_i686_msvc 0.52.6`,
+  `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`, `windows_x86_64_gnu 0.53.1`,
+  `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`, `windows_x86_64_msvc 0.52.6`,
+  `windows_x86_64_msvc 0.53.1`
 
 Source filenames: `license-apache-2.0`
 
@@ -5947,13 +5946,13 @@ Apache License
 ### License text 78
 
 Components: `windows-core 0.62.2`, `windows-link 0.2.1`, `windows-result 0.4.1`, `windows-strings 0.5.1`,
-  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-sys 0.61.2`, `windows-targets 0.52.6`,
-  `windows-targets 0.53.5`, `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`,
-  `windows_aarch64_msvc 0.52.6`, `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`,
-  `windows_i686_gnu 0.53.1`, `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`,
-  `windows_i686_msvc 0.52.6`, `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`,
-  `windows_x86_64_gnu 0.53.1`, `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`,
-  `windows_x86_64_msvc 0.52.6`, `windows_x86_64_msvc 0.53.1`
+  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-targets 0.52.6`, `windows-targets 0.53.5`,
+  `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`, `windows_aarch64_msvc 0.52.6`,
+  `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`, `windows_i686_gnu 0.53.1`,
+  `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`, `windows_i686_msvc 0.52.6`,
+  `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`, `windows_x86_64_gnu 0.53.1`,
+  `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`, `windows_x86_64_msvc 0.52.6`,
+  `windows_x86_64_msvc 0.53.1`
 
 Source filenames: `license-mit`
 

@@ -37,8 +37,8 @@ are not part of this binary notice.
 | `pcre2` | `0.2.11` | `Unlicense OR MIT` |
 | `pcre2-sys` | `0.2.10` | `Unlicense OR MIT` |
 | `portable-atomic` | `1.14.0` | `Apache-2.0 OR MIT` |
-| `pyo3` | `0.29.0` | `MIT OR Apache-2.0` |
-| `pyo3-ffi` | `0.29.0` | `MIT OR Apache-2.0` |
+| `pyo3` | `0.29.2` | `MIT OR Apache-2.0` |
+| `pyo3-ffi` | `0.29.2` | `MIT OR Apache-2.0` |
 | `quick-xml` | `0.41.0` | `MIT` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
 | `schemars` | `1.2.1` | `MIT` |
@@ -2269,7 +2269,7 @@ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF S
 
 ### License text 31
 
-Components: `pyo3 0.29.0`, `pyo3-ffi 0.29.0`
+Components: `pyo3 0.29.2`, `pyo3-ffi 0.29.2`
 
 Source filenames: `LICENSE-APACHE`
 
@@ -2456,7 +2456,7 @@ END OF TERMS AND CONDITIONS
 
 ### License text 32
 
-Components: `pyo3 0.29.0`, `pyo3-ffi 0.29.0`
+Components: `pyo3 0.29.2`, `pyo3-ffi 0.29.2`
 
 Source filenames: `LICENSE-MIT`
 

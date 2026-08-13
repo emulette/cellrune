@@ -43,6 +43,9 @@ jobs:
           key: cargo-registry-${{ runner.os }}-1.92.0-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-1.92.0-
 
+      - name: Verify checked-in native dependency license bundles
+        run: python3 bindings/scripts/generate_third_party_licenses.py --check
+
       - name: Check formatting
         run: cargo fmt --all --check
 
