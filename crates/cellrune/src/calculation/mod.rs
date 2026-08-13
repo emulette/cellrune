@@ -27,6 +27,7 @@ mod lexer;
 mod limits;
 mod operators;
 mod parser;
+pub(crate) mod performance_counters;
 mod pipeline;
 mod reference_resolution;
 mod runtime;
