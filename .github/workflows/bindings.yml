@@ -127,9 +127,8 @@ jobs:
       # cross-compiles with the same pinned Zig.
       - name: Install Zig for the glibc baseline
         if: runner.os == 'Linux'
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        with:
-          version: 0.14.1
+        shell: bash
+        run: python3 scripts/install_zig/install.py
 
       - name: Build interpreter-specific wheel against the glibc baseline
         if: runner.os == 'Linux'
@@ -411,9 +410,8 @@ jobs:
 
       - name: Install Zig
         if: matrix.needs_zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        with:
-          version: 0.14.1
+        shell: bash
+        run: python3 scripts/install_zig/install.py
 
       - name: Install cross-compilation cargo tools
         if: matrix.cargo_tool != ''

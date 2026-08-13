@@ -24,6 +24,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - The public function catalog now contains 412 official Excel-facing names and 413 accepted
   entries including the non-official OOXML dummy-function marker. The versioned 0.1.14 catalog
   and semantic snapshots remain byte-exact.
+- Replaced the pinned third-party `setup-zig` action with a repository-owned, checksum-verified
+  Zig 0.14.1 installer so the Linux binding artifact matrix no longer depends on a Node 20
+  runtime.
 
 ## [0.1.14] - 2026-08-10
 
