@@ -19,19 +19,19 @@ TABLE_AUTHORING_CONTRACT_PATH = (
 )
 ArithmeticSemantics = Literal["excel_near_zero", "ieee_754"]
 FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
-CATALOG_V0_1_14_REFERENCE_SHA256 = (
+CATALOG_V0_1_15_REFERENCE_SHA256 = (
     pathlib.Path(__file__).parents[3]
     / "crates"
     / "cellrune"
     / "testdata"
-    / "function-catalog-v0.1.14.sha256"
+    / "function-catalog-v0.1.15.sha256"
 ).read_text(encoding="utf-8").strip()
 
 
 def catalog_digest() -> str:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 387
+    assert len(catalog["entries"]) == 413
     entries = {entry["name"]: entry for entry in catalog["entries"]}
     assert all(
         name in entries
@@ -50,6 +50,11 @@ def catalog_digest() -> str:
             "COMPLEX", "IMABS", "IMAGINARY", "IMARGUMENT", "IMCONJUGATE",
             "IMREAL", "IMDIV", "IMPOWER", "IMPRODUCT", "IMSUB", "IMSUM",
             "IMEXP", "IMLN", "IMSQRT",
+            "ACCRINT", "ACCRINTM", "COUPDAYBS", "COUPDAYS", "COUPDAYSNC",
+            "COUPNCD", "COUPNUM", "COUPPCD", "DISC", "DURATION", "INTRATE",
+            "MDURATION", "ODDFPRICE", "ODDFYIELD", "ODDLPRICE", "ODDLYIELD",
+            "PRICE", "PRICEDISC", "PRICEMAT", "RECEIVED", "TBILLEQ",
+            "TBILLPRICE", "TBILLYIELD", "YIELD", "YIELDDISC", "YIELDMAT",
         )
     )
     assert all(
@@ -128,7 +133,7 @@ def recalculate_with_invalid_solver_semantics(
 
 
 def main() -> None:
-    assert catalog_digest() == CATALOG_V0_1_14_REFERENCE_SHA256
+    assert catalog_digest() == CATALOG_V0_1_15_REFERENCE_SHA256
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")

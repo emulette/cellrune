@@ -518,13 +518,26 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.14 catalog contains 386 official
-  Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 387 accepted entries.
+  `.is_official()`. The current catalog contains 412 official Excel-facing
+  names and one non-official compatibility entry for the OOXML dummy-function
+  marker, for 413 accepted entries. The versioned 0.1.14 catalog remains
+  386 official names and 387 accepted entries byte-exact.
 - The 19 official names added in 0.1.14 are `CONVERT`, `BESSELI`, `BESSELJ`,
   `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`,
   `IMCONJUGATE`, `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`,
   `IMEXP`, `IMLN`, and `IMSQRT`. None returns an array.
+- The 26 official fixed-income names added on top of 0.1.14 are `ACCRINT`,
+  `ACCRINTM`, `COUPDAYBS`, `COUPDAYS`, `COUPDAYSNC`, `COUPNCD`, `COUPNUM`,
+  `COUPPCD`, `DISC`, `DURATION`, `INTRATE`, `MDURATION`, `ODDFPRICE`,
+  `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD`, `PRICE`, `PRICEDISC`, `PRICEMAT`,
+  `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`,
+  and `YIELDMAT`. None returns an array.
+- Fixed-income day counts cover US 30/360, Actual/Actual, Actual/360,
+  Actual/365, and European 30/360; coupon schedules walk backward from
+  maturity and preserve month-end policy. `YIELD(N>1)` and `ODDFYIELD` share
+  a safeguarded Newton/bracket root solver bounded to 100 evaluations in
+  Excel-compatible mode, charging the calculation budget and observing
+  cancellation per evaluation.
 - `CONVERT` uses a case-sensitive typed unit registry with explicit decimal and
   binary prefix policies. Complex functions share one finite internal value,
   parser, suffix policy, canonical text formatter, and scaled arithmetic.

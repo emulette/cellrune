@@ -8,11 +8,12 @@ use super::kernel::{
     AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
     DateAdditionalFunction, DateFunction, DistributionFunction, DynamicArrayFunction,
     DynamicFunction, ElementwiseArrayFunction, EngineeringFunction, Evaluator,
-    FinancialAdditionalFunction, FinancialFunction, GroupedArrayFunction, GroupedFunction,
-    InformationArrayFunction, InformationFunction, LegacyArrayFunction, LegacyFunction,
-    LogicalFunction, LookupFunction, MathFunction, ModernTextArrayFunction, ModernTextFunction,
-    RegressionFunction, RomanFunction, StatisticalAdditionalFunction, StatisticalFunction,
-    SumOfSquaresFunction, TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    FinancialAdditionalFunction, FinancialFunction, FixedIncomeFunction, GroupedArrayFunction,
+    GroupedFunction, InformationArrayFunction, InformationFunction, LegacyArrayFunction,
+    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextArrayFunction,
+    ModernTextFunction, RegressionFunction, RomanFunction, StatisticalAdditionalFunction,
+    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
+    TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -138,6 +139,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_12,
     V0_1_13,
     V0_1_14,
+    V0_1_15,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -433,6 +435,9 @@ macro_rules! function {
             $name,
             Evaluator::FinancialAdditional(FinancialAdditionalFunction::$variant),
         )
+    };
+    ($variant:ident, $name:literal, FixedIncome) => {
+        FunctionDescriptor::new($name, Evaluator::FixedIncome(FixedIncomeFunction::$variant))
     };
     (Areas, "AREAS", Areas) => {
         FunctionDescriptor::new("AREAS", Evaluator::Areas)
@@ -1006,6 +1011,49 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Nominal, "NOMINAL", FinancialAdditional),
     function!(PDuration, "PDURATION", FinancialAdditional),
     function!(Rri, "RRI", FinancialAdditional),
+    function!(Accrint, "ACCRINT", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Accrintm, "ACCRINTM", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupDayBs, "COUPDAYBS", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupDays, "COUPDAYS", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupDaysNc, "COUPDAYSNC", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupNcd, "COUPNCD", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupNum, "COUPNUM", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupPcd, "COUPPCD", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Disc, "DISC", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Duration, "DURATION", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(IntRate, "INTRATE", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(MDuration, "MDURATION", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(OddFPrice, "ODDFPRICE", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(OddFYield, "ODDFYIELD", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(OddLPrice, "ODDLPRICE", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(OddLYield, "ODDLYIELD", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Price, "PRICE", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(PriceDisc, "PRICEDISC", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(PriceMat, "PRICEMAT", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Received, "RECEIVED", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(TbillEq, "TBILLEQ", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(TbillPrice, "TBILLPRICE", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(TbillYield, "TBILLYIELD", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Yield, "YIELD", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(YieldDisc, "YIELDDISC", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(YieldMat, "YIELDMAT", FixedIncome)
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(Areas, "AREAS", Areas)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::AreaCount,

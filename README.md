@@ -102,9 +102,15 @@ CellRune 0.1.14 adds exactly 19 official Excel-facing engineering names: `CONVER
 `BESSELJ`, `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`, `IMCONJUGATE`,
 `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`, `IMEXP`, `IMLN`, and `IMSQRT`.
 `CONVERT` uses a typed, case-sensitive unit registry; the complex family shares one finite parser
-and canonical formatter; and the four Bessel functions use budgeted first-party kernels. The
-source catalog contains 386 official names and 387 accepted entries including the OOXML
-dummy-function marker.
+and canonical formatter; and the four Bessel functions use budgeted first-party kernels.
+
+The fixed-income wave on top of 0.1.14 adds exactly 26 official names: `ACCRINT`, `ACCRINTM`,
+`COUPDAYBS`, `COUPDAYS`, `COUPDAYSNC`, `COUPNCD`, `COUPNUM`, `COUPPCD`, `DISC`, `DURATION`,
+`INTRATE`, `MDURATION`, `ODDFPRICE`, `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD`, `PRICE`, `PRICEDISC`,
+`PRICEMAT`, `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`, and
+`YIELDMAT`. They share a typed day-count and coupon-schedule model and a safeguarded yield root
+solver that charges the calculation budget and observes cancellation. The current source catalog
+contains 412 official names and 413 accepted entries including the OOXML dummy-function marker.
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;

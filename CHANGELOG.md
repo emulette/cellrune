@@ -10,6 +10,21 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- Twenty-six fixed-income security functions: `ACCRINT`, `ACCRINTM`, `COUPDAYBS`, `COUPDAYS`,
+  `COUPDAYSNC`, `COUPNCD`, `COUPNUM`, `COUPPCD`, `DISC`, `DURATION`, `INTRATE`, `MDURATION`,
+  `ODDFPRICE`, `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD`, `PRICE`, `PRICEDISC`, `PRICEMAT`,
+  `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`, and `YIELDMAT`,
+  built on a typed day-count and coupon-schedule model plus a safeguarded yield root solver that
+  charges the calculation budget and observes cancellation.
+
+### Changed
+
+- The public function catalog now contains 412 official Excel-facing names and 413 accepted
+  entries including the non-official OOXML dummy-function marker. The versioned 0.1.14 catalog
+  and semantic snapshots remain byte-exact.
+
 ## [0.1.14] - 2026-08-10
 
 ### Added
