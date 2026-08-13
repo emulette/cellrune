@@ -16,6 +16,7 @@ libm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+system_alloc_stats.workspace = true
 zip.workspace = true
 
 [[bench]]
@@ -24,4 +25,8 @@ harness = false
 
 [[bench]]
 name = "interactive"
+harness = false
+
+[[bench]]
+name = "v015_phase_memory"
 harness = false

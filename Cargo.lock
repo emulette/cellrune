@@ -222,6 +222,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "system_alloc_stats",
  "zip",
 ]
 
@@ -1258,6 +1259,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "system_alloc_stats"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e4e0a4ac22418063d4379319c25c254f4fe31edb29169eb95a10e95adb51f11"
 
 [[package]]
 name = "target-lexicon"

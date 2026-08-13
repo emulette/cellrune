@@ -55,6 +55,7 @@ serde_json = "1.0.127"
 # 0.10.0 is yanked, so 0.10.1 is the lowest version this range can actually resolve — a floor
 # below it would claim a configuration no suite (and no dependent) can ever build.
 sha2 = { version = ">=0.10.1, <0.12", default-features = false }
+system_alloc_stats = "0.2.0"
 tokio = { version = ">=1.44.2, <2", features = [
     "io-std",
     "macros",
@@ -78,3 +79,6 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+[profile.bench]
+lto = "thin"
