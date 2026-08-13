@@ -11,7 +11,7 @@ use cellrune::{
 const NOMINAL_FORMULAS: [(&str, &str, f64); 26] = [
     (
         "B1",
-        "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),0.05,1000,2)",
+        "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),A1,1000,2)",
         50.0,
     ),
     (
@@ -145,7 +145,20 @@ const ERROR_FORMULAS: [(&str, &str, ExcelError); 3] = [
 
 #[test]
 fn v015_fixed_income_full_incremental_write_reopen_pipeline() {
-    let mut session = WorkbookCalculationSession::new(generated_workbook());
+    let source_draft = generated_workbook();
+    let source_calculation =
+        calculate_workbook(source_draft.workbook(), CalculationOptions::default());
+    let source_output = write_xlsx_draft_bytes(
+        &source_draft,
+        &source_calculation,
+        cellrune::RecalculationWriteOptions::default(),
+    )
+    .expect("write generated fixed-income input workbook");
+    let source_document =
+        open_xlsx_document_bytes(source_output.bytes(), cellrune::OpenOptions::default())
+            .expect("read generated fixed-income input workbook");
+    let mut session =
+        WorkbookCalculationSession::new(WorkbookDraft::from_document(&source_document));
     let sheet = session.workbook().sheets()[0].id();
 
     let initial = session
@@ -174,12 +187,31 @@ fn v015_fixed_income_full_incremental_write_reopen_pipeline() {
         )
         .expect("incremental calculation after input edit");
     assert_eq!(incremental.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(incremental.dirty_count(), 1);
+    assert_eq!(incremental.evaluated_count(), 1);
+    assert_eq!(incremental.changed_cells().len(), 1);
+    assert_eq!(
+        incremental.changed_cells()[0].cell().address(),
+        address_of("B1")
+    );
     let incremental_calculation = session.calculation().expect("incremental calculation");
     let fresh_calculation = calculate_workbook(session.workbook(), CalculationOptions::default());
     assert_eq!(
         incremental_calculation.cells().collect::<Vec<_>>(),
         fresh_calculation.cells().collect::<Vec<_>>(),
         "incremental calculation must match a fresh full calculation",
+    );
+    assert_eq!(
+        incremental_calculation.provenance(),
+        fresh_calculation.provenance(),
+        "incremental and fresh calculations must carry identical provenance",
+    );
+    assert_eq!(
+        cell_result(incremental_calculation, sheet, "B1"),
+        Some(&CalculationCellResult::Value(
+            CellValue::number(60.0).expect("finite changed accrual")
+        )),
+        "the referenced rate edit must re-evaluate ACCRINT",
     );
 
     let output = write_xlsx_draft_bytes(

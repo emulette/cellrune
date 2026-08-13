@@ -104,20 +104,32 @@ pub(super) fn date_from_serial_arg(serial: f64, engine: &Engine<'_>) -> Result<D
 /// Discount a set of `(period_time, cash_flow)` pairs and return the dirty value together with the
 /// time-weighted cash-flow sum `Σ t·CF·q^(-t)`. Macaulay duration and the analytic yield
 /// derivative both derive from this single pure pass.
+#[cfg(test)]
 pub(super) fn cash_flow_reduction(
     flows: &[(f64, f64)],
     frequency: f64,
     yield_rate: f64,
 ) -> (f64, f64) {
+    cash_flow_reduction_with_poll(flows, frequency, yield_rate, &mut || Ok(()))
+        .expect("an infallible cash-flow poll cannot fail")
+}
+
+pub(super) fn cash_flow_reduction_with_poll(
+    flows: &[(f64, f64)],
+    frequency: f64,
+    yield_rate: f64,
+    poll: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<(f64, f64), ErrorKind> {
     let log_q = (yield_rate / frequency).ln_1p();
     let mut value = 0.0;
     let mut time_weighted = 0.0;
-    for (time, cash_flow) in flows {
+    for (index, (time, cash_flow)) in flows.iter().enumerate() {
+        poll_loop_cancellation(index + 1, poll)?;
         let discount = (-time * log_q).exp();
         value += cash_flow * discount;
         time_weighted += time * cash_flow * discount;
     }
-    (value, time_weighted)
+    Ok((value, time_weighted))
 }
 
 pub(super) fn charge_work(
@@ -133,6 +145,28 @@ pub(super) fn charge_work(
     engine.charge_function_iterations(context, units.max(1) as u64)
 }
 
+const LOOP_CANCELLATION_INTERVAL: usize = 256;
+
+pub(super) fn poll_loop_cancellation(
+    completed_work: usize,
+    poll: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<(), ErrorKind> {
+    if completed_work.is_multiple_of(LOOP_CANCELLATION_INTERVAL) {
+        poll()?;
+    }
+    Ok(())
+}
+
+pub(super) fn check_cancellation(context: EvalContext<'_>) -> Result<(), ErrorKind> {
+    if context.is_cancelled() {
+        Err(ErrorKind::ResourceLimit(
+            CalculationLimitKind::FunctionIterations,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 pub(super) fn finite_number(value: f64) -> Value {
     if value.is_finite() {
         Value::Number(value)
@@ -146,4 +180,35 @@ pub(in crate::calculation::functions::fixed_income) fn coupon_amount(
     frequency: CouponFrequency,
 ) -> f64 {
     100.0 * rate / frequency.as_f64()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn long_cash_flow_reduction_polls_cancellation_every_256_items() {
+        let flows = vec![(1.0, 1.0); 1_024];
+        let polls = Cell::new(0_usize);
+        let result = cash_flow_reduction_with_poll(&flows, 2.0, 0.05, &mut || {
+            let next = polls.get() + 1;
+            polls.set(next);
+            if next == 2 {
+                Err(ErrorKind::ResourceLimit(
+                    CalculationLimitKind::FunctionIterations,
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(
+            result,
+            Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations
+            ))
+        );
+        assert_eq!(polls.get(), 2);
+    }
 }

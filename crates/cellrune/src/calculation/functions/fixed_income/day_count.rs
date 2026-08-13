@@ -27,8 +27,29 @@ pub(super) fn annual_denominator(basis: DayCountBasis, start: Date, end: Date) -
 }
 
 pub(super) fn actual_days(start: Date, end: Date) -> f64 {
-    (days_from_civil(end.year, end.month, end.day)
-        - days_from_civil(start.year, start.month, start.day)) as f64
+    (actual_day_ordinal(end) - actual_day_ordinal(start)) as f64
+}
+
+fn actual_day_ordinal(date: Date) -> i64 {
+    let fictitious_leap_day = Date {
+        year: 1900,
+        month: 2,
+        day: 29,
+    };
+    let march_first = Date {
+        year: 1900,
+        month: 3,
+        day: 1,
+    };
+    if date == fictitious_leap_day {
+        return days_from_civil(1900, 2, 28) + 1;
+    }
+    let ordinal = days_from_civil(date.year, date.month, date.day);
+    if date >= march_first {
+        ordinal + 1
+    } else {
+        ordinal
+    }
 }
 
 fn actual_actual_denominator(start: Date, end: Date) -> f64 {
@@ -101,5 +122,36 @@ mod tests {
             ),
             365.0
         );
+    }
+
+    #[test]
+    fn actual_days_preserve_the_excel_1900_fictitious_day() {
+        assert_eq!(actual_days(date(1900, 2, 28), date(1900, 2, 29)), 1.0);
+        assert_eq!(actual_days(date(1900, 2, 29), date(1900, 3, 1)), 1.0);
+        assert_eq!(actual_days(date(1900, 2, 28), date(1900, 3, 1)), 2.0);
+        assert_eq!(actual_days(date(1900, 1, 0), date(1900, 1, 1)), 1.0);
+    }
+
+    #[test]
+    fn multi_year_actual_actual_denominators_match_independent_rationals() {
+        let first_start = date(2019, 7, 1);
+        let first_end = date(2021, 7, 1);
+        let first_days = actual_days(first_start, first_end);
+        let first_denominator =
+            annual_denominator(DayCountBasis::ActualActual, first_start, first_end);
+        assert_eq!(first_days, 731.0);
+        assert_eq!(first_denominator, 1_096.0 / 3.0);
+        let first_disc = 0.05 * first_denominator / first_days;
+        assert!((first_disc - 274.0 / 10_965.0).abs() < 1e-15);
+
+        let second_start = date(2019, 12, 31);
+        let second_end = date(2022, 1, 1);
+        let second_days = actual_days(second_start, second_end);
+        let second_denominator =
+            annual_denominator(DayCountBasis::ActualActual, second_start, second_end);
+        assert_eq!(second_days, 732.0);
+        assert_eq!(second_denominator, 1_461.0 / 4.0);
+        let second_disc = 0.03 * second_denominator / second_days;
+        assert!((second_disc - 1_461.0 / 97_600.0).abs() < 1e-15);
     }
 }

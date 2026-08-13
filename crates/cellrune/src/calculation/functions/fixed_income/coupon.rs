@@ -74,7 +74,13 @@ fn coupon_measure(
         Ok(date) => date,
         Err(kind) => return Value::Error(kind),
     };
-    let Some(schedule) = regular_schedule(settlement_date, maturity_date, frequency, basis) else {
+    let Some(schedule) = regular_schedule(
+        settlement_date,
+        maturity_date,
+        frequency,
+        basis,
+        engine.date_system(),
+    ) else {
         return Value::Error(ErrorKind::Num);
     };
     match measure {

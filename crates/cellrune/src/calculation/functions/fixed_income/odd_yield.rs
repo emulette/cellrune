@@ -5,10 +5,11 @@ use super::super::super::value::{ErrorKind, Value};
 use super::super::util::required_number;
 use super::odd_price::odd_first_flows;
 use super::odd_schedule::odd_first_measures;
+use super::schedule::estimated_periods;
 use super::solver::{EXCEL_YIELD_POLICY, EXTENDED_YIELD_POLICY, solve};
 use super::{
-    cash_flow_reduction, coerce_basis, coerce_date, coerce_frequency, date_from_serial_arg,
-    finite_number,
+    cash_flow_reduction_with_poll, charge_work, check_cancellation, coerce_basis, coerce_date,
+    coerce_frequency, date_from_serial_arg, finite_number,
 };
 use crate::FinancialSolverSemantics;
 
@@ -76,17 +77,30 @@ pub(super) fn call(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr])
         Ok(date) => date,
         Err(kind) => return Value::Error(kind),
     };
-    let Some(measures) = odd_first_measures(
+    let Some(work) = estimated_periods(issue_date, maturity_date, frequency) else {
+        return Value::Error(ErrorKind::Num);
+    };
+    if let Err(kind) = charge_work(engine, context, work.saturating_mul(3)) {
+        return Value::Error(kind);
+    }
+    let mut poll = || check_cancellation(context);
+    let measures = match odd_first_measures(
         issue_date,
         first_coupon_date,
         settlement_date,
         maturity_date,
         frequency,
         basis,
-    ) else {
-        return Value::Error(ErrorKind::Num);
+        &mut poll,
+    ) {
+        Ok(Some(measures)) => measures,
+        Ok(None) => return Value::Error(ErrorKind::Num),
+        Err(kind) => return Value::Error(kind),
     };
-    let flows = odd_first_flows(&measures, rate, redemption, frequency);
+    let flows = match odd_first_flows(&measures, rate, redemption, frequency, &mut poll) {
+        Ok(flows) => flows,
+        Err(kind) => return Value::Error(kind),
+    };
 
     let frequency_value = frequency.as_f64();
     let lower_bound = -frequency_value;
@@ -95,12 +109,15 @@ pub(super) fn call(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr])
         FinancialSolverSemantics::ExtendedSearch => EXTENDED_YIELD_POLICY,
     };
     let accrued_interest = flows.accrued_interest;
-    let residual = |yield_: f64| {
-        let (value, time_weighted) = cash_flow_reduction(&flows.flows, frequency_value, yield_);
+    let residual = |yield_: f64| -> Result<(f64, f64), ErrorKind> {
+        let (value, time_weighted) =
+            cash_flow_reduction_with_poll(&flows.flows, frequency_value, yield_, &mut || {
+                check_cancellation(context)
+            })?;
         let q = 1.0 + yield_ / frequency_value;
         let clean = value - accrued_interest;
         let derivative = -time_weighted / (frequency_value * q);
-        (clean - price, derivative)
+        Ok((clean - price, derivative))
     };
     match solve(
         engine,

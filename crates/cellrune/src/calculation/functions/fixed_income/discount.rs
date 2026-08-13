@@ -136,6 +136,10 @@ fn discount_security(
     finite_number(result)
 }
 
+fn maturity_security_date_order(issue: f64, settlement: f64, maturity: f64) -> bool {
+    issue < settlement && settlement < maturity
+}
+
 fn maturity_security(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -169,7 +173,7 @@ fn maturity_security(
         Ok(basis) => basis,
         Err(kind) => return Value::Error(kind),
     };
-    if settlement >= maturity {
+    if !maturity_security_date_order(issue, settlement, maturity) {
         return Value::Error(ErrorKind::Num);
     }
     if rate < 0.0 {
@@ -212,4 +216,69 @@ fn maturity_security(
         }
     };
     finite_number(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::maturity_security_date_order;
+    use crate::{
+        CalculationCellId, CalculationCellResult, CalculationHints, CellAddress, CellContent,
+        CellValue, DateSystem, FormulaCell, FormulaDialect, FormulaMetadata, FormulaText,
+        Provenance, ProviderIdentity, SavedResult, Sheet, SheetId, SheetName, SheetVisibility,
+        WorkbookSnapshot, WorkbookSource,
+    };
+
+    #[test]
+    fn maturity_security_requires_issue_before_settlement() {
+        assert!(maturity_security_date_order(10.0, 20.0, 30.0));
+        assert!(!maturity_security_date_order(20.0, 20.0, 30.0));
+        assert!(!maturity_security_date_order(25.0, 20.0, 30.0));
+    }
+
+    #[test]
+    fn worksheet_disc_matches_multi_year_actual_actual_rationals() {
+        let sheet_id = SheetId::new(1).unwrap();
+        let mut sheet = Sheet::new(
+            sheet_id,
+            SheetName::new("ActualActual").unwrap(),
+            SheetVisibility::Visible,
+        );
+        for (address, formula) in [
+            ("A1", "DISC(DATE(2019,7,1),DATE(2021,7,1),95,100,1)"),
+            ("A2", "DISC(DATE(2019,12,31),DATE(2022,1,1),97,100,1)"),
+        ] {
+            sheet
+                .insert_cell(
+                    CellAddress::from_a1(address).unwrap(),
+                    CellContent::Formula(FormulaCell::new(
+                        FormulaDialect::ExcelA1,
+                        FormulaText::from_xlsx(formula).unwrap(),
+                        SavedResult::Missing,
+                        FormulaMetadata::Normal,
+                    )),
+                )
+                .unwrap();
+        }
+        let workbook = WorkbookSnapshot::new(
+            vec![sheet],
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(
+                ProviderIdentity::new("fixed-income-test", "1").unwrap(),
+                None,
+            ),
+        )
+        .unwrap();
+        let calculation =
+            crate::calculation::calculate_workbook(&workbook, crate::CalculationOptions::default());
+        for (address, expected) in [("A1", 274.0 / 10_965.0), ("A2", 1_461.0 / 97_600.0)] {
+            let Some(CalculationCellResult::Value(CellValue::Number(value))) = calculation.cell(
+                CalculationCellId::new(sheet_id, CellAddress::from_a1(address).unwrap()),
+            ) else {
+                panic!("expected numeric multi-year DISC result at {address}");
+            };
+            assert!((value.get() - expected).abs() < 1e-15);
+        }
+    }
 }

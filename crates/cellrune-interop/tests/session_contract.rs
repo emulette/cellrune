@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cellrune_interop::{
     CalculationOptionsDto, CalculationResultDto, CellValueDto, INTEROP_SCHEMA_VERSION,
-    InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto, function_catalog,
+    InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, RecalculationModeDto, WorkbookSession,
+    WritableCellValueDto, WriteOptionsDto, function_catalog,
 };
 
 #[test]
@@ -147,6 +147,75 @@ fn typed_values_edits_and_stable_errors_cover_the_public_boundary() {
     assert!(
         serde_json::from_str::<WritableCellValueDto>(r#"{"kind":"unsupported"}"#).is_err(),
         "the output-only sentinel must not deserialize as a writable value"
+    );
+}
+
+#[test]
+fn v0_1_15_fixed_income_crosses_capability_usage_and_recalculation_boundaries() {
+    let mut session = WorkbookSession::create();
+    session
+        .set_value("Sheet1", "A1", WritableCellValueDto::Number { value: 0.05 })
+        .expect("fixed-income input must be accepted");
+    session
+        .set_formula(
+            "Sheet1",
+            "B1",
+            "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),A1,1000,2)",
+            None,
+        )
+        .expect("fixed-income formula must be accepted");
+
+    let capabilities = session
+        .capabilities(CalculationOptionsDto::default(), 0, 1)
+        .expect("fixed-income capability scan must work");
+    assert_eq!(capabilities.formula_count, 1);
+    assert_eq!(capabilities.supported_count, 1);
+    assert!(capabilities.entries[0].supported);
+    assert!(capabilities.entries[0].issue_codes.is_empty());
+
+    let usage = session.function_usage();
+    let accrint = usage
+        .entries
+        .iter()
+        .find(|entry| entry.name == "ACCRINT")
+        .expect("ACCRINT usage must be present");
+    assert!(accrint.supported);
+    assert_eq!(accrint.call_count, 1);
+    assert_eq!(accrint.formula_count, 1);
+    assert_eq!(accrint.sample_cells[0].address, "B1");
+
+    session
+        .recalculate(RecalculationModeDto::Full, CalculationOptionsDto::default())
+        .expect("fixed-income full calculation must work");
+    session
+        .set_value("Sheet1", "A1", WritableCellValueDto::Number { value: 0.06 })
+        .expect("fixed-income input edit must be accepted");
+    let delta = session
+        .recalculate(
+            RecalculationModeDto::Incremental,
+            CalculationOptionsDto::default(),
+        )
+        .expect("fixed-income incremental calculation must work");
+    assert_eq!(delta.mode, "incremental");
+    assert_eq!(delta.dirty_count, 1);
+    assert_eq!(delta.evaluated_count, 1);
+    assert_eq!(delta.changed_cells.len(), 1);
+    assert_eq!(delta.changed_cells[0].cell.address, "B1");
+
+    let result = session
+        .read_range(&RangeRequestDto {
+            sheet: "Sheet1".to_owned(),
+            start: "B1".to_owned(),
+            end: "B1".to_owned(),
+            offset: 0,
+            limit: 1,
+        })
+        .expect("fixed-income result must be readable");
+    assert_eq!(
+        result.cells[0].calculated,
+        Some(CalculationResultDto::Value {
+            value: CellValueDto::Number { value: 60.0 },
+        })
     );
 }
 

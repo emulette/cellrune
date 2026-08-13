@@ -5,7 +5,7 @@
 /// month; otherwise the maturity day-of-month is preserved and clamped to the target month length.
 use crate::DateSystem;
 
-use super::super::calendar::{Date, days_in_month, serial_from_date};
+use super::super::calendar::{Date, days_from_civil, days_in_month, serial_from_date};
 use super::model::{CouponFrequency, DayCountBasis};
 
 #[derive(Debug, Clone, Copy)]
@@ -20,7 +20,20 @@ pub(super) struct RegularSchedule {
 
 impl RegularSchedule {
     pub(super) fn previous_coupon_serial(self, system: DateSystem) -> Option<f64> {
+        if self.previous_coupon < date_system_epoch(system) {
+            return match system {
+                DateSystem::Excel1900 => Some(0.0),
+                DateSystem::Excel1904 => Some(coupon_actual_days(
+                    date_system_epoch(system),
+                    self.previous_coupon,
+                )),
+            };
+        }
         serial_from_date(self.previous_coupon, system)
+    }
+
+    pub(super) fn previous_coupon_precedes_epoch(self, system: DateSystem) -> bool {
+        self.previous_coupon < date_system_epoch(system)
     }
 
     pub(super) fn next_coupon_serial(self, system: DateSystem) -> Option<f64> {
@@ -29,10 +42,15 @@ impl RegularSchedule {
 }
 
 pub(super) fn is_end_of_month(date: Date) -> bool {
-    date.day == days_in_month(date.year, date.month)
+    // Excel's 1900 date system exposes the fictitious 1900-02-29. Treat it as
+    // month-end even though the proleptic Gregorian calendar has only 28 days.
+    date.day >= days_in_month(date.year, date.month)
 }
 
 pub(super) fn add_months(date: Date, months: i64, end_of_month: bool) -> Option<Date> {
+    if months == 0 {
+        return Some(date);
+    }
     let total = i64::from(date.year)
         .checked_mul(12)?
         .checked_add(i64::from(date.month).checked_sub(1)?)?
@@ -59,23 +77,36 @@ pub(super) fn regular_schedule(
     maturity: Date,
     frequency: CouponFrequency,
     basis: DayCountBasis,
+    date_system: DateSystem,
 ) -> Option<RegularSchedule> {
     let months = frequency.months();
     let end_of_month = is_end_of_month(maturity);
 
-    let mut next = maturity;
-    let previous = loop {
-        let prior = add_months(next, -months, end_of_month)?;
-        if prior <= settlement {
-            break prior;
-        }
-        next = prior;
+    let maturity_index = month_index(maturity);
+    let settlement_index = month_index(settlement);
+    let month_distance = maturity_index.checked_sub(settlement_index)?;
+    let mut steps = month_distance.div_euclid(months);
+    let candidate = add_months(maturity, -steps.checked_mul(months)?, end_of_month)?;
+    if candidate > settlement {
+        steps = steps.checked_add(1)?;
+    }
+    let previous = add_months(maturity, -steps.checked_mul(months)?, end_of_month)?;
+    let next = if steps == 1 {
+        maturity
+    } else {
+        add_months(previous, months, end_of_month)?
     };
 
-    let accrued_days = super::day_count::days_between(previous, settlement, basis);
+    // Coupon dates can project before the workbook epoch. Excel reports the
+    // previous coupon as serial zero and measures accrued days from that epoch.
+    let accrued_start = match date_system {
+        DateSystem::Excel1900 => previous.max(date_system_epoch(date_system)),
+        DateSystem::Excel1904 => previous,
+    };
+    let accrued_days = super::day_count::days_between(accrued_start, settlement, basis);
     let days_to_next = super::day_count::days_between(settlement, next, basis);
     let period_days = period_days(previous, next, basis, frequency);
-    let coupon_count = coupon_count(next, maturity, months);
+    let coupon_count = steps;
 
     Some(RegularSchedule {
         previous_coupon: previous,
@@ -87,6 +118,19 @@ pub(super) fn regular_schedule(
     })
 }
 
+pub(super) fn estimated_periods(
+    start: Date,
+    end: Date,
+    frequency: CouponFrequency,
+) -> Option<usize> {
+    let month_distance = month_index(end).checked_sub(month_index(start))?;
+    usize::try_from(month_distance.div_euclid(frequency.months()) + 2).ok()
+}
+
+fn month_index(date: Date) -> i64 {
+    i64::from(date.year) * 12 + i64::from(date.month) - 1
+}
+
 fn period_days(
     previous: Date,
     next: Date,
@@ -94,7 +138,7 @@ fn period_days(
     frequency: CouponFrequency,
 ) -> f64 {
     match basis {
-        DayCountBasis::ActualActual => super::day_count::days_between(previous, next, basis),
+        DayCountBasis::ActualActual => coupon_actual_days(previous, next),
         DayCountBasis::Us30360 | DayCountBasis::Actual360 | DayCountBasis::European30360 => {
             360.0 / frequency.as_f64()
         }
@@ -112,7 +156,7 @@ pub(super) fn normal_period_days(
     match basis {
         DayCountBasis::ActualActual => {
             let end = add_months(start, months, end_of_month)?;
-            Some(super::day_count::days_between(start, end, basis))
+            Some(coupon_actual_days(start, end))
         }
         DayCountBasis::Us30360 | DayCountBasis::Actual360 | DayCountBasis::European30360 => {
             Some(360.0 / frequency.as_f64())
@@ -121,10 +165,44 @@ pub(super) fn normal_period_days(
     }
 }
 
-fn coupon_count(next: Date, maturity: Date, months: i64) -> i64 {
-    let next_index = i64::from(next.year) * 12 + i64::from(next.month) - 1;
-    let maturity_index = i64::from(maturity.year) * 12 + i64::from(maturity.month) - 1;
-    (maturity_index - next_index) / months + 1
+fn date_system_epoch(system: DateSystem) -> Date {
+    match system {
+        DateSystem::Excel1900 => Date {
+            year: 1900,
+            month: 1,
+            day: 0,
+        },
+        DateSystem::Excel1904 => Date {
+            year: 1904,
+            month: 1,
+            day: 1,
+        },
+    }
+}
+
+fn coupon_actual_days(start: Date, end: Date) -> f64 {
+    fn gregorian_coupon_date(date: Date) -> Date {
+        if date
+            == (Date {
+                year: 1900,
+                month: 2,
+                day: 29,
+            })
+        {
+            Date {
+                year: 1900,
+                month: 2,
+                day: 28,
+            }
+        } else {
+            date
+        }
+    }
+
+    let start = gregorian_coupon_date(start);
+    let end = gregorian_coupon_date(end);
+    (days_from_civil(end.year, end.month, end.day)
+        - days_from_civil(start.year, start.month, start.day)) as f64
 }
 
 #[cfg(test)]
@@ -144,6 +222,7 @@ mod tests {
             date(2025, 7, 1),
             CouponFrequency::Semiannual,
             DayCountBasis::Us30360,
+            DateSystem::Excel1900,
         )
         .unwrap();
         assert_eq!(schedule.previous_coupon, date(2025, 1, 1));
@@ -161,6 +240,7 @@ mod tests {
             date(2027, 1, 1),
             CouponFrequency::Semiannual,
             DayCountBasis::Us30360,
+            DateSystem::Excel1900,
         )
         .unwrap();
         assert_eq!(schedule.previous_coupon, date(2025, 7, 1));
@@ -177,6 +257,7 @@ mod tests {
             date(2025, 8, 31),
             CouponFrequency::Semiannual,
             DayCountBasis::ActualActual,
+            DateSystem::Excel1900,
         )
         .unwrap();
         assert_eq!(schedule.previous_coupon, date(2024, 8, 31));
@@ -191,9 +272,30 @@ mod tests {
             date(2024, 2, 29),
             CouponFrequency::Semiannual,
             DayCountBasis::ActualActual,
+            DateSystem::Excel1900,
         )
         .unwrap();
         assert_eq!(schedule.previous_coupon, date(2022, 8, 31));
         assert_eq!(schedule.next_coupon, date(2023, 2, 28));
+    }
+
+    #[test]
+    fn excel_1900_coupon_period_excludes_the_fictitious_leap_day() {
+        let schedule = regular_schedule(
+            date(1900, 2, 28),
+            date(1900, 2, 29),
+            CouponFrequency::Semiannual,
+            DayCountBasis::ActualActual,
+            DateSystem::Excel1900,
+        )
+        .unwrap();
+        assert_eq!(schedule.previous_coupon, date(1899, 8, 31));
+        assert_eq!(
+            schedule.previous_coupon_serial(DateSystem::Excel1900),
+            Some(0.0)
+        );
+        assert_eq!(schedule.accrued_days, 59.0);
+        assert_eq!(schedule.days_to_next, 1.0);
+        assert_eq!(schedule.period_days, 181.0);
     }
 }

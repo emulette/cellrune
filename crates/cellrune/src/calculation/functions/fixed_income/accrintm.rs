@@ -22,8 +22,10 @@ pub(super) fn call(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr])
         Ok(number) => number,
         Err(kind) => return Value::Error(kind),
     };
+    let par_is_absent = args.get(3).is_none();
     let par = match args.get(3) {
-        Some(Expr::Missing) | None => 1000.0,
+        Some(Expr::Missing) => 1000.0,
+        None => 0.0,
         Some(expr) => match required_number(engine, context, expr) {
             Ok(number) => number,
             Err(kind) => return Value::Error(kind),
@@ -36,7 +38,7 @@ pub(super) fn call(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr])
     if issue >= settlement {
         return Value::Error(ErrorKind::Num);
     }
-    if rate <= 0.0 || par <= 0.0 {
+    if rate <= 0.0 || (!par_is_absent && par <= 0.0) {
         return Value::Error(ErrorKind::Num);
     }
     let issue_date = match date_from_serial_arg(issue, engine) {

@@ -127,6 +127,38 @@ async function main() {
     assert.equal(values.get(expected.address), expected.value);
   }
 
+  workbook.setNumber("Sheet1", "H1", 0.05);
+  workbook.setFormula(
+    "Sheet1",
+    "I1",
+    "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),H1,1000,2)",
+  );
+  const fixedIncomeUsage = workbook
+    .functionUsage()
+    .entries.find((entry) => entry.name === "ACCRINT");
+  assert.notEqual(fixedIncomeUsage, undefined);
+  assert.equal(fixedIncomeUsage.supported, true);
+  assert.equal(fixedIncomeUsage.callCount, 1);
+  assert.deepEqual(fixedIncomeUsage.sampleCells, [
+    { sheetId: 1, sheetName: "Sheet1", address: "I1" },
+  ]);
+  await workbook.recalculate({ mode: "full" });
+  let accrued = workbook.readRange("Sheet1", "I1", "I1", { limit: 1 }).cells[0];
+  assert.equal(accrued.calculated.value.kind, "number");
+  assert.equal(accrued.calculated.value.value, 50);
+  workbook.setNumber("Sheet1", "H1", 0.06);
+  const fixedIncomeDelta = await workbook.recalculate({ mode: "incremental" });
+  assert.equal(fixedIncomeDelta.mode, "incremental");
+  assert.equal(fixedIncomeDelta.dirtyCount, 1);
+  assert.equal(fixedIncomeDelta.evaluatedCount, 1);
+  assert.deepEqual(
+    fixedIncomeDelta.changedCells.map((cell) => cell.cell.address),
+    ["I1"],
+  );
+  accrued = workbook.readRange("Sheet1", "I1", "I1", { limit: 1 }).cells[0];
+  assert.equal(accrued.calculated.value.kind, "number");
+  assert.equal(accrued.calculated.value.value, 60);
+
   workbook.setFormula("Sheet1", "A3", "=0.1+0.2-0.3");
   workbook.setFormula("Sheet1", "A4", "=IRR({-1,100000})");
   await workbook.recalculate({ mode: "full" });

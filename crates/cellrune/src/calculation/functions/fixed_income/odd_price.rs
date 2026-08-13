@@ -5,9 +5,10 @@ use super::super::super::value::{ErrorKind, Value};
 use super::super::util::required_number;
 use super::model::CouponFrequency;
 use super::odd_schedule::{OddFirstMeasures, odd_first_measures, odd_last_measures};
+use super::schedule::estimated_periods;
 use super::{
-    cash_flow_reduction, charge_work, coerce_basis, coerce_date, coerce_frequency, coupon_amount,
-    date_from_serial_arg, finite_number,
+    cash_flow_reduction_with_poll, charge_work, check_cancellation, coerce_basis, coerce_date,
+    coerce_frequency, coupon_amount, date_from_serial_arg, finite_number, poll_loop_cancellation,
 };
 
 pub(super) fn odd_f_price(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -74,23 +75,37 @@ pub(super) fn odd_f_price(engine: &Engine<'_>, context: EvalContext<'_>, args: &
         Ok(date) => date,
         Err(kind) => return Value::Error(kind),
     };
+    let Some(work) = estimated_periods(issue_date, maturity_date, frequency) else {
+        return Value::Error(ErrorKind::Num);
+    };
+    if let Err(kind) = charge_work(engine, context, work.saturating_mul(3)) {
+        return Value::Error(kind);
+    }
 
-    let Some(measures) = odd_first_measures(
+    let mut poll = || check_cancellation(context);
+    let measures = match odd_first_measures(
         issue_date,
         first_coupon_date,
         settlement_date,
         maturity_date,
         frequency,
         basis,
-    ) else {
-        return Value::Error(ErrorKind::Num);
+        &mut poll,
+    ) {
+        Ok(Some(measures)) => measures,
+        Ok(None) => return Value::Error(ErrorKind::Num),
+        Err(kind) => return Value::Error(kind),
     };
-    let flows = odd_first_flows(&measures, rate, redemption, frequency);
+    let flows = match odd_first_flows(&measures, rate, redemption, frequency, &mut poll) {
+        Ok(flows) => flows,
+        Err(kind) => return Value::Error(kind),
+    };
     let accrued = flows.accrued_interest;
-    if let Err(kind) = charge_work(engine, context, flows.flows.len()) {
-        return Value::Error(kind);
-    }
-    let (value, _) = cash_flow_reduction(&flows.flows, frequency.as_f64(), yield_);
+    let (value, _) =
+        match cash_flow_reduction_with_poll(&flows.flows, frequency.as_f64(), yield_, &mut poll) {
+            Ok(reduction) => reduction,
+            Err(kind) => return Value::Error(kind),
+        };
     finite_number(value - accrued)
 }
 
@@ -150,14 +165,24 @@ pub(super) fn odd_l_price(engine: &Engine<'_>, context: EvalContext<'_>, args: &
         Ok(date) => date,
         Err(kind) => return Value::Error(kind),
     };
-    let Some(measures) = odd_last_measures(
+    let Some(work) = estimated_periods(last_interest_date, maturity_date, frequency) else {
+        return Value::Error(ErrorKind::Num);
+    };
+    if let Err(kind) = charge_work(engine, context, work) {
+        return Value::Error(kind);
+    }
+    let mut poll = || check_cancellation(context);
+    let measures = match odd_last_measures(
         last_interest_date,
         settlement_date,
         maturity_date,
         frequency,
         basis,
-    ) else {
-        return Value::Error(ErrorKind::Num);
+        &mut poll,
+    ) {
+        Ok(Some(measures)) => measures,
+        Ok(None) => return Value::Error(ErrorKind::Num),
+        Err(kind) => return Value::Error(kind),
     };
     let coupon = coupon_amount(rate, frequency);
     let result = (redemption + coupon * measures.coupon_days_fraction)
@@ -222,14 +247,24 @@ pub(super) fn odd_l_yield(engine: &Engine<'_>, context: EvalContext<'_>, args: &
         Ok(date) => date,
         Err(kind) => return Value::Error(kind),
     };
-    let Some(measures) = odd_last_measures(
+    let Some(work) = estimated_periods(last_interest_date, maturity_date, frequency) else {
+        return Value::Error(ErrorKind::Num);
+    };
+    if let Err(kind) = charge_work(engine, context, work) {
+        return Value::Error(kind);
+    }
+    let mut poll = || check_cancellation(context);
+    let measures = match odd_last_measures(
         last_interest_date,
         settlement_date,
         maturity_date,
         frequency,
         basis,
-    ) else {
-        return Value::Error(ErrorKind::Num);
+        &mut poll,
+    ) {
+        Ok(Some(measures)) => measures,
+        Ok(None) => return Value::Error(ErrorKind::Num),
+        Err(kind) => return Value::Error(kind),
     };
     let coupon = coupon_amount(rate, frequency);
     let result = ((redemption + coupon * measures.coupon_days_fraction)
@@ -250,29 +285,83 @@ pub(super) fn odd_first_flows(
     rate: f64,
     redemption: f64,
     frequency: CouponFrequency,
-) -> OddFirstFlows {
+    poll: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<OddFirstFlows, ErrorKind> {
+    if measures.is_long_first {
+        odd_first_long_flows(measures, rate, redemption, frequency, poll)
+    } else {
+        odd_first_short_flows(measures, rate, redemption, frequency, poll)
+    }
+}
+
+fn odd_first_short_flows(
+    measures: &OddFirstMeasures,
+    rate: f64,
+    redemption: f64,
+    frequency: CouponFrequency,
+    poll: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<OddFirstFlows, ErrorKind> {
     let coupon = coupon_amount(rate, frequency);
-    let alpha = measures.days_to_first_coupon / measures.period_days;
-    let first_cash_flow = coupon * measures.first_period_days / measures.period_days;
+    let first_time = measures.settlement_to_first_fraction;
+    let first_cash_flow = coupon * measures.issue_to_first_fraction;
 
     let mut flows = Vec::with_capacity(measures.coupon_count.max(0) as usize + 1);
-    flows.push((alpha, first_cash_flow));
+    flows.push((first_time, first_cash_flow));
     for k in 2..=measures.coupon_count {
-        flows.push(((k - 1) as f64 + alpha, coupon));
+        poll_loop_cancellation(k as usize, poll)?;
+        flows.push(((k - 1) as f64 + first_time, coupon));
     }
-    flows.push(((measures.coupon_count - 1) as f64 + alpha, redemption));
+    flows.push(((measures.coupon_count - 1) as f64 + first_time, redemption));
 
-    OddFirstFlows {
+    Ok(OddFirstFlows {
         flows,
-        accrued_interest: coupon * measures.accrued_days / measures.period_days,
+        accrued_interest: coupon * measures.accrued_fraction,
+    })
+}
+
+fn odd_first_long_flows(
+    measures: &OddFirstMeasures,
+    rate: f64,
+    redemption: f64,
+    frequency: CouponFrequency,
+    poll: &mut impl FnMut() -> Result<(), ErrorKind>,
+) -> Result<OddFirstFlows, ErrorKind> {
+    let coupon = coupon_amount(rate, frequency);
+    let nq = measures.settlement_to_first_fraction.floor();
+    let dsc_over_e = measures.settlement_to_first_fraction - nq;
+    let first_time = nq + dsc_over_e;
+    let n = measures.coupon_count - 1;
+
+    let mut flows = Vec::with_capacity(measures.coupon_count.max(0) as usize + 1);
+    // Microsoft long-first notation: `Σ DCᵢ/NLᵢ` is paid at `Nq + DSC/E`.
+    flows.push((first_time, coupon * measures.issue_to_first_fraction));
+    // The regular coupon sum is `k=1..N` at `k + Nq + DSC/E`.
+    for k in 1..=n {
+        poll_loop_cancellation(k as usize, poll)?;
+        flows.push((k as f64 + first_time, coupon));
     }
+    // Redemption is paid at `N + Nq + DSC/E`.
+    flows.push((n as f64 + first_time, redemption));
+
+    Ok(OddFirstFlows {
+        flows,
+        // Microsoft long-first notation: clean price subtracts `C × Σ Aᵢ/NLᵢ`.
+        accrued_interest: coupon * measures.accrued_fraction,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::super::calendar::Date;
+    use super::super::cash_flow_reduction;
     use super::super::model::DayCountBasis;
     use super::*;
+    use crate::{
+        CalculationCellId, CalculationCellResult, CalculationHints, CellAddress, CellContent,
+        CellValue, DateSystem, ExcelError, FormulaCell, FormulaDialect, FormulaMetadata,
+        FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet, SheetId, SheetName,
+        SheetVisibility, WorkbookSnapshot, WorkbookSource,
+    };
 
     const fn date(year: i32, month: u32, day: u32) -> Date {
         Date { year, month, day }
@@ -287,11 +376,93 @@ mod tests {
             date(2030, 3, 1),
             CouponFrequency::Semiannual,
             DayCountBasis::Us30360,
+            &mut || Ok(()),
+        )
+        .unwrap()
+        .unwrap();
+        let flows = odd_first_flows(
+            &measures,
+            0.05,
+            100.0,
+            CouponFrequency::Semiannual,
+            &mut || Ok(()),
         )
         .unwrap();
-        let flows = odd_first_flows(&measures, 0.05, 100.0, CouponFrequency::Semiannual);
         let (value, _) = cash_flow_reduction(&flows.flows, 2.0, 0.06);
         assert!((value - flows.accrued_interest - 95.673_855_249_014_57).abs() < 1e-12);
+    }
+
+    #[test]
+    fn microsoft_odd_first_example_rounds_to_documented_price() {
+        let measures = odd_first_measures(
+            date(2008, 10, 15),
+            date(2009, 3, 1),
+            date(2008, 11, 11),
+            date(2021, 3, 1),
+            CouponFrequency::Semiannual,
+            DayCountBasis::ActualActual,
+            &mut || Ok(()),
+        )
+        .unwrap()
+        .unwrap();
+        let flows = odd_first_flows(
+            &measures,
+            0.0785,
+            100.0,
+            CouponFrequency::Semiannual,
+            &mut || Ok(()),
+        )
+        .unwrap();
+        let (dirty, _) = cash_flow_reduction(&flows.flows, 2.0, 0.0625);
+        let price = dirty - flows.accrued_interest;
+        assert!((price - 113.60).abs() < 0.005);
+    }
+
+    #[test]
+    fn odd_first_long_price_uses_quasi_coupon_amount_and_time() {
+        let measures = odd_first_measures(
+            date(2023, 9, 1),
+            date(2025, 3, 1),
+            date(2025, 2, 1),
+            date(2030, 3, 1),
+            CouponFrequency::Semiannual,
+            DayCountBasis::Us30360,
+            &mut || Ok(()),
+        )
+        .unwrap()
+        .unwrap();
+        let flows = odd_first_flows(
+            &measures,
+            0.05,
+            100.0,
+            CouponFrequency::Semiannual,
+            &mut || Ok(()),
+        )
+        .unwrap();
+        assert!((flows.flows[0].0 - 1.0 / 6.0).abs() < 1e-12);
+        assert_eq!(flows.flows[0].1, 7.5);
+        assert!((flows.accrued_interest - 2.5 * 17.0 / 6.0).abs() < 1e-12);
+        let (dirty, _) = cash_flow_reduction(&flows.flows, 2.0, 0.06);
+        assert!((dirty - flows.accrued_interest - 95.644_232_627_811_8).abs() < 1e-12);
+
+        let supplied_price = dirty - flows.accrued_interest;
+        let residual = |yield_: f64| {
+            let (value, weighted) = cash_flow_reduction(&flows.flows, 2.0, yield_);
+            let q = 1.0 + yield_ / 2.0;
+            Ok((
+                value - flows.accrued_interest - supplied_price,
+                -weighted / (2.0 * q),
+            ))
+        };
+        let recovered = super::super::solver::solve_with_charge(
+            -2.0,
+            flows.flows.len(),
+            super::super::solver::EXTENDED_YIELD_POLICY,
+            &residual,
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        assert!((recovered - 0.06).abs() < 1e-12);
     }
 
     #[test]
@@ -302,7 +473,9 @@ mod tests {
             date(2025, 6, 15),
             CouponFrequency::Semiannual,
             DayCountBasis::Us30360,
+            &mut || Ok(()),
         )
+        .unwrap()
         .unwrap();
         let coupon = coupon_amount(0.05, CouponFrequency::Semiannual);
         let price = (100.0 + coupon * measures.coupon_days_fraction)
@@ -316,5 +489,87 @@ mod tests {
             * 2.0
             / measures.to_maturity_fraction;
         assert!((yield_ - 0.076_504_400_859_952_39).abs() < 1e-12);
+    }
+
+    #[test]
+    fn all_odd_adapters_reject_zero_and_negative_redemption() {
+        let cases = [
+            (
+                "A1",
+                "ODDFPRICE(DATE(2025,2,1),DATE(2030,3,1),DATE(2024,11,15),DATE(2025,3,1),0.05,0.06,0,2,0)",
+            ),
+            (
+                "A2",
+                "ODDFPRICE(DATE(2025,2,1),DATE(2030,3,1),DATE(2023,9,1),DATE(2025,3,1),0.05,0.06,-1,2,0)",
+            ),
+            (
+                "A3",
+                "ODDFYIELD(DATE(2025,2,1),DATE(2030,3,1),DATE(2024,11,15),DATE(2025,3,1),0.05,95,0,2,0)",
+            ),
+            (
+                "A4",
+                "ODDFYIELD(DATE(2025,2,1),DATE(2030,3,1),DATE(2023,9,1),DATE(2025,3,1),0.05,95,-1,2,0)",
+            ),
+            (
+                "A5",
+                "ODDLPRICE(DATE(2025,2,1),DATE(2025,6,15),DATE(2024,10,15),0.05,0.06,0,2,0)",
+            ),
+            (
+                "A6",
+                "ODDLPRICE(DATE(2024,2,1),DATE(2025,6,15),DATE(2024,1,1),0.05,0.06,-1,2,0)",
+            ),
+            (
+                "A7",
+                "ODDLYIELD(DATE(2025,2,1),DATE(2025,6,15),DATE(2024,10,15),0.05,99,0,2,0)",
+            ),
+            (
+                "A8",
+                "ODDLYIELD(DATE(2024,2,1),DATE(2025,6,15),DATE(2024,1,1),0.05,99,-1,2,0)",
+            ),
+        ];
+        let sheet_id = SheetId::new(1).unwrap();
+        let mut sheet = Sheet::new(
+            sheet_id,
+            SheetName::new("OddRedemption").unwrap(),
+            SheetVisibility::Visible,
+        );
+        for (address, formula) in cases {
+            sheet
+                .insert_cell(
+                    CellAddress::from_a1(address).unwrap(),
+                    CellContent::Formula(FormulaCell::new(
+                        FormulaDialect::ExcelA1,
+                        FormulaText::from_xlsx(formula).unwrap(),
+                        SavedResult::Missing,
+                        FormulaMetadata::Normal,
+                    )),
+                )
+                .unwrap();
+        }
+        let workbook = WorkbookSnapshot::new(
+            vec![sheet],
+            DateSystem::Excel1900,
+            CalculationHints::default(),
+            WorkbookSource::default(),
+            Provenance::new(
+                ProviderIdentity::new("fixed-income-test", "1").unwrap(),
+                None,
+            ),
+        )
+        .unwrap();
+        let calculation =
+            crate::calculation::calculate_workbook(&workbook, crate::CalculationOptions::default());
+        for (address, _) in cases {
+            assert_eq!(
+                calculation.cell(CalculationCellId::new(
+                    sheet_id,
+                    CellAddress::from_a1(address).unwrap(),
+                )),
+                Some(&CalculationCellResult::Value(CellValue::Error(
+                    ExcelError::Number
+                ))),
+                "unexpected redemption boundary result at {address}"
+            );
+        }
     }
 }

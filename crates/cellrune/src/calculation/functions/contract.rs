@@ -1718,14 +1718,15 @@ const FIXED_INCOME_ACCRINT_DEFAULTS: &[ArgumentDefault] = &[
     ),
     ArgumentDefault::new(
         7,
-        DefaultTrigger::Absent,
+        DefaultTrigger::AbsentOrMissing,
         ArgumentDefaultValue::Logical(true),
     ),
 ];
 const FIXED_INCOME_ACCRINTM_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(3, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
     ArgumentDefault::new(
         3,
-        DefaultTrigger::AbsentOrMissing,
+        DefaultTrigger::Missing,
         ArgumentDefaultValue::Number(1000.0),
     ),
     ArgumentDefault::new(
@@ -1864,5 +1865,18 @@ mod tests {
             assert!(arity.accepts(maximum), "{evaluator:?}");
             assert!(!arity.accepts(maximum + 1), "{evaluator:?}");
         }
+    }
+
+    #[test]
+    fn accrint_calc_method_defaults_true_when_absent_or_missing() {
+        let contract = Evaluator::FixedIncome(FixedIncomeFunction::Accrint).call_contract();
+        assert_eq!(
+            contract.default_at(7, DefaultTrigger::Absent),
+            Some(ArgumentDefaultValue::Logical(true))
+        );
+        assert_eq!(
+            contract.default_at(7, DefaultTrigger::Missing),
+            Some(ArgumentDefaultValue::Logical(true))
+        );
     }
 }

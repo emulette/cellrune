@@ -175,6 +175,42 @@ def main() -> None:
         for expected in corpus["expected_numbers"]:
             assert values[expected["address"]] == expected["value"]
 
+        workbook.set_number("Sheet1", "H1", 0.05)
+        workbook.set_formula(
+            "Sheet1",
+            "I1",
+            "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2025,1,1),H1,1000,2)",
+        )
+        fixed_income_usage = next(
+            entry
+            for entry in workbook.function_usage()["entries"]
+            if entry["name"] == "ACCRINT"
+        )
+        assert fixed_income_usage["supported"]
+        assert fixed_income_usage["call_count"] == 1
+        assert fixed_income_usage["sample_cells"] == [
+            {"sheet_id": 1, "sheet_name": "Sheet1", "address": "I1"}
+        ]
+        workbook.recalculate(mode="full")
+        accrued = workbook.read_range("Sheet1", "I1", "I1", limit=1)["cells"][0]
+        assert accrued["calculated"] == {
+            "kind": "value",
+            "value": {"kind": "number", "value": 50.0},
+        }
+        workbook.set_number("Sheet1", "H1", 0.06)
+        fixed_income_delta = workbook.recalculate(mode="incremental")
+        assert fixed_income_delta["mode"] == "incremental"
+        assert fixed_income_delta["dirty_count"] == 1
+        assert fixed_income_delta["evaluated_count"] == 1
+        assert [
+            cell["cell"]["address"] for cell in fixed_income_delta["changed_cells"]
+        ] == ["I1"]
+        accrued = workbook.read_range("Sheet1", "I1", "I1", limit=1)["cells"][0]
+        assert accrued["calculated"] == {
+            "kind": "value",
+            "value": {"kind": "number", "value": 60.0},
+        }
+
         for offset in (-1, 2**64, 1.5, True):
             assert_error(
                 "interop.page.offset_invalid",
