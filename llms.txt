@@ -520,8 +520,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
   `.is_official()`. The 0.1.15 catalog contains 412 official Excel-facing
   names and one non-official compatibility entry for the OOXML dummy-function
-  marker, for 413 accepted entries. The versioned 0.1.14 catalog remains
-  386 official names and 387 accepted entries byte-exact.
+  marker, for 413 accepted entries. Both its catalog and semantic registry are
+  protected by byte-exact 0.1.15 snapshots. The versioned 0.1.14 catalog
+  remains 386 official names and 387 accepted entries byte-exact.
 - The 19 official names added in 0.1.14 are `CONVERT`, `BESSELI`, `BESSELJ`,
   `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`,
   `IMCONJUGATE`, `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`,

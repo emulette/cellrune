@@ -22,8 +22,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 ### Changed
 
 - The public function catalog now contains 412 official Excel-facing names and 413 accepted
-  entries including the non-official OOXML dummy-function marker. The versioned 0.1.14 catalog
-  and semantic snapshots remain byte-exact.
+  entries including the non-official OOXML dummy-function marker. The 0.1.15 catalog and semantic
+  registry have byte-exact snapshots, while the versioned 0.1.14 snapshots remain unchanged.
+- Excel Oracle expectations classify all 78 active nominal, coercion, and domain cases for the
+  twenty-six fixed-income functions as matches in both frozen host profiles; two existing
+  composite cases unlocked by the family also match.
 - Replaced the pinned third-party `setup-zig` action with a repository-owned, checksum-verified
   Zig 0.14.1 installer so the Linux binding artifact matrix no longer depends on a Node 20
   runtime.
