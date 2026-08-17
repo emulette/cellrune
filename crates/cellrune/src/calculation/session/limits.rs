@@ -11,6 +11,8 @@ pub struct SessionLimits {
     pub(super) max_delta_cells: usize,
     pub(super) max_retained_deltas: usize,
     pub(super) max_delta_page: usize,
+    pub(super) max_transaction_detail_items: usize,
+    pub(super) max_transaction_page_items: usize,
     pub(super) max_rewrite_formulas: usize,
     pub(super) max_rewrite_source_bytes: usize,
     pub(super) max_rewrite_ast_nodes: usize,
@@ -57,7 +59,8 @@ impl SessionLimits {
         self.max_batch_operations
     }
 
-    /// Returns the maximum evaluated formula cells in one pass.
+    /// Returns the maximum evaluated formula cells in one recalculation or cumulatively across
+    /// the uncached base and candidate passes of one workbook transaction.
     pub const fn max_evaluated_cells(self) -> usize {
         self.max_evaluated_cells
     }
@@ -75,6 +78,34 @@ impl SessionLimits {
     /// Returns the maximum deltas returned by one cursor page.
     pub const fn max_delta_page(self) -> usize {
         self.max_delta_page
+    }
+
+    /// Replaces the retained transaction-detail and per-page item limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionErrorCode::InvalidLimits`] when either supplied limit is zero.
+    pub fn with_transaction_detail_limits(
+        mut self,
+        max_detail_items: usize,
+        max_page_items: usize,
+    ) -> Result<Self, SessionError> {
+        if max_detail_items == 0 || max_page_items == 0 {
+            return Err(SessionError::new(SessionErrorCode::InvalidLimits, None));
+        }
+        self.max_transaction_detail_items = max_detail_items;
+        self.max_transaction_page_items = max_page_items;
+        Ok(self)
+    }
+
+    /// Returns the maximum detail items retained by one completed transaction.
+    pub const fn max_transaction_detail_items(self) -> usize {
+        self.max_transaction_detail_items
+    }
+
+    /// Returns the maximum items returned by one transaction detail page.
+    pub const fn max_transaction_page_items(self) -> usize {
+        self.max_transaction_page_items
     }
 
     /// Replaces the cumulative typed formula-rewrite limits.
@@ -156,6 +187,8 @@ impl Default for SessionLimits {
             max_delta_cells: 1_000_000,
             max_retained_deltas: 256,
             max_delta_page: 100,
+            max_transaction_detail_items: 2_000_000,
+            max_transaction_page_items: 1_000,
             max_rewrite_formulas: 1_000_000,
             max_rewrite_source_bytes: 256 * 1024 * 1024,
             max_rewrite_ast_nodes: 10_000_000,

@@ -17,6 +17,7 @@ mod delta;
 mod error;
 mod impact;
 mod limits;
+mod transaction;
 
 pub use delta::{CalculationDelta, CalculationDeltaCell, CalculationDeltaPage};
 use delta::{DeltaMetadata, build_delta, build_empty_delta, build_incremental_delta};
@@ -24,6 +25,14 @@ use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{affected_formulas, formula_cells, formula_cells_from_workbook};
 pub use limits::{CancellationToken, SessionLimits};
+pub use transaction::{
+    CompletedWorkbookTransaction, InstallDeltaBasisReason, PreparedWorkbookTransaction,
+    TransactionAffectedFormula, TransactionDetailItem, TransactionDetailSection,
+    TransactionImpactCause, TransactionImpactCoverage, TransactionImpactPage,
+    TransactionInstallResultChange, TransactionIssueChange, TransactionIssueChangeKind,
+    TransactionPageCursor, TransactionResultChange, WorkbookTransactionReceipt,
+    WorkbookTransactionReport,
+};
 
 /// Caller-selected recalculation policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -682,12 +691,15 @@ impl PreparedCalculation {
         self.execution_mode
     }
 
-    /// Executes the job without mutating the source session.
-    ///
-    /// # Errors
-    ///
-    /// Returns a stable cancellation or session resource-limit error.
-    pub fn run(self) -> Result<CompletedCalculation, SessionError> {
+    pub(super) const fn decision_reason(&self) -> CalculationDecisionReason {
+        self.reason
+    }
+
+    pub(super) fn dirty_cells(&self) -> &BTreeSet<CalculationCellId> {
+        &self.dirty
+    }
+
+    pub(super) fn execute(&self) -> Result<CalculationRunResult, SessionError> {
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
@@ -717,99 +729,120 @@ impl PreparedCalculation {
                     })
                     .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
             );
-            let delta = build_empty_delta(DeltaMetadata {
-                base_revision: self.base_revision,
-                result_revision: self.expected_revision,
-                mode: self.execution_mode,
-                reason: self.reason,
-                dirty_count: 0,
-                evaluated_count: 0,
-                parsed_formula_count: 0,
-            });
-            return Ok(CompletedCalculation {
-                expected_revision: self.expected_revision,
-                base_cursor: self.base_cursor,
-                options: self.options,
+            return Ok(CalculationRunResult {
                 compiled,
                 calculation,
-                delta,
-                cancellation: self.cancellation,
+                evaluated_count: 0,
+                evaluated_cells: BTreeSet::new(),
+                parsed_formula_count: 0,
+                function_iterations: 0,
+                reference_cells: 0,
             });
         }
-        let (calculation, compiled, evaluated_count, parsed_formula_count) =
-            if self.compile_required {
-                let (calculation, compiled, evaluated) =
-                    calculate_and_compile(&self.workbook, self.options, || {
-                        self.cancellation.is_cancelled()
-                    })
-                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                let parsed = compiled.formula_count();
-                (Arc::new(calculation), Arc::new(compiled), evaluated, parsed)
-            } else {
-                let compiled = self.compiled.as_ref().ok_or_else(|| {
-                    SessionError::new(SessionErrorCode::CalculationUninitialized, None)
-                })?;
-                let previous = (self.execution_mode == CalculationExecutionMode::Incremental)
-                    .then_some(self.previous.as_deref())
-                    .flatten();
-                let (calculation, evaluated) = calculate_from_compiled(
-                    &self.workbook,
-                    self.options,
-                    compiled,
-                    previous,
-                    dirty,
-                    || self.cancellation.is_cancelled(),
-                )
+        let (calculation, compiled, work, parsed_formula_count) = if self.compile_required {
+            let (calculation, compiled, work) =
+                calculate_and_compile(&self.workbook, self.options, || {
+                    self.cancellation.is_cancelled()
+                })
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                let compiled = self.compiled.as_ref().map(Arc::clone).ok_or_else(|| {
-                    SessionError::new(SessionErrorCode::CalculationUninitialized, None)
-                })?;
-                (Arc::new(calculation), compiled, evaluated, 0)
-            };
+            let parsed = compiled.formula_count();
+            (Arc::new(calculation), Arc::new(compiled), work, parsed)
+        } else {
+            let compiled = self.compiled.as_ref().ok_or_else(|| {
+                SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+            })?;
+            let previous = (self.execution_mode == CalculationExecutionMode::Incremental)
+                .then_some(self.previous.as_deref())
+                .flatten();
+            let (calculation, work) = calculate_from_compiled(
+                &self.workbook,
+                self.options,
+                compiled,
+                previous,
+                dirty,
+                || self.cancellation.is_cancelled(),
+            )
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+            let compiled = self.compiled.as_ref().map(Arc::clone).ok_or_else(|| {
+                SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+            })?;
+            (Arc::new(calculation), compiled, work, 0)
+        };
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
-        if evaluated_count > self.limits.max_evaluated_cells {
+        if work.evaluated_cells.len() > self.limits.max_evaluated_cells {
             return Err(SessionError::new(
                 SessionErrorCode::EvaluationLimitExceeded,
                 Some(format!(
-                    "evaluated={evaluated_count}, limit={}",
+                    "evaluated={}, limit={}",
+                    work.evaluated_cells.len(),
                     self.limits.max_evaluated_cells
                 )),
             ));
         }
+        Ok(CalculationRunResult {
+            compiled,
+            calculation,
+            evaluated_count: work.evaluated_cells.len(),
+            evaluated_cells: work.evaluated_cells,
+            parsed_formula_count,
+            function_iterations: work.function_iterations,
+            reference_cells: work.reference_cells,
+        })
+    }
+
+    /// Executes the job without mutating the source session.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable cancellation or session resource-limit error.
+    pub fn run(self) -> Result<CompletedCalculation, SessionError> {
+        let execution = self.execute()?;
         let delta = if self.execution_mode == CalculationExecutionMode::Incremental {
-            let previous = self.previous.as_deref().ok_or_else(|| {
-                SessionError::new(SessionErrorCode::CalculationUninitialized, None)
-            })?;
-            build_incremental_delta(
-                previous,
-                &calculation,
-                &self.dirty,
-                DeltaMetadata {
+            if self.reason == CalculationDecisionReason::NoDirtyFormulas {
+                build_empty_delta(DeltaMetadata {
                     base_revision: self.base_revision,
                     result_revision: self.expected_revision,
                     mode: self.execution_mode,
                     reason: self.reason,
-                    dirty_count: self.dirty.len(),
-                    evaluated_count,
+                    dirty_count: 0,
+                    evaluated_count: 0,
                     parsed_formula_count: 0,
-                },
-                self.limits.max_delta_cells,
-                &|| self.cancellation.is_cancelled(),
-            )?
+                })
+            } else {
+                let previous = self.previous.as_deref().ok_or_else(|| {
+                    SessionError::new(SessionErrorCode::CalculationUninitialized, None)
+                })?;
+                build_incremental_delta(
+                    previous,
+                    &execution.calculation,
+                    &self.dirty,
+                    DeltaMetadata {
+                        base_revision: self.base_revision,
+                        result_revision: self.expected_revision,
+                        mode: self.execution_mode,
+                        reason: self.reason,
+                        dirty_count: self.dirty.len(),
+                        evaluated_count: execution.evaluated_count,
+                        parsed_formula_count: 0,
+                    },
+                    self.limits.max_delta_cells,
+                    &|| self.cancellation.is_cancelled(),
+                )?
+            }
         } else {
             build_delta(
                 self.previous.as_deref(),
-                &calculation,
+                &execution.calculation,
                 DeltaMetadata {
                     base_revision: self.base_revision,
                     result_revision: self.expected_revision,
                     mode: self.execution_mode,
                     reason: self.reason,
                     dirty_count: self.dirty.len(),
-                    evaluated_count,
-                    parsed_formula_count,
+                    evaluated_count: execution.evaluated_count,
+                    parsed_formula_count: execution.parsed_formula_count,
                 },
                 self.limits.max_delta_cells,
                 &|| self.cancellation.is_cancelled(),
@@ -822,12 +855,23 @@ impl PreparedCalculation {
             expected_revision: self.expected_revision,
             base_cursor: self.base_cursor,
             options: self.options,
-            compiled,
-            calculation,
+            compiled: execution.compiled,
+            calculation: execution.calculation,
             delta,
             cancellation: self.cancellation,
         })
     }
+}
+
+#[derive(Debug)]
+pub(super) struct CalculationRunResult {
+    pub(super) compiled: Arc<CompiledWorkbook>,
+    pub(super) calculation: Arc<CalculationSnapshot>,
+    pub(super) evaluated_count: usize,
+    pub(super) evaluated_cells: BTreeSet<CalculationCellId>,
+    pub(super) parsed_formula_count: usize,
+    pub(super) function_iterations: u64,
+    pub(super) reference_cells: u64,
 }
 
 /// A calculated but not yet installed session result.

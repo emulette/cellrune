@@ -49,7 +49,9 @@ impl<'workbook> Engine<'workbook> {
             dependency_limit_exceeded: false,
             cycle_cells: Arc::new(BTreeSet::new()),
             blocked_cells: Arc::new(BTreeSet::new()),
-            evaluated_cell_count: 0,
+            evaluated_cells: BTreeSet::new(),
+            function_iterations: 0,
+            reference_cells: 0,
         };
         engine.parse_all_cancellable(cancelled)?;
         if cancelled() {
@@ -195,7 +197,9 @@ impl<'workbook> Engine<'workbook> {
             dependency_limit_exceeded: compiled.dependency_limit_exceeded,
             cycle_cells: Arc::clone(&compiled.cycle_cells),
             blocked_cells: Arc::clone(&compiled.blocked_cells),
-            evaluated_cell_count: 0,
+            evaluated_cells: BTreeSet::new(),
+            function_iterations: 0,
+            reference_cells: 0,
         };
         let internal_dirty = match dirty {
             Some(cells) => {
@@ -250,7 +254,7 @@ impl<'workbook> Engine<'workbook> {
             if cancelled() {
                 return false;
             }
-            self.evaluated_cell_count += 1;
+            self.evaluated_cells.insert(cell);
             if self.evaluate_one(cell, cancelled).is_err() {
                 return false;
             }
@@ -283,7 +287,7 @@ impl<'workbook> Engine<'workbook> {
             if cancelled() {
                 return false;
             }
-            self.evaluated_cell_count += 1;
+            self.evaluated_cells.insert(cell);
             if self.evaluate_one(cell, cancelled).is_err() {
                 return false;
             }
@@ -305,8 +309,9 @@ impl<'workbook> Engine<'workbook> {
                 Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
             };
-            self.materialize_legacy_array(cell, range, result, cancelled)?;
-            return Ok(());
+            let outcome = self.materialize_legacy_array(cell, range, result, cancelled);
+            self.record_evaluation_work(&budget);
+            return outcome;
         }
         if let Some(declared_range) = self.dynamic_array_range(cell) {
             let result = match expr {
@@ -317,8 +322,9 @@ impl<'workbook> Engine<'workbook> {
                 Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
             };
-            self.materialize_dynamic_array(cell, declared_range, result, cancelled)?;
-            return Ok(());
+            let outcome = self.materialize_dynamic_array(cell, declared_range, result, cancelled);
+            self.record_evaluation_work(&budget);
+            return outcome;
         }
         let value = match expr {
             Some(_) if self.name_limit_cells.contains(&cell) => Value::Error(
@@ -343,11 +349,29 @@ impl<'workbook> Engine<'workbook> {
             None => Value::Error(ErrorKind::Unsupported),
         };
         self.results.insert(cell, value);
+        self.record_evaluation_work(&budget);
         Ok(())
     }
 
-    pub(in crate::calculation) const fn evaluated_cell_count(&self) -> usize {
-        self.evaluated_cell_count
+    fn record_evaluation_work(&mut self, budget: &EvaluationBudget) {
+        self.function_iterations = self
+            .function_iterations
+            .saturating_add(budget.function_iterations());
+        self.reference_cells = self
+            .reference_cells
+            .saturating_add(budget.reference_cells());
+    }
+
+    pub(in crate::calculation) fn evaluated_cells(&self) -> impl Iterator<Item = CellId> + '_ {
+        self.evaluated_cells.iter().copied()
+    }
+
+    pub(in crate::calculation) const fn function_iterations(&self) -> u64 {
+        self.function_iterations
+    }
+
+    pub(in crate::calculation) const fn reference_cells(&self) -> u64 {
+        self.reference_cells
     }
 
     pub(in crate::calculation) fn retained_result(

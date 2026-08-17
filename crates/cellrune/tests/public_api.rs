@@ -24,15 +24,18 @@ use std::marker::PhantomData;
 use cellrune::{
     ApplyChangesError, CalculationCellResult, CalculationExecutionMode, CalculationHints,
     CalculationIssue, CalculationMode, CalculationOptions, CalculationSnapshot, CancellationToken,
-    CellAddress, CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameAnalysis,
-    DefinedNameAnalysisError, DefinedNameAnalysisOptions, DefinedNameExternalReference,
-    DefinedNameExternalTargetKind, DefinedNameScope, Diagnostic, DiagnosticSeverity,
-    FormulaCapability, FormulaCapabilityReport, FormulaCell, FunctionSupport, NumberFormatKind,
-    Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode, RecalculationWriteOptions,
-    SavedResult, SavedResultIssue, SessionError, SharedFormulaRole, Sheet, SheetId,
-    SheetVisibility, Table, TableColumn, TableColumnId, TableId, TableName, ValidationError,
-    WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind, XlsxDocument,
-    XlsxReadError, XlsxWriteError, analyze_defined_name, analyze_defined_name_cancellable,
+    CellAddress, CellContent, CellRange, CellValue, CompletedWorkbookTransaction, DateSystem,
+    DefinedName, DefinedNameAnalysis, DefinedNameAnalysisError, DefinedNameAnalysisOptions,
+    DefinedNameExternalReference, DefinedNameExternalTargetKind, DefinedNameScope, Diagnostic,
+    DiagnosticSeverity, EditBatch, FormulaCapability, FormulaCapabilityReport, FormulaCell,
+    FunctionSupport, NumberFormatKind, PreparedWorkbookTransaction, Provenance, ReadOptions,
+    RecalculatedWorkbook, RecalculationMode, RecalculationWriteOptions, SavedResult,
+    SavedResultIssue, SessionError, SharedFormulaRole, Sheet, SheetId, SheetVisibility, Table,
+    TableColumn, TableColumnId, TableId, TableName, TransactionDetailSection,
+    TransactionImpactPage, TransactionPageCursor, ValidationError, WorkbookCalculationSession,
+    WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
+    WorkbookTransactionReceipt, WorkbookTransactionReport, XlsxDocument, XlsxReadError,
+    XlsxWriteError, analyze_defined_name, analyze_defined_name_cancellable,
     analyze_defined_name_with_options, calculate_workbook, read_xlsx_bytes,
     scan_formula_capabilities, write_recalculated_xlsx_bytes,
 };
@@ -243,6 +246,83 @@ const _FROZEN_WORKBOOK_FINGERPRINT: fn(&WorkbookSnapshot) -> WorkbookFingerprint
 
 const _FROZEN_CALCULATION_SOURCE_FINGERPRINT: fn(&CalculationSnapshot) -> WorkbookFingerprint =
     CalculationSnapshot::source_fingerprint;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_PREPARE_TRANSACTION: fn(
+    &WorkbookCalculationSession,
+    u64,
+    EditBatch,
+    RecalculationMode,
+    CalculationOptions,
+    CancellationToken,
+) -> Result<PreparedWorkbookTransaction, ApplyChangesError> =
+    WorkbookCalculationSession::prepare_transaction;
+
+const _FROZEN_RUN_TRANSACTION: fn(
+    PreparedWorkbookTransaction,
+) -> Result<CompletedWorkbookTransaction, SessionError> = PreparedWorkbookTransaction::run;
+
+const _FROZEN_TRANSACTION_REPORT: fn(&CompletedWorkbookTransaction) -> &WorkbookTransactionReport =
+    CompletedWorkbookTransaction::report;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_TRANSACTION_PAGE: fn(
+    &CompletedWorkbookTransaction,
+    TransactionDetailSection,
+    Option<&TransactionPageCursor>,
+    usize,
+) -> Result<TransactionImpactPage, SessionError> = CompletedWorkbookTransaction::page;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_TRANSACTION_PAGE_CANCELLABLE: fn(
+    &CompletedWorkbookTransaction,
+    TransactionDetailSection,
+    Option<&TransactionPageCursor>,
+    usize,
+    &CancellationToken,
+) -> Result<TransactionImpactPage, SessionError> = CompletedWorkbookTransaction::page_cancellable;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_TRANSACTION_PAGE_FROM_TOKEN: fn(
+    &CompletedWorkbookTransaction,
+    TransactionDetailSection,
+    Option<&str>,
+    usize,
+) -> Result<TransactionImpactPage, SessionError> = CompletedWorkbookTransaction::page_from_token;
+
+#[allow(clippy::type_complexity)]
+const _FROZEN_TRANSACTION_PAGE_FROM_TOKEN_CANCELLABLE: fn(
+    &CompletedWorkbookTransaction,
+    TransactionDetailSection,
+    Option<&str>,
+    usize,
+    &CancellationToken,
+) -> Result<
+    TransactionImpactPage,
+    SessionError,
+> = CompletedWorkbookTransaction::page_from_token_cancellable;
+
+const _FROZEN_TRANSACTION_CURSOR_TOKEN: fn(&TransactionPageCursor) -> String =
+    TransactionPageCursor::to_token;
+
+const _FROZEN_DISCARD_TRANSACTION: fn(
+    &mut CompletedWorkbookTransaction,
+) -> Result<(), SessionError> = CompletedWorkbookTransaction::discard;
+
+const _FROZEN_INSTALL_TRANSACTION: fn(
+    &mut WorkbookCalculationSession,
+    &mut CompletedWorkbookTransaction,
+) -> Result<WorkbookTransactionReceipt, SessionError> =
+    WorkbookCalculationSession::install_transaction;
+
+const _FROZEN_INSTALL_TRANSACTION_CANCELLABLE: fn(
+    &mut WorkbookCalculationSession,
+    &mut CompletedWorkbookTransaction,
+    &CancellationToken,
+) -> Result<
+    WorkbookTransactionReceipt,
+    SessionError,
+> = WorkbookCalculationSession::install_transaction_cancellable;
 
 const _FROZEN_SCAN_FORMULA_CAPABILITIES: fn(&WorkbookSnapshot) -> FormulaCapabilityReport =
     scan_formula_capabilities;

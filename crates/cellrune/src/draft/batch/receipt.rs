@@ -15,6 +15,37 @@ pub struct EditReceipt {
 }
 
 impl EditReceipt {
+    pub(crate) fn clone_cancellable(&self, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        fn clone_copy_slice<T: Copy>(
+            values: &[T],
+            cancelled: &impl Fn() -> bool,
+        ) -> Result<Vec<T>, ()> {
+            let mut cloned = Vec::with_capacity(values.len());
+            for value in values {
+                if cancelled() {
+                    return Err(());
+                }
+                cloned.push(*value);
+            }
+            Ok(cloned)
+        }
+
+        Ok(Self {
+            base_revision: self.base_revision,
+            result_revision: self.result_revision,
+            applied_change_count: self.applied_change_count,
+            changed_cells: clone_copy_slice(&self.changed_cells, cancelled)?,
+            calculation_changed_cells: clone_copy_slice(
+                &self.calculation_changed_cells,
+                cancelled,
+            )?,
+            created_sheet_ids: clone_copy_slice(&self.created_sheet_ids, cancelled)?,
+            changed_table_ids: clone_copy_slice(&self.changed_table_ids, cancelled)?,
+            topology_changed: self.topology_changed,
+            calculation_metadata_changed: self.calculation_metadata_changed,
+        })
+    }
+
     /// Returns the revision checked before the batch.
     pub const fn base_revision(&self) -> u64 {
         self.base_revision

@@ -614,6 +614,14 @@ pub(super) struct EvaluationBudget {
 }
 
 impl EvaluationBudget {
+    const fn function_iterations(&self) -> u64 {
+        self.function_iterations.get()
+    }
+
+    const fn reference_cells(&self) -> u64 {
+        self.reference_cells.get()
+    }
+
     fn enter_lambda(&self, limits: CalculationLimits) -> Result<ActiveLambda<'_>, ErrorKind> {
         let depth = self
             .lambda_depth
@@ -867,7 +875,9 @@ pub struct Engine<'workbook> {
     dependency_limit_exceeded: bool,
     pub(super) cycle_cells: Arc<BTreeSet<CellId>>,
     pub(super) blocked_cells: Arc<BTreeSet<CellId>>,
-    evaluated_cell_count: usize,
+    evaluated_cells: BTreeSet<CellId>,
+    function_iterations: u64,
+    reference_cells: u64,
 }
 
 impl<'workbook> Engine<'workbook> {

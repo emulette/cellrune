@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use super::ast::{Expr, SheetPrefix};
 use super::convert::cell_from_value;
 use super::error::parse_error_detail;
-use super::eval::{CompiledWorkbook, Engine, public_to_internal};
+use super::eval::{CompiledWorkbook, Engine, internal_to_public, public_to_internal};
 use super::functions::descriptor::{DependencyKind, ReferenceMetadataKind, Volatility};
 use super::functions::{
     CallableShadow, DynamicFunction, Evaluator, builtin_invocation_arguments_are_reachable,
@@ -569,12 +569,30 @@ pub(super) fn calculate_and_compile(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
     cancelled: impl Fn() -> bool,
-) -> Result<(CalculationSnapshot, CompiledWorkbook, usize), ()> {
+) -> Result<(CalculationSnapshot, CompiledWorkbook, CalculationWork), ()> {
     let engine = Engine::evaluate_cancellable(workbook, options, &cancelled)?;
-    let evaluated = engine.evaluated_cell_count();
+    let work = calculation_work(workbook, &engine);
     let snapshot = snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?;
     let compiled = engine.compiled(&cancelled)?;
-    Ok((snapshot, compiled, evaluated))
+    Ok((snapshot, compiled, work))
+}
+
+#[derive(Debug)]
+pub(super) struct CalculationWork {
+    pub(super) evaluated_cells: BTreeSet<CalculationCellId>,
+    pub(super) function_iterations: u64,
+    pub(super) reference_cells: u64,
+}
+
+fn calculation_work(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> CalculationWork {
+    CalculationWork {
+        evaluated_cells: engine
+            .evaluated_cells()
+            .filter_map(|cell| internal_to_public(workbook, cell))
+            .collect(),
+        function_iterations: engine.function_iterations(),
+        reference_cells: engine.reference_cells(),
+    }
 }
 
 pub(super) fn calculate_from_compiled(
@@ -584,17 +602,17 @@ pub(super) fn calculate_from_compiled(
     previous: Option<&CalculationSnapshot>,
     dirty: Option<&BTreeSet<CalculationCellId>>,
     cancelled: impl Fn() -> bool,
-) -> Result<(CalculationSnapshot, usize), ()> {
+) -> Result<(CalculationSnapshot, CalculationWork), ()> {
     let engine =
         Engine::evaluate_compiled(workbook, options, compiled, previous, dirty, &cancelled)?;
-    let evaluated = engine.evaluated_cell_count();
+    let work = calculation_work(workbook, &engine);
     let snapshot = match (previous, dirty) {
         (Some(previous), Some(dirty)) => snapshot_from_incremental_engine_cancellable(
             workbook, options, &engine, previous, dirty, &cancelled,
         )?,
         _ => snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?,
     };
-    Ok((snapshot, evaluated))
+    Ok((snapshot, work))
 }
 
 fn snapshot_from_incremental_engine_cancellable(

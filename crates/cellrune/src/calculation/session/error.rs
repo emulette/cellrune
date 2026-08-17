@@ -20,6 +20,14 @@ const MESSAGE_CANCELLATION: &str = "calculation was cancelled";
 const MESSAGE_REWRITE_LIMIT: &str = "formula rewrite exceeds the configured whole-workbook limit";
 const MESSAGE_TABLE_MATERIALIZATION_LIMIT: &str =
     "table resize exceeds the configured materialization-cell limit";
+const MESSAGE_TRANSACTION_CONSUMED: &str =
+    "workbook transaction was already installed, discarded, or found stale";
+const MESSAGE_TRANSACTION_CURSOR_INVALID: &str =
+    "transaction detail cursor does not belong to this report section";
+const MESSAGE_TRANSACTION_DETAIL_LIMIT: &str =
+    "transaction report exceeds the configured retained-detail limit";
+const MESSAGE_TRANSACTION_RESOURCE_LIMIT: &str =
+    "workbook transaction exceeded the configured resource limit";
 
 pub(super) fn stale_calculation_cursor_detail(
     calculation_cursor: u64,
@@ -62,6 +70,14 @@ pub enum SessionErrorCode {
     RewriteLimitExceeded,
     /// A table resize exceeded its configured worksheet-materialization budget.
     TableMaterializationLimitExceeded,
+    /// A completed transaction was already installed, discarded, or found stale.
+    TransactionConsumed,
+    /// A transaction detail cursor belongs to another report or section.
+    TransactionCursorInvalid,
+    /// A transaction report exceeded its configured retained-detail budget.
+    TransactionDetailLimitExceeded,
+    /// A transaction phase exceeded its configured resource budget.
+    TransactionResourceLimitExceeded,
 }
 
 impl SessionErrorCode {
@@ -85,6 +101,10 @@ impl SessionErrorCode {
             Self::TableMaterializationLimitExceeded => {
                 "session.table_materialization_limit_exceeded"
             }
+            Self::TransactionConsumed => "session.transaction_consumed",
+            Self::TransactionCursorInvalid => "session.transaction_cursor_invalid",
+            Self::TransactionDetailLimitExceeded => "session.transaction_detail_limit_exceeded",
+            Self::TransactionResourceLimitExceeded => "session.transaction_resource_limit_exceeded",
         }
     }
 
@@ -105,6 +125,10 @@ impl SessionErrorCode {
             Self::Cancelled => MESSAGE_CANCELLATION,
             Self::RewriteLimitExceeded => MESSAGE_REWRITE_LIMIT,
             Self::TableMaterializationLimitExceeded => MESSAGE_TABLE_MATERIALIZATION_LIMIT,
+            Self::TransactionConsumed => MESSAGE_TRANSACTION_CONSUMED,
+            Self::TransactionCursorInvalid => MESSAGE_TRANSACTION_CURSOR_INVALID,
+            Self::TransactionDetailLimitExceeded => MESSAGE_TRANSACTION_DETAIL_LIMIT,
+            Self::TransactionResourceLimitExceeded => MESSAGE_TRANSACTION_RESOURCE_LIMIT,
         }
     }
 }

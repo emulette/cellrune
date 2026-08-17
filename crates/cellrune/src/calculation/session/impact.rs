@@ -35,6 +35,31 @@ pub(super) fn affected_formulas(
     existing_dirty: &BTreeSet<CalculationCellId>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<CalculationCellId>, ()> {
+    let impact = affected_formula_impact(workbook, compiled, previous, changed_cells, cancelled)?;
+    let mut replacement = BTreeSet::new();
+    for cell in existing_dirty {
+        if cancelled() {
+            return Err(());
+        }
+        replacement.insert(*cell);
+    }
+    replacement.extend(impact.direct);
+    replacement.extend(impact.transitive);
+    Ok(replacement)
+}
+
+pub(super) struct AffectedFormulaImpact {
+    pub(super) direct: BTreeSet<CalculationCellId>,
+    pub(super) transitive: BTreeSet<CalculationCellId>,
+}
+
+pub(super) fn affected_formula_impact(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    previous: Option<&CalculationSnapshot>,
+    changed_cells: &[CalculationCellId],
+    cancelled: &impl Fn() -> bool,
+) -> Result<AffectedFormulaImpact, ()> {
     if cancelled() {
         return Err(());
     }
@@ -51,7 +76,7 @@ pub(super) fn affected_formulas(
             changed_internal.push(internal);
         }
     }
-    let mut dirty = BTreeSet::new();
+    let mut direct = BTreeSet::new();
     if let Some(previous) = previous {
         for cell in changed_cells {
             charger.charge()?;
@@ -61,7 +86,7 @@ pub(super) fn affected_formulas(
             if let MaterializedResultOrigin::DynamicSpill { anchor, .. } = materialized.origin()
                 && let Some(anchor) = public_to_internal(workbook, anchor)
             {
-                dirty.insert(anchor);
+                direct.insert(anchor);
             }
         }
     }
@@ -69,30 +94,42 @@ pub(super) fn affected_formulas(
         let formulas = compiled.direct_affected_formulas(changed, &mut || charger.charge())?;
         for formula in formulas {
             charger.charge()?;
-            dirty.insert(formula);
+            direct.insert(formula);
+        }
+        if compiled.formula_cells().any(|formula| formula == changed) {
+            direct.insert(changed);
         }
     }
-    let mut pending = dirty.iter().copied().collect::<Vec<_>>();
+    let mut all = direct.clone();
+    let mut pending = direct.iter().copied().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
         for child in compiled.dependents(cell) {
             charger.charge()?;
-            if dirty.insert(*child) {
+            if all.insert(*child) {
                 pending.push(*child);
             }
         }
     }
-    let mut replacement = BTreeSet::new();
-    for cell in existing_dirty {
-        charger.charge()?;
-        replacement.insert(*cell);
-    }
-    for cell in dirty {
+    let mut public_direct = BTreeSet::new();
+    for cell in direct {
         charger.charge()?;
         if let Some(cell) = internal_to_public(workbook, cell) {
-            replacement.insert(cell);
+            public_direct.insert(cell);
         }
     }
-    Ok(replacement)
+    let mut public_transitive = BTreeSet::new();
+    for cell in all {
+        charger.charge()?;
+        if let Some(cell) = internal_to_public(workbook, cell)
+            && !public_direct.contains(&cell)
+        {
+            public_transitive.insert(cell);
+        }
+    }
+    Ok(AffectedFormulaImpact {
+        direct: public_direct,
+        transitive: public_transitive,
+    })
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {

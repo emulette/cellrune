@@ -63,8 +63,13 @@ pub use limits::{CalculationLimits, CalculationOptionsError};
 pub use session::{
     ApplyChangesError, CalculationDecisionReason, CalculationDelta, CalculationDeltaCell,
     CalculationDeltaPage, CalculationExecutionMode, CancellationToken, CompletedCalculation,
-    PreparedCalculation, PreparedEditBatch, RecalculationMode, SessionError, SessionErrorCode,
-    SessionLimits, WorkbookCalculationSession,
+    CompletedWorkbookTransaction, InstallDeltaBasisReason, PreparedCalculation, PreparedEditBatch,
+    PreparedWorkbookTransaction, RecalculationMode, SessionError, SessionErrorCode, SessionLimits,
+    TransactionAffectedFormula, TransactionDetailItem, TransactionDetailSection,
+    TransactionImpactCause, TransactionImpactCoverage, TransactionImpactPage,
+    TransactionInstallResultChange, TransactionIssueChange, TransactionIssueChangeKind,
+    TransactionPageCursor, TransactionResultChange, WorkbookCalculationSession,
+    WorkbookTransactionReceipt, WorkbookTransactionReport,
 };
 
 /// Stable identity of a formula cell within one workbook snapshot.
