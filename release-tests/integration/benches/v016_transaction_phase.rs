@@ -351,18 +351,29 @@ fn assert_scenario_report(scenario: Scenario, completed: &cellrune::CompletedWor
 }
 
 fn report_base_reused(scenario: Scenario) -> bool {
-    scenario != Scenario::PendingUncalculatedEdit
+    matches!(
+        scenario,
+        Scenario::CurrentCalculatedBase | Scenario::TopologyFullFallback
+    )
 }
 
-fn expected_base_execution(_scenario: Scenario) -> CalculationExecutionMode {
-    CalculationExecutionMode::Incremental
+fn expected_base_execution(scenario: Scenario) -> CalculationExecutionMode {
+    match scenario {
+        Scenario::MissingBaseCalculation | Scenario::OptionsMismatchedBase => {
+            CalculationExecutionMode::Full
+        }
+        _ => CalculationExecutionMode::Incremental,
+    }
 }
 
 fn expected_base_decision(scenario: Scenario) -> CalculationDecisionReason {
-    if scenario == Scenario::PendingUncalculatedEdit {
-        CalculationDecisionReason::DirtySubset
-    } else {
-        CalculationDecisionReason::NoDirtyFormulas
+    match scenario {
+        Scenario::MissingBaseCalculation => CalculationDecisionReason::InitialCalculation,
+        Scenario::StalePendingUncalculatedEdit => CalculationDecisionReason::DirtySubset,
+        Scenario::OptionsMismatchedBase => CalculationDecisionReason::OptionsChanged,
+        Scenario::CurrentCalculatedBase | Scenario::TopologyFullFallback => {
+            CalculationDecisionReason::NoDirtyFormulas
+        }
     }
 }
 

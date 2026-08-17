@@ -10,21 +10,27 @@ use cellrune_interop::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Scenario {
     CurrentCalculatedBase,
-    PendingUncalculatedEdit,
+    MissingBaseCalculation,
+    StalePendingUncalculatedEdit,
+    OptionsMismatchedBase,
     TopologyFullFallback,
 }
 
 impl Scenario {
-    pub(super) const ALL: [Self; 3] = [
+    pub(super) const ALL: [Self; 5] = [
         Self::CurrentCalculatedBase,
-        Self::PendingUncalculatedEdit,
+        Self::MissingBaseCalculation,
+        Self::StalePendingUncalculatedEdit,
+        Self::OptionsMismatchedBase,
         Self::TopologyFullFallback,
     ];
 
     pub(super) const fn as_str(self) -> &'static str {
         match self {
             Self::CurrentCalculatedBase => "current_calculated_base",
-            Self::PendingUncalculatedEdit => "pending_uncalculated_edit",
+            Self::MissingBaseCalculation => "missing_base_calculation",
+            Self::StalePendingUncalculatedEdit => "stale_pending_uncalculated_edit",
+            Self::OptionsMismatchedBase => "options_mismatched_base",
             Self::TopologyFullFallback => "topology_full_fallback",
         }
     }
@@ -62,8 +68,14 @@ pub(super) fn core_session(formulas: u32, scenario: Scenario) -> WorkbookCalcula
     session
         .apply_changes(0, EditBatch::new(changes))
         .expect("initial benchmark workbook");
-    recalculate_core(&mut session);
-    if scenario == Scenario::PendingUncalculatedEdit {
+    match scenario {
+        Scenario::MissingBaseCalculation => {}
+        Scenario::OptionsMismatchedBase => {
+            recalculate_core(&mut session, mismatched_core_options());
+        }
+        _ => recalculate_core(&mut session, CalculationOptions::default()),
+    }
+    if scenario == Scenario::StalePendingUncalculatedEdit {
         session
             .apply_changes(
                 session.workbook().semantic_revision(),
@@ -80,10 +92,12 @@ pub(super) fn core_session(formulas: u32, scenario: Scenario) -> WorkbookCalcula
 
 pub(super) fn core_transaction_batch(scenario: Scenario) -> EditBatch {
     let change = match scenario {
-        Scenario::CurrentCalculatedBase => {
+        Scenario::CurrentCalculatedBase
+        | Scenario::MissingBaseCalculation
+        | Scenario::OptionsMismatchedBase => {
             WorkbookChange::set_cell_value(sheet(), address(1, 1), number(2.0))
         }
-        Scenario::PendingUncalculatedEdit => {
+        Scenario::StalePendingUncalculatedEdit => {
             WorkbookChange::set_cell_value(sheet(), address(1, 1), number(3.0))
         }
         Scenario::TopologyFullFallback => WorkbookChange::set_cell_formula(
@@ -110,10 +124,20 @@ pub(super) fn interop_session(formulas: u32, scenario: Scenario) -> WorkbookSess
     session
         .apply_changes_v2(0, EditBatchV2Dto { changes })
         .expect("initial interop benchmark workbook");
-    session
-        .recalculate(RecalculationModeDto::Full, CalculationOptionsDto::default())
-        .expect("initial interop benchmark calculation");
-    if scenario == Scenario::PendingUncalculatedEdit {
+    match scenario {
+        Scenario::MissingBaseCalculation => {}
+        Scenario::OptionsMismatchedBase => {
+            session
+                .recalculate(RecalculationModeDto::Full, mismatched_interop_options())
+                .expect("mismatched interop benchmark calculation");
+        }
+        _ => {
+            session
+                .recalculate(RecalculationModeDto::Full, CalculationOptionsDto::default())
+                .expect("initial interop benchmark calculation");
+        }
+    }
+    if scenario == Scenario::StalePendingUncalculatedEdit {
         session
             .apply_changes_v2(
                 session.summary().semantic_revision,
@@ -128,8 +152,10 @@ pub(super) fn interop_session(formulas: u32, scenario: Scenario) -> WorkbookSess
 
 pub(super) fn interop_transaction_batch(scenario: Scenario) -> EditBatchV2Dto {
     let change = match scenario {
-        Scenario::CurrentCalculatedBase => value_change("A1", 2.0),
-        Scenario::PendingUncalculatedEdit => value_change("A1", 3.0),
+        Scenario::CurrentCalculatedBase
+        | Scenario::MissingBaseCalculation
+        | Scenario::OptionsMismatchedBase => value_change("A1", 2.0),
+        Scenario::StalePendingUncalculatedEdit => value_change("A1", 3.0),
         Scenario::TopologyFullFallback => formula_change("B1", "=$A$1+1000001"),
     };
     EditBatchV2Dto {
@@ -137,14 +163,22 @@ pub(super) fn interop_transaction_batch(scenario: Scenario) -> EditBatchV2Dto {
     }
 }
 
-fn recalculate_core(session: &mut WorkbookCalculationSession) {
+fn recalculate_core(session: &mut WorkbookCalculationSession, options: CalculationOptions) {
     session
-        .recalculate(
-            RecalculationMode::Full,
-            CalculationOptions::default(),
-            CancellationToken::new(),
-        )
+        .recalculate(RecalculationMode::Full, options, CancellationToken::new())
         .expect("initial benchmark calculation");
+}
+
+fn mismatched_core_options() -> CalculationOptions {
+    CalculationOptions::default()
+        .with_today_serial(FiniteNumber::new(45_000.0).expect("finite benchmark TODAY serial"))
+}
+
+fn mismatched_interop_options() -> CalculationOptionsDto {
+    CalculationOptionsDto {
+        today_serial: Some(45_000.0),
+        ..CalculationOptionsDto::default()
+    }
 }
 
 fn value_change(address: &str, value: f64) -> WorkbookChangeV2Dto {
