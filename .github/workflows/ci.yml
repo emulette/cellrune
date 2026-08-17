@@ -55,6 +55,9 @@ jobs:
       - name: Verify checked-in native dependency license bundles
         run: python3 bindings/scripts/generate_third_party_licenses.py --check
 
+      - name: Verify published version and README link contracts
+        run: python3 bindings/scripts/check_version_consistency.py
+
       - name: Check formatting
         run: cargo fmt --all --check
 

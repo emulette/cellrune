@@ -118,7 +118,7 @@ CellRune 0.1.16 implements `XLOOKUP` and adds `DATEVALUE`, `TIMEVALUE`,
 `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. The deterministic source catalog contains 416 official
 names and 417 accepted entries including the non-official OOXML dummy-function marker. Their
 fixed grammar, lookup modes, calendar rules, wildcard behavior, and array-result boundaries are
-documented in [llms.txt](llms.txt).
+documented in [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;
@@ -196,7 +196,8 @@ cancelled, stale, or oversized replacement leaves the previous published preview
 successful semantic mutation, commit, discard, or session close drops the published preview.
 Preview details use core-owned opaque cursors; a cancelled or resource-limited pre-commit remains
 retryable, while a stale or successful commit consumes its preview. The complete Rust and binding
-call shapes are documented in [llms.txt](llms.txt).
+call shapes are documented in
+[llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 Table authoring uses stable identities rather than positional names. Construct
 `WorkbookChange::rename_table`, `rename_table_column`, or `resize_table_rows` and include it in the
@@ -277,7 +278,8 @@ In the 0.1.16 bindings, Python exposes synchronous
 native preview operation releases the GIL. Node.js exposes Promise-backed `previewChanges`, then
 synchronous `previewChangesPage`, `commitPreview`, and `discardPreview`. Python DTO fields use
 snake case and integer IDs; Node DTO fields use camel case and `bigint` IDs. A successful Python
-write report has `output_sha256`; the Node `WriteReport` has `outputSha256`. [llms.txt](llms.txt)
+write report has `output_sha256`; the Node `WriteReport` has `outputSha256`.
+[llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt)
 defines the shared lifecycle and pagination semantics.
 
 Python workbooks are context managers:

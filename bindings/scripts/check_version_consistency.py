@@ -2,13 +2,14 @@
 """Assert every published version declaration agrees with the workspace manifest.
 
 CellRune publishes one version across three registries and a GitHub Release, and several build
-steps resolve with `--locked` or `--frozen-lockfile`. A bump that reaches most declarations but not
-all of them otherwise fails much later in the release. The 0.1.1 bump found stale declarations in
-eight places beyond the documented checklist, three of which would have failed a release outright.
+steps resolve with `--locked` or `--frozen-lockfile`. Published README links also render outside the
+repository on crates.io, PyPI, and npm. A stale version or repository-relative link otherwise fails
+much later in the release. The 0.1.1 bump found stale declarations in eight places beyond the
+documented checklist, three of which would have failed a release outright.
 
 This release-contract check derives the expected version from `[workspace.package]` and checks
-every other declaration against it. Developers run it locally while preparing a release, and the
-tag workflow runs it before artifact builds or any publication job.
+every other declaration against it. Developers run it locally while preparing a release, and both
+CI and the tag workflow run it before artifact builds or any publication job.
 
 Every check here is written so that finding nothing is a failure rather than a pass. A gate whose
 regex stops matching because a generator changed its output, or whose file was moved, would
@@ -28,10 +29,14 @@ from workspace_version import repository_root, workspace_version
 ERROR_PREFIX = "version consistency check failed"
 MESSAGE_MISMATCH = "{path}: {label} is {actual}, expected {expected}"
 MESSAGE_MISSING = "{path}: no {label} found"
+MESSAGE_RELATIVE_LINK = (
+    "{path}:{line}: relative link {target} does not resolve on crates.io, PyPI, or npm"
+)
 MESSAGE_UNREADABLE = "{path}: cannot be read: {reason}"
 
 NODE_PLATFORM_DIRECTORY = "bindings/node/npm"
 NODE_PLATFORM_SCOPE = "@cellrune/node-"
+PUBLISHED_READMES = ("README.md", "bindings/node/README.md")
 SKIPPED_DIRECTORIES = frozenset({"target", "node_modules", ".git"})
 
 # Documentation and policy files that name the release version in prose or in an install command.
@@ -122,6 +127,24 @@ def _check_matches(
                     path=relative, label=label, actual=actual, expected=expected
                 )
             )
+
+
+def _check_published_readme_links(root: pathlib.Path, problems: list[str]) -> None:
+    """Reject repository-relative links that break on registry project pages."""
+    for relative in PUBLISHED_READMES:
+        if (text := _read_text(root / relative, relative, problems)) is None:
+            continue
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for target in re.findall(r"\]\(([^)\s]+)", line):
+                if target.startswith(("http://", "https://", "#")):
+                    continue
+                problems.append(
+                    MESSAGE_RELATIVE_LINK.format(
+                        path=relative,
+                        line=line_number,
+                        target=target,
+                    )
+                )
 
 
 def check(root: pathlib.Path, expected: str) -> list[str]:
@@ -304,6 +327,11 @@ def check(root: pathlib.Path, expected: str) -> list[str]:
             _check_matches(
                 text, relative, re.compile(pattern, re.MULTILINE), label, expected, problems
             )
+
+    # Registry project pages render these README files outside the repository tree. Relative links
+    # work on GitHub but break on crates.io, PyPI, and npm, so they must use public absolute URLs.
+    # Fragment-only links remain local to the rendered page and are valid.
+    _check_published_readme_links(root, problems)
 
     # The changelog drives the release notes, so the version must have its own dated section.
     relative = "CHANGELOG.md"

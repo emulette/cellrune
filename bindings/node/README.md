@@ -82,7 +82,7 @@ leaves a prior published preview available. Pre-commit cancellation or a
 resource error is retryable; a stale or successful commit consumes the preview.
 Pass an opaque `PreviewCursor` from `previewChangesPage` back unchanged for the
 same preview and section. The complete shared lifecycle and page contract is in
-[`llms.txt`](../../llms.txt).
+[`llms.txt`](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 `Workbook` supports typed errors, revision-checked edit batches, incremental
 calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and explicit

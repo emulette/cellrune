@@ -63,7 +63,7 @@ jobs:
           key: cargo-registry-${{ runner.os }}-1.92.0-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-1.92.0-
 
-      - name: Verify every published version declaration agrees
+      - name: Verify published version and README link contracts
         run: python3 bindings/scripts/check_version_consistency.py
 
       - name: Verify checked-in native dependency license bundles
@@ -104,24 +104,6 @@ jobs:
           done
           check THIRD_PARTY_LICENSES.md crates/cellrune/THIRD_PARTY_LICENSES.md
           exit "$status"
-
-      - name: Require absolute links in published READMEs
-        run: |
-          grep -Hno ']([^)]*)' README.md bindings/node/README.md \
-            | sed 's/](\(.*\))$/\1/' \
-            | awk '
-                BEGIN { FS = ":"; status = 0 }
-                {
-                  file = $1
-                  line = $2
-                  target = substr($0, length(file) + length(line) + 3)
-                }
-                target !~ /^(https?:\/\/|#)/ {
-                  printf "::error file=%s,line=%s::relative link %s does not resolve on PyPI, crates.io, or npm\n", file, line, target
-                  status = 1
-                }
-                END { exit status }
-              '
 
       # Advisories are excluded on purpose. They read a live database, so a CVE disclosed
       # between two runs would change whether an unchanged tag can publish; `maintenance.yml`
