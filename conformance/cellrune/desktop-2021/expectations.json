@@ -770,8 +770,8 @@
     "excel_value": "3",
     "excel_type": "n",
     "excel_rich_error": false,
-    "cellrune_value": "#VALUE!",
-    "cellrune_type": "e",
+    "cellrune_value": "100",
+    "cellrune_type": "n",
     "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "curated:lookup:c002": {
@@ -829,11 +829,10 @@
     "excel_rich_error": false
   },
   "curated:lookup:c012": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "K007",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "curated:lookup:c013": {
     "classification": "match",
@@ -920,11 +919,10 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.NUMBERVALUE) for this oracle case."
   },
   "curated:textdate:c013": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "46113",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WORKDAY.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:textdate:c014": {
     "classification": "divergent",
@@ -2966,18 +2964,16 @@
     "excel_rich_error": false
   },
   "function:datevalue": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "45351",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DATEVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:datevalue:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DATEVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:daverage": {
     "classification": "match",
@@ -6012,25 +6008,22 @@
     "excel_rich_error": false
   },
   "function:networkdays-intl": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "64",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (NETWORKDAYS.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:networkdays-intl:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (NETWORKDAYS.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:networkdays-intl:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (NETWORKDAYS.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:networkdays:coercion": {
     "classification": "divergent",
@@ -8449,18 +8442,16 @@
     "excel_rich_error": false
   },
   "function:timevalue": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.60812500000000003",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TIMEVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:timevalue:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TIMEVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:tinv": {
     "classification": "match",
@@ -9009,25 +9000,22 @@
     "excel_rich_error": false
   },
   "function:workday-intl": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "46079",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WORKDAY.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:workday-intl:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "46027",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WORKDAY.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:workday-intl:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WORKDAY.INTL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:workday:coercion": {
     "classification": "match",
@@ -9102,11 +9090,10 @@
     "excel_rich_error": false
   },
   "function:xlookup:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "function:xlookup:domain": {
     "classification": "match",

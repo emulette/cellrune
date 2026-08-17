@@ -15,6 +15,7 @@ from cellrune import (
     WorkbookChange,
     WorkbookChangeV2,
     WorkbookTransactionReceipt,
+    WriteReport,
     function_catalog,
 )
 
@@ -97,6 +98,8 @@ def check() -> None:
     output: bytes = workbook.to_bytes()
     reopened: Workbook = Workbook.from_bytes(output)
     reopened.close()
+    write_report: WriteReport = workbook.save("typing-check.xlsx")
+    write_report["output_sha256"].upper()
 
 
 def check_v2_types(workbook: Workbook, revision: int) -> None:

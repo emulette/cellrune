@@ -211,6 +211,7 @@ pub struct NativeWriteReport {
     pub changed_parts: Vec<String>,
     pub removed_parts: Vec<String>,
     pub diagnostic_count: f64,
+    pub output_sha256: String,
 }
 
 pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSummary {
@@ -407,6 +408,7 @@ pub(crate) fn write_report(value: WriteReportDto) -> NativeWriteReport {
         changed_parts: value.changed_parts,
         removed_parts: value.removed_parts,
         diagnostic_count: value.diagnostic_count as f64,
+        output_sha256: value.output_sha256,
     }
 }
 

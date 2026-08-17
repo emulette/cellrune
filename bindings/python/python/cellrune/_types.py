@@ -478,6 +478,7 @@ class WriteReport(TypedDict):
     changed_parts: list[str]
     removed_parts: list[str]
     diagnostic_count: int
+    output_sha256: str
 
 
 class CalculationLimits(TypedDict):

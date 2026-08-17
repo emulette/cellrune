@@ -1,6 +1,6 @@
 use crate::{
-    CalculationCellId, CalculationOptions, Diagnostic, InputHash, ProviderIdentity, SourceId,
-    XlsxDocumentKind,
+    CalculationCellId, CalculationOptions, Diagnostic, InputHash, OutputHash, ProviderIdentity,
+    SourceId, XlsxDocumentKind,
 };
 
 use super::{RecalculationWritePolicy, WriteOptions, XlsxWriteError};
@@ -16,7 +16,7 @@ pub struct WriteProvenance {
 }
 
 impl WriteProvenance {
-    pub(crate) fn new(
+    pub(super) fn new(
         input_hash: Option<InputHash>,
         semantic_revision: u64,
         presentation_revision: u64,
@@ -68,17 +68,39 @@ pub struct WriteReport {
     changed_parts: Vec<SourceId>,
     removed_parts: Vec<SourceId>,
     diagnostics: Vec<Diagnostic>,
+    output_hash: OutputHash,
     provenance: WriteProvenance,
 }
 
-impl WriteReport {
-    pub(crate) fn new(
-        policy: RecalculationWritePolicy,
-        materialized_count: usize,
-        invalidated_cells: Vec<CalculationCellId>,
+pub(super) struct VerifiedOutputReceipt {
+    changed_parts: Vec<SourceId>,
+    removed_parts: Vec<SourceId>,
+    diagnostics: Vec<Diagnostic>,
+    output_hash: OutputHash,
+}
+
+impl VerifiedOutputReceipt {
+    pub(super) fn new(
         changed_parts: Vec<SourceId>,
         removed_parts: Vec<SourceId>,
         diagnostics: Vec<Diagnostic>,
+        output_bytes: &[u8],
+    ) -> Self {
+        Self {
+            changed_parts,
+            removed_parts,
+            diagnostics,
+            output_hash: OutputHash::for_bytes(output_bytes),
+        }
+    }
+}
+
+impl WriteReport {
+    pub(super) fn new(
+        policy: RecalculationWritePolicy,
+        materialized_count: usize,
+        invalidated_cells: Vec<CalculationCellId>,
+        output: VerifiedOutputReceipt,
         provenance: WriteProvenance,
     ) -> Self {
         Self {
@@ -86,9 +108,10 @@ impl WriteReport {
             policy,
             materialized_count,
             invalidated_cells,
-            changed_parts,
-            removed_parts,
-            diagnostics,
+            changed_parts: output.changed_parts,
+            removed_parts: output.removed_parts,
+            diagnostics: output.diagnostics,
+            output_hash: output.output_hash,
             provenance,
         }
     }
@@ -127,6 +150,11 @@ impl WriteReport {
     /// Returns bounded write diagnostics.
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    /// Returns the SHA-256 identity of the exact verified output archive bytes.
+    pub const fn output_hash(&self) -> OutputHash {
+        self.output_hash
     }
 
     /// Returns exact source and calculation provenance.

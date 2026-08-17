@@ -1,14 +1,16 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { CellRuneError, Workbook, functionCatalog } = require("..");
 
 function assertCatalogContract() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 413);
+  assert.equal(catalog.entries.length, 417);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [
     "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST", "BINOM.DIST.RANGE",
@@ -28,10 +30,11 @@ function assertCatalogContract() {
     "MDURATION", "ODDFPRICE", "ODDFYIELD", "ODDLPRICE", "ODDLYIELD",
     "PRICE", "PRICEDISC", "PRICEMAT", "RECEIVED", "TBILLEQ",
     "TBILLPRICE", "TBILLYIELD", "YIELD", "YIELDDISC", "YIELDMAT",
+    "DATEVALUE", "NETWORKDAYS.INTL", "TIMEVALUE", "WORKDAY.INTL",
   ]) {
     assert.ok(entries.has(name), name);
   }
-  for (const name of ["GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND"]) {
+  for (const name of ["GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND", "XLOOKUP"]) {
     assert.equal(entries.get(name).returnsArray, true, name);
   }
   for (const [name, entry] of entries) {
@@ -279,6 +282,17 @@ async function main() {
 
   await workbook.recalculate({ mode: "full" });
   const bytes = await workbook.toBytes();
+  const temporaryDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "cellrune-binding-"),
+  );
+  const savedPath = path.join(temporaryDirectory, "saved.xlsx");
+  const writeReport = await workbook.save(savedPath);
+  const outputSha256 = crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(savedPath))
+    .digest("hex");
+  assert.equal(writeReport.outputSha256, outputSha256);
+  fs.rmSync(temporaryDirectory, { force: true, recursive: true });
   const reopened = await Workbook.fromBytes(bytes);
   assert.equal(reopened.summary().documentKind, "xlsx");
   assert.equal(

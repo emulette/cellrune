@@ -259,6 +259,30 @@ impl InputHash {
     }
 }
 
+/// A SHA-256 digest associated with verified output bytes.
+///
+/// This is intentionally a distinct type from [`InputHash`], so source identity and output
+/// receipt identity cannot be mixed accidentally at a Rust API boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OutputHash([u8; 32]);
+
+impl OutputHash {
+    /// Constructs a digest from its 32 bytes.
+    pub const fn sha256(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the SHA-256 bytes.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub(crate) fn for_bytes(bytes: &[u8]) -> Self {
+        let digest = Sha256::digest(bytes);
+        Self(digest.into())
+    }
+}
+
 /// Deterministic producer and input identity metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Provenance {
@@ -306,11 +330,24 @@ fn is_valid_diagnostic_code(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::InputHash;
+    use super::{InputHash, OutputHash};
 
     #[test]
     fn input_hash_uses_sha256_over_the_exact_input_bytes() {
         let hash = InputHash::for_bytes(b"abc");
+        assert_eq!(
+            hash.as_bytes(),
+            &[
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+    }
+
+    #[test]
+    fn output_hash_uses_sha256_over_the_exact_output_bytes() {
+        let hash = OutputHash::for_bytes(b"abc");
         assert_eq!(
             hash.as_bytes(),
             &[

@@ -139,9 +139,7 @@ pub(crate) fn write_canonical_draft(
         options.policy(),
         materialization.materialized_count(),
         materialization.invalidated_cells().to_vec(),
-        changed_parts,
-        Vec::new(),
-        Vec::new(),
+        super::report::VerifiedOutputReceipt::new(changed_parts, Vec::new(), Vec::new(), &bytes),
         WriteProvenance::new(
             None,
             draft.semantic_revision(),

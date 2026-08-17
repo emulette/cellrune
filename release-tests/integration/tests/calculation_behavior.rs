@@ -2716,7 +2716,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        412
+        416
     );
     let let_entry = catalog
         .iter()
@@ -2734,6 +2734,13 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
             .iter()
             .find(|entry| entry.name() == "FILTER")
             .expect("FILTER")
+            .returns_array()
+    );
+    assert!(
+        catalog
+            .iter()
+            .find(|entry| entry.name() == "XLOOKUP")
+            .expect("XLOOKUP")
             .returns_array()
     );
     for name in ["ABS", "IF", "COUNTIF", "COUNTIFS", "INDEX", "ISNUMBER"] {
@@ -5226,6 +5233,295 @@ fn xlookup_supports_exact_vector_lookup_and_excel_resave_prefixes() {
             ExcelError::Name
         )))
     );
+}
+
+#[test]
+fn datevalue_timevalue_and_intl_workdays_follow_the_released_ascii_contract() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "DATEVALUE(\"2024-02-29\")"),
+        (1, 2, "DATEVALUE(\"1900-02-29\")"),
+        (1, 3, "DATEVALUE(\"2024/02/29\")"),
+        (1, 4, "TIMEVALUE(\"14:35:42\")"),
+        (1, 5, "TIMEVALUE(\"24:00\")"),
+        (1, 6, "NETWORKDAYS.INTL(DATE(2026,1,1),DATE(2026,1,11),1)"),
+        (1, 7, "NETWORKDAYS.INTL(DATE(2026,1,11),DATE(2026,1,1),1)"),
+        (
+            1,
+            8,
+            "NETWORKDAYS.INTL(DATE(2026,1,1),DATE(2026,1,11),\"1111111\")",
+        ),
+        (1, 9, "NETWORKDAYS.INTL(1,2,\"2\")"),
+        (1, 10, "WORKDAY.INTL(DATE(2026,1,1),2,1)"),
+        (1, 11, "WORKDAY.INTL(DATE(2026,1,1),0,\"0000011\")"),
+        (1, 12, "WORKDAY.INTL(DATE(2026,1,1),1,\"1111111\")"),
+    ]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (column, expected) in [
+        (1, 45_351.0),
+        (2, 60.0),
+        (4, (14.0 * 3_600.0 + 35.0 * 60.0 + 42.0) / 86_400.0),
+        (6, 7.0),
+        (7, -7.0),
+        (8, 0.0),
+        (10, 46_027.0),
+        (11, 46_023.0),
+    ] {
+        assert_number(&calculation, column, expected, 1e-15);
+    }
+    for column in [3, 5, 9, 12] {
+        assert_eq!(
+            calculation.cell(cell_id(column)),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "unexpected error at column {column}",
+        );
+    }
+    let limits = CalculationLimits::default()
+        .with_max_function_iterations(4)
+        .expect("positive INTL calendar limit");
+    let limited = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "NETWORKDAYS.INTL(DATE(2026,1,1),DATE(2026,1,11),1)")]),
+        CalculationOptions::default().with_limits(limits),
+    );
+    assert_issue(&limited, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn xlookup_reuses_xmatch_modes_and_spills_selected_rows_and_columns() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, value) in [
+        ("A1", 1.0),
+        ("A2", 2.0),
+        ("A3", 3.0),
+        ("A4", 4.0),
+        ("C1", 10.0),
+        ("C2", 20.0),
+        ("C3", 30.0),
+        ("C4", 40.0),
+        ("A5", 1.0),
+        ("B5", 2.0),
+        ("C5", 3.0),
+        ("A6", 10.0),
+        ("B6", 20.0),
+        ("C6", 30.0),
+        ("A7", 100.0),
+        ("B7", 200.0),
+        ("C7", 300.0),
+        ("A10", 2.0),
+        ("B10", 21.0),
+        ("C10", 22.0),
+        ("H10", 2.0),
+        ("H11", 201.0),
+        ("H12", 202.0),
+        ("Q1", 4.0),
+        ("Q2", 3.0),
+        ("Q3", 2.0),
+        ("Q4", 1.0),
+        ("R1", 40.0),
+        ("R2", 30.0),
+        ("R3", 20.0),
+        ("R4", 10.0),
+    ] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid XLOOKUP source address"),
+                CellValue::number(value).expect("finite XLOOKUP source value"),
+            )
+            .expect("XLOOKUP source mutation");
+    }
+    for (address, value) in [
+        ("B1", "one"),
+        ("B2", "two"),
+        ("B3", "three"),
+        ("B4", "a?b"),
+        ("U20", "occupied"),
+    ] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid XLOOKUP text source address"),
+                CellValue::Text(value.to_owned()),
+            )
+            .expect("XLOOKUP text source mutation");
+    }
+    for (address, formula) in [
+        ("E1", "=XLOOKUP(2,A1:A3,B1:C3)"),
+        ("E5", "=XLOOKUP(2,A5:C5,A6:C7)"),
+        ("J10", "=XLOOKUP(2,A10,B10:C10)"),
+        ("L10", "=XLOOKUP(2,H10,H11:H12)"),
+        ("T20", "=XLOOKUP(2,A1:A4,B1:C4)"),
+        ("XFD1", "=XLOOKUP(2,A1:A4,B1:C4)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid XLOOKUP dynamic anchor"),
+                FormulaText::from_user_input(formula).expect("valid XLOOKUP dynamic formula"),
+                None,
+            )
+            .expect("XLOOKUP dynamic mutation");
+    }
+    for (address, formula) in [
+        ("H1", "XLOOKUP(2.5,A1:A3,B1:B3,,-1,1)"),
+        ("H2", "XLOOKUP(2.5,A1:A3,B1:B3,,1,2)"),
+        ("H3", "XLOOKUP(\"t?o*\",B1:B3,A1:A3,,2,1)"),
+        ("H4", "XLOOKUP(2,A1:A3,B1:B3,1/0)"),
+        ("H5", "XLOOKUP(4,A1:A3,B1:B3,\"fallback\")"),
+        ("H6", "XLOOKUP(\"*\",B1:B3,A1:A3,,2,2)"),
+        ("W1", "XLOOKUP(2,A1:A4,C1:C4,,0,1)"),
+        ("W2", "XLOOKUP(2,A1:A4,C1:C4,,0,-1)"),
+        ("W3", "XLOOKUP(2,A1:A4,C1:C4,,0,2)"),
+        ("W4", "XLOOKUP(2,Q1:Q4,R1:R4,,0,-2)"),
+        ("W5", "XLOOKUP(2.5,A1:A4,C1:C4,,-1,1)"),
+        ("W6", "XLOOKUP(2.5,A1:A4,C1:C4,,-1,-1)"),
+        ("W7", "XLOOKUP(2.5,A1:A4,C1:C4,,-1,2)"),
+        ("W8", "XLOOKUP(2.5,Q1:Q4,R1:R4,,-1,-2)"),
+        ("W9", "XLOOKUP(2.5,A1:A4,C1:C4,,1,1)"),
+        ("W10", "XLOOKUP(2.5,A1:A4,C1:C4,,1,-1)"),
+        ("W11", "XLOOKUP(2.5,A1:A4,C1:C4,,1,2)"),
+        ("W12", "XLOOKUP(2.5,Q1:Q4,R1:R4,,1,-2)"),
+        ("W13", "XLOOKUP(\"a~?b\",B1:B4,A1:A4,,2,1)"),
+        ("W14", "XLOOKUP(\"*\",B1:B4,A1:A4,,2,-1)"),
+        ("W15", "XLOOKUP(\"*\",B1:B4,A1:A4,,2,2)"),
+        ("W16", "XLOOKUP(\"*\",B1:B4,A1:A4,,2,-2)"),
+        ("W17", "XLOOKUP(1,A1:B2,C1:C2)"),
+    ] {
+        draft
+            .set_cell_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid XLOOKUP scalar address"),
+                FormulaText::from_xlsx(formula).expect("valid XLOOKUP scalar formula"),
+            )
+            .expect("XLOOKUP scalar mutation");
+    }
+
+    assert!(scan_formula_capabilities(draft.workbook()).is_supported());
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for (address, expected) in [
+        ("E1", "two"),
+        ("H1", "two"),
+        ("H2", "three"),
+        ("H5", "fallback"),
+    ] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            ))),
+            "unexpected XLOOKUP text at {address}",
+        );
+    }
+    for (address, expected) in [
+        ("F1", 20.0),
+        ("E5", 20.0),
+        ("E6", 200.0),
+        ("H3", 2.0),
+        ("J10", 21.0),
+        ("K10", 22.0),
+        ("L10", 201.0),
+        ("L11", 202.0),
+        ("W1", 20.0),
+        ("W2", 20.0),
+        ("W3", 20.0),
+        ("W4", 20.0),
+        ("W5", 20.0),
+        ("W6", 20.0),
+        ("W7", 20.0),
+        ("W8", 20.0),
+        ("W9", 30.0),
+        ("W10", 30.0),
+        ("W11", 30.0),
+        ("W12", 30.0),
+        ("W13", 4.0),
+        ("W14", 4.0),
+    ] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "H4"),
+        Some(&CalculationCellResult::Value(CellValue::Text(
+            "two".to_owned()
+        )))
+    );
+    assert_eq!(
+        materialized_result(&calculation, sheet_id, "H6"),
+        Some(&CalculationCellResult::Value(CellValue::Error(
+            ExcelError::Value
+        )))
+    );
+    for address in ["T20", "XFD1"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Spill
+            ))),
+            "unexpected XLOOKUP spill result at {address}",
+        );
+    }
+    for address in ["W15", "W16", "W17"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Error(
+                ExcelError::Value
+            ))),
+            "unexpected XLOOKUP value error at {address}",
+        );
+    }
+
+    let mut limited_draft = WorkbookDraft::new();
+    let limited_sheet = limited_draft.workbook().sheets()[0].id();
+    for (address, value) in [
+        ("A1", 1.0),
+        ("A2", 2.0),
+        ("A3", 3.0),
+        ("B1", 10.0),
+        ("C1", 11.0),
+        ("D1", 12.0),
+        ("B2", 20.0),
+        ("C2", 21.0),
+        ("D2", 22.0),
+        ("B3", 30.0),
+        ("C3", 31.0),
+        ("D3", 32.0),
+    ] {
+        limited_draft
+            .set_cell_value(
+                limited_sheet,
+                CellAddress::from_a1(address).expect("valid limited XLOOKUP source address"),
+                CellValue::number(value).expect("finite limited XLOOKUP source value"),
+            )
+            .expect("limited XLOOKUP source mutation");
+    }
+    limited_draft
+        .set_cell_dynamic_formula(
+            limited_sheet,
+            CellAddress::from_a1("F1").expect("valid limited XLOOKUP anchor"),
+            FormulaText::from_user_input("=XLOOKUP(3,A1:A3,B1:D3)")
+                .expect("valid limited XLOOKUP formula"),
+            None,
+        )
+        .expect("limited XLOOKUP mutation");
+    let limits = CalculationLimits::default()
+        .with_max_function_iterations(4)
+        .expect("nonzero XLOOKUP iteration limit");
+    let limited = calculate_workbook(
+        limited_draft.workbook(),
+        CalculationOptions::default().with_limits(limits),
+    );
+    let limited_anchor = CalculationCellId::new(
+        limited_sheet,
+        CellAddress::from_a1("F1").expect("valid limited XLOOKUP anchor"),
+    );
+    let Some(CalculationCellResult::Unavailable(issue)) = limited.cell(limited_anchor) else {
+        panic!("limited XLOOKUP must withhold its array result");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.detail(), Some("max_function_iterations"));
 }
 
 #[test]

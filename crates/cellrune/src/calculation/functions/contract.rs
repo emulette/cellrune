@@ -649,6 +649,18 @@ const EMPTY_COLLECTION_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::AbsentOrMissing,
     ArgumentDefaultValue::EmptyCollection,
 )];
+const INTL_WORKDAY_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(1.0),
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::EmptyCollection,
+    ),
+];
 const TAKE_DROP_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(1, DefaultTrigger::Missing, ArgumentDefaultValue::SourceRows),
     ArgumentDefault::new(
@@ -1336,6 +1348,7 @@ impl DateFunction {
         match self {
             Self::Now | Self::Today => CallContract::uniform(Arity::exact(0), SCALAR),
             Self::Date | Self::DateDif => CallContract::uniform(Arity::exact(3), SCALAR),
+            Self::DateValue | Self::TimeValue => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::Year | Self::Month | Self::Day => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::EDate | Self::Eomonth => CallContract::uniform(Arity::exact(2), SCALAR),
             Self::YearFrac => {
@@ -1347,6 +1360,10 @@ impl DateFunction {
             Self::Workday | Self::NetworkDays => {
                 CallContract::positional(Arity::range(2, 3), &[SCALAR, SCALAR, ARRAY])
                     .with_defaults(EMPTY_COLLECTION_DEFAULTS)
+            }
+            Self::WorkdayIntl | Self::NetworkDaysIntl => {
+                CallContract::positional(Arity::range(2, 4), &[SCALAR, SCALAR, SCALAR, ARRAY])
+                    .with_defaults(INTL_WORKDAY_DEFAULTS)
             }
         }
     }

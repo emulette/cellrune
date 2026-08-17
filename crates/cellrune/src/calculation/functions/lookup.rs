@@ -1,4 +1,5 @@
 use super::kernel::LookupFunction;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use super::super::ast::Expr;
@@ -10,6 +11,7 @@ use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 use super::descriptor::DynamicReferenceKind;
 use super::lookup_common::VectorView;
 use super::util::{required_number, required_text};
+use super::xmatch::{find_match, parse_match_mode, parse_search_mode};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -291,114 +293,128 @@ fn push_sheet_qualifier(output: &mut String, sheet: &str) {
 }
 
 fn xlookup(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    match call_xlookup_array(engine, context, args) {
+        Ok(result) => result
+            .data
+            .into_iter()
+            .next()
+            .unwrap_or(Value::Error(ErrorKind::Value)),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+pub(super) fn call_xlookup_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
     if args.len() < 3 || args.len() > 6 {
-        return Value::Error(ErrorKind::Value);
+        return Err(ErrorKind::Value);
     }
     let lookup = engine.eval_scalar(context, &args[0]);
     if let Value::Error(kind) = lookup {
-        return Value::Error(kind);
+        return Err(kind);
     }
-    let lookup_rect = match engine.resolve_rect_expr(context, &args[1]) {
-        Ok(rect) => rect,
-        Err(kind) => return Value::Error(kind),
-    };
-    let return_rect = match engine.resolve_rect_expr(context, &args[2]) {
-        Ok(rect) => rect,
-        Err(kind) => return Value::Error(kind),
-    };
-    let match_mode = match args.get(4) {
-        None | Some(Expr::Missing) => 0,
-        Some(expr) => match required_number(engine, context, expr) {
-            Ok(number) => number.trunc() as i32,
-            Err(kind) => return Value::Error(kind),
-        },
-    };
-    let search_mode = match args.get(5) {
-        None | Some(Expr::Missing) => 1,
-        Some(expr) => match required_number(engine, context, expr) {
-            Ok(number) => number.trunc() as i32,
-            Err(kind) => return Value::Error(kind),
-        },
-    };
-    if match_mode != 0 || !matches!(search_mode, 1 | -1) {
-        return Value::Error(ErrorKind::Unsupported);
-    }
-
-    let vertical = lookup_rect.width() == 1;
-    let horizontal = lookup_rect.height() == 1;
-    if !vertical && !horizontal {
-        return Value::Error(ErrorKind::Value);
-    }
-    let aligned = if vertical && return_rect.width() == 1 {
-        lookup_rect.height() == return_rect.height()
-    } else if horizontal && return_rect.height() == 1 {
-        lookup_rect.width() == return_rect.width()
-    } else {
-        false
-    };
-    if !aligned {
-        return Value::Error(ErrorKind::Value);
-    }
-    let length = if vertical {
+    let lookup_rect = engine.resolve_rect_expr(context, &args[1])?;
+    let return_rect = engine.resolve_rect_expr(context, &args[2])?;
+    let match_mode = parse_match_mode(engine, context, args.get(4))?;
+    let search_mode = parse_search_mode(engine, context, args.get(5))?;
+    let orientation = xlookup_orientation(lookup_rect, return_rect)?;
+    let length = if orientation == XLookupOrientation::Vertical {
         engine.operation_row_count([&lookup_rect, &return_rect])
     } else {
         lookup_rect.width()
     };
-    if let Err(kind) = engine.ensure_array_cells(length) {
-        return Value::Error(kind);
+    let length = u32::try_from(length).map_err(|_| ErrorKind::Num)?;
+    engine.ensure_array_cells(length.into())?;
+    let match_offset = find_match(
+        engine,
+        context,
+        &lookup,
+        length,
+        match_mode,
+        search_mode,
+        |offset| {
+            let cell = lookup_axis_cell(lookup_rect, orientation, offset);
+            engine.read_reference_cell(context, cell).map(Cow::Owned)
+        },
+    );
+    match match_offset {
+        Ok(offset) => xlookup_return_array(engine, context, return_rect, orientation, offset),
+        Err(ErrorKind::NA) => Ok(Array::scalar(match args.get(3) {
+            None | Some(Expr::Missing) => Value::Error(ErrorKind::NA),
+            Some(if_not_found) => engine.eval_scalar(context, if_not_found),
+        })),
+        Err(kind) => Err(kind),
     }
+}
 
-    for step in 0..length as u32 {
-        let offset = if search_mode == 1 {
-            step
-        } else {
-            length as u32 - step - 1
-        };
-        let candidate_cell = if vertical {
-            (
-                lookup_rect.sheet,
-                lookup_rect.row_start + offset,
-                lookup_rect.col_start,
-            )
-        } else {
-            (
-                lookup_rect.sheet,
-                lookup_rect.row_start,
-                lookup_rect.col_start + offset,
-            )
-        };
-        let candidate = match engine.read_reference_cell(context, candidate_cell) {
-            Ok(value) => value,
-            Err(kind) => return Value::Error(kind),
-        };
-        match compare(&candidate, &lookup) {
-            Ok(Ordering::Equal) => {
-                let result_cell = if vertical {
-                    (
-                        return_rect.sheet,
-                        return_rect.row_start + offset,
-                        return_rect.col_start,
-                    )
-                } else {
-                    (
-                        return_rect.sheet,
-                        return_rect.row_start,
-                        return_rect.col_start + offset,
-                    )
-                };
-                return engine
-                    .read_reference_cell(context, result_cell)
-                    .unwrap_or_else(Value::Error);
-            }
-            Ok(Ordering::Less | Ordering::Greater) => {}
-            Err(kind) => return Value::Error(kind),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XLookupOrientation {
+    Vertical,
+    Horizontal,
+}
+
+fn xlookup_orientation(lookup: Rect, result: Rect) -> Result<XLookupOrientation, ErrorKind> {
+    let vertical = lookup.width() == 1 && lookup.height() == result.height();
+    let horizontal = lookup.height() == 1 && lookup.width() == result.width();
+    match (vertical, horizontal) {
+        (true, false) => Ok(XLookupOrientation::Vertical),
+        (false, true) => Ok(XLookupOrientation::Horizontal),
+        (true, true) => Ok(XLookupOrientation::Vertical),
+        _ => Err(ErrorKind::Value),
+    }
+}
+
+fn lookup_axis_cell(rect: Rect, orientation: XLookupOrientation, offset: u32) -> (usize, u32, u32) {
+    match orientation {
+        XLookupOrientation::Vertical => (rect.sheet, rect.row_start + offset, rect.col_start),
+        XLookupOrientation::Horizontal => (rect.sheet, rect.row_start, rect.col_start + offset),
+    }
+}
+
+fn xlookup_return_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    result: Rect,
+    orientation: XLookupOrientation,
+    offset: u32,
+) -> Result<Array, ErrorKind> {
+    let (rows, cols) = match orientation {
+        XLookupOrientation::Vertical => (
+            1,
+            u32::try_from(result.width()).map_err(|_| ErrorKind::Num)?,
+        ),
+        XLookupOrientation::Horizontal => (
+            u32::try_from(result.height()).map_err(|_| ErrorKind::Num)?,
+            1,
+        ),
+    };
+    let cells = u64::from(rows)
+        .checked_mul(u64::from(cols))
+        .ok_or(ErrorKind::Num)?;
+    engine.ensure_array_cells(cells)?;
+    engine.charge_function_iterations(context, cells)?;
+    let mut data = Vec::with_capacity(usize::try_from(cells).map_err(|_| ErrorKind::Num)?);
+    for index in 0..cells {
+        if index % 256 == 0 {
+            super::array_common::poll_cancellation(context)?;
         }
+        let cell = match orientation {
+            XLookupOrientation::Vertical => (
+                result.sheet,
+                result.row_start + offset,
+                result.col_start + u32::try_from(index).map_err(|_| ErrorKind::Num)?,
+            ),
+            XLookupOrientation::Horizontal => (
+                result.sheet,
+                result.row_start + u32::try_from(index).map_err(|_| ErrorKind::Num)?,
+                result.col_start + offset,
+            ),
+        };
+        data.push(engine.read_reference_cell(context, cell)?);
     }
-
-    match args.get(3) {
-        None | Some(Expr::Missing) => Value::Error(ErrorKind::NA),
-        Some(if_not_found) => engine.eval_scalar(context, if_not_found),
-    }
+    Ok(Array { rows, cols, data })
 }
 
 fn table_lookup(

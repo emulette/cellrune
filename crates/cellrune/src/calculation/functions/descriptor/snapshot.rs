@@ -18,16 +18,16 @@ pub(super) fn stable_semantic_snapshot(version: CompatibilityVersion) -> String 
             descriptor.canonical_name(),
             descriptor.evaluator().stable_name(),
             descriptor
-                .array_evaluator()
+                .array_evaluator_for_version(version)
                 .map_or_else(|| "none".to_owned(), |value| value.stable_name()),
             descriptor.call_contract().stable_snapshot(),
-            result_kind_name(descriptor.result_kind()),
+            result_kind_name(descriptor.result_kind_for_version(version)),
             sheet_span_name(descriptor.sheet_span_policy()),
             volatility_name(descriptor.volatility()),
             dependency_name(descriptor.dependency_kind()),
             storage_policy_name(descriptor.storage_prefix_policy()),
             compatibility_version_name(descriptor.minimum_version()),
-            bool_name(descriptor.catalog_returns_array()),
+            bool_name(descriptor.catalog_returns_array_for_version(version)),
             bool_name(descriptor.is_in_public_catalog()),
             bool_name(descriptor.is_official()),
             descriptor
@@ -140,5 +140,6 @@ const fn compatibility_version_name(version: CompatibilityVersion) -> &'static s
         CompatibilityVersion::V0_1_13 => "0.1.13",
         CompatibilityVersion::V0_1_14 => "0.1.14",
         CompatibilityVersion::V0_1_15 => "0.1.15",
+        CompatibilityVersion::V0_1_16 => "0.1.16",
     }
 }

@@ -258,6 +258,7 @@ export interface NativeWriteReport {
   changedParts: Array<string>
   removedParts: Array<string>
   diagnosticCount: number
+  outputSha256: string
 }
 
 export declare function openWorkbookBytes(bytes: Buffer): Promise<NativeWorkbook>

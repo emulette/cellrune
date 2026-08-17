@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
+import tempfile
 from collections.abc import Callable
 from typing import Literal, cast
 
@@ -23,7 +25,7 @@ FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 def assert_catalog_contract() -> None:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 413
+    assert len(catalog["entries"]) == 417
     entries = {entry["name"]: entry for entry in catalog["entries"]}
     assert all(
         name in entries
@@ -47,11 +49,14 @@ def assert_catalog_contract() -> None:
             "MDURATION", "ODDFPRICE", "ODDFYIELD", "ODDLPRICE", "ODDLYIELD",
             "PRICE", "PRICEDISC", "PRICEMAT", "RECEIVED", "TBILLEQ",
             "TBILLPRICE", "TBILLYIELD", "YIELD", "YIELDDISC", "YIELDMAT",
+            "DATEVALUE", "NETWORKDAYS.INTL", "TIMEVALUE", "WORKDAY.INTL",
         )
     )
     assert all(
         entries[name]["returns_array"]
-        for name in ("GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND")
+        for name in (
+            "GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND", "XLOOKUP"
+        )
     )
     assert all(entries[name]["official"] for name in entries if name != "__XLUDF.DUMMYFUNCTION")
 
@@ -371,6 +376,12 @@ def main() -> None:
 
         workbook.recalculate(mode="full")
         output = workbook.to_bytes()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            saved_path = pathlib.Path(temporary_directory) / "saved.xlsx"
+            write_report = workbook.save(saved_path)
+            assert write_report["output_sha256"] == hashlib.sha256(
+                saved_path.read_bytes()
+            ).hexdigest()
 
     reopened = Workbook.from_bytes(output)
     assert reopened.summary()["document_kind"] == "xlsx"

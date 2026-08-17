@@ -128,8 +128,8 @@ pub use cell::{
 };
 pub use defined_name::{DefinedName, DefinedNameScope};
 pub use diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticSeverity, InputHash, Provenance, ProviderIdentity,
-    SourceId, SourceLocation,
+    Diagnostic, DiagnosticCode, DiagnosticSeverity, InputHash, OutputHash, Provenance,
+    ProviderIdentity, SourceId, SourceLocation,
 };
 pub use draft::{EditBatch, EditReceipt, WorkbookChange, WorkbookDraft};
 pub use error::{ValidationError, ValidationErrorCode};

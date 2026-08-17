@@ -14,6 +14,7 @@ import {
   type WorkbookTransactionReceipt,
   type WorkbookChange,
   type WorkbookChangeV2,
+  type WriteReport,
   Workbook,
   functionCatalog,
 } from "@cellrune/node";
@@ -113,6 +114,8 @@ async function check(): Promise<void> {
     value.value.toFixed(2);
   }
   const bytes: Buffer = await workbook.toBytes();
+  const writeReport: WriteReport = await workbook.save("typing-check.xlsx");
+  writeReport.outputSha256.toUpperCase();
   const reopened: Workbook = await Workbook.fromBytes(bytes);
   reopened.close();
   reopened.close();

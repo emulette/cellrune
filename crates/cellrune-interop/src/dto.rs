@@ -1231,6 +1231,8 @@ pub struct WriteReportDto {
     pub removed_parts: Vec<String>,
     /// Write diagnostic count.
     pub diagnostic_count: u64,
+    /// Lowercase hexadecimal SHA-256 identity of the exact verified output bytes.
+    pub output_sha256: String,
 }
 
 #[cfg(test)]

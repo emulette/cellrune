@@ -140,6 +140,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_13,
     V0_1_14,
     V0_1_15,
+    V0_1_16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +162,7 @@ pub(super) struct FunctionDescriptor {
     dependency_kind: DependencyKind,
     storage_prefix_policy: StoragePrefixPolicy,
     minimum_version: CompatibilityVersion,
+    array_result_minimum_version: CompatibilityVersion,
     catalog_array_result: bool,
     public_catalog: bool,
     official: bool,
@@ -183,6 +185,7 @@ impl FunctionDescriptor {
             dependency_kind: DependencyKind::Standard,
             storage_prefix_policy: StoragePrefixPolicy::ExcelNamespaces,
             minimum_version: CompatibilityVersion::Baseline,
+            array_result_minimum_version: CompatibilityVersion::Baseline,
             catalog_array_result: false,
             public_catalog: true,
             official: true,
@@ -199,6 +202,18 @@ impl FunctionDescriptor {
     const fn with_array_evaluator(mut self, evaluator: ArrayEvaluator) -> Self {
         self.array_evaluator = Some(evaluator);
         self.result_kind = FunctionResultKind::Array;
+        self.catalog_array_result = true;
+        self
+    }
+
+    const fn with_array_evaluator_from(
+        mut self,
+        evaluator: ArrayEvaluator,
+        minimum_version: CompatibilityVersion,
+    ) -> Self {
+        self.array_evaluator = Some(evaluator);
+        self.result_kind = FunctionResultKind::Array;
+        self.array_result_minimum_version = minimum_version;
         self.catalog_array_result = true;
         self
     }
@@ -284,12 +299,36 @@ impl FunctionDescriptor {
         self.array_evaluator
     }
 
+    #[cfg(test)]
+    pub(super) fn array_evaluator_for_version(
+        self,
+        version: CompatibilityVersion,
+    ) -> Option<ArrayEvaluator> {
+        (self.array_result_minimum_version <= version)
+            .then_some(self.array_evaluator)
+            .flatten()
+    }
+
     pub(super) const fn call_contract(self) -> CallContract {
         self.call_contract
     }
 
     pub(super) const fn result_kind(self) -> FunctionResultKind {
         self.result_kind
+    }
+
+    #[cfg(test)]
+    pub(super) fn result_kind_for_version(
+        self,
+        version: CompatibilityVersion,
+    ) -> FunctionResultKind {
+        if self.array_evaluator_for_version(version).is_none()
+            && self.array_result_minimum_version > CompatibilityVersion::Baseline
+        {
+            FunctionResultKind::Scalar
+        } else {
+            self.result_kind
+        }
     }
 
     pub(super) const fn sheet_span_policy(self) -> SheetSpanPolicy {
@@ -312,8 +351,13 @@ impl FunctionDescriptor {
         self.minimum_version
     }
 
+    #[cfg(test)]
     pub(super) const fn catalog_returns_array(self) -> bool {
         self.catalog_array_result
+    }
+
+    pub(super) fn catalog_returns_array_for_version(self, version: CompatibilityVersion) -> bool {
+        self.catalog_array_result && self.array_result_minimum_version <= version
     }
 
     pub(super) const fn is_in_public_catalog(self) -> bool {
@@ -666,7 +710,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(VLookup, "VLOOKUP", Lookup).with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
     function!(XMatch, "XMATCH", Lookup).with_minimum_version(CompatibilityVersion::V0_1_10),
-    function!(XLookup, "XLOOKUP", Lookup),
+    function!(XLookup, "XLOOKUP", Lookup)
+        .with_array_evaluator_from(ArrayEvaluator::XLookup, CompatibilityVersion::V0_1_16),
     function!(GroupBy, "GROUPBY", Grouped)
         .with_array_evaluator(ArrayEvaluator::Grouped(GroupedArrayFunction::GroupBy))
         .with_minimum_version(CompatibilityVersion::V0_1_10),
@@ -772,16 +817,22 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         ))
         .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Date, "DATE", Date),
+    function!(DateValue, "DATEVALUE", Date).with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(DateDif, "DATEDIF", Date),
     function!(Day, "DAY", Date),
     function!(EDate, "EDATE", Date),
     function!(Eomonth, "EOMONTH", Date),
     function!(Month, "MONTH", Date),
     function!(NetworkDays, "NETWORKDAYS", Date),
+    function!(NetworkDaysIntl, "NETWORKDAYS.INTL", Date)
+        .with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(Now, "NOW", Date).with_volatility(Volatility::Now),
     function!(Today, "TODAY", Date).with_volatility(Volatility::Today),
+    function!(TimeValue, "TIMEVALUE", Date).with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(Weekday, "WEEKDAY", Date),
     function!(Workday, "WORKDAY", Date),
+    function!(WorkdayIntl, "WORKDAY.INTL", Date)
+        .with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(Year, "YEAR", Date),
     function!(YearFrac, "YEARFRAC", Date),
     function!(Days, "DAYS", DateAdditional),
@@ -1513,6 +1564,22 @@ mod tests {
         assert_eq!(
             actual, "e554fd48342e8e88b0c9200f211f626c02dc0454baec4b00c8fbaf9007ac6379",
             "stable v0.1.14 semantic snapshot changed:\n{snapshot}",
+        );
+    }
+
+    #[test]
+    fn v0_1_16_semantic_registry_is_byte_exact() {
+        let snapshot = super::snapshot::stable_semantic_snapshot(CompatibilityVersion::V0_1_16);
+        let mut digest = Sha256::new();
+        digest.update(snapshot.as_bytes());
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual, "8e1982322a0208193bfe6966b21fd17ab5f6bab13696194c79c9847f5eed8c5e",
+            "stable v0.1.16 semantic snapshot changed:\n{snapshot}",
         );
     }
 

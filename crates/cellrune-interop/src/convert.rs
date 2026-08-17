@@ -637,6 +637,7 @@ pub(crate) fn write_report(
             .map(|source| source.as_str().to_owned())
             .collect(),
         diagnostic_count: count_u64(report.diagnostics().len()),
+        output_sha256: hex_bytes(report.output_hash().as_bytes()),
     }
 }
 

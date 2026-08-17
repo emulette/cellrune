@@ -472,9 +472,7 @@ pub(crate) fn write_document_draft(
         options.policy(),
         materialization.materialized_count(),
         materialization.invalidated_cells().to_vec(),
-        changed_parts,
-        removed_parts,
-        Vec::new(),
+        super::report::VerifiedOutputReceipt::new(changed_parts, removed_parts, Vec::new(), &bytes),
         WriteProvenance::new(
             Some(document.input_hash()),
             draft.semantic_revision(),

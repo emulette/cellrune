@@ -421,6 +421,9 @@ pub(super) fn call_function_array(
         ArrayEvaluator::Grouped(function) => {
             Some(grouped::call_array(engine, context, function, args))
         }
+        ArrayEvaluator::XLookup => {
+            Some(lookup::call_xlookup_array(engine, context, args).map(ArrayEvaluation::untracked))
+        }
     }
 }
 
@@ -766,7 +769,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    function_catalog_for_version(CompatibilityVersion::V0_1_15)
+    function_catalog_for_version(CompatibilityVersion::V0_1_16)
 }
 
 fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::FunctionCatalogEntry> {
@@ -781,7 +784,7 @@ fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::Fun
                 descriptor.canonical_name().to_owned(),
                 descriptor.canonical_name().to_owned(),
                 false,
-                descriptor.catalog_returns_array(),
+                descriptor.catalog_returns_array_for_version(version),
                 descriptor.is_official(),
             ));
             let aliases = descriptor.aliases().iter().map(move |alias| {
@@ -790,7 +793,7 @@ fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::Fun
                     alias.name().to_owned(),
                     descriptor.canonical_name().to_owned(),
                     true,
-                    descriptor.catalog_returns_array(),
+                    descriptor.catalog_returns_array_for_version(version),
                     alias.is_official(),
                 )
             });
@@ -956,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_names_are_unique_and_current_catalog_is_v0_1_15() {
+    fn registry_names_are_unique_and_current_catalog_is_v0_1_16() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
@@ -984,10 +987,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 413);
+        assert_eq!(catalog.len(), 417);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            412
+            416
         );
         assert!(
             catalog
@@ -1009,12 +1012,40 @@ mod tests {
             Some("COVARIANCE.P")
         );
         for name in [
-            "ARABIC", "DAVERAGE", "DCOUNT", "DCOUNTA", "DGET", "DMAX", "DMIN", "DPRODUCT",
-            "DSTDEV", "DSTDEVP", "DSUM", "DVAR", "DVARP", "GROWTH", "LINEST", "LOGEST", "MINVERSE",
-            "MUNIT", "ROMAN", "TREND",
+            "DATEVALUE",
+            "NETWORKDAYS.INTL",
+            "TIMEVALUE",
+            "WORKDAY.INTL",
+            "ARABIC",
+            "DAVERAGE",
+            "DCOUNT",
+            "DCOUNTA",
+            "DGET",
+            "DMAX",
+            "DMIN",
+            "DPRODUCT",
+            "DSTDEV",
+            "DSTDEVP",
+            "DSUM",
+            "DVAR",
+            "DVARP",
+            "GROWTH",
+            "LINEST",
+            "LOGEST",
+            "MINVERSE",
+            "MUNIT",
+            "ROMAN",
+            "TREND",
         ] {
             assert!(catalog.iter().any(|entry| entry.name() == name), "{name}");
         }
+        assert!(
+            catalog
+                .iter()
+                .find(|entry| entry.name() == "XLOOKUP")
+                .expect("XLOOKUP")
+                .returns_array()
+        );
         for name in [
             "BESSELI",
             "BESSELJ",
@@ -1275,6 +1306,68 @@ mod tests {
         assert_eq!(
             actual,
             include_str!("../../../testdata/function-catalog-v0.1.14.sha256").trim()
+        );
+    }
+
+    #[test]
+    fn v0_1_15_fixed_income_catalog_is_byte_exact() {
+        let catalog =
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_15);
+        assert_eq!(catalog.len(), 413);
+        assert_eq!(
+            catalog.iter().filter(|entry| entry.is_official()).count(),
+            412
+        );
+
+        let mut digest = Sha256::new();
+        for entry in catalog {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            include_str!("../../../testdata/function-catalog-v0.1.15.sha256").trim()
+        );
+    }
+
+    #[test]
+    fn v0_1_16_datevalue_and_xlookup_catalog_is_byte_exact() {
+        let mut digest = Sha256::new();
+        for entry in
+            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_16)
+        {
+            digest.update(entry.name().as_bytes());
+            digest.update([0]);
+            digest.update(entry.canonical_name().as_bytes());
+            digest.update([0]);
+            digest.update(if entry.is_alias() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.returns_array() { b"1" } else { b"0" });
+            digest.update([0]);
+            digest.update(if entry.is_official() { b"1" } else { b"0" });
+            digest.update(b"\n");
+        }
+        let actual = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            include_str!("../../../testdata/function-catalog-v0.1.16.sha256").trim()
         );
     }
 }

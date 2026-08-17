@@ -451,6 +451,7 @@ function normalizeWriteReport(report) {
     changedParts: report.changedParts,
     removedParts: report.removedParts,
     diagnosticCount: report.diagnosticCount,
+    outputSha256: report.outputSha256,
   };
 }
 

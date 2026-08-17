@@ -422,6 +422,7 @@ pub(crate) fn write_report<'py>(
     result.set_item("changed_parts", &value.changed_parts)?;
     result.set_item("removed_parts", &value.removed_parts)?;
     result.set_item("diagnostic_count", value.diagnostic_count)?;
+    result.set_item("output_sha256", &value.output_sha256)?;
     Ok(result)
 }
 

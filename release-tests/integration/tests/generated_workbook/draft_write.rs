@@ -7,6 +7,8 @@ use cellrune::{
     write_recalculated_xlsx_bytes, write_xlsx_draft_bytes, write_xlsx_draft_path,
 };
 
+use sha2::{Digest, Sha256};
+
 use super::recalculation_write_support as support;
 
 #[test]
@@ -58,6 +60,9 @@ fn canonical_draft_is_deterministic_and_reopens_with_typed_results() {
     let second = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
         .expect("deterministic output");
     assert_eq!(first.bytes(), second.bytes());
+    let output_hash: [u8; 32] = Sha256::digest(first.bytes()).into();
+    assert_eq!(first.report().output_hash().as_bytes(), &output_hash);
+    assert_eq!(second.report().output_hash(), first.report().output_hash());
     assert!(first.report().is_complete());
     assert_eq!(first.report().provenance().input_hash(), None);
     assert!(

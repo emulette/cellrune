@@ -437,6 +437,13 @@ fn capability_usage_catalog_and_incomplete_write_contracts_are_explicit() {
     assert_eq!(invalidated.materialized_count, 1);
     assert_eq!(invalidated.invalidated_cells.len(), 1);
     assert_eq!(invalidated.invalidated_cells[0].address, "A2");
+    assert_eq!(invalidated.output_sha256.len(), 64);
+    assert!(
+        invalidated
+            .output_sha256
+            .bytes()
+            .all(|byte| { byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) })
+    );
 }
 
 #[test]
@@ -453,6 +460,11 @@ fn path_open_and_save_respect_destination_replacement() {
         .save_path(&path, WriteOptionsDto::default())
         .expect("new path save must work");
     assert_eq!(first.policy, "require_complete");
+    let (bytes, bytes_report) = session
+        .save_bytes(WriteOptionsDto::default())
+        .expect("bytes save must work");
+    assert_eq!(std::fs::read(&path).expect("path output bytes"), bytes);
+    assert_eq!(first.output_sha256, bytes_report.output_sha256);
 
     let reopened = WorkbookSession::open_path(&path).expect("path output must reopen");
     assert!(reopened.summary().document_backed);

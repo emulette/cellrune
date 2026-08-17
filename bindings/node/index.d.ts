@@ -417,6 +417,7 @@ export interface WriteReport {
   readonly changedParts: readonly string[];
   readonly removedParts: readonly string[];
   readonly diagnosticCount: number;
+  readonly outputSha256: string;
 }
 
 export type TransactionDetailSection =

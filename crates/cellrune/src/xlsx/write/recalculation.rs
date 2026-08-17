@@ -169,9 +169,12 @@ pub fn write_recalculated_xlsx_bytes(
         options.policy(),
         materialization.materialized_count(),
         materialization.invalidated_cells().to_vec(),
-        changed_parts,
-        removed_parts,
-        diagnostics,
+        super::report::VerifiedOutputReceipt::new(
+            changed_parts,
+            removed_parts,
+            diagnostics,
+            &bytes,
+        ),
         provenance,
     );
     Ok(RecalculatedWorkbook::new(bytes, report, document.kind()))

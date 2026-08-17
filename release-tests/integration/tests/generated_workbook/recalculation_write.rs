@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 
+use sha2::{Digest, Sha256};
+
 use cellrune::{
     CalculationCellId, CalculationCellResult, CalculationOptions, CellAddress, CellContent,
     CellValue, FormulaMetadata, FrozenPane, OpenOptions, PhoneticRun, PhoneticTextRange,
@@ -48,6 +50,8 @@ fn complete_recalculation_writes_every_typed_cache_and_preserves_semantics() {
         output.report().provenance().semantic_revision(),
         document.semantic_revision()
     );
+    let output_hash: [u8; 32] = Sha256::digest(output.bytes()).into();
+    assert_eq!(output.report().output_hash().as_bytes(), &output_hash);
 
     let reopened = open_xlsx_document_bytes(output.bytes(), OpenOptions::default())
         .expect("verified output must reopen");
@@ -125,6 +129,8 @@ fn complete_recalculation_writes_every_typed_cache_and_preserves_semantics() {
     )
     .expect("writer adapter");
     assert!(writer_report.is_complete());
+    let writer_hash: [u8; 32] = Sha256::digest(&writer_bytes).into();
+    assert_eq!(writer_report.output_hash().as_bytes(), &writer_hash);
     open_xlsx_document_bytes(&writer_bytes, OpenOptions::default()).expect("writer output reopens");
 }
 
@@ -250,6 +256,8 @@ fn calculation_identity_and_destination_contracts_are_enforced() {
         .expect("explicit replacement");
     assert!(report.is_complete());
     let replaced = fs::read(destination.path()).expect("replacement bytes");
+    let replaced_hash: [u8; 32] = Sha256::digest(&replaced).into();
+    assert_eq!(report.output_hash().as_bytes(), &replaced_hash);
     open_xlsx_document_bytes(&replaced, OpenOptions::default()).expect("replacement reopens");
 }
 

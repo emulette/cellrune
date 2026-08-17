@@ -287,16 +287,20 @@ function_enum!(ModernTextFunction {
 
 function_enum!(DateFunction {
     Date,
+    DateValue,
     DateDif,
     Day,
     EDate,
     Eomonth,
     Month,
     NetworkDays,
+    NetworkDaysIntl,
     Now,
     Today,
+    TimeValue,
     Weekday,
     Workday,
+    WorkdayIntl,
     Year,
     YearFrac,
 });
@@ -741,6 +745,7 @@ pub(in crate::calculation) enum ArrayEvaluator {
     Regression(RegressionFunction),
     ModernText(ModernTextArrayFunction),
     Grouped(GroupedArrayFunction),
+    XLookup,
 }
 
 #[cfg(test)]
@@ -756,6 +761,7 @@ impl ArrayEvaluator {
             Self::Regression(value) => format!("regression:{}", value.stable_name()),
             Self::ModernText(value) => format!("modern_text:{}", value.stable_name()),
             Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
+            Self::XLookup => "lookup:xlookup".to_owned(),
         }
     }
 
@@ -790,6 +796,7 @@ impl ArrayEvaluator {
                 .map(Self::ModernText),
         );
         evaluators.extend(GroupedArrayFunction::ALL.iter().copied().map(Self::Grouped));
+        evaluators.push(Self::XLookup);
         evaluators
     }
 }

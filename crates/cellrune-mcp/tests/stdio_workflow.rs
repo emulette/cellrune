@@ -309,6 +309,10 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let mcp_write_report: WriteReportDto = serde_json::from_value(saved["report"].clone())
         .expect("write report must match the shared DTO");
     assert_eq!(mcp_write_report, direct_write_report);
+    assert_eq!(
+        saved["report"]["output_sha256"],
+        direct_write_report.output_sha256
+    );
     assert!(mcp_output.is_file());
 
     let overwrite_error = failed_tool(mcp.call_tool(
