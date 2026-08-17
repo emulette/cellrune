@@ -49,8 +49,8 @@
     "typecheck": "tsc --noEmit --strict --types node --module nodenext --moduleResolution nodenext --target es2022 tests/types.ts"
   },
   "devDependencies": {
-    "@napi-rs/cli": "3.7.4",
-    "@types/node": "26.1.1",
+    "@napi-rs/cli": "3.8.6",
+    "@types/node": "26.2.0",
     "typescript": "7.0.2"
   },
   "optionalDependencies": {

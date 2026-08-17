@@ -58,11 +58,11 @@ FALLBACK_LICENSES = {
         "LICENSE-APACHE",
     ),
     "rmcp": (
-        "1f9358eddca42d3a510c70ae6446dd6548c7c856",
+        "02c62aef2e331e5cf79c06c744eb1eb052cc8ebd",
         "bindings/licenses/rmcp-LICENSE",
     ),
     "rmcp-macros": (
-        "1f9358eddca42d3a510c70ae6446dd6548c7c856",
+        "02c62aef2e331e5cf79c06c744eb1eb052cc8ebd",
         "bindings/licenses/rmcp-LICENSE",
     ),
 }

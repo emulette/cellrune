@@ -15,10 +15,13 @@ const U64_IDENTITY_FIELDS: &[&str] = &[
 ];
 
 pub(crate) fn serialize<T: Serialize>(value: &T) -> napi::Result<String> {
-    let mut value =
-        serde_json::to_value(value).map_err(|_| napi_error(InteropError::serialization()))?;
+    serialize_json(value).map_err(|_| napi_error(InteropError::serialization()))
+}
+
+fn serialize_json<T: Serialize>(value: &T) -> serde_json::Result<String> {
+    let mut value = serde_json::to_value(value)?;
     stringify_u64_identities(&mut value);
-    serde_json::to_string(&value).map_err(|_| napi_error(InteropError::serialization()))
+    serde_json::to_string(&value)
 }
 
 fn stringify_u64_identities(value: &mut Value) {
@@ -62,7 +65,7 @@ mod tests {
 
     #[test]
     fn identities_are_stringified_without_rewriting_string_contents() {
-        let serialized = super::serialize(&NestedIdentity {
+        let serialized = super::serialize_json(&NestedIdentity {
             preview_id: u64::MAX,
             detail: r#"embedded \"base_revision\":123 remains text"#,
             nested: Revision {

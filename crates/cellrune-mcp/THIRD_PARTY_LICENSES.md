@@ -81,7 +81,7 @@ are not part of this binary notice.
 | `quick-xml` | `0.41.0` | `MIT` |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
-| `rmcp` | `3.1.0` | `Apache-2.0` |
+| `rmcp` | `3.1.2` | `Apache-2.0` |
 | `rustix` | `1.1.4` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `rustix-linux-procfs` | `0.1.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `schemars` | `1.2.1` | `MIT` |
@@ -4771,7 +4771,7 @@ Apache License
 
 ### License text 59
 
-Components: `rmcp 3.1.0`
+Components: `rmcp 3.1.2`
 
 Source filenames: `rmcp-LICENSE`
 

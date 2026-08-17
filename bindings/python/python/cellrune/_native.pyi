@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from os import PathLike
 from types import TracebackType
 from typing import Literal
@@ -90,7 +91,7 @@ class Workbook:
     def preview_changes(
         self,
         expected_revision: int,
-        changes: list[WorkbookChangeV2],
+        changes: Sequence[WorkbookChangeV2],
         *,
         mode: Literal["auto", "incremental", "full"] = "auto",
         today_serial: float | None = None,
@@ -115,12 +116,12 @@ class Workbook:
     def apply_changes(
         self,
         expected_revision: int,
-        changes: list[WorkbookChange],
+        changes: Sequence[WorkbookChange],
     ) -> EditReceipt: ...
     def apply_changes_v2(
         self,
         expected_revision: int,
-        changes: list[WorkbookChangeV2],
+        changes: Sequence[WorkbookChangeV2],
     ) -> EditReceiptV2: ...
     def changes_since(
         self,
