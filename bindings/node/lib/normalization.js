@@ -1,6 +1,6 @@
 "use strict";
 
-const { protocolError } = require("./errors.js");
+const { PROTOCOL_DETAIL, protocolError } = require("./errors.js");
 const {
   requireObject,
   requireProtocolFinite,
@@ -462,6 +462,260 @@ function normalizeCellReference(cell) {
   };
 }
 
+function parsePreviewJson(value) {
+  if (typeof value !== "string") {
+    throw protocolError(PROTOCOL_DETAIL.PREVIEW_PAYLOAD_MALFORMED);
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw protocolError(PROTOCOL_DETAIL.PREVIEW_PAYLOAD_JSON_INVALID);
+  }
+}
+
+function normalizePreviewChanges(value) {
+  requireObject(value, "preview changes");
+  requireProtocolVersion(value.schema_version, "preview changes");
+  return {
+    schemaVersion: value.schema_version,
+    previewId: BigInt(value.preview_id),
+    report: normalizeTransactionReport(value.report),
+  };
+}
+
+function normalizeTransactionReport(report) {
+  requireObject(report, "transaction report");
+  return {
+    contractVersion: report.contract_version,
+    baseRevision: BigInt(report.base_revision),
+    resultRevision: BigInt(report.result_revision),
+    baseFingerprint: normalizeFingerprint(report.base_fingerprint),
+    resultFingerprint: normalizeFingerprint(report.result_fingerprint),
+    inputSha256: report.input_sha256 ?? null,
+    calculatorProvider: {
+      name: report.calculator_provider.name,
+      version: report.calculator_provider.version,
+    },
+    calculationOptions: normalizeTransactionOptions(report.calculation_options),
+    baseCalculationReused: report.base_calculation_reused,
+    baseExecutionMode: report.base_execution_mode,
+    baseDecisionReason: report.base_decision_reason,
+    candidateRequestedMode: report.candidate_requested_mode,
+    candidateExecutionMode: report.candidate_execution_mode,
+    candidateDecisionReason: report.candidate_decision_reason,
+    editReceipt: normalizeTransactionEditReceipt(report.edit_receipt),
+    impactCoverage: report.impact_coverage,
+    directAffectedCount: report.direct_affected_count,
+    transitiveAffectedCount: report.transitive_affected_count,
+    conservativeAffectedCount: report.conservative_affected_count,
+    baseEvaluatedCount: report.base_evaluated_count,
+    candidateEvaluatedCount: report.candidate_evaluated_count,
+    parsedFormulaCount: report.parsed_formula_count,
+    functionIterationCount: report.function_iteration_count,
+    referenceCellCount: report.reference_cell_count,
+    previewChangedCount: report.preview_changed_count,
+    previewRemovedCount: report.preview_removed_count,
+    introducedIssueCount: report.introduced_issue_count,
+    resolvedIssueCount: report.resolved_issue_count,
+    changedIssueCount: report.changed_issue_count,
+    installDeltaCount: report.install_delta_count,
+    installedCalculationRevision:
+      report.installed_calculation_revision == null
+        ? null
+        : BigInt(report.installed_calculation_revision),
+    installedCalculationFingerprint:
+      report.installed_calculation_fingerprint == null
+        ? null
+        : normalizeFingerprint(report.installed_calculation_fingerprint),
+    installedCalculationOptions:
+      report.installed_calculation_options == null
+        ? null
+        : normalizeTransactionOptions(report.installed_calculation_options),
+    installDeltaBasisDiffersFromPreviewBase:
+      report.install_delta_basis_differs_from_preview_base,
+    installDeltaBasisReasons: report.install_delta_basis_reasons,
+    detailCounts: {
+      affected: report.detail_counts.affected,
+      evaluated: report.detail_counts.evaluated,
+      previewResults: report.detail_counts.preview_results,
+      previewIssues: report.detail_counts.preview_issues,
+      installResults: report.detail_counts.install_results,
+    },
+  };
+}
+
+function normalizeTransactionOptions(options) {
+  return {
+    todaySerial: options.today_serial ?? null,
+    nowSerial: options.now_serial ?? null,
+    arithmeticSemantics: options.arithmetic_semantics,
+    financialSolverSemantics: options.financial_solver_semantics,
+    limits: {
+      maxFormulaTokens: options.limits.max_formula_tokens,
+      maxFormulaSourceBytes: options.limits.max_formula_source_bytes,
+      maxFormulaAstNodes: options.limits.max_formula_ast_nodes,
+      maxFormulaNestingDepth: options.limits.max_formula_nesting_depth,
+      maxDependencyEdges: options.limits.max_dependency_edges,
+      maxReferenceAreas: options.limits.max_reference_areas,
+      maxArrayCells: options.limits.max_array_cells,
+      maxTextBytes: options.limits.max_text_bytes,
+      maxFunctionIterations: options.limits.max_function_iterations,
+      maxLetBindings: options.limits.max_let_bindings,
+      maxLambdaDepth: options.limits.max_lambda_depth,
+      maxLambdaInvocations: options.limits.max_lambda_invocations,
+    },
+  };
+}
+
+function normalizeFingerprint(value) {
+  return { schemaVersion: value.schema_version, digestHex: value.digest_hex };
+}
+
+function normalizeTransactionEditReceipt(receipt) {
+  return {
+    schemaVersion: receipt.schema_version,
+    baseRevision: BigInt(receipt.base_revision),
+    resultRevision: BigInt(receipt.result_revision),
+    appliedChangeCount: receipt.applied_change_count,
+    changedCells: receipt.changed_cells.map(normalizeTransactionCellReference),
+    calculationChangedCells: receipt.calculation_changed_cells.map(
+      normalizeTransactionCellReference,
+    ),
+    createdSheetIds: receipt.created_sheet_ids,
+    topologyChanged: receipt.topology_changed,
+    calculationMetadataChanged: receipt.calculation_metadata_changed,
+  };
+}
+
+function normalizeTransactionPage(value) {
+  requireObject(value, "transaction detail page");
+  requireProtocolVersion(value.schema_version, "transaction detail page");
+  return {
+    schemaVersion: value.schema_version,
+    previewId: BigInt(value.preview_id),
+    section: value.section,
+    items: value.items.map(normalizeTransactionDetail),
+    nextCursor:
+      value.next_cursor == null
+        ? null
+        : { previewId: BigInt(value.next_cursor.preview_id), token: value.next_cursor.token },
+    totalCount: value.total_count,
+  };
+}
+
+function normalizeTransactionDetail(item) {
+  const cell = item.cell ? normalizeTransactionCellReference(item.cell) : null;
+  switch (item.kind) {
+    case "affected":
+      return { kind: item.kind, cell, cause: item.cause };
+    case "evaluated":
+      return { kind: item.kind, cell };
+    case "preview_result":
+      return {
+        kind: item.kind,
+        cell,
+        previousOrigin: normalizeTransactionOrigin(item.previous_origin),
+        previousResult: normalizeTransactionResult(item.previous_result),
+        resultOrigin: normalizeTransactionOrigin(item.result_origin),
+        result: normalizeTransactionResult(item.result),
+      };
+    case "preview_issue":
+      return {
+        kind: item.kind,
+        cell,
+        changeKind: item.change_kind,
+        previous: item.previous ?? null,
+        current: item.current ?? null,
+      };
+    case "install_result":
+      return {
+        kind: item.kind,
+        cell,
+        origin: normalizeTransactionOrigin(item.origin),
+        result: normalizeTransactionResult(item.result),
+      };
+    case "unknown":
+      return { kind: item.kind };
+    default:
+      throw protocolError(PROTOCOL_DETAIL.TRANSACTION_DETAIL_KIND_UNKNOWN);
+  }
+}
+
+function normalizeTransactionCellReference(value) {
+  return {
+    sheetId: value.sheet_id,
+    sheetName: value.sheet_name,
+    address: value.address,
+  };
+}
+
+function normalizeTransactionOrigin(origin) {
+  if (origin == null) {
+    return null;
+  }
+  return {
+    kind: origin.kind,
+    anchor:
+      origin.anchor == null ? null : normalizeTransactionCellReference(origin.anchor),
+    range: origin.range ?? null,
+  };
+}
+
+function normalizeTransactionResult(result) {
+  if (result == null) {
+    return null;
+  }
+  if (result.kind === "value") {
+    return { kind: "value", value: result.value };
+  }
+  if (result.kind === "unavailable") {
+    return {
+      kind: "unavailable",
+      code: result.code,
+      message: result.message,
+      detail: result.detail ?? null,
+    };
+  }
+  throw protocolError(PROTOCOL_DETAIL.TRANSACTION_RESULT_MALFORMED);
+}
+
+function normalizeTransactionReceipt(value) {
+  requireObject(value, "transaction receipt");
+  requireProtocolVersion(value.schema_version, "transaction receipt");
+  return {
+    schemaVersion: value.schema_version,
+    edit: normalizeTransactionEditReceipt(value.edit),
+    calculationDelta: normalizeTransactionCalculationDelta(value.calculation_delta),
+    baseFingerprint: normalizeFingerprint(value.base_fingerprint),
+    resultFingerprint: normalizeFingerprint(value.result_fingerprint),
+  };
+}
+
+function normalizeTransactionCalculationDelta(delta) {
+  return {
+    schemaVersion: delta.schema_version,
+    cursor: BigInt(delta.cursor),
+    baseRevision: BigInt(delta.base_revision),
+    resultRevision: BigInt(delta.result_revision),
+    mode: delta.mode,
+    reason: delta.reason,
+    dirtyCount: delta.dirty_count,
+    evaluatedCount: delta.evaluated_count,
+    parsedFormulaCount: delta.parsed_formula_count,
+    changedCells: delta.changed_cells.map((change) => ({
+      cell: normalizeTransactionCellReference(change.cell),
+      origin: change.origin,
+      anchor:
+        change.anchor == null ? null : normalizeTransactionCellReference(change.anchor),
+      range: change.range ?? null,
+      result: normalizeTransactionResult(change.result),
+    })),
+    removedMaterializedCells: delta.removed_materialized_cells.map(
+      normalizeTransactionCellReference,
+    ),
+  };
+}
+
 module.exports = {
   normalizeCalculationDelta,
   normalizeCalculationDeltaPage,
@@ -473,5 +727,9 @@ module.exports = {
   normalizeFunctionUsage,
   normalizeRangePage,
   normalizeSummary,
+  normalizePreviewChanges,
+  normalizeTransactionImpactPage: normalizeTransactionPage,
+  normalizeTransactionReceipt,
+  parsePreviewJson,
   normalizeWriteReport,
 };

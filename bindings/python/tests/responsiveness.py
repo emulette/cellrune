@@ -42,6 +42,22 @@ def main() -> None:
     )
     assert report["unavailable_count"] == 0
 
+    preview = assert_allows_interpreter_progress(
+        lambda: workbook.preview_changes(
+            workbook.summary()["semantic_revision"],
+            [
+                {
+                    "kind": "set_value",
+                    "sheet": "Sheet1",
+                    "address": "A1",
+                    "value": {"kind": "number", "value": 2.0},
+                }
+            ],
+        ),
+        "native preview retained the Python interpreter lock",
+    )
+    workbook.discard_preview(preview["preview_id"])
+
     usage = assert_allows_interpreter_progress(
         workbook.function_usage,
         "function-usage scan retained the Python interpreter lock",

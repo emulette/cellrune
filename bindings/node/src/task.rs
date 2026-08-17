@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cellrune_binding_support::SharedWorkbookSession;
 use cellrune_interop::{
-    CalculationOptionsDto, RecalculationModeDto, WorkbookSession, WriteOptionsDto,
+    CalculationOptionsDto, EditBatchV2Dto, RecalculationModeDto, WorkbookSession, WriteOptionsDto,
 };
 use napi::bindgen_prelude::Buffer;
 use napi::{Env, Task};
@@ -101,6 +101,69 @@ pub struct RecalculateTask {
     pub(crate) session: Arc<SharedWorkbookSession>,
     pub(crate) mode: RecalculationModeDto,
     pub(crate) options: CalculationOptionsDto,
+}
+
+pub struct PreviewTask {
+    pub(crate) session: Arc<SharedWorkbookSession>,
+    pub(crate) expected_revision: u64,
+    pub(crate) batch: EditBatchV2Dto,
+    pub(crate) mode: RecalculationModeDto,
+    pub(crate) options: CalculationOptionsDto,
+}
+
+impl Task for PreviewTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        let operation = self.session.cancellable_operation().map_err(napi_error)?;
+        let cancellation = operation.token().clone();
+        let prepared = {
+            self.session
+                .lock()
+                .map_err(napi_error)?
+                .prepare_preview_changes_cancellable(
+                    self.expected_revision,
+                    self.batch.clone(),
+                    self.mode,
+                    self.options,
+                    &cancellation,
+                )
+                .map_err(napi_error)?
+        };
+        let request_id = prepared.request_id();
+        let completed = match prepared.run() {
+            Ok(completed) => completed,
+            Err(error) => {
+                match self.session.lock() {
+                    Ok(mut session) => session.abandon_recalculation(request_id),
+                    Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+                }
+                return Err(napi_error(error));
+            }
+        };
+        let serialized = match crate::preview_json::serialize(completed.summary()) {
+            Ok(serialized) => serialized,
+            Err(error) => {
+                match self.session.lock() {
+                    Ok(mut session) => session.abandon_recalculation(request_id),
+                    Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+                }
+                return Err(error);
+            }
+        };
+        self.session
+            .lock()
+            .map_err(napi_error)?
+            .publish_preview(completed)
+            .map_err(napi_error)?;
+        drop(operation);
+        Ok(serialized)
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output)
+    }
 }
 
 impl Task for RecalculateTask {

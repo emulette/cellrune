@@ -1,6 +1,6 @@
 use cellrune_interop::{
     ArithmeticSemanticsDto, EditBatchDto, EditBatchV2Dto, FinancialSolverSemanticsDto,
-    WorkbookSummaryDto, WriteReportDto,
+    PreviewCursorDto, TransactionDetailSectionDto, WorkbookSummaryDto, WriteReportDto,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -134,6 +134,60 @@ pub(crate) struct ChangesSinceArgs {
     pub(crate) limit: u32,
 }
 
+/// Input for an immutable, retained edit-and-calculation preview.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreviewChangesArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Current semantic revision that must still match when the candidate is captured.
+    pub(crate) expected_revision: u64,
+    /// Ordered v1 or stable-ID table changes evaluated without changing the live workbook.
+    #[serde(flatten)]
+    pub(crate) batch: EditBatchV2Dto,
+    /// `auto`, `incremental`, or `full`; omitted selects `auto`.
+    #[serde(default)]
+    pub(crate) mode: cellrune_interop::RecalculationModeDto,
+    /// Optional finite Excel serial returned by `TODAY()`.
+    pub(crate) today_serial: Option<f64>,
+    /// Optional finite Excel serial returned by `NOW()`.
+    pub(crate) now_serial: Option<f64>,
+    /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
+    #[serde(default)]
+    pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
+    /// Financial convergence policy; omitted selects Microsoft's function-specific budgets.
+    #[serde(default)]
+    pub(crate) financial_solver_semantics: FinancialSolverSemanticsDto,
+}
+
+/// Input for one opaque-cursor page of a retained preview report section.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreviewChangesPageArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Session-local preview identifier returned by `workbook_preview_changes`.
+    pub(crate) preview_id: u64,
+    /// Report detail section to page.
+    pub(crate) section: TransactionDetailSectionDto,
+    /// Opaque cursor returned by the preceding page for this same preview.
+    pub(crate) cursor: Option<PreviewCursorDto>,
+    /// Item count; omitted or zero selects the interop default, with a hard maximum of 1,000.
+    #[serde(default)]
+    #[schemars(range(max = 1_000))]
+    pub(crate) limit: u32,
+}
+
+/// Input identifying one retained preview for commitment or disposal.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreviewIdArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Session-local preview identifier returned by `workbook_preview_changes`.
+    pub(crate) preview_id: u64,
+}
+
 /// Input for a verified, atomic workbook Save As operation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -212,6 +266,31 @@ impl SessionClosed {
             schema_version: cellrune_interop::INTEROP_SCHEMA_VERSION,
             session_id,
             closed: true,
+        }
+    }
+}
+
+/// Result of discarding a retained preview without changing the live workbook.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreviewDiscarded {
+    /// Interop schema version.
+    pub(crate) schema_version: u32,
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Session-local preview identifier that was discarded.
+    pub(crate) preview_id: u64,
+    /// Always true for a successful discard.
+    pub(crate) discarded: bool,
+}
+
+impl PreviewDiscarded {
+    pub(crate) fn new(session_id: String, preview_id: u64) -> Self {
+        Self {
+            schema_version: cellrune_interop::INTEROP_SCHEMA_VERSION,
+            session_id,
+            preview_id,
+            discarded: true,
         }
     }
 }

@@ -2,6 +2,7 @@
 
 mod calculation;
 mod edit;
+mod preview;
 mod query;
 mod save;
 
@@ -16,6 +17,9 @@ use crate::InteropError;
 
 pub use calculation::{CompletedRecalculation, PreparedRecalculation};
 pub use edit::{PreparedChanges, PreparedChangesV2};
+pub use preview::{
+    CompletedPreview, DEFAULT_PREVIEW_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedPreview,
+};
 pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog};
 pub use save::PreparedWorkbookSave;
 
@@ -25,6 +29,8 @@ pub struct WorkbookSession {
     engine: WorkbookCalculationSession,
     active_calculation: Option<(u64, CancellationToken)>,
     next_calculation_id: u64,
+    published_preview: Option<preview::PublishedPreview>,
+    next_preview_id: u64,
 }
 
 impl WorkbookSession {
@@ -81,6 +87,8 @@ impl WorkbookSession {
             engine,
             active_calculation: None,
             next_calculation_id: 1,
+            published_preview: None,
+            next_preview_id: 1,
         }
     }
 
@@ -89,11 +97,28 @@ impl WorkbookSession {
             calculation.source_revision() == self.engine.workbook().semantic_revision()
         })
     }
+
+    fn invalidate_preview_for_mutation(&mut self) {
+        if let Some(mut preview) = self.published_preview.take() {
+            preview.discard();
+        }
+    }
 }
 
 impl Default for WorkbookSession {
     fn default() -> Self {
         Self::create()
+    }
+}
+
+impl Drop for WorkbookSession {
+    fn drop(&mut self) {
+        if let Some((_, token)) = self.active_calculation.take() {
+            token.cancel();
+        }
+        if let Some(mut preview) = self.published_preview.take() {
+            preview.discard();
+        }
     }
 }
 

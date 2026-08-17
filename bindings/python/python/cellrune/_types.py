@@ -478,3 +478,171 @@ class WriteReport(TypedDict):
     changed_parts: list[str]
     removed_parts: list[str]
     diagnostic_count: int
+
+
+class CalculationLimits(TypedDict):
+    max_formula_tokens: int
+    max_formula_source_bytes: int
+    max_formula_ast_nodes: int
+    max_formula_nesting_depth: int
+    max_dependency_edges: int
+    max_reference_areas: int
+    max_array_cells: int
+    max_text_bytes: int
+    max_function_iterations: int
+    max_let_bindings: int
+    max_lambda_depth: int
+    max_lambda_invocations: int
+
+
+class TransactionCalculationOptions(TypedDict):
+    today_serial: float | None
+    now_serial: float | None
+    arithmetic_semantics: Literal["excel_near_zero", "ieee_754"]
+    financial_solver_semantics: Literal[
+        "excel_iteration_budget", "extended_search"
+    ]
+    limits: CalculationLimits
+
+
+class ProviderIdentity(TypedDict):
+    name: str
+    version: str
+
+
+class PreviewCursor(TypedDict):
+    preview_id: int
+    token: str
+
+
+class TransactionDetailCounts(TypedDict):
+    affected: int
+    evaluated: int
+    preview_results: int
+    preview_issues: int
+    install_results: int
+
+
+class MaterializedResultOrigin(TypedDict):
+    kind: Literal["direct_formula", "legacy_array", "dynamic_spill", "unknown"]
+    anchor: CellReference | None
+    range: str | None
+
+
+class CalculationIssue(TypedDict):
+    code: str
+    message: str
+    detail: str | None
+
+
+class AffectedTransactionDetail(TypedDict):
+    kind: Literal["affected"]
+    cell: CellReference
+    cause: str
+
+
+class EvaluatedTransactionDetail(TypedDict):
+    kind: Literal["evaluated"]
+    cell: CellReference
+
+
+class PreviewResultTransactionDetail(TypedDict):
+    kind: Literal["preview_result"]
+    cell: CellReference
+    previous_origin: MaterializedResultOrigin | None
+    previous_result: CalculationResult | None
+    result_origin: MaterializedResultOrigin | None
+    result: CalculationResult | None
+
+
+class PreviewIssueTransactionDetail(TypedDict):
+    kind: Literal["preview_issue"]
+    cell: CellReference
+    change_kind: Literal["introduced", "resolved", "changed"]
+    previous: CalculationIssue | None
+    current: CalculationIssue | None
+
+
+class InstallResultTransactionDetail(TypedDict):
+    kind: Literal["install_result"]
+    cell: CellReference
+    origin: MaterializedResultOrigin | None
+    result: CalculationResult | None
+
+
+class UnknownTransactionDetail(TypedDict):
+    kind: Literal["unknown"]
+
+
+TransactionDetailItem = (
+    AffectedTransactionDetail
+    | EvaluatedTransactionDetail
+    | PreviewResultTransactionDetail
+    | PreviewIssueTransactionDetail
+    | InstallResultTransactionDetail
+    | UnknownTransactionDetail
+)
+
+
+class TransactionReport(TypedDict):
+    contract_version: int
+    base_revision: int
+    result_revision: int
+    base_fingerprint: WorkbookFingerprint
+    result_fingerprint: WorkbookFingerprint
+    input_sha256: str | None
+    calculator_provider: ProviderIdentity
+    calculation_options: TransactionCalculationOptions
+    base_calculation_reused: bool
+    base_execution_mode: str
+    base_decision_reason: str
+    candidate_requested_mode: Literal["auto", "incremental", "full"]
+    candidate_execution_mode: str
+    candidate_decision_reason: str
+    edit_receipt: EditReceipt
+    impact_coverage: Literal["exact", "conservative_full"]
+    direct_affected_count: int
+    transitive_affected_count: int
+    conservative_affected_count: int
+    base_evaluated_count: int
+    candidate_evaluated_count: int
+    parsed_formula_count: int
+    function_iteration_count: int
+    reference_cell_count: int
+    preview_changed_count: int
+    preview_removed_count: int
+    introduced_issue_count: int
+    resolved_issue_count: int
+    changed_issue_count: int
+    install_delta_count: int
+    installed_calculation_revision: int | None
+    installed_calculation_fingerprint: WorkbookFingerprint | None
+    installed_calculation_options: TransactionCalculationOptions | None
+    install_delta_basis_differs_from_preview_base: bool
+    install_delta_basis_reasons: list[str]
+    detail_counts: TransactionDetailCounts
+
+
+class PreviewChanges(TypedDict):
+    schema_version: int
+    preview_id: int
+    report: TransactionReport
+
+
+class TransactionImpactPage(TypedDict):
+    schema_version: int
+    preview_id: int
+    section: Literal[
+        "affected", "evaluated", "preview_results", "preview_issues", "install_results"
+    ]
+    items: list[TransactionDetailItem]
+    next_cursor: PreviewCursor | None
+    total_count: int
+
+
+class WorkbookTransactionReceipt(TypedDict):
+    schema_version: int
+    edit: EditReceipt
+    calculation_delta: CalculationDelta
+    base_fingerprint: WorkbookFingerprint
+    result_fingerprint: WorkbookFingerprint

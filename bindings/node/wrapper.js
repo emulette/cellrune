@@ -7,6 +7,7 @@ const {
 } = require("./lib/changes.js");
 const {
   CellRuneError,
+  INPUT_DETAIL,
   closedError,
   inputError,
   withErrors,
@@ -21,9 +22,13 @@ const {
   normalizeEditReceiptV2,
   normalizeFunctionCatalog,
   normalizeFunctionUsage,
+  normalizePreviewChanges,
   normalizeRangePage,
   normalizeSummary,
+  normalizeTransactionImpactPage,
+  normalizeTransactionReceipt,
   normalizeWriteReport,
+  parsePreviewJson,
 } = require("./lib/normalization.js");
 const {
   requireFinite,
@@ -159,6 +164,100 @@ class Workbook {
       ),
     );
     return normalizeCalculationDelta(await withErrors(task));
+  }
+
+  async previewChanges(expectedRevision, changes, options = {}) {
+    requireU64BigInt(expectedRevision, "expectedRevision");
+    if (!Array.isArray(changes) || changes.length === 0) {
+      throw inputError("changes must be a non-empty array");
+    }
+    requireOptions(options);
+    requireOptionKeys(options, [
+      "mode",
+      "todaySerial",
+      "nowSerial",
+      "arithmeticSemantics",
+      "financialSolverSemantics",
+    ]);
+    const mode = options.mode ?? "auto";
+    if (!["auto", "incremental", "full"].includes(mode)) {
+      throw inputError("mode must be auto, incremental, or full");
+    }
+    requireOptionalFinite(options.todaySerial, "todaySerial");
+    requireOptionalFinite(options.nowSerial, "nowSerial");
+    requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
+    requireOptionalString(
+      options.financialSolverSemantics,
+      "financialSolverSemantics",
+    );
+    const payload = {
+      changes: changes.map((change, index) =>
+        serializeWorkbookChangeV2(change, index),
+      ),
+    };
+    const task = withSyncErrors(() =>
+      this.#session().previewChanges(
+        expectedRevision.toString(),
+        JSON.stringify(payload),
+        JSON.stringify({
+          mode,
+          today_serial: options.todaySerial ?? null,
+          now_serial: options.nowSerial ?? null,
+          arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
+          financial_solver_semantics:
+            options.financialSolverSemantics ?? "excel_iteration_budget",
+        }),
+      ),
+    );
+    return normalizePreviewChanges(parsePreviewJson(await withErrors(task)));
+  }
+
+  previewChangesPage(previewId, options = {}) {
+    requireU64BigInt(previewId, "previewId");
+    requireOptions(options);
+    requireOptionKeys(options, ["section", "cursor", "limit"]);
+    requireString(options.section, "section");
+    if (
+      ![
+        "affected",
+        "evaluated",
+        "preview_results",
+        "preview_issues",
+        "install_results",
+      ].includes(options.section)
+    ) {
+      throw inputError(INPUT_DETAIL.PREVIEW_SECTION_INVALID);
+    }
+    const limit = options.limit ?? 0;
+    requireNonNegativeInteger(limit, "limit");
+    const cursor = options.cursor ?? null;
+    const cursorJson = cursor === null ? null : JSON.stringify(previewCursorWire(cursor));
+    return normalizeTransactionImpactPage(
+      parsePreviewJson(
+        withSyncErrors(() =>
+          this.#session().previewChangesPage(
+            previewId.toString(),
+            options.section,
+            cursorJson,
+            limit,
+          ),
+        ),
+      ),
+    );
+  }
+
+  commitPreview(previewId) {
+    requireU64BigInt(previewId, "previewId");
+    return normalizeTransactionReceipt(
+      parsePreviewJson(
+        withSyncErrors(() => this.#session().commitPreview(previewId.toString())),
+      ),
+    );
+  }
+
+  discardPreview(previewId) {
+    requireU64BigInt(previewId, "previewId");
+    return withSyncErrors(() => this.#session().discardPreview(previewId.toString()));
   }
 
   applyChanges(expectedRevision, changes) {
@@ -330,6 +429,15 @@ class Workbook {
     requireString(address, "address");
     withSyncErrors(operation);
   }
+}
+
+function previewCursorWire(cursor) {
+  if (cursor === null || typeof cursor !== "object") {
+    throw inputError(INPUT_DETAIL.PREVIEW_CURSOR_INVALID);
+  }
+  requireU64BigInt(cursor.previewId, "cursor.previewId");
+  requireString(cursor.token, "cursor.token");
+  return { preview_id: cursor.previewId.toString(), token: cursor.token };
 }
 
 function functionCatalog() {

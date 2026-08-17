@@ -113,6 +113,7 @@ def recalculate_with_invalid_solver_semantics(
 
 def main() -> None:
     assert_catalog_contract()
+    assert_preview_contract()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")
@@ -441,6 +442,56 @@ def main() -> None:
         table_workbook.to_bytes(invalidate_unavailable=True)
     )
     assert_table_authoring_result(reopened_table_workbook, table_contract)
+
+
+def assert_preview_contract() -> None:
+    workbook = Workbook.create()
+    initial = workbook.apply_changes(
+        0,
+        [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "A1",
+                "value": {"kind": "number", "value": 1.0},
+            },
+            {
+                "kind": "set_formula",
+                "sheet": "Sheet1",
+                "address": "A2",
+                "formula": "=A1+1",
+            },
+        ],
+    )
+    preview = workbook.preview_changes(
+        initial["result_revision"],
+        [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "A1",
+                "value": {"kind": "number", "value": 4.0},
+            }
+        ],
+        today_serial=None,
+        now_serial=None,
+    )
+    assert preview["report"]["base_revision"] == initial["result_revision"]
+    assert preview["report"]["result_revision"] == initial["result_revision"] + 1
+    assert preview["report"]["calculation_options"]["limits"]["max_array_cells"] == 1_000_000
+    page = workbook.preview_changes_page(
+        preview["preview_id"], section="preview_results", limit=1
+    )
+    assert page["preview_id"] == preview["preview_id"]
+    assert page["items"]
+    receipt = workbook.commit_preview(preview["preview_id"])
+    assert receipt["edit"]["result_revision"] == preview["report"]["result_revision"]
+    try:
+        workbook.preview_changes_page(preview["preview_id"], section="affected")
+    except CellRuneError as error:
+        assert error.code == "interop.preview.not_found"
+    else:
+        raise AssertionError("committed preview remained pageable")
 
 
 def assert_table_authoring_result(

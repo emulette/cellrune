@@ -46,6 +46,19 @@ async function main() {
     const report = await calculation;
     assert.equal(report.unavailableCount, 0);
     assert.ok(ticks > 0, "native calculation blocked the JavaScript event loop");
+
+    ticks = 0;
+    const previewTask = workbook.previewChanges(workbook.summary().semanticRevision, [
+      {
+        kind: "setValue",
+        sheet: "Sheet1",
+        address: "A1",
+        value: { kind: "number", value: 2 },
+      },
+    ]);
+    const preview = await previewTask;
+    assert.ok(ticks > 0, "native preview blocked the JavaScript event loop");
+    workbook.discardPreview(preview.previewId);
   } finally {
     clearInterval(timer);
   }

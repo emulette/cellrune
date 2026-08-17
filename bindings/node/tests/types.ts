@@ -6,8 +6,12 @@ import {
   type EditReceipt,
   type EditReceiptV2,
   type FunctionCatalogReport,
+  type PreviewChanges,
+  type PreviewCursor,
   type RangePage,
   type TableSummary,
+  type TransactionImpactPage,
+  type WorkbookTransactionReceipt,
   type WorkbookChange,
   type WorkbookChangeV2,
   Workbook,
@@ -74,6 +78,20 @@ async function check(): Promise<void> {
   const delta: CalculationDelta = await workbook.recalculate({
     mode: "incremental",
   });
+  const preview: PreviewChanges = await workbook.previewChanges(
+    delta.resultRevision,
+    changes,
+  );
+  const previewPage: TransactionImpactPage = workbook.previewChangesPage(
+    preview.previewId,
+    { section: "preview_results", limit: 1 },
+  );
+  const cursor: PreviewCursor | null = previewPage.nextCursor;
+  cursor?.token.toUpperCase();
+  const transactionReceipt: WorkbookTransactionReceipt = workbook.commitPreview(
+    preview.previewId,
+  );
+  transactionReceipt.calculationDelta.resultRevision === preview.report.resultRevision;
   delta.resultRevision === receipt.resultRevision;
   workbook.changesSince(0n);
   const page: RangePage = workbook.readRange("Sheet1", "A1", "B1");

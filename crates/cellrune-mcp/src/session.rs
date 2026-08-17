@@ -192,12 +192,36 @@ fn prune_expired(entries: &mut BTreeMap<String, SessionEntry>, now: Instant, ttl
 mod tests {
     use super::*;
 
+    fn session_with_preview() -> WorkbookSession {
+        let mut workbook = WorkbookSession::create();
+        workbook
+            .set_formula("Sheet1", "A2", "=A1+1", None)
+            .expect("formula must be accepted");
+        workbook
+            .preview_changes(
+                workbook.summary().semantic_revision,
+                cellrune_interop::EditBatchV2Dto {
+                    changes: vec![cellrune_interop::WorkbookChangeV2Dto::V1(
+                        cellrune_interop::WorkbookChangeDto::SetValue {
+                            sheet: "Sheet1".to_owned(),
+                            address: "A1".to_owned(),
+                            value: cellrune_interop::WritableCellValueDto::Number { value: 2.0 },
+                        },
+                    )],
+                },
+                cellrune_interop::RecalculationModeDto::Auto,
+                cellrune_interop::CalculationOptionsDto::default(),
+            )
+            .expect("preview must publish");
+        workbook
+    }
+
     #[test]
     fn expired_sessions_return_a_stable_error() {
         let cache = SessionCache::new(2, Duration::from_secs(10));
         let start = Instant::now();
         let handle = cache
-            .prepare_insert_at(WorkbookSession::create(), start)
+            .prepare_insert_at(session_with_preview(), start)
             .expect("session must be inserted");
         let id = handle.id().to_owned();
         let handle = handle.commit();
@@ -215,7 +239,7 @@ mod tests {
         let cache = SessionCache::new(2, Duration::from_secs(60));
         let start = Instant::now();
         let first = cache
-            .prepare_insert_at(WorkbookSession::create(), start)
+            .prepare_insert_at(session_with_preview(), start)
             .expect("first session must be inserted");
         let first_id = first.id().to_owned();
         let first = first.commit();

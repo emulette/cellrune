@@ -6,11 +6,15 @@ from cellrune import (
     EditReceipt,
     EditReceiptV2,
     FunctionCatalogReport,
+    PreviewChanges,
+    PreviewCursor,
     RangePage,
     TableSummary,
+    TransactionImpactPage,
     Workbook,
     WorkbookChange,
     WorkbookChangeV2,
+    WorkbookTransactionReceipt,
     function_catalog,
 )
 
@@ -61,6 +65,17 @@ def check() -> None:
         arithmetic_semantics="ieee_754",
         financial_solver_semantics="extended_search",
     )
+    preview: PreviewChanges = workbook.preview_changes(delta["result_revision"], changes)
+    preview_page: TransactionImpactPage = workbook.preview_changes_page(
+        preview["preview_id"], section="preview_results", limit=1
+    )
+    cursor: PreviewCursor | None = preview_page["next_cursor"]
+    if cursor is not None:
+        cursor["token"].upper()
+    transaction_receipt: WorkbookTransactionReceipt = workbook.commit_preview(
+        preview["preview_id"]
+    )
+    assert transaction_receipt["calculation_delta"]["result_revision"] == preview["report"]["result_revision"]
     assert delta["result_revision"] == receipt["result_revision"]
     workbook.changes_since(0)
     page: RangePage = workbook.read_range("Sheet1", "A1", "B1")

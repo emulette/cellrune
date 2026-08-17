@@ -3,11 +3,13 @@ use std::sync::Arc;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, RangeRequestDto,
-    RecalculationModeDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
+    RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
+use serde::Deserialize;
 
 use crate::conversion::{
     NativeCalculationDeltaPage, NativeEditReceipt, NativeEditReceiptV2, NativeFunctionUsageReport,
@@ -15,7 +17,7 @@ use crate::conversion::{
 };
 use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
-use crate::task::{BytesTask, CalculateTask, RecalculateTask, SavePathTask};
+use crate::task::{BytesTask, CalculateTask, PreviewTask, RecalculateTask, SavePathTask};
 
 #[napi]
 pub struct NativeWorkbook {
@@ -122,6 +124,71 @@ impl NativeWorkbook {
                 financial_solver_semantics.as_deref(),
             )?,
         }))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn preview_changes(
+        &self,
+        expected_revision: String,
+        batch_json: String,
+        options_json: String,
+    ) -> napi::Result<AsyncTask<PreviewTask>> {
+        let expected_revision = parse_u64(&expected_revision)?;
+        let batch = serde_json::from_str::<EditBatchV2Dto>(&batch_json)
+            .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
+        let options = serde_json::from_str::<PreviewOptionsInput>(&options_json)
+            .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
+        Ok(AsyncTask::new(PreviewTask {
+            session: Arc::clone(&self.session),
+            expected_revision,
+            batch,
+            mode: options.mode,
+            options: options.calculation_options(),
+        }))
+    }
+
+    #[napi(ts_return_type = "string")]
+    pub fn preview_changes_page(
+        &self,
+        preview_id: String,
+        section: String,
+        cursor_json: Option<String>,
+        limit: f64,
+    ) -> napi::Result<String> {
+        let preview_id = parse_u64(&preview_id)?;
+        let cursor = cursor_json
+            .map(|value| {
+                serde_json::from_str::<PreviewCursorDto>(&value)
+                    .map_err(|_| napi_error(InteropError::preview_cursor_invalid()))
+            })
+            .transpose()?;
+        let page = self
+            .lock()?
+            .preview_changes_page(
+                preview_id,
+                preview_section(&section)?,
+                cursor,
+                limit_from_number(limit)?,
+            )
+            .map_err(napi_error)?;
+        crate::preview_json::serialize(&page)
+    }
+
+    #[napi(ts_return_type = "string")]
+    pub fn commit_preview(&self, preview_id: String) -> napi::Result<String> {
+        let preview_id = parse_u64(&preview_id)?;
+        let receipt = self
+            .lock()?
+            .commit_preview(preview_id)
+            .map_err(napi_error)?;
+        crate::preview_json::serialize(&receipt)
+    }
+
+    #[napi]
+    pub fn discard_preview(&self, preview_id: String) -> napi::Result<()> {
+        self.lock()?
+            .discard_preview(parse_u64(&preview_id)?)
+            .map_err(napi_error)
     }
 
     #[napi]
@@ -264,6 +331,30 @@ impl NativeWorkbook {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreviewOptionsInput {
+    #[serde(default)]
+    mode: RecalculationModeDto,
+    today_serial: Option<f64>,
+    now_serial: Option<f64>,
+    #[serde(default)]
+    arithmetic_semantics: ArithmeticSemanticsDto,
+    #[serde(default)]
+    financial_solver_semantics: FinancialSolverSemanticsDto,
+}
+
+impl PreviewOptionsInput {
+    const fn calculation_options(&self) -> CalculationOptionsDto {
+        CalculationOptionsDto {
+            today_serial: self.today_serial,
+            now_serial: self.now_serial,
+            arithmetic_semantics: self.arithmetic_semantics,
+            financial_solver_semantics: self.financial_solver_semantics,
+        }
+    }
+}
+
 impl NativeWorkbook {
     pub(crate) fn create() -> Self {
         Self::new(WorkbookSession::create())
@@ -317,6 +408,17 @@ fn recalculation_mode(value: &str) -> napi::Result<RecalculationModeDto> {
         "incremental" => Ok(RecalculationModeDto::Incremental),
         "full" => Ok(RecalculationModeDto::Full),
         _ => Err(napi_error(InteropError::invalid_recalculation_mode())),
+    }
+}
+
+fn preview_section(value: &str) -> napi::Result<TransactionDetailSectionDto> {
+    match value {
+        "affected" => Ok(TransactionDetailSectionDto::Affected),
+        "evaluated" => Ok(TransactionDetailSectionDto::Evaluated),
+        "preview_results" => Ok(TransactionDetailSectionDto::PreviewResults),
+        "preview_issues" => Ok(TransactionDetailSectionDto::PreviewIssues),
+        "install_results" => Ok(TransactionDetailSectionDto::InstallResults),
+        _ => Err(napi_error(InteropError::invalid_preview_section())),
     }
 }
 

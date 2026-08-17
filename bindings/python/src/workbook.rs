@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, RangeRequestDto,
-    RecalculationModeDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
+    RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -265,6 +266,104 @@ impl Workbook {
         conversion::edit_receipt_v2(py, &receipt)
     }
 
+    #[pyo3(signature = (expected_revision, changes, **options))]
+    pub fn preview_changes<'py>(
+        &self,
+        py: Python<'py>,
+        expected_revision: &Bound<'_, PyAny>,
+        changes: &Bound<'_, PyAny>,
+        options: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let expected_revision =
+            revision_from_python(expected_revision).map_err(|error| into_py_error(py, error))?;
+        let batch = edit_batch_v2_from_python(py, changes)?;
+        let options = preview_options_from_python(py, options)?;
+        let operation = self
+            .session
+            .cancellable_operation()
+            .map_err(|error| into_py_error(py, error))?;
+        let cancellation = operation.token().clone();
+        let prepared = py.detach(move || {
+            self.lock_interop_wait()?
+                .prepare_preview_changes_cancellable(
+                    expected_revision,
+                    batch,
+                    options.mode,
+                    options.calculation_options,
+                    &cancellation,
+                )
+        });
+        let prepared = prepared.map_err(|error| into_py_error(py, error))?;
+        let request_id = prepared.request_id();
+        let completed = match py.detach(move || prepared.run()) {
+            Ok(completed) => completed,
+            Err(error) => {
+                let cleanup = py.detach(|| {
+                    self.lock_interop_wait()
+                        .map(|mut session| session.abandon_recalculation(request_id))
+                });
+                return Err(into_py_error(py, cleanup.err().unwrap_or(error)));
+            }
+        };
+        let preview = match conversion::preview_changes(py, completed.summary()) {
+            Ok(preview) => preview,
+            Err(error) => {
+                let cleanup = py.detach(|| {
+                    self.lock_interop_wait()
+                        .map(|mut session| session.abandon_recalculation(request_id))
+                });
+                return Err(cleanup
+                    .err()
+                    .map_or(error, |cleanup| into_py_error(py, cleanup)));
+            }
+        };
+        py.detach(move || self.lock_interop_wait()?.publish_preview(completed))
+            .map_err(|error| into_py_error(py, error))?;
+        drop(operation);
+        Ok(preview)
+    }
+
+    #[pyo3(signature = (preview_id, *, section, cursor=None, limit=None))]
+    pub fn preview_changes_page<'py>(
+        &self,
+        py: Python<'py>,
+        preview_id: &Bound<'_, PyAny>,
+        section: &str,
+        cursor: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let preview_id =
+            revision_from_python(preview_id).map_err(|error| into_py_error(py, error))?;
+        let section = preview_section(section).map_err(|error| into_py_error(py, error))?;
+        let cursor = preview_cursor_from_python(py, cursor)?;
+        let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
+        let page = py.detach(move || {
+            self.lock_interop_wait()?
+                .preview_changes_page(preview_id, section, cursor, limit)
+        });
+        let page = page.map_err(|error| into_py_error(py, error))?;
+        conversion::transaction_impact_page(py, &page)
+    }
+
+    pub fn commit_preview<'py>(
+        &self,
+        py: Python<'py>,
+        preview_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let preview_id =
+            revision_from_python(preview_id).map_err(|error| into_py_error(py, error))?;
+        let receipt = py.detach(move || self.lock_interop_wait()?.commit_preview(preview_id));
+        let receipt = receipt.map_err(|error| into_py_error(py, error))?;
+        conversion::transaction_receipt(py, &receipt)
+    }
+
+    pub fn discard_preview(&self, py: Python<'_>, preview_id: &Bound<'_, PyAny>) -> PyResult<()> {
+        let preview_id =
+            revision_from_python(preview_id).map_err(|error| into_py_error(py, error))?;
+        py.detach(move || self.lock_interop_wait()?.discard_preview(preview_id))
+            .map_err(|error| into_py_error(py, error))
+    }
+
     #[pyo3(signature = (cursor=None, *, limit=None))]
     pub fn changes_since<'py>(
         &self,
@@ -441,6 +540,11 @@ impl Workbook {
     }
 }
 
+struct PreviewOptionsInput {
+    mode: RecalculationModeDto,
+    calculation_options: CalculationOptionsDto,
+}
+
 fn page_offset_from_python(value: Option<&Bound<'_, PyAny>>) -> Result<u64, InteropError> {
     let Some(value) = value else {
         return Ok(0);
@@ -502,6 +606,120 @@ fn edit_batch_v2_from_python(
     let serialized = edit_batch_json_from_python(py, changes)?;
     serde_json::from_str(&serialized)
         .map_err(|error| into_py_error(py, InteropError::invalid_change_payload(error.to_string())))
+}
+
+fn preview_cursor_from_python(
+    py: Python<'_>,
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<PreviewCursorDto>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let serialized = py
+        .import("json")?
+        .call_method1("dumps", (value,))?
+        .extract::<String>()?;
+    serde_json::from_str(&serialized)
+        .map(Some)
+        .map_err(|_| into_py_error(py, InteropError::preview_cursor_invalid()))
+}
+
+fn preview_options_from_python(
+    py: Python<'_>,
+    options: Option<&Bound<'_, PyDict>>,
+) -> PyResult<PreviewOptionsInput> {
+    let Some(options) = options else {
+        return Ok(PreviewOptionsInput {
+            mode: RecalculationModeDto::Auto,
+            calculation_options: CalculationOptionsDto::default(),
+        });
+    };
+    const ALLOWED: &[&str] = &[
+        "mode",
+        "today_serial",
+        "now_serial",
+        "arithmetic_semantics",
+        "financial_solver_semantics",
+    ];
+    for key in options.keys().iter() {
+        let key = key
+            .extract::<String>()
+            .map_err(|_| into_py_error(py, InteropError::invalid_change_payload(String::new())))?;
+        if !ALLOWED.contains(&key.as_str()) {
+            return Err(into_py_error(py, InteropError::invalid_change_payload(key)));
+        }
+    }
+    let mode = option_text(
+        py,
+        options,
+        "mode",
+        "auto",
+        InteropError::invalid_recalculation_mode,
+    )?;
+    let arithmetic_semantics = option_text(
+        py,
+        options,
+        "arithmetic_semantics",
+        "excel_near_zero",
+        InteropError::invalid_arithmetic_semantics,
+    )?;
+    let financial_solver_semantics = option_text(
+        py,
+        options,
+        "financial_solver_semantics",
+        "excel_iteration_budget",
+        InteropError::invalid_financial_solver_semantics,
+    )?;
+    let today_serial = options.get_item("today_serial")?;
+    let now_serial = options.get_item("now_serial")?;
+    Ok(PreviewOptionsInput {
+        mode: parse_recalculation_mode(&mode).map_err(|error| into_py_error(py, error))?,
+        calculation_options: CalculationOptionsDto {
+            today_serial: optional_number_from_python(
+                today_serial.as_ref().filter(|value| !value.is_none()),
+            )
+            .map_err(|error| into_py_error(py, error))?,
+            now_serial: optional_number_from_python(
+                now_serial.as_ref().filter(|value| !value.is_none()),
+            )
+            .map_err(|error| into_py_error(py, error))?,
+            arithmetic_semantics: parse_arithmetic_semantics(&arithmetic_semantics)
+                .map_err(|error| into_py_error(py, error))?,
+            financial_solver_semantics: parse_financial_solver_semantics(
+                &financial_solver_semantics,
+            )
+            .map_err(|error| into_py_error(py, error))?,
+        },
+    })
+}
+
+fn option_text(
+    py: Python<'_>,
+    options: &Bound<'_, PyDict>,
+    key: &str,
+    default: &str,
+    invalid: fn() -> InteropError,
+) -> PyResult<String> {
+    options
+        .get_item(key)?
+        .map(|value| {
+            value
+                .extract::<String>()
+                .map_err(|_| into_py_error(py, invalid()))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or_else(|| default.to_owned()))
+}
+
+fn preview_section(value: &str) -> Result<TransactionDetailSectionDto, InteropError> {
+    match value {
+        "affected" => Ok(TransactionDetailSectionDto::Affected),
+        "evaluated" => Ok(TransactionDetailSectionDto::Evaluated),
+        "preview_results" => Ok(TransactionDetailSectionDto::PreviewResults),
+        "preview_issues" => Ok(TransactionDetailSectionDto::PreviewIssues),
+        "install_results" => Ok(TransactionDetailSectionDto::InstallResults),
+        _ => Err(InteropError::invalid_preview_section()),
+    }
 }
 
 fn edit_batch_json_from_python(py: Python<'_>, changes: &Bound<'_, PyAny>) -> PyResult<String> {

@@ -9,6 +9,16 @@ const ERROR = Object.freeze({
     "native binding returned an invalid typed value",
   ],
 });
+const PROTOCOL_DETAIL = Object.freeze({
+  PREVIEW_PAYLOAD_MALFORMED: "native preview payload is malformed",
+  PREVIEW_PAYLOAD_JSON_INVALID: "native preview payload is invalid JSON",
+  TRANSACTION_DETAIL_KIND_UNKNOWN: "transaction detail kind is unknown",
+  TRANSACTION_RESULT_MALFORMED: "transaction calculation result is malformed",
+});
+const INPUT_DETAIL = Object.freeze({
+  PREVIEW_SECTION_INVALID: "section is not a transaction detail section",
+  PREVIEW_CURSOR_INVALID: "cursor must be a preview cursor object",
+});
 
 class CellRuneError extends Error {
   constructor(message, code, kind, details = {}) {
@@ -87,6 +97,8 @@ function protocolError(detail) {
 
 module.exports = {
   CellRuneError,
+  INPUT_DETAIL,
+  PROTOCOL_DETAIL,
   closedError,
   inputError,
   protocolError,

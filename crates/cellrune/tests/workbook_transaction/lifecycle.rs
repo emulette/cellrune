@@ -313,3 +313,55 @@ fn cancellation_is_retryable_while_stale_and_discard_are_terminal() {
         SessionErrorCode::TransactionConsumed
     );
 }
+
+#[test]
+fn transaction_basis_validation_is_retryable_on_cancellation_and_terminal_on_stale() {
+    let mut session = calculated_session();
+    let mut completed = session
+        .prepare_transaction(
+            session.workbook().semantic_revision(),
+            EditBatch::new([set_value("A1", 11.0)]),
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("transaction prepares")
+        .run()
+        .expect("transaction calculates");
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+
+    assert_eq!(
+        session
+            .validate_transaction_cancellable(&mut completed, &cancelled)
+            .expect_err("cancelled validation preserves the completed transaction")
+            .code(),
+        SessionErrorCode::Cancelled
+    );
+    assert!(
+        completed
+            .page(TransactionDetailSection::Affected, None, 1)
+            .is_ok()
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([set_value("A1", 12.0)]),
+        )
+        .expect("intervening edit installs");
+    assert_eq!(
+        session
+            .validate_transaction(&mut completed)
+            .expect_err("changed live identity makes publication stale")
+            .code(),
+        SessionErrorCode::StaleResult
+    );
+    assert_eq!(
+        completed
+            .page(TransactionDetailSection::Affected, None, 1)
+            .expect_err("stale validation releases retained details")
+            .code(),
+        SessionErrorCode::TransactionConsumed
+    );
+}

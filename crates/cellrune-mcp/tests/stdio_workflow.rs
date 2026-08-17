@@ -210,7 +210,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 16);
     assert!(
         tools
             .iter()
@@ -221,6 +221,17 @@ fn stdio_workflow_matches_the_rust_interop_session() {
             .iter()
             .all(|tool| tool["name"].as_str().unwrap_or_default() != "SUM")
     );
+    for name in [
+        "workbook_preview_changes",
+        "workbook_preview_changes_page",
+        "workbook_commit_preview",
+        "workbook_discard_preview",
+    ] {
+        assert!(
+            tools.iter().any(|tool| tool["name"] == name),
+            "{name} must be exposed through stdio"
+        );
+    }
 
     let created = successful_tool(mcp.call_tool("workbook_create", json!({})));
     let session_id = created["session_id"]
@@ -832,6 +843,173 @@ fn resource_protocol_errors_and_byte_bounded_pagination_are_stdio_visible() {
     );
     assert_eq!(missing["error"]["code"], -32_002);
     assert_eq!(missing["error"]["data"]["code"], "mcp.session.not_found");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn retained_preview_tools_are_thin_stdio_lifecycle_adapters() {
+    let root = TestDirectory::new("preview-workflow-root");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+
+    let created = successful_tool(mcp.call_tool("workbook_create", json!({})));
+    let session_id = created["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "number", "value": 1.0}},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "A2", "formula": "=A1+1"}
+            ]
+        }),
+    ));
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "auto"}),
+    ));
+
+    let preview = successful_tool(mcp.call_tool(
+        "workbook_preview_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "mode": "auto",
+            "changes": [{"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "number", "value": 4.0}}]
+        }),
+    ));
+    let preview_id = preview["preview_id"]
+        .as_u64()
+        .expect("preview must expose its opaque numeric ID");
+    assert_eq!(preview["report"]["base_revision"], 1);
+    assert_eq!(preview["report"]["result_revision"], 2);
+    assert!(preview["report"]["calculation_options"]["limits"].is_object());
+
+    let no_op = successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [
+                {"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "number", "value": 1.0}}
+            ]
+        }),
+    ));
+    assert_eq!(no_op["base_revision"], 1);
+    assert_eq!(no_op["result_revision"], 1);
+
+    successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({
+            "session_id": session_id,
+            "sheet": "Sheet1",
+            "start": "A1",
+            "end": "A2",
+            "offset": 0,
+            "limit": 10
+        }),
+    ));
+    successful_tool(mcp.call_tool("workbook_function_usage", json!({"session_id": session_id})));
+    successful_tool(mcp.call_tool(
+        "workbook_changes_since",
+        json!({"session_id": session_id, "cursor": 0, "limit": 10}),
+    ));
+    let read_only_output = root.path.join("preview-read-only-save.xlsx");
+    successful_tool(mcp.call_tool(
+        "workbook_save_as",
+        json!({
+            "session_id": session_id,
+            "path": read_only_output,
+            "invalidate_unavailable": false,
+            "replace_existing": false
+        }),
+    ));
+
+    let first_page = successful_tool(mcp.call_tool(
+        "workbook_preview_changes_page",
+        json!({
+            "session_id": session_id,
+            "preview_id": preview_id,
+            "section": "preview_results",
+            "limit": 1
+        }),
+    ));
+    assert_eq!(first_page["preview_id"], preview_id);
+    assert_eq!(first_page["section"], "preview_results");
+    assert!(
+        first_page["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
+    if let Some(cursor) = first_page["next_cursor"].as_object() {
+        let wrong_section = failed_tool(mcp.call_tool(
+            "workbook_preview_changes_page",
+            json!({
+                "session_id": session_id,
+                "preview_id": preview_id,
+                "section": "affected",
+                "cursor": cursor,
+                "limit": 1
+            }),
+        ));
+        assert_eq!(wrong_section["code"], "session.transaction_cursor_invalid");
+
+        let second_page = successful_tool(mcp.call_tool(
+            "workbook_preview_changes_page",
+            json!({
+                "session_id": session_id,
+                "preview_id": preview_id,
+                "section": "preview_results",
+                "cursor": cursor,
+                "limit": 1
+            }),
+        ));
+        assert_ne!(second_page["items"], first_page["items"]);
+    }
+
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_commit_preview",
+        json!({"session_id": session_id, "preview_id": preview_id}),
+    ));
+    assert_eq!(receipt["edit"]["result_revision"], 2);
+    let consumed = failed_tool(mcp.call_tool(
+        "workbook_commit_preview",
+        json!({"session_id": session_id, "preview_id": preview_id}),
+    ));
+    assert_eq!(consumed["code"], "interop.preview.not_found");
+
+    let disposable = successful_tool(mcp.call_tool(
+        "workbook_preview_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 2,
+            "changes": [{"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "number", "value": 5.0}}]
+        }),
+    ));
+    let disposable_id = disposable["preview_id"]
+        .as_u64()
+        .expect("replacement preview must expose an ID");
+    let discarded = successful_tool(mcp.call_tool(
+        "workbook_discard_preview",
+        json!({"session_id": session_id, "preview_id": disposable_id}),
+    ));
+    assert_eq!(discarded["discarded"], true);
+    let absent = failed_tool(mcp.call_tool(
+        "workbook_preview_changes_page",
+        json!({
+            "session_id": session_id,
+            "preview_id": disposable_id,
+            "section": "affected"
+        }),
+    ));
+    assert_eq!(absent["code"], "interop.preview.not_found");
 
     let (status, _, _) = mcp.finish();
     assert!(status.success());

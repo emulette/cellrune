@@ -419,6 +419,160 @@ export interface WriteReport {
   readonly diagnosticCount: number;
 }
 
+export type TransactionDetailSection =
+  | "affected"
+  | "evaluated"
+  | "preview_results"
+  | "preview_issues"
+  | "install_results";
+
+export interface PreviewCursor {
+  readonly previewId: bigint;
+  readonly token: string;
+}
+
+export interface CalculationLimits {
+  readonly maxFormulaTokens: number;
+  readonly maxFormulaSourceBytes: number;
+  readonly maxFormulaAstNodes: number;
+  readonly maxFormulaNestingDepth: number;
+  readonly maxDependencyEdges: number;
+  readonly maxReferenceAreas: number;
+  readonly maxArrayCells: number;
+  readonly maxTextBytes: number;
+  readonly maxFunctionIterations: number;
+  readonly maxLetBindings: number;
+  readonly maxLambdaDepth: number;
+  readonly maxLambdaInvocations: number;
+}
+
+export interface TransactionCalculationOptions {
+  readonly todaySerial: number | null;
+  readonly nowSerial: number | null;
+  readonly arithmeticSemantics: "excel_near_zero" | "ieee_754";
+  readonly financialSolverSemantics:
+    | "excel_iteration_budget"
+    | "extended_search";
+  readonly limits: CalculationLimits;
+}
+
+export interface ProviderIdentity {
+  readonly name: string;
+  readonly version: string;
+}
+
+export interface TransactionDetailCounts {
+  readonly affected: number;
+  readonly evaluated: number;
+  readonly previewResults: number;
+  readonly previewIssues: number;
+  readonly installResults: number;
+}
+
+export interface MaterializedResultOrigin {
+  readonly kind:
+    | "direct_formula"
+    | "legacy_array"
+    | "dynamic_spill"
+    | "unknown";
+  readonly anchor: CellReference | null;
+  readonly range: string | null;
+}
+
+export interface CalculationIssue {
+  readonly code: string;
+  readonly message: string;
+  readonly detail: string | null;
+}
+
+export type TransactionDetailItem =
+  | { readonly kind: "affected"; readonly cell: CellReference; readonly cause: string }
+  | { readonly kind: "evaluated"; readonly cell: CellReference }
+  | {
+      readonly kind: "preview_result";
+      readonly cell: CellReference;
+      readonly previousOrigin: MaterializedResultOrigin | null;
+      readonly previousResult: CalculationResult | null;
+      readonly resultOrigin: MaterializedResultOrigin | null;
+      readonly result: CalculationResult | null;
+    }
+  | {
+      readonly kind: "preview_issue";
+      readonly cell: CellReference;
+      readonly changeKind: "introduced" | "resolved" | "changed";
+      readonly previous: CalculationIssue | null;
+      readonly current: CalculationIssue | null;
+    }
+  | {
+      readonly kind: "install_result";
+      readonly cell: CellReference;
+      readonly origin: MaterializedResultOrigin | null;
+      readonly result: CalculationResult | null;
+    }
+  | { readonly kind: "unknown" };
+
+export interface TransactionReport {
+  readonly contractVersion: number;
+  readonly baseRevision: bigint;
+  readonly resultRevision: bigint;
+  readonly baseFingerprint: WorkbookFingerprint;
+  readonly resultFingerprint: WorkbookFingerprint;
+  readonly inputSha256: string | null;
+  readonly calculatorProvider: ProviderIdentity;
+  readonly calculationOptions: TransactionCalculationOptions;
+  readonly baseCalculationReused: boolean;
+  readonly baseExecutionMode: string;
+  readonly baseDecisionReason: string;
+  readonly candidateRequestedMode: RecalculationMode;
+  readonly candidateExecutionMode: string;
+  readonly candidateDecisionReason: string;
+  readonly editReceipt: EditReceipt;
+  readonly impactCoverage: "exact" | "conservative_full";
+  readonly directAffectedCount: number;
+  readonly transitiveAffectedCount: number;
+  readonly conservativeAffectedCount: number;
+  readonly baseEvaluatedCount: number;
+  readonly candidateEvaluatedCount: number;
+  readonly parsedFormulaCount: number;
+  readonly functionIterationCount: number;
+  readonly referenceCellCount: number;
+  readonly previewChangedCount: number;
+  readonly previewRemovedCount: number;
+  readonly introducedIssueCount: number;
+  readonly resolvedIssueCount: number;
+  readonly changedIssueCount: number;
+  readonly installDeltaCount: number;
+  readonly installedCalculationRevision: bigint | null;
+  readonly installedCalculationFingerprint: WorkbookFingerprint | null;
+  readonly installedCalculationOptions: TransactionCalculationOptions | null;
+  readonly installDeltaBasisDiffersFromPreviewBase: boolean;
+  readonly installDeltaBasisReasons: readonly string[];
+  readonly detailCounts: TransactionDetailCounts;
+}
+
+export interface PreviewChanges {
+  readonly schemaVersion: number;
+  readonly previewId: bigint;
+  readonly report: TransactionReport;
+}
+
+export interface TransactionImpactPage {
+  readonly schemaVersion: number;
+  readonly previewId: bigint;
+  readonly section: TransactionDetailSection;
+  readonly items: readonly TransactionDetailItem[];
+  readonly nextCursor: PreviewCursor | null;
+  readonly totalCount: number;
+}
+
+export interface WorkbookTransactionReceipt {
+  readonly schemaVersion: number;
+  readonly edit: EditReceipt;
+  readonly calculationDelta: CalculationDelta;
+  readonly baseFingerprint: WorkbookFingerprint;
+  readonly resultFingerprint: WorkbookFingerprint;
+}
+
 export class Workbook {
   private constructor();
   static create(): Workbook;
@@ -440,6 +594,21 @@ export class Workbook {
   functionUsage(): FunctionUsageReport;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;
   recalculate(options?: RecalculationOptions): Promise<CalculationDelta>;
+  previewChanges(
+    expectedRevision: bigint,
+    changes: readonly WorkbookChangeV2[],
+    options?: RecalculationOptions,
+  ): Promise<PreviewChanges>;
+  previewChangesPage(
+    previewId: bigint,
+    options: {
+      readonly section: TransactionDetailSection;
+      readonly cursor?: PreviewCursor | null;
+      readonly limit?: number;
+    },
+  ): TransactionImpactPage;
+  commitPreview(previewId: bigint): WorkbookTransactionReceipt;
+  discardPreview(previewId: bigint): void;
   applyChanges(
     expectedRevision: bigint,
     changes: readonly WorkbookChange[],

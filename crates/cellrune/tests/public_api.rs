@@ -315,6 +315,17 @@ const _FROZEN_INSTALL_TRANSACTION: fn(
 ) -> Result<WorkbookTransactionReceipt, SessionError> =
     WorkbookCalculationSession::install_transaction;
 
+const _FROZEN_VALIDATE_TRANSACTION: fn(
+    &WorkbookCalculationSession,
+    &mut CompletedWorkbookTransaction,
+) -> Result<(), SessionError> = WorkbookCalculationSession::validate_transaction;
+
+const _FROZEN_VALIDATE_TRANSACTION_CANCELLABLE: fn(
+    &WorkbookCalculationSession,
+    &mut CompletedWorkbookTransaction,
+    &CancellationToken,
+) -> Result<(), SessionError> = WorkbookCalculationSession::validate_transaction_cancellable;
+
 const _FROZEN_INSTALL_TRANSACTION_CANCELLABLE: fn(
     &mut WorkbookCalculationSession,
     &mut CompletedWorkbookTransaction,

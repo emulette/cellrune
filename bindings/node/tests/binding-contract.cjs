@@ -41,6 +41,7 @@ function assertCatalogContract() {
 
 async function main() {
   assertCatalogContract();
+  await assertPreviewContract();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(
@@ -383,6 +384,48 @@ async function main() {
     await tableWorkbook.toBytes({ invalidateUnavailable: true }),
   );
   assertTableAuthoringResult(reopenedTableWorkbook, tableContract);
+}
+
+async function assertPreviewContract() {
+  const workbook = Workbook.create();
+  const initial = workbook.applyChanges(0n, [
+    {
+      kind: "setValue",
+      sheet: "Sheet1",
+      address: "A1",
+      value: { kind: "number", value: 1 },
+    },
+    {
+      kind: "setFormula",
+      sheet: "Sheet1",
+      address: "A2",
+      formula: "=A1+1",
+    },
+  ]);
+  const preview = await workbook.previewChanges(initial.resultRevision, [
+    {
+      kind: "setValue",
+      sheet: "Sheet1",
+      address: "A1",
+      value: { kind: "number", value: 4 },
+    },
+  ]);
+  assert.equal(preview.report.baseRevision, initial.resultRevision);
+  assert.equal(preview.report.resultRevision, initial.resultRevision + 1n);
+  assert.equal(preview.report.calculationOptions.limits.maxArrayCells, 1_000_000);
+  const page = workbook.previewChangesPage(preview.previewId, {
+    section: "preview_results",
+    limit: 1,
+  });
+  assert.equal(page.previewId, preview.previewId);
+  assert.ok(page.items.length > 0);
+  const receipt = workbook.commitPreview(preview.previewId);
+  assert.equal(receipt.edit.resultRevision, preview.report.resultRevision);
+  assert.throws(
+    () => workbook.previewChangesPage(preview.previewId, { section: "affected" }),
+    (error) =>
+      error instanceof CellRuneError && error.code === "interop.preview.not_found",
+  );
 }
 
 function assertTableAuthoringResult(workbook, contract) {

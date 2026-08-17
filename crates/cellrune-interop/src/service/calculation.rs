@@ -97,6 +97,7 @@ impl WorkbookSession {
         self.require_active_recalculation(completed.request_id)?;
         self.active_calculation = None;
         let delta = self.engine.install(completed.completed)?;
+        self.invalidate_preview_for_mutation();
         Ok(calculation_delta(self.engine.workbook(), &delta))
     }
 
@@ -188,12 +189,14 @@ impl WorkbookSession {
         Ok(calculation_delta_page(self.engine.workbook(), &page))
     }
 
-    fn require_active_recalculation(&self, request_id: u64) -> Result<(), InteropError> {
+    pub(super) fn require_active_recalculation(&self, request_id: u64) -> Result<(), InteropError> {
         let active = self
             .active_calculation
             .as_ref()
-            .map(|(active_request_id, _)| *active_request_id);
-        if active == Some(request_id) {
+            .map(|(active_request_id, token)| (*active_request_id, token));
+        if active.is_some_and(|(active_request_id, token)| {
+            active_request_id == request_id && !token.is_cancelled()
+        }) {
             Ok(())
         } else {
             Err(InteropError::calculation_cancelled())

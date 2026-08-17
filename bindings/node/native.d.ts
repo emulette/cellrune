@@ -9,6 +9,10 @@ export declare class NativeWorkbook {
   functionUsage(): NativeFunctionUsageReport
   calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationReport>
   recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null): Promise<NativeCalculationDelta>
+  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string): Promise<string>
+  previewChangesPage(previewId: string, section: string, cursorJson: string | undefined | null, limit: number): string
+  commitPreview(previewId: string): string
+  discardPreview(previewId: string): void
   applyChanges(expectedRevision: string, batchJson: string): NativeEditReceipt
   applyChangesV2(expectedRevision: string, batchJson: string): NativeEditReceiptV2
   changesSince(cursor: string, limit: number): NativeCalculationDeltaPage

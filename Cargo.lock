@@ -264,6 +264,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "serde",
  "serde_json",
 ]
 
@@ -275,6 +276,7 @@ dependencies = [
  "cellrune-interop",
  "pyo3",
  "pyo3-build-config",
+ "serde",
  "serde_json",
 ]
 

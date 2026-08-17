@@ -37,6 +37,13 @@ const MESSAGE_NUMBER_INVALID: &str =
 const MESSAGE_ARCHIVE_LIMIT_INVALID: &str = "archive byte limit must be greater than zero";
 const MESSAGE_DEFINED_NAME_SHEET_IDENTITY: &str =
     "defined-name analysis returned an unknown sheet identity";
+const MESSAGE_PREVIEW_NOT_FOUND: &str = "workbook preview is not published in this session";
+const MESSAGE_PREVIEW_CURSOR_INVALID: &str = "preview cursor does not belong to this preview";
+const MESSAGE_PREVIEW_RESPONSE_LIMIT: &str =
+    "preview response cannot contain one complete detail item within the byte limit";
+const MESSAGE_PREVIEW_ID_EXHAUSTED: &str = "workbook preview identifier is exhausted";
+const MESSAGE_PREVIEW_SECTION_INVALID: &str = "preview detail section is not recognized";
+const MESSAGE_SERIALIZATION: &str = "interop DTO serialization failed";
 
 /// Broad error boundary used by all language bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -258,6 +265,42 @@ impl InteropError {
         )
     }
 
+    pub(crate) fn preview_not_found() -> Self {
+        Self::state("interop.preview.not_found", MESSAGE_PREVIEW_NOT_FOUND)
+    }
+
+    /// Creates the stable malformed retained-preview cursor error used by bindings.
+    pub fn preview_cursor_invalid() -> Self {
+        Self::input(
+            "interop.preview.cursor_invalid",
+            MESSAGE_PREVIEW_CURSOR_INVALID,
+        )
+    }
+
+    pub(crate) fn preview_response_limit() -> Self {
+        Self::state(
+            "interop.preview.response_limit_exceeded",
+            MESSAGE_PREVIEW_RESPONSE_LIMIT,
+        )
+    }
+
+    pub(crate) fn preview_id_exhausted() -> Self {
+        Self::state("interop.preview.id_exhausted", MESSAGE_PREVIEW_ID_EXHAUSTED)
+    }
+
+    /// Creates the stable invalid-preview-section input error used by bindings and MCP.
+    pub fn invalid_preview_section() -> Self {
+        Self::input(
+            "interop.preview.section_invalid",
+            MESSAGE_PREVIEW_SECTION_INVALID,
+        )
+    }
+
+    /// Creates the stable DTO serialization error used by native bindings.
+    pub fn serialization() -> Self {
+        Self::state("interop.dto.serialization", MESSAGE_SERIALIZATION)
+    }
+
     fn new(
         kind: InteropErrorKind,
         code: impl Into<String>,
@@ -386,6 +429,7 @@ mod tests {
 
     use super::{
         InteropError, InteropErrorKind, MESSAGE_ARCHIVE_LIMIT_INVALID, MESSAGE_NUMBER_INVALID,
+        MESSAGE_SERIALIZATION,
     };
 
     #[test]
@@ -408,6 +452,15 @@ mod tests {
         assert_eq!(error.kind(), InteropErrorKind::Input);
         assert_eq!(error.code(), "interop.workbook.archive_limit_invalid");
         assert_eq!(error.message(), MESSAGE_ARCHIVE_LIMIT_INVALID);
+    }
+
+    #[test]
+    fn dto_serialization_has_a_stable_binding_contract() {
+        let error = InteropError::serialization();
+
+        assert_eq!(error.kind(), InteropErrorKind::State);
+        assert_eq!(error.code(), "interop.dto.serialization");
+        assert_eq!(error.message(), MESSAGE_SERIALIZATION);
     }
 
     #[test]

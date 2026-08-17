@@ -21,7 +21,7 @@ cap-std = { workspace = true, optional = true }
 cellrune = { path = "../cellrune", version = "=0.1.15" }
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 zip.workspace = true

@@ -3,10 +3,42 @@ use cellrune_interop::{
     CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
     EditReceiptDto, EditReceiptV2Dto, FunctionCatalogReportDto, FunctionUsageReportDto,
-    RangePageDto, WorkbookFingerprintDto, WorkbookSummaryDto, WriteReportDto,
+    PreviewChangesDto, RangePageDto, TransactionImpactPageDto, WorkbookFingerprintDto,
+    WorkbookSummaryDto, WorkbookTransactionReceiptDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+
+pub(crate) fn preview_changes<'py>(
+    py: Python<'py>,
+    value: &PreviewChangesDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    json_dict(py, value)
+}
+
+pub(crate) fn transaction_impact_page<'py>(
+    py: Python<'py>,
+    value: &TransactionImpactPageDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    json_dict(py, value)
+}
+
+pub(crate) fn transaction_receipt<'py>(
+    py: Python<'py>,
+    value: &WorkbookTransactionReceiptDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    json_dict(py, value)
+}
+
+fn json_dict<'py, T: serde::Serialize>(py: Python<'py>, value: &T) -> PyResult<Bound<'py, PyDict>> {
+    let json = serde_json::to_string(value).map_err(|_| {
+        crate::error::into_py_error(py, cellrune_interop::InteropError::serialization())
+    })?;
+    Ok(py
+        .import("json")?
+        .call_method1("loads", (json,))?
+        .cast_into::<PyDict>()?)
+}
 
 pub(crate) fn workbook_summary<'py>(
     py: Python<'py>,

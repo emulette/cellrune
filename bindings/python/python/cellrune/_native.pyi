@@ -12,10 +12,14 @@ from ._types import (
     ErrorDetails,
     FunctionCatalogReport,
     FunctionUsageReport,
+    PreviewChanges,
+    PreviewCursor,
     RangePage,
+    TransactionImpactPage,
     WorkbookChange,
     WorkbookChangeV2,
     WorkbookSummary,
+    WorkbookTransactionReceipt,
     WriteReport,
 )
 
@@ -83,6 +87,31 @@ class Workbook:
             "excel_iteration_budget", "extended_search"
         ] = "excel_iteration_budget",
     ) -> CalculationDelta: ...
+    def preview_changes(
+        self,
+        expected_revision: int,
+        changes: list[WorkbookChangeV2],
+        *,
+        mode: Literal["auto", "incremental", "full"] = "auto",
+        today_serial: float | None = None,
+        now_serial: float | None = None,
+        arithmetic_semantics: Literal["excel_near_zero", "ieee_754"] = "excel_near_zero",
+        financial_solver_semantics: Literal[
+            "excel_iteration_budget", "extended_search"
+        ] = "excel_iteration_budget",
+    ) -> PreviewChanges: ...
+    def preview_changes_page(
+        self,
+        preview_id: int,
+        *,
+        section: Literal[
+            "affected", "evaluated", "preview_results", "preview_issues", "install_results"
+        ],
+        cursor: PreviewCursor | None = None,
+        limit: int | None = None,
+    ) -> TransactionImpactPage: ...
+    def commit_preview(self, preview_id: int) -> WorkbookTransactionReceipt: ...
+    def discard_preview(self, preview_id: int) -> None: ...
     def apply_changes(
         self,
         expected_revision: int,

@@ -184,6 +184,12 @@ impl CompletedWorkbookTransaction {
             ))
         }
     }
+
+    fn mark_stale(&mut self) {
+        self.payload = None;
+        self.report.release_details();
+        self.state = CompletedTransactionState::Stale;
+    }
 }
 
 impl WorkbookCalculationSession {
@@ -251,17 +257,34 @@ impl WorkbookCalculationSession {
         self.install_transaction_cancellable(completed, &CancellationToken::new())
     }
 
-    /// Atomically installs a completed transaction with cooperative pre-commit cancellation.
+    /// Confirms that a completed transaction still matches its captured live-session basis.
+    ///
+    /// This check lets an owning interop layer reject a stale candidate before publishing it for
+    /// later inspection. A stale result is terminal and releases the completed transaction;
+    /// cancellation preserves it for an explicit retry.
     ///
     /// # Errors
     ///
-    /// Returns the same errors as [`Self::install_transaction`]. Cancellation before the commit
-    /// boundary preserves the completed candidate for an explicit retry.
-    pub fn install_transaction_cancellable(
-        &mut self,
+    /// Returns [`SessionErrorCode::StaleResult`] when workbook, calculation, options, or history
+    /// identity changed, and [`SessionErrorCode::TransactionConsumed`] after a terminal state.
+    pub fn validate_transaction(
+        &self,
+        completed: &mut CompletedWorkbookTransaction,
+    ) -> Result<(), SessionError> {
+        self.validate_transaction_cancellable(completed, &CancellationToken::new())
+    }
+
+    /// Confirms the captured transaction basis with cooperative cancellation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same lifecycle and stale errors as [`Self::validate_transaction`], plus
+    /// [`SessionErrorCode::Cancelled`] without consuming a current transaction.
+    pub fn validate_transaction_cancellable(
+        &self,
         completed: &mut CompletedWorkbookTransaction,
         cancellation: &CancellationToken,
-    ) -> Result<WorkbookTransactionReceipt, SessionError> {
+    ) -> Result<(), SessionError> {
         if completed.state != CompletedTransactionState::Completed {
             return Err(SessionError::new(
                 SessionErrorCode::TransactionConsumed,
@@ -289,11 +312,28 @@ impl WorkbookCalculationSession {
             || !compiled_identity_matches
             || self.calculation_options != payload.captured_options;
         if stale {
-            completed.payload = None;
-            completed.report.release_details();
-            completed.state = CompletedTransactionState::Stale;
+            completed.mark_stale();
             return Err(SessionError::new(SessionErrorCode::StaleResult, None));
         }
+        Ok(())
+    }
+
+    /// Atomically installs a completed transaction with cooperative pre-commit cancellation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::install_transaction`]. Cancellation before the commit
+    /// boundary preserves the completed candidate for an explicit retry.
+    pub fn install_transaction_cancellable(
+        &mut self,
+        completed: &mut CompletedWorkbookTransaction,
+        cancellation: &CancellationToken,
+    ) -> Result<WorkbookTransactionReceipt, SessionError> {
+        self.validate_transaction_cancellable(completed, cancellation)?;
+        let payload = completed
+            .payload
+            .as_ref()
+            .ok_or_else(|| SessionError::new(SessionErrorCode::TransactionConsumed, None))?;
         let next_cursor = payload
             .base_cursor
             .checked_add(1)

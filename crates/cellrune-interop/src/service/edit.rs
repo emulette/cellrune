@@ -59,7 +59,11 @@ impl WorkbookSession {
         prepared: PreparedChanges,
     ) -> Result<EditReceiptDto, InteropError> {
         let PreparedChanges { prepared, receipt } = prepared;
+        let semantic_identity_changed = receipt.base_revision != receipt.result_revision;
         self.engine.install_changes(prepared)?;
+        if semantic_identity_changed {
+            self.invalidate_preview_for_mutation();
+        }
         Ok(receipt)
     }
 
@@ -126,7 +130,12 @@ impl WorkbookSession {
         prepared: PreparedChangesV2,
     ) -> Result<EditReceiptV2Dto, InteropError> {
         let PreparedChangesV2 { prepared, receipt } = prepared;
+        let semantic_identity_changed =
+            receipt.receipt.base_revision != receipt.receipt.result_revision;
         self.engine.install_changes(prepared)?;
+        if semantic_identity_changed {
+            self.invalidate_preview_for_mutation();
+        }
         Ok(receipt)
     }
 
@@ -456,7 +465,7 @@ fn convert_edit_batch(
     Ok(EditBatch::new(changes))
 }
 
-fn convert_edit_batch_v2(
+pub(super) fn convert_edit_batch_v2(
     workbook: &WorkbookSnapshot,
     batch: EditBatchV2Dto,
     cancelled: &impl Fn() -> bool,

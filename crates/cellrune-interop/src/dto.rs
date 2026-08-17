@@ -411,6 +411,315 @@ pub struct CalculationDeltaPageDto {
     pub deltas: Vec<CalculationDeltaDto>,
 }
 
+/// Complete resource limits used by a reported calculation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalculationLimitsDto {
+    /// Maximum lexical tokens in one formula.
+    pub max_formula_tokens: u64,
+    /// Maximum UTF-8 source bytes in one formula.
+    pub max_formula_source_bytes: u64,
+    /// Maximum AST nodes in one formula.
+    pub max_formula_ast_nodes: u64,
+    /// Maximum parser nesting depth in one formula.
+    pub max_formula_nesting_depth: u64,
+    /// Maximum dependency edges in one workbook calculation.
+    pub max_dependency_edges: u64,
+    /// Maximum identity-preserving areas in one reference.
+    pub max_reference_areas: u64,
+    /// Maximum array cells or reference traversal cells in one evaluation.
+    pub max_array_cells: u64,
+    /// Maximum UTF-8 bytes in one calculated text value.
+    pub max_text_bytes: u64,
+    /// Maximum function iterations in one formula-cell evaluation.
+    pub max_function_iterations: u64,
+    /// Maximum bindings in one `LET` expression.
+    pub max_let_bindings: u64,
+    /// Maximum simultaneous lambda-body depth.
+    pub max_lambda_depth: u64,
+    /// Maximum lambda-body invocations in one formula-cell evaluation.
+    pub max_lambda_invocations: u64,
+}
+
+/// All deterministic calculation options recorded by a transaction report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalculationOptionsReportDto {
+    /// Excel serial returned by `TODAY()`, when supplied.
+    pub today_serial: Option<f64>,
+    /// Excel serial date-time returned by `NOW()`, when supplied.
+    pub now_serial: Option<f64>,
+    /// Policy for cancelling addition and subtraction.
+    pub arithmetic_semantics: ArithmeticSemanticsDto,
+    /// Policy for iterative financial-solver convergence.
+    pub financial_solver_semantics: FinancialSolverSemanticsDto,
+    /// Complete formula-kernel resource limits.
+    pub limits: CalculationLimitsDto,
+}
+
+/// Deterministic producer identity captured by a transaction report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderIdentityDto {
+    /// Stable provider name.
+    pub name: String,
+    /// Provider version.
+    pub version: String,
+}
+
+/// Completeness of the reported semantic formula impact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionImpactCoverageDto {
+    /// The retained graph proves the direct and transitive impact set is complete.
+    Exact,
+    /// A topology or dynamic-dependency boundary required a conservative full formula set.
+    ConservativeFull,
+}
+
+/// One transaction detail section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionDetailSectionDto {
+    /// Direct, transitive, or conservative affected formulas.
+    Affected,
+    /// Formula cells actually executed by the candidate evaluator.
+    Evaluated,
+    /// Exact base-to-candidate materialized result differences.
+    PreviewResults,
+    /// Exact base-to-candidate calculation issue differences.
+    PreviewIssues,
+    /// Exact result differences that installation would append to history.
+    InstallResults,
+}
+
+/// One materialization origin retained in transaction result details.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MaterializedResultOriginDto {
+    /// `direct_formula`, `legacy_array`, or `dynamic_spill`.
+    pub kind: String,
+    /// Array or spill anchor, when applicable.
+    pub anchor: Option<CellReferenceDto>,
+    /// Complete array or spill range, when applicable.
+    pub range: Option<String>,
+}
+
+/// One stable calculation issue with optional source-specific detail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalculationIssueDto {
+    /// Stable CellRune issue code.
+    pub code: String,
+    /// Shared issue message.
+    pub message: String,
+    /// Optional source-specific context.
+    pub detail: Option<String>,
+}
+
+/// One typed transaction detail item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TransactionDetailItemDto {
+    /// One affected formula and its impact cause.
+    Affected {
+        /// Formula cell.
+        cell: CellReferenceDto,
+        /// `direct`, `transitive`, or `conservative`.
+        cause: String,
+    },
+    /// One formula cell actually executed by the candidate evaluator.
+    Evaluated {
+        /// Formula cell.
+        cell: CellReferenceDto,
+    },
+    /// One exact base-to-candidate result difference.
+    PreviewResult {
+        /// Changed materialized cell.
+        cell: CellReferenceDto,
+        /// Base materialization origin, absent when the cell was introduced.
+        previous_origin: Option<MaterializedResultOriginDto>,
+        /// Base result, absent when the cell was introduced.
+        previous_result: Option<CalculationResultDto>,
+        /// Candidate materialization origin, absent when the cell was removed.
+        result_origin: Option<MaterializedResultOriginDto>,
+        /// Candidate result, absent when the cell was removed.
+        result: Option<CalculationResultDto>,
+    },
+    /// One exact base-to-candidate calculation issue difference.
+    PreviewIssue {
+        /// Formula cell.
+        cell: CellReferenceDto,
+        /// `introduced`, `resolved`, or `changed`.
+        change_kind: String,
+        /// Base issue, when present.
+        previous: Option<CalculationIssueDto>,
+        /// Candidate issue, when present.
+        current: Option<CalculationIssueDto>,
+    },
+    /// One exact installation-delta result difference.
+    InstallResult {
+        /// Changed or removed materialized cell.
+        cell: CellReferenceDto,
+        /// Installed materialization origin, absent for a removal.
+        origin: Option<MaterializedResultOriginDto>,
+        /// Installed result, absent for a removal.
+        result: Option<CalculationResultDto>,
+    },
+    /// A newer core detail variant not yet represented by this interop schema.
+    Unknown,
+}
+
+/// Total retained items in each transaction detail section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TransactionDetailCountsDto {
+    /// Affected-formula item count.
+    pub affected: u64,
+    /// Evaluated-formula item count.
+    pub evaluated: u64,
+    /// Preview-result item count.
+    pub preview_results: u64,
+    /// Preview-issue item count.
+    pub preview_issues: u64,
+    /// Install-result item count.
+    pub install_results: u64,
+}
+
+/// Complete bounded transaction summary; detail items are read separately by section.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkbookTransactionReportDto {
+    /// Core transaction report contract version.
+    pub contract_version: u16,
+    /// Transaction base semantic revision.
+    pub base_revision: u64,
+    /// Candidate semantic revision.
+    pub result_revision: u64,
+    /// Transaction base semantic fingerprint.
+    pub base_fingerprint: WorkbookFingerprintDto,
+    /// Candidate semantic fingerprint.
+    pub result_fingerprint: WorkbookFingerprintDto,
+    /// Exact package input SHA-256 in lower-case hexadecimal, when package-backed.
+    pub input_sha256: Option<String>,
+    /// Calculator producer identity.
+    pub calculator_provider: ProviderIdentityDto,
+    /// Complete deterministic calculation options.
+    pub calculation_options: CalculationOptionsReportDto,
+    /// Whether a current installed base calculation was reused.
+    pub base_calculation_reused: bool,
+    /// Selected base execution mode.
+    pub base_execution_mode: String,
+    /// Selected base execution reason.
+    pub base_decision_reason: String,
+    /// Candidate mode requested by the caller.
+    pub candidate_requested_mode: RecalculationModeDto,
+    /// Selected candidate execution mode.
+    pub candidate_execution_mode: String,
+    /// Selected candidate execution reason.
+    pub candidate_decision_reason: String,
+    /// Exact candidate edit receipt.
+    pub edit_receipt: EditReceiptDto,
+    /// Whether the affected-formula detail is exact or conservative.
+    pub impact_coverage: TransactionImpactCoverageDto,
+    /// Directly affected formula count.
+    pub direct_affected_count: u64,
+    /// Transitively affected formula count.
+    pub transitive_affected_count: u64,
+    /// Conservatively retained formula count.
+    pub conservative_affected_count: u64,
+    /// Evaluations used to calculate an uncached base.
+    pub base_evaluated_count: u64,
+    /// Evaluations used to calculate the candidate.
+    pub candidate_evaluated_count: u64,
+    /// Formulas parsed across base and candidate work.
+    pub parsed_formula_count: u64,
+    /// Function iterations charged across base and candidate work.
+    pub function_iteration_count: u64,
+    /// Reference cells charged across base and candidate work.
+    pub reference_cell_count: u64,
+    /// Introduced or changed preview materialized-result count.
+    pub preview_changed_count: u64,
+    /// Removed preview materialized-result count.
+    pub preview_removed_count: u64,
+    /// Introduced calculation issue count.
+    pub introduced_issue_count: u64,
+    /// Resolved calculation issue count.
+    pub resolved_issue_count: u64,
+    /// Replaced calculation issue count.
+    pub changed_issue_count: u64,
+    /// Changed plus removed install-delta result count.
+    pub install_delta_count: u64,
+    /// Prior installed calculation revision used for the install delta, when present.
+    pub installed_calculation_revision: Option<u64>,
+    /// Prior installed calculation fingerprint used for the install delta, when present.
+    pub installed_calculation_fingerprint: Option<WorkbookFingerprintDto>,
+    /// Prior installed calculation options used for the install delta, when present.
+    pub installed_calculation_options: Option<CalculationOptionsReportDto>,
+    /// Whether installation compares against a basis different from preview base.
+    pub install_delta_basis_differs_from_preview_base: bool,
+    /// Ordered reasons for the install-delta basis difference.
+    pub install_delta_basis_reasons: Vec<String>,
+    /// Total retained details by section.
+    pub detail_counts: TransactionDetailCountsDto,
+}
+
+/// Opaque cursor bound to one published preview and one core report section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewCursorDto {
+    /// Session-local preview identifier that issued this cursor.
+    pub preview_id: u64,
+    /// Opaque core cursor token. Clients must not interpret or modify it.
+    pub token: String,
+}
+
+/// One page of transaction details for a published preview.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TransactionImpactPageDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Published preview identifier.
+    pub preview_id: u64,
+    /// Detail section represented by this page.
+    pub section: TransactionDetailSectionDto,
+    /// Complete detail items in deterministic core order.
+    pub items: Vec<TransactionDetailItemDto>,
+    /// Cursor for the next page, or `None` only when the section is complete.
+    pub next_cursor: Option<PreviewCursorDto>,
+    /// Complete retained item count for this section.
+    pub total_count: u64,
+}
+
+/// Published retained-preview summary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewChangesDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Opaque session-local preview identifier.
+    pub preview_id: u64,
+    /// Complete bounded transaction summary.
+    pub report: WorkbookTransactionReportDto,
+}
+
+/// Exact receipt returned after installing one published preview.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkbookTransactionReceiptDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Exact committed edit receipt.
+    pub edit: EditReceiptDto,
+    /// Exact installed and history-appended calculation delta.
+    pub calculation_delta: CalculationDeltaDto,
+    /// Base semantic fingerprint checked before installation.
+    pub base_fingerprint: WorkbookFingerprintDto,
+    /// Candidate semantic fingerprint installed by the transaction.
+    pub result_fingerprint: WorkbookFingerprintDto,
+}
+
 /// One cell in a paged range response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

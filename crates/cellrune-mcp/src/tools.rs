@@ -2,7 +2,8 @@ use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
     CancellationToken as WorkbookCancellationToken, CapabilityPageDto, CompletedRecalculation,
     EditReceiptDto, EditReceiptV2Dto, FinancialSolverSemanticsDto, FunctionUsageReportDto,
-    InteropError, RangePageDto, RangeRequestDto, WorkbookSession, WriteOptionsDto,
+    InteropError, PreviewChangesDto, RangePageDto, RangeRequestDto, TransactionImpactPageDto,
+    WorkbookSession, WorkbookTransactionReceiptDto, WriteOptionsDto,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool, tool_router};
@@ -12,8 +13,9 @@ use tokio_util::sync::CancellationToken;
 use crate::error::McpError;
 use crate::model::{
     ApplyChangesArgs, ApplyChangesV2Args, CapabilityArgs, ChangesSinceArgs, CreateWorkbookArgs,
-    OpenWorkbookArgs, ReadRangeArgs, RecalculateArgs, SaveWorkbookArgs, SessionArgs, SessionClosed,
-    SessionStarted, SessionSummary, WorkbookSaved,
+    OpenWorkbookArgs, PreviewChangesArgs, PreviewChangesPageArgs, PreviewDiscarded, PreviewIdArgs,
+    ReadRangeArgs, RecalculateArgs, SaveWorkbookArgs, SessionArgs, SessionClosed, SessionStarted,
+    SessionSummary, WorkbookSaved,
 };
 use crate::server::CellruneMcpServer;
 
@@ -427,6 +429,232 @@ Use next_cursor to continue until it is absent.",
         self.bounded_json(page)
     }
 
+    /// Calculate and retain an immutable edit preview without changing the live workbook.
+    #[tool(
+        name = "workbook_preview_changes",
+        input_schema = crate::schema::mcp_schema::<PreviewChangesArgs>(),
+        output_schema = crate::schema::mcp_schema::<PreviewChangesDto>(),
+        description = "Capture a revision-checked v2 edit candidate, calculate it immutably, and retain one preview in the session. The response is a complete report summary and a preview_id for paging, commit, or discard. A failed, cancelled, or oversized replacement leaves an earlier published preview unchanged.",
+        annotations(
+            title = "Preview workbook changes",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_preview_changes(
+        &self,
+        Parameters(args): Parameters<PreviewChangesArgs>,
+        cancellation: CancellationToken,
+    ) -> Result<Json<PreviewChangesDto>, McpError> {
+        if cancellation.is_cancelled() {
+            return Err(McpError::cancelled());
+        }
+        let handle = self.sessions.get(&args.session_id)?;
+        let session_id = args.session_id.clone();
+        let workbook = handle.workbook().clone();
+        let prepare_cancellation = WorkbookCancellationToken::new();
+        let worker_cancellation = prepare_cancellation.clone();
+        let mut prepare_worker = tokio::task::spawn_blocking(move || {
+            workbook
+                .blocking_lock()
+                .prepare_preview_changes_cancellable(
+                    args.expected_revision,
+                    args.batch,
+                    args.mode,
+                    calculation_options(
+                        args.today_serial,
+                        args.now_serial,
+                        args.arithmetic_semantics,
+                        args.financial_solver_semantics,
+                    ),
+                    &worker_cancellation,
+                )
+        });
+        let prepared = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                prepare_cancellation.cancel();
+                if let Ok(Ok(prepared)) = prepare_worker.await {
+                    handle
+                        .workbook()
+                        .lock()
+                        .await
+                        .abandon_recalculation(prepared.request_id());
+                }
+                return Err(McpError::cancelled());
+            },
+            joined = &mut prepare_worker => join_result(joined)?,
+        };
+        let request_id = prepared.request_id();
+        let mut worker =
+            tokio::task::spawn_blocking(move || prepared.run().map_err(McpError::from));
+        let completed = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                {
+                    let mut workbook = handle.workbook().lock().await;
+                    workbook.cancel_recalculation(request_id);
+                }
+                let _ = worker.await;
+                handle.workbook().lock().await.abandon_recalculation(request_id);
+                return Err(McpError::cancelled());
+            },
+            joined = &mut worker => match joined {
+                Ok(result) => result,
+                Err(error) => Err(worker_error(error)),
+            },
+        };
+        let completed = match completed {
+            Ok(completed) => completed,
+            Err(error) => {
+                handle
+                    .workbook()
+                    .lock()
+                    .await
+                    .abandon_recalculation(request_id);
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.ensure_json_size(completed.summary()) {
+            handle
+                .workbook()
+                .lock()
+                .await
+                .abandon_recalculation(request_id);
+            return Err(error);
+        }
+        let preview = handle.workbook().lock().await.publish_preview(completed)?;
+        self.sessions.touch(&session_id)?;
+        Ok(Json(preview))
+    }
+
+    /// Return a byte-bounded, opaque-cursor page from one retained preview report section.
+    #[tool(
+        name = "workbook_preview_changes_page",
+        input_schema = crate::schema::mcp_schema::<PreviewChangesPageArgs>(),
+        output_schema = crate::schema::mcp_schema::<TransactionImpactPageDto>(),
+        description = "Return the longest complete preview report-detail prefix that fits the server response byte limit. The cursor is opaque, bound to its preview_id and section by the core, and advances only through returned items.",
+        annotations(
+            title = "Page workbook preview changes",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_preview_changes_page(
+        &self,
+        Parameters(args): Parameters<PreviewChangesPageArgs>,
+    ) -> Result<Json<TransactionImpactPageDto>, McpError> {
+        let handle = self.sessions.get(&args.session_id)?;
+        let page = handle
+            .workbook()
+            .lock()
+            .await
+            .preview_changes_page_bounded(
+                args.preview_id,
+                args.section,
+                args.cursor,
+                args.limit,
+                self.config.max_response_bytes(),
+            )?;
+        self.sessions.touch(&args.session_id)?;
+        Ok(Json(page))
+    }
+
+    /// Install one retained preview into its live workbook exactly once.
+    #[tool(
+        name = "workbook_commit_preview",
+        input_schema = crate::schema::mcp_schema::<PreviewIdArgs>(),
+        output_schema = crate::schema::mcp_schema::<WorkbookTransactionReceiptDto>(),
+        description = "Install one retained preview if its captured base is still current. A cancelled pre-commit attempt remains available for retry; a stale or successfully committed preview is terminal and cannot be used again.",
+        annotations(
+            title = "Commit workbook preview",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_commit_preview(
+        &self,
+        Parameters(args): Parameters<PreviewIdArgs>,
+        cancellation: CancellationToken,
+    ) -> Result<Json<WorkbookTransactionReceiptDto>, McpError> {
+        if cancellation.is_cancelled() {
+            return Err(McpError::cancelled());
+        }
+        let handle = self.sessions.get(&args.session_id)?;
+        let preview_receipt = handle
+            .workbook()
+            .lock()
+            .await
+            .preview_commit_receipt(args.preview_id)?;
+        self.ensure_json_size(&preview_receipt)?;
+        let workbook = handle.workbook().clone();
+        let commit_cancellation = WorkbookCancellationToken::new();
+        let worker_cancellation = commit_cancellation.clone();
+        let preview_id = args.preview_id;
+        let mut worker = tokio::task::spawn_blocking(move || {
+            workbook
+                .blocking_lock()
+                .commit_preview_cancellable(preview_id, &worker_cancellation)
+                .map_err(McpError::from)
+        });
+        let receipt = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                commit_cancellation.cancel();
+                match worker.await {
+                    Ok(Ok(receipt)) => Ok(receipt),
+                    Ok(Err(error)) if error.payload().code == "session.cancelled" => {
+                        Err(McpError::cancelled())
+                    }
+                    Ok(Err(error)) => Err(error),
+                    Err(error) => Err(worker_error(error)),
+                }
+            },
+            joined = &mut worker => match joined {
+                Ok(result) => result,
+                Err(error) => Err(worker_error(error)),
+            },
+        }?;
+        self.sessions.touch(&args.session_id)?;
+        Ok(Json(receipt))
+    }
+
+    /// Discard one retained preview without modifying its live workbook.
+    #[tool(
+        name = "workbook_discard_preview",
+        input_schema = crate::schema::mcp_schema::<PreviewIdArgs>(),
+        output_schema = crate::schema::mcp_schema::<PreviewDiscarded>(),
+        description = "Discard one retained preview without changing the live workbook. The preview_id is consumed and later page, commit, or discard calls reject it.",
+        annotations(
+            title = "Discard workbook preview",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_discard_preview(
+        &self,
+        Parameters(args): Parameters<PreviewIdArgs>,
+    ) -> Result<Json<PreviewDiscarded>, McpError> {
+        let response = PreviewDiscarded::new(args.session_id.clone(), args.preview_id);
+        self.ensure_json_size(&response)?;
+        let handle = self.sessions.get(&args.session_id)?;
+        handle
+            .workbook()
+            .lock()
+            .await
+            .discard_preview(args.preview_id)?;
+        self.sessions.touch(&args.session_id)?;
+        Ok(Json(response))
+    }
+
     /// Save the current calculated revision to an explicit local destination.
     #[tool(
         name = "workbook_save_as",
@@ -643,6 +871,177 @@ mod tests {
                 CalculationOptionsDto::default(),
             )
             .expect("the session must accept a later calculation");
+        drop(server);
+        fs::remove_dir_all(root).expect("test root must be removed");
+    }
+
+    #[tokio::test]
+    async fn oversized_preview_commit_response_preserves_the_retained_preview() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must follow the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "cellrune-mcp-preview-commit-response-limit-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).expect("test root must be created");
+        let config = ServerConfig::new(
+            vec![root.clone()],
+            DEFAULT_MAX_SESSIONS,
+            DEFAULT_SESSION_TTL_SECONDS,
+            DEFAULT_MAX_RESPONSE_BYTES,
+            DEFAULT_MAX_WORKBOOK_BYTES,
+            false,
+        )
+        .expect("test configuration must be valid")
+        .with_test_response_bytes(1);
+        let server = CellruneMcpServer::new(config);
+        let mut workbook = WorkbookSession::create();
+        workbook
+            .set_formula("Sheet1", "A2", "=A1+1", None)
+            .expect("formula must be accepted");
+        let preview = workbook
+            .preview_changes(
+                workbook.summary().semantic_revision,
+                cellrune_interop::EditBatchV2Dto {
+                    changes: vec![cellrune_interop::WorkbookChangeV2Dto::V1(
+                        cellrune_interop::WorkbookChangeDto::SetValue {
+                            sheet: "Sheet1".to_owned(),
+                            address: "A1".to_owned(),
+                            value: cellrune_interop::WritableCellValueDto::Number { value: 4.0 },
+                        },
+                    )],
+                },
+                cellrune_interop::RecalculationModeDto::Auto,
+                CalculationOptionsDto::default(),
+            )
+            .expect("preview must publish");
+        let preview_id = preview.preview_id;
+        let prepared = server
+            .sessions
+            .prepare_insert(workbook)
+            .expect("preview session must be inserted");
+        let session_id = prepared.id().to_owned();
+        prepared.commit();
+
+        let error = match server
+            .workbook_commit_preview(
+                Parameters(PreviewIdArgs {
+                    session_id: session_id.clone(),
+                    preview_id,
+                }),
+                CancellationToken::new(),
+            )
+            .await
+        {
+            Ok(_) => panic!("an oversized receipt must reject before mutation"),
+            Err(error) => error,
+        };
+        assert_eq!(error.payload().code, "mcp.response.byte_limit_exceeded");
+
+        let handle = server
+            .sessions
+            .get(&session_id)
+            .expect("session remains resident");
+        let mut workbook = handle.workbook().lock().await;
+        assert!(
+            workbook
+                .preview_changes_page(
+                    preview_id,
+                    cellrune_interop::TransactionDetailSectionDto::PreviewResults,
+                    None,
+                    1,
+                )
+                .is_ok(),
+            "rejected commit response must keep the preview pageable"
+        );
+        workbook
+            .commit_preview(preview_id)
+            .expect("preserved preview can later commit");
+        drop(workbook);
+        drop(handle);
+        drop(server);
+        fs::remove_dir_all(root).expect("test root must be removed");
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_commit_preserves_the_retained_preview_for_retry() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must follow the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "cellrune-mcp-preview-commit-cancelled-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).expect("test root must be created");
+        let config = ServerConfig::new(
+            vec![root.clone()],
+            DEFAULT_MAX_SESSIONS,
+            DEFAULT_SESSION_TTL_SECONDS,
+            DEFAULT_MAX_RESPONSE_BYTES,
+            DEFAULT_MAX_WORKBOOK_BYTES,
+            false,
+        )
+        .expect("test configuration must be valid");
+        let server = CellruneMcpServer::new(config);
+        let mut workbook = WorkbookSession::create();
+        workbook
+            .set_formula("Sheet1", "A2", "=A1+1", None)
+            .expect("formula must be accepted");
+        let preview = workbook
+            .preview_changes(
+                workbook.summary().semantic_revision,
+                cellrune_interop::EditBatchV2Dto {
+                    changes: vec![cellrune_interop::WorkbookChangeV2Dto::V1(
+                        cellrune_interop::WorkbookChangeDto::SetValue {
+                            sheet: "Sheet1".to_owned(),
+                            address: "A1".to_owned(),
+                            value: cellrune_interop::WritableCellValueDto::Number { value: 4.0 },
+                        },
+                    )],
+                },
+                cellrune_interop::RecalculationModeDto::Auto,
+                CalculationOptionsDto::default(),
+            )
+            .expect("preview must publish");
+        let preview_id = preview.preview_id;
+        let prepared = server
+            .sessions
+            .prepare_insert(workbook)
+            .expect("preview session must be inserted");
+        let session_id = prepared.id().to_owned();
+        prepared.commit();
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+
+        let error = match server
+            .workbook_commit_preview(
+                Parameters(PreviewIdArgs {
+                    session_id: session_id.clone(),
+                    preview_id,
+                }),
+                cancellation,
+            )
+            .await
+        {
+            Ok(_) => panic!("pre-cancelled commit must not mutate the workbook"),
+            Err(error) => error,
+        };
+        assert_eq!(error.payload().code, "mcp.operation.cancelled");
+
+        let handle = server
+            .sessions
+            .get(&session_id)
+            .expect("session remains resident");
+        handle
+            .workbook()
+            .lock()
+            .await
+            .commit_preview(preview_id)
+            .expect("cancelled pre-commit can be retried exactly once");
+        drop(handle);
         drop(server);
         fs::remove_dir_all(root).expect("test root must be removed");
     }

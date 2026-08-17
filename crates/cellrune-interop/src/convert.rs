@@ -1,18 +1,25 @@
 use cellrune::{
     ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
-    CalculationDelta, CalculationDeltaPage, CalculationExecutionMode, CalculationOptions,
-    CalculationSnapshot, CellAddress, CellContent, CellValue, EditReceipt, ExcelError,
-    FinancialSolverSemantics, FiniteNumber, MaterializedResultOrigin, RecalculationMode,
-    RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility,
-    WorkbookDraft, WorkbookFingerprint, WorkbookSnapshot, WriteOptions, XlsxDocumentKind,
+    CalculationDelta, CalculationDeltaPage, CalculationExecutionMode, CalculationIssue,
+    CalculationOptions, CalculationSnapshot, CellAddress, CellContent, CellValue, EditReceipt,
+    ExcelError, FinancialSolverSemantics, FiniteNumber, InstallDeltaBasisReason,
+    MaterializedResultOrigin, RecalculationMode, RecalculationWriteOptions,
+    RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility, TransactionDetailItem,
+    TransactionDetailSection, TransactionImpactCause, TransactionImpactCoverage,
+    TransactionIssueChangeKind, WorkbookDraft, WorkbookFingerprint, WorkbookSnapshot,
+    WorkbookTransactionReceipt, WorkbookTransactionReport, WriteOptions, XlsxDocumentKind,
 };
 
 use crate::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
-    CalculationOptionsDto, CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto,
-    CellValueDto, EditReceiptDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION,
-    InteropError, RecalculationModeDto, SavedValueStateDto, WorkbookFingerprintDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    CalculationIssueDto, CalculationLimitsDto, CalculationOptionsDto, CalculationOptionsReportDto,
+    CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto, CellValueDto,
+    EditReceiptDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION, InteropError,
+    MaterializedResultOriginDto, ProviderIdentityDto, RecalculationModeDto, SavedValueStateDto,
+    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
+    TransactionImpactCoverageDto, TransactionImpactPageDto, WorkbookFingerprintDto,
+    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
+    WriteOptionsDto, WriteReportDto,
 };
 
 pub(crate) fn workbook_fingerprint(value: WorkbookFingerprint) -> WorkbookFingerprintDto {
@@ -247,6 +254,343 @@ pub(crate) fn calculation_delta_page(
             .map(|delta| calculation_delta(workbook, delta))
             .collect(),
     }
+}
+
+pub(crate) fn transaction_report(
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+    report: &WorkbookTransactionReport,
+) -> WorkbookTransactionReportDto {
+    let install_delta = report.install_delta();
+    WorkbookTransactionReportDto {
+        contract_version: report.contract_version(),
+        base_revision: report.base_revision(),
+        result_revision: report.result_revision(),
+        base_fingerprint: workbook_fingerprint(report.base_fingerprint()),
+        result_fingerprint: workbook_fingerprint(report.result_fingerprint()),
+        input_sha256: report.input_hash().map(|value| hex_bytes(value.as_bytes())),
+        calculator_provider: ProviderIdentityDto {
+            name: report.calculator_provider().name().to_owned(),
+            version: report.calculator_provider().version().to_owned(),
+        },
+        calculation_options: calculation_options_report(report.calculation_options()),
+        base_calculation_reused: report.base_calculation_reused(),
+        base_execution_mode: execution_mode_name(report.base_execution_mode()).to_owned(),
+        base_decision_reason: decision_reason_name(report.base_decision_reason()).to_owned(),
+        candidate_requested_mode: recalculation_mode_dto(report.candidate_requested_mode()),
+        candidate_execution_mode: execution_mode_name(report.candidate_execution_mode()).to_owned(),
+        candidate_decision_reason: decision_reason_name(report.candidate_decision_reason())
+            .to_owned(),
+        edit_receipt: transaction_edit_receipt(base, candidate, report.edit_receipt()),
+        impact_coverage: match report.impact_coverage() {
+            TransactionImpactCoverage::Exact => TransactionImpactCoverageDto::Exact,
+            TransactionImpactCoverage::ConservativeFull => {
+                TransactionImpactCoverageDto::ConservativeFull
+            }
+            _ => TransactionImpactCoverageDto::ConservativeFull,
+        },
+        direct_affected_count: count_u64(report.direct_affected_count()),
+        transitive_affected_count: count_u64(report.transitive_affected_count()),
+        conservative_affected_count: count_u64(report.conservative_affected_count()),
+        base_evaluated_count: count_u64(report.base_evaluated_count()),
+        candidate_evaluated_count: count_u64(report.candidate_evaluated_count()),
+        parsed_formula_count: count_u64(report.parsed_formula_count()),
+        function_iteration_count: report.function_iteration_count(),
+        reference_cell_count: report.reference_cell_count(),
+        preview_changed_count: count_u64(report.preview_changed_count()),
+        preview_removed_count: count_u64(report.preview_removed_count()),
+        introduced_issue_count: count_u64(report.introduced_issue_count()),
+        resolved_issue_count: count_u64(report.resolved_issue_count()),
+        changed_issue_count: count_u64(report.changed_issue_count()),
+        install_delta_count: count_u64(
+            install_delta
+                .changed_cells()
+                .len()
+                .saturating_add(install_delta.removed_materialized_cells().len()),
+        ),
+        installed_calculation_revision: report.installed_calculation_revision(),
+        installed_calculation_fingerprint: report
+            .installed_calculation_fingerprint()
+            .map(workbook_fingerprint),
+        installed_calculation_options: report
+            .installed_calculation_options()
+            .map(calculation_options_report),
+        install_delta_basis_differs_from_preview_base: report
+            .install_delta_basis_differs_from_preview_base(),
+        install_delta_basis_reasons: report
+            .install_delta_basis_reasons()
+            .iter()
+            .map(|reason| install_delta_basis_reason_name(*reason).to_owned())
+            .collect(),
+        detail_counts: TransactionDetailCountsDto {
+            affected: count_u64(report.detail_count(TransactionDetailSection::Affected)),
+            evaluated: count_u64(report.detail_count(TransactionDetailSection::Evaluated)),
+            preview_results: count_u64(
+                report.detail_count(TransactionDetailSection::PreviewResults),
+            ),
+            preview_issues: count_u64(report.detail_count(TransactionDetailSection::PreviewIssues)),
+            install_results: count_u64(
+                report.detail_count(TransactionDetailSection::InstallResults),
+            ),
+        },
+    }
+}
+
+pub(crate) fn transaction_page(
+    preview_id: u64,
+    section: TransactionDetailSectionDto,
+    total_count: usize,
+    items: impl IntoIterator<Item = TransactionDetailItem>,
+    next_cursor_token: Option<String>,
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+) -> TransactionImpactPageDto {
+    TransactionImpactPageDto {
+        schema_version: INTEROP_SCHEMA_VERSION,
+        preview_id,
+        section,
+        items: items
+            .into_iter()
+            .map(|item| transaction_detail_item(base, candidate, item))
+            .collect(),
+        next_cursor: next_cursor_token.map(|token| crate::PreviewCursorDto { preview_id, token }),
+        total_count: count_u64(total_count),
+    }
+}
+
+pub(crate) fn transaction_receipt(
+    workbook: &WorkbookSnapshot,
+    receipt: &WorkbookTransactionReceipt,
+) -> WorkbookTransactionReceiptDto {
+    WorkbookTransactionReceiptDto {
+        schema_version: INTEROP_SCHEMA_VERSION,
+        edit: edit_receipt(workbook, receipt.edit()),
+        calculation_delta: calculation_delta(workbook, receipt.calculation_delta()),
+        base_fingerprint: workbook_fingerprint(receipt.base_fingerprint()),
+        result_fingerprint: workbook_fingerprint(receipt.result_fingerprint()),
+    }
+}
+
+pub(crate) fn preview_transaction_receipt(
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+    report: &WorkbookTransactionReport,
+) -> WorkbookTransactionReceiptDto {
+    WorkbookTransactionReceiptDto {
+        schema_version: INTEROP_SCHEMA_VERSION,
+        edit: transaction_edit_receipt(base, candidate, report.edit_receipt()),
+        calculation_delta: calculation_delta(candidate, report.install_delta()),
+        base_fingerprint: workbook_fingerprint(report.base_fingerprint()),
+        result_fingerprint: workbook_fingerprint(report.result_fingerprint()),
+    }
+}
+
+pub(crate) const fn transaction_detail_section(
+    section: TransactionDetailSectionDto,
+) -> TransactionDetailSection {
+    match section {
+        TransactionDetailSectionDto::Affected => TransactionDetailSection::Affected,
+        TransactionDetailSectionDto::Evaluated => TransactionDetailSection::Evaluated,
+        TransactionDetailSectionDto::PreviewResults => TransactionDetailSection::PreviewResults,
+        TransactionDetailSectionDto::PreviewIssues => TransactionDetailSection::PreviewIssues,
+        TransactionDetailSectionDto::InstallResults => TransactionDetailSection::InstallResults,
+    }
+}
+
+fn transaction_edit_receipt(
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+    receipt: &EditReceipt,
+) -> EditReceiptDto {
+    EditReceiptDto {
+        schema_version: INTEROP_SCHEMA_VERSION,
+        base_revision: receipt.base_revision(),
+        result_revision: receipt.result_revision(),
+        applied_change_count: count_u64(receipt.applied_change_count()),
+        changed_cells: receipt
+            .changed_cells()
+            .iter()
+            .map(|cell| transaction_cell_reference(base, candidate, *cell))
+            .collect(),
+        calculation_changed_cells: receipt
+            .calculation_changed_cells()
+            .iter()
+            .map(|cell| transaction_cell_reference(base, candidate, *cell))
+            .collect(),
+        created_sheet_ids: receipt
+            .created_sheet_ids()
+            .iter()
+            .map(|sheet_id| sheet_id.get())
+            .collect(),
+        topology_changed: receipt.topology_changed(),
+        calculation_metadata_changed: receipt.calculation_metadata_changed(),
+    }
+}
+
+fn transaction_detail_item(
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+    item: TransactionDetailItem,
+) -> TransactionDetailItemDto {
+    match item {
+        TransactionDetailItem::Affected(affected) => TransactionDetailItemDto::Affected {
+            cell: transaction_cell_reference(base, candidate, affected.cell()),
+            cause: match affected.cause() {
+                TransactionImpactCause::Direct => "direct",
+                TransactionImpactCause::Transitive => "transitive",
+                TransactionImpactCause::Conservative => "conservative",
+                _ => "conservative",
+            }
+            .to_owned(),
+        },
+        TransactionDetailItem::Evaluated(cell) => TransactionDetailItemDto::Evaluated {
+            cell: transaction_cell_reference(base, candidate, cell),
+        },
+        TransactionDetailItem::PreviewResult(change) => TransactionDetailItemDto::PreviewResult {
+            cell: transaction_cell_reference(base, candidate, change.cell()),
+            previous_origin: change
+                .previous_origin()
+                .map(|origin| transaction_origin(base, candidate, origin)),
+            previous_result: change.previous_result().map(result_to_dto),
+            result_origin: change
+                .result_origin()
+                .map(|origin| transaction_origin(base, candidate, origin)),
+            result: change.result().map(result_to_dto),
+        },
+        TransactionDetailItem::PreviewIssue(change) => TransactionDetailItemDto::PreviewIssue {
+            cell: transaction_cell_reference(base, candidate, change.cell()),
+            change_kind: match change.kind() {
+                TransactionIssueChangeKind::Introduced => "introduced",
+                TransactionIssueChangeKind::Resolved => "resolved",
+                TransactionIssueChangeKind::Changed => "changed",
+                _ => "changed",
+            }
+            .to_owned(),
+            previous: change.previous().map(issue_to_dto),
+            current: change.current().map(issue_to_dto),
+        },
+        TransactionDetailItem::InstallResult(change) => TransactionDetailItemDto::InstallResult {
+            cell: transaction_cell_reference(base, candidate, change.cell()),
+            origin: change
+                .origin()
+                .map(|origin| transaction_origin(base, candidate, origin)),
+            result: change.result().map(result_to_dto),
+        },
+        _ => TransactionDetailItemDto::Unknown,
+    }
+}
+
+fn transaction_cell_reference(
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+    id: CalculationCellId,
+) -> CellReferenceDto {
+    let workbook = if candidate.sheet_by_id(id.sheet_id()).is_some() {
+        candidate
+    } else {
+        base
+    };
+    cell_reference(workbook, id)
+}
+
+fn transaction_origin(
+    base: &WorkbookSnapshot,
+    candidate: &WorkbookSnapshot,
+    origin: MaterializedResultOrigin,
+) -> MaterializedResultOriginDto {
+    match origin {
+        MaterializedResultOrigin::DirectFormula => MaterializedResultOriginDto {
+            kind: "direct_formula".to_owned(),
+            anchor: None,
+            range: None,
+        },
+        MaterializedResultOrigin::LegacyArray { anchor, range } => MaterializedResultOriginDto {
+            kind: "legacy_array".to_owned(),
+            anchor: Some(transaction_cell_reference(base, candidate, anchor)),
+            range: Some(range_text(range.start(), range.end())),
+        },
+        MaterializedResultOrigin::DynamicSpill { anchor, range } => MaterializedResultOriginDto {
+            kind: "dynamic_spill".to_owned(),
+            anchor: Some(transaction_cell_reference(base, candidate, anchor)),
+            range: Some(range_text(range.start(), range.end())),
+        },
+        _ => MaterializedResultOriginDto {
+            kind: "unknown".to_owned(),
+            anchor: None,
+            range: None,
+        },
+    }
+}
+
+fn issue_to_dto(issue: &CalculationIssue) -> CalculationIssueDto {
+    CalculationIssueDto {
+        code: issue.code().as_str().to_owned(),
+        message: issue.message().to_owned(),
+        detail: issue.detail().map(str::to_owned),
+    }
+}
+
+fn calculation_options_report(options: CalculationOptions) -> CalculationOptionsReportDto {
+    let limits = options.limits();
+    CalculationOptionsReportDto {
+        today_serial: options.today_serial().map(FiniteNumber::get),
+        now_serial: options.now_serial().map(FiniteNumber::get),
+        arithmetic_semantics: match options.arithmetic_semantics() {
+            ArithmeticSemantics::ExcelNearZero => ArithmeticSemanticsDto::ExcelNearZero,
+            ArithmeticSemantics::Ieee754 => ArithmeticSemanticsDto::Ieee754,
+            _ => ArithmeticSemanticsDto::ExcelNearZero,
+        },
+        financial_solver_semantics: match options.financial_solver_semantics() {
+            FinancialSolverSemantics::ExcelIterationBudget => {
+                FinancialSolverSemanticsDto::ExcelIterationBudget
+            }
+            FinancialSolverSemantics::ExtendedSearch => FinancialSolverSemanticsDto::ExtendedSearch,
+            _ => FinancialSolverSemanticsDto::ExcelIterationBudget,
+        },
+        limits: CalculationLimitsDto {
+            max_formula_tokens: limits.max_formula_tokens(),
+            max_formula_source_bytes: limits.max_formula_source_bytes(),
+            max_formula_ast_nodes: limits.max_formula_ast_nodes(),
+            max_formula_nesting_depth: limits.max_formula_nesting_depth(),
+            max_dependency_edges: limits.max_dependency_edges(),
+            max_reference_areas: limits.max_reference_areas(),
+            max_array_cells: limits.max_array_cells(),
+            max_text_bytes: limits.max_text_bytes(),
+            max_function_iterations: limits.max_function_iterations(),
+            max_let_bindings: limits.max_let_bindings(),
+            max_lambda_depth: limits.max_lambda_depth(),
+            max_lambda_invocations: limits.max_lambda_invocations(),
+        },
+    }
+}
+
+const fn recalculation_mode_dto(mode: RecalculationMode) -> RecalculationModeDto {
+    match mode {
+        RecalculationMode::Auto => RecalculationModeDto::Auto,
+        RecalculationMode::Incremental => RecalculationModeDto::Incremental,
+        RecalculationMode::Full => RecalculationModeDto::Full,
+    }
+}
+
+const fn install_delta_basis_reason_name(reason: InstallDeltaBasisReason) -> &'static str {
+    match reason {
+        InstallDeltaBasisReason::NoInstalledCalculation => "no_installed_calculation",
+        InstallDeltaBasisReason::PriorPendingEdits => "prior_pending_edits",
+        InstallDeltaBasisReason::CalculationOptionsChanged => "calculation_options_changed",
+        InstallDeltaBasisReason::InstalledCalculationIdentityMismatch => {
+            "installed_calculation_identity_mismatch"
+        }
+        _ => "installed_calculation_identity_mismatch",
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut value = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(&mut value, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    value
 }
 
 pub(crate) fn cell_reference(
