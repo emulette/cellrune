@@ -1,22 +1,24 @@
 # CellRune
 
-CellRune is a Rust library for bounded XLSX/XLSM reading and deterministic formula calculation. It
-keeps the workbook read from disk immutable, returns recalculated values in a separate snapshot,
-and can retain an exact package backing for explicit round-trip writing.
+CellRune is a headless Rust backend for bounded XLSX/XLSM reading and deterministic formula
+calculation. It keeps the workbook read from disk immutable, returns recalculated values in a
+separate snapshot, and can retain an exact package backing for explicit round-trip writing. Its
+MCP integration is a local stdio workflow server, not a browser, UI, hosted service, or remote
+transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.15 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.16 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.15
+cargo add cellrune@0.1.16
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.15"
+cellrune = "0.1.16"
 ```
 
 ## Features
@@ -45,7 +47,7 @@ cellrune = "0.1.15"
   `TODAY()` or `NOW()`;
 - returns stable error and issue codes for programmatic handling;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
-  explicit cache-invalidation policies;
+  explicit cache-invalidation policies and reports a verified output SHA-256 identity;
 - creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name, table rename,
   table-column rename, table-row resize, number-format, date-system, and calculation-property edits
   through `WorkbookDraft`;
@@ -54,9 +56,10 @@ cellrune = "0.1.15"
 - exposes the same versioned read/edit/calculate/write contract through typed Python and
   Node.js/TypeScript native packages;
 - supports atomic typed edit batches, persistent parsed/dependency state, safe incremental
-  recalculation, bounded result deltas, cooperative cancellation, and stale-result rejection;
-- provides a local stdio MCP server with high-level open, inspect, edit, recalculate, range-read,
-  delta, and verified Save As tools over the same interop session; and
+  recalculation, bounded result deltas, cooperative cancellation, stale-result rejection, and
+  retained immutable change previews; and
+- provides a local stdio MCP server with high-level open, inspect, edit, preview, recalculate,
+  range-read, delta, and verified Save As tools over the same interop session; and
 - raw-copies unchanged package entries without exposing ZIP or XML implementation types.
 
 ## Usage
@@ -109,8 +112,13 @@ The fixed-income wave on top of 0.1.14 adds exactly 26 official names: `ACCRINT`
 `INTRATE`, `MDURATION`, `ODDFPRICE`, `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD`, `PRICE`, `PRICEDISC`,
 `PRICEMAT`, `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`, and
 `YIELDMAT`. They share a typed day-count and coupon-schedule model and a safeguarded yield root
-solver that charges the calculation budget and observes cancellation. The current source catalog
-contains 412 official names and 413 accepted entries including the OOXML dummy-function marker.
+solver that charges the calculation budget and observes cancellation.
+
+CellRune 0.1.16 implements `XLOOKUP` and adds `DATEVALUE`, `TIMEVALUE`,
+`NETWORKDAYS.INTL`, and `WORKDAY.INTL`. The deterministic source catalog contains 416 official
+names and 417 accepted entries including the non-official OOXML dummy-function marker. Their
+fixed grammar, lookup modes, calendar rules, wildcard behavior, and array-result boundaries are
+documented in [llms.txt](llms.txt).
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;
@@ -181,6 +189,15 @@ Long-running work can be prepared outside the session lock with `prepare_recalcu
 through a request-owned `CancellationToken`, and installed only if its source revision is still
 current.
 
+The 0.1.16 change-preview workflow captures an immutable base/candidate transaction
+without mutating the live workbook. Retention belongs to `cellrune-interop::WorkbookSession`, which
+allows one active preview calculation and one published preview. Publication is two phase: a failed,
+cancelled, stale, or oversized replacement leaves the previous published preview available. A
+successful semantic mutation, commit, discard, or session close drops the published preview.
+Preview details use core-owned opaque cursors; a cancelled or resource-limited pre-commit remains
+retryable, while a stale or successful commit consumes its preview. The complete Rust and binding
+call shapes are documented in [llms.txt](llms.txt).
+
 Table authoring uses stable identities rather than positional names. Construct
 `WorkbookChange::rename_table`, `rename_table_column`, or `resize_table_rows` and include it in the
 same atomic `EditBatch` as other workbook changes. Renames update cell formulas, defined names,
@@ -201,9 +218,11 @@ invalid definitions, unsupported expressions, and missing names.
 `write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
 `write_recalculated_xlsx_path` bind a calculation to that exact input, update typed formula
 caches, remove stale calculation chains, preserve unrelated package content, and reopen the output
-before reporting success. Strict mode rejects incomplete calculations without producing an
-artifact; cache invalidation is an explicit opt-in policy. `write_preserved_xlsx_bytes` remains
-available for an unchanged preservation copy.
+before reporting success. Their `WriteReport::output_hash()` returns an `OutputHash`: the SHA-256
+of the exact verified output archive bytes, deliberately distinct from the input identity. Strict
+mode rejects incomplete calculations without producing an artifact; cache invalidation is an
+explicit opt-in policy. `write_preserved_xlsx_bytes` remains available for an unchanged
+preservation copy.
 
 `WorkbookDraft::new` creates a canonical workbook, while
 `WorkbookDraft::from_document` retains the source package for preservation-aware edits. Calculate
@@ -237,12 +256,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.15 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.16 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.15"
-npm install "@cellrune/node@0.1.15"
+python -m pip install "cellrune==0.1.16"
+npm install "@cellrune/node@0.1.16"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -252,6 +271,14 @@ Python `inspect_defined_name` and Node.js `inspectDefinedName` expose the typed 
 The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separate
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
 table-row resize plus `changed_table_ids`/`changedTableIds` receipts.
+
+In the 0.1.16 bindings, Python exposes synchronous
+`preview_changes`, `preview_changes_page`, `commit_preview`, and `discard_preview`; the long
+native preview operation releases the GIL. Node.js exposes Promise-backed `previewChanges`, then
+synchronous `previewChangesPage`, `commitPreview`, and `discardPreview`. Python DTO fields use
+snake case and integer IDs; Node DTO fields use camel case and `bigint` IDs. A successful Python
+write report has `output_sha256`; the Node `WriteReport` has `outputSha256`. [llms.txt](llms.txt)
+defines the shared lifecycle and pagination semantics.
 
 Python workbooks are context managers:
 
@@ -291,8 +318,8 @@ try {
 ```
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
-session has been released. An active calculation is cooperatively cancelled, and subsequent
-operations fail with the stable `interop.session.closed` code.
+session has been released. An active calculation is cooperatively cancelled and a published preview
+is discarded; subsequent operations fail with the stable `interop.session.closed` code.
 
 ## Local MCP
 
@@ -306,11 +333,16 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 12 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
+Its 16 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
 `workbook_read_range`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`,
-`workbook_changes_since`, and `workbook_save_as`. The v2 edit tool adds stable-ID table rename,
-table-column rename, and table-row resize while retaining the v1 edit shapes.
+`workbook_changes_since`, `workbook_save_as`, `workbook_preview_changes`,
+`workbook_preview_changes_page`, `workbook_commit_preview`, and `workbook_discard_preview`.
+The v2 edit tool adds stable-ID table rename, table-column rename, and table-row resize while
+retaining the v1 edit shapes. The four preview tools are the retained immutable transaction
+workflow: preview returns a summary and ID, page returns a byte-bounded core-cursor page, and
+commit or discard consumes the interop-owned preview. `workbook_save_as` returns the shared write
+report, including its lowercase `output_sha256` output identity.
 
 The server also publishes read-only JSON resources at `cellrune://support/functions` and the
 `cellrune://sessions/{session_id}/summary` resource template. Operators can set
@@ -343,10 +375,13 @@ the same file handle under the configured archive-byte ceiling. Existing destina
 protected unless the server starts with `--allow-overwrite` and a request also sets
 `replace_existing`. Save As retains an open destination-directory capability from validation
 through atomic installation, so renaming or replacing the ambient parent path cannot redirect a
-write outside the approved root. Resource lists use byte-bounded cursor pagination. At session
-capacity, create/open may evict the least-recently-used idle session; active sessions are never
-evicted. Give the server the narrowest practical root; another process with write access inside
-that root can still change workbook inputs and contents.
+write outside the approved root. Resource lists use byte-bounded cursor pagination. Preview pages
+likewise return the longest complete interop prefix that fits the response limit and use opaque
+cursors bound to the preview and detail section. At session capacity, create/open may evict the
+least-recently-used idle session; active sessions are never evicted. TTL expiry and LRU eviction
+drop the interop session, which discards its retained preview rather than maintaining a separate
+MCP preview cache. Give the server the narrowest practical root; another process with write access
+inside that root can still change workbook inputs and contents.
 
 Tool results carry untrusted content. Cell text, sheet names, and defined names come from the
 workbook and are returned verbatim, so a crafted workbook can place text that reads as an
@@ -370,6 +405,7 @@ other formulas continue to calculate.
 
 The following are outside the current scope:
 
+- browser, frontend/UI, WebAssembly, hosted-service, and remote-MCP transports;
 - `.xls`, `.xlsb`, `.ods`, and CSV;
 - macro, add-in, external-workbook, query, or data-connection execution;
 - 3-D references outside the audited direct-consumer policy above;

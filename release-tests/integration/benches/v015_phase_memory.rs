@@ -4,7 +4,8 @@
 //! `cargo bench -p cellrune-integration-tests --bench v015_phase_memory -- --output evidence.json`.
 //! Passing `--baseline baseline.json` adds a descriptive comparison to the output. It never changes
 //! the exit status based on the measurements. `--smoke` uses a small one-sample workload to check
-//! the measurement setup.
+//! the measurement setup. `--commit <sha>` records an explicit source identity when a baseline is
+//! built from a Git archive that intentionally has no `.git` directory.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -16,6 +17,10 @@ use cellrune::{
     FormulaText, RecalculationMode, SheetId, WorkbookCalculationSession, WorkbookChange,
 };
 use serde::{Deserialize, Serialize};
+
+#[path = "support/platform.rs"]
+mod platform;
+
 const RECORDED_SAMPLES: usize = 10;
 const FORMULAS: u32 = 10_000;
 
@@ -138,7 +143,9 @@ fn main() {
     let mut evidence = Evidence {
         schema: "cellrune_0_1_15_phase_memory_v2".to_owned(),
         mode: if smoke { "smoke" } else { "measurement" }.to_owned(),
-        commit: command_output("git", &["rev-parse", "HEAD"]),
+        commit: value_after(&arguments, "--commit")
+            .map(str::to_owned)
+            .unwrap_or_else(|| command_output("git", &["rev-parse", "HEAD"])),
         rustc: command_output("rustc", &["--version"]),
         machine: machine_identity(),
         target: command_output("rustc", &["-vV"])
@@ -261,22 +268,7 @@ fn measure_retained_child(executable: &std::path::Path, formulas: u32) -> usize 
 }
 
 fn current_rss_bytes(pid: u32) -> usize {
-    if cfg!(target_os = "linux") {
-        let status = fs::read_to_string(format!("/proc/{pid}/status")).expect("read child status");
-        let value = status
-            .lines()
-            .find_map(|line| line.strip_prefix("VmRSS:"))
-            .and_then(|line| line.split_whitespace().next())
-            .expect("VmRSS value")
-            .parse::<usize>()
-            .expect("numeric VmRSS");
-        value * 1_024
-    } else {
-        command_output("ps", &["-o", "rss=", "-p", &pid.to_string()])
-            .parse::<usize>()
-            .expect("numeric ps RSS")
-            * 1_024
-    }
+    platform::current_rss_bytes(pid)
 }
 
 fn independent_session(formulas: u32) -> WorkbookCalculationSession {
@@ -474,22 +466,7 @@ fn metric_comparison(baseline: f64, candidate: f64) -> MetricComparison {
 }
 
 fn machine_identity() -> String {
-    if cfg!(target_os = "macos") {
-        command_output("sysctl", &["-n", "hw.model"])
-    } else {
-        let machine = command_output("uname", &["-m"]);
-        let cpu = fs::read_to_string("/proc/cpuinfo")
-            .ok()
-            .and_then(|contents| {
-                contents.lines().find_map(|line| {
-                    line.strip_prefix("model name")
-                        .and_then(|value| value.split_once(':').map(|(_, model)| model.trim()))
-                        .map(str::to_owned)
-                })
-            })
-            .unwrap_or_else(|| "unknown-cpu".to_owned());
-        format!("{machine}:{cpu}")
-    }
+    platform::machine_identity()
 }
 
 fn command_output(program: &str, arguments: &[&str]) -> String {

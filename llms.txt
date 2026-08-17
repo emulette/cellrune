@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.15, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.16, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -53,9 +53,11 @@ privately and binds it to a SHA-256 `InputHash`.
 `write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
 `write_recalculated_xlsx_path` materialize a `CalculationSnapshot` made from
 that exact document, preserve unrelated package content, and reopen the output
-before success. The default strict policy produces no artifact if any result
-is unavailable. `write_preserved_xlsx_bytes` produces an unchanged
-preservation copy.
+before success. A successful `WriteReport::output_hash()` is an `OutputHash`,
+the SHA-256 identity of those exact verified output bytes; it is intentionally
+not interchangeable with `InputHash`. The default strict policy produces no
+artifact if any result is unavailable. `write_preserved_xlsx_bytes` produces
+an unchanged preservation copy.
 
 `WorkbookDraft::new()` creates a canonical XLSX workbook.
 `WorkbookDraft::from_document(&XlsxDocument)` creates a preservation-backed edit
@@ -78,29 +80,45 @@ a consumer never writes its own UTF-16 conversion. See
 
 For AI hosts, the separate `cellrune-mcp` binary provides local stdio MCP
 `2025-11-25` tools over `cellrune-interop::WorkbookSession`. It exposes
-high-level workbook lifecycle, summary, range, usage, capability, batch edit,
+high-level workbook lifecycle, summary, range, usage, capability, batch edit, preview,
 recalculation, delta, and Save As operations—not one tool per spreadsheet
 function. Configured filesystem roots are canonicalized at startup; every
 workbook path supplied to a tool must be absolute and resolve inside one of
-those roots. It has no remote transport. The 12 tools are `workbook_create`,
+those roots. It has no remote transport. The 16 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`,
-`workbook_changes_since`, and `workbook_save_as`.
+`workbook_changes_since`, `workbook_save_as`, `workbook_preview_changes`,
+`workbook_preview_changes_page`, `workbook_commit_preview`, and
+`workbook_discard_preview`.
 Read-only JSON resources expose the versioned function catalog at
 `cellrune://support/functions` and active session metadata through the
 `cellrune://sessions/{session_id}/summary` template. Operators can bound
 resident sessions, idle lifetime, response bytes, and workbook bytes with
 the corresponding `cellrune-mcp --help` options. Input validation and parsing
-use the same capability-bound file handle and archive-byte ceiling. At
-capacity, create/open may evict the least-recently-used idle session; active
-sessions are never evicted.
+use the same capability-bound file handle and archive-byte ceiling. Preview
+detail pages are byte-bounded and use opaque core cursors. At capacity,
+create/open may evict the least-recently-used idle session; active sessions are
+never evicted. Expiry or LRU eviction drops the interop session and therefore
+discards its retained preview; MCP does not keep a second preview cache.
 
 The Python `Workbook` is a context manager. Python and Node.js `Workbook`
 objects also expose `closed` and an idempotent `close()`. Once `close()`
 returns, the binding-owned native session has been released. An active
-calculation is cooperatively cancelled, and subsequent operations fail with
-the stable `interop.session.closed` code.
+calculation is cooperatively cancelled and a published preview is discarded;
+subsequent operations fail with the stable `interop.session.closed` code.
+
+The 0.1.16 binding preview calls are transport views of that single
+interop-owned transaction. Python uses synchronous `Workbook.preview_changes`,
+`preview_changes_page`, `commit_preview`, and `discard_preview`; the long
+native preview operation releases the GIL. Python returns snake-case DTO fields
+and ordinary integer IDs. Node uses Promise-backed
+`await workbook.previewChanges(expectedRevision, changes, options)`, followed
+by synchronous `previewChangesPage`, `commitPreview`, and `discardPreview`.
+Node returns camel-case DTO fields and `bigint` IDs/cursors. A failed or
+cancelled replacement preserves a previous published preview; pre-commit
+cancellation or resource failure is retryable, while stale and successful
+commits consume the preview.
 
 ## Naming conventions
 
@@ -469,6 +487,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   provides cooperative cancellation. Running a prepared calculation returns
   `CompletedCalculation`; cancellation or a newer workbook revision never
   replaces the installed current result.
+- `session.prepare_transaction(expected_revision, batch, mode, options, token)`
+  captures immutable base and candidate drafts without mutating the live
+  session. Run its `PreparedWorkbookTransaction` off-lock to obtain a
+  `CompletedWorkbookTransaction`. Its `.report()` is a complete transaction
+  summary and `.page_from_token(section, cursor, limit)` consumes only its
+  opaque core cursor contract. `validate_transaction` rejects a changed live
+  basis before publication; `install_transaction_cancellable` atomically
+  installs the exact candidate, receipt, and delta. Pre-commit cancellation or
+  resource failure is retryable; stale and successful installation are terminal.
+  `CompletedWorkbookTransaction::discard()` releases a candidate without
+  changing the live session.
 - `CalculationDelta` distinguishes dirty, evaluated, changed, and removed
   materialized cells. `CalculationDeltaCell` carries each changed cell,
   materialization origin, and result. `CalculationExecutionMode` reports
@@ -518,11 +547,11 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.15 catalog contains 412 official Excel-facing
-  names and one non-official compatibility entry for the OOXML dummy-function
-  marker, for 413 accepted entries. Both its catalog and semantic registry are
-  protected by byte-exact 0.1.15 snapshots. The versioned 0.1.14 catalog
-  remains 386 official names and 387 accepted entries byte-exact.
+  `.is_official()`. The 0.1.16 catalog contains 416 official
+  Excel-facing names and one non-official compatibility entry for the OOXML
+  dummy-function marker, for 417 accepted entries. The 0.1.15 catalog and
+  semantic registry remain protected by byte-exact snapshots; 0.1.14 remains
+  386 official names and 387 accepted entries byte-exact.
 - The 19 official names added in 0.1.14 are `CONVERT`, `BESSELI`, `BESSELJ`,
   `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`,
   `IMCONJUGATE`, `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`,
@@ -533,6 +562,23 @@ than guessing a name from a different XLSX crate (`calamine`,
   `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD`, `PRICE`, `PRICEDISC`, `PRICEMAT`,
   `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`,
   and `YIELDMAT`. None returns an array.
+- The four 0.1.16 official names are `DATEVALUE`, `TIMEVALUE`,
+  `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. `XLOOKUP` is now implemented and is
+  marked `.returns_array()`. It accepts a one-dimensional lookup vector and a
+  matching-axis return range; the array result is the matching row (vertical
+  lookup) or column (horizontal lookup). It supports exact, next-smaller,
+  next-larger, and linear wildcard matching, plus forward, reverse, ascending
+  binary, and descending binary search. Binary search assumes correctly sorted
+  caller input and wildcard mode rejects binary search. `if_not_found` is lazy
+  and is evaluated only for no-match.
+- `DATEVALUE` accepts space/tab-trimmed ASCII `YYYY-MM-DD`; `TIMEVALUE` accepts
+  the same trimming with ASCII `HH:MM`, optional seconds, and one-to-nine
+  fractional-second digits.
+  Both reject locale-dependent input. `DATEVALUE` validates Gregorian fields
+  and maps `1900-02-29` to serial 60 only in the Excel 1900 system.
+  `NETWORKDAYS.INTL` and `WORKDAY.INTL` support numeric weekend codes 1..7 and
+  11..17 or a seven-bit Monday-first mask, deduplicate numeric holidays, and
+  charge the iteration budget while observing cancellation.
 - Fixed-income day counts cover US 30/360, Actual/Actual, Actual/360,
   Actual/365, and European 30/360; coupon schedules walk backward from
   maturity and preserve month-end policy. `YIELD(N>1)` and `ODDFYIELD` share
@@ -676,6 +722,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `SourceLocation::source`, `::sheet`, and `::cell` construct source-linked
   locations; `.with_byte_offset(...)` adds a zero-based byte offset.
 - `Provenance` pairs a `ProviderIdentity` with an optional `InputHash`.
+- `OutputHash` is a distinct SHA-256 newtype for exact verified output archive
+  bytes. `WriteReport::output_hash()` returns it only on a successful write;
+  never use it as an input identity.
 - `WriteProvenance` records the input hash, semantic and presentation
   revisions, calculator identity, and deterministic calculation options used
   by a completed write.
@@ -710,6 +759,7 @@ set of Excel formula syntax and functions. Unsupported formulas appear as
 structured per-cell calculation issues while independent formulas continue to
 calculate. Out of scope for the current version:
 
+- Browser, frontend/UI, WebAssembly, hosted-service, and remote-MCP transports.
 - `.xls`, `.xlsb`, `.ods`, and CSV.
 - Macro, add-in, external-workbook, query, or data-connection execution.
 - 3-D references outside the audited direct-consumer policy described under

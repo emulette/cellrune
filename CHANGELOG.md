@@ -8,6 +8,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [0.1.16] - 2026-08-17
+
+### Added
+
+- Retained, immutable verified change previews across the Rust interop session, Python, Node.js,
+  and local MCP. A session retains one active calculation and one published preview; two-phase
+  publication preserves an earlier preview when a replacement fails, is cancelled, or cannot fit
+  its response. Commit installs only a current captured base, while a pre-commit cancellation or
+  resource failure remains retryable.
+- Four local stdio MCP tools: `workbook_preview_changes`,
+  `workbook_preview_changes_page`, `workbook_commit_preview`, and
+  `workbook_discard_preview`. The server now exposes 16 high-level workbook tools; preview paging
+  is byte-bounded and delegates its opaque cursor to the core transaction pager.
+- `OutputHash`, a distinct SHA-256 identity for exact verified output archive bytes. Rust write
+  reports expose `output_hash()`, Python reports expose `output_sha256`, Node reports expose
+  `outputSha256`, and MCP Save As returns the shared report.
+- `DATEVALUE`, `TIMEVALUE`, `NETWORKDAYS.INTL`, and `WORKDAY.INTL`, plus the implemented
+  `XLOOKUP` calculation contract including its array result shape, exact/approximate/wildcard
+  matching, and forward/reverse/binary search modes.
+
+### Changed
+
+- The deterministic source catalog contains 416 official Excel-facing names and 417 accepted
+  entries, including the non-official OOXML dummy-function marker. `XLOOKUP` remains a catalogued
+  name and the four date functions are new official names.
+- Public documentation now states the headless backend and local-stdio MCP boundary, the retained
+  preview lifecycle, binding call shapes, verified output identity, and the 0.1.16 formula
+  contracts.
+
 ## [0.1.15] - 2026-08-13
 
 ### Added
@@ -702,7 +731,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.15...HEAD
+[0.1.16]: https://github.com/emulette/cellrune/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/emulette/cellrune/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/emulette/cellrune/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/emulette/cellrune/compare/v0.1.12...v0.1.13

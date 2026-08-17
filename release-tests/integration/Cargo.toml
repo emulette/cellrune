@@ -11,7 +11,8 @@ workspace = true
 
 [dependencies]
 calamine.workspace = true
-cellrune = { version = "=0.1.15", path = "../../crates/cellrune" }
+cellrune = { version = "=0.1.16", path = "../../crates/cellrune", features = ["__internal-transaction-bench"] }
+cellrune-interop = { version = "=0.1.16", path = "../../crates/cellrune-interop" }
 libm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -31,5 +32,10 @@ test = false
 
 [[bench]]
 name = "v015_phase_memory"
+harness = false
+test = false
+
+[[bench]]
+name = "v016_transaction_phase"
 harness = false
 test = false

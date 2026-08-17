@@ -6,6 +6,16 @@ use super::detail::{
 use super::report::next_report_identity;
 use super::*;
 
+#[derive(Debug, Clone, Copy)]
+enum TransactionRunCheckpoint {
+    BaseCalculation,
+    CandidatePlanning,
+    CandidateCalculation,
+    PreviewDifference,
+    InstallDifference,
+    ReportConstruction,
+}
+
 impl PreparedWorkbookTransaction {
     /// Returns the immutable transaction base workbook.
     pub fn base_workbook(&self) -> &crate::WorkbookSnapshot {
@@ -28,6 +38,43 @@ impl PreparedWorkbookTransaction {
     ///
     /// Returns a calculation, cancellation, delta, or transaction detail resource-limit error.
     pub fn run(self) -> Result<CompletedWorkbookTransaction, SessionError> {
+        self.run_inner(|_| {})
+    }
+
+    /// Runs a transaction and returns exclusive phase durations for the manual release benchmark.
+    ///
+    /// This method exists only behind the release-test-only `__internal-transaction-bench` compile
+    /// fence. The array order is base calculation, candidate impact/planning, candidate
+    /// calculation, preview difference, install difference, and report construction. Each entry
+    /// covers only the work since the preceding checkpoint, so the durations neither overlap nor
+    /// accumulate.
+    #[cfg(feature = "__internal-transaction-bench")]
+    #[doc(hidden)]
+    pub fn run_with_benchmark_phases(
+        self,
+    ) -> Result<(CompletedWorkbookTransaction, [std::time::Duration; 6]), SessionError> {
+        let mut phases = [std::time::Duration::ZERO; 6];
+        let mut previous = std::time::Instant::now();
+        let completed = self.run_inner(|checkpoint| {
+            let now = std::time::Instant::now();
+            let index = match checkpoint {
+                TransactionRunCheckpoint::BaseCalculation => 0,
+                TransactionRunCheckpoint::CandidatePlanning => 1,
+                TransactionRunCheckpoint::CandidateCalculation => 2,
+                TransactionRunCheckpoint::PreviewDifference => 3,
+                TransactionRunCheckpoint::InstallDifference => 4,
+                TransactionRunCheckpoint::ReportConstruction => 5,
+            };
+            phases[index] = now.duration_since(previous);
+            previous = now;
+        })?;
+        Ok((completed, phases))
+    }
+
+    fn run_inner(
+        self,
+        mut checkpoint: impl FnMut(TransactionRunCheckpoint),
+    ) -> Result<CompletedWorkbookTransaction, SessionError> {
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
@@ -127,6 +174,7 @@ impl PreparedWorkbookTransaction {
                 execution.reference_cells,
             )
         };
+        checkpoint(TransactionRunCheckpoint::BaseCalculation);
 
         let topology_or_metadata_changed = self.edit_receipt.topology_changed()
             || self.edit_receipt.calculation_metadata_changed();
@@ -192,6 +240,7 @@ impl PreparedWorkbookTransaction {
                 )),
             ));
         }
+        checkpoint(TransactionRunCheckpoint::CandidatePlanning);
         let candidate_execution = candidate_prepared.execute()?;
         ensure_evaluated_resource_limits(
             &candidate_execution.calculation,
@@ -243,6 +292,7 @@ impl PreparedWorkbookTransaction {
                 )),
             ));
         }
+        checkpoint(TransactionRunCheckpoint::CandidateCalculation);
         let preview_delta = build_delta(
             Some(&base_calculation),
             &candidate_execution.calculation,
@@ -258,6 +308,7 @@ impl PreparedWorkbookTransaction {
             self.limits.max_delta_cells,
             &|| self.cancellation.is_cancelled(),
         )?;
+        checkpoint(TransactionRunCheckpoint::PreviewDifference);
         let install_base_revision = self
             .captured_calculation
             .as_ref()
@@ -299,6 +350,7 @@ impl PreparedWorkbookTransaction {
             ));
         }
 
+        checkpoint(TransactionRunCheckpoint::InstallDifference);
         let mut detail_budget = DetailBudget::new(self.limits.max_transaction_detail_items);
         let preview_results = build_preview_result_details(
             &base_calculation,
@@ -453,6 +505,7 @@ impl PreparedWorkbookTransaction {
             base_fingerprint: self.base_fingerprint,
             result_fingerprint,
         };
+        checkpoint(TransactionRunCheckpoint::ReportConstruction);
         Ok(CompletedWorkbookTransaction {
             report,
             payload: Some(payload),

@@ -28,16 +28,16 @@ use cellrune::{
     DefinedName, DefinedNameAnalysis, DefinedNameAnalysisError, DefinedNameAnalysisOptions,
     DefinedNameExternalReference, DefinedNameExternalTargetKind, DefinedNameScope, Diagnostic,
     DiagnosticSeverity, EditBatch, FormulaCapability, FormulaCapabilityReport, FormulaCell,
-    FunctionSupport, NumberFormatKind, OutputHash, PreparedWorkbookTransaction, Provenance,
-    ReadOptions, RecalculatedWorkbook, RecalculationMode, RecalculationWriteOptions, SavedResult,
-    SavedResultIssue, SessionError, SharedFormulaRole, Sheet, SheetId, SheetVisibility, Table,
-    TableColumn, TableColumnId, TableId, TableName, TransactionDetailSection,
-    TransactionImpactPage, TransactionPageCursor, ValidationError, WorkbookCalculationSession,
-    WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
-    WorkbookTransactionReceipt, WorkbookTransactionReport, WriteReport, XlsxDocument,
-    XlsxReadError, XlsxWriteError, analyze_defined_name, analyze_defined_name_cancellable,
-    analyze_defined_name_with_options, calculate_workbook, read_xlsx_bytes,
-    scan_formula_capabilities, write_recalculated_xlsx_bytes,
+    FunctionSupport, InputHash, NumberFormatKind, OutputHash, PreparedWorkbookTransaction,
+    Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode, RecalculationWriteOptions,
+    SavedResult, SavedResultIssue, SessionError, SharedFormulaRole, Sheet, SheetId,
+    SheetVisibility, Table, TableColumn, TableColumnId, TableId, TableName,
+    TransactionDetailSection, TransactionImpactPage, TransactionPageCursor, ValidationError,
+    WorkbookCalculationSession, WorkbookFingerprint, WorkbookSnapshot, WorkbookSource,
+    WorkbookSourceKind, WorkbookTransactionReceipt, WorkbookTransactionReport, WriteReport,
+    XlsxDocument, XlsxReadError, XlsxWriteError, analyze_defined_name,
+    analyze_defined_name_cancellable, analyze_defined_name_with_options, calculate_workbook,
+    read_xlsx_bytes, scan_formula_capabilities, write_recalculated_xlsx_bytes,
 };
 
 /// Captures a payload binding's exact type. The intermediate `let pinned = payload(…);` at every
@@ -265,6 +265,7 @@ const _FROZEN_RUN_TRANSACTION: fn(
 const _FROZEN_TRANSACTION_REPORT: fn(&CompletedWorkbookTransaction) -> &WorkbookTransactionReport =
     CompletedWorkbookTransaction::report;
 
+const _FROZEN_INPUT_HASH_CONSTRUCTOR: fn([u8; 32]) -> InputHash = InputHash::sha256;
 const _FROZEN_OUTPUT_HASH_CONSTRUCTOR: fn([u8; 32]) -> OutputHash = OutputHash::sha256;
 const _FROZEN_WRITE_REPORT_OUTPUT_HASH: fn(&WriteReport) -> OutputHash = WriteReport::output_hash;
 

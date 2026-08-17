@@ -23,6 +23,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 capability-fs = ["dep:cap-std"]
+# Internal compile fence used only by the release-test manual benchmark. It does not alter the
+# default API, transaction report, or serialized interop contracts.
+__internal-transaction-bench = []
 
 [dependencies]
 cap-std = { workspace = true, optional = true }
