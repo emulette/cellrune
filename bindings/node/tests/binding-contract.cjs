@@ -67,6 +67,9 @@ async function main() {
   );
   assert.equal(definedNameCorpus.schema_version, 1);
   const workbook = Workbook.create();
+  const fingerprint = workbook.summary().fingerprint;
+  assert.equal(fingerprint.schemaVersion, 7);
+  assert.match(fingerprint.digestHex, /^[0-9a-f]{64}$/u);
   for (const operation of corpus.operations) {
     if (operation.kind === "set_number") {
       workbook.setNumber(operation.sheet, operation.address, operation.value);

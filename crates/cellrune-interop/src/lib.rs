@@ -22,8 +22,9 @@ pub use dto::{
     EditReceiptDto, EditReceiptV2Dto, FinancialSolverSemanticsDto, FunctionCatalogEntryDto,
     FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto, RangePageDto,
     RangeRequestDto, RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto,
-    TableColumnDto, TableSummaryDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookSummaryDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    TableColumnDto, TableSummaryDto, WorkbookChangeDto, WorkbookChangeV2Dto,
+    WorkbookFingerprintDto, WorkbookSummaryDto, WritableCellValueDto, WriteOptionsDto,
+    WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use service::{

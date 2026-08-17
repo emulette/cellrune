@@ -764,6 +764,16 @@ pub struct SheetSummaryDto {
     pub tables: Vec<TableSummaryDto>,
 }
 
+/// Transport-safe versioned workbook semantic fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkbookFingerprintDto {
+    /// Semantic fingerprint schema version.
+    pub schema_version: u16,
+    /// Lower-case 64-character digest hexadecimal.
+    pub digest_hex: String,
+}
+
 /// Bounded workbook metadata returned without cell contents.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -772,6 +782,8 @@ pub struct WorkbookSummaryDto {
     pub schema_version: u32,
     /// Current monotonic semantic revision.
     pub semantic_revision: u64,
+    /// Versioned history-independent semantic fingerprint.
+    pub fingerprint: WorkbookFingerprintDto,
     /// Whether the session preserves an opened XLSX or XLSM package.
     pub document_backed: bool,
     /// `xlsx`, `xlsm`, or `new_xlsx`.

@@ -78,11 +78,18 @@ pub struct NativeSheetSummary {
 pub struct NativeWorkbookSummary {
     pub schema_version: u32,
     pub semantic_revision: String,
+    pub fingerprint: NativeWorkbookFingerprint,
     pub document_backed: bool,
     pub document_kind: String,
     pub date_system: String,
     pub diagnostic_count: f64,
     pub sheets: Vec<NativeSheetSummary>,
+}
+
+#[napi(object)]
+pub struct NativeWorkbookFingerprint {
+    pub schema_version: u16,
+    pub digest_hex: String,
 }
 
 #[napi(object)]
@@ -210,6 +217,10 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
     NativeWorkbookSummary {
         schema_version: value.schema_version,
         semantic_revision: value.semantic_revision.to_string(),
+        fingerprint: NativeWorkbookFingerprint {
+            schema_version: value.fingerprint.schema_version,
+            digest_hex: value.fingerprint.digest_hex,
+        },
         document_backed: value.document_backed,
         document_kind: value.document_kind,
         date_system: value.date_system,

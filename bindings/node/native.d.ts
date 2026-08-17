@@ -229,9 +229,15 @@ export interface NativeTableSummary {
   columns: Array<NativeTableColumn>
 }
 
+export interface NativeWorkbookFingerprint {
+  schemaVersion: number
+  digestHex: string
+}
+
 export interface NativeWorkbookSummary {
   schemaVersion: number
   semanticRevision: string
+  fingerprint: NativeWorkbookFingerprint
   documentBacked: boolean
   documentKind: string
   dateSystem: string

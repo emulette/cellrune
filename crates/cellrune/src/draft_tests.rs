@@ -398,7 +398,7 @@ fn presentation_only_edits_reuse_the_existing_calculation_identity() {
         .set_cell_value(sheet_id, cell, CellValue::Text("明日".to_owned()))
         .expect("text");
     let semantic_revision = draft.semantic_revision();
-    let fingerprint = crate::calculation::workbook_fingerprint(draft.workbook());
+    let fingerprint = draft.workbook().fingerprint();
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
 
     draft
@@ -417,10 +417,7 @@ fn presentation_only_edits_reuse_the_existing_calculation_identity() {
         .expect("pane");
 
     assert_eq!(draft.semantic_revision(), semantic_revision);
-    assert_eq!(
-        crate::calculation::workbook_fingerprint(draft.workbook()),
-        fingerprint
-    );
+    assert_eq!(draft.workbook().fingerprint(), fingerprint);
     assert!(calculation.matches_workbook(draft.workbook()));
 }
 
@@ -547,7 +544,7 @@ fn table_edit_collision_is_atomic() {
         )
         .expect("seed collision");
     let revision = draft.semantic_revision();
-    let before_fingerprint = crate::calculation::workbook_fingerprint(draft.workbook());
+    let before_fingerprint = draft.workbook().fingerprint();
     let error = draft
         .apply_changes(EditBatch::new([
             WorkbookChange::rename_table(
@@ -567,10 +564,7 @@ fn table_edit_collision_is_atomic() {
         ValidationError::TableMaterializationCollision { .. }
     ));
     assert_eq!(draft.semantic_revision(), revision);
-    assert_eq!(
-        crate::calculation::workbook_fingerprint(draft.workbook()),
-        before_fingerprint
-    );
+    assert_eq!(draft.workbook().fingerprint(), before_fingerprint);
     assert_eq!(
         draft
             .workbook()
@@ -667,7 +661,7 @@ fn header_only_table_can_expand_and_materialize_calculated_columns() {
 fn table_resize_materialization_limit_fails_before_installation() {
     let draft = empty_table_draft();
     let original_revision = draft.semantic_revision();
-    let original_fingerprint = crate::calculation::workbook_fingerprint(draft.workbook());
+    let original_fingerprint = draft.workbook().fingerprint();
     let limits = SessionLimits::default()
         .with_table_materialization_limit(1)
         .expect("limits");
@@ -689,10 +683,7 @@ fn table_resize_materialization_limit_fails_before_installation() {
             if error.code() == SessionErrorCode::TableMaterializationLimitExceeded
     ));
     assert_eq!(session.workbook().semantic_revision(), original_revision);
-    assert_eq!(
-        crate::calculation::workbook_fingerprint(session.workbook()),
-        original_fingerprint
-    );
+    assert_eq!(session.workbook().fingerprint(), original_fingerprint);
 }
 
 #[test]
@@ -756,7 +747,7 @@ fn table_authoring_rejects_invalid_targets_names_and_overlap_atomically() {
     let missing_column_id = TableColumnId::new(99).expect("missing column ID");
     let mut draft = two_table_draft();
     let revision = draft.semantic_revision();
-    let fingerprint = crate::calculation::workbook_fingerprint(draft.workbook());
+    let fingerprint = draft.workbook().fingerprint();
 
     let cases = [
         (
@@ -821,10 +812,7 @@ fn table_authoring_rejects_invalid_targets_names_and_overlap_atomically() {
     for (result, expected) in cases {
         assert_eq!(result.expect_err("invalid table edit"), expected);
         assert_eq!(draft.semantic_revision(), revision);
-        assert_eq!(
-            crate::calculation::workbook_fingerprint(draft.workbook()),
-            fingerprint
-        );
+        assert_eq!(draft.workbook().fingerprint(), fingerprint);
     }
 }
 
@@ -875,7 +863,7 @@ fn related_malformed_formula_aborts_table_rename_atomically() {
         )
         .expect("seed malformed formula");
     let revision = draft.semantic_revision();
-    let fingerprint = crate::calculation::workbook_fingerprint(draft.workbook());
+    let fingerprint = draft.workbook().fingerprint();
     let error = draft
         .apply_changes(EditBatch::new([WorkbookChange::rename_table(
             table_id,
@@ -890,10 +878,7 @@ fn related_malformed_formula_aborts_table_rename_atomically() {
         } if owner == "cell:sheet_id=1,address=E1"
     ));
     assert_eq!(draft.semantic_revision(), revision);
-    assert_eq!(
-        crate::calculation::workbook_fingerprint(draft.workbook()),
-        fingerprint
-    );
+    assert_eq!(draft.workbook().fingerprint(), fingerprint);
     assert_eq!(
         draft
             .workbook()

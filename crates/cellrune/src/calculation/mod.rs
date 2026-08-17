@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::{
-    CellAddress, CellValue, FiniteNumber, Provenance, ProviderIdentity, SheetId, WorkbookSnapshot,
+    CellAddress, CellValue, FiniteNumber, Provenance, ProviderIdentity, SheetId,
+    WorkbookFingerprint, WorkbookSnapshot,
 };
 use decimal::DecimalTrace;
 
@@ -812,7 +813,7 @@ pub struct CalculationSnapshot {
     options: CalculationOptions,
     provenance: Provenance,
     source_revision: u64,
-    source_fingerprint: [u8; 32],
+    source_fingerprint: WorkbookFingerprint,
 }
 
 pub(crate) struct IncrementalCalculationPatch<'a> {
@@ -895,7 +896,9 @@ impl CalculationSnapshot {
             options,
             provenance,
             source_revision: source.semantic_revision(),
-            source_fingerprint: source.semantic_fingerprint_cancellable(cancelled)?,
+            source_fingerprint: WorkbookFingerprint::current(
+                source.semantic_fingerprint_cancellable(cancelled)?,
+            ),
         })
     }
 
@@ -919,7 +922,9 @@ impl CalculationSnapshot {
                 source.provenance().input_hash(),
             ),
             source_revision: source.semantic_revision(),
-            source_fingerprint: source.semantic_fingerprint_cancellable(cancelled)?,
+            source_fingerprint: WorkbookFingerprint::current(
+                source.semantic_fingerprint_cancellable(cancelled)?,
+            ),
         })
     }
 
@@ -1004,7 +1009,9 @@ impl CalculationSnapshot {
                 source.provenance().input_hash(),
             ),
             source_revision: source.semantic_revision(),
-            source_fingerprint: source.semantic_fingerprint_cancellable(cancelled)?,
+            source_fingerprint: WorkbookFingerprint::current(
+                source.semantic_fingerprint_cancellable(cancelled)?,
+            ),
         })
     }
 
@@ -1076,16 +1083,14 @@ impl CalculationSnapshot {
         self.source_revision
     }
 
-    pub(crate) const fn source_fingerprint(&self) -> &[u8; 32] {
-        &self.source_fingerprint
+    /// Returns the versioned semantic fingerprint of the source workbook.
+    pub const fn source_fingerprint(&self) -> WorkbookFingerprint {
+        self.source_fingerprint
     }
 
     pub(crate) fn matches_workbook(&self, workbook: &WorkbookSnapshot) -> bool {
         self.source_revision == workbook.semantic_revision()
-            && self.source_fingerprint
-                == workbook
-                    .semantic_fingerprint_cancellable(&|| false)
-                    .expect("non-cancellable fingerprinting cannot be cancelled")
+            && self.source_fingerprint == workbook.fingerprint()
             && self.provenance.input_hash() == workbook.provenance().input_hash()
     }
 }
@@ -1117,8 +1122,6 @@ fn build_materialized_owner_index(
     }
     Ok(owners)
 }
-
-pub(crate) use identity::workbook_fingerprint;
 
 /// Scans formula grammar and function-surface support without returning calculated values.
 pub fn scan_formula_capabilities(workbook: &WorkbookSnapshot) -> FormulaCapabilityReport {

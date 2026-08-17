@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cellrune_interop::{
     CalculationOptionsDto, CalculationResultDto, CellValueDto, INTEROP_SCHEMA_VERSION,
-    InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, RecalculationModeDto, WorkbookSession,
-    WritableCellValueDto, WriteOptionsDto, function_catalog,
+    InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, RecalculationModeDto, WorkbookFingerprintDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto, function_catalog,
 };
 
 #[test]
@@ -13,6 +13,19 @@ fn typed_values_edits_and_stable_errors_cover_the_public_boundary() {
     let summary = session.summary();
     assert_eq!(summary.schema_version, INTEROP_SCHEMA_VERSION);
     assert_eq!(summary.semantic_revision, 0);
+    assert_eq!(summary.fingerprint.schema_version, 7);
+    assert_eq!(summary.fingerprint.digest_hex.len(), 64);
+    assert!(
+        summary
+            .fingerprint
+            .digest_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    let serialized = serde_json::to_string(&summary.fingerprint).expect("fingerprint JSON");
+    let round_trip: WorkbookFingerprintDto =
+        serde_json::from_str(&serialized).expect("fingerprint JSON round trip");
+    assert_eq!(round_trip, summary.fingerprint);
     assert!(!summary.document_backed);
     assert_eq!(summary.document_kind, "new_xlsx");
     assert_eq!(summary.date_system, "excel_1900");

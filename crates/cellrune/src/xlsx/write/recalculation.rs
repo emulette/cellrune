@@ -14,12 +14,12 @@ use super::{
     RecalculatedWorkbook, RecalculationWriteOptions, WriteProvenance, WriteReport, XlsxWriteError,
     XlsxWriteErrorCode,
 };
-use crate::calculation::workbook_fingerprint;
 use crate::xlsx::document::{OpenOptions, XlsxDocument, open_xlsx_document_bytes};
 use crate::xlsx::package::PartPath;
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, Diagnostic, DiagnosticCode,
-    DiagnosticSeverity, MaterializedResultOrigin, ReadOptions, SavedResult, SourceLocation,
+    DiagnosticSeverity, InputHash, MaterializedResultOrigin, ReadOptions, SavedResult,
+    SourceLocation, WorkbookSnapshot,
 };
 
 const CONTENT_TYPES_PART: &[u8] = b"[Content_Types].xml";
@@ -221,19 +221,31 @@ fn validate_calculation_identity(
     document: &XlsxDocument,
     calculation: &CalculationSnapshot,
 ) -> Result<(), XlsxWriteError> {
-    if calculation.provenance().input_hash() != Some(document.input_hash()) {
+    validate_calculation_identity_parts(
+        Some(document.input_hash()),
+        document.workbook(),
+        calculation,
+    )
+}
+
+fn validate_calculation_identity_parts(
+    input_hash: Option<InputHash>,
+    workbook: &WorkbookSnapshot,
+    calculation: &CalculationSnapshot,
+) -> Result<(), XlsxWriteError> {
+    if calculation.provenance().input_hash() != input_hash {
         return Err(
             XlsxWriteError::new(XlsxWriteErrorCode::SourceIdentityMismatch)
                 .with_detail(DETAIL_CALCULATION_INPUT_MISMATCH),
         );
     }
-    if calculation.source_revision() != document.semantic_revision() {
+    if calculation.source_revision() != workbook.semantic_revision() {
         return Err(
             XlsxWriteError::new(XlsxWriteErrorCode::StaleSemanticRevision)
                 .with_detail(DETAIL_CALCULATION_REVISION_MISMATCH),
         );
     }
-    if calculation.source_fingerprint() != &workbook_fingerprint(document.workbook()) {
+    if calculation.source_fingerprint() != workbook.fingerprint() {
         return Err(
             XlsxWriteError::new(XlsxWriteErrorCode::StaleSemanticRevision)
                 .with_detail(DETAIL_CALCULATION_FINGERPRINT_MISMATCH),
@@ -426,4 +438,33 @@ fn verification_error() -> XlsxWriteError {
 
 fn io_write_error(error: std::io::Error) -> XlsxWriteError {
     XlsxWriteError::new(XlsxWriteErrorCode::Io).with_cause(error)
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::validate_calculation_identity_parts;
+    use crate::{
+        CalculationOptions, CellAddress, CellValue, FiniteNumber, WorkbookDraft,
+        XlsxWriteErrorCode, calculate_workbook,
+    };
+
+    #[test]
+    fn fingerprint_only_mismatch_is_stale() {
+        let base = WorkbookDraft::new();
+        let calculation = calculate_workbook(base.workbook(), CalculationOptions::default());
+        let mut changed = base.clone();
+        let sheet_id = changed.workbook().sheets()[0].id();
+        changed
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1("A1").expect("constant address"),
+                CellValue::Number(FiniteNumber::new(1.0).expect("finite value")),
+            )
+            .expect("test edit");
+        let same_revision = changed.workbook().clone().with_semantic_revision(0);
+
+        let error = validate_calculation_identity_parts(None, &same_revision, &calculation)
+            .expect_err("semantic fingerprint mismatch must be stale");
+        assert_eq!(error.code(), XlsxWriteErrorCode::StaleSemanticRevision);
+    }
 }

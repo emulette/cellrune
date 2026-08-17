@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
@@ -692,6 +693,53 @@ impl WorkbookSource {
     }
 }
 
+/// A versioned, history-independent digest of workbook semantics.
+///
+/// The digest is an equality and stale-state aid. It is not an input-file hash, electronic
+/// signature, or authenticity proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WorkbookFingerprint {
+    schema_version: u16,
+    bytes: [u8; 32],
+}
+
+impl WorkbookFingerprint {
+    /// The semantic hashing schema used by this CellRune release.
+    pub const CURRENT_SCHEMA_VERSION: u16 =
+        crate::calculation::identity::WORKBOOK_FINGERPRINT_SCHEMA_VERSION as u16;
+
+    pub(crate) const fn current(bytes: [u8; 32]) -> Self {
+        Self {
+            schema_version: Self::CURRENT_SCHEMA_VERSION,
+            bytes,
+        }
+    }
+
+    /// Returns the semantic hashing schema version.
+    pub const fn schema_version(self) -> u16 {
+        self.schema_version
+    }
+
+    /// Returns the stable digest bytes.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
+
+    /// Returns the digest as lower-case hexadecimal without a prefix.
+    pub fn to_hex(self) -> String {
+        self.to_string()
+    }
+}
+
+impl fmt::Display for WorkbookFingerprint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.bytes {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
 /// An immutable workbook snapshot with deterministic sheet lookup and order.
 #[derive(Debug, Clone)]
 pub struct WorkbookSnapshot {
@@ -1155,6 +1203,14 @@ impl WorkbookSnapshot {
     /// Returns the monotonic semantic revision associated with this snapshot.
     pub const fn semantic_revision(&self) -> u64 {
         self.semantic_revision
+    }
+
+    /// Returns the versioned, history-independent semantic fingerprint.
+    pub fn fingerprint(&self) -> WorkbookFingerprint {
+        WorkbookFingerprint::current(
+            self.semantic_fingerprint_cancellable(&|| false)
+                .expect("non-cancellable fingerprinting cannot be cancelled"),
+        )
     }
 
     pub(crate) fn semantic_fingerprint_cancellable(

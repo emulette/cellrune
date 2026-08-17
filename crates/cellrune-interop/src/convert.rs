@@ -4,16 +4,23 @@ use cellrune::{
     CalculationSnapshot, CellAddress, CellContent, CellValue, EditReceipt, ExcelError,
     FinancialSolverSemantics, FiniteNumber, MaterializedResultOrigin, RecalculationMode,
     RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility,
-    WorkbookDraft, WorkbookSnapshot, WriteOptions, XlsxDocumentKind,
+    WorkbookDraft, WorkbookFingerprint, WorkbookSnapshot, WriteOptions, XlsxDocumentKind,
 };
 
 use crate::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationOptionsDto, CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto,
     CellValueDto, EditReceiptDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION,
-    InteropError, RecalculationModeDto, SavedValueStateDto, WritableCellValueDto, WriteOptionsDto,
-    WriteReportDto,
+    InteropError, RecalculationModeDto, SavedValueStateDto, WorkbookFingerprintDto,
+    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
+
+pub(crate) fn workbook_fingerprint(value: WorkbookFingerprint) -> WorkbookFingerprintDto {
+    WorkbookFingerprintDto {
+        schema_version: value.schema_version(),
+        digest_hex: value.to_hex(),
+    }
+}
 
 pub(crate) fn calculation_options(
     options: CalculationOptionsDto,

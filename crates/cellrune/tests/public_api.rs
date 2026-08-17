@@ -31,8 +31,8 @@ use cellrune::{
     Provenance, ReadOptions, RecalculatedWorkbook, RecalculationMode, RecalculationWriteOptions,
     SavedResult, SavedResultIssue, SessionError, SharedFormulaRole, Sheet, SheetId,
     SheetVisibility, Table, TableColumn, TableColumnId, TableId, TableName, ValidationError,
-    WorkbookSnapshot, WorkbookSource, WorkbookSourceKind, XlsxDocument, XlsxReadError,
-    XlsxWriteError, analyze_defined_name, analyze_defined_name_cancellable,
+    WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind, XlsxDocument,
+    XlsxReadError, XlsxWriteError, analyze_defined_name, analyze_defined_name_cancellable,
     analyze_defined_name_with_options, calculate_workbook, read_xlsx_bytes,
     scan_formula_capabilities, write_recalculated_xlsx_bytes,
 };
@@ -237,6 +237,12 @@ const _FROZEN_READ_XLSX_BYTES: fn(&[u8], ReadOptions) -> Result<WorkbookSnapshot
 
 const _FROZEN_CALCULATE_WORKBOOK: fn(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot =
     calculate_workbook;
+
+const _FROZEN_WORKBOOK_FINGERPRINT: fn(&WorkbookSnapshot) -> WorkbookFingerprint =
+    WorkbookSnapshot::fingerprint;
+
+const _FROZEN_CALCULATION_SOURCE_FINGERPRINT: fn(&CalculationSnapshot) -> WorkbookFingerprint =
+    CalculationSnapshot::source_fingerprint;
 
 const _FROZEN_SCAN_FORMULA_CAPABILITIES: fn(&WorkbookSnapshot) -> FormulaCapabilityReport =
     scan_formula_capabilities;

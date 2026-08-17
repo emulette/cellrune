@@ -148,7 +148,7 @@ pub use table::{
 };
 pub use workbook::{
     CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,
-    WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
+    WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
 };
 pub use xlsx::{
     OpenOptions, PackageSummary, ReadLimits, ReadOptions, ReadOptionsError, RecalculatedWorkbook,

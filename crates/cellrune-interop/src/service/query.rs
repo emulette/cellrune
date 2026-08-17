@@ -11,7 +11,7 @@ use cellrune::{
 use super::WorkbookSession;
 use crate::convert::{
     calculation_options, cell_dto, cell_reference, count_u64, document_kind, range_text,
-    visibility_name,
+    visibility_name, workbook_fingerprint,
 };
 use crate::{
     CalculationOptionsDto, CapabilityEntryDto, CapabilityPageDto, DefinedNameDynamicKindDto,
@@ -64,6 +64,7 @@ impl WorkbookSession {
         WorkbookSummaryDto {
             schema_version: INTEROP_SCHEMA_VERSION,
             semantic_revision: workbook.semantic_revision(),
+            fingerprint: workbook_fingerprint(workbook.fingerprint()),
             document_backed: self.engine.draft().is_document_backed(),
             document_kind: document_kind(self.engine.draft()).to_owned(),
             date_system: match workbook.date_system() {

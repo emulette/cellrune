@@ -3,7 +3,7 @@ use cellrune_interop::{
     CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
     EditReceiptDto, EditReceiptV2Dto, FunctionCatalogReportDto, FunctionUsageReportDto,
-    RangePageDto, WorkbookSummaryDto, WriteReportDto,
+    RangePageDto, WorkbookFingerprintDto, WorkbookSummaryDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -15,6 +15,7 @@ pub(crate) fn workbook_summary<'py>(
     let result = PyDict::new(py);
     result.set_item("schema_version", value.schema_version)?;
     result.set_item("semantic_revision", value.semantic_revision)?;
+    result.set_item("fingerprint", workbook_fingerprint(py, &value.fingerprint)?)?;
     result.set_item("document_backed", value.document_backed)?;
     result.set_item("document_kind", &value.document_kind)?;
     result.set_item("date_system", &value.date_system)?;
@@ -53,6 +54,16 @@ pub(crate) fn workbook_summary<'py>(
         sheets.append(item)?;
     }
     result.set_item("sheets", sheets)?;
+    Ok(result)
+}
+
+fn workbook_fingerprint<'py>(
+    py: Python<'py>,
+    value: &WorkbookFingerprintDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("schema_version", value.schema_version)?;
+    result.set_item("digest_hex", &value.digest_hex)?;
     Ok(result)
 }
 

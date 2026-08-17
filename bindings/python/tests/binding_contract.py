@@ -122,6 +122,13 @@ def main() -> None:
     )
     assert defined_name_corpus["schema_version"] == 1
     with Workbook.create() as workbook:
+        fingerprint = workbook.summary()["fingerprint"]
+        assert fingerprint["schema_version"] == 7
+        assert len(fingerprint["digest_hex"]) == 64
+        assert all(
+            character in "0123456789abcdef"
+            for character in fingerprint["digest_hex"]
+        )
         for operation in corpus["operations"]:
             kind = operation["kind"]
             if kind == "set_number":

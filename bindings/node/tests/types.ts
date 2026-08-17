@@ -36,6 +36,7 @@ async function check(): Promise<void> {
   const catalog: FunctionCatalogReport = functionCatalog();
   catalog.entries[0].canonicalName.toUpperCase();
   const workbook: Workbook = Workbook.create();
+  workbook.summary().fingerprint.digestHex.toUpperCase();
   workbook.setNumber("Sheet1", "A1", 1);
   workbook.setFormula("Sheet1", "B1", "=A1+1");
   await workbook.calculate();

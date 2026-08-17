@@ -178,9 +178,15 @@ export interface SheetSummary {
   readonly tables: readonly TableSummary[];
 }
 
+export interface WorkbookFingerprint {
+  readonly schemaVersion: number;
+  readonly digestHex: string;
+}
+
 export interface WorkbookSummary {
   readonly schemaVersion: number;
   readonly semanticRevision: bigint;
+  readonly fingerprint: WorkbookFingerprint;
   readonly documentBacked: boolean;
   readonly documentKind: "xlsx" | "xlsm" | "new_xlsx" | "open_xml";
   readonly dateSystem: "excel_1900" | "excel_1904";

@@ -214,9 +214,15 @@ class SheetSummary(TypedDict):
     tables: list[TableSummary]
 
 
+class WorkbookFingerprint(TypedDict):
+    schema_version: int
+    digest_hex: str
+
+
 class WorkbookSummary(TypedDict):
     schema_version: int
     semantic_revision: int
+    fingerprint: WorkbookFingerprint
     document_backed: bool
     document_kind: Literal["xlsx", "xlsm", "new_xlsx", "open_xml"]
     date_system: Literal["excel_1900", "excel_1904"]

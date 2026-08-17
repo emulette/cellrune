@@ -5,7 +5,10 @@ use crate::{
     FormulaMetadata, NumberFormatKind, SharedFormulaRole, Sheet, SheetVisibility, WorkbookSnapshot,
 };
 
-pub(crate) fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
+pub(crate) const WORKBOOK_FINGERPRINT_SCHEMA_VERSION: u8 = 7;
+
+#[cfg(test)]
+fn workbook_fingerprint(workbook: &WorkbookSnapshot) -> [u8; 32] {
     workbook_fingerprint_cancellable(workbook, &|| false)
         .expect("non-cancellable fingerprinting cannot be cancelled")
 }
@@ -17,7 +20,7 @@ pub(crate) fn sheet_fingerprint_cancellable(
     let mut hash = SemanticHash::new();
     // Schema byte 7: the sheet folds one canonical adaptive radix root with bounded packed leaves.
     // Its digest remains insertion-history independent while an edit rehashes only one leaf path.
-    hash.u8(7);
+    hash.u8(WORKBOOK_FINGERPRINT_SCHEMA_VERSION);
     hash.u32(sheet.id().get());
     hash.string(sheet.name().as_str());
     hash.sheet_visibility(sheet.visibility());
@@ -88,7 +91,7 @@ pub(crate) fn workbook_fingerprint_cancellable(
 ) -> Result<[u8; 32], ()> {
     let mut hash = SemanticHash::new();
     // Schema byte 7: one canonical packed-leaf sheet tree replaces the flat sheet digest fold.
-    hash.u8(7);
+    hash.u8(WORKBOOK_FINGERPRINT_SCHEMA_VERSION);
     hash.date_system(workbook.date_system());
     hash.calculation_hints(workbook.calculation_hints());
     hash.usize(workbook.sheets().len());

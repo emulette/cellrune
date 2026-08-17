@@ -268,6 +268,10 @@ function normalizeSummary(summary) {
   return {
     schemaVersion: summary.schemaVersion,
     semanticRevision: BigInt(summary.semanticRevision),
+    fingerprint: {
+      schemaVersion: summary.fingerprint.schemaVersion,
+      digestHex: summary.fingerprint.digestHex,
+    },
     documentBacked: summary.documentBacked,
     documentKind: summary.documentKind,
     dateSystem: summary.dateSystem,
