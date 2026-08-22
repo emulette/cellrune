@@ -113,7 +113,7 @@ jobs:
       # accepts the upload, and `deny.toml` is what enforces `wildcards = "deny"` on the
       # requirement ranges we publish.
       - name: Install pinned cargo-deny
-        uses: taiki-e/install-action@b20dedce73af6905cdc30d6611090c9b67557c8d # v2
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2
         with:
           tool: cargo-deny@0.20.2
           fallback: none
