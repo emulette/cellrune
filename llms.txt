@@ -1,6 +1,6 @@
 # CellRune
 
-> Pure Rust XLSX/XLSM reader with deterministic, explicitly scoped formula
+> Rust XLSX/XLSM backend with deterministic, explicitly scoped formula
 > calculation and a package-backed round-trip document foundation. Reading and
 > calculation are separate operations, macros are never executed, external
 > links are never followed, and parsing, calculation, and writing costs are
@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.16, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.17, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -108,7 +108,7 @@ returns, the binding-owned native session has been released. An active
 calculation is cooperatively cancelled and a published preview is discarded;
 subsequent operations fail with the stable `interop.session.closed` code.
 
-The 0.1.16 binding preview calls are transport views of that single
+The binding preview calls are transport views of that single
 interop-owned transaction. Python uses synchronous `Workbook.preview_changes`,
 `preview_changes_page`, `commit_preview`, and `discard_preview`; the long
 native preview operation releases the GIL. Python returns snake-case DTO fields
@@ -164,23 +164,11 @@ than guessing a name from a different XLSX crate (`calamine`,
 - **Public failure/value families are owned by different boundaries — never mixed:**
   see the Error taxonomy table below. Pick the family by *what layer failed*,
   not by guessing a generic `Error`/`Result` shape.
-- **Public enums that may grow new variants are `#[non_exhaustive]`**
-  (`CellValue`, `ExcelError`, `ValidationError`, `ValidationErrorCode`, `XlsxErrorCode`,
-  `XlsxWriteErrorCode`, `ReadOptionsError`, `WriteOptionsError`,
-  `CalculationOptionsError`, `CalculationIssueCode`, `SessionErrorCode`,
-  `CalculationDecisionReason`, `MaterializedResultOrigin`, `FormulaDialect`,
-  `FormulaMetadata`, `WorkbookChange`, `XlsxDocumentKind`,
-  `RecalculationWritePolicy`, `ArithmeticSemantics`, `FinancialSolverSemantics`,
-  `DefinedNameAnalysis`, `DefinedNameReferenceArea`,
-  `DefinedNameDynamicKind`, `DefinedNameExternalTargetKind`,
-  `DefinedNameInvalidReason`, `DefinedNameUnsupportedReason`,
-  `DefinedNameAnalysisLimitKind`, `DefinedNameAnalysisErrorKind`,
-  `PhoneticType`, `PhoneticAlignment`, `TableType`, `TotalsRowFunction`,
-  `TableCalendarType`, `TableDateTimeGrouping`, `TableCustomFilterOperator`,
-  `TableDynamicFilterType`, `TableIconSet`, `TableSortBy`, `TableSortMethod`,
-  `TableFilterItem`, and `TableFilterCriteria`). A
-  `match` on one of these needs a wildcard arm even if every current variant
-  is handled.
+- **Respect `#[non_exhaustive]` on public enums.** Examples include `CellValue`,
+  `ExcelError`, `ValidationError`, `CalculationIssueCode`, `WorkbookChange`,
+  `TransactionDetailItem`, `XlsxDocumentKind`, and `RecalculationWritePolicy`.
+  A `match` on any enum marked this way needs a wildcard arm even if every
+  current variant is handled.
 - **Every stable machine code exposes `.as_str()`,** returning `&str` or
   `&'static str` for programmatic comparison and logging
   (`XlsxErrorCode::as_str`, `DiagnosticCode::as_str`,
@@ -547,11 +535,12 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.16 catalog contains 416 official
+  `.is_official()`. The 0.1.17 catalog contains 416 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 417 accepted entries. The 0.1.15 catalog and
-  semantic registry remain protected by byte-exact snapshots; 0.1.14 remains
-  386 official names and 387 accepted entries byte-exact.
+  dummy-function marker, for 417 accepted entries. The descriptor registry
+  retains versioned semantic snapshots, while the current catalog is guarded
+  by structural and behavioral assertions rather than byte hashes. The 0.1.14
+  catalog contained 386 official names and 387 accepted entries.
 - The 19 official names added in 0.1.14 are `CONVERT`, `BESSELI`, `BESSELJ`,
   `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`,
   `IMCONJUGATE`, `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`,

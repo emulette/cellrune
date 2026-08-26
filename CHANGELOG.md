@@ -8,6 +8,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [0.1.17] - 2026-08-26
+
+### Changed
+
+- Simplified release evidence to rely on functional and structural assertions: removed function
+  catalog SHA golden files, the duplicated Excel Oracle artifact/hash chain, and source-commit
+  fields from the manual performance harness JSON.
+- Advanced the committed Excel Oracle metadata, suite, case-manifest, and observations schemas to
+  v3 while retaining their fixture references, case inventory, host identity, saved values, and
+  semantic comparison checks.
+
+### Fixed
+
+- Package-backed drafts can now add sheets to valid workbooks whose relationship namespace is
+  declared on each existing `sheet`. Added sheets bind their relationship attributes explicitly,
+  including alternate prefixes and Strict OOXML relationship namespaces, and the result passes
+  full-package verification and reopen.
+
 ## [0.1.16] - 2026-08-17
 
 ### Added
@@ -731,6 +749,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
+[0.1.17]: https://github.com/emulette/cellrune/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/emulette/cellrune/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/emulette/cellrune/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/emulette/cellrune/compare/v0.1.13...v0.1.14

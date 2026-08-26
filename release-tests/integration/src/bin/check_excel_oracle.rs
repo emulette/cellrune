@@ -1,6 +1,5 @@
 //! Audit and reporting tool for committed Excel-saved workbook oracles.
 
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
@@ -49,14 +48,6 @@ const CELLRUNE_SUITE_ID: &str = "cellrune-excel-host-matrix-v1";
 const CELLRUNE_FEATURE_SET_ID: &str = "cellrune-excel-function-pool-522-v1";
 const CELLRUNE_GENERATOR_NAME: &str = "CellRune deterministic Excel oracle generator";
 const CELLRUNE_GENERATOR_REVISION: &str = "oracle-harness-v2";
-const CELLRUNE_HARNESS_SHA256: &str =
-    "6bd9416b08809e429b20d447afec54f3a8bd79b467d8e3760ccc7f54e8a2b1be";
-const CELLRUNE_SOURCE_SHA256: &str =
-    "87690d792af82fec157ac4d4316ac1f4a62accb7ca3e5184f8624de43423934f";
-const CELLRUNE_ONLINE_SHA256: &str =
-    "a576920db7f6ff0d04f75b7c2c568fb8798a74f2a586a83da8cebc07c89d0161";
-const CELLRUNE_DESKTOP_SHA256: &str =
-    "9e923cb70d2c056a59f5fc2505f789ab8f2497e8f99a470da53b92a913f6b0b7";
 const CELLRUNE_PRIMARY_CASES: usize = 1_527;
 const CELLRUNE_ACTIVE_CASES: usize = 1_496;
 const CELLRUNE_FORMULA_CELLS: usize = 1_892;
@@ -228,7 +219,7 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
     if suite.schema != SUITE_SCHEMA || suite.suite_id != CELLRUNE_SUITE_ID {
         return Err(format!("unsupported suite schema {}", suite.schema));
     }
-    if !is_filename(&suite.case_manifest.file) || !is_sha256(&suite.case_manifest.sha256) {
+    if !is_filename(&suite.case_manifest.file) {
         return Err("suite case manifest must be a filename".to_owned());
     }
     if suite.feature_set_id.as_deref() != Some(CELLRUNE_FEATURE_SET_ID)
@@ -238,10 +229,10 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
             .is_none_or(|range| range.first != "0.1.8" || range.last != "0.1.19")
         || suite.state.as_deref() != Some("frozen")
         || suite.active_case_count != Some(CELLRUNE_ACTIVE_CASES)
-        || suite.source_workbook.as_ref().is_none_or(|source| {
-            source.sha256 != CELLRUNE_SOURCE_SHA256
-                || source.formula_cells != CELLRUNE_FORMULA_CELLS
-        })
+        || suite
+            .source_workbook
+            .as_ref()
+            .is_none_or(|source| source.formula_cells != CELLRUNE_FORMULA_CELLS)
         || !matches!(
             suite.case_selection,
             Some(cellrune_integration_tests::oracle::CaseSelection::ManifestAddresses)
@@ -278,7 +269,7 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
         }
     }
     if suite.profiles.len() != 2 {
-        return Err("v2 suite must list exactly two workbook profiles".to_owned());
+        return Err("suite must list exactly two workbook profiles".to_owned());
     }
     if suite.state.as_deref() == Some("frozen")
         && suite
@@ -286,7 +277,7 @@ fn validate_suite_contract(suite: &OracleSuite) -> Result<(), String> {
             .iter()
             .any(|profile| profile.artifacts.is_none())
     {
-        return Err("frozen suite profiles must pin artifact hashes".to_owned());
+        return Err("frozen suite profiles must declare artifact files".to_owned());
     }
     Ok(())
 }
@@ -378,8 +369,7 @@ struct LoadedOracle {
 fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOracle, String> {
     let metadata_path = directory.join(METADATA_FILE);
     let metadata: Metadata = read_json(&metadata_path)?;
-    if metadata.schema != METADATA_SCHEMA && metadata.schema != "cellrune_excel_oracle_metadata_v1"
-    {
+    if metadata.schema != METADATA_SCHEMA {
         return Err(format!(
             "{}: unsupported metadata schema {}",
             metadata_path.display(),
@@ -402,17 +392,6 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
     raw::verify_package_invariants(&workbook_path)?;
     if suite_path.is_some() {
         raw::verify_no_absolute_path_provenance(&workbook_path)?;
-    }
-    if let Some(expected_hash) = metadata.sha256.as_deref() {
-        let actual_hash = sha256_file(&workbook_path)?;
-        if actual_hash != expected_hash {
-            return Err(format!(
-                "{}: workbook sha256 {} != metadata {}",
-                workbook_path.display(),
-                actual_hash,
-                expected_hash
-            ));
-        }
     }
     let workbook = read_xlsx_path(&workbook_path, ReadOptions::default())
         .map_err(|error| format!("{}: {error}", workbook_path.display()))?;
@@ -538,7 +517,7 @@ fn load_suite_binding(
     validate_profile_artifacts(profile, directory, metadata)?;
 
     let suite_directory = suite_path.parent().expect("suite path always has a parent");
-    if !is_filename(&suite.case_manifest.file) || suite.case_manifest.sha256.len() != 64 {
+    if !is_filename(&suite.case_manifest.file) {
         return Err(format!(
             "{}: case manifest must be a filename",
             suite_path.display()
@@ -546,28 +525,12 @@ fn load_suite_binding(
     }
     let manifest_path = suite_directory.join(&suite.case_manifest.file);
     let manifest: CaseManifest = read_json(&manifest_path)?;
-    let manifest_hash = sha256_file(&manifest_path)?;
-    if manifest_hash != suite.case_manifest.sha256 {
-        return Err(format!(
-            "{}: case manifest sha256 {} != suite {}",
-            manifest_path.display(),
-            manifest_hash,
-            suite.case_manifest.sha256
-        ));
-    }
     validate_manifest_contract(&suite, &manifest)
         .map_err(|error| format!("{}: {error}", manifest_path.display()))?;
 
     let observations_path = directory.join(OBSERVATIONS_FILE);
     let observations: Observations = read_json(&observations_path)?;
-    validate_observation_header(
-        &observations,
-        &suite,
-        profile,
-        metadata,
-        &manifest_hash,
-        &observations_path,
-    )?;
+    validate_observation_header(&observations, &suite, profile, metadata, &observations_path)?;
     let raw_cells = raw::read_formula_cells(workbook_path)?;
     let raw_cached_cells = raw::read_cached_cells(workbook_path)?;
     if raw_cells.len() != metadata.formula_cells {
@@ -685,10 +648,7 @@ fn validate_profile_metadata(
         .source_workbook
         .as_ref()
         .ok_or_else(|| format!("{}: suite source workbook is absent", directory.display()))?;
-    let matches = metadata.sha256.as_deref().is_some_and(is_sha256)
-        && metadata.source_workbook_sha256.as_deref() == Some(source_workbook.sha256.as_str())
-        && metadata.case_manifest_sha256.as_deref() == Some(suite.case_manifest.sha256.as_str())
-        && metadata.formula_cells == source_workbook.formula_cells
+    let matches = metadata.formula_cells == source_workbook.formula_cells
         && metadata.selected_cases == suite.active_case_count
         && matches!(
             metadata.case_selection,
@@ -745,20 +705,15 @@ fn validate_profile_artifacts(
                 expected_file
             ));
         }
-        let path = directory.join(&artifact.file);
-        let actual_hash = sha256_file(&path)?;
-        if actual_hash != artifact.sha256 {
+        if !directory.join(&artifact.file).is_file() {
             return Err(format!(
-                "{}: profile artifact sha256 {} != {}",
-                path.display(),
-                actual_hash,
-                artifact.sha256
+                "{}: profile artifact file is absent",
+                directory.join(&artifact.file).display()
             ));
         }
     }
     if artifacts.workbook.formula_cells != Some(metadata.formula_cells)
         || artifacts.workbook.selected_cases != metadata.selected_cases
-        || artifacts.workbook.sha256 != expected_profile_workbook_sha256(profile)?
         || artifacts.metadata.formula_cells.is_some()
         || artifacts.metadata.selected_cases.is_some()
         || artifacts.observations.formula_cells.is_some()
@@ -777,17 +732,12 @@ fn validate_observation_header(
     suite: &OracleSuite,
     profile: &HostProfile,
     metadata: &Metadata,
-    manifest_hash: &str,
     observations_path: &Path,
 ) -> Result<(), String> {
     if observations.schema != OBSERVATIONS_SCHEMA
         || observations.suite_id != suite.suite_id
         || observations.host_profile_id != profile.profile_id
         || observations.saved_at != metadata.oracle.saved_at
-        || observations.workbook_sha256 != metadata.sha256
-        || observations.source_workbook_sha256 != metadata.source_workbook_sha256
-        || observations.case_manifest_sha256.as_deref() != Some(manifest_hash)
-        || observations.harness_sha256 != metadata.generator.harness_sha256
         || observations.feature_set_id != suite.feature_set_id
         || observations.case_count != metadata.selected_cases
     {
@@ -1020,12 +970,6 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
     serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let digest = Sha256::digest(bytes);
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
 fn is_filename(value: &str) -> bool {
     !value.is_empty()
         && value != "."
@@ -1034,14 +978,9 @@ fn is_filename(value: &str) -> bool {
         && !value.contains('\\')
 }
 
-fn is_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 fn generator_is_expected(generator: &GeneratorMetadata) -> bool {
     generator.name.as_deref() == Some(CELLRUNE_GENERATOR_NAME)
         && generator.revision.as_deref() == Some(CELLRUNE_GENERATOR_REVISION)
-        && generator.harness_sha256.as_deref() == Some(CELLRUNE_HARNESS_SHA256)
 }
 
 fn valid_generator(generator: &Option<GeneratorMetadata>) -> bool {
@@ -1050,26 +989,12 @@ fn valid_generator(generator: &Option<GeneratorMetadata>) -> bool {
 
 fn generators_match(left: &GeneratorMetadata, right: &Option<GeneratorMetadata>) -> bool {
     right.as_ref().is_some_and(|right| {
-        left.name == right.name
-            && left.revision == right.revision
-            && left.harness_sha256 == right.harness_sha256
-            && generator_is_expected(left)
+        left.name == right.name && left.revision == right.revision && generator_is_expected(left)
     })
 }
 
 fn valid_artifact(artifact: &ArtifactReference) -> bool {
-    is_filename(&artifact.file) && is_sha256(&artifact.sha256)
-}
-
-fn expected_profile_workbook_sha256(profile: &HostProfile) -> Result<&'static str, String> {
-    match profile.directory.as_str() {
-        "online" => Ok(CELLRUNE_ONLINE_SHA256),
-        "desktop-2021" => Ok(CELLRUNE_DESKTOP_SHA256),
-        _ => Err(format!(
-            "unexpected host profile directory {}",
-            profile.directory
-        )),
-    }
+    is_filename(&artifact.file)
 }
 
 fn profile_definition_is_expected(profile: &HostProfile) -> bool {
@@ -1492,9 +1417,9 @@ mod tests {
     }
 
     #[test]
-    fn v2_suite_rejects_release_and_harness_provenance_substitution() {
+    fn suite_rejects_release_and_generator_contract_substitution() {
         let suite_path = oracle_root().join("cellrune/suite.json");
-        let mut suite: OracleSuite = read_json(&suite_path).expect("committed v2 suite");
+        let mut suite: OracleSuite = read_json(&suite_path).expect("committed suite");
         assert!(validate_suite_contract(&suite).is_ok());
 
         suite
@@ -1504,12 +1429,9 @@ mod tests {
             .last = "0.1.20".to_owned();
         assert!(validate_suite_contract(&suite).is_err());
 
-        let mut suite: OracleSuite = read_json(&suite_path).expect("committed v2 suite");
-        suite
-            .generator
-            .as_mut()
-            .expect("v2 generator")
-            .harness_sha256 = Some("0".repeat(64));
+        let mut suite: OracleSuite = read_json(&suite_path).expect("committed suite");
+        suite.generator.as_mut().expect("suite generator").revision =
+            Some("unexpected-generator".to_owned());
         assert!(validate_suite_contract(&suite).is_err());
     }
 

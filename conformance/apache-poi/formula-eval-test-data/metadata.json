@@ -1,7 +1,6 @@
 {
-  "schema": "cellrune_excel_oracle_metadata_v1",
+  "schema": "cellrune_excel_oracle_metadata_v3",
   "workbook": "workbook.xlsx",
-  "sha256": "01b21647d53501e8ec10f4eb522945d41ea3c8d1fdd57f8b0142ec34884c33eb",
   "formula_cells": 1295,
   "date_system": "excel1900",
   "iterative_calculation": false,

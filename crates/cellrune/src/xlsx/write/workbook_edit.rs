@@ -3,12 +3,14 @@ use std::io::Cursor;
 
 use quick_xml::Writer;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
 
 use super::serialization::escape_text;
 use super::workbook_patch::patch_calculation_properties_with_hints;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
+use crate::xlsx::xml::{DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL};
 use crate::{DateSystem, DefinedNameScope, Sheet, SheetId, SheetVisibility, WorkbookSnapshot};
 
 const DETAIL_SHEET_COUNT: &str = "workbook sheet metadata does not match the source document";
@@ -23,6 +25,13 @@ const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 pub(crate) struct WorkbookPatchOptions {
     pub(crate) request_host_recalculation: bool,
     pub(crate) ensure_book_view: bool,
+}
+
+#[derive(Debug)]
+struct RelationshipAttribute {
+    qualified_name: Vec<u8>,
+    prefix: Vec<u8>,
+    namespace: Vec<u8>,
 }
 
 pub(crate) fn patch_workbook_semantics(
@@ -49,7 +58,7 @@ pub(crate) fn patch_workbook_semantics(
     let mut workbook_name = None::<Vec<u8>>;
     let mut sheets_depth = None;
     let mut sheets_name = None::<Vec<u8>>;
-    let mut relationship_attribute_name = None::<Vec<u8>>;
+    let mut relationship_attribute = None::<RelationshipAttribute>;
     let mut existing_sheet_index = 0_usize;
     let mut saw_workbook_properties = false;
     let mut saw_book_views = false;
@@ -113,8 +122,8 @@ pub(crate) fn patch_workbook_semantics(
                         .get(existing_sheet_index)
                         .and_then(|source_sheet| draft.sheet_by_id(source_sheet.id()))
                         .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
-                    let (patched, relationship_name) = patch_sheet(&element, sheet, source)?;
-                    relationship_attribute_name.get_or_insert(relationship_name);
+                    let (patched, relationship) = patch_sheet(&element, &xml, sheet, source)?;
+                    relationship_attribute.get_or_insert(relationship);
                     existing_sheet_index = existing_sheet_index.saturating_add(1);
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
@@ -184,8 +193,8 @@ pub(crate) fn patch_workbook_semantics(
                         .get(existing_sheet_index)
                         .and_then(|source_sheet| draft.sheet_by_id(source_sheet.id()))
                         .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
-                    let (patched, relationship_name) = patch_sheet(&element, sheet, source)?;
-                    relationship_attribute_name.get_or_insert(relationship_name);
+                    let (patched, relationship) = patch_sheet(&element, &xml, sheet, source)?;
+                    relationship_attribute.get_or_insert(relationship);
                     existing_sheet_index = existing_sheet_index.saturating_add(1);
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
@@ -222,24 +231,24 @@ pub(crate) fn patch_workbook_semantics(
                     if existing_sheet_index != original.sheets().len() {
                         return Err(invalid_generated(source, DETAIL_SHEET_COUNT));
                     }
-                    let relationship_name = relationship_attribute_name
-                        .as_deref()
+                    let relationship = relationship_attribute
+                        .as_ref()
                         .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?;
                     for sheet in draft
                         .sheets()
                         .iter()
                         .filter(|sheet| original.sheet_by_id(sheet.id()).is_none())
                     {
-                        let relationship =
+                        let relationship_id =
                             added_relationships.get(&sheet.id()).ok_or_else(|| {
                                 invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE)
                             })?;
                         write_added_sheet(
                             &mut writer,
                             sheets_name.as_deref().unwrap_or(b"sheets"),
-                            relationship_name,
-                            sheet,
                             relationship,
+                            sheet,
+                            relationship_id,
                             source,
                         )?;
                     }
@@ -364,16 +373,42 @@ fn write_workbook_properties(
 
 fn patch_sheet(
     element: &BytesStart<'_>,
+    reader: &NsReader<&[u8]>,
     sheet: &Sheet,
     source: &PartPath,
-) -> Result<(BytesStart<'static>, Vec<u8>), XlsxWriteError> {
+) -> Result<(BytesStart<'static>, RelationshipAttribute), XlsxWriteError> {
     let name = decode_name(element.name().as_ref(), source)?.to_owned();
     let mut patched = BytesStart::new(name);
-    let mut relationship_name = None;
+    let mut relationship = None;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.local_name().as_ref() == b"id" && attribute.key.as_ref() != b"sheetId" {
-            relationship_name = Some(attribute.key.as_ref().to_vec());
+        let (namespace, local_name) = reader.resolver().resolve_attribute(attribute.key);
+        let namespace = match namespace {
+            ResolveResult::Bound(namespace)
+                if matches!(
+                    namespace.as_ref(),
+                    DOCUMENT_RELATIONSHIPS_TRANSITIONAL | DOCUMENT_RELATIONSHIPS_STRICT
+                ) =>
+            {
+                Some(namespace.as_ref().to_vec())
+            }
+            _ => None,
+        };
+        if local_name.as_ref() == b"id"
+            && let Some(namespace) = namespace
+        {
+            if relationship.is_none() {
+                let qualified_name = attribute.key.as_ref().to_vec();
+                let prefix_end = qualified_name
+                    .iter()
+                    .position(|byte| *byte == b':')
+                    .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?;
+                relationship = Some(RelationshipAttribute {
+                    prefix: qualified_name[..prefix_end].to_vec(),
+                    qualified_name,
+                    namespace,
+                });
+            }
             patched.push_attribute(attribute);
         } else if !matches!(attribute.key.as_ref(), b"name" | b"sheetId" | b"state") {
             patched.push_attribute(attribute);
@@ -389,15 +424,14 @@ fn patch_sheet(
     }
     Ok((
         patched.into_owned(),
-        relationship_name
-            .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?,
+        relationship.ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?,
     ))
 }
 
 fn write_added_sheet(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     sheets_name: &[u8],
-    relationship_name: &[u8],
+    relationship: &RelationshipAttribute,
     sheet: &Sheet,
     relationship_id: &str,
     source: &PartPath,
@@ -412,7 +446,15 @@ fn write_added_sheet(
         SheetVisibility::Hidden => element.push_attribute(("state", "hidden")),
         SheetVisibility::VeryHidden => element.push_attribute(("state", "veryHidden")),
     }
-    element.push_attribute((decode_name(relationship_name, source)?, relationship_id));
+    let namespace_declaration = format!("xmlns:{}", decode_name(&relationship.prefix, source)?);
+    element.push_attribute((
+        namespace_declaration.as_str(),
+        decode_name(&relationship.namespace, source)?,
+    ));
+    element.push_attribute((
+        decode_name(&relationship.qualified_name, source)?,
+        relationship_id,
+    ));
     write_event(writer, Event::Empty(element), source)
 }
 

@@ -8,17 +8,17 @@ transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.16 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.17 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.16
+cargo add cellrune@0.1.17
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.16"
+cellrune = "0.1.17"
 ```
 
 ## Features
@@ -57,7 +57,7 @@ cellrune = "0.1.16"
   Node.js/TypeScript native packages;
 - supports atomic typed edit batches, persistent parsed/dependency state, safe incremental
   recalculation, bounded result deltas, cooperative cancellation, stale-result rejection, and
-  retained immutable change previews; and
+  retained immutable change previews;
 - provides a local stdio MCP server with high-level open, inspect, edit, preview, recalculate,
   range-read, delta, and verified Save As tools over the same interop session; and
 - raw-copies unchanged package entries without exposing ZIP or XML implementation types.
@@ -114,7 +114,7 @@ The fixed-income wave on top of 0.1.14 adds exactly 26 official names: `ACCRINT`
 `YIELDMAT`. They share a typed day-count and coupon-schedule model and a safeguarded yield root
 solver that charges the calculation budget and observes cancellation.
 
-CellRune 0.1.16 implements `XLOOKUP` and adds `DATEVALUE`, `TIMEVALUE`,
+CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
 `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. The deterministic source catalog contains 416 official
 names and 417 accepted entries including the non-official OOXML dummy-function marker. Their
 fixed grammar, lookup modes, calendar rules, wildcard behavior, and array-result boundaries are
@@ -257,12 +257,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.16 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.17 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.16"
-npm install "@cellrune/node@0.1.16"
+python -m pip install "cellrune==0.1.17"
+npm install "@cellrune/node@0.1.17"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -273,7 +273,7 @@ The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separat
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
 table-row resize plus `changed_table_ids`/`changedTableIds` receipts.
 
-In the 0.1.16 bindings, Python exposes synchronous
+In the current bindings, Python exposes synchronous
 `preview_changes`, `preview_changes_page`, `commit_preview`, and `discard_preview`; the long
 native preview operation releases the GIL. Node.js exposes Promise-backed `previewChanges`, then
 synchronous `previewChangesPage`, `commitPreview`, and `discardPreview`. Python DTO fields use

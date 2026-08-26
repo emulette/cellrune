@@ -4,8 +4,7 @@
 //! `cargo bench -p cellrune-integration-tests --bench v015_phase_memory -- --output evidence.json`.
 //! Passing `--baseline baseline.json` adds a descriptive comparison to the output. It never changes
 //! the exit status based on the measurements. `--smoke` uses a small one-sample workload to check
-//! the measurement setup. `--commit <sha>` records an explicit source identity when a baseline is
-//! built from a Git archive that intentionally has no `.git` directory.
+//! the measurement setup.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -58,7 +57,6 @@ struct Comparison {
 struct Evidence {
     schema: String,
     mode: String,
-    commit: String,
     rustc: String,
     machine: String,
     target: String,
@@ -143,9 +141,6 @@ fn main() {
     let mut evidence = Evidence {
         schema: "cellrune_0_1_15_phase_memory_v2".to_owned(),
         mode: if smoke { "smoke" } else { "measurement" }.to_owned(),
-        commit: value_after(&arguments, "--commit")
-            .map(str::to_owned)
-            .unwrap_or_else(|| command_output("git", &["rev-parse", "HEAD"])),
         rustc: command_output("rustc", &["--version"]),
         machine: machine_identity(),
         target: command_output("rustc", &["-vV"])

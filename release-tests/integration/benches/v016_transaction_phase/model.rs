@@ -101,7 +101,6 @@ impl ScenarioEvidence {
 pub(super) struct Evidence {
     pub(super) schema: String,
     pub(super) mode: String,
-    pub(super) commit: String,
     pub(super) rustc: String,
     pub(super) machine: String,
     pub(super) target: String,

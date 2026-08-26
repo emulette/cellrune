@@ -13,8 +13,8 @@ cargo run \
 
 The checker:
 
-- verifies suite, manifest, workbook, metadata, observation, feature-set, profile, count, and
-  SHA-256 provenance;
+- verifies suite, manifest, workbook, metadata, observation, feature-set, profile, file-reference,
+  and count contracts;
 - exact-matches every formula anchor and observed array-result cell against the raw XLSX cache;
 - opens each workbook and selects the active manifest formula cells;
 - compares Excel's saved value with `expectations.json`;

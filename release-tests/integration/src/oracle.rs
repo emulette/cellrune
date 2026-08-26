@@ -6,13 +6,13 @@ use cellrune::{CalculationCellResult, CellValue};
 use serde::{Deserialize, Serialize};
 
 /// Metadata schema accepted by the local oracle checker.
-pub const METADATA_SCHEMA: &str = "cellrune_excel_oracle_metadata_v2";
+pub const METADATA_SCHEMA: &str = "cellrune_excel_oracle_metadata_v3";
 /// Host-matrix suite schema accepted by the local oracle checker.
-pub const SUITE_SCHEMA: &str = "cellrune_excel_oracle_suite_v2";
+pub const SUITE_SCHEMA: &str = "cellrune_excel_oracle_suite_v3";
 /// Stable case-manifest schema accepted by the local oracle checker.
-pub const CASE_MANIFEST_SCHEMA: &str = "cellrune_excel_oracle_cases_v2";
+pub const CASE_MANIFEST_SCHEMA: &str = "cellrune_excel_oracle_cases_v3";
 /// Saved-host observation schema accepted by the local oracle checker.
-pub const OBSERVATIONS_SCHEMA: &str = "cellrune_excel_oracle_observations_v2";
+pub const OBSERVATIONS_SCHEMA: &str = "cellrune_excel_oracle_observations_v3";
 /// Default scale-relative tolerance for finite numeric results.
 pub const DEFAULT_SCALED_EPSILON: f64 = 1e-8;
 
@@ -22,9 +22,6 @@ pub const DEFAULT_SCALED_EPSILON: f64 = 1e-8;
 pub struct Metadata {
     pub schema: String,
     pub workbook: String,
-    pub sha256: Option<String>,
-    pub source_workbook_sha256: Option<String>,
-    pub case_manifest_sha256: Option<String>,
     pub formula_cells: usize,
     pub selected_cases: Option<usize>,
     pub date_system: String,
@@ -65,7 +62,6 @@ pub struct SourceMetadata {
 pub struct GeneratorMetadata {
     pub name: Option<String>,
     pub revision: Option<String>,
-    pub harness_sha256: Option<String>,
 }
 
 /// Excel host that wrote the saved calculation cache.
@@ -105,7 +101,6 @@ pub struct OracleSuite {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceWorkbookMetadata {
-    pub sha256: String,
     pub formula_cells: usize,
 }
 
@@ -113,7 +108,6 @@ pub struct SourceWorkbookMetadata {
 #[serde(deny_unknown_fields)]
 pub struct CaseManifestReference {
     pub file: String,
-    pub sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,7 +143,6 @@ pub struct ProfileArtifacts {
 #[serde(deny_unknown_fields)]
 pub struct ArtifactReference {
     pub file: String,
-    pub sha256: String,
     pub formula_cells: Option<usize>,
     pub selected_cases: Option<usize>,
 }
@@ -254,10 +247,6 @@ pub struct Observations {
     pub suite_id: String,
     pub host_profile_id: String,
     pub saved_at: String,
-    pub workbook_sha256: Option<String>,
-    pub source_workbook_sha256: Option<String>,
-    pub case_manifest_sha256: Option<String>,
-    pub harness_sha256: Option<String>,
     pub feature_set_id: Option<String>,
     pub case_count: Option<usize>,
     pub cases: Vec<ObservedCase>,
@@ -510,7 +499,7 @@ fn validate_tolerance(name: &str, value: f64) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Comparator, Metadata, ObservedValue, values_match};
+    use super::{Comparator, METADATA_SCHEMA, Metadata, ObservedValue, values_match};
 
     fn number(value: &str) -> ObservedValue {
         ObservedValue {
@@ -549,11 +538,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_metadata_does_not_require_host_matrix_provenance() {
+    fn standalone_metadata_does_not_require_host_matrix_provenance() {
         let metadata: Metadata = serde_json::from_value(serde_json::json!({
-            "schema": "cellrune_excel_oracle_metadata_v1",
+            "schema": METADATA_SCHEMA,
             "workbook": "workbook.xlsx",
-            "sha256": "a".repeat(64),
             "formula_cells": 1,
             "date_system": "excel1900",
             "iterative_calculation": false,
@@ -577,9 +565,9 @@ mod tests {
                 "product_tier": null
             }
         }))
-        .expect("legacy metadata");
+        .expect("standalone metadata");
 
-        assert_eq!(metadata.source_workbook_sha256, None);
+        assert_eq!(metadata.selected_cases, None);
         assert_eq!(metadata.oracle.host_build, None);
     }
 }

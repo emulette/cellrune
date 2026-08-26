@@ -94,7 +94,6 @@ fn main() {
     let evidence = Evidence {
         schema: "cellrune_0_1_16_transaction_phase_v1".to_owned(),
         mode: if smoke { "smoke" } else { "measurement" }.to_owned(),
-        commit: platform::command_output("git", &["rev-parse", "HEAD"]),
         rustc: platform::command_output("rustc", &["--version"]),
         machine: platform::machine_identity(),
         target: platform::command_output("rustc", &["-vV"])

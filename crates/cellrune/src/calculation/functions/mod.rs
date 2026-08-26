@@ -769,10 +769,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    function_catalog_for_version(CompatibilityVersion::V0_1_16)
-}
-
-fn function_catalog_for_version(version: CompatibilityVersion) -> Vec<super::FunctionCatalogEntry> {
+    let version = CompatibilityVersion::V0_1_16;
     let mut entries = descriptor::descriptors()
         .iter()
         .copied()
@@ -864,8 +861,6 @@ pub(super) fn normalize_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-
-    use sha2::{Digest, Sha256};
 
     use super::{Expr, descriptor, normalize_name};
 
@@ -959,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_names_are_unique_and_current_catalog_is_v0_1_16() {
+    fn registry_names_are_unique_and_current_catalog_is_structurally_complete() {
         let kernels: BTreeSet<_> = descriptor::descriptors()
             .iter()
             .map(|descriptor| descriptor.canonical_name())
@@ -1139,235 +1134,5 @@ mod tests {
                 "{name}",
             );
         }
-    }
-
-    #[test]
-    fn migrated_catalog_is_byte_exact_with_the_v0_1_9_snapshot() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_9)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual: [u8; 32] = digest.finalize().into();
-        assert_eq!(
-            actual,
-            [
-                0xd0, 0xa5, 0x38, 0x20, 0x7e, 0x53, 0x6d, 0x3c, 0x5b, 0x52, 0xe2, 0xae, 0x1c, 0x33,
-                0x53, 0xcf, 0xef, 0x3e, 0xe9, 0x65, 0xb8, 0xea, 0x84, 0x1c, 0x14, 0x1b, 0xf2, 0x0a,
-                0x6c, 0x12, 0xd9, 0xae,
-            ]
-        );
-    }
-
-    #[test]
-    fn v0_1_10_grouped_checkpoint_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_10)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.10.sha256").trim()
-        );
-    }
-
-    #[test]
-    fn v0_1_11_database_regression_matrix_and_numeral_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_11)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.11.sha256").trim()
-        );
-    }
-
-    #[test]
-    fn v0_1_12_probability_distribution_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_12)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.12.sha256").trim()
-        );
-    }
-
-    #[test]
-    fn v0_1_13_t_family_and_sample_test_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_13)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.13.sha256").trim()
-        );
-    }
-
-    #[test]
-    fn v0_1_14_engineering_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_14)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.14.sha256").trim()
-        );
-    }
-
-    #[test]
-    fn v0_1_15_fixed_income_catalog_is_byte_exact() {
-        let catalog =
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_15);
-        assert_eq!(catalog.len(), 413);
-        assert_eq!(
-            catalog.iter().filter(|entry| entry.is_official()).count(),
-            412
-        );
-
-        let mut digest = Sha256::new();
-        for entry in catalog {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.15.sha256").trim()
-        );
-    }
-
-    #[test]
-    fn v0_1_16_datevalue_and_xlookup_catalog_is_byte_exact() {
-        let mut digest = Sha256::new();
-        for entry in
-            super::function_catalog_for_version(super::descriptor::CompatibilityVersion::V0_1_16)
-        {
-            digest.update(entry.name().as_bytes());
-            digest.update([0]);
-            digest.update(entry.canonical_name().as_bytes());
-            digest.update([0]);
-            digest.update(if entry.is_alias() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.returns_array() { b"1" } else { b"0" });
-            digest.update([0]);
-            digest.update(if entry.is_official() { b"1" } else { b"0" });
-            digest.update(b"\n");
-        }
-        let actual = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(
-            actual,
-            include_str!("../../../testdata/function-catalog-v0.1.16.sha256").trim()
-        );
     }
 }

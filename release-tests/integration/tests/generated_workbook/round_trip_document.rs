@@ -1,18 +1,20 @@
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
 use cellrune::{
     ApplyChangesError, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
     CalculationExecutionMode, CalculationOptions, CancellationToken, CellAddress, CellContent,
-    CellValue, EditBatch, OpenOptions, ReadLimits, ReadOptions, RecalculationMode, Row,
-    SessionErrorCode, SessionLimits, SheetId, TableColumnId, TableColumnName, TableId, TableName,
+    CellValue, EditBatch, OpenOptions, ReadLimits, ReadOptions, RecalculationMode,
+    RecalculationWriteOptions, Row, SessionErrorCode, SessionLimits, SheetId, SheetName,
+    SheetVisibility, TableColumnId, TableColumnName, TableId, TableName,
     WorkbookCalculationSession, WorkbookChange, WorkbookDraft, WorkbookSourceKind, WriteLimits,
     WriteOptions, XlsxDocumentKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
     open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx_bytes,
-    scan_formula_capabilities, write_preserved_xlsx_bytes,
+    scan_formula_capabilities, write_preserved_xlsx_bytes, write_xlsx_draft_bytes,
 };
 use sha2::{Digest, Sha256};
 use zip::read::ZipArchive;
+use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_formula_fixture,
@@ -488,6 +490,113 @@ fn mutated_archive_bytes_change_identity_even_when_workbook_semantics_match() {
 }
 
 #[test]
+fn added_sheets_bind_root_and_element_scoped_relationship_namespaces() {
+    const TRANSITIONAL: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+
+    for (case, prefix, namespace, element_scoped) in [
+        ("root-transitional", "r", TRANSITIONAL, false),
+        ("element-transitional", "r", TRANSITIONAL, true),
+        ("alternate-prefix", "rel", TRANSITIONAL, true),
+        ("element-strict", "strictRel", STRICT, true),
+    ] {
+        let source = workbook_with_relationship_namespace(
+            &generated_workbook(ProducerProfile::Excel),
+            prefix,
+            namespace,
+            element_scoped,
+        );
+        let document = open_xlsx_document_bytes(&source, OpenOptions::default())
+            .unwrap_or_else(|error| panic!("{case}: open input: {error}"));
+        let inputs = document
+            .workbook()
+            .sheet_by_name("Inputs")
+            .expect("Inputs sheet")
+            .id();
+        let calculations = document
+            .workbook()
+            .sheet_by_name("Calculations")
+            .expect("Calculations sheet");
+        assert_eq!(calculations.visibility(), SheetVisibility::Hidden, "{case}");
+
+        let mut draft = WorkbookDraft::from_document(&document);
+        let first_added = draft
+            .add_sheet(SheetName::new("Added One").expect("sheet name"))
+            .expect("add first sheet");
+        let second_added = draft
+            .add_sheet(SheetName::new("Added Two").expect("sheet name"))
+            .expect("add second sheet");
+        draft
+            .set_cell_value(
+                first_added,
+                CellAddress::from_a1("A1").expect("address"),
+                CellValue::number(7.0).expect("finite value"),
+            )
+            .expect("set added value");
+        draft
+            .set_cell_formula(
+                second_added,
+                CellAddress::from_a1("A1").expect("address"),
+                cellrune::FormulaText::from_xlsx("'Added One'!A1+1").expect("formula"),
+            )
+            .expect("set added formula");
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let output =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .unwrap_or_else(|error| panic!("{case}: write draft: {error}"));
+
+        let manifest = archive_manifest(output.bytes());
+        let workbook_xml =
+            std::str::from_utf8(&manifest.get("xl/workbook.xml").expect("workbook part").2)
+                .expect("UTF-8 workbook XML");
+        let declaration = format!(r#"xmlns:{prefix}="{namespace}""#);
+        let relationship = format!("{prefix}:id=");
+        assert_eq!(workbook_xml.matches(&relationship).count(), 4, "{case}");
+        assert!(
+            workbook_xml.matches(&declaration).count() >= 2,
+            "{case}: each added sheet needs an in-scope relationship namespace"
+        );
+        assert!(
+            workbook_xml.contains(r#"opaque:marker="preserved""#),
+            "{case}"
+        );
+        assert!(workbook_xml.contains(r#"opaque:id="foreign""#), "{case}");
+
+        let reopened = open_xlsx_document_bytes(output.bytes(), OpenOptions::default())
+            .unwrap_or_else(|error| panic!("{case}: reopen output: {error}"));
+        assert_eq!(reopened.workbook().sheets().len(), 4, "{case}");
+        assert_eq!(
+            reopened
+                .workbook()
+                .sheet_by_id(inputs)
+                .expect("existing Inputs sheet")
+                .name()
+                .as_str(),
+            "Inputs",
+            "{case}",
+        );
+        assert_eq!(
+            reopened
+                .workbook()
+                .sheet_by_name("Calculations")
+                .expect("existing Calculations sheet")
+                .visibility(),
+            SheetVisibility::Hidden,
+            "{case}",
+        );
+        assert!(
+            reopened.workbook().sheet_by_id(first_added).is_some(),
+            "{case}"
+        );
+        assert!(
+            reopened.workbook().sheet_by_id(second_added).is_some(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
 fn document_and_write_limits_fail_with_stable_codes() {
     let bytes = generated_workbook(ProducerProfile::Excel);
     let read_limits = ReadLimits::default()
@@ -528,4 +637,53 @@ fn archive_manifest(bytes: &[u8]) -> BTreeMap<String, (zip::CompressionMethod, u
         assert!(replaced.is_none(), "duplicate fixture entry");
     }
     manifest
+}
+
+fn workbook_with_relationship_namespace(
+    bytes: &[u8],
+    prefix: &str,
+    namespace: &str,
+    element_scoped: bool,
+) -> Vec<u8> {
+    const ROOT_DECLARATION: &str =
+        "          xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"";
+
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("source archive");
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).expect("source entry");
+        let name = file.name().to_owned();
+        let compression = file.compression();
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents).expect("source contents");
+        if name == "xl/workbook.xml" {
+            let mut workbook = String::from_utf8(contents).expect("UTF-8 workbook XML");
+            if element_scoped {
+                workbook = workbook.replace(ROOT_DECLARATION, "");
+                let scoped = format!(r#" xmlns:{prefix}="{namespace}" {prefix}:id="#);
+                workbook = workbook.replace(" r:id=", &scoped);
+            }
+            workbook = workbook.replace(
+                r#"name="Calculations" sheetId="2""#,
+                r#"name="Calculations" sheetId="2" state="hidden""#,
+            );
+            let first_relationship = format!(r#"{prefix}:id="rId1"/>"#);
+            let marked_relationship = format!(
+                r#"xmlns:opaque="urn:cellrune:test" opaque:marker="preserved" {prefix}:id="rId1" opaque:id="foreign"/>"#
+            );
+            workbook = workbook.replacen(&first_relationship, &marked_relationship, 1);
+            contents = workbook.into_bytes();
+        }
+        writer
+            .start_file(
+                name,
+                SimpleFileOptions::default().compression_method(compression),
+            )
+            .expect("start rewritten entry");
+        writer.write_all(&contents).expect("write rewritten entry");
+    }
+    writer
+        .finish()
+        .expect("finish rewritten archive")
+        .into_inner()
 }
