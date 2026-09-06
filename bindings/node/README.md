@@ -14,7 +14,7 @@ dependency. You do not need to select a platform package yourself.
 ## Install
 
 ```console
-npm install @cellrune/node@0.1.17
+npm install @cellrune/node@0.1.18
 ```
 
 ## CommonJS
@@ -83,6 +83,27 @@ resource error is retryable; a stale or successful commit consumes the preview.
 Pass an opaque `PreviewCursor` from `previewChangesPage` back unchanged for the
 same preview and section. The complete shared lifecycle and page contract is in
 [`llms.txt`](https://github.com/emulette/cellrune/blob/main/llms.txt).
+
+Calculate a few outputs before any full calculation with:
+
+```javascript
+const result = await workbook.calculateTargets([
+  { sheet: "Sheet1", start: "B1" },
+  { sheet: "Sheet1", start: "D1", end: "D10" },
+], { limits: { maxResultCells: 100, maxEvaluatedCells: 10000 } });
+```
+
+`TargetCalculationResult` has `scope: "targets"`, a `bigint` `semanticRevision`, source identity,
+typed `cells`, deterministic options, limits, and `evaluatedCount`, `parsedFormulaCount`, and
+`reusedCount`. It includes only requested cells in sheet-ID and row-major order. Calculation
+parses/evaluates required precedents, deduplicates overlap, and can reuse a compatible current
+complete cache. It does not install a full cache, clear dirty formulas, advance deltas, invalidate
+a preview, or satisfy the full-calculation requirement for saving. Defaults allow 1024 targets,
+10000 returned cells, and 100000 evaluator invocations, including dynamic retries. Known array
+followers evaluate the whole anchor; include the anchor when requesting an undeclared spill
+whose owner has not yet been calculated. Saved formula caches are never treated as current.
+Use declared spill ranges or full calculation if independent undeclared spills may overlap;
+anchors outside the dependency scope are not discovered by a partial request.
 
 `Workbook` supports typed errors, revision-checked edit batches, incremental
 calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and explicit

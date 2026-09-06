@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::error::napi_error;
 
 const U64_IDENTITY_FIELDS: &[&str] = &[
+    "semantic_revision",
     "preview_id",
     "base_revision",
     "result_revision",

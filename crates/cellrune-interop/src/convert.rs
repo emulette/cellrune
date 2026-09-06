@@ -530,7 +530,9 @@ fn issue_to_dto(issue: &CalculationIssue) -> CalculationIssueDto {
     }
 }
 
-fn calculation_options_report(options: CalculationOptions) -> CalculationOptionsReportDto {
+pub(crate) fn calculation_options_report(
+    options: CalculationOptions,
+) -> CalculationOptionsReportDto {
     let limits = options.limits();
     CalculationOptionsReportDto {
         today_serial: options.today_serial().map(FiniteNumber::get),
@@ -584,7 +586,7 @@ const fn install_delta_basis_reason_name(reason: InstallDeltaBasisReason) -> &'s
     }
 }
 
-fn hex_bytes(bytes: &[u8]) -> String {
+pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
     let mut value = String::with_capacity(bytes.len().saturating_mul(2));
     for byte in bytes {
         use std::fmt::Write as _;

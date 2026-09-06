@@ -17,7 +17,9 @@ mod delta;
 mod error;
 mod impact;
 mod limits;
+mod targeted;
 mod transaction;
+pub use targeted::{CompletedTargetCalculation, PreparedTargetCalculation};
 
 pub use delta::{CalculationDelta, CalculationDeltaCell, CalculationDeltaPage};
 use delta::{DeltaMetadata, build_delta, build_empty_delta, build_incremental_delta};

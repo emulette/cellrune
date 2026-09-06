@@ -574,6 +574,37 @@ export interface WorkbookTransactionReceipt {
   readonly resultFingerprint: WorkbookFingerprint;
 }
 
+export interface CalculationTarget {
+  readonly sheet: string;
+  readonly start: string;
+  readonly end?: string;
+}
+
+export interface TargetCalculationLimits {
+  readonly maxTargets: number;
+  readonly maxResultCells: number;
+  readonly maxEvaluatedCells: number;
+}
+
+export interface TargetCalculationOptions extends CalculationOptions {
+  readonly limits?: Partial<TargetCalculationLimits>;
+}
+
+export interface TargetCalculationResult {
+  readonly schemaVersion: number;
+  readonly scope: "targets";
+  readonly semanticRevision: bigint;
+  readonly sourceFingerprint: WorkbookFingerprint;
+  readonly inputSha256: string | null;
+  readonly calculatorProvider: ProviderIdentity;
+  readonly calculationOptions: TransactionCalculationOptions;
+  readonly limits: TargetCalculationLimits;
+  readonly cells: readonly { readonly cell: CellReference; readonly result: CalculationResult }[];
+  readonly evaluatedCount: number;
+  readonly parsedFormulaCount: number;
+  readonly reusedCount: number;
+}
+
 export class Workbook {
   private constructor();
   static create(): Workbook;
@@ -594,6 +625,7 @@ export class Workbook {
   ): DefinedNameInspection;
   functionUsage(): FunctionUsageReport;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;
+  calculateTargets(targets: readonly CalculationTarget[], options?: TargetCalculationOptions): Promise<TargetCalculationResult>;
   recalculate(options?: RecalculationOptions): Promise<CalculationDelta>;
   previewChanges(
     expectedRevision: bigint,

@@ -98,6 +98,58 @@ impl Engine<'_> {
         Ok(())
     }
 
+    pub(super) fn prepare_target_names(
+        &mut self,
+        cell: CellId,
+        loaded: &mut BTreeSet<usize>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        let Some(parsed) = self.asts.get(&cell).cloned() else {
+            return Ok(());
+        };
+        let mut pending = self
+            .name_references_for_scope(cell.0, None, parsed.root(), cancelled)?
+            .into_iter()
+            .map(|name| (name, None))
+            .collect::<Vec<_>>();
+        while let Some((name, scope)) = pending.pop() {
+            if cancelled() {
+                return Err(());
+            }
+            let Some((index, definition)) = self.resolve_defined_name_scoped(cell.0, scope, &name)
+            else {
+                continue;
+            };
+            if !loaded.insert(index) {
+                continue;
+            }
+            let scope = definition.scope();
+            let parsed = crate::calculation::parser::parse_formula_with_limits(
+                definition.formula().as_str(),
+                self.options.limits(),
+            )
+            .ok();
+            if let Some(parsed) = &parsed {
+                pending.extend(
+                    self.name_references_for_scope(cell.0, Some(scope), parsed.root(), cancelled)?
+                        .into_iter()
+                        .map(|name| (name, Some(scope))),
+                );
+            }
+            std::sync::Arc::make_mut(&mut self.defined_name_asts)[index] = parsed;
+        }
+        match self.inspect_name_graph(cell.0, parsed.root(), cancelled)? {
+            NameGraphStatus::Supported => {}
+            NameGraphStatus::Cycle => {
+                std::sync::Arc::make_mut(&mut self.name_cycle_cells).insert(cell);
+            }
+            NameGraphStatus::LimitExceeded => {
+                std::sync::Arc::make_mut(&mut self.name_limit_cells).insert(cell);
+            }
+        }
+        Ok(())
+    }
+
     fn inspect_name_graph(
         &self,
         sheet: usize,

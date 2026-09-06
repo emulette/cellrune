@@ -467,85 +467,11 @@ fn scan_with_engine_cancellable(
             if cancelled() {
                 return Err(());
             }
-            let CellContent::Formula(formula) = cell.content() else {
+            let CellContent::Formula(_) = cell.content() else {
                 continue;
             };
             let id = CalculationCellId::new(sheet.id(), cell.address());
-            let internal_id = (
-                sheet_index,
-                cell.address().row().get(),
-                cell.address().column().get(),
-            );
-            let mut issues = Vec::new();
-            if engine.dependency_limit_exceeded() {
-                issues.push(resource_limit_issue(CalculationLimitKind::DependencyEdges));
-            }
-            let has_name_cycle = engine.has_name_cycle(internal_id);
-            let has_name_limit = engine.has_name_limit(internal_id);
-            if has_name_cycle {
-                issues.push(CalculationIssue::new(
-                    CalculationIssueCode::UnsupportedName,
-                    None,
-                ));
-            }
-            if has_name_limit {
-                issues.push(resource_limit_issue(
-                    CalculationLimitKind::FormulaNestingDepth,
-                ));
-            }
-            let supported_metadata = match formula.metadata() {
-                FormulaMetadata::Normal | FormulaMetadata::Shared { .. } => true,
-                FormulaMetadata::Array { .. } => formula
-                    .metadata()
-                    .legacy_array_range_at(cell.address())
-                    .is_some(),
-                FormulaMetadata::DynamicArray { .. } => formula
-                    .metadata()
-                    .dynamic_array_range_at(cell.address())
-                    .is_some(),
-                FormulaMetadata::DataTable { .. } => false,
-            };
-            if !supported_metadata {
-                issues.push(CalculationIssue::new(
-                    CalculationIssueCode::UnsupportedExpression,
-                    None,
-                ));
-            }
-            match formula.text() {
-                None => issues.push(CalculationIssue::new(
-                    CalculationIssueCode::MissingFormulaText,
-                    None,
-                )),
-                Some(_) => match engine.parse_failure(internal_id) {
-                    Some(error) => match error.limit {
-                        Some(limit) => issues.push(resource_limit_issue(limit)),
-                        None => issues.push(CalculationIssue::new(
-                            CalculationIssueCode::ParseError,
-                            Some(parse_error_detail(error)),
-                        )),
-                    },
-                    None if has_name_cycle || has_name_limit => {}
-                    None => match engine.parsed_expr(internal_id) {
-                        Some(expr) => inspect_expr(
-                            engine,
-                            NameScanContext::root(sheet_index),
-                            expr,
-                            CapabilityInspectionPolicy::new(ARRAY_EXPRESSION_POLICY, false),
-                            &mut HashSet::new(),
-                            &mut CapabilityScope::default(),
-                            &mut issues,
-                        ),
-                        None => issues.push(CalculationIssue::new(
-                            CalculationIssueCode::ParseError,
-                            None,
-                        )),
-                    },
-                },
-            }
-            issues.sort_by(|left, right| {
-                (left.code(), left.detail()).cmp(&(right.code(), right.detail()))
-            });
-            issues.dedup();
+            let issues = formula_issues(engine, sheet_index, cell);
             let capability = if issues.is_empty() {
                 FormulaCapability::Supported
             } else {
@@ -555,6 +481,90 @@ fn scan_with_engine_cancellable(
         }
     }
     Ok(FormulaCapabilityReport::new(entries))
+}
+
+pub(super) fn formula_issues(
+    engine: &Engine<'_>,
+    sheet_index: usize,
+    cell: &crate::Cell,
+) -> Vec<CalculationIssue> {
+    let CellContent::Formula(formula) = cell.content() else {
+        return Vec::new();
+    };
+    let internal_id = (
+        sheet_index,
+        cell.address().row().get(),
+        cell.address().column().get(),
+    );
+    let mut issues = Vec::new();
+    if engine.dependency_limit_exceeded() {
+        issues.push(resource_limit_issue(CalculationLimitKind::DependencyEdges));
+    }
+    let has_name_cycle = engine.has_name_cycle(internal_id);
+    let has_name_limit = engine.has_name_limit(internal_id);
+    if has_name_cycle {
+        issues.push(CalculationIssue::new(
+            CalculationIssueCode::UnsupportedName,
+            None,
+        ));
+    }
+    if has_name_limit {
+        issues.push(resource_limit_issue(
+            CalculationLimitKind::FormulaNestingDepth,
+        ));
+    }
+    let supported_metadata = match formula.metadata() {
+        FormulaMetadata::Normal | FormulaMetadata::Shared { .. } => true,
+        FormulaMetadata::Array { .. } => formula
+            .metadata()
+            .legacy_array_range_at(cell.address())
+            .is_some(),
+        FormulaMetadata::DynamicArray { .. } => formula
+            .metadata()
+            .dynamic_array_range_at(cell.address())
+            .is_some(),
+        FormulaMetadata::DataTable { .. } => false,
+    };
+    if !supported_metadata {
+        issues.push(CalculationIssue::new(
+            CalculationIssueCode::UnsupportedExpression,
+            None,
+        ));
+    }
+    match formula.text() {
+        None => issues.push(CalculationIssue::new(
+            CalculationIssueCode::MissingFormulaText,
+            None,
+        )),
+        Some(_) => match engine.parse_failure(internal_id) {
+            Some(error) => match error.limit {
+                Some(limit) => issues.push(resource_limit_issue(limit)),
+                None => issues.push(CalculationIssue::new(
+                    CalculationIssueCode::ParseError,
+                    Some(parse_error_detail(error)),
+                )),
+            },
+            None if has_name_cycle || has_name_limit => {}
+            None => match engine.parsed_expr(internal_id) {
+                Some(expr) => inspect_expr(
+                    engine,
+                    NameScanContext::root(sheet_index),
+                    expr,
+                    CapabilityInspectionPolicy::new(ARRAY_EXPRESSION_POLICY, false),
+                    &mut HashSet::new(),
+                    &mut CapabilityScope::default(),
+                    &mut issues,
+                ),
+                None => issues.push(CalculationIssue::new(
+                    CalculationIssueCode::ParseError,
+                    None,
+                )),
+            },
+        },
+    }
+    issues.sort_by(|left, right| (left.code(), left.detail()).cmp(&(right.code(), right.detail())));
+    issues.dedup();
+    issues
 }
 
 pub(super) fn calculate_workbook(
@@ -1808,4 +1818,58 @@ fn inspect_let(
         issues,
     );
     local_scope.truncate(previous_len);
+}
+
+pub(super) fn target_result(
+    workbook: &WorkbookSnapshot,
+    engine: &Engine<'_>,
+    internal_id: super::runtime::CellId,
+) -> CalculationCellResult {
+    if let Some(result) = engine.retained_result(internal_id) {
+        return result.clone();
+    }
+    let sheet_index = internal_id.0;
+    if let Some(cell) = crate::CellAddress::from_indices(internal_id.1, internal_id.2)
+        .ok()
+        .and_then(|address| workbook.sheets()[sheet_index].cell(address))
+        && let Some(issue) = formula_issues(engine, sheet_index, cell).into_iter().next()
+    {
+        return CalculationCellResult::Unavailable(issue);
+    }
+    if engine.cycle_cells.contains(&internal_id) {
+        return CalculationCellResult::Unavailable(CalculationIssue::new(
+            CalculationIssueCode::CircularReference,
+            None,
+        ));
+    }
+    if engine.blocked_cells.contains(&internal_id) {
+        return CalculationCellResult::Unavailable(CalculationIssue::new(
+            CalculationIssueCode::BlockedByUpstream,
+            None,
+        ));
+    }
+    let options = engine.calculation_options();
+    let direct_unavailable = BTreeSet::new();
+    match engine.cell_value(internal_id) {
+        Value::Error(ErrorKind::ResourceLimit(limit)) => {
+            CalculationCellResult::Unavailable(resource_limit_issue(limit))
+        }
+        Value::Error(ErrorKind::Unsupported) => {
+            let missing_volatile_input = engine.parsed_expr(internal_id).is_some_and(|expr| {
+                (options.today_serial().is_none()
+                    && contains_volatility(engine, sheet_index, expr, Volatility::Today))
+                    || (options.now_serial().is_none()
+                        && contains_volatility(engine, sheet_index, expr, Volatility::Now))
+            });
+            let code = if missing_volatile_input {
+                CalculationIssueCode::VolatileInputMissing
+            } else if engine.has_unavailable_dependency(internal_id, &direct_unavailable) {
+                CalculationIssueCode::BlockedByUpstream
+            } else {
+                CalculationIssueCode::UnsupportedExpression
+            };
+            CalculationCellResult::Unavailable(CalculationIssue::new(code, None))
+        }
+        value => CalculationCellResult::Value(cell_from_value(value)),
+    }
 }

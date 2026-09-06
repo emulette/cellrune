@@ -8,17 +8,17 @@ transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.17 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.18 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.17
+cargo add cellrune@0.1.18
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.17"
+cellrune = "0.1.18"
 ```
 
 ## Features
@@ -189,6 +189,42 @@ Long-running work can be prepared outside the session lock with `prepare_recalcu
 through a request-owned `CancellationToken`, and installed only if its source revision is still
 current.
 
+Use targeted calculation when a headless service needs only a few outputs. Rust exposes
+`calculate_targets` and `WorkbookCalculationSession::calculate_targets`; Python and Node expose
+the same operation without requiring a prior full calculation:
+
+```python
+result = workbook.calculate_targets([
+    {"sheet": "Sheet1", "start": "B1"},
+    {"sheet": "Sheet1", "start": "D1", "end": "D10"},
+])
+```
+
+```javascript
+const result = await workbook.calculateTargets([
+  { sheet: "Sheet1", start: "B1" },
+  { sheet: "Sheet1", start: "D1", end: "D10" },
+]);
+```
+
+The separate partial result contains only requested cells, deduplicated in sheet-ID and row-major
+order, with typed values/issues, revision, fingerprint, provenance, options, and work counts.
+Only target formulas and required precedents are parsed/evaluated; layout metadata is inspected
+across the source workbook. A current complete cache with matching options can supply results.
+Partial requests preserve dirty state, full results, delta history, previews, and save requirements.
+Defaults bound input targets to 1,024, returned cells to 10,000, and evaluator invocations to
+100,000; dynamic retries count toward the work budget. Request limits can be set with `limits`.
+Known array followers calculate their entire anchor. For an undeclared spill whose owner has
+never been calculated, include its anchor in the request; an unknown follower alone cannot locate
+an arbitrary formula elsewhere in the workbook. Saved formula results are never used as current
+calculation values. See [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for
+the complete Rust types and transport contract.
+
+Undeclared spills outside the dependency scope are not discovered. Use declared spill ranges or
+full calculation when independently anchored spills may overlap. A reproducible comparison of
+small and complete scopes is recorded in the
+[targeted calculation benchmark](https://github.com/emulette/cellrune/blob/main/release-tests/integration/benches/targeted_calculation.md).
+
 The 0.1.16 change-preview workflow captures an immutable base/candidate transaction
 without mutating the live workbook. Retention belongs to `cellrune-interop::WorkbookSession`, which
 allows one active preview calculation and one published preview. Publication is two phase: a failed,
@@ -257,12 +293,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.17 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.18 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.17"
-npm install "@cellrune/node@0.1.17"
+python -m pip install "cellrune==0.1.18"
+npm install "@cellrune/node@0.1.18"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -335,9 +371,9 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 16 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
+Its 17 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
 `workbook_read_range`, `workbook_function_usage`, `workbook_scan_capabilities`,
-`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`,
+`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`, and `workbook_discard_preview`.
 The v2 edit tool adds stable-ID table rename, table-column rename, and table-row resize while
@@ -345,6 +381,11 @@ retaining the v1 edit shapes. The four preview tools are the retained immutable 
 workflow: preview returns a summary and ID, page returns a byte-bounded core-cursor page, and
 commit or discard consumes the interop-owned preview. `workbook_save_as` returns the shared write
 report, including its lowercase `output_sha256` output identity.
+
+`workbook_calculate_targets` accepts `session_id`, `targets`, optional `options`, and optional
+`limits`. Its limits are capped at the defaults above. The entire partial response must fit
+`--max-response-bytes`; an oversized response fails without installing state, so callers can
+retry with fewer targets. It uses the existing request cancellation and session lifetime controls.
 
 The server also publishes read-only JSON resources at `cellrune://support/functions` and the
 `cellrune://sessions/{session_id}/summary` resource template. Operators can set

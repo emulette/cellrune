@@ -47,7 +47,18 @@ fn main() {
     let sheet = workbook.sheet_by_name("Sheet1").expect(SHEET_FAILURE);
     let address = CellAddress::from_a1("B1").expect(ADDRESS_FAILURE);
     let cell_id = CalculationCellId::new(sheet.id(), address);
+    let partial = cellrune::calculate_targets(
+        &workbook,
+        &[cellrune::CalculationTarget::cell(cell_id)],
+        CalculationOptions::default(),
+        cellrune::TargetCalculationLimits::default(),
+        CancellationToken::new(),
+    )
+    .expect(RESULT_FAILURE);
+    assert_eq!(partial.len(), 1);
+    assert_eq!(partial.parsed_formula_count(), 1);
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_eq!(partial.cell(cell_id), calculation.cell(cell_id));
     let Some(CalculationCellResult::Value(CellValue::Number(actual))) = calculation.cell(cell_id)
     else {
         panic!("{RESULT_FAILURE}");

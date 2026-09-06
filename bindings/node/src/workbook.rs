@@ -26,6 +26,22 @@ pub struct NativeWorkbook {
 
 #[napi]
 impl NativeWorkbook {
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn calculate_targets(
+        &self,
+        request_json: String,
+    ) -> napi::Result<AsyncTask<crate::targeted::TargetCalculationTask>> {
+        let request =
+            serde_json::from_str::<cellrune_interop::TargetCalculationRequestDto>(&request_json)
+                .map_err(|error| {
+                    napi_error(InteropError::invalid_target_payload(error.to_string()))
+                })?;
+        Ok(AsyncTask::new(crate::targeted::TargetCalculationTask {
+            session: Arc::clone(&self.session),
+            request,
+        }))
+    }
+
     #[napi(getter)]
     pub fn closed(&self) -> bool {
         self.session.is_closed()

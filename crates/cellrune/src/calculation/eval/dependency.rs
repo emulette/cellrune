@@ -504,6 +504,33 @@ impl Engine<'_> {
         Ok(result)
     }
 
+    pub(super) fn target_dependencies(
+        &self,
+        cell: super::CellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<DependencyTarget>, ()> {
+        let mut targets = Vec::new();
+        if !self.name_cycle_cells.contains(&cell)
+            && !self.name_limit_cells.contains(&cell)
+            && let Some(parsed) = self.asts.get(&cell)
+        {
+            let budget = EvaluationBudget::default();
+            self.collect_dependency_targets(
+                EvalContext::for_cancellable(cell, &budget, cancelled),
+                parsed.root(),
+                &mut VisitedDefinitions::default(),
+                &mut Vec::new(),
+                &mut targets,
+            );
+        }
+        if cancelled() {
+            return Err(());
+        }
+        targets.sort_by(compare_targets);
+        targets.dedup();
+        Ok(targets)
+    }
+
     fn expr_has_unresolved_dynamic_dependency(
         &self,
         context: EvalContext<'_>,

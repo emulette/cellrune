@@ -2,6 +2,7 @@
 
 mod conversion;
 mod error;
+mod targeted;
 mod workbook;
 
 use pyo3::prelude::*;

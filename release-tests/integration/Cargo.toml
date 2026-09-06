@@ -11,8 +11,8 @@ workspace = true
 
 [dependencies]
 calamine.workspace = true
-cellrune = { version = "=0.1.17", path = "../../crates/cellrune", features = ["__internal-transaction-bench"] }
-cellrune-interop = { version = "=0.1.17", path = "../../crates/cellrune-interop" }
+cellrune = { version = "=0.1.18", path = "../../crates/cellrune", features = ["__internal-transaction-bench"] }
+cellrune-interop = { version = "=0.1.18", path = "../../crates/cellrune-interop" }
 libm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -22,6 +22,11 @@ zip.workspace = true
 
 [[bench]]
 name = "hardening"
+harness = false
+test = false
+
+[[bench]]
+name = "targeted_calculation"
 harness = false
 test = false
 

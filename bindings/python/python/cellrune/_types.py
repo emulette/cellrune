@@ -3,6 +3,27 @@
 from typing import Literal, TypedDict
 
 
+class CalculationTargetOptions(TypedDict, total=False):
+    end: str
+
+
+class CalculationTarget(CalculationTargetOptions):
+    sheet: str
+    start: str
+
+
+class TargetCalculationLimitOptions(TypedDict, total=False):
+    max_targets: int
+    max_result_cells: int
+    max_evaluated_cells: int
+
+
+class TargetCalculationLimits(TypedDict):
+    max_targets: int
+    max_result_cells: int
+    max_evaluated_cells: int
+
+
 class ErrorDetails(TypedDict):
     source_code: str | None
     source_id: str | None
@@ -647,3 +668,23 @@ class WorkbookTransactionReceipt(TypedDict):
     calculation_delta: CalculationDelta
     base_fingerprint: WorkbookFingerprint
     result_fingerprint: WorkbookFingerprint
+
+
+class TargetCalculationCell(TypedDict):
+    cell: CellReference
+    result: CalculationResult
+
+
+class TargetCalculationResult(TypedDict):
+    schema_version: int
+    scope: Literal["targets"]
+    semantic_revision: int
+    source_fingerprint: WorkbookFingerprint
+    input_sha256: str | None
+    calculator_provider: ProviderIdentity
+    calculation_options: TransactionCalculationOptions
+    limits: TargetCalculationLimits
+    cells: list[TargetCalculationCell]
+    evaluated_count: int
+    parsed_formula_count: int
+    reused_count: int

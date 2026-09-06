@@ -23,6 +23,7 @@ const ROOT_ARCHIVE_FILES = [
   "lib/changes.js",
   "lib/errors.js",
   "lib/normalization.js",
+  "lib/targeted.js",
   "lib/validation.js",
   "native.d.ts",
   "native.js",

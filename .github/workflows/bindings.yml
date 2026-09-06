@@ -171,6 +171,9 @@ jobs:
       - name: Run Python interactive-session tests
         run: python tests/interactive.py
 
+      - name: Verify targeted calculation
+        run: python tests/targeted.py
+
       - name: Run Python introspection tests
         run: python tests/introspection.py
 

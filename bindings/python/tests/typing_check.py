@@ -1,4 +1,5 @@
 from cellrune import (
+    TargetCalculationResult,
     CalculationDelta,
     CellRuneError,
     CellValue,
@@ -34,6 +35,8 @@ table_summary: TableSummary = {
 
 
 def check() -> None:
+    partial: TargetCalculationResult = Workbook.create().calculate_targets([{"sheet": "Sheet1", "start": "A1"}], limits={"max_result_cells": 10})
+    partial["cells"][0]["cell"]["address"].upper()
     catalog: FunctionCatalogReport = function_catalog()
     catalog["entries"][0]["canonical_name"].upper()
     with Workbook.create() as scoped:

@@ -20,6 +20,20 @@ pub(crate) struct Workbook {
 
 #[pymethods]
 impl Workbook {
+    #[pyo3(signature = (targets, **options))]
+    pub fn calculate_targets<'py>(
+        &self,
+        py: Python<'py>,
+        targets: &Bound<'_, PyAny>,
+        options: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let request = crate::targeted::request_from_python(py, targets, options)?;
+        let response = py
+            .detach(|| cellrune_binding_support::calculate_targets(&self.session, &request))
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &response)
+    }
+
     #[staticmethod]
     pub fn create() -> Self {
         Self::new(WorkbookSession::create())

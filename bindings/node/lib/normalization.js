@@ -474,6 +474,26 @@ function parsePreviewJson(value) {
   }
 }
 
+function normalizeTargetCalculation(value) {
+  requireObject(value, "target calculation");
+  requireProtocolVersion(value.schema_version, "target calculation");
+  return {
+    schemaVersion: value.schema_version,
+    scope: value.scope,
+    semanticRevision: BigInt(value.semantic_revision),
+    sourceFingerprint: normalizeFingerprint(value.source_fingerprint),
+    inputSha256: value.input_sha256,
+    calculatorProvider: value.calculator_provider,
+    calculationOptions: normalizeTransactionOptions(value.calculation_options),
+    limits: { maxTargets: value.limits.max_targets, maxResultCells: value.limits.max_result_cells,
+      maxEvaluatedCells: value.limits.max_evaluated_cells },
+    cells: value.cells.map(item => ({ cell: normalizeTransactionCellReference(item.cell), result: normalizeTransactionResult(item.result) })),
+    evaluatedCount: value.evaluated_count,
+    parsedFormulaCount: value.parsed_formula_count,
+    reusedCount: value.reused_count,
+  };
+}
+
 function normalizePreviewChanges(value) {
   requireObject(value, "preview changes");
   requireProtocolVersion(value.schema_version, "preview changes");
@@ -718,6 +738,7 @@ function normalizeTransactionCalculationDelta(delta) {
 }
 
 module.exports = {
+  normalizeTargetCalculation,
   normalizeCalculationDelta,
   normalizeCalculationDeltaPage,
   normalizeCalculationReport,

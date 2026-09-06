@@ -2,6 +2,11 @@
 
 from ._native import SCHEMA_VERSION, CellRuneError, Workbook, function_catalog
 from ._types import (
+    CalculationTarget,
+    TargetCalculationCell,
+    TargetCalculationLimitOptions,
+    TargetCalculationLimits,
+    TargetCalculationResult,
     AddSheetChange,
     BlankValue,
     CalculatedValue,
@@ -80,6 +85,11 @@ from ._types import (
 )
 
 __all__ = [
+    "CalculationTarget",
+    "TargetCalculationCell",
+    "TargetCalculationLimitOptions",
+    "TargetCalculationLimits",
+    "TargetCalculationResult",
     "SCHEMA_VERSION",
     "AddSheetChange",
     "BlankValue",

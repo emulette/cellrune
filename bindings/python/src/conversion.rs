@@ -30,7 +30,10 @@ pub(crate) fn transaction_receipt<'py>(
     json_dict(py, value)
 }
 
-fn json_dict<'py, T: serde::Serialize>(py: Python<'py>, value: &T) -> PyResult<Bound<'py, PyDict>> {
+pub(crate) fn json_dict<'py, T: serde::Serialize>(
+    py: Python<'py>,
+    value: &T,
+) -> PyResult<Bound<'py, PyDict>> {
     let json = serde_json::to_string(value).map_err(|_| {
         crate::error::into_py_error(py, cellrune_interop::InteropError::serialization())
     })?;

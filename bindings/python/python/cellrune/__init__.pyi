@@ -5,6 +5,11 @@ from ._native import (
     function_catalog as function_catalog,
 )
 from ._types import (
+    CalculationTarget as CalculationTarget,
+    TargetCalculationCell as TargetCalculationCell,
+    TargetCalculationLimitOptions as TargetCalculationLimitOptions,
+    TargetCalculationLimits as TargetCalculationLimits,
+    TargetCalculationResult as TargetCalculationResult,
     AddSheetChange as AddSheetChange,
     BlankValue as BlankValue,
     CalculatedValue as CalculatedValue,

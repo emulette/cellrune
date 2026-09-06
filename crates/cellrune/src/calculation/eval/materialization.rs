@@ -170,11 +170,19 @@ impl Engine<'_> {
         }
         self.dynamic_spills.insert(anchor, range);
         if declared_range.is_none() {
-            self.array_regions.push(ArrayRegion {
-                anchor,
-                rect: range,
-                provisional: true,
-            });
+            if let Some(region) = self
+                .array_regions
+                .iter_mut()
+                .find(|region| region.anchor == anchor)
+            {
+                region.rect = range;
+            } else {
+                self.array_regions.push(ArrayRegion {
+                    anchor,
+                    rect: range,
+                    provisional: true,
+                });
+            }
         }
         Ok(())
     }

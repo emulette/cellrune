@@ -8,6 +8,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [0.1.18] - 2026-09-06
+
+### Added
+
+- Targeted partial calculation across Rust, Python (`calculate_targets`), Node.js
+  (`calculateTargets`), and MCP (`workbook_calculate_targets`). The first request parses and
+  evaluates requested cells and their required precedents, with deduplicated rectangular targets,
+  typed values/issues, deterministic ordering, and bounded work. Dynamic references and known
+  array followers use the existing formula evaluator and array collision rules.
+- Separate immutable partial results carry the source revision, fingerprint, provenance, options,
+  limits, and parsed/evaluated/reused counts. Compatible current complete calculations can supply
+  cached results. Partial requests preserve full-cache, dirty, delta, preview, and save contracts;
+  cancelled, stale, or oversized responses are withheld. MCP now exposes 17 workbook tools.
+
 ## [0.1.17] - 2026-08-26
 
 ### Changed
@@ -749,6 +763,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
+[0.1.18]: https://github.com/emulette/cellrune/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/emulette/cellrune/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/emulette/cellrune/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/emulette/cellrune/compare/v0.1.14...v0.1.15

@@ -1,4 +1,5 @@
 import {
+  type TargetCalculationResult,
   CellRuneError,
   type CalculationDelta,
   type CellValue,
@@ -18,6 +19,14 @@ import {
   Workbook,
   functionCatalog,
 } from "@cellrune/node";
+
+async function checkTargets(workbook: Workbook): Promise<void> {
+  const result: TargetCalculationResult = await workbook.calculateTargets([{sheet: "Sheet1", start: "A1"}], {limits: {maxResultCells: 10}});
+  const revision: bigint = result.semanticRevision;
+  revision.toString();
+  result.cells[0].cell.address.toUpperCase();
+}
+void checkTargets;
 import type { Buffer } from "node:buffer";
 
 // @ts-expect-error CellRuneError instances are created by the binding.

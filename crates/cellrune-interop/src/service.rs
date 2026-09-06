@@ -5,6 +5,8 @@ mod edit;
 mod preview;
 mod query;
 mod save;
+mod targeted;
+pub use targeted::{CompletedTargetRequest, PreparedTargetRequest};
 
 use std::path::Path;
 

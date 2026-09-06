@@ -26,6 +26,7 @@ mod materialization;
 mod name_graph;
 mod orchestration;
 mod reference;
+mod targeted;
 
 pub(super) use dependency::DependencyTarget;
 use dependency::{TableTopologyRevision, table_dependency_by_id_cancellable};
@@ -876,11 +877,15 @@ pub struct Engine<'workbook> {
     pub(super) cycle_cells: Arc<BTreeSet<CellId>>,
     pub(super) blocked_cells: Arc<BTreeSet<CellId>>,
     evaluated_cells: BTreeSet<CellId>,
+    target_pending: Option<std::cell::RefCell<BTreeSet<CellId>>>,
     function_iterations: u64,
     reference_cells: u64,
 }
 
 impl<'workbook> Engine<'workbook> {
+    pub(super) const fn calculation_options(&self) -> CalculationOptions {
+        self.options
+    }
     /// Resolves which of a cell's competing sources actually supplies its value.
     ///
     /// A cell can hold a literal and still read as something else — an array formula or a dynamic
@@ -907,6 +912,13 @@ impl<'workbook> Engine<'workbook> {
             return ValueSource::Error(ErrorKind::Unsupported);
         }
         if let Some(owner) = self.array_owner(cell) {
+            if !self.results.contains_key(&owner)
+                && !self.cycle_cells.contains(&owner)
+                && !self.blocked_cells.contains(&owner)
+                && !self.parse_failures.contains_key(&owner)
+            {
+                self.record_target_dependency(owner);
+            }
             return self.results.get(&owner).map_or(
                 ValueSource::Error(ErrorKind::Unsupported),
                 ValueSource::Calculated,
@@ -920,8 +932,26 @@ impl<'workbook> Engine<'workbook> {
         };
         match source.content() {
             CellContent::Literal(value) => ValueSource::Literal(value),
-            CellContent::Formula(_) => ValueSource::Error(ErrorKind::Unsupported),
+            CellContent::Formula(_) => {
+                self.record_target_dependency(cell);
+                ValueSource::Error(ErrorKind::Unsupported)
+            }
         }
+    }
+
+    fn record_target_dependency(&self, cell: CellId) {
+        if let Some(pending) = &self.target_pending {
+            let mut pending = pending.borrow_mut();
+            if pending.len() as u64 <= self.options.limits().max_dependency_edges() {
+                pending.insert(cell);
+            }
+        }
+    }
+
+    fn target_dependencies_pending(&self) -> bool {
+        self.target_pending
+            .as_ref()
+            .is_some_and(|pending| !pending.borrow().is_empty())
     }
 
     pub fn cell_value(&self, cell: CellId) -> Value {

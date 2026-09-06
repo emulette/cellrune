@@ -26,9 +26,20 @@ impl<'workbook> Engine<'workbook> {
         options: CalculationOptions,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
+        let mut engine = Self::unparsed_cancellable(workbook, options, cancelled)?;
+        engine.parse_all_cancellable(cancelled)?;
+        engine.classify_name_graphs(cancelled)?;
+        Ok(engine)
+    }
+
+    pub(super) fn unparsed_cancellable(
+        workbook: &'workbook WorkbookSnapshot,
+        options: CalculationOptions,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
         let (array_regions, column_extents) = collect_workbook_layout(workbook, cancelled)?;
         let table_topologies = super::dependency::workbook_table_topologies(workbook, cancelled)?;
-        let mut engine = Self {
+        let engine = Self {
             workbook,
             previous: None,
             dirty: None,
@@ -52,12 +63,8 @@ impl<'workbook> Engine<'workbook> {
             evaluated_cells: BTreeSet::new(),
             function_iterations: 0,
             reference_cells: 0,
+            target_pending: None,
         };
-        engine.parse_all_cancellable(cancelled)?;
-        if cancelled() {
-            return Err(());
-        }
-        engine.classify_name_graphs(cancelled)?;
         if cancelled() {
             return Err(());
         }
@@ -200,6 +207,7 @@ impl<'workbook> Engine<'workbook> {
             evaluated_cells: BTreeSet::new(),
             function_iterations: 0,
             reference_cells: 0,
+            target_pending: None,
         };
         let internal_dirty = match dirty {
             Some(cells) => {
@@ -295,7 +303,11 @@ impl<'workbook> Engine<'workbook> {
         !cancelled()
     }
 
-    fn evaluate_one(&mut self, cell: CellId, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
+    pub(super) fn evaluate_one(
+        &mut self,
+        cell: CellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
         let expr = self.asts.get(&cell).cloned();
         let budget = EvaluationBudget::default();
         let context = EvalContext::for_cancellable(cell, &budget, cancelled);
@@ -309,6 +321,10 @@ impl<'workbook> Engine<'workbook> {
                 Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
             };
+            if self.target_dependencies_pending() {
+                self.record_evaluation_work(&budget);
+                return Ok(());
+            }
             let outcome = self.materialize_legacy_array(cell, range, result, cancelled);
             self.record_evaluation_work(&budget);
             return outcome;
@@ -322,6 +338,10 @@ impl<'workbook> Engine<'workbook> {
                 Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
             };
+            if self.target_dependencies_pending() {
+                self.record_evaluation_work(&budget);
+                return Ok(());
+            }
             let outcome = self.materialize_dynamic_array(cell, declared_range, result, cancelled);
             self.record_evaluation_work(&budget);
             return outcome;
@@ -335,6 +355,10 @@ impl<'workbook> Engine<'workbook> {
             }
             Some(expr) => {
                 let evaluated = self.eval_final_scalar_with_trace(context, expr.root());
+                if self.target_dependencies_pending() {
+                    self.record_evaluation_work(&budget);
+                    return Ok(());
+                }
                 if let (Value::Number(_), Some(trace)) = (&evaluated.value, evaluated.decimal_trace)
                 {
                     self.numeric_decimal_traces.insert(cell, trace);

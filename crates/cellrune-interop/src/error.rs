@@ -84,6 +84,23 @@ pub struct InteropError {
 }
 
 impl InteropError {
+    pub(crate) fn target_limit() -> Self {
+        let code = cellrune::TargetCalculationErrorCode::TargetLimitExceeded;
+        Self::input(code.as_str(), code.message())
+    }
+
+    /// Creates the stable invalid partial-calculation payload error used by native bindings.
+    pub fn invalid_target_payload(detail: String) -> Self {
+        Self::new(
+            InteropErrorKind::Input,
+            "interop.calculation.target.invalid_payload",
+            "targeted calculation payload is invalid",
+            ErrorDetails {
+                detail: Some(detail),
+                ..ErrorDetails::default()
+            },
+        )
+    }
     /// Returns the broad error boundary.
     pub const fn kind(&self) -> InteropErrorKind {
         self.kind
@@ -313,6 +330,22 @@ impl InteropError {
             message: message.into(),
             details: Box::new(details),
         }
+    }
+}
+
+impl From<cellrune::TargetCalculationError> for InteropError {
+    fn from(error: cellrune::TargetCalculationError) -> Self {
+        use cellrune::TargetCalculationErrorCode as Code;
+        let kind = match error.code() {
+            Code::Cancelled | Code::StaleResult => InteropErrorKind::State,
+            _ => InteropErrorKind::Input,
+        };
+        Self::new(
+            kind,
+            error.code().as_str(),
+            error.code().message(),
+            ErrorDetails::default(),
+        )
     }
 }
 

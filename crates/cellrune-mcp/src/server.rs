@@ -199,6 +199,7 @@ mod tests {
             vec![
                 "workbook_apply_changes",
                 "workbook_apply_changes_v2",
+                "workbook_calculate_targets",
                 "workbook_changes_since",
                 "workbook_close",
                 "workbook_commit_preview",
@@ -289,6 +290,7 @@ mod tests {
         let expected_annotations = [
             ("workbook_apply_changes", false, true, true, false),
             ("workbook_apply_changes_v2", false, true, true, false),
+            ("workbook_calculate_targets", true, false, true, false),
             ("workbook_changes_since", true, false, true, false),
             ("workbook_close", false, true, true, false),
             ("workbook_commit_preview", false, true, false, false),

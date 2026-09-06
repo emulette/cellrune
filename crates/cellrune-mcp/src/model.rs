@@ -119,6 +119,23 @@ pub(crate) struct RecalculateArgs {
     pub(crate) financial_solver_semantics: FinancialSolverSemanticsDto,
 }
 
+/// Input for bounded calculation of explicitly requested cells.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CalculateTargetsArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Cells and inclusive rectangles to return, deduplicated in sheet-ID and row-major order.
+    #[schemars(length(min = 1, max = 1024))]
+    pub(crate) targets: Vec<cellrune_interop::CalculationTargetDto>,
+    /// Deterministic calculation inputs; omission uses the core defaults.
+    #[serde(default)]
+    pub(crate) options: cellrune_interop::CalculationOptionsDto,
+    /// Request limits, capped by the server at 1024 targets, 10000 results, and 100000 evaluator invocations.
+    #[serde(default)]
+    pub(crate) limits: cellrune_interop::TargetCalculationLimitsDto,
+}
+
 /// Input for a page of installed recalculation deltas.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

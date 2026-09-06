@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.17, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.18, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -84,10 +84,10 @@ high-level workbook lifecycle, summary, range, usage, capability, batch edit, pr
 recalculation, delta, and Save As operations—not one tool per spreadsheet
 function. Configured filesystem roots are canonicalized at startup; every
 workbook path supplied to a tool must be absolute and resolve inside one of
-those roots. It has no remote transport. The 16 tools are `workbook_create`,
+those roots. It has no remote transport. The 17 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
-`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`,
+`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`, and
 `workbook_discard_preview`.
@@ -535,7 +535,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.17 catalog contains 416 official
+  `.is_official()`. The 0.1.18 catalog contains 416 official
   Excel-facing names and one non-official compatibility entry for the OOXML
   dummy-function marker, for 417 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
@@ -608,6 +608,55 @@ than guessing a name from a different XLSX crate (`calamine`,
   whether a particular call later produces an Excel error value.
 
 ### Calculation
+
+- `CalculationTarget::cell(CalculationCellId)` requests one cell;
+  `CalculationTarget::new(SheetId, CellRange)` requests an inclusive rectangle.
+  `TargetCalculationLimits::new(max_targets, max_result_cells, max_evaluated_cells)`
+  requires nonzero `usize` values; defaults are 1024, 10000, and 100000.
+- `calculate_targets(&WorkbookSnapshot, &[CalculationTarget], CalculationOptions,
+  TargetCalculationLimits, CancellationToken) -> Result<TargetCalculationResult, TargetCalculationError>`
+  needs no previous calculation. It parses/evaluates the selected formulas and required precedents,
+  inspecting workbook layout metadata without globally parsing formula text. Overlap is deduplicated.
+  Literals and empty cells return their typed value or Blank. Unrelated cycles/unsupported formulas
+  are outside this request. Static names, sheets, table references and supported 3D references reuse
+  the full evaluator; dynamic references can discover additional precedents during evaluation.
+- `TargetCalculationResult` is separate from `CalculationSnapshot`. `.cells()` contains only
+  requested cells, ordered by sheet ID, row, column. `.cell(id)`, `.source_revision()`,
+  `.source_fingerprint()`, `.provenance()`, `.options()`, `.limits()`, `.evaluated_count()`,
+  `.parsed_formula_count()`, and `.reused_count()` expose scope and provenance. Evaluated count
+  includes dynamic-reference retries and a scoped second pass for newly discovered spills.
+  Results never enable save, replace the complete cache, clear dirty formulas, advance deltas,
+  or invalidate retained previews. Resource failures cannot publish incomplete requested output.
+- `WorkbookCalculationSession::prepare_target_calculation(targets, options, limits, token)`
+  captures an owned `PreparedTargetCalculation`; `.run()` returns `CompletedTargetCalculation`.
+  `session.finish_target_calculation(completed)` validates cancellation and source state without
+  installing anything. `session.calculate_targets(...)` is the synchronous convenience method.
+  A complete calculation is reused only for the same source identity/revision and calculation
+  options (including formula limits). Partial results are not retained as a new cache.
+- Known legacy-array and dynamic-spill followers evaluate their complete anchor, retaining the
+  existing collision and array limits. An undeclared spill follower with no known owner cannot
+  discover an arbitrary anchor elsewhere: include the anchor in the targets, or use a current
+  complete calculation. Saved formula results never supply current values.
+  Undeclared spills outside the dependency scope are not discovered; use declared spill ranges
+  or full calculation when independently anchored spills may overlap.
+- Python: `workbook.calculate_targets([{"sheet": "Sheet1", "start": "B1", "end": "B10"}],
+  today_serial=..., now_serial=..., arithmetic_semantics=..., financial_solver_semantics=...,
+  limits={"max_result_cells": 100}) -> TargetCalculationResult`; omit `end` for one cell.
+  Node: `await workbook.calculateTargets([{sheet: "Sheet1", start: "B1", end: "B10"}],
+  {limits: {maxResultCells: 100}}) -> TargetCalculationResult`. Node uses camel case and a bigint
+  semanticRevision; Python uses snake case and an int. Both run native evaluation off-lock;
+  Python releases the GIL and Node uses a worker. Cancellation, supersession and close use the
+  existing active-calculation lifecycle.
+- MCP `workbook_calculate_targets` takes `session_id`, `targets`, optional `options` and `limits`,
+  with snake-case interop fields. The server caps limits at the defaults above and rejects a
+  response that cannot fit `--max-response-bytes` in full. There is no partial-result paging
+  registry. Responses include `scope: "targets"`, `semantic_revision`, `source_fingerprint`,
+  `input_sha256`, `calculator_provider`, `calculation_options`, `limits`, `cells`, and all three
+  work counts. Each cell contains `cell` (sheet ID/name/address) and `result` (value or issue).
+- `TargetCalculationErrorCode::as_str()` returns `calculation.target.empty_targets`,
+  `.sheet_not_found`, `.invalid_limits`, `.target_limit_exceeded`, `.evaluation_limit_exceeded`,
+  `.cancelled`, or `.stale_result` under the same `calculation.target` prefix. Bindings also use
+  existing address/sheet validation and active-request cancellation codes.
 
 - `calculate_workbook(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot` —
   stateless full recalculation and the correctness oracle; never mutates the

@@ -2,6 +2,7 @@ mod conversion;
 mod defined_name;
 mod error;
 mod preview_json;
+mod targeted;
 mod task;
 mod workbook;
 

@@ -10,6 +10,29 @@ use std::sync::{Mutex, MutexGuard, TryLockError};
 
 use cellrune_interop::{CancellationToken, InteropError, WorkbookSession};
 
+/// Executes a partial request off-lock and checks lifecycle and revision before returning it.
+///
+/// # Errors
+/// Returns a stable input, resource, cancellation, stale, or closed-session error.
+pub fn calculate_targets(
+    session: &SharedWorkbookSession,
+    request: &cellrune_interop::TargetCalculationRequestDto,
+) -> Result<cellrune_interop::TargetCalculationResultDto, InteropError> {
+    let operation = session.cancellable_operation()?;
+    let prepared = session
+        .lock()?
+        .prepare_target_calculation(request, operation.token().clone())?;
+    let request_id = prepared.request_id();
+    let completed = match prepared.run() {
+        Ok(completed) => completed,
+        Err(error) => {
+            session.lock()?.abandon_recalculation(request_id);
+            return Err(error);
+        }
+    };
+    session.lock()?.finish_target_calculation(completed)
+}
+
 /// Owns a workbook session shared by one language-binding object and its background tasks.
 pub struct SharedWorkbookSession {
     closed: AtomicBool,

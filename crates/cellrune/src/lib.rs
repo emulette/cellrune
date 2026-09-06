@@ -123,6 +123,11 @@ pub use calculation::{
     scan_formula_capabilities_with_options, scan_function_usage, scan_function_usage_with_options,
     supported_function_catalog,
 };
+pub use calculation::{
+    CalculationTarget, CompletedTargetCalculation, PreparedTargetCalculation,
+    TargetCalculationError, TargetCalculationErrorCode, TargetCalculationLimits,
+    TargetCalculationResult, calculate_targets,
+};
 pub use cell::{
     Cell, CellContent, CellValue, ExcelError, FiniteNumber, NumberFormat, NumberFormatKind,
 };

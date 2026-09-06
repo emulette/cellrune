@@ -210,7 +210,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 16);
+    assert_eq!(tools.len(), 17);
     assert!(
         tools
             .iter()
@@ -266,6 +266,22 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     ));
     assert_eq!(capabilities["formula_count"], 1);
     assert_eq!(capabilities["supported_count"], 1);
+
+    let partial = successful_tool(mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id": session_id, "targets": [{"sheet":"Sheet1", "start":"A2"}]
+        }),
+    ));
+    assert_eq!(partial["scope"], "targets");
+    assert_eq!(partial["evaluated_count"], 1);
+    assert_eq!(partial["cells"][0]["result"]["value"]["value"], 6.0);
+    let empty_history =
+        successful_tool(mcp.call_tool("workbook_changes_since", json!({"session_id": session_id})));
+    assert_eq!(
+        empty_history["deltas"].as_array().expect("history").len(),
+        0
+    );
 
     let recalculated = successful_tool(mcp.call_tool(
         "workbook_recalculate",

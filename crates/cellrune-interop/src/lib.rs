@@ -10,6 +10,12 @@ mod convert;
 mod dto;
 mod error;
 mod service;
+mod targeted;
+pub use service::{CompletedTargetRequest, PreparedTargetRequest};
+pub use targeted::{
+    CalculationTargetDto, TargetCalculationCellDto, TargetCalculationLimitsDto,
+    TargetCalculationRequestDto, TargetCalculationResultDto, TargetCalculationScopeDto,
+};
 
 pub use cellrune::CancellationToken;
 pub use dto::{

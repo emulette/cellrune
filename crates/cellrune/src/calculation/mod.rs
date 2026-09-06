@@ -36,6 +36,7 @@ mod session;
 mod sheet_span;
 mod structured_reference;
 mod syntax;
+mod targeted;
 mod textfmt;
 mod value;
 use crate::calculation::persistent_store::{
@@ -63,13 +64,18 @@ pub use limits::{CalculationLimits, CalculationOptionsError};
 pub use session::{
     ApplyChangesError, CalculationDecisionReason, CalculationDelta, CalculationDeltaCell,
     CalculationDeltaPage, CalculationExecutionMode, CancellationToken, CompletedCalculation,
-    CompletedWorkbookTransaction, InstallDeltaBasisReason, PreparedCalculation, PreparedEditBatch,
-    PreparedWorkbookTransaction, RecalculationMode, SessionError, SessionErrorCode, SessionLimits,
-    TransactionAffectedFormula, TransactionDetailItem, TransactionDetailSection,
-    TransactionImpactCause, TransactionImpactCoverage, TransactionImpactPage,
-    TransactionInstallResultChange, TransactionIssueChange, TransactionIssueChangeKind,
-    TransactionPageCursor, TransactionResultChange, WorkbookCalculationSession,
-    WorkbookTransactionReceipt, WorkbookTransactionReport,
+    CompletedTargetCalculation, CompletedWorkbookTransaction, InstallDeltaBasisReason,
+    PreparedCalculation, PreparedEditBatch, PreparedTargetCalculation, PreparedWorkbookTransaction,
+    RecalculationMode, SessionError, SessionErrorCode, SessionLimits, TransactionAffectedFormula,
+    TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
+    TransactionImpactCoverage, TransactionImpactPage, TransactionInstallResultChange,
+    TransactionIssueChange, TransactionIssueChangeKind, TransactionPageCursor,
+    TransactionResultChange, WorkbookCalculationSession, WorkbookTransactionReceipt,
+    WorkbookTransactionReport,
+};
+pub use targeted::{
+    CalculationTarget, TargetCalculationError, TargetCalculationErrorCode, TargetCalculationLimits,
+    TargetCalculationResult, calculate_targets,
 };
 
 /// Stable identity of a formula cell within one workbook snapshot.

@@ -1,6 +1,7 @@
 "use strict";
 
 const native = require("./native.js");
+const { targetRequest } = require("./lib/targeted.js");
 const {
   serializeWorkbookChange,
   serializeWorkbookChangeV2,
@@ -17,6 +18,7 @@ const {
   normalizeCalculationDelta,
   normalizeCalculationDeltaPage,
   normalizeCalculationReport,
+  normalizeTargetCalculation,
   normalizeDefinedNameInspection,
   normalizeEditReceipt,
   normalizeEditReceiptV2,
@@ -139,6 +141,12 @@ class Workbook {
       ),
     );
     return normalizeCalculationReport(await withErrors(task));
+  }
+
+  async calculateTargets(targets, options = {}) {
+    const request = targetRequest(targets, options);
+    const task = withSyncErrors(() => this.#session().calculateTargets(request));
+    return normalizeTargetCalculation(parsePreviewJson(await withErrors(task)));
   }
 
   async recalculate(options = {}) {

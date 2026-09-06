@@ -4,6 +4,9 @@ from types import TracebackType
 from typing import Literal
 
 from ._types import (
+    CalculationTarget,
+    TargetCalculationLimitOptions,
+    TargetCalculationResult,
     CalculationDelta,
     CalculationDeltaPage,
     CalculationReport,
@@ -34,6 +37,16 @@ class CellRuneError(Exception):
     details: ErrorDetails
 
 class Workbook:
+    def calculate_targets(
+        self,
+        targets: Sequence[CalculationTarget],
+        *,
+        today_serial: float | None = None,
+        now_serial: float | None = None,
+        arithmetic_semantics: Literal["excel_near_zero", "ieee_754"] = "excel_near_zero",
+        financial_solver_semantics: Literal["excel_iteration_budget", "extended_search"] = "excel_iteration_budget",
+        limits: TargetCalculationLimitOptions | None = None,
+    ) -> TargetCalculationResult: ...
     @staticmethod
     def create() -> Workbook: ...
     @staticmethod
