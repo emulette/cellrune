@@ -118,6 +118,7 @@ ROOT_NPM_FILES = frozenset(
         "package/lib/changes.js",
         "package/lib/errors.js",
         "package/lib/normalization.js",
+        "package/lib/targeted.js",
         "package/lib/validation.js",
         "package/native.d.ts",
         "package/native.js",
