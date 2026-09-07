@@ -10,6 +10,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-09-07
+
 ### Changed
 
 - Reduced edit preparation work for large workbooks by looking up changed formula cells directly
@@ -786,7 +788,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/emulette/cellrune/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/emulette/cellrune/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/emulette/cellrune/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/emulette/cellrune/compare/v0.1.15...v0.1.16

@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.18, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.19, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -535,7 +535,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.18 catalog contains 416 official
+  `.is_official()`. The 0.1.19 catalog contains 416 official
   Excel-facing names and one non-official compatibility entry for the OOXML
   dummy-function marker, for 417 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
