@@ -28,6 +28,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   and reading only each worksheet's edits and calculation results.
 - Reduced temporary allocation in `SUM`, `AVERAGE`, `MIN`, `MAX`, and `PRODUCT` by aggregating
   collected arguments directly, with the same coercion, evaluation order, and arithmetic policy.
+- Opening an in-memory XLSX document avoids an extra archive copy and checks the archive size
+  limit before buffering the input.
 
 ## [0.1.18] - 2026-09-06
 
