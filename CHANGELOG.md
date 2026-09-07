@@ -26,6 +26,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   workbook and calculation options, including paged queries through language bindings and MCP.
 - Reduced multi-sheet XLSX save work by sharing ZIP access and part lookup within each save,
   and reading only each worksheet's edits and calculation results.
+- Reduced temporary allocation in `SUM`, `AVERAGE`, `MIN`, `MAX`, and `PRODUCT` by aggregating
+  collected arguments directly, with the same coercion, evaluation order, and arithmetic policy.
 
 ## [0.1.18] - 2026-09-06
 

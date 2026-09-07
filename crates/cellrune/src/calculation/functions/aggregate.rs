@@ -112,7 +112,9 @@ fn aggregate_collected(
     values: Vec<ArgumentValue>,
     aggregate: Aggregate,
 ) -> Value {
-    let mut numbers = Vec::new();
+    let mut sum = ExcelSum::new(engine);
+    let mut result = 0.0_f64;
+    let mut count = 0_u64;
     for ArgumentValue {
         value,
         decimal_trace,
@@ -120,46 +122,46 @@ fn aggregate_collected(
         ..
     } in values
     {
-        match value {
-            Value::Number(number) => numbers.push((number, decimal_trace)),
+        let (number, decimal_trace) = match value {
+            Value::Number(number) => (number, decimal_trace),
             Value::Logical(logical) if !from_collection => {
                 let number = if logical { 1.0 } else { 0.0 };
-                numbers.push((number, DecimalTrace::from_number(number)));
+                (number, DecimalTrace::from_number(number))
             }
             Value::Text(text) if !from_collection => match text.parse::<f64>() {
-                Ok(number) => numbers.push((number, DecimalTrace::from_number(number))),
+                Ok(number) => (number, DecimalTrace::from_number(number)),
                 Err(_) => return Value::Error(ErrorKind::Value),
             },
             Value::Error(kind) => return Value::Error(kind),
-            Value::Blank | Value::Text(_) | Value::Logical(_) => {}
+            Value::Blank | Value::Text(_) | Value::Logical(_) => continue,
+        };
+        match aggregate {
+            Aggregate::Sum | Aggregate::Average => sum.add_with_trace(number, decimal_trace),
+            Aggregate::Min => {
+                result = if count == 0 {
+                    number
+                } else {
+                    result.min(number)
+                }
+            }
+            Aggregate::Max => {
+                result = if count == 0 {
+                    number
+                } else {
+                    result.max(number)
+                }
+            }
+            Aggregate::Product => result = if count == 0 { 1.0 } else { result } * number,
         }
+        count += 1;
     }
     let result = match aggregate {
-        Aggregate::Sum => traced_sum(engine, &numbers),
-        Aggregate::Average if numbers.is_empty() => return Value::Error(ErrorKind::Div0),
-        Aggregate::Average => traced_sum(engine, &numbers) / numbers.len() as f64,
-        Aggregate::Min => numbers
-            .into_iter()
-            .map(|(number, _)| number)
-            .reduce(f64::min)
-            .unwrap_or(0.0),
-        Aggregate::Max => numbers
-            .into_iter()
-            .map(|(number, _)| number)
-            .reduce(f64::max)
-            .unwrap_or(0.0),
-        Aggregate::Product if numbers.is_empty() => 0.0,
-        Aggregate::Product => numbers.into_iter().map(|(number, _)| number).product(),
+        Aggregate::Sum => sum.total(),
+        Aggregate::Average if count == 0 => return Value::Error(ErrorKind::Div0),
+        Aggregate::Average => sum.total() / count as f64,
+        Aggregate::Min | Aggregate::Max | Aggregate::Product => result,
     };
     finite_number(result)
-}
-
-fn traced_sum(engine: &Engine<'_>, numbers: &[(f64, Option<DecimalTrace>)]) -> f64 {
-    let mut sum = ExcelSum::new(engine);
-    for (number, decimal_trace) in numbers {
-        sum.add_with_trace(*number, *decimal_trace);
-    }
-    sum.total()
 }
 
 fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
