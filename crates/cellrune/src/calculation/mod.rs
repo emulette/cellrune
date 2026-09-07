@@ -1124,10 +1124,7 @@ pub fn scan_formula_capabilities_with_options(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
 ) -> FormulaCapabilityReport {
-    workbook
-        .analysis_cache()
-        .reports(workbook, options)
-        .capabilities
+    workbook.analysis_cache().capabilities(workbook, options)
 }
 
 /// Returns the deterministic catalog of function names implemented by this build.
@@ -1148,7 +1145,7 @@ pub fn scan_function_usage_with_options(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
 ) -> FunctionUsageReport {
-    workbook.analysis_cache().reports(workbook, options).usage
+    workbook.analysis_cache().usage(workbook, options)
 }
 
 /// Calculates formulas without mutating the source snapshot and records runtime issues per cell.

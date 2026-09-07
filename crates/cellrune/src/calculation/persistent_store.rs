@@ -834,6 +834,45 @@ mod tests {
     }
 
     #[test]
+    fn patch_releases_replaced_and_removed_values_after_the_last_snapshot() {
+        use std::sync::Arc;
+
+        let replaced = Arc::new(String::from("replaced"));
+        let removed = Arc::new(String::from("removed"));
+        let replaced_weak = Arc::downgrade(&replaced);
+        let removed_weak = Arc::downgrade(&removed);
+        let mut map = PersistentRadixMap::default();
+        map.apply_sorted_patch_cancellable(
+            [
+                (1, Some(replaced)),
+                (2, Some(removed)),
+                (3, Some(Arc::new(String::from("unchanged")))),
+            ],
+            &|| false,
+        )
+        .expect("initial patch completes");
+        let previous = map.clone();
+
+        map.apply_sorted_patch_cancellable(
+            [(1, Some(Arc::new(String::from("updated")))), (2, None)],
+            &|| false,
+        )
+        .expect("replacement and removal complete");
+        assert_eq!(
+            previous.get(1).map(|value| value.as_str()),
+            Some("replaced")
+        );
+        assert_eq!(previous.get(2).map(|value| value.as_str()), Some("removed"));
+        assert_eq!(map.get(1).map(|value| value.as_str()), Some("updated"));
+        assert!(map.get(2).is_none());
+        assert_eq!(map.get(3).map(|value| value.as_str()), Some("unchanged"));
+
+        drop(previous);
+        assert!(replaced_weak.upgrade().is_none());
+        assert!(removed_weak.upgrade().is_none());
+    }
+
+    #[test]
     fn streaming_iterator_supports_mixed_front_and_back_consumption() {
         let map = PersistentRadixMap::from_sorted_iter([
             (1_u128, 1_u128),

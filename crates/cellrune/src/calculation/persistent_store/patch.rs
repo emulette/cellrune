@@ -170,35 +170,16 @@ fn build_merged_node<V>(
         return Err(());
     }
     if keys.len() <= leaf_capacity::<V>() {
-        let mut slots = Vec::with_capacity(keys.len());
-        let mut owned = Vec::new();
+        let mut leaf = Vec::with_capacity(keys.len());
         for _ in keys {
-            match entries.next().expect("one merged radix entry per key") {
-                MergedEntry::Shared(entry) => slots.push(Some(entry)),
-                MergedEntry::Owned(_, value) => {
-                    owned.push(value);
-                    slots.push(None);
-                }
-            }
+            let entry = match entries.next().expect("one merged radix entry per key") {
+                MergedEntry::Shared(entry) => entry,
+                // A surviving sibling must not retain values overwritten by a later patch.
+                MergedEntry::Owned(key, value) => LeafEntry::singleton(key, value),
+            };
+            leaf.push(entry);
         }
-        let values = Arc::<[V]>::from(owned);
-        let mut index = 0;
-        let entries = keys
-            .iter()
-            .zip(slots)
-            .map(|(key, shared)| {
-                shared.unwrap_or_else(|| {
-                    let entry = LeafEntry {
-                        key: *key,
-                        values: Arc::clone(&values),
-                        index,
-                    };
-                    index += 1;
-                    entry
-                })
-            })
-            .collect();
-        return Ok(Arc::new(RadixNode::leaf(entries)));
+        return Ok(Arc::new(RadixNode::leaf(leaf)));
     }
     let branch_depth = first_differing_byte(keys[0], keys[keys.len() - 1], depth)
         .expect("duplicate radix keys exceeded leaf capacity");

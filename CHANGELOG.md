@@ -24,7 +24,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   Larger inputs can complete within existing limits; text-heavy inputs observe the work budget.
 - Reduced targeted calculation setup by reusing worksheet formula addresses, column extents, and
   declared array metadata while preserving source identity and current full-result reuse.
-- Reuse capability and function-usage analysis for repeated queries on the same immutable
+- Cache capability and function-usage reports on demand for repeated queries on the same immutable
   workbook and calculation options, including paged queries through language bindings and MCP.
 - Reduced multi-sheet XLSX save work by sharing ZIP access and part lookup within each save,
   and reading only each worksheet's edits and calculation results.
