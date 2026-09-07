@@ -34,17 +34,16 @@ pub(super) fn cell_at(sheet: &Sheet, row: u32, column: u32) -> Option<&crate::Ce
 /// that no dependency rectangle covers, so an edit in an unreferenced column would change the
 /// correct answer without dirtying the formula and full and incremental recalculation would
 /// disagree. Clamping per column keeps the value a function of the recorded dependencies alone.
-#[derive(Debug, Clone, Default)]
-pub(in crate::calculation) struct ColumnExtents {
-    rows_by_column: BTreeMap<u32, u32>,
+#[derive(Debug, Clone, Copy)]
+pub(in crate::calculation) struct ColumnExtents<'workbook> {
+    rows_by_column: &'workbook BTreeMap<u32, u32>,
 }
 
-impl ColumnExtents {
-    pub(super) fn record(&mut self, column: u32, row: u32) {
-        self.rows_by_column
-            .entry(column)
-            .and_modify(|current| *current = (*current).max(row))
-            .or_insert(row);
+impl<'workbook> ColumnExtents<'workbook> {
+    pub(super) fn from_sheet(sheet: &'workbook Sheet) -> Self {
+        Self {
+            rows_by_column: sheet.column_max_rows(),
+        }
     }
 
     fn row_end_within(&self, col_start: u32, col_end: u32) -> u32 {

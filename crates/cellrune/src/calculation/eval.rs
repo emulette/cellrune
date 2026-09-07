@@ -16,9 +16,7 @@ use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
     CalculationOptions, CalculationSnapshot,
 };
-use crate::{
-    CellContent, CellValue, DefinedNameScope, FiniteNumber, FormulaMetadata, WorkbookSnapshot,
-};
+use crate::{CellContent, CellValue, DefinedNameScope, FiniteNumber, WorkbookSnapshot};
 
 mod dependency;
 mod expression;
@@ -50,38 +48,19 @@ where
     Ok(cloned)
 }
 
-fn collect_workbook_layout(
-    workbook: &WorkbookSnapshot,
+fn collect_workbook_layout<'workbook>(
+    workbook: &'workbook WorkbookSnapshot,
     cancelled: &impl Fn() -> bool,
-) -> Result<(Vec<ArrayRegion>, Vec<ColumnExtents>), ()> {
+) -> Result<(Vec<ArrayRegion>, Vec<ColumnExtents<'workbook>>), ()> {
     let mut array_regions = Vec::new();
     let mut column_extents = Vec::with_capacity(workbook.sheets().len());
     for (sheet_index, sheet) in workbook.sheets().iter().enumerate() {
         if cancelled() {
             return Err(());
         }
-        let mut extents = ColumnExtents::default();
-        for cell in sheet.cells() {
+        for (address, range) in sheet.array_formula_ranges() {
             if cancelled() {
                 return Err(());
-            }
-            let address = cell.address();
-            extents.record(address.column().get(), address.row().get());
-            let CellContent::Formula(formula) = cell.content() else {
-                continue;
-            };
-            let range = match formula.metadata() {
-                FormulaMetadata::Array { range, .. } => *range,
-                FormulaMetadata::DynamicArray {
-                    range: Some(range), ..
-                } => *range,
-                FormulaMetadata::Normal
-                | FormulaMetadata::Shared { .. }
-                | FormulaMetadata::DynamicArray { range: None, .. }
-                | FormulaMetadata::DataTable { .. } => continue,
-            };
-            if range.start() != address || (range.height() == 1 && range.width() == 1) {
-                continue;
             }
             array_regions.push(ArrayRegion {
                 anchor: (sheet_index, address.row().get(), address.column().get()),
@@ -96,28 +75,21 @@ fn collect_workbook_layout(
                 provisional: false,
             });
         }
-        column_extents.push(extents);
+        column_extents.push(ColumnExtents::from_sheet(sheet));
     }
     Ok((array_regions, column_extents))
 }
 
-fn collect_column_extents(
-    workbook: &WorkbookSnapshot,
+fn collect_column_extents<'workbook>(
+    workbook: &'workbook WorkbookSnapshot,
     cancelled: &impl Fn() -> bool,
-) -> Result<Vec<ColumnExtents>, ()> {
+) -> Result<Vec<ColumnExtents<'workbook>>, ()> {
     let mut extents = Vec::with_capacity(workbook.sheets().len());
     for sheet in workbook.sheets() {
         if cancelled() {
             return Err(());
         }
-        let mut sheet_extents = ColumnExtents::default();
-        for (column, row) in sheet.column_max_rows() {
-            if cancelled() {
-                return Err(());
-            }
-            sheet_extents.record(*column, *row);
-        }
-        extents.push(sheet_extents);
+        extents.push(ColumnExtents::from_sheet(sheet));
     }
     Ok(extents)
 }
@@ -872,7 +844,7 @@ pub struct Engine<'workbook> {
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
-    column_extents: Vec<ColumnExtents>,
+    column_extents: Vec<ColumnExtents<'workbook>>,
     dynamic_spills: BTreeMap<CellId, Rect>,
     parse_failures: Arc<BTreeMap<CellId, ParseError>>,
     name_cycle_cells: Arc<BTreeSet<CellId>>,
@@ -1248,8 +1220,20 @@ mod tests {
     }
 
     #[test]
-    fn workbook_layout_collection_polls_cancellation_between_sparse_cells() {
-        let workbook = generated_analysis_workbook();
+    fn workbook_layout_collection_polls_cancellation_between_array_regions() {
+        let mut draft = crate::WorkbookDraft::new();
+        for column in [1, 2] {
+            let start = CellAddress::from_indices(1, column).expect("array anchor");
+            let end = CellAddress::from_indices(2, column).expect("array follower");
+            draft
+                .set_cell_dynamic_formula(
+                    draft.workbook().sheets()[0].id(),
+                    start,
+                    FormulaText::from_xlsx("SEQUENCE(2)").expect("array formula"),
+                    Some(CellRange::new(start, end).expect("array range")),
+                )
+                .expect("set array formula");
+        }
         let polls = Cell::new(0_u32);
         let cancelled = || {
             let next = polls.get() + 1;
@@ -1257,7 +1241,7 @@ mod tests {
             next >= 3
         };
 
-        assert!(collect_workbook_layout(&workbook, &cancelled).is_err());
+        assert!(collect_workbook_layout(draft.workbook(), &cancelled).is_err());
         assert_eq!(polls.get(), 3);
     }
 

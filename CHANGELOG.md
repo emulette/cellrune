@@ -20,6 +20,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   retaining shared immutable snapshots and the existing automatic calculation selection rules.
 - `UNIQUE` now groups duplicates in one pass and charges actual tuple, text, and comparison work.
   Larger inputs can complete within existing limits; text-heavy inputs observe the work budget.
+- Reduced targeted calculation setup by reusing worksheet formula addresses, column extents, and
+  declared array metadata while preserving source identity and current full-result reuse.
 
 ## [0.1.18] - 2026-09-06
 

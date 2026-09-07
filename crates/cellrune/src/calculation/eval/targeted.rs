@@ -9,7 +9,7 @@ use crate::calculation::targeted::source_provenance;
 use crate::calculation::value::{ErrorKind, Value};
 use crate::{
     CalculationCellId, CalculationCellResult, CalculationIssue, CalculationIssueCode,
-    CalculationOptions, CancellationToken, CellContent, TargetCalculationError,
+    CalculationOptions, CancellationToken, CellAddress, CellContent, TargetCalculationError,
     TargetCalculationErrorCode, TargetCalculationLimits, TargetCalculationResult,
     WorkbookFingerprint, WorkbookSnapshot,
 };
@@ -21,7 +21,6 @@ struct Frame {
 }
 
 struct Planner {
-    formulas: Vec<BTreeSet<(u32, u32)>>,
     loaded: BTreeSet<CellId>,
     names: BTreeSet<usize>,
     done: BTreeSet<CellId>,
@@ -48,21 +47,7 @@ impl<'workbook> Engine<'workbook> {
         engine.target_pending = Some(std::cell::RefCell::new(BTreeSet::new()));
         Arc::make_mut(&mut engine.defined_name_asts)
             .resize_with(workbook.defined_names().len(), || None);
-        let mut formulas = Vec::with_capacity(workbook.sheets().len());
-        for sheet in workbook.sheets() {
-            let mut entries = BTreeSet::new();
-            for cell in sheet.cells() {
-                if cancelled() {
-                    return Err(cancelled_error());
-                }
-                if matches!(cell.content(), CellContent::Formula(_)) {
-                    entries.insert((cell.address().row().get(), cell.address().column().get()));
-                }
-            }
-            formulas.push(entries);
-        }
         let mut planner = Planner {
-            formulas,
             loaded: BTreeSet::new(),
             names: BTreeSet::new(),
             done: BTreeSet::new(),
@@ -147,10 +132,9 @@ impl<'workbook> Engine<'workbook> {
 impl Planner {
     fn owner(&self, engine: &Engine<'_>, cell: CellId) -> Option<CellId> {
         engine.array_owner(cell).or_else(|| {
-            self.formulas
-                .get(cell.0)
-                .filter(|formulas| formulas.contains(&(cell.1, cell.2)))
-                .map(|_| cell)
+            let sheet = engine.workbook.sheets().get(cell.0)?;
+            let address = CellAddress::from_indices(cell.1, cell.2).ok()?;
+            sheet.formula_addresses().contains(&address).then_some(cell)
         })
     }
 
@@ -220,12 +204,19 @@ impl Planner {
                 DependencyTarget::TableIdentity(_) | DependencyTarget::FormulaContent(_) => {}
                 DependencyTarget::Area(span) => {
                     for rect in span.rects() {
-                        for &(row, column) in self.formulas[rect.sheet]
-                            .range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
+                        let start = CellAddress::from_indices(rect.row_start, 1)
+                            .expect("resolved reference start is a valid row");
+                        let end = CellAddress::from_indices(rect.row_end, crate::EXCEL_MAX_COLUMNS)
+                            .expect("resolved reference end is a valid row");
+                        for address in engine.workbook.sheets()[rect.sheet]
+                            .formula_addresses()
+                            .range(start..=end)
                         {
                             if cancelled() {
                                 return Err(cancelled_error());
                             }
+                            let row = address.row().get();
+                            let column = address.column().get();
                             if column >= rect.col_start && column <= rect.col_end {
                                 cells.insert(
                                     self.owner(engine, (rect.sheet, row, column))
