@@ -783,6 +783,7 @@ pub struct WorkbookSnapshot {
     provenance: Provenance,
     semantic_revision: u64,
     semantic_fingerprint: OnceLock<[u8; 32]>,
+    analysis_cache: Arc<crate::calculation::WorkbookAnalysisCache>,
 }
 
 pub(crate) enum WorkbookBuildError {
@@ -855,6 +856,7 @@ impl WorkbookSnapshot {
             provenance: self.provenance.clone(),
             semantic_revision: self.semantic_revision,
             semantic_fingerprint: self.semantic_fingerprint.clone(),
+            analysis_cache: Arc::clone(&self.analysis_cache),
         })
     }
 
@@ -887,6 +889,7 @@ impl WorkbookSnapshot {
             provenance: Provenance::new(crate::ProviderIdentity::writer(), None),
             semantic_revision: 0,
             semantic_fingerprint: OnceLock::new(),
+            analysis_cache: Arc::default(),
         }
     }
 
@@ -1081,6 +1084,7 @@ impl WorkbookSnapshot {
             provenance,
             semantic_revision: 0,
             semantic_fingerprint: OnceLock::new(),
+            analysis_cache: Arc::default(),
         })
     }
 
@@ -1272,7 +1276,14 @@ impl WorkbookSnapshot {
         )
     }
 
-    pub(crate) const fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {
+    pub(crate) fn analysis_cache(&self) -> &crate::calculation::WorkbookAnalysisCache {
+        &self.analysis_cache
+    }
+
+    pub(crate) fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {
+        if self.semantic_revision != semantic_revision {
+            self.analysis_cache = Arc::default();
+        }
         self.semantic_revision = semantic_revision;
         self
     }

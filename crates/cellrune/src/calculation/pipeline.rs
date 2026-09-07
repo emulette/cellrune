@@ -107,12 +107,15 @@ fn call_shadow(
     })
 }
 
-pub(super) fn scan_formula_capabilities(
+pub(super) fn scan_analysis_reports(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
-) -> FormulaCapabilityReport {
+) -> super::analysis_cache::AnalysisReports {
     let engine = Engine::analyze(workbook, options);
-    scan_with_engine(workbook, &engine)
+    super::analysis_cache::AnalysisReports {
+        capabilities: scan_with_engine(workbook, &engine),
+        usage: scan_usage_with_engine(workbook, &engine),
+    }
 }
 
 const MAX_FUNCTION_USAGE_SAMPLES: usize = 8;
@@ -124,11 +127,7 @@ struct FunctionUsageAccumulator {
     sample_cells: Vec<CalculationCellId>,
 }
 
-pub(super) fn scan_function_usage(
-    workbook: &WorkbookSnapshot,
-    options: CalculationOptions,
-) -> FunctionUsageReport {
-    let engine = Engine::analyze(workbook, options);
+fn scan_usage_with_engine(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> FunctionUsageReport {
     let mut formula_count = 0_usize;
     let mut parsed_formula_count = 0_usize;
     let mut usage = BTreeMap::<String, FunctionUsageAccumulator>::new();
@@ -149,7 +148,7 @@ pub(super) fn scan_function_usage(
             parsed_formula_count += 1;
             let public_id = CalculationCellId::new(sheet.id(), cell.address());
             let mut calls = Vec::new();
-            collect_function_calls(&engine, sheet_index, expr, &mut calls);
+            collect_function_calls(engine, sheet_index, expr, &mut calls);
             let unique = calls.iter().cloned().collect::<BTreeSet<_>>();
             for name in calls {
                 usage.entry(name).or_default().call_count += 1;

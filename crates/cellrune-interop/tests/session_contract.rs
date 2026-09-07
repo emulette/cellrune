@@ -444,6 +444,39 @@ fn capability_usage_catalog_and_incomplete_write_contracts_are_explicit() {
             .bytes()
             .all(|byte| { byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) })
     );
+    session
+        .set_formula("Sheet1", "A2", "=ABS(-1)", None)
+        .expect("replace unsupported formula");
+    let updated = session
+        .capabilities(CalculationOptionsDto::default(), 1, 1)
+        .expect("updated page");
+    assert_eq!(updated.supported_count, 2);
+    assert!(updated.entries[0].supported);
+    assert!(!second.entries[0].supported);
+    let updated_usage = session.function_usage();
+    assert!(
+        updated_usage
+            .entries
+            .iter()
+            .any(|entry| entry.name == "ABS")
+    );
+    assert!(
+        !updated_usage
+            .entries
+            .iter()
+            .any(|entry| entry.name == "MYSTERY")
+    );
+    session.clear_cell("Sheet1", "A1").expect("remove formula");
+    session
+        .rename_sheet("Sheet1", "Renamed")
+        .expect("rename source sheet");
+    let remaining = session
+        .capabilities(CalculationOptionsDto::default(), 0, 1)
+        .expect("page after removal and rename");
+    assert_eq!(remaining.formula_count, 1);
+    assert_eq!(remaining.entries[0].cell.address, "A2");
+    assert_eq!(remaining.entries[0].cell.sheet_name, "Renamed");
+    assert_eq!(session.function_usage().formula_count, 1);
 }
 
 #[test]

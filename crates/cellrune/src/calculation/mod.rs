@@ -9,6 +9,7 @@ use crate::{
 };
 use decimal::DecimalTrace;
 
+mod analysis_cache;
 mod ast;
 mod coerce;
 mod convert;
@@ -40,6 +41,8 @@ mod targeted;
 mod textfmt;
 mod value;
 use crate::calculation::persistent_store::{PersistentRadixEntries, PersistentRadixMap};
+
+pub(crate) use analysis_cache::WorkbookAnalysisCache;
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
@@ -232,7 +235,7 @@ impl FormulaCapabilityEntry {
 /// Deterministically ordered capability report for all formula cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormulaCapabilityReport {
-    entries: Vec<FormulaCapabilityEntry>,
+    entries: Arc<[FormulaCapabilityEntry]>,
     supported_count: usize,
 }
 
@@ -243,7 +246,7 @@ impl FormulaCapabilityReport {
             .filter(|entry| matches!(entry.capability(), FormulaCapability::Supported))
             .count();
         Self {
-            entries,
+            entries: entries.into(),
             supported_count,
         }
     }
@@ -392,19 +395,19 @@ impl FunctionUsageEntry {
 /// Workbook-level function demand report for prioritizing compatibility work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionUsageReport {
-    entries: Vec<FunctionUsageEntry>,
+    entries: Arc<[FunctionUsageEntry]>,
     formula_count: usize,
     parsed_formula_count: usize,
 }
 
 impl FunctionUsageReport {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         entries: Vec<FunctionUsageEntry>,
         formula_count: usize,
         parsed_formula_count: usize,
     ) -> Self {
         Self {
-            entries,
+            entries: entries.into(),
             formula_count,
             parsed_formula_count,
         }
@@ -1121,7 +1124,10 @@ pub fn scan_formula_capabilities_with_options(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
 ) -> FormulaCapabilityReport {
-    pipeline::scan_formula_capabilities(workbook, options)
+    workbook
+        .analysis_cache()
+        .reports(workbook, options)
+        .capabilities
 }
 
 /// Returns the deterministic catalog of function names implemented by this build.
@@ -1142,7 +1148,7 @@ pub fn scan_function_usage_with_options(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
 ) -> FunctionUsageReport {
-    pipeline::scan_function_usage(workbook, options)
+    workbook.analysis_cache().reports(workbook, options).usage
 }
 
 /// Calculates formulas without mutating the source snapshot and records runtime issues per cell.

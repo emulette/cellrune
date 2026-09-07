@@ -2673,6 +2673,27 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
         cellrune::FunctionSupport::Unsupported
     );
 
+    let capabilities = scan_formula_capabilities(&workbook);
+    let fingerprint = workbook.fingerprint();
+    let restricted = CalculationOptions::default().with_limits(
+        CalculationLimits::default()
+            .with_max_formula_ast_nodes(1)
+            .expect("positive syntax limit"),
+    );
+    let limited_capabilities = scan_formula_capabilities_with_options(&workbook, restricted);
+    assert_eq!(limited_capabilities.supported_count(), 0);
+    assert_capability_issue_code(
+        &limited_capabilities,
+        1,
+        CalculationIssueCode::ResourceLimitExceeded,
+    );
+    let limited_usage = cellrune::scan_function_usage_with_options(&workbook, restricted);
+    assert_eq!(limited_usage.formula_count(), 4);
+    assert_eq!(limited_usage.parsed_formula_count(), 0);
+    assert_eq!(scan_function_usage(&workbook), report);
+    assert_eq!(scan_formula_capabilities(&workbook.clone()), capabilities);
+    assert_eq!(workbook.fingerprint(), fingerprint);
+
     let scoped_report = scan_function_usage(&workbook_with_formulas(&[
         (1, 1, "LET(total,SUM(1,2),total)"),
         (1, 2, "MAP({1},LAMBDA(item,item+1))"),
