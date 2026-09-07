@@ -24,6 +24,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   declared array metadata while preserving source identity and current full-result reuse.
 - Reuse capability and function-usage analysis for repeated queries on the same immutable
   workbook and calculation options, including paged queries through language bindings and MCP.
+- Reduced multi-sheet XLSX save work by sharing ZIP access and part lookup within each save,
+  and reading only each worksheet's edits and calculation results.
 
 ## [0.1.18] - 2026-09-06
 

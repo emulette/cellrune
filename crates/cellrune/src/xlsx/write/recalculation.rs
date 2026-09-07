@@ -92,13 +92,14 @@ pub fn write_recalculated_xlsx_bytes(
     )?;
 
     let source = document.preserved_package();
+    let mut source_reader = source.reader()?;
     let mut replacements = BTreeMap::<PartPath, Vec<u8>>::new();
     for (sheet_id, updates) in &updates_by_sheet {
         let part = document.worksheet_part_path(*sheet_id).ok_or_else(|| {
             XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
                 .with_detail(DETAIL_SEMANTIC_VERIFICATION)
         })?;
-        let original = source.read_part(part)?;
+        let original = source_reader.read_part(part)?;
         let rewritten = patch_worksheet(&original, part, updates, limits)?;
         replacements.insert(part.clone(), rewritten);
     }
@@ -106,7 +107,7 @@ pub fn write_recalculated_xlsx_bytes(
     let request_host_recalculation =
         !materialization.is_complete() || !document.workbook().diagnostics().is_empty();
     let workbook_part = document.workbook_part_path();
-    let original_workbook = source.read_part(workbook_part)?;
+    let original_workbook = source_reader.read_part(workbook_part)?;
     replacements.insert(
         workbook_part.clone(),
         patch_calculation_properties(
@@ -120,7 +121,7 @@ pub fn write_recalculated_xlsx_bytes(
     let relationship_part = workbook_part
         .relationship_part()
         .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
-    let relationship_bytes = source.read_part(&relationship_part)?;
+    let relationship_bytes = source_reader.read_part(&relationship_part)?;
     let chain = remove_calculation_chain_relationship(
         &relationship_bytes,
         &relationship_part,
@@ -134,13 +135,14 @@ pub fn write_recalculated_xlsx_bytes(
     if !removals.is_empty() {
         let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
             .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
-        let content_types = source.read_part(&content_types_part)?;
+        let content_types = source_reader.read_part(&content_types_part)?;
         replacements.insert(
             content_types_part.clone(),
             remove_content_type_overrides(&content_types, &content_types_part, &removals, limits)?,
         );
     }
 
+    drop(source_reader);
     let changed_parts = replacements
         .keys()
         .map(PartPath::source_id)

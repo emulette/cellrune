@@ -92,6 +92,7 @@ pub(crate) fn write_document_draft(
     )?;
     let materialization = MaterializationPlan::new(calculation, options.policy(), limits)?;
     let source = document.preserved_package();
+    let mut source_reader = source.reader()?;
     let shared_strings_source = document
         .package_summary()
         .shared_strings_part()
@@ -100,7 +101,7 @@ pub(crate) fn write_document_draft(
         .map_err(|error| invalid_plan_with_cause(document.workbook_part_path(), error))?;
     let shared_strings_bytes = shared_strings_source
         .as_ref()
-        .map(|part| source.read_part(part))
+        .map(|part| source_reader.read_part(part))
         .transpose()?;
     let mut replacements = BTreeMap::<PartPath, Vec<u8>>::new();
     let mut additions = BTreeMap::<PartPath, Vec<u8>>::new();
@@ -116,7 +117,7 @@ pub(crate) fn write_document_draft(
             .workbook()
             .table_by_id(*table_id)
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
-        let bytes = source.read_part(&part)?;
+        let bytes = source_reader.read_part(&part)?;
         replacements.insert(part.clone(), patch_table_xml(&bytes, &part, table, limits)?);
     }
 
@@ -124,7 +125,7 @@ pub(crate) fn write_document_draft(
     let relationship_part = workbook_part
         .relationship_part()
         .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
-    let relationship_bytes = source.read_part(&relationship_part)?;
+    let relationship_bytes = source_reader.read_part(&relationship_part)?;
     let mut relationship_ids =
         RelationshipIdAllocator::from_xml(&relationship_bytes, &relationship_part, limits)?;
     let mut added_relationship_ids = BTreeMap::<SheetId, String>::new();
@@ -172,12 +173,15 @@ pub(crate) fn write_document_draft(
             .worksheet_part_path(sheet_id)
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
-        let bytes = source.read_part(&part)?;
+        let bytes = source_reader.read_part(&part)?;
         let targets = draft
             .cell_mutations()
-            .keys()
-            .chain(draft.presentation_cell_mutations().iter())
-            .filter(|id| id.sheet_id() == sheet_id)
+            .sheet_keys(sheet_id)
+            .chain(
+                draft
+                    .presentation_cell_mutations()
+                    .range(sheet_cell_bounds(sheet_id)),
+            )
             .map(|id| id.address())
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
@@ -235,7 +239,7 @@ pub(crate) fn write_document_draft(
     }
     let existing_style_bytes = styles_part
         .as_ref()
-        .map(|part| source.read_part(part))
+        .map(|part| source_reader.read_part(part))
         .transpose()?;
     let style_plan = plan_document_styles(
         existing_style_bytes.as_deref(),
@@ -268,8 +272,7 @@ pub(crate) fn write_document_draft(
         let mut semantic_edits = BTreeMap::new();
         let phonetic_targets = draft
             .presentation_cell_mutations()
-            .iter()
-            .filter(|id| id.sheet_id() == sheet_id)
+            .range(sheet_cell_bounds(sheet_id))
             .map(|id| id.address())
             .collect::<BTreeSet<_>>();
         ensure_phonetic_edit_preservation(
@@ -283,9 +286,12 @@ pub(crate) fn write_document_draft(
         )?;
         let edit_addresses = draft
             .cell_mutations()
-            .keys()
-            .chain(draft.presentation_cell_mutations().iter())
-            .filter(|id| id.sheet_id() == sheet_id)
+            .sheet_keys(sheet_id)
+            .chain(
+                draft
+                    .presentation_cell_mutations()
+                    .range(sheet_cell_bounds(sheet_id)),
+            )
             .map(|id| id.address())
             .collect::<BTreeSet<_>>();
         for address in edit_addresses {
@@ -362,8 +368,7 @@ pub(crate) fn write_document_draft(
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let sheet_materialization = materialization
             .cells()
-            .iter()
-            .filter(|(id, _)| id.sheet_id() == *sheet_id)
+            .range(sheet_cell_bounds(*sheet_id))
             .map(|(id, planned)| (id.address(), planned))
             .collect::<BTreeMap<_, _>>();
         let sheet_styles = sheet
@@ -387,7 +392,7 @@ pub(crate) fn write_document_draft(
 
     let request_host_recalculation =
         !materialization.is_complete() || !draft.workbook().diagnostics().is_empty();
-    let workbook_bytes = source.read_part(workbook_part)?;
+    let workbook_bytes = source_reader.read_part(workbook_part)?;
     replacements.insert(
         workbook_part.clone(),
         patch_workbook_semantics(
@@ -429,7 +434,7 @@ pub(crate) fn write_document_draft(
     if !removals.is_empty() || !new_content_types.is_empty() {
         let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
             .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
-        let content_types = source.read_part(&content_types_part)?;
+        let content_types = source_reader.read_part(&content_types_part)?;
         let without_chain = if removals.is_empty() {
             content_types
         } else {
@@ -446,6 +451,7 @@ pub(crate) fn write_document_draft(
         );
     }
 
+    drop(source_reader);
     let changed_parts = replacements
         .keys()
         .chain(additions.keys())
@@ -532,16 +538,19 @@ fn validate_dynamic_formula_edits(
     Ok(())
 }
 
+fn sheet_cell_bounds(sheet_id: SheetId) -> std::ops::RangeInclusive<CalculationCellId> {
+    let first = crate::CellAddress::from_indices(1, 1).expect("first worksheet address");
+    let last = crate::CellAddress::from_indices(crate::EXCEL_MAX_ROWS, crate::EXCEL_MAX_COLUMNS)
+        .expect("last worksheet address");
+    CalculationCellId::new(sheet_id, first)..=CalculationCellId::new(sheet_id, last)
+}
+
 fn sheet_cache_updates(
     sheet_id: SheetId,
     materialization: &MaterializationPlan,
 ) -> Result<BTreeMap<crate::CellAddress, WorksheetCellUpdate>, XlsxWriteError> {
     let mut updates = BTreeMap::new();
-    for (id, planned) in materialization
-        .cells()
-        .iter()
-        .filter(|(id, _)| id.sheet_id() == sheet_id)
-    {
+    for (id, planned) in materialization.cells().range(sheet_cell_bounds(sheet_id)) {
         let action = match &planned.action {
             MaterializationAction::Set(value) => WorksheetCacheAction::Set(value.clone()),
             MaterializationAction::Invalidate => WorksheetCacheAction::Invalidate,
