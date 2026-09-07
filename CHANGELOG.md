@@ -8,6 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [Unreleased]
+
+### Changed
+
+- Reduced edit preparation work for large workbooks by looking up changed formula cells directly
+  in the compiled calculation state.
+
 ## [0.1.18] - 2026-09-06
 
 ### Added
@@ -763,6 +770,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.18...HEAD
 [0.1.18]: https://github.com/emulette/cellrune/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/emulette/cellrune/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/emulette/cellrune/compare/v0.1.15...v0.1.16

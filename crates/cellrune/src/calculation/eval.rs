@@ -177,6 +177,10 @@ impl CompiledWorkbook {
         self.asts.keys().chain(self.parse_failures.keys()).copied()
     }
 
+    pub(super) fn contains_formula(&self, cell: CellId) -> bool {
+        self.asts.contains_key(&cell) || self.parse_failures.contains_key(&cell)
+    }
+
     pub(super) fn direct_affected_formulas(
         &self,
         changed: CellId,
