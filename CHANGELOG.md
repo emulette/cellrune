@@ -18,6 +18,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   worksheets, while preserving output validation and unchanged worksheet content.
 - Reduced copying and allocation when applying large incremental calculation results, while
   retaining shared immutable snapshots and the existing automatic calculation selection rules.
+- `UNIQUE` now groups duplicates in one pass and charges actual tuple, text, and comparison work.
+  Larger inputs can complete within existing limits; text-heavy inputs observe the work budget.
 
 ## [0.1.18] - 2026-09-06
 

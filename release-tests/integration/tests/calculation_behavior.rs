@@ -3191,6 +3191,34 @@ fn modern_array_argument_boundaries_are_never_silently_accepted() {
 }
 
 #[test]
+fn unique_large_rows_and_columns_fit_the_actual_work_budget() {
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "SUM(UNIQUE(SEQUENCE(5000)))"),
+        (1, 2, "SUM(UNIQUE(SEQUENCE(1,5000),TRUE))"),
+        (1, 3, "SUM(UNIQUE(VSTACK(SEQUENCE(1001),{1}),FALSE,TRUE))"),
+        (1, 4, "SUM(UNIQUE(SEQUENCE(2000,2)))"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    assert_number(&calculation, 1, 12_502_500.0, 0.0);
+    assert_number(&calculation, 2, 12_502_500.0, 0.0);
+    assert_number(&calculation, 3, 501_500.0, 0.0);
+    assert_number(&calculation, 4, 8_002_000.0, 0.0);
+}
+
+#[test]
+fn unique_text_processing_consumes_work_and_cannot_hide_exhaustion() {
+    let text = "x".repeat(300);
+    let formula = format!("IFERROR(SUM(UNIQUE({{\"{text}\";\"{text}\"}})),0)");
+    let workbook = workbook_with_formulas(&[(1, 1, formula.as_str())]);
+    let limits = CalculationLimits::default()
+        .with_max_function_iterations(64)
+        .expect("positive text work limit");
+    let calculation =
+        calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
 fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
     let mut draft = WorkbookDraft::new();
     let sheet_id = draft.workbook().sheets()[0].id();
@@ -3207,6 +3235,10 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
         ("E5", "=UNIQUE({1;1;2;3},FALSE,TRUE)"),
         ("G5", "=SORT({TRUE;\"z\";2;#N/A})"),
         ("I5", "=VSTACK({1,2},{3})"),
+        (
+            "N5",
+            "=UNIQUE({0;-0;TRUE;1;\"1\";\"A\";\"a\";\"Ä\";\"ä\";#N/A;#N/A})",
+        ),
     ] {
         draft
             .set_cell_dynamic_formula(
@@ -3259,10 +3291,12 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
         ("I5", 1.0),
         ("J5", 2.0),
         ("I6", 3.0),
+        ("N5", 0.0),
+        ("N7", 1.0),
     ] {
         assert_materialized_number(&calculation, sheet_id, address, expected);
     }
-    for address in ["U2", "U3", "J6"] {
+    for address in ["U2", "U3", "J6", "N12"] {
         assert_eq!(
             materialized_result(&calculation, sheet_id, address),
             Some(&CalculationCellResult::Value(CellValue::Error(
@@ -3270,7 +3304,16 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
             )))
         );
     }
-    for (address, expected) in [("C5", "A"), ("C6", "B"), ("C7", "C"), ("G6", "z")] {
+    for (address, expected) in [
+        ("C5", "A"),
+        ("C6", "B"),
+        ("C7", "C"),
+        ("G6", "z"),
+        ("N8", "1"),
+        ("N9", "A"),
+        ("N10", "Ä"),
+        ("N11", "ä"),
+    ] {
         assert_eq!(
             materialized_result(&calculation, sheet_id, address),
             Some(&CalculationCellResult::Value(CellValue::Text(
@@ -3278,10 +3321,12 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
             )))
         );
     }
-    assert_eq!(
-        materialized_result(&calculation, sheet_id, "G7"),
-        Some(&CalculationCellResult::Value(CellValue::Logical(true)))
-    );
+    for address in ["G7", "N6"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            Some(&CalculationCellResult::Value(CellValue::Logical(true)))
+        );
+    }
     assert_eq!(
         materialized_result(&calculation, sheet_id, "G8"),
         Some(&CalculationCellResult::Value(CellValue::Error(

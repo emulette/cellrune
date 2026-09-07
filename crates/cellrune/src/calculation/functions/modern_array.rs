@@ -5,6 +5,9 @@ use super::super::coerce::{to_logical, to_number};
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
+
+mod unique;
+
 pub(super) fn choose_cols(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -66,7 +69,7 @@ pub(super) fn unique_array(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
-    unique(engine, context, args)
+    unique::unique(engine, context, args)
 }
 
 pub(super) fn vstack(
@@ -447,80 +450,6 @@ fn value_rank(value: &Value) -> u8 {
         Value::Text(_) => 2,
         Value::Logical(_) => 3,
         Value::Error(_) => 4,
-    }
-}
-
-fn unique(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    args: &[Expr],
-) -> Result<Array, ErrorKind> {
-    if args.is_empty() || args.len() > 3 {
-        return Err(ErrorKind::Value);
-    }
-    let source = engine.eval_array(context, &args[0])?;
-    let by_column = optional_logical(engine, context, args.get(1), false)?;
-    let exactly_once = optional_logical(engine, context, args.get(2), false)?;
-    let item_count = if by_column { source.cols } else { source.rows };
-    let comparisons = u64::from(item_count)
-        .checked_mul(u64::from(item_count))
-        .and_then(|count| {
-            count.checked_mul(u64::from(if by_column { source.rows } else { source.cols }))
-        })
-        .ok_or(ErrorKind::Num)?;
-    engine.charge_function_iterations(context, comparisons)?;
-    let mut selected = Vec::new();
-    for candidate in 0..item_count {
-        let occurrences = (0..item_count)
-            .filter(|other| array_item_eq(&source, candidate, *other, by_column))
-            .count();
-        let already_selected = selected
-            .iter()
-            .any(|existing| array_item_eq(&source, candidate, *existing, by_column));
-        if !already_selected && (!exactly_once || occurrences == 1) {
-            selected.push(candidate);
-        }
-    }
-    if selected.is_empty() {
-        return Err(ErrorKind::Calc);
-    }
-    let (rows, cols) = if by_column {
-        (source.rows, selected.len() as u32)
-    } else {
-        (selected.len() as u32, source.cols)
-    };
-    let cell_count = cell_count(rows, cols)?;
-    engine.ensure_array_cells(cell_count)?;
-    let mut data = Vec::with_capacity(cell_count as usize);
-    if by_column {
-        for row in 0..source.rows {
-            for column in &selected {
-                data.push(source.at(row, *column).clone());
-            }
-        }
-    } else {
-        for row in selected {
-            for column in 0..source.cols {
-                data.push(source.at(row, column).clone());
-            }
-        }
-    }
-    Ok(Array { rows, cols, data })
-}
-
-fn array_item_eq(source: &Array, left: u32, right: u32, by_column: bool) -> bool {
-    if by_column {
-        (0..source.rows).all(|row| values_equal(source.at(row, left), source.at(row, right)))
-    } else {
-        (0..source.cols)
-            .all(|column| values_equal(source.at(left, column), source.at(right, column)))
-    }
-}
-
-fn values_equal(left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
-        _ => left == right,
     }
 }
 
