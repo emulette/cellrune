@@ -9,7 +9,7 @@ use quick_xml::reader::NsReader;
 use super::serialization::serialize_cell;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
-use crate::{Cell, CellAddress, CellPresentation, CellRange};
+use crate::{Cell, CellAddress, CellPresentation, CellRange, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
 const DETAIL_ROW_ORDER: &str = "worksheet rows are not in ascending order";
 const DETAIL_CELL_ORDER: &str = "worksheet cells are not in ascending column order";
@@ -209,9 +209,13 @@ pub(crate) fn patch_worksheet_semantics(
                     )?;
                     last_row = number;
                     let qualified = element.name().as_ref().to_vec();
-                    if edits
-                        .keys()
-                        .any(|address| address.row().get() == number && !seen.contains(address))
+                    if number <= EXCEL_MAX_ROWS
+                        && edits
+                            .range(
+                                edit_address(number, 1, source)?
+                                    ..=edit_address(number, EXCEL_MAX_COLUMNS, source)?,
+                            )
+                            .any(|(address, _)| !seen.contains(address))
                     {
                         write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                         let mut state = RowState {
@@ -381,18 +385,18 @@ fn insert_missing_rows(
     sheet_data_name: &[u8],
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
+    let first_row = after.saturating_add(1);
+    let last_row = before.saturating_sub(1).min(EXCEL_MAX_ROWS);
+    if first_row > last_row {
+        return Ok(());
+    }
     let rows = edits
-        .keys()
-        .filter(|address| {
-            address.row().get() > after && address.row().get() < before && !seen.contains(*address)
-        })
-        .map(|address| address.row().get())
-        .collect::<BTreeSet<_>>();
-    let row_name = qualified_sibling_name(sheet_data_name, b"row");
-    for number in rows {
-        let actionable = edits.iter().any(|(address, edit)| {
-            address.row().get() == number
-                && !seen.contains(address)
+        .range(
+            edit_address(first_row, 1, source)?
+                ..=edit_address(last_row, EXCEL_MAX_COLUMNS, source)?,
+        )
+        .filter(|(address, edit)| {
+            !seen.contains(*address)
                 && matches!(
                     edit,
                     WorksheetSemanticEdit::Upsert {
@@ -400,10 +404,11 @@ fn insert_missing_rows(
                         ..
                     }
                 )
-        });
-        if !actionable {
-            continue;
-        }
+        })
+        .map(|(address, _)| address.row().get())
+        .collect::<BTreeSet<_>>();
+    let row_name = qualified_sibling_name(sheet_data_name, b"row");
+    for number in rows {
         let mut start = BytesStart::new(decode_name(&row_name, source)?);
         let number_text = number.to_string();
         start.push_attribute(("r", number_text.as_str()));
@@ -432,15 +437,18 @@ fn insert_missing_cells(
     before_column: u32,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
+    let first_column = row.last_column.saturating_add(1);
+    let last_column = before_column.saturating_sub(1).min(EXCEL_MAX_COLUMNS);
+    if first_column > last_column || row.number > EXCEL_MAX_ROWS {
+        return Ok(());
+    }
     let addresses = edits
-        .keys()
-        .filter(|address| {
-            address.row().get() == row.number
-                && address.column().get() > row.last_column
-                && address.column().get() < before_column
-                && !seen.contains(*address)
-        })
-        .copied()
+        .range(
+            edit_address(row.number, first_column, source)?
+                ..=edit_address(row.number, last_column, source)?,
+        )
+        .filter(|(address, _)| !seen.contains(*address))
+        .map(|(address, _)| *address)
         .collect::<Vec<_>>();
     for address in addresses {
         match edits
@@ -472,6 +480,10 @@ fn insert_missing_cells(
         }
     }
     Ok(())
+}
+
+fn edit_address(row: u32, column: u32, source: &PartPath) -> Result<CellAddress, XlsxWriteError> {
+    CellAddress::from_indices(row, column).map_err(|error| invalid_xml(source, error))
 }
 
 fn write_serialized_cell(

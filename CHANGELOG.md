@@ -14,6 +14,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 - Reduced edit preparation work for large workbooks by looking up changed formula cells directly
   in the compiled calculation state.
+- Reduced repeated scanning when writing new XLSX rows and applying batches of edits to existing
+  worksheets, while preserving output validation and unchanged worksheet content.
 
 ## [0.1.18] - 2026-09-06
 
