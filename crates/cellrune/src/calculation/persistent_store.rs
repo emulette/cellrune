@@ -2,6 +2,8 @@ use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
+mod patch;
+
 const KEY_BYTES: usize = size_of::<u128>();
 const CANCELLATION_POLL_INTERVAL: usize = 256;
 
@@ -733,6 +735,17 @@ mod tests {
             .map(|value| (u128::from(value) << 8, value))
             .collect::<Vec<_>>();
         let bulk = PersistentRadixMap::from_sorted_iter(entries.iter().copied());
+        let mut patched = PersistentRadixMap::default();
+        patched
+            .apply_sorted_patch_cancellable(
+                entries.iter().map(|(key, value)| (*key, Some(*value))),
+                &|| false,
+            )
+            .expect("sorted patch completes");
+        assert_eq!(
+            bulk.semantic_fingerprint_cancellable(&leaf, &internal, &|| false),
+            patched.semantic_fingerprint_cancellable(&leaf, &internal, &|| false)
+        );
         let mut incremental = PersistentRadixMap::default();
         for (key, value) in entries.iter().rev().copied() {
             incremental.insert(key, value);
@@ -745,11 +758,79 @@ mod tests {
         for (key, _) in entries.iter().skip(200) {
             assert!(incremental.remove(*key).is_some());
         }
+        patched
+            .apply_sorted_patch_cancellable(
+                entries.iter().skip(200).map(|(key, _)| (*key, None)),
+                &|| false,
+            )
+            .expect("sorted removal completes");
         let expected = PersistentRadixMap::from_sorted_iter(entries[..200].iter().copied());
+        assert_eq!(
+            expected.semantic_fingerprint_cancellable(&leaf, &internal, &|| false),
+            patched.semantic_fingerprint_cancellable(&leaf, &internal, &|| false)
+        );
         assert_eq!(
             expected.semantic_fingerprint_cancellable(&leaf, &internal, &|| false),
             incremental.semantic_fingerprint_cancellable(&leaf, &internal, &|| false)
         );
+        let mut expected_values = entries[..200]
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for round in 0_u64..8 {
+            let previous = patched.clone();
+            let previous_values = expected_values.clone();
+            let changes = (0_u64..800)
+                .map(|index| {
+                    let key = (u128::from(index % 7) << 120) | (u128::from(index) << (round % 8));
+                    (key, (!index.is_multiple_of(3)).then_some(index + round))
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            for (key, value) in &changes {
+                match value {
+                    Some(value) => {
+                        expected_values.insert(*key, *value);
+                    }
+                    None => {
+                        expected_values.remove(key);
+                    }
+                }
+            }
+            patched
+                .apply_sorted_patch_cancellable(changes, &|| false)
+                .expect("mixed patch completes");
+            let rebuilt = PersistentRadixMap::from_sorted_iter(
+                expected_values.iter().map(|(key, value)| (*key, *value)),
+            );
+            assert_eq!(
+                patched
+                    .ordered_entries()
+                    .map(|(key, value)| (key, *value))
+                    .collect::<Vec<_>>(),
+                expected_values
+                    .iter()
+                    .map(|(key, value)| (*key, *value))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                previous
+                    .ordered_entries()
+                    .map(|(key, value)| (key, *value))
+                    .collect::<Vec<_>>(),
+                previous_values.into_iter().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                patched.semantic_fingerprint_cancellable(&leaf, &internal, &|| false),
+                rebuilt.semantic_fingerprint_cancellable(&leaf, &internal, &|| false)
+            );
+        }
+        patched
+            .apply_sorted_patch_cancellable(
+                expected_values.into_keys().map(|key| (key, None)),
+                &|| false,
+            )
+            .expect("remove all entries");
+        assert_eq!(patched.ordered_entries().len(), 0);
     }
 
     #[test]
@@ -778,6 +859,23 @@ mod tests {
                 &|| true,
             )
             .is_err()
+        );
+        let mut map = PersistentRadixMap::from_sorted_iter((0_u128..1_000).map(|key| (key, key)));
+        let previous = map.clone();
+        let polls = std::cell::Cell::new(0);
+        assert!(
+            map.apply_sorted_patch_cancellable(
+                (0_u128..1_000).map(|key| (key, Some(key + 1))),
+                &|| {
+                    polls.set(polls.get() + 1);
+                    polls.get() > 10
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(
+            map.ordered_entries().collect::<Vec<_>>(),
+            previous.ordered_entries().collect::<Vec<_>>()
         );
     }
 }

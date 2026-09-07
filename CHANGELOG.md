@@ -16,6 +16,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   in the compiled calculation state.
 - Reduced repeated scanning when writing new XLSX rows and applying batches of edits to existing
   worksheets, while preserving output validation and unchanged worksheet content.
+- Reduced copying and allocation when applying large incremental calculation results, while
+  retaining shared immutable snapshots and the existing automatic calculation selection rules.
 
 ## [0.1.18] - 2026-09-06
 
