@@ -77,29 +77,45 @@ impl PreservedPackage {
         &self.bytes
     }
 
-    pub(in crate::xlsx) fn read_part(&self, part: &PartPath) -> Result<Vec<u8>, XlsxWriteError> {
+    pub(in crate::xlsx) fn reader(&self) -> Result<PackageReader<'_>, XlsxWriteError> {
         let mut archive = ZipArchive::new(Cursor::new(self.bytes())).map_err(zip_read_error)?;
+        let mut parts = BTreeMap::new();
         for index in 0..archive.len() {
-            let mut file = archive.by_index(index).map_err(zip_read_error)?;
-            if file.is_dir() {
-                continue;
+            let file = archive.by_index_raw(index).map_err(zip_read_error)?;
+            if !file.is_dir() {
+                let part = PartPath::from_archive_name(file.name_raw()).map_err(read_plan_error)?;
+                let previous = parts.insert(part, index);
+                debug_assert!(previous.is_none());
             }
-            let candidate =
-                PartPath::from_archive_name(file.name_raw()).map_err(read_plan_error)?;
-            if &candidate != part {
-                continue;
-            }
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).map_err(|error| {
-                XlsxWriteError::new(XlsxWriteErrorCode::Io)
-                    .at_source(part.source_id())
-                    .with_cause(error)
-            })?;
-            return Ok(bytes);
         }
-        Err(XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
-            .with_detail(DETAIL_SOURCE_PART_NOT_FOUND)
-            .at_source(part.source_id()))
+        Ok(PackageReader { archive, parts })
+    }
+}
+
+/// Borrows one validated source package for the duration of a save operation.
+pub(in crate::xlsx) struct PackageReader<'package> {
+    archive: ZipArchive<Cursor<&'package [u8]>>,
+    parts: BTreeMap<PartPath, usize>,
+}
+
+impl PackageReader<'_> {
+    pub(in crate::xlsx) fn read_part(
+        &mut self,
+        part: &PartPath,
+    ) -> Result<Vec<u8>, XlsxWriteError> {
+        let index = self.parts.get(part).copied().ok_or_else(|| {
+            XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
+                .with_detail(DETAIL_SOURCE_PART_NOT_FOUND)
+                .at_source(part.source_id())
+        })?;
+        let mut file = self.archive.by_index(index).map_err(zip_read_error)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|error| {
+            XlsxWriteError::new(XlsxWriteErrorCode::Io)
+                .at_source(part.source_id())
+                .with_cause(error)
+        })?;
+        Ok(bytes)
     }
 }
 

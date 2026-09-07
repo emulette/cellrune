@@ -167,11 +167,7 @@ pub fn open_xlsx_document_bytes(
     bytes: &[u8],
     options: OpenOptions,
 ) -> Result<XlsxDocument, XlsxReadError> {
-    open_with_source(
-        Cursor::new(bytes.to_vec()),
-        options,
-        WorkbookSourceKind::Bytes,
-    )
+    open_with_source(Cursor::new(bytes), options, WorkbookSourceKind::Bytes)
 }
 
 /// Opens a bounded package-backed workbook from a filesystem path without retaining the host path.

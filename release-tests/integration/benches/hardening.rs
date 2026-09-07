@@ -4,9 +4,10 @@ use std::io::{Cursor, Write as _};
 use std::time::{Duration, Instant};
 
 use cellrune::{
-    CalculationCellResult, CalculationOptions, CellValue, OpenOptions, RecalculationWriteOptions,
-    calculate_workbook, open_xlsx_document_bytes, scan_formula_capabilities,
-    write_recalculated_xlsx_bytes,
+    CalculationCellResult, CalculationOptions, CellAddress, CellContent, CellValue, EditBatch,
+    OpenOptions, RecalculationWriteOptions, WorkbookChange, WorkbookDraft, calculate_workbook,
+    open_xlsx_document_bytes, scan_formula_capabilities, write_recalculated_xlsx_bytes,
+    write_xlsx_draft_bytes,
 };
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -34,6 +35,13 @@ fn main() {
     );
     assert!(rows > 0, "row count must be greater than zero");
     assert!(iterations > 0, "iteration count must be greater than zero");
+
+    if arguments.iter().any(|value| value == "--draft-write") {
+        let edited = argument(&numeric_arguments, 2, rows);
+        assert!(edited <= rows, "edited rows must fit the source worksheet");
+        run_draft_write_benchmark(rows, iterations, edited);
+        return;
+    }
 
     let archive = build_workbook(rows);
     let mut read_total = Duration::ZERO;
@@ -120,6 +128,75 @@ fn argument(arguments: &[&str], index: usize, default: u32) -> u32 {
                 .expect("benchmark argument must be u32")
         })
         .unwrap_or(default)
+}
+
+fn run_draft_write_benchmark(rows: u32, iterations: u32, edited: u32) {
+    let mut canonical = WorkbookDraft::new();
+    set_draft_values(&mut canonical, rows, 1.0);
+    let document = open_xlsx_document_bytes(&build_workbook(rows), OpenOptions::default())
+        .expect("source workbook");
+    let mut patched = WorkbookDraft::from_document(&document);
+    set_draft_values(&mut patched, edited, 2.0);
+
+    println!("cellrune_draft_write_benchmark_v1");
+    println!("rows\t{rows}");
+    println!("edited_rows\t{edited}");
+    println!("iterations\t{iterations}");
+    for (name, draft, changed) in [("canonical", &canonical, 0), ("patch", &patched, edited)] {
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        if name == "patch" {
+            assert_formula_result(&calculation, rows + edited);
+        }
+        let mut elapsed = Duration::ZERO;
+        let mut output_bytes = 0;
+        for _ in 0..iterations {
+            let started = Instant::now();
+            let output = write_xlsx_draft_bytes(
+                black_box(draft),
+                black_box(&calculation),
+                RecalculationWriteOptions::default(),
+            )
+            .expect("draft output");
+            elapsed += started.elapsed();
+            assert!(output.report().is_complete());
+            output_bytes = output.bytes().len();
+            let reopened = open_xlsx_document_bytes(output.bytes(), OpenOptions::default())
+                .expect("draft output reopens");
+            let sheet = &reopened.workbook().sheets()[0];
+            for row in 1..=rows {
+                let address = CellAddress::from_indices(row, 1).expect("generated address");
+                let expected = CellValue::number(if row <= changed { 2.0 } else { 1.0 })
+                    .expect("finite value");
+                assert_eq!(
+                    sheet.cell(address).expect("written cell").content(),
+                    &CellContent::Literal(expected),
+                );
+            }
+            if name == "patch" {
+                let reopened_calculation =
+                    calculate_workbook(reopened.workbook(), CalculationOptions::default());
+                assert_formula_result(&reopened_calculation, rows + edited);
+            }
+        }
+        println!("{name}_write_mean_ms\t{:.3}", mean_ms(elapsed, iterations));
+        println!("{name}_output_bytes\t{output_bytes}");
+    }
+}
+
+fn set_draft_values(draft: &mut WorkbookDraft, rows: u32, value: f64) {
+    let sheet = draft.workbook().sheets()[0].id();
+    for start in (1..=rows).step_by(25_000) {
+        let end = (start + 24_999).min(rows);
+        draft
+            .apply_changes(EditBatch::new((start..=end).map(|row| {
+                WorkbookChange::set_cell_value(
+                    sheet,
+                    CellAddress::from_indices(row, 1).expect("generated address"),
+                    CellValue::number(value).expect("finite value"),
+                )
+            })))
+            .expect("bounded benchmark batch");
+    }
 }
 
 fn mean_ms(total: Duration, iterations: u32) -> f64 {

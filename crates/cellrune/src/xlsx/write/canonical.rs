@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 
 use zip::CompressionMethod;
@@ -328,21 +328,21 @@ pub(super) fn generated_worksheet_xml(
     }
     push_sheet_views(&mut xml, presentation.frozen_pane(sheet.id()));
     xml.push_str("<sheetData>");
-    let rows = cells
-        .keys()
-        .map(|address| address.row().get())
-        .collect::<BTreeSet<_>>();
-    for row in rows {
-        xml.push_str("<row r=\"");
-        xml.push_str(&row.to_string());
-        xml.push_str("\">");
-        for (address, cell) in cells
-            .iter()
-            .filter(|(address, _)| address.row().get() == row)
-        {
-            let _ = address;
-            xml.push_str(cell);
+    let mut current_row = None;
+    for (address, cell) in &cells {
+        let row = address.row().get();
+        if current_row != Some(row) {
+            if current_row.is_some() {
+                xml.push_str("</row>");
+            }
+            xml.push_str("<row r=\"");
+            xml.push_str(&row.to_string());
+            xml.push_str("\">");
+            current_row = Some(row);
         }
+        xml.push_str(cell);
+    }
+    if current_row.is_some() {
         xml.push_str("</row>");
     }
     xml.push_str("</sheetData>");

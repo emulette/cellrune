@@ -69,6 +69,12 @@ impl DraftCellMutationStore {
         self.iter().map(|(id, _)| id)
     }
 
+    pub(crate) fn sheet_keys(&self, sheet_id: SheetId) -> impl Iterator<Item = &CalculationCellId> {
+        self.chunks
+            .range((sheet_id, 0)..=(sheet_id, u32::MAX))
+            .flat_map(|(_, chunk)| chunk.keys())
+    }
+
     pub(crate) const fn is_empty(&self) -> bool {
         self.len == 0
     }

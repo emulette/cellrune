@@ -56,6 +56,7 @@ fn main() {
     for requested in [1, 100, 10_000] {
         let mut full_times = Vec::new();
         let mut partial_times = Vec::new();
+        let mut repeated_times = Vec::new();
         let mut cached_times = Vec::new();
         let targets = [CalculationTarget::new(
             id(1, 3).sheet_id(),
@@ -73,6 +74,20 @@ fn main() {
                 .expect("first request");
             partial_times.push(started.elapsed().as_secs_f64() * 1_000.0);
             evaluated = result.evaluated_count();
+            let started = Instant::now();
+            let repeated = partial
+                .calculate_targets(&targets, options, limits, CancellationToken::new())
+                .expect("repeated request without a full cache");
+            repeated_times.push(started.elapsed().as_secs_f64() * 1_000.0);
+            assert_eq!(repeated.evaluated_count(), result.evaluated_count());
+            assert_eq!(
+                repeated.parsed_formula_count(),
+                result.parsed_formula_count()
+            );
+            assert_eq!(
+                repeated.cells().collect::<Vec<_>>(),
+                result.cells().collect::<Vec<_>>()
+            );
             let started = Instant::now();
             full.recalculate(RecalculationMode::Full, options, CancellationToken::new())
                 .expect("full calculation");
@@ -96,10 +111,11 @@ fn main() {
             assert_eq!(cached.reused_count(), requested as usize);
         }
         println!(
-            "formulas={} targets={requested} samples={samples} full_ms={:.3} first_partial_ms={:.3} cached_partial_ms={:.3} partial_evaluations={evaluated}",
+            "formulas={} targets={requested} samples={samples} full_ms={:.3} first_partial_ms={:.3} repeated_partial_ms={:.3} cached_partial_ms={:.3} partial_evaluations={evaluated}",
             ROWS * 2,
             median(full_times),
             median(partial_times),
+            median(repeated_times),
             median(cached_times)
         );
     }

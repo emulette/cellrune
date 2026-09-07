@@ -231,6 +231,7 @@ pub struct Sheet {
     visibility: SheetVisibility,
     cells: CellStore,
     formula_addresses: Arc<BTreeSet<CellAddress>>,
+    array_formula_ranges: Arc<BTreeMap<CellAddress, CellRange>>,
     column_max_rows: Arc<BTreeMap<u32, u32>>,
     bounds_dirty: bool,
     min_row: Option<Row>,
@@ -253,6 +254,7 @@ impl Sheet {
             visibility: self.visibility,
             cells: self.cells.clone(),
             formula_addresses: Arc::clone(&self.formula_addresses),
+            array_formula_ranges: Arc::clone(&self.array_formula_ranges),
             column_max_rows: Arc::clone(&self.column_max_rows),
             bounds_dirty: self.bounds_dirty,
             min_row: self.min_row,
@@ -273,6 +275,7 @@ impl Sheet {
             visibility,
             cells: CellStore::default(),
             formula_addresses: Arc::new(BTreeSet::new()),
+            array_formula_ranges: Arc::new(BTreeMap::new()),
             column_max_rows: Arc::new(BTreeMap::new()),
             bounds_dirty: false,
             min_row: None,
@@ -325,7 +328,7 @@ impl Sheet {
                 column: address.column().get(),
             });
         }
-        let is_formula = matches!(content, CellContent::Formula(_));
+        self.track_formula_metadata(address, &content);
         self.semantic_fingerprint = OnceLock::new();
         self.update_bounds(address);
         self.update_column_extent(address);
@@ -333,9 +336,6 @@ impl Sheet {
             address,
             Cell::with_number_format(address, content, number_format),
         );
-        if is_formula {
-            Arc::make_mut(&mut self.formula_addresses).insert(address);
-        }
         Ok(())
     }
 
@@ -356,6 +356,14 @@ impl Sheet {
     /// Iterates sparse cells in deterministic row-major order.
     pub fn cells(&self) -> impl ExactSizeIterator<Item = &Cell> + DoubleEndedIterator {
         self.cells.values()
+    }
+
+    pub(crate) fn formula_addresses(&self) -> &BTreeSet<CellAddress> {
+        &self.formula_addresses
+    }
+
+    pub(crate) fn array_formula_ranges(&self) -> &BTreeMap<CellAddress, CellRange> {
+        &self.array_formula_ranges
     }
 
     pub(crate) fn column_max_rows(&self) -> &BTreeMap<u32, u32> {
@@ -491,7 +499,7 @@ impl Sheet {
         number_format: NumberFormat,
     ) {
         self.semantic_fingerprint = OnceLock::new();
-        self.track_formula_address(address, &content);
+        self.track_formula_metadata(address, &content);
         let is_new = !self.cells.insert(
             address,
             Cell::with_content_and_number_format(address, content, number_format),
@@ -505,7 +513,7 @@ impl Sheet {
     pub(crate) fn upsert_cell_instance_deferred(&mut self, cell: Cell) {
         let address = cell.address();
         self.semantic_fingerprint = OnceLock::new();
-        self.track_formula_address(address, cell.content());
+        self.track_formula_metadata(address, cell.content());
         let is_new = !self.cells.insert(address, cell);
         if is_new {
             self.update_bounds(address);
@@ -517,6 +525,9 @@ impl Sheet {
         self.semantic_fingerprint = OnceLock::new();
         if self.formula_addresses.contains(&address) {
             Arc::make_mut(&mut self.formula_addresses).remove(&address);
+        }
+        if self.array_formula_ranges.contains_key(&address) {
+            Arc::make_mut(&mut self.array_formula_ranges).remove(&address);
         }
         let removed = self.cells.remove(&address);
         if removed
@@ -564,7 +575,22 @@ impl Sheet {
         self.bounds_dirty = false;
     }
 
-    fn track_formula_address(&mut self, address: CellAddress, content: &CellContent) {
+    fn track_formula_metadata(&mut self, address: CellAddress, content: &CellContent) {
+        let range = match content {
+            CellContent::Formula(formula) => formula
+                .metadata()
+                .legacy_array_range_at(address)
+                .or_else(|| formula.metadata().dynamic_array_range_at(address).flatten())
+                .filter(|range| range.height() > 1 || range.width() > 1),
+            CellContent::Literal(_) => None,
+        };
+        if let Some(range) = range {
+            if self.array_formula_ranges.get(&address) != Some(&range) {
+                Arc::make_mut(&mut self.array_formula_ranges).insert(address, range);
+            }
+        } else if self.array_formula_ranges.contains_key(&address) {
+            Arc::make_mut(&mut self.array_formula_ranges).remove(&address);
+        }
         if matches!(content, CellContent::Formula(_)) {
             if !self.formula_addresses.contains(&address) {
                 Arc::make_mut(&mut self.formula_addresses).insert(address);
@@ -757,6 +783,7 @@ pub struct WorkbookSnapshot {
     provenance: Provenance,
     semantic_revision: u64,
     semantic_fingerprint: OnceLock<[u8; 32]>,
+    analysis_cache: Arc<crate::calculation::WorkbookAnalysisCache>,
 }
 
 pub(crate) enum WorkbookBuildError {
@@ -829,6 +856,7 @@ impl WorkbookSnapshot {
             provenance: self.provenance.clone(),
             semantic_revision: self.semantic_revision,
             semantic_fingerprint: self.semantic_fingerprint.clone(),
+            analysis_cache: Arc::clone(&self.analysis_cache),
         })
     }
 
@@ -861,6 +889,7 @@ impl WorkbookSnapshot {
             provenance: Provenance::new(crate::ProviderIdentity::writer(), None),
             semantic_revision: 0,
             semantic_fingerprint: OnceLock::new(),
+            analysis_cache: Arc::default(),
         }
     }
 
@@ -1055,6 +1084,7 @@ impl WorkbookSnapshot {
             provenance,
             semantic_revision: 0,
             semantic_fingerprint: OnceLock::new(),
+            analysis_cache: Arc::default(),
         })
     }
 
@@ -1246,7 +1276,14 @@ impl WorkbookSnapshot {
         )
     }
 
-    pub(crate) const fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {
+    pub(crate) fn analysis_cache(&self) -> &crate::calculation::WorkbookAnalysisCache {
+        &self.analysis_cache
+    }
+
+    pub(crate) fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {
+        if self.semantic_revision != semantic_revision {
+            self.analysis_cache = Arc::default();
+        }
         self.semantic_revision = semantic_revision;
         self
     }

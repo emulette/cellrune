@@ -8,6 +8,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Rel
 This file records concise user-visible and release-operator changes. Design rationale, test
 inventories, and measurements belong in the linked documentation rather than in release entries.
 
+## [Unreleased]
+
+## [0.1.19] - 2026-09-07
+
+### Changed
+
+- Reduced edit preparation work for large workbooks by looking up changed formula cells directly
+  in the compiled calculation state.
+- Reduced repeated scanning when writing new XLSX rows and applying batches of edits to existing
+  worksheets, while preserving output validation and unchanged worksheet content.
+- Reduced copying and allocation when applying large incremental calculation results, while
+  retaining shared immutable snapshots and the existing automatic calculation selection rules.
+- `UNIQUE` now groups duplicates in one pass and charges actual tuple, text, and comparison work.
+  Larger inputs can complete within existing limits; text-heavy inputs observe the work budget.
+- Reduced targeted calculation setup by reusing worksheet formula addresses, column extents, and
+  declared array metadata while preserving source identity and current full-result reuse.
+- Cache capability and function-usage reports on demand for repeated queries on the same immutable
+  workbook and calculation options, including paged queries through language bindings and MCP.
+- Reduced multi-sheet XLSX save work by sharing ZIP access and part lookup within each save,
+  and reading only each worksheet's edits and calculation results.
+- Reduced temporary allocation in `SUM`, `AVERAGE`, `MIN`, `MAX`, and `PRODUCT` by aggregating
+  collected arguments directly, with the same coercion, evaluation order, and arithmetic policy.
+- Opening an in-memory XLSX document avoids an extra archive copy and checks the archive size
+  limit before buffering the input.
+
 ## [0.1.18] - 2026-09-06
 
 ### Added
@@ -763,6 +788,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/emulette/cellrune/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/emulette/cellrune/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/emulette/cellrune/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/emulette/cellrune/compare/v0.1.15...v0.1.16

@@ -9,6 +9,7 @@ use crate::{
 };
 use decimal::DecimalTrace;
 
+mod analysis_cache;
 mod ast;
 mod coerce;
 mod convert;
@@ -39,9 +40,9 @@ mod syntax;
 mod targeted;
 mod textfmt;
 mod value;
-use crate::calculation::persistent_store::{
-    PersistentRadixEntries, PersistentRadixMap, PersistentValue,
-};
+use crate::calculation::persistent_store::{PersistentRadixEntries, PersistentRadixMap};
+
+pub(crate) use analysis_cache::WorkbookAnalysisCache;
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
@@ -234,7 +235,7 @@ impl FormulaCapabilityEntry {
 /// Deterministically ordered capability report for all formula cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormulaCapabilityReport {
-    entries: Vec<FormulaCapabilityEntry>,
+    entries: Arc<[FormulaCapabilityEntry]>,
     supported_count: usize,
 }
 
@@ -245,7 +246,7 @@ impl FormulaCapabilityReport {
             .filter(|entry| matches!(entry.capability(), FormulaCapability::Supported))
             .count();
         Self {
-            entries,
+            entries: entries.into(),
             supported_count,
         }
     }
@@ -394,19 +395,19 @@ impl FunctionUsageEntry {
 /// Workbook-level function demand report for prioritizing compatibility work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionUsageReport {
-    entries: Vec<FunctionUsageEntry>,
+    entries: Arc<[FunctionUsageEntry]>,
     formula_count: usize,
     parsed_formula_count: usize,
 }
 
 impl FunctionUsageReport {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         entries: Vec<FunctionUsageEntry>,
         formula_count: usize,
         parsed_formula_count: usize,
     ) -> Self {
         Self {
-            entries,
+            entries: entries.into(),
             formula_count,
             parsed_formula_count,
         }
@@ -682,38 +683,32 @@ impl<V> CalculationStore<V> {
         })
     }
 
-    fn insert_cancellable(
+    fn apply_patch_cancellable(
         &mut self,
-        cell: CalculationCellId,
-        value: V,
+        removed: &BTreeSet<CalculationCellId>,
+        values: BTreeMap<CalculationCellId, V>,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<PersistentValue<V>>, ()> {
-        if cancelled() {
-            return Err(());
-        }
-        let previous = self.cells.insert(Self::key(cell), value);
-        if previous.is_none() {
-            self.len += 1;
-        }
-        Ok(previous)
-    }
-
-    fn remove_cancellable(
-        &mut self,
-        cell: &CalculationCellId,
-        cancelled: &impl Fn() -> bool,
-    ) -> Result<Option<PersistentValue<V>>, ()> {
-        if cancelled() {
-            return Err(());
-        }
-        if self.cells.get(Self::key(*cell)).is_none() {
-            return Ok(None);
-        }
-        let removed = self.cells.remove(Self::key(*cell));
-        if removed.is_some() {
-            self.len -= 1;
-        }
-        Ok(removed)
+    ) -> Result<(), ()> {
+        let mut removed = removed.iter().peekable();
+        let mut values = values.into_iter().peekable();
+        let changes = std::iter::from_fn(|| {
+            if let Some(&&cell) = removed.peek()
+                && values.peek().is_none_or(|(next, _)| cell < *next)
+            {
+                removed.next();
+                return Some((Self::key(cell), None));
+            }
+            values.next().map(|(cell, value)| {
+                if removed.peek().is_some_and(|&&removed| removed == cell) {
+                    removed.next();
+                }
+                (Self::key(cell), Some(value))
+            })
+        });
+        self.len = self
+            .cells
+            .apply_sorted_patch_cancellable(changes, cancelled)?;
+        Ok(())
     }
 
     fn iter(&self) -> CalculationStoreIter<'_, V> {
@@ -766,13 +761,9 @@ mod calculation_store_tests {
 
         let mutable = calculation_store_mut_cancellable(&mut store, &cancelled)
             .expect("outer store clone completes");
-        assert_eq!(
-            mutable
-                .insert_cancellable(first, 3, &cancelled)
-                .map(|value| value.as_deref().copied()),
-            Ok(Some(1)),
-            "insert returns the previous value without deep-cloning it"
-        );
+        mutable
+            .apply_patch_cancellable(&BTreeSet::new(), BTreeMap::from([(first, 3)]), &cancelled)
+            .expect("result patch completes");
         assert_eq!(installed.get(&first), Some(&1));
         assert_eq!(installed.get(&second), Some(&2));
         assert_eq!(store.get(&first), Some(&3));
@@ -960,54 +951,41 @@ impl CalculationSnapshot {
         let mut materialized_cells_by_owner = Arc::clone(&self.materialized_cells_by_owner);
         let mut numeric_decimal_traces = Arc::clone(&self.numeric_decimal_traces);
 
-        let cells_mut = calculation_store_mut_cancellable(&mut cells, cancelled)?;
-        for (cell, result) in cell_results {
-            if cancelled() {
-                return Err(());
-            }
-            cells_mut.insert_cancellable(cell, result, cancelled)?;
-        }
+        calculation_store_mut_cancellable(&mut cells, cancelled)?.apply_patch_cancellable(
+            &BTreeSet::new(),
+            cell_results,
+            cancelled,
+        )?;
 
-        let owners_mut =
-            calculation_store_mut_cancellable(&mut materialized_cells_by_owner, cancelled)?;
-        let mut removed = Vec::new();
+        let mut removed = BTreeSet::new();
         for owner in dirty {
-            if let Some(cells) = owners_mut.remove_cancellable(owner, cancelled)? {
-                removed.extend(cells.iter().copied());
-            }
-        }
-        let materialized_mut =
-            calculation_store_mut_cancellable(&mut materialized_cells, cancelled)?;
-        for cell in &removed {
             if cancelled() {
                 return Err(());
             }
-            materialized_mut.remove_cancellable(cell, cancelled)?;
+            if let Some(cells) = self.materialized_cells_by_owner.get(owner) {
+                for cell in cells {
+                    if cancelled() {
+                        return Err(());
+                    }
+                    removed.insert(*cell);
+                }
+            }
         }
         let mut added_by_owner = BTreeMap::<CalculationCellId, Vec<CalculationCellId>>::new();
-        for (cell, result) in materialized_results {
+        for (cell, result) in &materialized_results {
             if cancelled() {
                 return Err(());
             }
-            let owner = materialized_owner(cell, &result);
-            added_by_owner.entry(owner).or_default().push(cell);
-            materialized_mut.insert_cancellable(cell, result, cancelled)?;
+            let owner = materialized_owner(*cell, result);
+            // The source map already visits each owner's cells in address order.
+            added_by_owner.entry(owner).or_default().push(*cell);
         }
-        for (owner, mut cells) in added_by_owner {
-            cells.sort_unstable();
-            owners_mut.insert_cancellable(owner, cells, cancelled)?;
-        }
-
-        let traces_mut = calculation_store_mut_cancellable(&mut numeric_decimal_traces, cancelled)?;
-        for cell in removed {
-            traces_mut.remove_cancellable(&cell, cancelled)?;
-        }
-        for (cell, trace) in decimal_traces {
-            if cancelled() {
-                return Err(());
-            }
-            traces_mut.insert_cancellable(cell, trace, cancelled)?;
-        }
+        calculation_store_mut_cancellable(&mut materialized_cells_by_owner, cancelled)?
+            .apply_patch_cancellable(dirty, added_by_owner, cancelled)?;
+        calculation_store_mut_cancellable(&mut materialized_cells, cancelled)?
+            .apply_patch_cancellable(&removed, materialized_results, cancelled)?;
+        calculation_store_mut_cancellable(&mut numeric_decimal_traces, cancelled)?
+            .apply_patch_cancellable(&removed, decimal_traces, cancelled)?;
 
         Ok(Self {
             cells,
@@ -1146,7 +1124,7 @@ pub fn scan_formula_capabilities_with_options(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
 ) -> FormulaCapabilityReport {
-    pipeline::scan_formula_capabilities(workbook, options)
+    workbook.analysis_cache().capabilities(workbook, options)
 }
 
 /// Returns the deterministic catalog of function names implemented by this build.
@@ -1167,7 +1145,7 @@ pub fn scan_function_usage_with_options(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
 ) -> FunctionUsageReport {
-    pipeline::scan_function_usage(workbook, options)
+    workbook.analysis_cache().usage(workbook, options)
 }
 
 /// Calculates formulas without mutating the source snapshot and records runtime issues per cell.

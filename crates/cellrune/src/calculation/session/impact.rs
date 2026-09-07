@@ -96,7 +96,7 @@ pub(super) fn affected_formula_impact(
             charger.charge()?;
             direct.insert(formula);
         }
-        if compiled.formula_cells().any(|formula| formula == changed) {
+        if compiled.contains_formula(changed) {
             direct.insert(changed);
         }
     }

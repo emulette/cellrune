@@ -433,6 +433,46 @@ fn declared_spill_followers_calculate_the_whole_anchor_and_check_collisions() {
             cellrune::ExcelError::Spill
         )))
     );
+    let original = draft.workbook().clone();
+    draft
+        .set_cell_dynamic_formula(
+            sheet(),
+            address("B1"),
+            FormulaText::from_xlsx("SEQUENCE(2)").expect("smaller array formula"),
+            Some(CellRange::new(address("B1"), address("B2")).expect("smaller range")),
+        )
+        .expect("shrink array");
+    let read_followers = |workbook: &cellrune::WorkbookSnapshot| {
+        calculate_targets(
+            workbook,
+            &[target("B1"), target("B2"), target("B3")],
+            CalculationOptions::default(),
+            TargetCalculationLimits::default(),
+            CancellationToken::new(),
+        )
+        .expect("array followers after an edit")
+    };
+    let smaller = read_followers(draft.workbook());
+    assert_eq!(smaller.cell(id("B2")), Some(&number(2.0)));
+    assert_eq!(
+        smaller.cell(id("B3")),
+        Some(&CalculationCellResult::Value(CellValue::Blank))
+    );
+    value(&mut draft, "B1", 8.0);
+    let replaced = read_followers(draft.workbook());
+    assert_eq!(replaced.cell(id("B1")), Some(&number(8.0)));
+    assert_eq!(
+        replaced.cell(id("B2")),
+        Some(&CalculationCellResult::Value(CellValue::Blank))
+    );
+    draft
+        .clear_cell(sheet(), address("B1"))
+        .expect("clear anchor");
+    assert_eq!(
+        read_followers(draft.workbook()).cell(id("B1")),
+        Some(&CalculationCellResult::Value(CellValue::Blank))
+    );
+    assert_eq!(read_followers(&original).cell(id("B3")), Some(&number(3.0)));
 }
 
 #[test]
