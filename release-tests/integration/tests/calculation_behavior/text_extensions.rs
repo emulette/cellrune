@@ -85,7 +85,6 @@ fn numbervalue_rejects_malformed_numbers_and_propagates_errors() {
         "NUMBERVALUE(\"1.2,3\")",
         "NUMBERVALUE(\"1%2\")",
         "NUMBERVALUE(\"$12\")",
-        "NUMBERVALUE(\"(12)\")",
         "NUMBERVALUE(TRUE)",
         "NUMBERVALUE(\"NaN\")",
         "NUMBERVALUE(\"inf\")",
@@ -99,6 +98,27 @@ fn numbervalue_rejects_malformed_numbers_and_propagates_errors() {
     }
     assert_error("NUMBERVALUE(#N/A)", ExcelError::NotAvailable);
     assert_error("NUMBERVALUE(\"1\",#DIV/0!)", ExcelError::DivisionByZero);
+}
+
+#[test]
+fn numbervalue_recognizes_parentheses_controls_and_separator_precedence() {
+    for (formula, expected) in [
+        ("NUMBERVALUE(\"(12.5)\")", -12.5),
+        ("NUMBERVALUE(\"(128)%\")", -1.28),
+        ("NUMBERVALUE(\" - 0 \t1\t2\r .\n3 4 \" )", -12.34),
+        ("NUMBERVALUE(\"12%3\",\".\",\"%\")", 123.0),
+        ("NUMBERVALUE(\"12%3\",\"%\",\",\")", 12.3),
+        ("NUMBERVALUE(\"12 3\",\" \",\",\")", 12.3),
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_number(&result, 1, expected, 1e-12);
+    }
+    assert_error("NUMBERVALUE(\"1\",\".\",\"\")", ExcelError::Value);
+    assert_error("NUMBERVALUE(\",\")", ExcelError::Value);
+    assert_error("NUMBERVALUE(\"(-12)\")", ExcelError::Value);
 }
 
 #[test]
