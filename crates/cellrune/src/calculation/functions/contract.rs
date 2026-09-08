@@ -137,6 +137,7 @@ pub(super) enum DefaultTrigger {
 pub(super) enum ArgumentDefaultValue {
     Omitted,
     Number(f64),
+    Text(&'static str),
     Logical(bool),
     NotAvailable,
     CalculationError,
@@ -1295,12 +1296,27 @@ impl TextFunction {
     }
 }
 
+const NUMBER_VALUE_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        1,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Text("."),
+    ),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Text(","),
+    ),
+];
+
 impl TextAdditionalFunction {
     const fn call_contract(self) -> CallContract {
         match self {
-            Self::Char | Self::Clean | Self::UniChar | Self::Unicode | Self::Value => {
+            Self::Char | Self::Code | Self::Clean | Self::UniChar | Self::Unicode | Self::Value => {
                 CallContract::uniform(Arity::exact(1), SCALAR)
             }
+            Self::NumberValue => CallContract::uniform(Arity::range(1, 3), SCALAR)
+                .with_defaults(NUMBER_VALUE_DEFAULTS),
             Self::Concatenate => CallContract::uniform(Arity::range(1, 255), ARRAY),
             Self::Dollar => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                 .with_defaults(DOLLAR_DEFAULTS),

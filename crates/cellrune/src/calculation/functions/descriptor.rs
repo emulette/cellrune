@@ -793,6 +793,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Trim, "TRIM", Text),
     function!(Upper, "UPPER", Text),
     function!(Char, "CHAR", TextAdditional),
+    function!(Code, "CODE", TextAdditional).with_minimum_version(CompatibilityVersion::V0_1_20),
+    function!(NumberValue, "NUMBERVALUE", TextAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(Clean, "CLEAN", TextAdditional),
     function!(Concatenate, "CONCATENATE", TextAdditional),
     function!(Dollar, "DOLLAR", TextAdditional),

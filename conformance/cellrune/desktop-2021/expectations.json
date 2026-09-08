@@ -912,11 +912,10 @@
     "note": "This required Excel host does not implement the formula surface and saved #NAME?."
   },
   "curated:textdate:c012": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1234.56",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.NUMBERVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:textdate:c013": {
     "classification": "match",
@@ -2281,18 +2280,16 @@
     "excel_rich_error": false
   },
   "function:code": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "65",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CODE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:code:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "32",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CODE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:column": {
     "classification": "match",
@@ -6251,18 +6248,16 @@
     "excel_rich_error": false
   },
   "function:numbervalue": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1234.56",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.NUMBERVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:numbervalue:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.NUMBERVALUE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:oct2bin": {
     "classification": "match",

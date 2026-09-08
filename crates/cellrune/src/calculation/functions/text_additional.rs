@@ -15,6 +15,10 @@ pub(super) fn call(
 ) -> Value {
     match function {
         TextAdditionalFunction::Char => character(engine, context, args),
+        TextAdditionalFunction::Code => code(engine, context, args),
+        TextAdditionalFunction::NumberValue => {
+            super::number_value::number_value(engine, context, args)
+        }
         TextAdditionalFunction::Clean => clean(engine, context, args),
         TextAdditionalFunction::Concatenate => concatenate(engine, context, args),
         TextAdditionalFunction::Dollar => dollar(engine, context, args),
@@ -39,6 +43,28 @@ fn character(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Va
     cp1252_character(code).map_or(Value::Error(ErrorKind::Value), |character| {
         engine.bounded_text(character.to_string())
     })
+}
+
+fn code(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [argument] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let text = match required_text(engine, context, argument) {
+        Ok(text) => text,
+        Err(kind) => return Value::Error(kind),
+    };
+    let Some(character) = text.chars().next() else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let point = u32::from(character);
+    if point < 128 || (160..=255).contains(&point) {
+        return Value::Number(f64::from(point));
+    }
+    (128_u8..=159)
+        .find(|code| cp1252_character(*code) == Some(character))
+        .map_or(Value::Error(ErrorKind::Value), |code| {
+            Value::Number(f64::from(code))
+        })
 }
 
 fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

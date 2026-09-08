@@ -266,6 +266,8 @@ function_enum!(TextFunction {
 
 function_enum!(TextAdditionalFunction {
     Char,
+    Code,
+    NumberValue,
     Clean,
     Concatenate,
     Dollar,

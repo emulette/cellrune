@@ -52,6 +52,7 @@ mod math;
 mod modern_array;
 mod modern_text;
 mod moments;
+mod number_value;
 mod reference_introspection;
 mod regex_common;
 mod regex_options;
@@ -122,6 +123,7 @@ fn materialize_default(value: contract::ArgumentDefaultValue, args: &[Expr]) -> 
     match value {
         contract::ArgumentDefaultValue::Omitted => None,
         contract::ArgumentDefaultValue::Number(number) => Some(Expr::number(number)),
+        contract::ArgumentDefaultValue::Text(text) => Some(Expr::Text(text.to_owned())),
         contract::ArgumentDefaultValue::Logical(logical) => Some(Expr::Logical(logical)),
         contract::ArgumentDefaultValue::NotAvailable => Some(Expr::ErrorLit(ErrorKind::NA)),
         contract::ArgumentDefaultValue::CalculationError => Some(Expr::ErrorLit(ErrorKind::Calc)),
@@ -982,10 +984,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 420);
+        assert_eq!(catalog.len(), 422);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            419
+            421
         );
         assert!(
             catalog

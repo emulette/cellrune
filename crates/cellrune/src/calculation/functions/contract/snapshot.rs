@@ -121,6 +121,9 @@ fn write_default_value(snapshot: &mut String, value: ArgumentDefaultValue) {
             write!(snapshot, "number:{:016x}", number.to_bits())
                 .expect("writing to String cannot fail");
         }
+        ArgumentDefaultValue::Text(value) => {
+            write!(snapshot, "text:{value:?}").expect("writing to String cannot fail");
+        }
         ArgumentDefaultValue::Logical(value) => {
             snapshot.push_str(if value {
                 "logical:true"
