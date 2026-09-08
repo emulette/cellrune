@@ -1527,8 +1527,13 @@ impl StatisticalFunction {
                 CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
                     .with_defaults(PERCENT_RANK_DEFAULTS)
             }
-            Self::RankEq => CallContract::positional(Arity::range(2, 3), &[SCALAR, ARRAY, SCALAR])
-                .with_defaults(RANK_DEFAULTS),
+            Self::ForecastLinear => {
+                CallContract::positional(Arity::exact(3), &[SCALAR, ARRAY, ARRAY])
+            }
+            Self::RankEq | Self::RankAvg => {
+                CallContract::positional(Arity::range(2, 3), &[SCALAR, ARRAY, SCALAR])
+                    .with_defaults(RANK_DEFAULTS)
+            }
             Self::ZTest => CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
                 .with_defaults(Z_TEST_DEFAULTS),
         }

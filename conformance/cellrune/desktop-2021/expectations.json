@@ -4103,11 +4103,10 @@
     "excel_rich_error": false
   },
   "function:forecast": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "45",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FORECAST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:forecast-ets": {
     "classification": "not_implemented",
@@ -4138,39 +4137,34 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.FORECAST.ETS.STAT) for this oracle case."
   },
   "function:forecast-linear": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "45",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.FORECAST.LINEAR) for this oracle case."
+    "excel_rich_error": false
   },
   "function:forecast-linear:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "7",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.FORECAST.LINEAR) for this oracle case."
+    "excel_rich_error": false
   },
   "function:forecast-linear:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.FORECAST.LINEAR) for this oracle case."
+    "excel_rich_error": false
   },
   "function:forecast:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "7",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FORECAST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:forecast:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FORECAST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:formulatext": {
     "classification": "match",
@@ -6986,25 +6980,22 @@
     "excel_rich_error": false
   },
   "function:rank-avg": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "16",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.RANK.AVG) for this oracle case."
+    "excel_rich_error": false
   },
   "function:rank-avg:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.RANK.AVG) for this oracle case."
+    "excel_rich_error": false
   },
   "function:rank-avg:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.RANK.AVG) for this oracle case."
+    "excel_rich_error": false
   },
   "function:rank-eq": {
     "classification": "match",

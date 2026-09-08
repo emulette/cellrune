@@ -769,7 +769,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    let version = CompatibilityVersion::V0_1_16;
+    let version = CompatibilityVersion::V0_1_20;
     let mut entries = descriptor::descriptors()
         .iter()
         .copied()
@@ -972,7 +972,7 @@ mod tests {
             .map(|descriptor| descriptor.aliases().len())
             .sum::<usize>();
         assert_eq!(aliases.len(), alias_count);
-        assert_eq!(aliases.len(), 25);
+        assert_eq!(aliases.len(), 26);
         assert!(aliases.is_disjoint(&kernels));
         assert!(
             descriptor::descriptors()
@@ -982,10 +982,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 417);
+        assert_eq!(catalog.len(), 420);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            416
+            419
         );
         assert!(
             catalog

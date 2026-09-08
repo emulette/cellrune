@@ -142,6 +142,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_14,
     V0_1_15,
     V0_1_16,
+    V0_1_20,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -949,6 +950,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(QuartileInc, "QUARTILE.INC", Statistical)
         .with_aliases(&[FunctionAlias::official("QUARTILE")]),
     function!(RankEq, "RANK.EQ", Statistical).with_aliases(&[FunctionAlias::official("RANK")]),
+    function!(RankAvg, "RANK.AVG", Statistical).with_minimum_version(CompatibilityVersion::V0_1_20),
+    function!(ForecastLinear, "FORECAST.LINEAR", Statistical)
+        .with_aliases(&[FunctionAlias::official("FORECAST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(Rsq, "RSQ", Statistical),
     function!(Slope, "SLOPE", Statistical),
     function!(Small, "SMALL", Statistical),

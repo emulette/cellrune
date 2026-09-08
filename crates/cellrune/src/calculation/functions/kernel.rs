@@ -379,6 +379,8 @@ function_enum!(StatisticalFunction {
     PercentRankInc,
     QuartileInc,
     RankEq,
+    RankAvg,
+    ForecastLinear,
     Rsq,
     Slope,
     Small,

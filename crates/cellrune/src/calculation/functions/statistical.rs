@@ -40,7 +40,9 @@ pub(super) fn call(
         StatisticalFunction::PercentRankInc => percent_rank(engine, context, args),
         StatisticalFunction::PercentileInc => percentile(engine, context, args, false),
         StatisticalFunction::QuartileInc => percentile(engine, context, args, true),
-        StatisticalFunction::RankEq => rank(engine, context, args),
+        StatisticalFunction::RankEq => rank(engine, context, args, false),
+        StatisticalFunction::RankAvg => rank(engine, context, args, true),
+        StatisticalFunction::ForecastLinear => forecast(engine, context, args),
         StatisticalFunction::NormSDistLegacy => {
             standard_normal_distribution(engine, context, args, true)
         }
@@ -93,15 +95,7 @@ fn paired_statistic(
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let pairs = match numeric_pairs(engine, context, args) {
-        Ok(pairs) if !pairs.is_empty() => pairs,
-        Ok(_) => return Value::Error(ErrorKind::Div0),
-        Err(kind) => return Value::Error(kind),
-    };
-    let moments = match PairedMoments::collect_with_work(pairs, || {
-        poll_cancellation(context)?;
-        engine.charge_function_iterations(context, 1)
-    }) {
+    let moments = match paired_moments(engine, context, args) {
         Ok(moments) => moments,
         Err(kind) => return Value::Error(kind),
     };
@@ -139,6 +133,47 @@ fn paired_statistic(
         Value::Number(result)
     } else {
         Value::Error(ErrorKind::Num)
+    }
+}
+
+fn paired_moments(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<PairedMoments, ErrorKind> {
+    let pairs = numeric_pairs(engine, context, args)?;
+    if pairs.is_empty() {
+        return Err(ErrorKind::Div0);
+    }
+    PairedMoments::collect_with_work(pairs, || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    })
+}
+
+fn forecast(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [x, _, _] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let result = (|| {
+        let x = required_number(engine, context, x)?;
+        let moments = paired_moments(engine, context, &args[1..])?;
+        let deviation = moments.right_second_moment();
+        if deviation == 0.0 {
+            return Err(ErrorKind::Div0);
+        }
+        // Center the prediction instead of subtracting a large intercept.
+        let predicted =
+            moments.left_mean()? + moments.co_moment() / deviation * (x - moments.right_mean()?);
+        if predicted.is_finite() {
+            Ok(predicted)
+        } else {
+            Err(ErrorKind::Num)
+        }
+    })();
+    match result {
+        Ok(value) => Value::Number(value),
+        Err(kind) => Value::Error(kind),
     }
 }
 
@@ -451,7 +486,7 @@ fn percentile(
     Value::Number(numbers[lower] + (numbers[upper] - numbers[lower]) * fraction)
 }
 
-fn rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+fn rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], average: bool) -> Value {
     if args.len() < 2 || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
     }
@@ -459,7 +494,7 @@ fn rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Ok(number) => number,
         Err(kind) => return Value::Error(kind),
     };
-    let mut numbers = match numeric_arguments(engine, context, &args[1..2]) {
+    let numbers = match numeric_arguments(engine, context, &args[1..2]) {
         Ok(numbers) => numbers,
         Err(kind) => return Value::Error(kind),
     };
@@ -470,15 +505,33 @@ fn rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         },
         None => false,
     };
-    numbers.sort_by(f64::total_cmp);
-    if !ascending {
-        numbers.reverse();
+    let mut preceding = 0_u64;
+    let mut equal = 0_u64;
+    for candidate in numbers {
+        if let Err(kind) =
+            poll_cancellation(context).and_then(|()| engine.charge_function_iterations(context, 1))
+        {
+            return Value::Error(kind);
+        }
+        if candidate == number {
+            equal += 1;
+        } else if if ascending {
+            candidate < number
+        } else {
+            candidate > number
+        } {
+            preceding += 1;
+        }
     }
-    numbers
-        .iter()
-        .position(|candidate| *candidate == number)
-        .map(|index| Value::Number((index + 1) as f64))
-        .unwrap_or(Value::Error(ErrorKind::NA))
+    if equal == 0 {
+        return Value::Error(ErrorKind::NA);
+    }
+    let tied_offset = if average {
+        (equal - 1) as f64 / 2.0
+    } else {
+        0.0
+    };
+    Value::Number(preceding as f64 + 1.0 + tied_offset)
 }
 
 fn sample_variance(
