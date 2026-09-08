@@ -95,15 +95,15 @@ fn versioned_corpus_calculates_writes_and_reopens() {
     let report = session
         .calculate(CalculationOptionsDto::default())
         .expect("calculation must succeed");
-    assert_eq!(report.formula_count, 3);
+    assert_eq!(report.formula_count, 19);
     assert_eq!(report.unavailable_count, 0);
-    assert_eq!(report.materialized_cell_count, 6);
+    assert_eq!(report.materialized_cell_count, 22);
 
     let page = session
         .read_range(&RangeRequestDto {
             sheet: "Sheet1".to_owned(),
             start: "A1".to_owned(),
-            end: "F2".to_owned(),
+            end: "Y2".to_owned(),
             offset: 0,
             limit: 100,
         })
@@ -131,24 +131,31 @@ fn versioned_corpus_calculates_writes_and_reopens() {
         .save_bytes(WriteOptionsDto::default())
         .expect("verified save must succeed");
     assert!(write_report.complete);
-    assert_eq!(write_report.materialized_count, 6);
+    assert_eq!(write_report.materialized_count, 22);
 
     let reopened = WorkbookSession::open_bytes(&bytes).expect("written package must reopen");
     let reopened_page = reopened
         .read_range(&RangeRequestDto {
             sheet: "Sheet1".to_owned(),
-            start: "B1".to_owned(),
-            end: "F1".to_owned(),
+            start: "A1".to_owned(),
+            end: "Y2".to_owned(),
             offset: 0,
-            limit: 10,
+            limit: 100,
         })
         .expect("reopened range must be readable");
-    let b1 = reopened_page
-        .cells
-        .iter()
-        .find(|cell| cell.address == "B1")
-        .expect("B1 must be returned");
-    assert_eq!(b1.source_value, CellValueDto::Number { value: 5.0 });
+    for expected in &corpus.expected_numbers {
+        let cell = reopened_page
+            .cells
+            .iter()
+            .find(|cell| cell.address == expected.address)
+            .expect("saved corpus cell must be returned");
+        assert_eq!(
+            cell.source_value,
+            CellValueDto::Number {
+                value: expected.value
+            }
+        );
+    }
 }
 
 #[test]

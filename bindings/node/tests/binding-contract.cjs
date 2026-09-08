@@ -10,9 +10,13 @@ const { CellRuneError, Workbook, functionCatalog } = require("..");
 function assertCatalogContract() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 417);
+  assert.equal(catalog.entries.length, 433);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [
+    "CODE", "NUMBERVALUE", "DDB", "XNPV",
+    "MDETERM", "RANK.AVG", "FORECAST.LINEAR", "FORECAST",
+    "NORM.INV", "NORM.S.INV", "NORMINV", "NORMSINV",
+    "LOGNORM.DIST", "LOGNORM.INV", "LOGNORMDIST", "LOGINV",
     "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST", "BINOM.DIST.RANGE",
     "BINOM.INV", "BINOMDIST", "CRITBINOM", "GAMMA", "GAMMA.DIST", "GAMMA.INV",
     "GAMMADIST", "GAMMAINV", "GAMMALN", "GAMMALN.PRECISE", "HYPGEOM.DIST",
@@ -89,7 +93,7 @@ async function main() {
   }
   const report = await workbook.calculate();
   assert.equal(report.unavailableCount, 0);
-  const page = workbook.readRange("Sheet1", "A1", "F2", { limit: 100 });
+  const page = workbook.readRange("Sheet1", "A1", "Y2", { limit: 100 });
   const values = new Map();
   for (const cell of page.cells) {
     const value =
