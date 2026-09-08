@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.19, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.20, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -535,12 +535,38 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.19 catalog contains 416 official
+  `.is_official()`. The 0.1.20 catalog contains 432 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 417 accepted entries. The descriptor registry
+  dummy-function marker, for 433 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
+- The sixteen official names added in 0.1.20 are `CODE`, `NUMBERVALUE`, `DDB`,
+  `XNPV`, `MDETERM`, `RANK.AVG`, `FORECAST.LINEAR`, `FORECAST`, `NORM.INV`,
+  `NORM.S.INV`, `NORMINV`, `NORMSINV`, `LOGNORM.DIST`, `LOGNORM.INV`,
+  `LOGNORMDIST`, and `LOGINV`. All return scalars. Legacy aliases preserve the
+  modern signatures except `LOGNORMDIST(x, mean, standard_dev)`, which always
+  returns the CDF and has no cumulative argument.
+- `CODE` returns the first character's deterministic Windows-1252 code, using
+  the same mapping as `CHAR`; empty or unmappable text returns `#VALUE!`.
+  `NUMBERVALUE(text, [decimal_separator], [group_separator])` uses `.` and `,`
+  when a separator is absent or missing. Explicit separators use their first
+  character and must be nonempty and different. ASCII space/tab/CR/LF are
+  ignored unless chosen as a separator; trailing percent signs scale by 100
+  each. Empty/whitespace-only text yields zero, and parentheses denote a
+  negative number. Malformed numbers return `#VALUE!`; no host locale is read.
+- `RANK.AVG` averages the positions of equal numeric values; `RANK`/`RANK.EQ`
+  return the first such position. They count values in one pass without sorting.
+  `FORECAST.LINEAR`/`FORECAST` reuse paired numeric regression moments and
+  evaluate the centered line at `x`; unequal lengths return `#N/A`, and absent
+  usable pairs or constant known-x values return `#DIV/0!`.
+- `DDB(cost, salvage, life, period, [factor])` defaults an absent factor to 2,
+  computes declining book value directly, and caps depreciation at the salvage
+  floor. `XNPV(rate, values, dates)` discounts actual elapsed days over 365,
+  shares XIRR's date/value validation, and permits cash flows of only one sign.
+  `MDETERM` requires a square numeric array, propagates input errors, and returns
+  zero for a singular matrix. Its LU elimination observes work/workspace limits.
+  See `docs/NUMERICS.md` for numerical and boundary policies.
 - The 19 official names added in 0.1.14 are `CONVERT`, `BESSELI`, `BESSELJ`,
   `BESSELK`, `BESSELY`, `COMPLEX`, `IMABS`, `IMAGINARY`, `IMARGUMENT`,
   `IMCONJUGATE`, `IMREAL`, `IMDIV`, `IMPOWER`, `IMPRODUCT`, `IMSUB`, `IMSUM`,

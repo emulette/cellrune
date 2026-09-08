@@ -8,17 +8,17 @@ transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.19 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.20 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.19
+cargo add cellrune@0.1.20
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.19"
+cellrune = "0.1.20"
 ```
 
 ## Features
@@ -37,6 +37,9 @@ cellrune = "0.1.19"
 - expands shared formulas while preserving absolute and relative references;
 - returns typed formula values and stable per-cell calculation issues in one result snapshot;
 - reports normalized per-workbook function demand and exposes the implemented function catalog;
+- calculates average-tie ranks, linear forecasts, matrix determinants, dated cash-flow present
+  values, declining-balance depreciation, normal/lognormal inverses, and deterministic
+  text-to-number conversions;
 - evaluates first-class and defined-name `LAMBDA` callables, including immediate invocation,
   `ISOMITTED`, `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`, and `MAKEARRAY`, under explicit
   recursion and iteration limits;
@@ -115,10 +118,9 @@ The fixed-income wave on top of 0.1.14 adds exactly 26 official names: `ACCRINT`
 solver that charges the calculation budget and observes cancellation.
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
-`NETWORKDAYS.INTL`, and `WORKDAY.INTL`. The deterministic source catalog contains 416 official
-names and 417 accepted entries including the non-official OOXML dummy-function marker. Their
-fixed grammar, lookup modes, calendar rules, wildcard behavior, and array-result boundaries are
-documented in [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
+`NETWORKDAYS.INTL`, and `WORKDAY.INTL`. Their fixed grammar, lookup modes, calendar rules,
+wildcard behavior, and array-result boundaries are documented alongside the current function
+catalog in [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 The regex functions target PCRE2 semantics with bounded compile, matching, capture, and output
 work. CellRune's prebuilt Python, Node.js, and MCP artifacts pin the bundled PCRE2 10.46 engine;
@@ -293,12 +295,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.19 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.20 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.19"
-npm install "@cellrune/node@0.1.19"
+python -m pip install "cellrune==0.1.20"
+npm install "@cellrune/node@0.1.20"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

@@ -10,6 +10,24 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-09-08
+
+### Added
+
+- `CODE`, `NUMBERVALUE`, `DDB`, `XNPV`, `MDETERM`, `RANK.AVG`, and
+  `FORECAST.LINEAR` / `FORECAST` across Rust, Python, Node.js, and MCP calculation.
+- `NORM.INV`, `NORM.S.INV`, `LOGNORM.DIST`, and `LOGNORM.INV`, with legacy names
+  `NORMINV`, `NORMSINV`, `LOGNORMDIST`, and `LOGINV`. Normal quantiles resolve
+  representable extreme-tail probabilities with bounded, cancellable refinement.
+
+### Changed
+
+- Reduced calculation preparation allocations by borrowing normalized lookup keys, moving
+  parser source components into the resulting syntax tree, and reusing worksheet formula indexes
+  during dependency collection.
+- `RANK` and `RANK.EQ` count numeric positions directly without sorting; they charge the actual
+  linear counting work to the function-iteration limit.
+
 ## [0.1.19] - 2026-09-07
 
 ### Changed
