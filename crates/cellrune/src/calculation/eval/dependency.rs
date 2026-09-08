@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use sha2::{Digest, Sha256};
 
 use super::{Engine, EvalContext, EvaluationBudget};
-use crate::CellContent;
 use crate::calculation::ast::{Expr, StructuredReference};
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
 use crate::calculation::functions::kernel::LegacyFunction;
@@ -18,6 +17,7 @@ use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan};
 use crate::calculation::scope::{CallableValue, DefinedLambdaId, ScopeValue};
+use crate::{CellAddress, CellContent, EXCEL_MAX_COLUMNS};
 use crate::{SheetId, Table, TableId, WorkbookSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -706,21 +706,8 @@ impl Engine<'_> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<(DependencyGraph, bool), ()> {
         let mut dependencies = BTreeMap::new();
-        let mut formula_cells = Vec::with_capacity(self.workbook.sheets().len());
-        for sheet in self.workbook.sheets() {
-            if cancelled() {
-                return Err(());
-            }
-            let mut cells = BTreeSet::new();
-            for cell in sheet.cells() {
-                if cancelled() {
-                    return Err(());
-                }
-                if matches!(cell.content(), CellContent::Formula(_)) {
-                    cells.insert((cell.address().row().get(), cell.address().column().get()));
-                }
-            }
-            formula_cells.push(cells);
+        if cancelled() {
+            return Err(());
         }
         let mut edge_count = 0_u64;
         for (cell, parsed) in self.asts.iter() {
@@ -749,7 +736,10 @@ impl Engine<'_> {
             for target in targets {
                 match target {
                     DependencyTarget::Cell(cell) | DependencyTarget::SpillAnchor(cell) => {
-                        if formula_cells[cell.0].contains(&(cell.1, cell.2)) {
+                        if self.workbook.sheets()[cell.0].formula_addresses().contains(
+                            &CellAddress::from_indices(cell.1, cell.2)
+                                .expect("resolved cell address"),
+                        ) {
                             cell_dependencies.push(cell);
                         }
                         if let Some(owner) = self.cancellable_array_owner(cell, cancelled)? {
@@ -763,8 +753,12 @@ impl Engine<'_> {
                                 return Err(());
                             }
                             if rect.is_single_cell() {
-                                if formula_cells[rect.sheet]
-                                    .contains(&(rect.row_start, rect.col_start))
+                                if self.workbook.sheets()[rect.sheet]
+                                    .formula_addresses()
+                                    .contains(
+                                        &CellAddress::from_indices(rect.row_start, rect.col_start)
+                                            .expect("resolved single-cell rectangle"),
+                                    )
                                 {
                                     cell_dependencies.push((
                                         rect.sheet,
@@ -780,14 +774,24 @@ impl Engine<'_> {
                                 }
                                 continue;
                             }
-                            for (row, column) in formula_cells[rect.sheet]
-                                .range((rect.row_start, 0)..=(rect.row_end, u32::MAX))
+                            let start = CellAddress::from_indices(rect.row_start, 1)
+                                .expect("resolved rectangle start");
+                            let end = CellAddress::from_indices(rect.row_end, EXCEL_MAX_COLUMNS)
+                                .expect("resolved rectangle end");
+                            for address in self.workbook.sheets()[rect.sheet]
+                                .formula_addresses()
+                                .range(start..=end)
                             {
                                 if cancelled() {
                                     return Err(());
                                 }
-                                if *column >= rect.col_start && *column <= rect.col_end {
-                                    cell_dependencies.push((rect.sheet, *row, *column));
+                                let column = address.column().get();
+                                if column >= rect.col_start && column <= rect.col_end {
+                                    cell_dependencies.push((
+                                        rect.sheet,
+                                        address.row().get(),
+                                        column,
+                                    ));
                                 }
                             }
                             for region in &self.array_regions {

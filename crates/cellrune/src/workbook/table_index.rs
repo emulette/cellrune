@@ -283,7 +283,12 @@ impl TableIndex {
                         .column_ids
                         .insert((table.id(), column.column_id()), column_location);
                     if column_names
-                        .insert(Box::from(case_insensitive_key(column.name())), column_index)
+                        .insert(
+                            case_insensitive_key(column.name())
+                                .into_owned()
+                                .into_boxed_str(),
+                            column_index,
+                        )
                         .is_some()
                     {
                         return Err(ValidationError::DuplicateTableColumnName {
@@ -336,7 +341,7 @@ impl TableIndex {
 
     pub(crate) fn by_display_name(&self, name: &str) -> Option<TableLocation> {
         let key = case_insensitive_key(name);
-        self.display_names.get(key.as_str()).copied()
+        self.display_names.get(key.as_ref()).copied()
     }
 
     pub(crate) fn by_id(&self, table_id: TableId) -> Option<TableLocation> {
@@ -358,7 +363,7 @@ impl TableIndex {
     ) -> Option<TableColumnLocation> {
         let table = self.by_id(table_id)?;
         let key = case_insensitive_key(name);
-        let column_index = *self.column_names.get(&table_id)?.get(key.as_str())?;
+        let column_index = *self.column_names.get(&table_id)?.get(key.as_ref())?;
         Some(TableColumnLocation {
             table,
             column_index,

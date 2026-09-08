@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -1114,8 +1115,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
 ];
 
 struct RegistryIndex {
-    canonical: HashMap<&'static str, FunctionId>,
-    accepted: HashMap<&'static str, FunctionId>,
+    canonical: HashMap<&'static str, &'static FunctionDescriptor>,
+    accepted: HashMap<&'static str, &'static FunctionDescriptor>,
     descriptors: HashMap<FunctionId, FunctionDescriptor>,
 }
 
@@ -1129,12 +1130,12 @@ fn registry_index() -> &'static RegistryIndex {
             .sum::<usize>();
         let mut accepted = HashMap::with_capacity(DESCRIPTORS.len() + alias_count);
         let mut descriptors = HashMap::with_capacity(DESCRIPTORS.len());
-        for descriptor in DESCRIPTORS.iter().copied() {
-            canonical.insert(descriptor.canonical_name, descriptor.id());
-            accepted.insert(descriptor.canonical_name, descriptor.id());
-            descriptors.insert(descriptor.id(), descriptor);
+        for descriptor in DESCRIPTORS {
+            canonical.insert(descriptor.canonical_name, descriptor);
+            accepted.insert(descriptor.canonical_name, descriptor);
+            descriptors.insert(descriptor.id(), *descriptor);
             for alias in descriptor.aliases {
-                accepted.insert(alias.name, descriptor.id());
+                accepted.insert(alias.name, descriptor);
             }
         }
         RegistryIndex {
@@ -1164,31 +1165,36 @@ pub(super) fn descriptor(canonical_name: &str) -> Option<FunctionDescriptor> {
     index
         .canonical
         .get(canonical_name)
-        .and_then(|id| index.descriptors.get(id))
-        .copied()
+        .map(|descriptor| **descriptor)
 }
 
 pub(super) fn resolve(name: &str) -> Option<FunctionDescriptor> {
-    let upper = name.to_ascii_uppercase();
+    let upper = uppercase_key(name);
     resolve_upper(&upper)
+}
+
+fn uppercase_key(name: &str) -> Cow<'_, str> {
+    if name.bytes().any(|byte| byte.is_ascii_lowercase()) {
+        Cow::Owned(name.to_ascii_uppercase())
+    } else {
+        Cow::Borrowed(name)
+    }
 }
 
 fn resolve_upper(upper: &str) -> Option<FunctionDescriptor> {
     let index = registry_index();
-    let direct = index
-        .accepted
-        .get(upper)
-        .and_then(|id| index.descriptors.get(id))
-        .copied();
+    let direct = index.accepted.get(upper).map(|descriptor| **descriptor);
     if direct.is_some() {
         return direct;
     }
     let base = strip_storage_prefixes(upper);
+    if base.len() == upper.len() {
+        return None;
+    }
     index
         .accepted
         .get(base)
-        .and_then(|id| index.descriptors.get(id))
-        .copied()
+        .map(|descriptor| **descriptor)
         .filter(|descriptor| {
             matches!(
                 descriptor.storage_prefix_policy(),
@@ -1198,7 +1204,7 @@ fn resolve_upper(upper: &str) -> Option<FunctionDescriptor> {
 }
 
 pub(super) fn normalize_name(name: &str) -> String {
-    let upper = name.to_ascii_uppercase();
+    let upper = uppercase_key(name);
     let base = strip_storage_prefixes(&upper);
     resolve_upper(&upper).map_or_else(
         || base.to_owned(),

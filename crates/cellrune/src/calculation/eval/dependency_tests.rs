@@ -115,7 +115,7 @@ fn unresolved_dynamic_dependency_analysis_polls_cancellation_during_recursion() 
 }
 
 #[test]
-fn dependency_formula_index_polls_cancellation_between_sparse_cells() {
+fn dependency_collection_polls_cancellation_between_formulas() {
     let mut draft = WorkbookDraft::new();
     let sheet_id = SheetId::new(1).expect("default sheet ID");
     draft
@@ -133,7 +133,9 @@ fn dependency_formula_index_polls_cancellation_between_sparse_cells() {
     };
 
     assert_eq!(engine.dependencies_cancellable(&cancelled), Err(()));
-    assert_eq!(polls.get(), 3);
+    // A nested expression can observe cancellation before its caller checks it.
+    // Bound the return latency without requiring the removed inventory scan.
+    assert!((3..=4).contains(&polls.get()));
 }
 
 #[test]

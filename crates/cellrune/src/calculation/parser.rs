@@ -84,7 +84,7 @@ pub(super) fn parse_formula_with_limits(
         return Err(parser.error(ParseErrorCode::UnexpectedToken));
     }
     validate_ast_limits(&root.expr, root.span, limits)?;
-    let mut node_sources = parser.node_sources.iter().rev();
+    let mut node_sources = parser.node_sources.into_iter().rev();
     let node_tree =
         NodeSpanTree::from_postorder(&root.expr, &mut node_sources).ok_or(ParseError {
             code: ParseErrorCode::UnexpectedToken,

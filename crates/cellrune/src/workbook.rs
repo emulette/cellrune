@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU32;
@@ -93,7 +94,7 @@ impl SheetName {
         }) {
             return Err(ValidationError::SheetNameInvalidCharacter { character });
         }
-        let lookup_key = case_insensitive_key(&value).into_boxed_str();
+        let lookup_key = case_insensitive_key(&value).into_owned().into_boxed_str();
         Ok(Self {
             original: value.into_boxed_str(),
             lookup_key,
@@ -1103,8 +1104,9 @@ impl WorkbookSnapshot {
         scope: DefinedNameScope,
         name: &str,
     ) -> Option<(usize, &DefinedName)> {
+        let names = self.defined_name_index.get(&scope)?;
         let key = case_insensitive_key(name);
-        let index = *self.defined_name_index.get(&scope)?.get(key.as_str())?;
+        let index = *names.get(key.as_ref())?;
         Some((index, &self.defined_names[index]))
     }
 
@@ -1207,7 +1209,7 @@ impl WorkbookSnapshot {
 
     pub(crate) fn sheet_index_by_name(&self, name: &str) -> Option<usize> {
         let key = case_insensitive_key(name);
-        self.sheet_name_index.get(key.as_str()).copied()
+        self.sheet_name_index.get(key.as_ref()).copied()
     }
 
     /// Returns the workbook date system.
@@ -1302,6 +1304,14 @@ fn sheet_identity_store_cancellable(
     )
 }
 
-fn case_insensitive_key(value: &str) -> String {
-    value.chars().flat_map(char::to_lowercase).collect()
+fn case_insensitive_key(value: &str) -> Cow<'_, str> {
+    if value.is_ascii() {
+        if value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            Cow::Owned(value.to_ascii_lowercase())
+        } else {
+            Cow::Borrowed(value)
+        }
+    } else {
+        Cow::Owned(value.chars().flat_map(char::to_lowercase).collect())
+    }
 }

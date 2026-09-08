@@ -55,9 +55,9 @@ impl NodeSpanTree {
         &self.components
     }
 
-    pub(super) fn from_postorder<'a>(
+    pub(super) fn from_postorder(
         expr: &Expr,
-        sources: &mut impl Iterator<Item = &'a PendingNodeSource>,
+        sources: &mut impl Iterator<Item = PendingNodeSource>,
     ) -> Option<Self> {
         let source = sources.next()?;
         let mut children = match expr {
@@ -110,7 +110,7 @@ impl NodeSpanTree {
         children.reverse();
         Some(Self {
             span: source.span,
-            components: source.components.clone().into(),
+            components: source.components.into(),
             children: children.into(),
         })
     }
