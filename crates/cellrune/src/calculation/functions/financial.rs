@@ -3,6 +3,7 @@ use super::super::ast::Expr;
 use super::super::decimal::{DecimalTrace, RationalTrace};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
+use super::array_common::poll_cancellation;
 use super::calendar::date_from_serial;
 use super::kernel::FinancialFunction;
 use super::util::{
@@ -30,6 +31,8 @@ pub(super) fn call(
         FinancialFunction::Sln => sln(engine, context, args),
         FinancialFunction::Syd => syd(engine, context, args),
         FinancialFunction::Db => db(engine, context, args),
+        FinancialFunction::Ddb => ddb(engine, context, args),
+        FinancialFunction::Xnpv => xnpv(engine, context, args),
     }
 }
 
@@ -237,61 +240,11 @@ fn xirr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() < 2 || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
     }
-    let mut visited_cells = 0_u64;
-    let cashflow_items = match collect_argument_values_with_counter(
-        engine,
-        context,
-        std::slice::from_ref(&args[0]),
-        &mut visited_cells,
-    ) {
+    let (cashflows, dates) = match dated_cashflows(engine, context, &args[..2], true) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    let date_items = match collect_argument_values_with_counter(
-        engine,
-        context,
-        std::slice::from_ref(&args[1]),
-        &mut visited_cells,
-    ) {
-        Ok(values) => values,
-        Err(kind) => return Value::Error(kind),
-    };
-    if cashflow_items.is_empty() || cashflow_items.len() != date_items.len() {
-        return Value::Error(ErrorKind::Num);
-    }
-
-    let mut cashflows = Vec::with_capacity(cashflow_items.len());
-    for item in cashflow_items {
-        match item.value {
-            Value::Number(number) => cashflows.push(number),
-            Value::Error(kind) => return Value::Error(kind),
-            Value::Blank | Value::Text(_) | Value::Logical(_) => {
-                return Value::Error(ErrorKind::Value);
-            }
-        }
-    }
-    if !cashflows.iter().any(|value| *value > 0.0) || !cashflows.iter().any(|value| *value < 0.0) {
-        return Value::Error(ErrorKind::Num);
-    }
-
-    let mut dates = Vec::with_capacity(date_items.len());
-    for item in date_items {
-        let date = match item.value {
-            Value::Number(number) => number.trunc(),
-            Value::Error(kind) => return Value::Error(kind),
-            Value::Blank | Value::Text(_) | Value::Logical(_) => {
-                return Value::Error(ErrorKind::Value);
-            }
-        };
-        if date_from_serial(date, engine.date_system()).is_none() {
-            return Value::Error(ErrorKind::Value);
-        }
-        dates.push(date);
-    }
     let start_date = dates[0];
-    if dates.iter().any(|date| *date < start_date) {
-        return Value::Error(ErrorKind::Num);
-    }
 
     let guess = match args.get(2) {
         Some(expr) => match required_number(engine, context, expr) {
@@ -319,6 +272,96 @@ fn xirr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
             (value, derivative)
         },
     )
+}
+
+fn dated_cashflows(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    require_opposing_signs: bool,
+) -> Result<(Vec<f64>, Vec<f64>), ErrorKind> {
+    let mut visited_cells = 0_u64;
+    let cashflow_items = collect_argument_values_with_counter(
+        engine,
+        context,
+        std::slice::from_ref(&args[0]),
+        &mut visited_cells,
+    )?;
+    let date_items = collect_argument_values_with_counter(
+        engine,
+        context,
+        std::slice::from_ref(&args[1]),
+        &mut visited_cells,
+    )?;
+    if cashflow_items.is_empty() || cashflow_items.len() != date_items.len() {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut cashflows = Vec::with_capacity(cashflow_items.len());
+    for item in cashflow_items {
+        poll_cancellation(context)?;
+        match item.value {
+            Value::Number(number) => cashflows.push(number),
+            Value::Error(kind) => return Err(kind),
+            Value::Blank | Value::Text(_) | Value::Logical(_) => {
+                return Err(ErrorKind::Value);
+            }
+        }
+    }
+    if require_opposing_signs
+        && (!cashflows.iter().any(|value| *value > 0.0)
+            || !cashflows.iter().any(|value| *value < 0.0))
+    {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut dates = Vec::with_capacity(date_items.len());
+    for item in date_items {
+        poll_cancellation(context)?;
+        let date = match item.value {
+            Value::Number(number) => number.trunc(),
+            Value::Error(kind) => return Err(kind),
+            Value::Blank | Value::Text(_) | Value::Logical(_) => {
+                return Err(ErrorKind::Value);
+            }
+        };
+        if date_from_serial(date, engine.date_system()).is_none() {
+            return Err(ErrorKind::Value);
+        }
+        dates.push(date);
+    }
+    let start_date = dates[0];
+    if dates.iter().any(|date| *date < start_date) {
+        return Err(ErrorKind::Num);
+    }
+
+    Ok((cashflows, dates))
+}
+
+fn xnpv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [rate, _, _] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let result = (|| {
+        let rate = required_number(engine, context, rate)?;
+        let (cashflows, dates) = dated_cashflows(engine, context, &args[1..], false)?;
+        if rate == -1.0 {
+            return Err(ErrorKind::Num);
+        }
+        let base = 1.0 + rate;
+        let start = dates[0];
+        let mut value = 0.0;
+        for (cashflow, date) in cashflows.iter().zip(&dates) {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)?;
+            value += cashflow / base.powf((date - start) / 365.0);
+        }
+        Ok(value)
+    })();
+    match result {
+        Ok(number) => financial_value(number),
+        Err(kind) => Value::Error(kind),
+    }
 }
 
 fn rate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -426,6 +469,37 @@ fn db(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         book -= depreciation;
     }
     financial_value(depreciation)
+}
+
+fn ddb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [_, _, _, _, _] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let values = match scalar_arguments(engine, context, args, 5) {
+        Ok(values) => values,
+        Err(kind) => return Value::Error(kind),
+    };
+    let (cost, salvage, life, period, factor) =
+        (values[0], values[1], values[2], values[3], values[4]);
+    if cost < 0.0 || salvage < 0.0 || life <= 0.0 || period <= 0.0 || period > life || factor <= 0.0
+    {
+        return Value::Error(ErrorKind::Num);
+    }
+    if salvage >= cost {
+        return Value::Number(0.0);
+    }
+    if life < 1.0 {
+        return financial_value(cost - salvage);
+    }
+    let period = period.max(1.0);
+    if factor >= life {
+        return financial_value(if period == 1.0 { cost - salvage } else { 0.0 });
+    }
+    let rate = factor / life;
+    // Closed-form remaining balance avoids work proportional to a caller's life/period.
+    // log1p also preserves a small declining rate when 1-rate would round to one.
+    let book = cost * ((period - 1.0) * (-rate).ln_1p()).exp();
+    financial_value((book * rate).min(book - salvage).max(0.0))
 }
 
 fn payment(rate: f64, periods: f64, present: f64, future: f64, payment_type: f64) -> f64 {

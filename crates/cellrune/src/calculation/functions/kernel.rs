@@ -437,6 +437,8 @@ function_enum!(DistributionFunction {
 
 function_enum!(FinancialFunction {
     Db,
+    Ddb,
+    Xnpv,
     Fv,
     Ipmt,
     Irr,

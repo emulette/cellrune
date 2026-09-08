@@ -3113,25 +3113,22 @@
     "excel_rich_error": false
   },
   "function:ddb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2400",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ddb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ddb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:dec2bin": {
     "classification": "match",
@@ -9106,25 +9103,22 @@
     "excel_rich_error": false
   },
   "function:xnpv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "979.02425722098951",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (XNPV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xnpv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-692.19444599330097",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (XNPV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xnpv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (XNPV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:xor": {
     "classification": "match",

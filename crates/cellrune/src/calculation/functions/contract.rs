@@ -1612,9 +1612,19 @@ impl DistributionFunction {
     }
 }
 
+const DDB_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    4,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Number(2.0),
+)];
+
 impl FinancialFunction {
     const fn call_contract(self) -> CallContract {
         match self {
+            Self::Ddb => {
+                CallContract::uniform(Arity::range(4, 5), SCALAR).with_defaults(DDB_DEFAULTS)
+            }
+            Self::Xnpv => CallContract::positional(Arity::exact(3), &[SCALAR, ARRAY, ARRAY]),
             Self::Fv | Self::Nper | Self::Pmt | Self::Pv => CallContract::positional(
                 Arity::range(3, 5),
                 &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],

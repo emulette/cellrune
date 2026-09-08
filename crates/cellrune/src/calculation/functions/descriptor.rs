@@ -1050,6 +1050,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(NegBinomDistLegacy, "NEGBINOMDIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(Db, "DB", Financial),
+    function!(Ddb, "DDB", Financial).with_minimum_version(CompatibilityVersion::V0_1_20),
+    function!(Xnpv, "XNPV", Financial).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(Fv, "FV", Financial),
     function!(Ipmt, "IPMT", Financial),
     function!(Irr, "IRR", Financial),
