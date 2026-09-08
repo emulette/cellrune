@@ -992,6 +992,20 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
     function!(BetaDist, "BETA.DIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(NormInv, "NORM.INV", Distribution)
+        .with_aliases(&[FunctionAlias::official("NORMINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
+    function!(NormSInv, "NORM.S.INV", Distribution)
+        .with_aliases(&[FunctionAlias::official("NORMSINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
+    function!(LogNormDist, "LOGNORM.DIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
+    // LOGNORMDIST omits the cumulative flag and always evaluates the CDF.
+    function!(LogNormDistLegacy, "LOGNORMDIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
+    function!(LogNormInv, "LOGNORM.INV", Distribution)
+        .with_aliases(&[FunctionAlias::official("LOGINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(FDist, "F.DIST", Distribution).with_minimum_version(CompatibilityVersion::V0_1_13),
     function!(FDistRt, "F.DIST.RT", Distribution)
         .with_aliases(&[FunctionAlias::official("FDIST")])

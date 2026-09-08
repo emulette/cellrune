@@ -1581,6 +1581,11 @@ impl StatisticalAdditionalFunction {
 impl DistributionFunction {
     const fn call_contract(self) -> CallContract {
         match self {
+            Self::NormSInv => CallContract::uniform(Arity::exact(1), SCALAR),
+            Self::NormInv | Self::LogNormDistLegacy | Self::LogNormInv => {
+                CallContract::uniform(Arity::exact(3), SCALAR)
+            }
+            Self::LogNormDist => CallContract::uniform(Arity::exact(4), SCALAR),
             Self::BetaDist => CallContract::positional(
                 Arity::range(4, 6),
                 &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],

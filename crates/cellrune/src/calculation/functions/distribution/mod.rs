@@ -8,6 +8,7 @@ mod binomial;
 pub(in crate::calculation::functions) mod f;
 mod gamma;
 mod hypergeometric;
+mod normal;
 pub(in crate::calculation::functions) mod t;
 
 pub(super) fn call(
@@ -17,6 +18,15 @@ pub(super) fn call(
     args: &[Expr],
 ) -> Value {
     match function {
+        DistributionFunction::NormInv => normal::normal_inverse(engine, context, args),
+        DistributionFunction::NormSInv => normal::normal_standard_inverse(engine, context, args),
+        DistributionFunction::LogNormDist => {
+            normal::lognormal_distribution(engine, context, args, false)
+        }
+        DistributionFunction::LogNormDistLegacy => {
+            normal::lognormal_distribution(engine, context, args, true)
+        }
+        DistributionFunction::LogNormInv => normal::lognormal_inverse(engine, context, args),
         DistributionFunction::BetaDist => beta::beta_distribution(engine, context, args),
         DistributionFunction::BetaDistLegacy => {
             beta::beta_distribution_legacy(engine, context, args)

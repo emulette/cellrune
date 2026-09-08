@@ -410,6 +410,11 @@ function_enum!(StatisticalAdditionalFunction {
 });
 
 function_enum!(DistributionFunction {
+    NormInv,
+    NormSInv,
+    LogNormDist,
+    LogNormDistLegacy,
+    LogNormInv,
     BetaDist,
     BetaDistLegacy,
     BetaInv,

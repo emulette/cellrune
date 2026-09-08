@@ -23,6 +23,8 @@ mod distributions;
 mod financial_extensions;
 #[path = "calculation_behavior/moments.rs"]
 mod moments;
+#[path = "calculation_behavior/normal_extensions.rs"]
+mod normal_extensions;
 #[path = "calculation_behavior/regression.rs"]
 mod regression;
 #[path = "calculation_behavior/roman_numeral.rs"]
@@ -2745,7 +2747,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        424
+        432
     );
     let let_entry = catalog
         .iter()

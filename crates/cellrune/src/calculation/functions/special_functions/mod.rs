@@ -28,7 +28,9 @@ pub(super) use incomplete_beta::{
 pub(super) use incomplete_gamma::{regularized_gamma_p, regularized_gamma_p_from_log};
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
-pub(super) use normal::{standard_normal_density, standard_normal_lower, standard_normal_upper};
+pub(super) use normal::{
+    standard_normal_density, standard_normal_inverse, standard_normal_lower, standard_normal_upper,
+};
 
 use super::super::value::ErrorKind;
 

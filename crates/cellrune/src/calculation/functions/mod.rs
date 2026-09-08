@@ -974,7 +974,7 @@ mod tests {
             .map(|descriptor| descriptor.aliases().len())
             .sum::<usize>();
         assert_eq!(aliases.len(), alias_count);
-        assert_eq!(aliases.len(), 26);
+        assert_eq!(aliases.len(), 29);
         assert!(aliases.is_disjoint(&kernels));
         assert!(
             descriptor::descriptors()
@@ -984,10 +984,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 425);
+        assert_eq!(catalog.len(), 433);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            424
+            432
         );
         assert!(
             catalog
