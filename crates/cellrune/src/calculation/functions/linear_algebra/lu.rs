@@ -27,22 +27,7 @@ pub(in crate::calculation::functions) fn invert(
         matrix.swap_rows(pivot_col, pivot_row);
         permutation.swap(pivot_col, pivot_row);
 
-        let pivot = matrix.get(pivot_col, pivot_col);
-        for row in (pivot_col + 1)..dimension {
-            let factor = matrix.get(row, pivot_col) / pivot;
-            if !factor.is_finite() {
-                return Err(ErrorKind::Num);
-            }
-            matrix.set(row, pivot_col, factor);
-            charge_work((dimension - pivot_col - 1) as u64)?;
-            for col in (pivot_col + 1)..dimension {
-                let next = matrix.get(row, col) - factor * matrix.get(pivot_col, col);
-                if !next.is_finite() {
-                    return Err(ErrorKind::Num);
-                }
-                matrix.set(row, col, next);
-            }
-        }
+        eliminate_column(&mut matrix, pivot_col, &mut charge_work)?;
     }
 
     let cells = dimension.checked_mul(dimension).ok_or(ErrorKind::Num)?;
@@ -88,6 +73,74 @@ pub(in crate::calculation::functions) fn invert(
         }
     }
     DenseMatrix::new(dimension, dimension, inverse)
+}
+
+pub(in crate::calculation::functions) fn determinant(
+    mut matrix: DenseMatrix,
+    mut charge_work: impl FnMut(u64) -> Result<(), ErrorKind>,
+) -> Result<f64, ErrorKind> {
+    if matrix.rows() != matrix.cols() {
+        return Err(ErrorKind::Value);
+    }
+    // Keep the diagonal product normalized so compensating large and small
+    // pivots do not overflow or underflow before the final determinant is known.
+    let mut mantissa = 1.0;
+    let mut exponent = 0_i64;
+    for pivot_col in 0..matrix.rows() {
+        charge_work((matrix.rows() - pivot_col) as u64)?;
+        let (pivot_row, pivot_abs) = select_pivot_row(&matrix, pivot_col);
+        // A tiny nonzero determinant is meaningful; MINVERSE's conditioning
+        // threshold must not turn it into a singular determinant.
+        if pivot_abs == 0.0 {
+            return Ok(0.0);
+        }
+        matrix.swap_rows(pivot_col, pivot_row);
+        if pivot_col != pivot_row {
+            mantissa = -mantissa;
+        }
+        let (pivot_mantissa, pivot_exponent) = libm::frexp(matrix.get(pivot_col, pivot_col));
+        let (product_mantissa, product_exponent) = libm::frexp(mantissa * pivot_mantissa);
+        mantissa = product_mantissa;
+        exponent += i64::from(pivot_exponent) + i64::from(product_exponent);
+        eliminate_column(&mut matrix, pivot_col, &mut charge_work)?;
+    }
+    if exponent > 1024 {
+        return Err(ErrorKind::Num);
+    }
+    if exponent < -1074 {
+        return Ok(0.0);
+    }
+    let result = libm::scalbn(mantissa, exponent as i32);
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+fn eliminate_column(
+    matrix: &mut DenseMatrix,
+    pivot_col: usize,
+    charge_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
+) -> Result<(), ErrorKind> {
+    let dimension = matrix.rows();
+    let pivot = matrix.get(pivot_col, pivot_col);
+    for row in (pivot_col + 1)..dimension {
+        let factor = matrix.get(row, pivot_col) / pivot;
+        if !factor.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        matrix.set(row, pivot_col, factor);
+        charge_work((dimension - pivot_col - 1) as u64)?;
+        for col in (pivot_col + 1)..dimension {
+            let next = matrix.get(row, col) - factor * matrix.get(pivot_col, col);
+            if !next.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            matrix.set(row, col, next);
+        }
+    }
+    Ok(())
 }
 
 fn select_pivot_row(matrix: &DenseMatrix, pivot_col: usize) -> (usize, f64) {

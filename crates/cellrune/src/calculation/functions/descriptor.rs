@@ -877,6 +877,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(MInverse, "MINVERSE", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MInverse))
         .with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(MDeterm, "MDETERM", Math).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(MMult, "MMULT", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MMult)),
     function!(MUnit, "MUNIT", Array)

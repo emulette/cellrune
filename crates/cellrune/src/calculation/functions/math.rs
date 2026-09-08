@@ -12,6 +12,9 @@ pub(super) fn call(
     args: &[Expr],
 ) -> Value {
     match function {
+        MathFunction::MDeterm => {
+            super::array::mdeterm(engine, context, args).map_or_else(Value::Error, Value::Number)
+        }
         MathFunction::Abs => unary(engine, context, args, f64::abs),
         MathFunction::Int => unary(engine, context, args, f64::floor),
         MathFunction::Sign => unary(engine, context, args, excel_sign),

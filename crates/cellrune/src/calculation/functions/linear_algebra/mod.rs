@@ -4,7 +4,7 @@ mod cpqr;
 mod lu;
 
 pub(super) use cpqr::{LeastSquaresSolution, solve_least_squares};
-pub(super) use lu::invert;
+pub(super) use lu::{determinant, invert};
 
 #[derive(Debug, Clone)]
 pub(super) struct DenseMatrix {

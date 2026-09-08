@@ -1049,6 +1049,7 @@ impl DatabaseFunction {
 impl MathFunction {
     const fn call_contract(self) -> CallContract {
         match self {
+            Self::MDeterm => CallContract::uniform(Arity::exact(1), ARRAY),
             Self::Abs
             | Self::Even
             | Self::Exp

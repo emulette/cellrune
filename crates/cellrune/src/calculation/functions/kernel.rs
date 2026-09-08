@@ -98,6 +98,7 @@ function_enum!(MathFunction {
     Ln,
     Log,
     Log10,
+    MDeterm,
     Mod,
     MRound,
     Odd,

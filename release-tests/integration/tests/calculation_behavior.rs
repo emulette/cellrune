@@ -15,6 +15,8 @@ use cellrune::{
 mod criteria_matching;
 #[path = "calculation_behavior/database.rs"]
 mod database;
+#[path = "calculation_behavior/determinant.rs"]
+mod determinant;
 #[path = "calculation_behavior/distributions.rs"]
 mod distributions;
 #[path = "calculation_behavior/financial_extensions.rs"]
@@ -2743,7 +2745,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        423
+        424
     );
     let let_entry = catalog
         .iter()

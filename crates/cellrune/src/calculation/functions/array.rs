@@ -36,6 +36,31 @@ pub(super) fn call_array(
     }
 }
 
+pub(super) fn mdeterm(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<f64, ErrorKind> {
+    let [argument] = args else {
+        return Err(ErrorKind::Value);
+    };
+    let source = engine.eval_array(context, argument)?;
+    if source.rows != source.cols {
+        return Err(ErrorKind::Value);
+    }
+    let cells = u64::from(source.rows) * u64::from(source.cols);
+    engine.ensure_array_cells(cells.checked_mul(2).ok_or(ErrorKind::Num)?)?;
+    let matrix = super::linear_algebra::DenseMatrix::new(
+        source.rows as usize,
+        source.cols as usize,
+        strict_numbers(source.data)?,
+    )?;
+    super::linear_algebra::determinant(matrix, |work| {
+        super::array_common::poll_cancellation(context)?;
+        engine.charge_function_iterations(context, work)
+    })
+}
+
 fn minverse(
     engine: &Engine<'_>,
     context: EvalContext<'_>,

@@ -48,11 +48,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H10": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H100": {
     "classification": "match",
@@ -97,11 +96,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H110": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H114": {
     "classification": "match",
@@ -296,11 +294,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H30": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H34": {
     "classification": "match",
@@ -381,11 +378,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H50": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H54": {
     "classification": "match",
@@ -478,11 +474,10 @@
     "excel_rich_error": false
   },
   "Sheet1!H70": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H74": {
     "classification": "match",
@@ -569,11 +564,10 @@
     "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "Sheet1!H90": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "Sheet1!H94": {
     "classification": "match",

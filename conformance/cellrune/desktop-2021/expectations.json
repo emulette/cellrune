@@ -5649,11 +5649,10 @@
     "excel_rich_error": false
   },
   "function:mdeterm": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-2",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MDETERM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:mduration": {
     "classification": "match",
