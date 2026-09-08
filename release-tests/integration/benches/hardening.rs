@@ -15,6 +15,9 @@ use zip::write::SimpleFileOptions;
 const DEFAULT_ROWS: u32 = 50_000;
 const DEFAULT_ITERATIONS: u32 = 3;
 
+#[path = "support/calculation_preparation.rs"]
+mod calculation_preparation;
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let test_mode = cfg!(test) || arguments.iter().any(|value| value == "--test");
@@ -35,6 +38,14 @@ fn main() {
     );
     assert!(rows > 0, "row count must be greater than zero");
     assert!(iterations > 0, "iteration count must be greater than zero");
+
+    if arguments
+        .iter()
+        .any(|value| value == "--calculation-preparation")
+    {
+        calculation_preparation::run(rows, iterations, &arguments);
+        return;
+    }
 
     if arguments.iter().any(|value| value == "--draft-write") {
         let edited = argument(&numeric_arguments, 2, rows);
