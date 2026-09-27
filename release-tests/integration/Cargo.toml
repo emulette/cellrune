@@ -26,6 +26,11 @@ harness = false
 test = false
 
 [[bench]]
+name = "function_usage"
+harness = false
+test = false
+
+[[bench]]
 name = "targeted_calculation"
 harness = false
 test = false
