@@ -32,6 +32,35 @@ lacks a value, so later releases can reuse the same setup.
 
 ## Verified
 
+### Existing function boundaries corrected in 0.1.21
+
+The saved Online and Mac profiles both now match the existing numeric-text cases for
+`ISEVEN`/`ISODD`, the zero-life `SLN` case (`#DIV/0!`), `ERROR.TYPE` on a spill error
+(`9`), the two cross-type `LOOKUP` cases (`#N/A`), and invalid text holidays in
+`NETWORKDAYS` (`#VALUE!`). These are corrections against the existing frozen workbooks.
+
+Worksheet tests also cover truncating `QUARTILE.INC` and its `QUARTILE` alias's quart
+argument before range validation and interpolation: `1.9` selects quartile 1, `4.9`
+selects quartile 4, and `-0.9` truncates to 0. `PERCENTILE.INC` continues to accept a
+fractional probability. These additional boundaries use contract tests, not newly
+recorded Excel observations.
+
+Parity operates on the truncated magnitude of the finite binary64 input, avoiding a
+saturating conversion to a signed 64-bit integer. Numeric text is accepted only in the
+parity functions; other information functions keep their type-inspection semantics.
+
+`LOOKUP` selects numeric, text, or logical candidates matching the search value's type
+and skips blank or error keys. A blank search value follows the existing numeric-zero
+comparison. Other lookup functions retain their own comparison rules.
+
+Standard `WORKDAY`/`NETWORKDAYS` holidays accept numeric serials and numeric text and
+reject other text, including date strings. No locale-dependent date parser is implied.
+`WORKDAY.INTL`/`NETWORKDAYS.INTL` preserve their existing numeric-only holiday collection:
+text and logical entries are ignored. Both families ignore blank/logical entries,
+propagate Excel errors, truncate valid fractional serials, and deduplicate holidays
+under the workbook's date system. The INTL distinction is an existing CellRune contract,
+not a claim of new Excel verification for every input shape.
+
 ### Selectable: iterative financial solvers
 
 `IRR`, `XIRR`, and `RATE` are root-finding functions with no closed form, so their results depend on

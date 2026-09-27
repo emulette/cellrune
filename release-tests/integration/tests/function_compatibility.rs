@@ -42,6 +42,8 @@ fn error(value: ExcelError) -> CalculationCellResult {
 #[test]
 fn parity_coerces_numeric_text_without_changing_other_information_functions() {
     for (formula, expected) in [
+        ("ISEVEN(2)", true),
+        ("ISODD(3.9)", true),
         ("ISEVEN(\"2\")", true),
         ("ISODD(\"2\")", false),
         ("ISEVEN(\" -2.9 \" )", true),
@@ -63,12 +65,19 @@ fn parity_coerces_numeric_text_without_changing_other_information_functions() {
         assert_eq!(result(formula, None), error(ExcelError::Value), "{formula}");
     }
     assert_eq!(result("ISODD(#N/A)", None), error(ExcelError::NotAvailable));
+    // Preserve the existing blank-reference contract while changing numeric text coercion.
+    assert_eq!(result("ISEVEN(A1)", None), error(ExcelError::Value));
 }
 
 #[test]
 fn error_type_classifies_spill_without_hiding_engine_issues() {
     for (formula, expected) in [
         ("ERROR.TYPE(#SPILL!)", 9.0),
+        ("ERROR.TYPE(#NULL!)", 1.0),
+        ("ERROR.TYPE(#VALUE!)", 3.0),
+        ("ERROR.TYPE(#REF!)", 4.0),
+        ("ERROR.TYPE(#NAME?)", 5.0),
+        ("ERROR.TYPE(#NUM!)", 6.0),
         ("ERROR.TYPE(A1)", 9.0),
         ("ERROR.TYPE(#DIV/0!)", 2.0),
         ("ERROR.TYPE(#N/A)", 7.0),
@@ -96,6 +105,11 @@ fn straight_line_zero_life_keeps_its_own_error_contract() {
         assert_eq!(result(formula, None), error(ExcelError::DivisionByZero));
     }
     assert_eq!(result("SLN(100,10,2.5)", None), number(36.0));
+    assert_eq!(result("SLN(100,10,-1)", None), error(ExcelError::Number));
+    assert_eq!(
+        result("SLN(100,#REF!,0)", None),
+        error(ExcelError::Reference)
+    );
     assert_eq!(result("SYD(100,10,0,1)", None), error(ExcelError::Number));
     assert_eq!(
         result("SLN(#N/A,10,0)", None),
@@ -112,6 +126,7 @@ fn quartile_truncates_before_indexing_without_changing_percentile() {
     for function in ["QUARTILE.INC", "QUARTILE"] {
         for (quart, expected) in [
             ("0", 0.0),
+            ("1", 10.0),
             ("1.9", 10.0),
             ("2", 20.0),
             ("3", 30.0),
@@ -131,6 +146,14 @@ fn quartile_truncates_before_indexing_without_changing_percentile() {
         }
         assert_eq!(result(&format!("{function}({{7}},1.9)"), None), number(7.0));
         assert_eq!(
+            result(&format!("{function}(A1:A2,1)"), None),
+            error(ExcelError::Number)
+        );
+        assert_eq!(
+            result(&format!("{function}({{0,\"ignored\",TRUE,10}},2)"), None),
+            number(5.0)
+        );
+        assert_eq!(
             result(&format!("{function}({{#N/A}},1.9)"), None),
             error(ExcelError::NotAvailable)
         );
@@ -148,6 +171,7 @@ fn lookup_does_not_use_numeric_candidates_for_text_searches() {
         "LOOKUP(\"x\",{1,2,3},{10,20,30})",
         "LOOKUP(\"x\",{1,10;2,20;3,30})",
         "LOOKUP(TRUE,{1,2,3})",
+        "LOOKUP(0,{1,2,3})",
     ] {
         assert_eq!(
             result(formula, None),
@@ -162,9 +186,17 @@ fn lookup_does_not_use_numeric_candidates_for_text_searches() {
         ("LOOKUP(\"b\",{1,\"a\",\"c\"},{10,20,30})", 20.0),
         ("LOOKUP(2,{1;2;3},{10;20;30})", 20.0),
         ("LOOKUP(2,{1,2,3;10,20,30})", 20.0),
+        ("LOOKUP(10,{1,2,3},{10,20,30})", 30.0),
+        ("LOOKUP(TRUE,{FALSE,TRUE},{10,20})", 20.0),
+        ("LOOKUP(2,{#N/A,1,2},{5,10,20})", 20.0),
+        ("LOOKUP(A1,{0,1},{10,20})", 10.0),
     ] {
         assert_eq!(result(formula, None), number(expected), "{formula}");
     }
+    assert_eq!(
+        result("LOOKUP(0,A1:A2)", None),
+        error(ExcelError::NotAvailable)
+    );
 }
 
 #[test]
@@ -258,6 +290,7 @@ fn information_arrays_apply_the_same_coercion_and_error_mapping() {
     for (address, formula) in [
         ("A1", "ISEVEN({\"2\",3,1E20})"),
         ("A3", "ERROR.TYPE({#SPILL!,#N/A})"),
+        ("A5", "ISEVEN({\"bad\",TRUE,#N/A,-2.9})"),
     ] {
         draft
             .set_cell_dynamic_formula(
@@ -278,6 +311,10 @@ fn information_arrays_apply_the_same_coercion_and_error_mapping() {
         ("C1", CalculationCellResult::Value(CellValue::Logical(true))),
         ("A3", number(9.0)),
         ("B3", number(7.0)),
+        ("A5", error(ExcelError::Value)),
+        ("B5", error(ExcelError::Value)),
+        ("C5", error(ExcelError::NotAvailable)),
+        ("D5", CalculationCellResult::Value(CellValue::Logical(true))),
     ] {
         assert_eq!(
             calculated

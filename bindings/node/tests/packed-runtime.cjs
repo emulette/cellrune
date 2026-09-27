@@ -41,7 +41,10 @@ async function main() {
   const { Workbook } = requireFromConsumer(PACKAGE_NAME);
   const workbook = Workbook.create();
   workbook.setNumber("Sheet1", "A1", 41);
-  workbook.setFormula("Sheet1", "B1", "=A1+1");
+  workbook.setFormula("Sheet1", "B1", "=SUM(A1,1)");
+  const usage = workbook.functionUsage();
+  assert.equal(usage.schemaVersion, 2);
+  assert.equal(usage.entries[0].callCount, 1n);
   const report = await workbook.calculate();
   assert.equal(report.unavailableCount, 0);
 

@@ -10,6 +10,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-09-27
+
 ### Changed
 
 - Aggregate static function demand without expanding every repeated defined-name call.
@@ -20,6 +22,7 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- Stack overflow during function usage analysis of deeply chained names and callable aliases.
 - Numeric text and large-number parity in `ISEVEN`/`ISODD`, `ERROR.TYPE(#SPILL!)`,
   `SLN` zero-life errors, and integer truncation in `QUARTILE.INC`/`QUARTILE`.
 - `LOOKUP` candidate type selection and invalid text holidays in `NETWORKDAYS`/`WORKDAY`.
