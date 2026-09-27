@@ -1,6 +1,6 @@
 use cellrune::{
     CalculationCellId, CalculationLimits, CalculationOptions, CellAddress, DefinedName,
-    DefinedNameScope, FormulaText, SheetId, WorkbookDraft, scan_function_usage,
+    DefinedNameScope, FormulaText, SheetId, SheetName, WorkbookDraft, scan_function_usage,
     scan_function_usage_with_options,
 };
 
@@ -115,4 +115,109 @@ fn let_scope_and_workbook_definitions_do_not_share_local_bindings() {
         .map(|entry| (entry.name(), entry.call_count(), entry.formula_count()))
         .collect();
     assert_eq!(actual, [("LET", 1, 1), ("MIN", 1, 1), ("SUM", 4, 2)]);
+}
+
+#[test]
+fn compressed_counts_are_exact_above_the_javascript_integer_limit_and_saturate_at_u64() {
+    for (expression, expected) in [
+        ("Name_53+SUM(2)".to_owned(), (1_u64 << 53) + 1),
+        ("Name_63".to_owned(), 1_u64 << 63),
+        (
+            (0..64)
+                .map(|i| format!("Name_{i}"))
+                .collect::<Vec<_>>()
+                .join("+"),
+            u64::MAX,
+        ),
+        ("Name_64".to_owned(), u64::MAX),
+    ] {
+        let mut draft = repeated_names(64);
+        let sheet = draft.workbook().sheets()[0].id();
+        formula(&mut draft, sheet, "A1", &expression);
+        let report = scan_function_usage(draft.workbook());
+        assert_eq!(report.entries()[0].call_count(), expected, "{expression}");
+        assert_eq!(report.entries()[0].formula_count(), 1);
+    }
+    let mut draft = repeated_names(63);
+    let sheet = draft.workbook().sheets()[0].id();
+    formula(&mut draft, sheet, "A1", "Name_63");
+    formula(&mut draft, sheet, "A2", "Name_63");
+    let report = scan_function_usage(draft.workbook());
+    assert_eq!(report.entries()[0].call_count(), u64::MAX);
+    assert_eq!(report.entries()[0].formula_count(), 2);
+}
+
+#[test]
+fn deep_name_chains_do_not_consume_the_host_call_stack() {
+    let mut draft = WorkbookDraft::new();
+    for i in 0..2048 {
+        let text = if i == 0 {
+            "SUM(1)".to_owned()
+        } else {
+            format!("Chain_{}", i - 1)
+        };
+        name(
+            &mut draft,
+            &format!("Chain_{i}"),
+            &text,
+            DefinedNameScope::Workbook,
+        );
+    }
+    let sheet = draft.workbook().sheets()[0].id();
+    formula(&mut draft, sheet, "A1", "Chain_2047");
+    let report = scan_function_usage(draft.workbook());
+    assert_eq!(report.entries()[0].call_count(), 1);
+}
+
+#[test]
+fn local_names_on_different_sheets_are_separate_from_workbook_definition_scope() {
+    let mut draft = WorkbookDraft::new();
+    let first = draft.workbook().sheets()[0].id();
+    let second = draft.add_sheet(SheetName::new("Second").unwrap()).unwrap();
+    name(&mut draft, "Base", "SUM(1)", DefinedNameScope::Workbook);
+    name(&mut draft, "Outer", "Base+Base", DefinedNameScope::Workbook);
+    name(&mut draft, "Base", "MIN(2)", DefinedNameScope::Sheet(first));
+    name(
+        &mut draft,
+        "Base",
+        "MAX(3)",
+        DefinedNameScope::Sheet(second),
+    );
+    formula(&mut draft, first, "A1", "Outer+Base");
+    formula(&mut draft, second, "A1", "Outer+Base");
+    let report = scan_function_usage(draft.workbook());
+    let counts: Vec<_> = report
+        .entries()
+        .iter()
+        .map(|e| (e.name(), e.call_count(), e.formula_count()))
+        .collect();
+    assert_eq!(counts, [("MAX", 1, 1), ("MIN", 1, 1), ("SUM", 4, 2)]);
+}
+
+#[test]
+fn cyclic_partial_summaries_do_not_poison_later_roots_or_shared_acyclic_children() {
+    let mut draft = repeated_names(8);
+    let sheet = draft.workbook().sheets()[0].id();
+    name(
+        &mut draft,
+        "Alpha",
+        "Name_8+Beta+Name_8",
+        DefinedNameScope::Workbook,
+    );
+    name(
+        &mut draft,
+        "Beta",
+        "MIN(1)+Alpha",
+        DefinedNameScope::Workbook,
+    );
+    for (address, text) in [("A1", "Alpha"), ("A2", "Beta"), ("A3", "Name_8")] {
+        formula(&mut draft, sheet, address, text);
+    }
+    let report = scan_function_usage(draft.workbook());
+    let counts: Vec<_> = report
+        .entries()
+        .iter()
+        .map(|e| (e.name(), e.call_count(), e.formula_count()))
+        .collect();
+    assert_eq!(counts, [("MIN", 2, 2), ("SUM", 1280, 3)]);
 }

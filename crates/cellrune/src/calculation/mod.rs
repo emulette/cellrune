@@ -377,6 +377,7 @@ impl FunctionUsageEntry {
     }
 
     /// Returns the total number of calls, including repeated calls in one formula.
+    /// A value of `u64::MAX` means at least that many calls; larger static counts saturate.
     pub const fn call_count(&self) -> u64 {
         self.call_count
     }
