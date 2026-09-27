@@ -1,8 +1,8 @@
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::{
-    Implementation, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-    ResourceContents, ServerCapabilities, ServerInfo,
+    Implementation, InitializeResult, ListResourceTemplatesResult, ListResourcesResult,
+    PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, ResourceContents, ServerCapabilities,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, Json, RoleServer, ServerHandler};
@@ -81,8 +81,8 @@ impl CellruneMcpServer {
 
 #[rmcp::tool_handler(router = self.tool_router)]
 impl ServerHandler for CellruneMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> InitializeResult {
+        InitializeResult::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()

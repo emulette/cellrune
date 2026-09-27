@@ -42,11 +42,11 @@ FALLBACK_LICENSES = {
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-derive": (
-        "e8e3bffa2dfa77a34b8c9cbd42ea4bfef0c29729",
+        "2763e12efc855748485129952a6ccb97ac991c06",
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-derive-backend": (
-        "956e4525fea6a676ea3680b711382f167b899af9",
+        "38162bb0eb324ae24b402982bad3d4ef3f24c90a",
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-sys": (

@@ -22,6 +22,7 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- Warnings-denied MCP builds with current `rmcp` and the Node derive dependency floor.
 - Stack overflow during function usage analysis of deeply chained names and callable aliases.
 - Numeric text and large-number parity in `ISEVEN`/`ISODD`, `ERROR.TYPE(#SPILL!)`,
   `SLN` zero-life errors, and integer truncation in `QUARTILE.INC`/`QUARTILE`.
