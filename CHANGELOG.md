@@ -23,6 +23,7 @@ inventories, and measurements belong in the linked documentation rather than in 
 ### Fixed
 
 - Warnings-denied MCP builds with current `rmcp` and the Node derive dependency floor.
+- Update the Node build tooling's `js-yaml` dependency to 4.3.2 for its merge-key CPU fix.
 - Stack overflow during function usage analysis of deeply chained names and callable aliases.
 - Numeric text and large-number parity in `ISEVEN`/`ISODD`, `ERROR.TYPE(#SPILL!)`,
   `SLN` zero-life errors, and integer truncation in `QUARTILE.INC`/`QUARTILE`.
