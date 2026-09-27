@@ -540,7 +540,12 @@ fn workday(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Valu
         Ok(days) => days,
         Err(kind) => return Value::Error(kind),
     };
-    let holidays = match holiday_serials(engine, context, args.get(2)) {
+    let holidays = match holiday_serials(
+        engine,
+        context,
+        args.get(2),
+        HolidayTextPolicy::NumericSerial,
+    ) {
         Ok(holidays) => holidays,
         Err(kind) => return Value::Error(kind),
     };
@@ -566,7 +571,12 @@ fn networkdays(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         Ok(serial) => serial,
         Err(kind) => return Value::Error(kind),
     };
-    let holidays = match holiday_serials(engine, context, args.get(2)) {
+    let holidays = match holiday_serials(
+        engine,
+        context,
+        args.get(2),
+        HolidayTextPolicy::NumericSerial,
+    ) {
         Ok(holidays) => holidays,
         Err(kind) => return Value::Error(kind),
     };
@@ -589,7 +599,7 @@ fn workday_intl(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         Ok(mask) => mask,
         Err(kind) => return Value::Error(kind),
     };
-    let holidays = match holiday_serials(engine, context, args.get(3)) {
+    let holidays = match holiday_serials(engine, context, args.get(3), HolidayTextPolicy::Ignore) {
         Ok(holidays) => holidays,
         Err(kind) => return Value::Error(kind),
     };
@@ -612,7 +622,7 @@ fn networkdays_intl(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]
         Ok(mask) => mask,
         Err(kind) => return Value::Error(kind),
     };
-    let holidays = match holiday_serials(engine, context, args.get(3)) {
+    let holidays = match holiday_serials(engine, context, args.get(3), HolidayTextPolicy::Ignore) {
         Ok(holidays) => holidays,
         Err(kind) => return Value::Error(kind),
     };
@@ -688,10 +698,17 @@ fn networkdays_from_parts(
     Value::Number(count as f64 * sign)
 }
 
+#[derive(Clone, Copy)]
+enum HolidayTextPolicy {
+    NumericSerial,
+    Ignore,
+}
+
 fn holiday_serials(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     expr: Option<&Expr>,
+    text_policy: HolidayTextPolicy,
 ) -> Result<BTreeSet<i64>, ErrorKind> {
     let Some(expr) = expr else {
         return Ok(BTreeSet::new());
@@ -711,6 +728,12 @@ fn holiday_serials(
                 holidays.insert(date_serial_from_number(number, engine.date_system())?);
             }
             Value::Error(kind) => return Err(kind),
+            Value::Text(_) if matches!(text_policy, HolidayTextPolicy::NumericSerial) => {
+                holidays.insert(date_serial_from_number(
+                    to_number(&item.value)?,
+                    engine.date_system(),
+                )?);
+            }
             Value::Blank | Value::Text(_) | Value::Logical(_) => {}
         }
     }

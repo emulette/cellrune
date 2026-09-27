@@ -1,11 +1,20 @@
 use cellrune::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
-    CalculationOptions, CellAddress, CellValue, ExcelError, FormulaText, WorkbookDraft,
+    CalculationOptions, CellAddress, CellValue, DateSystem, ExcelError, FormulaText, WorkbookDraft,
     calculate_workbook,
 };
 
 fn result(formula: &str, input: Option<CellValue>) -> CalculationCellResult {
+    result_in_system(formula, input, DateSystem::Excel1900)
+}
+
+fn result_in_system(
+    formula: &str,
+    input: Option<CellValue>,
+    system: DateSystem,
+) -> CalculationCellResult {
     let mut draft = WorkbookDraft::new();
+    draft.set_date_system(system).unwrap();
     let sheet = draft.workbook().sheets()[0].id();
     if let Some(value) = input {
         draft
@@ -163,8 +172,6 @@ fn calendar_functions_reject_invalid_holidays_instead_of_ignoring_them() {
     for (function, arguments) in [
         ("NETWORKDAYS", "DATE(2026,1,1),DATE(2026,1,2)"),
         ("WORKDAY", "DATE(2026,1,1),1"),
-        ("NETWORKDAYS.INTL", "DATE(2026,1,1),DATE(2026,1,2),1"),
-        ("WORKDAY.INTL", "DATE(2026,1,1),1,1"),
     ] {
         for holiday in ["\"bad\"", "{\"bad\"}", "A1", "A1:A2"] {
             let formula = format!("{function}({arguments},{holiday})");
@@ -177,6 +184,69 @@ fn calendar_functions_reject_invalid_holidays_instead_of_ignoring_them() {
         assert_eq!(
             result(&format!("{function}({arguments},#N/A)"), None),
             error(ExcelError::NotAvailable)
+        );
+    }
+}
+
+#[test]
+fn holiday_serials_preserve_date_systems_deduplication_and_intl_contracts() {
+    for (system, holiday) in [
+        (DateSystem::Excel1900, 46024),
+        (DateSystem::Excel1904, 44562),
+    ] {
+        for expression in [
+            format!("{holiday}"),
+            format!("{holiday}.9"),
+            format!("\"{holiday}\""),
+            format!("{{{holiday},{holiday}}}"),
+            "A1".into(),
+            "A1:A2".into(),
+        ] {
+            let formula = format!("NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),{expression})");
+            assert_eq!(
+                result_in_system(&formula, Some(CellValue::Text(holiday.to_string())), system),
+                number(1.0),
+                "{formula}"
+            );
+        }
+        for (formula, expected) in [
+            (
+                "NETWORKDAYS(DATE(2026,1,2),DATE(2026,1,1),DATE(2026,1,2))",
+                -1.0,
+            ),
+            (
+                "NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),DATE(2026,1,3))",
+                2.0,
+            ),
+            ("NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),A1:A2)", 2.0),
+            (
+                "NETWORKDAYS.INTL(DATE(2026,1,1),DATE(2026,1,2),1,{TRUE,\"bad\"})",
+                2.0,
+            ),
+        ] {
+            assert_eq!(
+                result_in_system(formula, None, system),
+                number(expected),
+                "{formula}"
+            );
+        }
+        for text in ["bad", "2026-01-02", "", "inf"] {
+            assert_eq!(
+                result_in_system(
+                    "NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),A1)",
+                    Some(CellValue::Text(text.into())),
+                    system
+                ),
+                error(ExcelError::Value)
+            );
+        }
+        assert_eq!(
+            result_in_system(
+                "NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),TRUE)",
+                None,
+                system
+            ),
+            number(2.0)
         );
     }
 }

@@ -241,7 +241,7 @@ fn lookup_offset<'value>(
     for offset in 0..length {
         if matches!(
             candidate(offset),
-            value if !matches!(value, Value::Error(_))
+            value if lookup_candidate_matches_type(lookup, value)
                 && compare(value, lookup) == Ok(Ordering::Equal)
         ) {
             exact = Some(offset);
@@ -253,7 +253,7 @@ fn lookup_offset<'value>(
     let mut matched = None;
     for offset in 0..length {
         match candidate(offset) {
-            Value::Error(_) => continue,
+            value if !lookup_candidate_matches_type(lookup, value) => continue,
             value => match compare(value, lookup) {
                 Ok(Ordering::Less) => matched = Some(offset),
                 Ok(Ordering::Equal) => {
@@ -265,6 +265,15 @@ fn lookup_offset<'value>(
         }
     }
     matched
+}
+
+fn lookup_candidate_matches_type(lookup: &Value, candidate: &Value) -> bool {
+    matches!(
+        (lookup, candidate),
+        (Value::Number(_) | Value::Blank, Value::Number(_))
+            | (Value::Text(_), Value::Text(_))
+            | (Value::Logical(_), Value::Logical(_))
+    )
 }
 
 fn column_letters(mut column: u32) -> String {
