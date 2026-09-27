@@ -170,6 +170,41 @@ fn deep_name_chains_do_not_consume_the_host_call_stack() {
 }
 
 #[test]
+fn deep_callable_aliases_preserve_argument_reachability_without_host_recursion() {
+    for with_let in [false, true] {
+        let mut draft = WorkbookDraft::new();
+        let sheet = draft.workbook().sheets()[0].id();
+        for level in 0..2048 {
+            name(
+                &mut draft,
+                &format!("Callable_{level}"),
+                &if level == 0 {
+                    "LAMBDA(x,SUM(x))".to_owned()
+                } else if with_let {
+                    format!("LET(f,Callable_{},f)", level - 1)
+                } else {
+                    format!("Callable_{}", level - 1)
+                },
+                DefinedNameScope::Workbook,
+            );
+        }
+        formula(&mut draft, sheet, "A1", "Callable_2047(MIN(1))");
+        let report = scan_function_usage(draft.workbook());
+        let counts: Vec<_> = report
+            .entries()
+            .iter()
+            .map(|entry| (entry.name(), entry.call_count()))
+            .collect();
+        let expected = if with_let {
+            vec![("LAMBDA", 1), ("LET", 2047), ("MIN", 1), ("SUM", 1)]
+        } else {
+            vec![("LAMBDA", 1), ("MIN", 1), ("SUM", 1)]
+        };
+        assert_eq!(counts, expected);
+    }
+}
+
+#[test]
 fn local_names_on_different_sheets_are_separate_from_workbook_definition_scope() {
     let mut draft = WorkbookDraft::new();
     let first = draft.workbook().sheets()[0].id();

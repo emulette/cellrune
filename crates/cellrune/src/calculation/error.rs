@@ -12,6 +12,8 @@ pub(crate) const ERROR_PARSE_INVALID_REFERENCE: &str = "invalid cell reference";
 pub(crate) const ERROR_PARSE_MISMATCHED_RANGE: &str = "mismatched range endpoints";
 
 pub(super) const MESSAGE_ANALYSIS_CACHE_POISONED: &str = "workbook analysis cache is poisoned";
+pub(super) const MESSAGE_CALLABLE_CLASSIFICATION_FRAME: &str =
+    "callable classification requires an active definition frame";
 pub(super) const MESSAGE_MISSING_FORMULA_TEXT: &str = "formula text is unavailable";
 pub(super) const MESSAGE_PARSE_ERROR: &str = "formula cannot be parsed";
 pub(super) const MESSAGE_UNSUPPORTED_FUNCTION: &str = "formula uses an unsupported function";

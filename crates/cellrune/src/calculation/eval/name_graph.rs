@@ -14,6 +14,8 @@ use crate::calculation::scope::{
 };
 use crate::{DefinedName, DefinedNameScope};
 
+mod callable;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NameGraphStatus {
     Supported,
@@ -29,57 +31,6 @@ fn dynamic_function(name: &str) -> Option<DynamicFunction> {
 }
 
 impl Engine<'_> {
-    pub(in crate::calculation) fn callable_shadow_for_name(
-        &self,
-        sheet: usize,
-        lookup_scope: Option<DefinedNameScope>,
-        name: &str,
-    ) -> CallableShadow {
-        self.callable_shadow_for_name_inner(sheet, lookup_scope, name, &mut BTreeSet::new())
-    }
-
-    fn callable_shadow_for_name_inner(
-        &self,
-        sheet: usize,
-        lookup_scope: Option<DefinedNameScope>,
-        name: &str,
-        active: &mut BTreeSet<DefinedLambdaId>,
-    ) -> CallableShadow {
-        let Some((index, defined_name)) =
-            self.resolve_defined_name_scoped(sheet, lookup_scope, name)
-        else {
-            return CallableShadow::Unshadowed;
-        };
-        let id = DefinedLambdaId::from_defined_name(defined_name);
-        if !active.insert(id.clone()) {
-            return CallableShadow::CyclicNonCallable;
-        }
-        let state = self
-            .defined_name_asts
-            .get(index)
-            .and_then(Option::as_ref)
-            .map_or(CallableShadow::Unknown, |parsed| {
-                let mut resolve =
-                    |nested: &str| -> Result<CallableShadow, std::convert::Infallible> {
-                        Ok(self.callable_shadow_for_name_inner(
-                            sheet,
-                            Some(id.scope()),
-                            nested,
-                            active,
-                        ))
-                    };
-                classify_callable_value(
-                    parsed.root(),
-                    &[],
-                    self.calculation_limits().max_let_bindings(),
-                    &mut resolve,
-                )
-                .expect("static callable classification is infallible")
-            });
-        active.remove(&id);
-        state
-    }
-
     pub(super) fn classify_name_graphs(&mut self, cancelled: &impl Fn() -> bool) -> Result<(), ()> {
         for (cell, parsed) in self.asts.iter() {
             if cancelled() {
