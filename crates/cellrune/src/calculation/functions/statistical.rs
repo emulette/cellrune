@@ -473,7 +473,7 @@ fn percentile(
         Err(kind) => return Value::Error(kind),
     };
     if quartile {
-        probability /= 4.0;
+        probability = probability.trunc() / 4.0;
     }
     if !(0.0..=1.0).contains(&probability) {
         return Value::Error(ErrorKind::Num);

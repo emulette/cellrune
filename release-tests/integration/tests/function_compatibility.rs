@@ -183,14 +183,43 @@ fn calendar_functions_reject_invalid_holidays_instead_of_ignoring_them() {
 
 #[test]
 fn information_arrays_apply_the_same_coercion_and_error_mapping() {
-    assert_eq!(
-        result("INDEX(ISEVEN({\"2\",3,1E20}),1,1)", None),
-        CalculationCellResult::Value(CellValue::Logical(true))
-    );
-    assert_eq!(
-        result("INDEX(ERROR.TYPE({#SPILL!,#N/A}),1,1)", None),
-        number(9.0)
-    );
+    let mut draft = WorkbookDraft::new();
+    let sheet = draft.workbook().sheets()[0].id();
+    for (address, formula) in [
+        ("A1", "ISEVEN({\"2\",3,1E20})"),
+        ("A3", "ERROR.TYPE({#SPILL!,#N/A})"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet,
+                CellAddress::from_a1(address).unwrap(),
+                FormulaText::from_xlsx(formula).unwrap(),
+                None,
+            )
+            .unwrap();
+    }
+    let calculated = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for (address, expected) in [
+        ("A1", CalculationCellResult::Value(CellValue::Logical(true))),
+        (
+            "B1",
+            CalculationCellResult::Value(CellValue::Logical(false)),
+        ),
+        ("C1", CalculationCellResult::Value(CellValue::Logical(true))),
+        ("A3", number(9.0)),
+        ("B3", number(7.0)),
+    ] {
+        assert_eq!(
+            calculated
+                .materialized_cell(CalculationCellId::new(
+                    sheet,
+                    CellAddress::from_a1(address).unwrap()
+                ))
+                .map(|cell| cell.result()),
+            Some(&expected),
+            "{address}"
+        );
+    }
 }
 
 #[test]

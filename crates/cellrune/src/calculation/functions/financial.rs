@@ -421,6 +421,9 @@ fn depreciation(
         Err(kind) => return Value::Error(kind),
     };
     let (cost, salvage, life) = (values[0], values[1], values[2]);
+    if !sum_of_years && life == 0.0 {
+        return Value::Error(ErrorKind::Div0);
+    }
     if life <= 0.0 {
         return Value::Error(ErrorKind::Num);
     }

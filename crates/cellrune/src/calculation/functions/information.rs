@@ -1,4 +1,5 @@
 use super::super::ast::Expr;
+use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
@@ -113,13 +114,13 @@ fn apply(function: InformationFunction, value: Value) -> Value {
 }
 
 fn parity(value: Value, odd: bool) -> Value {
-    match value {
-        Value::Number(number) => {
-            let is_odd = (number.abs().trunc() as i64) % 2 == 1;
-            Value::Logical(is_odd == odd)
-        }
-        Value::Error(kind) => Value::Error(kind),
-        Value::Blank | Value::Text(_) | Value::Logical(_) => Value::Error(ErrorKind::Value),
+    if matches!(value, Value::Blank | Value::Logical(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
+    match to_number(&value) {
+        // Keeping the remainder in f64 avoids saturating an out-of-range integer cast.
+        Ok(number) => Value::Logical((number.abs().trunc() % 2.0 == 1.0) == odd),
+        Err(kind) => Value::Error(kind),
     }
 }
 
@@ -156,6 +157,7 @@ fn error_type(value: Value) -> Value {
         Value::Error(ErrorKind::Name) => Value::Number(5.0),
         Value::Error(ErrorKind::Num) => Value::Number(6.0),
         Value::Error(ErrorKind::NA) => Value::Number(7.0),
+        Value::Error(ErrorKind::Spill) => Value::Number(9.0),
         Value::Error(kind) => Value::Error(kind),
         Value::Blank | Value::Number(_) | Value::Text(_) | Value::Logical(_) => {
             Value::Error(ErrorKind::NA)
