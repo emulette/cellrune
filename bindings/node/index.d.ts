@@ -387,7 +387,8 @@ export interface CalculationDeltaPage {
 export interface FunctionUsageEntry {
   readonly name: string;
   readonly supported: boolean;
-  readonly callCount: number;
+  /** Static call count; 18446744073709551615n means at least that many. */
+  readonly callCount: bigint;
   readonly formulaCount: number;
   readonly sampleCells: readonly CellReference[];
 }

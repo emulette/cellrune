@@ -47,6 +47,8 @@ function assertCatalogContract() {
 }
 
 async function main() {
+  require("./function-usage.cjs")();
+  await require("./compatibility.cjs")();
   assertCatalogContract();
   await assertPreviewContract();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
@@ -119,7 +121,7 @@ async function main() {
     .entries.find((entry) => entry.name === "ACCRINT");
   assert.notEqual(fixedIncomeUsage, undefined);
   assert.equal(fixedIncomeUsage.supported, true);
-  assert.equal(fixedIncomeUsage.callCount, 1);
+  assert.equal(fixedIncomeUsage.callCount, 1n);
   assert.deepEqual(fixedIncomeUsage.sampleCells, [
     { sheetId: 1, sheetName: "Sheet1", address: "I1" },
   ]);

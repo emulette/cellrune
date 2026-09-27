@@ -11,6 +11,7 @@ mod dto;
 mod error;
 mod service;
 mod targeted;
+mod usage_count;
 pub use service::{CompletedTargetRequest, PreparedTargetRequest};
 pub use targeted::{
     CalculationTargetDto, TargetCalculationCellDto, TargetCalculationLimitsDto,
@@ -45,6 +46,9 @@ pub use service::{
 
 /// Version of the serialized interop contract.
 pub const INTEROP_SCHEMA_VERSION: u32 = 1;
+
+/// Version of function usage reports with decimal-string JSON call counts.
+pub const INTEROP_FUNCTION_USAGE_SCHEMA_VERSION: u32 = 2;
 
 /// Version of the parallel table-authoring edit contract.
 pub const INTEROP_EDIT_SCHEMA_V2: u32 = 2;

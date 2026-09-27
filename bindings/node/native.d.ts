@@ -184,7 +184,7 @@ export interface NativeFunctionCatalogReport {
 export interface NativeFunctionUsageEntry {
   name: string
   supported: boolean
-  callCount: number
+  callCount: string
   formulaCount: number
   sampleCells: Array<NativeCellReference>
 }

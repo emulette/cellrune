@@ -1161,7 +1161,9 @@ pub struct FunctionUsageEntryDto {
     pub name: String,
     /// Whether the function has an implemented kernel.
     pub supported: bool,
-    /// Total call count.
+    /// Static call count, serialized as a decimal string. `u64::MAX` means at least that many.
+    #[serde(with = "crate::usage_count")]
+    #[schemars(with = "String")]
     pub call_count: u64,
     /// Distinct formula-cell count.
     pub formula_count: u64,

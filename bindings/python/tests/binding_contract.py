@@ -8,6 +8,8 @@ from collections.abc import Callable
 from typing import Literal, cast
 
 from cellrune import CellRuneError, Workbook, function_catalog
+from function_usage import assert_function_usage
+from compatibility import assert_compatibility
 
 CORPUS_PATH = pathlib.Path(__file__).parents[3] / "binding-contract" / "v1.json"
 DEFINED_NAME_CORPUS_PATH = (
@@ -121,6 +123,8 @@ def recalculate_with_invalid_solver_semantics(
 
 
 def main() -> None:
+    assert_function_usage()
+    assert_compatibility()
     assert_catalog_contract()
     assert_preview_contract()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))

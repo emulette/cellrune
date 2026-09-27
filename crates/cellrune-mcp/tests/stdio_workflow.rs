@@ -11,8 +11,203 @@ use cellrune_interop::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn usage_counts_are_lossless_decimal_strings_over_stdio() {
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../../binding-contract/function-usage-v2.json"
+    ))
+    .unwrap();
+    let root = TestDirectory::new("usage-counts");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let listed = mcp.request("tools/list", json!({}));
+    let tool = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "workbook_function_usage")
+        .unwrap();
+    let schema = &tool["outputSchema"];
+    let item = &schema["properties"]["entries"]["items"];
+    let item = match item["$ref"].as_str() {
+        Some(reference) => schema
+            .pointer(reference.strip_prefix('#').unwrap())
+            .unwrap(),
+        None => item,
+    };
+    assert_eq!(item["properties"]["call_count"]["type"], "string");
+    let created = successful_tool(mcp.call_tool("workbook_create", json!({})));
+    let session_id = created["session_id"].as_str().unwrap();
+    let changes: Vec<Value> = (0..=corpus["max_depth"].as_u64().unwrap())
+        .map(|depth| {
+            json!({
+                "kind": "set_defined_name", "name": format!("Usage_{depth}"),
+                "formula": if depth == 0 { "=SUM(1)".to_owned() }
+                    else { format!("=Usage_{}+Usage_{}", depth - 1, depth - 1) },
+                "hidden": false
+            })
+        })
+        .collect();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id, "expected_revision": 0, "changes": changes
+        }),
+    ));
+    for (index, case) in corpus["cases"].as_array().unwrap().iter().enumerate() {
+        successful_tool(mcp.call_tool("workbook_apply_changes", json!({
+            "session_id": session_id, "expected_revision": index + 1,
+            "changes": [{"kind": "set_formula", "sheet": "Sheet1", "address": "A1", "formula": case["formula"]}]
+        })));
+        let summary =
+            successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+        let usage = successful_tool(
+            mcp.call_tool("workbook_function_usage", json!({"session_id": session_id})),
+        );
+        assert_eq!(usage["schema_version"], corpus["schema_version"]);
+        assert_eq!(usage["formula_count"], 1);
+        assert_eq!(
+            usage["entries"],
+            json!([{
+                "name": "SUM", "supported": true, "call_count": case["call_count"], "formula_count": 1,
+                "sample_cells": [{"sheet_id": 1, "sheet_name": "Sheet1", "address": "A1"}]
+            }])
+        );
+        assert_eq!(
+            successful_tool(
+                mcp.call_tool("workbook_function_usage", json!({"session_id": session_id}))
+            ),
+            usage
+        );
+        assert_eq!(
+            successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id}))),
+            summary
+        );
+    }
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
 struct TestDirectory {
     path: PathBuf,
+}
+
+#[test]
+fn compatibility_corpus_survives_stdio_calculation_preview_and_save() {
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../../binding-contract/compatibility-v021.json"
+    ))
+    .unwrap();
+    let cases = corpus["cases"].as_array().unwrap();
+    let root = TestDirectory::new("compatibility");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let created = successful_tool(mcp.call_tool("workbook_create", json!({})));
+    let session_id = created["session_id"].as_str().unwrap();
+    let mut changes = vec![json!({"kind":"set_value", "sheet":"Sheet1", "address":"A1",
+        "value":{"kind":"number", "value":corpus["initial_input"]}})];
+    changes.extend(cases.iter().map(|case| {
+        json!({"kind":"set_formula", "sheet":"Sheet1",
+        "address":case["address"], "formula":case["formula"]})
+    }));
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id":session_id, "expected_revision":0, "changes":changes
+        }),
+    ));
+    let partial = successful_tool(mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id":session_id, "targets":[{"sheet":"Sheet1", "start":"B1", "end":"B9"}]
+        }),
+    ));
+    assert_eq!(partial["evaluated_count"], cases.len());
+    for (cell, case) in partial["cells"].as_array().unwrap().iter().zip(cases) {
+        assert_eq!(
+            cell["result"],
+            json!({"kind":"value", "value":case["initial"]})
+        );
+    }
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id":session_id, "mode":"full"}),
+    ));
+    let read_args = json!({"session_id":session_id, "sheet":"Sheet1", "start":"B1", "end":"B9"});
+    let initial = successful_tool(mcp.call_tool("workbook_read_range", read_args.clone()));
+    for (cell, case) in initial["cells"].as_array().unwrap().iter().zip(cases) {
+        assert_eq!(
+            cell["calculated"],
+            json!({"kind":"value", "value":case["initial"]})
+        );
+    }
+    let edit = json!([{"kind":"set_value", "sheet":"Sheet1", "address":"A1",
+        "value":{"kind":"number", "value":corpus["edited_input"]}}]);
+    let preview = successful_tool(mcp.call_tool(
+        "workbook_preview_changes",
+        json!({
+            "session_id":session_id, "expected_revision":1, "changes":edit, "mode":"auto"
+        }),
+    ));
+    let page = successful_tool(mcp.call_tool("workbook_preview_changes_page", json!({
+        "session_id":session_id, "preview_id":preview["preview_id"], "section":"preview_results", "limit":100
+    })));
+    for case in cases {
+        if case["initial"] != case["edited"] {
+            let item = page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["cell"]["address"] == case["address"])
+                .unwrap();
+            assert_eq!(
+                item["result"],
+                json!({"kind":"value", "value":case["edited"]})
+            );
+        }
+    }
+    assert_eq!(
+        successful_tool(mcp.call_tool("workbook_read_range", read_args.clone())),
+        initial
+    );
+    successful_tool(mcp.call_tool(
+        "workbook_discard_preview",
+        json!({"session_id":session_id, "preview_id":preview["preview_id"]}),
+    ));
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id":session_id, "expected_revision":1, "changes":edit
+        }),
+    ));
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id":session_id, "mode":"auto"}),
+    ));
+    let edited = successful_tool(mcp.call_tool("workbook_read_range", read_args));
+    for (cell, case) in edited["cells"].as_array().unwrap().iter().zip(cases) {
+        assert_eq!(
+            cell["calculated"],
+            json!({"kind":"value", "value":case["edited"]})
+        );
+    }
+    let path = root.path.join("compatibility.xlsx");
+    successful_tool(mcp.call_tool(
+        "workbook_save_as",
+        json!({"session_id":session_id, "path":path}),
+    ));
+    let reopened = successful_tool(mcp.call_tool("workbook_open", json!({"path":path})));
+    let saved = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({
+            "session_id":reopened["session_id"], "sheet":"Sheet1", "start":"B1", "end":"B9"
+        }),
+    ));
+    for (cell, case) in saved["cells"].as_array().unwrap().iter().zip(cases) {
+        assert_eq!(cell["source_value"], case["edited"]);
+    }
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
 }
 
 impl TestDirectory {

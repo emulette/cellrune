@@ -19,8 +19,8 @@ use crate::{
     DefinedNameInspectionResultDto, DefinedNameInvalidReasonDto, DefinedNameReferenceAreaDto,
     DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, FunctionCatalogEntryDto,
     FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto,
-    INTEROP_SCHEMA_VERSION, InteropError, RangePageDto, RangeRequestDto, SheetSummaryDto,
-    TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
+    INTEROP_FUNCTION_USAGE_SCHEMA_VERSION, INTEROP_SCHEMA_VERSION, InteropError, RangePageDto,
+    RangeRequestDto, SheetSummaryDto, TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
 };
 
 const UNKNOWN_RESULT_VARIANT: &str = "core_result_variant";
@@ -228,7 +228,7 @@ impl WorkbookSession {
         let workbook = self.engine.workbook();
         let report = scan_function_usage(workbook);
         FunctionUsageReportDto {
-            schema_version: INTEROP_SCHEMA_VERSION,
+            schema_version: INTEROP_FUNCTION_USAGE_SCHEMA_VERSION,
             formula_count: count_u64(report.formula_count()),
             parsed_formula_count: count_u64(report.parsed_formula_count()),
             unparsed_formula_count: count_u64(report.unparsed_formula_count()),

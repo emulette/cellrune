@@ -10,6 +10,21 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Changed
+
+- Aggregate static function demand without expanding every repeated defined-name call.
+  Counts saturate at `u64::MAX`, meaning at least that many calls; smaller counts are exact.
+- Function usage report schema 2 encodes JSON/MCP `call_count` as a decimal string.
+  Node `callCount` changes from `number` to `bigint`; use bigint arithmetic and convert
+  the field to a string before JSON serialization. Rust `u64` and Python `int` remain.
+
+### Fixed
+
+- Numeric text and large-number parity in `ISEVEN`/`ISODD`, `ERROR.TYPE(#SPILL!)`,
+  `SLN` zero-life errors, and integer truncation in `QUARTILE.INC`/`QUARTILE`.
+- `LOOKUP` candidate type selection and invalid text holidays in `NETWORKDAYS`/`WORKDAY`.
+  The existing numeric-only holiday handling in the `INTL` variants is preserved.
+
 ## [0.1.20] - 2026-09-08
 
 ### Added

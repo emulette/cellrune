@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "max_depth": 64,
+  "cases": [
+    { "formula": "=Usage_0", "call_count": "1" },
+    { "formula": "=Usage_53+Usage_0", "call_count": "9007199254740993" },
+    { "formula": "=Usage_63", "call_count": "9223372036854775808" },
+    { "formula": "=Usage_64", "call_count": "18446744073709551615" }
+  ]
+}

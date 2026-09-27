@@ -630,6 +630,15 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `FunctionUsageEntry` exposes `.name()`, `.support()`, `.call_count()`,
   `.formula_count()`, and up to eight deterministic `.sample_cells()`.
   `FunctionUsageReport` also records parsed and unparsed formula counts.
+- Demand is static, including repeated defined-name references, rather than a runtime
+  execution counter. Completed acyclic name summaries are reused within one scan;
+  scope and cycle-cut semantics remain intact. Counts saturate at `u64::MAX`:
+  values below `18446744073709551615` are exact; that maximum means at least that many.
+- Function usage report schema version 2 preserves `call_count` as a decimal string
+  in interop JSON and MCP. Rust DTOs retain `u64`, Python exposes `int`, and Node's
+  public `callCount` is `bigint`. Other reports keep their existing schema versions.
+  Node consumers must use bigint arithmetic and explicitly convert counts with
+  `.toString()` when serializing to JSON; converting through `Number` loses precision.
 - `FunctionSupport`: `Supported | Unsupported`; it is independent from
   whether a particular call later produces an Excel error value.
 

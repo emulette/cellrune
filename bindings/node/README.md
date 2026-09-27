@@ -11,6 +11,14 @@ calculation engine, editor, and writer.
 The package installs the matching native package through an optional
 dependency. You do not need to select a platform package yourself.
 
+## Function usage
+
+`workbook.functionUsage()` returns static function demand with `schemaVersion: 2`.
+Each entry's `callCount` is a `bigint`. Values below `18446744073709551615n` are
+exact; that maximum means at least that many calls. Use bigint arithmetic and
+`entry.callCount.toString()` when writing a count to JSON. This replaces the
+previous `number` field so large defined-name graphs do not lose precision.
+
 ## Install
 
 ```console

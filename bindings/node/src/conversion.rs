@@ -172,7 +172,7 @@ pub struct NativeCellReference {
 pub struct NativeFunctionUsageEntry {
     pub name: String,
     pub supported: bool,
-    pub call_count: f64,
+    pub call_count: String,
     pub formula_count: f64,
     pub sample_cells: Vec<NativeCellReference>,
 }
@@ -369,7 +369,7 @@ pub(crate) fn function_usage(value: FunctionUsageReportDto) -> NativeFunctionUsa
             .map(|entry| NativeFunctionUsageEntry {
                 name: entry.name,
                 supported: entry.supported,
-                call_count: entry.call_count as f64,
+                call_count: entry.call_count.to_string(),
                 formula_count: entry.formula_count as f64,
                 sample_cells: entry.sample_cells.into_iter().map(cell_reference).collect(),
             })

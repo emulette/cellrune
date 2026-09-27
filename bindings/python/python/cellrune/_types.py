@@ -462,6 +462,8 @@ class CalculationDeltaPage(TypedDict):
 
 
 class FunctionUsageEntry(TypedDict):
+    """Static demand; call_count == 18446744073709551615 means at least that many."""
+
     name: str
     supported: bool
     call_count: int

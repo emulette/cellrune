@@ -401,7 +401,7 @@ function normalizeFunctionUsage(report) {
     entries: report.entries.map((entry) => ({
       name: entry.name,
       supported: entry.supported,
-      callCount: entry.callCount,
+      callCount: BigInt(entry.callCount),
       formulaCount: entry.formulaCount,
       sampleCells: entry.sampleCells.map(normalizeCellReference),
     })),

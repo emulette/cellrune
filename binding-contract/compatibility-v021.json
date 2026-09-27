@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "initial_input": 2,
+  "edited_input": 3,
+  "cases": [
+    { "address": "B1", "formula": "=ISEVEN(A1&\"\")", "initial": {"kind":"logical","value":true}, "edited": {"kind":"logical","value":false} },
+    { "address": "B2", "formula": "=ISODD(A1&\"\")", "initial": {"kind":"logical","value":false}, "edited": {"kind":"logical","value":true} },
+    { "address": "B3", "formula": "=SLN(100,10,A1-2)", "initial": {"kind":"error","value":"#DIV/0!"}, "edited": {"kind":"number","value":90.0} },
+    { "address": "B4", "formula": "=ERROR.TYPE(#SPILL!)", "initial": {"kind":"number","value":9.0}, "edited": {"kind":"number","value":9.0} },
+    { "address": "B5", "formula": "=QUARTILE.INC({0,10,20,30,40},A1-0.1)", "initial": {"kind":"number","value":10.0}, "edited": {"kind":"number","value":20.0} },
+    { "address": "B6", "formula": "=QUARTILE({0,10,20,30,40},A1-0.1)", "initial": {"kind":"number","value":10.0}, "edited": {"kind":"number","value":20.0} },
+    { "address": "B7", "formula": "=LOOKUP(A1&\"\",{1,2,3},{10,20,30})", "initial": {"kind":"error","value":"#N/A"}, "edited": {"kind":"error","value":"#N/A"} },
+    { "address": "B8", "formula": "=NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),\"bad\")", "initial": {"kind":"error","value":"#VALUE!"}, "edited": {"kind":"error","value":"#VALUE!"} },
+    { "address": "B9", "formula": "=WORKDAY(DATE(2026,1,1),1,\"bad\")", "initial": {"kind":"error","value":"#VALUE!"}, "edited": {"kind":"error","value":"#VALUE!"} }
+  ]
+}
