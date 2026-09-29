@@ -121,7 +121,7 @@ fn collection_preserving_scope_value(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Option<ScopeValue> {
-    match expr {
+    crate::calculation::stack::grow(|| match expr {
         Expr::Paren(inner) => collection_preserving_scope_value(engine, context, inner),
         Expr::Array(_) | Expr::Name(_) | Expr::BuiltinCallable(_) => {
             Some(engine.eval_scope_value(context, expr))
@@ -136,7 +136,7 @@ fn collection_preserving_scope_value(
             Some(let_scope_value(engine, context, args))
         }
         _ => None,
-    }
+    })
 }
 
 pub(super) fn collect_callable_argument_values(

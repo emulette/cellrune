@@ -729,7 +729,7 @@ fn expr_contains_volatility(
     names: &mut BTreeSet<DefinedLambdaId>,
     local_scope: &mut CapabilityScope,
 ) -> bool {
-    match expr {
+    crate::calculation::stack::grow(|| match expr {
         Expr::Call { name, args } => {
             if let Some(arguments_are_reachable) =
                 call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
@@ -944,7 +944,7 @@ fn expr_contains_volatility(
         | Expr::ExternalReference(_)
         | Expr::QualifiedName { .. }
         | Expr::Missing => false,
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -1057,44 +1057,116 @@ fn inspect_expr(
     local_scope: &mut CapabilityScope,
     issues: &mut Vec<CalculationIssue>,
 ) {
-    match expr {
-        Expr::Call { name, args } => {
-            let normalized = normalize_name(name);
-            if let Some(arguments_are_reachable) =
-                call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
-            {
-                if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
-                    sheet.sheet,
-                    sheet.defined_name_scope,
-                    name,
-                ) && names.insert((id.clone(), policy))
+    crate::calculation::stack::grow(|| {
+        match expr {
+            Expr::Call { name, args } => {
+                let normalized = normalize_name(name);
+                if let Some(arguments_are_reachable) =
+                    call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
                 {
+                    if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                        sheet.sheet,
+                        sheet.defined_name_scope,
+                        name,
+                    ) && names.insert((id.clone(), policy))
+                    {
+                        inspect_expr(
+                            engine,
+                            sheet.for_definition(id.scope()),
+                            named,
+                            policy,
+                            names,
+                            &mut CapabilityScope::default(),
+                            issues,
+                        );
+                    }
+                    if arguments_are_reachable {
+                        let shadow = call_shadow(engine, sheet, name, local_scope)
+                            .expect("shadow reachability implies a shadow state");
+                        let sheet_span = match shadow {
+                            CallableShadow::Callable(super::functions::CallableArity::Builtin(
+                                callable,
+                            )) => descriptor_sheet_span_policy(callable.canonical_name())
+                                .unwrap_or(ARRAY_EXPRESSION_POLICY),
+                            CallableShadow::Unshadowed
+                            | CallableShadow::Callable(_)
+                            | CallableShadow::Unknown
+                            | CallableShadow::DefinitelyNonCallable
+                            | CallableShadow::CyclicNonCallable => ARRAY_EXPRESSION_POLICY,
+                        };
+                        let argument_policy = policy.with_sheet_span(sheet_span);
+                        for arg in args {
+                            inspect_expr(
+                                engine,
+                                sheet,
+                                arg,
+                                argument_policy,
+                                names,
+                                local_scope,
+                                issues,
+                            );
+                        }
+                    }
+                    return;
+                }
+                if !is_supported_function(name) {
+                    issues.push(CalculationIssue::new(
+                        CalculationIssueCode::UnsupportedFunction,
+                        Some(name.to_ascii_uppercase()),
+                    ));
+                }
+                if is_supported_function(name)
+                    && !function_arguments_are_reachable(
+                        name,
+                        args,
+                        engine.calculation_limits().max_let_bindings(),
+                    )
+                {
+                    return;
+                }
+                if dynamic_function(name) == Some(DynamicFunction::Let) {
+                    inspect_let(engine, sheet, args, policy, names, local_scope, issues);
+                    return;
+                }
+                if dynamic_function(name) == Some(DynamicFunction::Lambda)
+                    && let Some(lambda) = definition(expr)
+                {
+                    let previous_len = local_scope.len();
+                    for parameter in lambda.parameters() {
+                        local_scope.push_parameter(parameter.clone());
+                    }
                     inspect_expr(
                         engine,
-                        sheet.for_definition(id.scope()),
-                        named,
+                        sheet,
+                        lambda.body(),
                         policy,
                         names,
-                        &mut CapabilityScope::default(),
+                        local_scope,
                         issues,
                     );
+                    local_scope.truncate(previous_len);
+                    return;
                 }
-                if arguments_are_reachable {
-                    let shadow = call_shadow(engine, sheet, name, local_scope)
-                        .expect("shadow reachability implies a shadow state");
-                    let sheet_span = match shadow {
-                        CallableShadow::Callable(super::functions::CallableArity::Builtin(
-                            callable,
-                        )) => descriptor_sheet_span_policy(callable.canonical_name())
-                            .unwrap_or(ARRAY_EXPRESSION_POLICY),
-                        CallableShadow::Unshadowed
-                        | CallableShadow::Callable(_)
-                        | CallableShadow::Unknown
-                        | CallableShadow::DefinitelyNonCallable
-                        | CallableShadow::CyclicNonCallable => ARRAY_EXPRESSION_POLICY,
-                    };
-                    let argument_policy = policy.with_sheet_span(sheet_span);
-                    for arg in args {
+                if dynamic_function(name) == Some(DynamicFunction::Lambda) {
+                    return;
+                }
+                let argument_policy = descriptor_sheet_span_policy(&normalized)
+                    .unwrap_or(SheetSpanPolicy::Unsupported);
+                let suppresses_missing_names = matches!(
+                    function_dependency_kind(&normalized),
+                    Some(DependencyKind::ReferenceMetadataOnly(
+                        ReferenceMetadataKind::Predicate
+                    ))
+                );
+                let argument_policy = CapabilityInspectionPolicy::new(
+                    argument_policy,
+                    policy.suppress_missing_names || suppresses_missing_names,
+                );
+                if dynamic_function(name) == Some(DynamicFunction::Map)
+                    && let Some((lambda_expr, array_exprs)) = args.split_last()
+                    && let Some(lambda) = definition(lambda_expr)
+                {
+                    for arg in array_exprs {
                         inspect_expr(
                             engine,
                             sheet,
@@ -1105,67 +1177,31 @@ fn inspect_expr(
                             issues,
                         );
                     }
+                    let previous_len = local_scope.len();
+                    for parameter in lambda.parameters() {
+                        local_scope.push_parameter(parameter.clone());
+                    }
+                    inspect_expr(
+                        engine,
+                        sheet,
+                        lambda.body(),
+                        argument_policy,
+                        names,
+                        local_scope,
+                        issues,
+                    );
+                    local_scope.truncate(previous_len);
+                    return;
                 }
-                return;
-            }
-            if !is_supported_function(name) {
-                issues.push(CalculationIssue::new(
-                    CalculationIssueCode::UnsupportedFunction,
-                    Some(name.to_ascii_uppercase()),
-                ));
-            }
-            if is_supported_function(name)
-                && !function_arguments_are_reachable(
-                    name,
-                    args,
-                    engine.calculation_limits().max_let_bindings(),
-                )
-            {
-                return;
-            }
-            if dynamic_function(name) == Some(DynamicFunction::Let) {
-                inspect_let(engine, sheet, args, policy, names, local_scope, issues);
-                return;
-            }
-            if dynamic_function(name) == Some(DynamicFunction::Lambda)
-                && let Some(lambda) = definition(expr)
-            {
-                let previous_len = local_scope.len();
-                for parameter in lambda.parameters() {
-                    local_scope.push_parameter(parameter.clone());
-                }
-                inspect_expr(
-                    engine,
-                    sheet,
-                    lambda.body(),
-                    policy,
-                    names,
-                    local_scope,
-                    issues,
-                );
-                local_scope.truncate(previous_len);
-                return;
-            }
-            if dynamic_function(name) == Some(DynamicFunction::Lambda) {
-                return;
-            }
-            let argument_policy =
-                descriptor_sheet_span_policy(&normalized).unwrap_or(SheetSpanPolicy::Unsupported);
-            let suppresses_missing_names = matches!(
-                function_dependency_kind(&normalized),
-                Some(DependencyKind::ReferenceMetadataOnly(
-                    ReferenceMetadataKind::Predicate
-                ))
-            );
-            let argument_policy = CapabilityInspectionPolicy::new(
-                argument_policy,
-                policy.suppress_missing_names || suppresses_missing_names,
-            );
-            if dynamic_function(name) == Some(DynamicFunction::Map)
-                && let Some((lambda_expr, array_exprs)) = args.split_last()
-                && let Some(lambda) = definition(lambda_expr)
-            {
-                for arg in array_exprs {
+                for (index, arg) in args.iter().enumerate() {
+                    let argument_policy =
+                        if function_argument_is_callable(&normalized, index, args.len())
+                            && callable_argument_names_known_function(arg)
+                        {
+                            CapabilityInspectionPolicy::new(argument_policy.sheet_span, true)
+                        } else {
+                            argument_policy
+                        };
                     inspect_expr(
                         engine,
                         sheet,
@@ -1176,268 +1212,244 @@ fn inspect_expr(
                         issues,
                     );
                 }
-                let previous_len = local_scope.len();
-                for parameter in lambda.parameters() {
-                    local_scope.push_parameter(parameter.clone());
+            }
+            Expr::Invoke { callee, args } => {
+                let cyclic_callee = typed_invocation_shadow(engine, sheet, callee, local_scope)
+                    .is_some_and(|(_, shadow)| shadow == CallableShadow::CyclicNonCallable);
+                if !cyclic_callee {
+                    inspect_expr(engine, sheet, callee, policy, names, local_scope, issues);
                 }
-                inspect_expr(
+                if !typed_invocation_arguments_are_reachable(
                     engine,
                     sheet,
-                    lambda.body(),
-                    argument_policy,
-                    names,
+                    callee,
+                    args,
                     local_scope,
-                    issues,
-                );
-                local_scope.truncate(previous_len);
-                return;
-            }
-            for (index, arg) in args.iter().enumerate() {
-                let argument_policy =
-                    if function_argument_is_callable(&normalized, index, args.len())
-                        && callable_argument_names_known_function(arg)
-                    {
-                        CapabilityInspectionPolicy::new(argument_policy.sheet_span, true)
-                    } else {
-                        argument_policy
-                    };
-                inspect_expr(
-                    engine,
-                    sheet,
-                    arg,
-                    argument_policy,
-                    names,
-                    local_scope,
-                    issues,
-                );
-            }
-        }
-        Expr::Invoke { callee, args } => {
-            let cyclic_callee = typed_invocation_shadow(engine, sheet, callee, local_scope)
-                .is_some_and(|(_, shadow)| shadow == CallableShadow::CyclicNonCallable);
-            if !cyclic_callee {
-                inspect_expr(engine, sheet, callee, policy, names, local_scope, issues);
-            }
-            if !typed_invocation_arguments_are_reachable(engine, sheet, callee, args, local_scope) {
-                return;
-            }
-            let argument_policy = typed_invocation_shadow(engine, sheet, callee, local_scope)
-                .and_then(|(callable, shadow)| match shadow {
-                    CallableShadow::Unshadowed => Some(callable),
-                    CallableShadow::Callable(super::functions::CallableArity::Builtin(
-                        callable,
-                    )) => Some(callable),
-                    CallableShadow::Callable(_)
-                    | CallableShadow::Unknown
-                    | CallableShadow::DefinitelyNonCallable
-                    | CallableShadow::CyclicNonCallable => None,
-                })
-                .and_then(|callable| descriptor_sheet_span_policy(callable.canonical_name()))
-                .unwrap_or(ARRAY_EXPRESSION_POLICY);
-            let argument_policy = policy.with_sheet_span(argument_policy);
-            for arg in args {
-                inspect_expr(
-                    engine,
-                    sheet,
-                    arg,
-                    argument_policy,
-                    names,
-                    local_scope,
-                    issues,
-                );
-            }
-        }
-        Expr::Name(name) => {
-            if let Some(binding) = local_scope.lookup(name) {
-                if let Some(binding) = binding {
-                    inspect_expr(engine, sheet, &binding, policy, names, local_scope, issues);
+                ) {
+                    return;
                 }
-                return;
-            }
-            match engine.resolve_name_expr_with_id_for_scope(
-                sheet.sheet,
-                sheet.defined_name_scope,
-                name,
-            ) {
-                Some((id, named)) => {
-                    if names.insert((id.clone(), policy)) {
-                        let mut defined_scope = CapabilityScope::default();
-                        inspect_expr(
-                            engine,
-                            sheet.for_definition(id.scope()),
-                            named,
-                            policy,
-                            names,
-                            &mut defined_scope,
-                            issues,
-                        );
-                    }
-                }
-                None if policy.suppress_missing_names => {}
-                None => issues.push(CalculationIssue::new(
-                    CalculationIssueCode::UnsupportedName,
-                    Some(name.clone()),
-                )),
-            }
-        }
-        Expr::BuiltinCallable(callable) => {
-            let name = callable.canonical_name();
-            if let Some(binding) = local_scope.lookup(name) {
-                if let Some(binding) = binding {
-                    inspect_expr(engine, sheet, &binding, policy, names, local_scope, issues);
-                }
-                return;
-            }
-            if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
-                sheet.sheet,
-                sheet.defined_name_scope,
-                name,
-            ) && names.insert((id.clone(), policy))
-            {
-                let mut defined_scope = CapabilityScope::default();
-                inspect_expr(
-                    engine,
-                    sheet.for_definition(id.scope()),
-                    named,
-                    policy,
-                    names,
-                    &mut defined_scope,
-                    issues,
-                );
-            }
-        }
-        Expr::Array(rows) => {
-            for row in rows {
-                for element in row {
+                let argument_policy = typed_invocation_shadow(engine, sheet, callee, local_scope)
+                    .and_then(|(callable, shadow)| match shadow {
+                        CallableShadow::Unshadowed => Some(callable),
+                        CallableShadow::Callable(super::functions::CallableArity::Builtin(
+                            callable,
+                        )) => Some(callable),
+                        CallableShadow::Callable(_)
+                        | CallableShadow::Unknown
+                        | CallableShadow::DefinitelyNonCallable
+                        | CallableShadow::CyclicNonCallable => None,
+                    })
+                    .and_then(|callable| descriptor_sheet_span_policy(callable.canonical_name()))
+                    .unwrap_or(ARRAY_EXPRESSION_POLICY);
+                let argument_policy = policy.with_sheet_span(argument_policy);
+                for arg in args {
                     inspect_expr(
                         engine,
                         sheet,
-                        element,
-                        policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                        arg,
+                        argument_policy,
                         names,
                         local_scope,
                         issues,
                     );
                 }
             }
-        }
-        Expr::SpillRef(inner) => {
-            inspect_expr(
-                engine,
-                sheet,
-                inner,
-                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                names,
-                local_scope,
-                issues,
-            );
-        }
-        Expr::ImplicitIntersection(inner) | Expr::Unary { operand: inner, .. } => {
-            inspect_expr(
-                engine,
-                sheet,
-                inner,
-                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                names,
-                local_scope,
-                issues,
-            );
-        }
-        Expr::Paren(inner) => {
-            inspect_expr(engine, sheet, inner, policy, names, local_scope, issues);
-        }
-        Expr::ReferenceUnion { left, right } | Expr::ReferenceIntersection { left, right } => {
-            inspect_expr(engine, sheet, left, policy, names, local_scope, issues);
-            inspect_expr(engine, sheet, right, policy, names, local_scope, issues);
-        }
-        Expr::Binary { left, right, .. } => {
-            inspect_expr(
-                engine,
-                sheet,
-                left,
-                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                names,
-                local_scope,
-                issues,
-            );
-            inspect_expr(
-                engine,
-                sheet,
-                right,
-                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                names,
-                local_scope,
-                issues,
-            );
-        }
-        Expr::Range { start, end } => {
-            inspect_expr(
-                engine,
-                sheet,
-                start,
-                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                names,
-                local_scope,
-                issues,
-            );
-            inspect_expr(
-                engine,
-                sheet,
-                end,
-                policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
-                names,
-                local_scope,
-                issues,
-            );
-        }
-        Expr::Ref(reference) => {
-            // One reference carries one diagnosis, and the workbook prefix is the outer one: a
-            // reader told to remove a 3-D range from a formula that has none is routed to the
-            // wrong remedy. Evaluation resolves the prefix in the same order.
-            if let Some(detail) = reference
-                .sheet
-                .as_ref()
-                .and_then(SheetPrefix::external_workbook_detail)
-            {
+            Expr::Name(name) => {
+                if let Some(binding) = local_scope.lookup(name) {
+                    if let Some(binding) = binding {
+                        inspect_expr(engine, sheet, &binding, policy, names, local_scope, issues);
+                    }
+                    return;
+                }
+                match engine.resolve_name_expr_with_id_for_scope(
+                    sheet.sheet,
+                    sheet.defined_name_scope,
+                    name,
+                ) {
+                    Some((id, named)) => {
+                        if names.insert((id.clone(), policy)) {
+                            let mut defined_scope = CapabilityScope::default();
+                            inspect_expr(
+                                engine,
+                                sheet.for_definition(id.scope()),
+                                named,
+                                policy,
+                                names,
+                                &mut defined_scope,
+                                issues,
+                            );
+                        }
+                    }
+                    None if policy.suppress_missing_names => {}
+                    None => issues.push(CalculationIssue::new(
+                        CalculationIssueCode::UnsupportedName,
+                        Some(name.clone()),
+                    )),
+                }
+            }
+            Expr::BuiltinCallable(callable) => {
+                let name = callable.canonical_name();
+                if let Some(binding) = local_scope.lookup(name) {
+                    if let Some(binding) = binding {
+                        inspect_expr(engine, sheet, &binding, policy, names, local_scope, issues);
+                    }
+                    return;
+                }
+                if let Some((id, named)) = engine.resolve_name_expr_with_id_for_scope(
+                    sheet.sheet,
+                    sheet.defined_name_scope,
+                    name,
+                ) && names.insert((id.clone(), policy))
+                {
+                    let mut defined_scope = CapabilityScope::default();
+                    inspect_expr(
+                        engine,
+                        sheet.for_definition(id.scope()),
+                        named,
+                        policy,
+                        names,
+                        &mut defined_scope,
+                        issues,
+                    );
+                }
+            }
+            Expr::Array(rows) => {
+                for row in rows {
+                    for element in row {
+                        inspect_expr(
+                            engine,
+                            sheet,
+                            element,
+                            policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                            names,
+                            local_scope,
+                            issues,
+                        );
+                    }
+                }
+            }
+            Expr::SpillRef(inner) => {
+                inspect_expr(
+                    engine,
+                    sheet,
+                    inner,
+                    policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                    names,
+                    local_scope,
+                    issues,
+                );
+            }
+            Expr::ImplicitIntersection(inner) | Expr::Unary { operand: inner, .. } => {
+                inspect_expr(
+                    engine,
+                    sheet,
+                    inner,
+                    policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                    names,
+                    local_scope,
+                    issues,
+                );
+            }
+            Expr::Paren(inner) => {
+                inspect_expr(engine, sheet, inner, policy, names, local_scope, issues);
+            }
+            Expr::ReferenceUnion { left, right } | Expr::ReferenceIntersection { left, right } => {
+                inspect_expr(engine, sheet, left, policy, names, local_scope, issues);
+                inspect_expr(engine, sheet, right, policy, names, local_scope, issues);
+            }
+            Expr::Binary { left, right, .. } => {
+                inspect_expr(
+                    engine,
+                    sheet,
+                    left,
+                    policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                    names,
+                    local_scope,
+                    issues,
+                );
+                inspect_expr(
+                    engine,
+                    sheet,
+                    right,
+                    policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                    names,
+                    local_scope,
+                    issues,
+                );
+            }
+            Expr::Range { start, end } => {
+                inspect_expr(
+                    engine,
+                    sheet,
+                    start,
+                    policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                    names,
+                    local_scope,
+                    issues,
+                );
+                inspect_expr(
+                    engine,
+                    sheet,
+                    end,
+                    policy.with_sheet_span(ARRAY_EXPRESSION_POLICY),
+                    names,
+                    local_scope,
+                    issues,
+                );
+            }
+            Expr::Ref(reference) => {
+                // One reference carries one diagnosis, and the workbook prefix is the outer one: a
+                // reader told to remove a 3-D range from a formula that has none is routed to the
+                // wrong remedy. Evaluation resolves the prefix in the same order.
+                if let Some(detail) = reference
+                    .sheet
+                    .as_ref()
+                    .and_then(SheetPrefix::external_workbook_detail)
+                {
+                    issues.push(CalculationIssue::new(
+                        CalculationIssueCode::UnsupportedExpression,
+                        Some(detail),
+                    ));
+                } else if let Some(detail) = reference
+                    .sheet
+                    .as_ref()
+                    .and_then(SheetPrefix::sheet_range_detail)
+                    .filter(|_| matches!(policy.sheet_span, SheetSpanPolicy::Unsupported))
+                {
+                    issues.push(CalculationIssue::new(
+                        CalculationIssueCode::UnsupportedSheetRange,
+                        Some(detail),
+                    ));
+                }
+            }
+            Expr::StructuredRef(_) => {}
+            Expr::ExternalReference(reference) => {
+                let mut detail = reference.workbook.to_string();
+                if let Some(sheet) = &reference.sheet {
+                    detail.push_str(sheet);
+                    if let Some(sheet_end) = &reference.sheet_end {
+                        detail.push(':');
+                        detail.push_str(sheet_end);
+                    }
+                }
                 issues.push(CalculationIssue::new(
                     CalculationIssueCode::UnsupportedExpression,
                     Some(detail),
                 ));
-            } else if let Some(detail) = reference
-                .sheet
-                .as_ref()
-                .and_then(SheetPrefix::sheet_range_detail)
-                .filter(|_| matches!(policy.sheet_span, SheetSpanPolicy::Unsupported))
-            {
+            }
+            Expr::QualifiedName { name, .. } => {
                 issues.push(CalculationIssue::new(
-                    CalculationIssueCode::UnsupportedSheetRange,
-                    Some(detail),
+                    CalculationIssueCode::UnsupportedName,
+                    Some(name.to_string()),
                 ));
             }
+            Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::ErrorLit(_)
+            | Expr::Missing => {}
         }
-        Expr::StructuredRef(_) => {}
-        Expr::ExternalReference(reference) => {
-            let mut detail = reference.workbook.to_string();
-            if let Some(sheet) = &reference.sheet {
-                detail.push_str(sheet);
-                if let Some(sheet_end) = &reference.sheet_end {
-                    detail.push(':');
-                    detail.push_str(sheet_end);
-                }
-            }
-            issues.push(CalculationIssue::new(
-                CalculationIssueCode::UnsupportedExpression,
-                Some(detail),
-            ));
-        }
-        Expr::QualifiedName { name, .. } => {
-            issues.push(CalculationIssue::new(
-                CalculationIssueCode::UnsupportedName,
-                Some(name.to_string()),
-            ));
-        }
-        Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {}
-    }
+    })
 }
 
 fn callable_argument_names_known_function(expr: &Expr) -> bool {

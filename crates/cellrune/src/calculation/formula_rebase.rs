@@ -87,115 +87,119 @@ fn validate_expr(
     relative_policy: RelativeReferencePolicy,
     visited_names: &mut BTreeSet<DefinedLambdaId>,
 ) -> Result<(), ErrorKind> {
-    charge_node(engine, context)?;
-    match expr {
-        Expr::Ref(reference) => {
-            validate_reference(engine, context, reference, database, relative_policy)
-        }
-        Expr::Name(name) => {
-            let (id, named) = engine
-                .resolve_name_expr_with_id_in_context(context, name)
-                .ok_or(ErrorKind::Value)?;
-            if !visited_names.insert(id.clone()) {
-                return Err(ErrorKind::Value);
+    crate::calculation::stack::grow(|| {
+        charge_node(engine, context)?;
+        match expr {
+            Expr::Ref(reference) => {
+                validate_reference(engine, context, reference, database, relative_policy)
             }
-            let result = validate_expr(
-                engine,
-                context
-                    .without_bindings()
-                    .with_defined_name_scope(Some(id.scope())),
-                named,
-                database,
-                RelativeReferencePolicy::AbsoluteOnly,
-                visited_names,
-            );
-            visited_names.remove(&id);
-            result
-        }
-        Expr::Call { name, args } => {
-            if engine
-                .resolve_name_expr_with_id_in_context(context, name)
-                .is_some()
-                || matches!(
-                    function_dependency_kind(name),
-                    Some(DependencyKind::DynamicReference(_))
-                )
-                || function_result_kind(name).is_some_and(|kind| kind.returns_reference())
-                || function_result_kind(name).is_none()
-            {
-                return Err(ErrorKind::Value);
-            }
-            for arg in args {
-                validate_expr(
+            Expr::Name(name) => {
+                let (id, named) = engine
+                    .resolve_name_expr_with_id_in_context(context, name)
+                    .ok_or(ErrorKind::Value)?;
+                if !visited_names.insert(id.clone()) {
+                    return Err(ErrorKind::Value);
+                }
+                let result = validate_expr(
                     engine,
-                    context,
-                    arg,
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
                     database,
-                    relative_policy,
+                    RelativeReferencePolicy::AbsoluteOnly,
                     visited_names,
-                )?;
+                );
+                visited_names.remove(&id);
+                result
             }
-            Ok(())
-        }
-        Expr::Unary { operand, .. }
-        | Expr::Paren(operand)
-        | Expr::ImplicitIntersection(operand) => validate_expr(
-            engine,
-            context,
-            operand,
-            database,
-            relative_policy,
-            visited_names,
-        ),
-        Expr::Binary { left, right, .. }
-        | Expr::Range {
-            start: left,
-            end: right,
-        } => {
-            validate_expr(
-                engine,
-                context,
-                left,
-                database,
-                relative_policy,
-                visited_names,
-            )?;
-            validate_expr(
-                engine,
-                context,
-                right,
-                database,
-                relative_policy,
-                visited_names,
-            )
-        }
-        Expr::Array(rows) => {
-            for row in rows {
-                for value in row {
+            Expr::Call { name, args } => {
+                if engine
+                    .resolve_name_expr_with_id_in_context(context, name)
+                    .is_some()
+                    || matches!(
+                        function_dependency_kind(name),
+                        Some(DependencyKind::DynamicReference(_))
+                    )
+                    || function_result_kind(name).is_some_and(|kind| kind.returns_reference())
+                    || function_result_kind(name).is_none()
+                {
+                    return Err(ErrorKind::Value);
+                }
+                for arg in args {
                     validate_expr(
                         engine,
                         context,
-                        value,
+                        arg,
                         database,
                         relative_policy,
                         visited_names,
                     )?;
                 }
+                Ok(())
             }
-            Ok(())
+            Expr::Unary { operand, .. }
+            | Expr::Paren(operand)
+            | Expr::ImplicitIntersection(operand) => validate_expr(
+                engine,
+                context,
+                operand,
+                database,
+                relative_policy,
+                visited_names,
+            ),
+            Expr::Binary { left, right, .. }
+            | Expr::Range {
+                start: left,
+                end: right,
+            } => {
+                validate_expr(
+                    engine,
+                    context,
+                    left,
+                    database,
+                    relative_policy,
+                    visited_names,
+                )?;
+                validate_expr(
+                    engine,
+                    context,
+                    right,
+                    database,
+                    relative_policy,
+                    visited_names,
+                )
+            }
+            Expr::Array(rows) => {
+                for row in rows {
+                    for value in row {
+                        validate_expr(
+                            engine,
+                            context,
+                            value,
+                            database,
+                            relative_policy,
+                            visited_names,
+                        )?;
+                    }
+                }
+                Ok(())
+            }
+            Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::ErrorLit(_)
+            | Expr::Missing => Ok(()),
+            Expr::StructuredRef(_)
+            | Expr::ReferenceUnion { .. }
+            | Expr::ReferenceIntersection { .. }
+            | Expr::SpillRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
+            | Expr::BuiltinCallable(_)
+            | Expr::Invoke { .. } => Err(ErrorKind::Value),
         }
-        Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {
-            Ok(())
-        }
-        Expr::StructuredRef(_)
-        | Expr::ReferenceUnion { .. }
-        | Expr::ReferenceIntersection { .. }
-        | Expr::SpillRef(_)
-        | Expr::ExternalReference(_)
-        | Expr::QualifiedName { .. }
-        | Expr::BuiltinCallable(_)
-        | Expr::Invoke { .. } => Err(ErrorKind::Value),
-    }
+    })
 }
 
 fn validate_reference(
@@ -267,51 +271,53 @@ fn shift_expr_rows(
     expr: &mut Expr,
     row_delta: u32,
 ) -> Result<(), ErrorKind> {
-    charge_node(engine, context)?;
-    match expr {
-        Expr::Ref(reference) => shift_reference_rows(reference, row_delta),
-        Expr::Unary { operand, .. }
-        | Expr::Paren(operand)
-        | Expr::ImplicitIntersection(operand) => {
-            shift_expr_rows(engine, context, operand, row_delta)
-        }
-        Expr::Binary { left, right, .. }
-        | Expr::Range {
-            start: left,
-            end: right,
-        } => {
-            shift_expr_rows(engine, context, left, row_delta)?;
-            shift_expr_rows(engine, context, right, row_delta)
-        }
-        Expr::Call { args, .. } => {
-            for arg in args {
-                shift_expr_rows(engine, context, arg, row_delta)?;
+    crate::calculation::stack::grow(|| {
+        charge_node(engine, context)?;
+        match expr {
+            Expr::Ref(reference) => shift_reference_rows(reference, row_delta),
+            Expr::Unary { operand, .. }
+            | Expr::Paren(operand)
+            | Expr::ImplicitIntersection(operand) => {
+                shift_expr_rows(engine, context, operand, row_delta)
             }
-            Ok(())
-        }
-        Expr::Array(rows) => {
-            for row in rows {
-                for value in row {
-                    shift_expr_rows(engine, context, value, row_delta)?;
+            Expr::Binary { left, right, .. }
+            | Expr::Range {
+                start: left,
+                end: right,
+            } => {
+                shift_expr_rows(engine, context, left, row_delta)?;
+                shift_expr_rows(engine, context, right, row_delta)
+            }
+            Expr::Call { args, .. } => {
+                for arg in args {
+                    shift_expr_rows(engine, context, arg, row_delta)?;
                 }
+                Ok(())
             }
-            Ok(())
+            Expr::Array(rows) => {
+                for row in rows {
+                    for value in row {
+                        shift_expr_rows(engine, context, value, row_delta)?;
+                    }
+                }
+                Ok(())
+            }
+            Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::ErrorLit(_)
+            | Expr::Name(_)
+            | Expr::Missing => Ok(()),
+            Expr::StructuredRef(_)
+            | Expr::ReferenceUnion { .. }
+            | Expr::ReferenceIntersection { .. }
+            | Expr::SpillRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
+            | Expr::BuiltinCallable(_)
+            | Expr::Invoke { .. } => Err(ErrorKind::Value),
         }
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Logical(_)
-        | Expr::ErrorLit(_)
-        | Expr::Name(_)
-        | Expr::Missing => Ok(()),
-        Expr::StructuredRef(_)
-        | Expr::ReferenceUnion { .. }
-        | Expr::ReferenceIntersection { .. }
-        | Expr::SpillRef(_)
-        | Expr::ExternalReference(_)
-        | Expr::QualifiedName { .. }
-        | Expr::BuiltinCallable(_)
-        | Expr::Invoke { .. } => Err(ErrorKind::Value),
-    }
+    })
 }
 
 fn shift_reference_rows(reference: &mut Reference, row_delta: u32) -> Result<(), ErrorKind> {

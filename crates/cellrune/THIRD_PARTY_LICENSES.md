@@ -30,15 +30,20 @@ without confusing development-only tools with shipped library requirements.
 | `memchr` | 2.8.3 | `Unlicense OR MIT` |
 | `pcre2` | 0.2.11 | `Unlicense OR MIT` |
 | `pcre2-sys` | 0.2.10 | `Unlicense OR MIT` |
+| `psm` | 0.1.32 | `MIT OR Apache-2.0` |
 | `quick-xml` | 0.41.0 | `MIT` |
 | `sha2` | 0.11.0 | `MIT OR Apache-2.0` |
+| `stacker` | 0.1.25 | `MIT OR Apache-2.0` |
 | `typenum` | 1.20.1 | `MIT OR Apache-2.0` |
 | `typed-path` | 0.12.3 | `MIT OR Apache-2.0` |
 | `zip` | 8.6.0 | `MIT` |
 | `zlib-rs` | 0.6.6 | `Zlib` |
 
-`libm`, `pcre2`, `pcre2-sys`, `quick-xml`, `sha2`, and `zip` are CellRune's direct runtime dependencies.
-The remaining crates are selected transitively by those dependencies.
+`libm`, `pcre2`, `pcre2-sys`, `quick-xml`, `sha2`, `stacker`, and `zip` are CellRune's direct
+runtime dependencies. The remaining crates are selected transitively by those dependencies.
+On Windows targets, `stacker` also selects `windows-sys` 0.60.2, `windows-targets` 0.53.5,
+`windows-link` 0.2.1, and the target's `windows_x86_64_msvc` or `windows_aarch64_msvc` 0.53.1,
+all `MIT OR Apache-2.0`.
 
 The table covers the default feature set. The optional `capability-fs` feature adds
 `cap-std` and its transitive graph, which this table does not enumerate. Those crates

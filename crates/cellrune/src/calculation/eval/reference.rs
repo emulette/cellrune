@@ -135,65 +135,51 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ReferenceValue, ErrorKind> {
-        let reference = match expr {
-            Expr::Paren(inner) => return self.resolve_reference_value_expr(context, inner),
-            Expr::Ref(reference) => {
-                ReferenceValue::from_span(self.resolve_reference_span(context.sheet(), reference)?)
-            }
-            Expr::StructuredRef(reference) => {
-                self.resolve_structured_reference(context, reference)?
-            }
-            Expr::SpillRef(anchor) => {
-                ReferenceValue::from_rect(self.resolve_spill_reference(context, anchor)?)
-            }
-            Expr::ReferenceUnion { left, right } => {
-                let left = self.resolve_reference_value_expr(context, left)?;
-                let right = self.resolve_reference_value_expr(context, right)?;
-                union_reference_values(&left, &right)?
-            }
-            Expr::ReferenceIntersection { left, right } => {
-                let left = self.resolve_reference_value_expr(context, left)?;
-                let right = self.resolve_reference_value_expr(context, right)?;
-                let comparisons = intersection_reference_work(&left, &right)?;
-                self.ensure_function_iterations(comparisons)?;
-                if context.charges_reference_work() {
-                    self.charge_function_iterations(context, comparisons)?;
+        crate::calculation::stack::grow(|| {
+            let reference = match expr {
+                Expr::Paren(inner) => return self.resolve_reference_value_expr(context, inner),
+                Expr::Ref(reference) => ReferenceValue::from_span(
+                    self.resolve_reference_span(context.sheet(), reference)?,
+                ),
+                Expr::StructuredRef(reference) => {
+                    self.resolve_structured_reference(context, reference)?
                 }
-                let max_areas = self.options.limits().max_reference_areas();
-                intersect_reference_values(&left, &right, max_areas, || {
-                    if context.is_cancelled() {
-                        Err(ErrorKind::ResourceLimit(
-                            CalculationLimitKind::FunctionIterations,
-                        ))
-                    } else {
-                        Ok(())
+                Expr::SpillRef(anchor) => {
+                    ReferenceValue::from_rect(self.resolve_spill_reference(context, anchor)?)
+                }
+                Expr::ReferenceUnion { left, right } => {
+                    let left = self.resolve_reference_value_expr(context, left)?;
+                    let right = self.resolve_reference_value_expr(context, right)?;
+                    union_reference_values(&left, &right)?
+                }
+                Expr::ReferenceIntersection { left, right } => {
+                    let left = self.resolve_reference_value_expr(context, left)?;
+                    let right = self.resolve_reference_value_expr(context, right)?;
+                    let comparisons = intersection_reference_work(&left, &right)?;
+                    self.ensure_function_iterations(comparisons)?;
+                    if context.charges_reference_work() {
+                        self.charge_function_iterations(context, comparisons)?;
                     }
-                })?
-            }
-            Expr::Range { .. } => ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?),
-            Expr::Name(name) => match context.binding(name) {
-                Some(ScopeValue::Reference(reference)) => reference.clone(),
-                Some(_) => return Err(ErrorKind::Value),
-                None => self
-                    .resolve_name_expr_with_id_in_context(context, name)
-                    .ok_or(ErrorKind::Name)
-                    .and_then(|(id, named)| {
-                        self.resolve_reference_value_expr(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                        )
-                    })?,
-            },
-            Expr::BuiltinCallable(callable) => {
-                let name = callable.canonical_name();
-                match context.binding(name) {
+                    let max_areas = self.options.limits().max_reference_areas();
+                    intersect_reference_values(&left, &right, max_areas, || {
+                        if context.is_cancelled() {
+                            Err(ErrorKind::ResourceLimit(
+                                CalculationLimitKind::FunctionIterations,
+                            ))
+                        } else {
+                            Ok(())
+                        }
+                    })?
+                }
+                Expr::Range { .. } => {
+                    ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?)
+                }
+                Expr::Name(name) => match context.binding(name) {
                     Some(ScopeValue::Reference(reference)) => reference.clone(),
                     Some(_) => return Err(ErrorKind::Value),
                     None => self
                         .resolve_name_expr_with_id_in_context(context, name)
-                        .ok_or(ErrorKind::Value)
+                        .ok_or(ErrorKind::Name)
                         .and_then(|(id, named)| {
                             self.resolve_reference_value_expr(
                                 context
@@ -202,35 +188,54 @@ impl Engine<'_> {
                                 named,
                             )
                         })?,
-                }
-            }
-            Expr::Call { name, args } => {
-                if let Some(scoped) = callable_call_scope(self, context, name, args) {
-                    match scoped {
-                        ScopeValue::Reference(reference) => reference,
-                        _ => return Err(ErrorKind::Value),
+                },
+                Expr::BuiltinCallable(callable) => {
+                    let name = callable.canonical_name();
+                    match context.binding(name) {
+                        Some(ScopeValue::Reference(reference)) => reference.clone(),
+                        Some(_) => return Err(ErrorKind::Value),
+                        None => self
+                            .resolve_name_expr_with_id_in_context(context, name)
+                            .ok_or(ErrorKind::Value)
+                            .and_then(|(id, named)| {
+                                self.resolve_reference_value_expr(
+                                    context
+                                        .without_bindings()
+                                        .with_defined_name_scope(Some(id.scope())),
+                                    named,
+                                )
+                            })?,
                     }
-                } else if function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Let))
-                {
-                    let_reference(self, context, args)?
-                } else {
-                    ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?)
                 }
-            }
-            Expr::ErrorLit(kind) => return Err(*kind),
-            Expr::ExternalReference(_)
-            | Expr::QualifiedName { .. }
-            | Expr::ImplicitIntersection(_)
-            | Expr::Invoke { .. }
-            | Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Logical(_)
-            | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Array(_)
-            | Expr::Missing => return Err(ErrorKind::Value),
-        };
-        self.validate_reference_value(reference)
+                Expr::Call { name, args } => {
+                    if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                        match scoped {
+                            ScopeValue::Reference(reference) => reference,
+                            _ => return Err(ErrorKind::Value),
+                        }
+                    } else if function_evaluator(name)
+                        == Some(Evaluator::Dynamic(DynamicFunction::Let))
+                    {
+                        let_reference(self, context, args)?
+                    } else {
+                        ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?)
+                    }
+                }
+                Expr::ErrorLit(kind) => return Err(*kind),
+                Expr::ExternalReference(_)
+                | Expr::QualifiedName { .. }
+                | Expr::ImplicitIntersection(_)
+                | Expr::Invoke { .. }
+                | Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Logical(_)
+                | Expr::Unary { .. }
+                | Expr::Binary { .. }
+                | Expr::Array(_)
+                | Expr::Missing => return Err(ErrorKind::Value),
+            };
+            self.validate_reference_value(reference)
+        })
     }
 
     pub(super) fn resolve_spill_anchor_expr(
@@ -279,70 +284,74 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<Rect, ErrorKind> {
-        match expr {
-            Expr::Paren(inner) => self.resolve_rect_expr(context, inner),
-            Expr::ImplicitIntersection(inner) => self
-                .resolve_rect_expr(context, inner)
-                .and_then(|rect| self.implicit_intersection_rect(context, rect)),
-            Expr::Ref(reference) => self.resolve_reference(context.sheet(), reference),
-            Expr::StructuredRef(_)
-            | Expr::SpillRef(_)
-            | Expr::ReferenceUnion { .. }
-            | Expr::ReferenceIntersection { .. } => self
-                .resolve_reference_value_expr(context, expr)?
-                .into_single_rect(),
-            Expr::Range { start, end } => {
-                // A sheet span is not a rectangle the range operator can join. Excel reports the
-                // same `#VALUE!` it gives a range whose endpoints sit on different sheets, and the
-                // capability scanner classifies this position with `ARRAY_EXPRESSION_POLICY`, so
-                // answering with the engine-capability `Unsupported` here would make the scanner
-                // and the evaluator disagree.
-                let start = self.resolve_reference_value_expr(context, start)?;
-                let end = self.resolve_reference_value_expr(context, end)?;
-                range_reference_rect(&start, &end)
-            }
-            Expr::Name(name) => match context.binding(name) {
-                Some(ScopeValue::Reference(reference)) => reference.clone().into_single_rect(),
-                Some(_) => Err(ErrorKind::Value),
-                None => self
-                    .resolve_name_expr_with_id_in_context(context, name)
-                    .ok_or(ErrorKind::Name)
-                    .and_then(|(id, named)| {
-                        self.resolve_rect_expr(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                        )
-                    }),
-            },
-            Expr::Call { name, args } => {
-                if let Some(scoped) = callable_call_scope(self, context, name, args) {
-                    return match scoped {
-                        ScopeValue::Reference(reference) => reference.into_single_rect(),
-                        _ => Err(ErrorKind::Value),
-                    };
+        crate::calculation::stack::grow(|| {
+            match expr {
+                Expr::Paren(inner) => self.resolve_rect_expr(context, inner),
+                Expr::ImplicitIntersection(inner) => self
+                    .resolve_rect_expr(context, inner)
+                    .and_then(|rect| self.implicit_intersection_rect(context, rect)),
+                Expr::Ref(reference) => self.resolve_reference(context.sheet(), reference),
+                Expr::StructuredRef(_)
+                | Expr::SpillRef(_)
+                | Expr::ReferenceUnion { .. }
+                | Expr::ReferenceIntersection { .. } => self
+                    .resolve_reference_value_expr(context, expr)?
+                    .into_single_rect(),
+                Expr::Range { start, end } => {
+                    // A sheet span is not a rectangle the range operator can join. Excel reports the
+                    // same `#VALUE!` it gives a range whose endpoints sit on different sheets, and the
+                    // capability scanner classifies this position with `ARRAY_EXPRESSION_POLICY`, so
+                    // answering with the engine-capability `Unsupported` here would make the scanner
+                    // and the evaluator disagree.
+                    let start = self.resolve_reference_value_expr(context, start)?;
+                    let end = self.resolve_reference_value_expr(context, end)?;
+                    range_reference_rect(&start, &end)
                 }
-                if function_evaluator(name).is_some() && !function_call_shape_is_valid(name, args) {
-                    return Err(ErrorKind::Value);
-                }
-                match function_evaluator(name) {
-                    Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
-                        let_reference(self, context, args)?.into_single_rect()
+                Expr::Name(name) => match context.binding(name) {
+                    Some(ScopeValue::Reference(reference)) => reference.clone().into_single_rect(),
+                    Some(_) => Err(ErrorKind::Value),
+                    None => self
+                        .resolve_name_expr_with_id_in_context(context, name)
+                        .ok_or(ErrorKind::Name)
+                        .and_then(|(id, named)| {
+                            self.resolve_rect_expr(
+                                context
+                                    .without_bindings()
+                                    .with_defined_name_scope(Some(id.scope())),
+                                named,
+                            )
+                        }),
+                },
+                Expr::Call { name, args } => {
+                    if let Some(scoped) = callable_call_scope(self, context, name, args) {
+                        return match scoped {
+                            ScopeValue::Reference(reference) => reference.into_single_rect(),
+                            _ => Err(ErrorKind::Value),
+                        };
                     }
-                    Some(Evaluator::Legacy(LegacyFunction::Index)) => {
-                        self.resolve_index_rect(context, args)
+                    if function_evaluator(name).is_some()
+                        && !function_call_shape_is_valid(name, args)
+                    {
+                        return Err(ErrorKind::Value);
                     }
-                    _ => match function_dependency_kind(name) {
-                        Some(DependencyKind::DynamicReference(kind)) => {
-                            self.resolve_dynamic_rect(context, kind, args)
+                    match function_evaluator(name) {
+                        Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
+                            let_reference(self, context, args)?.into_single_rect()
                         }
-                        _ => Err(ErrorKind::Value),
-                    },
+                        Some(Evaluator::Legacy(LegacyFunction::Index)) => {
+                            self.resolve_index_rect(context, args)
+                        }
+                        _ => match function_dependency_kind(name) {
+                            Some(DependencyKind::DynamicReference(kind)) => {
+                                self.resolve_dynamic_rect(context, kind, args)
+                            }
+                            _ => Err(ErrorKind::Value),
+                        },
+                    }
                 }
+                _ => Err(ErrorKind::Value),
             }
-            _ => Err(ErrorKind::Value),
-        }
+        })
     }
 
     pub(in crate::calculation) fn resolve_index_rect(

@@ -59,59 +59,61 @@ impl NodeSpanTree {
         expr: &Expr,
         sources: &mut impl Iterator<Item = PendingNodeSource>,
     ) -> Option<Self> {
-        let source = sources.next()?;
-        let mut children = match expr {
-            Expr::Call { args, .. } => args
-                .iter()
-                .rev()
-                .map(|child| Self::from_postorder(child, sources))
-                .collect::<Option<Vec<_>>>()?,
-            Expr::Invoke { callee, args } => {
-                let mut children = args
+        crate::calculation::stack::grow(|| {
+            let source = sources.next()?;
+            let mut children = match expr {
+                Expr::Call { args, .. } => args
                     .iter()
                     .rev()
                     .map(|child| Self::from_postorder(child, sources))
-                    .collect::<Option<Vec<_>>>()?;
-                children.push(Self::from_postorder(callee, sources)?);
-                children
-            }
-            Expr::ImplicitIntersection(child)
-            | Expr::SpillRef(child)
-            | Expr::Unary { operand: child, .. }
-            | Expr::Paren(child) => vec![Self::from_postorder(child, sources)?],
-            Expr::Binary { left, right, .. }
-            | Expr::ReferenceUnion { left, right }
-            | Expr::ReferenceIntersection { left, right } => vec![
-                Self::from_postorder(right, sources)?,
-                Self::from_postorder(left, sources)?,
-            ],
-            Expr::Range { start, end } => vec![
-                Self::from_postorder(end, sources)?,
-                Self::from_postorder(start, sources)?,
-            ],
-            Expr::Array(rows) => rows
-                .iter()
-                .flatten()
-                .rev()
-                .map(|child| Self::from_postorder(child, sources))
-                .collect::<Option<Vec<_>>>()?,
-            Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Logical(_)
-            | Expr::ErrorLit(_)
-            | Expr::Ref(_)
-            | Expr::StructuredRef(_)
-            | Expr::ExternalReference(_)
-            | Expr::QualifiedName { .. }
-            | Expr::Name(_)
-            | Expr::BuiltinCallable(_)
-            | Expr::Missing => Vec::new(),
-        };
-        children.reverse();
-        Some(Self {
-            span: source.span,
-            components: source.components.into(),
-            children: children.into(),
+                    .collect::<Option<Vec<_>>>()?,
+                Expr::Invoke { callee, args } => {
+                    let mut children = args
+                        .iter()
+                        .rev()
+                        .map(|child| Self::from_postorder(child, sources))
+                        .collect::<Option<Vec<_>>>()?;
+                    children.push(Self::from_postorder(callee, sources)?);
+                    children
+                }
+                Expr::ImplicitIntersection(child)
+                | Expr::SpillRef(child)
+                | Expr::Unary { operand: child, .. }
+                | Expr::Paren(child) => vec![Self::from_postorder(child, sources)?],
+                Expr::Binary { left, right, .. }
+                | Expr::ReferenceUnion { left, right }
+                | Expr::ReferenceIntersection { left, right } => vec![
+                    Self::from_postorder(right, sources)?,
+                    Self::from_postorder(left, sources)?,
+                ],
+                Expr::Range { start, end } => vec![
+                    Self::from_postorder(end, sources)?,
+                    Self::from_postorder(start, sources)?,
+                ],
+                Expr::Array(rows) => rows
+                    .iter()
+                    .flatten()
+                    .rev()
+                    .map(|child| Self::from_postorder(child, sources))
+                    .collect::<Option<Vec<_>>>()?,
+                Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Logical(_)
+                | Expr::ErrorLit(_)
+                | Expr::Ref(_)
+                | Expr::StructuredRef(_)
+                | Expr::ExternalReference(_)
+                | Expr::QualifiedName { .. }
+                | Expr::Name(_)
+                | Expr::BuiltinCallable(_)
+                | Expr::Missing => Vec::new(),
+            };
+            children.reverse();
+            Some(Self {
+                span: source.span,
+                components: source.components.into(),
+                children: children.into(),
+            })
         })
     }
 }
@@ -237,11 +239,11 @@ pub struct ParsedFormula {
 
 impl Clone for ParsedFormula {
     fn clone(&self) -> Self {
-        Self {
+        crate::calculation::stack::grow(|| Self {
             original: Arc::clone(&self.original),
             root: self.root.clone(),
             source_map: self.source_map.clone(),
-        }
+        })
     }
 }
 

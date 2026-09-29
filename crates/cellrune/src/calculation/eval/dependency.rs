@@ -292,25 +292,27 @@ impl Engine<'_> {
         args: &[Expr],
         local_names: &[String],
     ) -> bool {
-        builtin_invocation_arguments_are_reachable(callee, args, |name| {
-            if let Some(value) = context.binding(name) {
-                return match value {
-                    ScopeValue::Callable(CallableValue::Lambda(closure)) => {
-                        CallableShadow::Callable(CallableArity::Exact(closure.parameters.len()))
-                    }
-                    ScopeValue::Callable(CallableValue::Builtin(callable)) => {
-                        CallableShadow::Callable(CallableArity::Builtin(*callable))
-                    }
-                    ScopeValue::Missing
-                    | ScopeValue::Scalar(_)
-                    | ScopeValue::Array(_)
-                    | ScopeValue::Reference(_) => CallableShadow::DefinitelyNonCallable,
-                };
-            }
-            if is_local_name(name, local_names) {
-                return CallableShadow::Unknown;
-            }
-            self.callable_shadow_for_name(context.sheet(), context.defined_name_scope(), name)
+        crate::calculation::stack::grow(|| {
+            builtin_invocation_arguments_are_reachable(callee, args, |name| {
+                if let Some(value) = context.binding(name) {
+                    return match value {
+                        ScopeValue::Callable(CallableValue::Lambda(closure)) => {
+                            CallableShadow::Callable(CallableArity::Exact(closure.parameters.len()))
+                        }
+                        ScopeValue::Callable(CallableValue::Builtin(callable)) => {
+                            CallableShadow::Callable(CallableArity::Builtin(*callable))
+                        }
+                        ScopeValue::Missing
+                        | ScopeValue::Scalar(_)
+                        | ScopeValue::Array(_)
+                        | ScopeValue::Reference(_) => CallableShadow::DefinitelyNonCallable,
+                    };
+                }
+                if is_local_name(name, local_names) {
+                    return CallableShadow::Unknown;
+                }
+                self.callable_shadow_for_name(context.sheet(), context.defined_name_scope(), name)
+            })
         })
     }
 
@@ -538,166 +540,187 @@ impl Engine<'_> {
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
     ) -> bool {
-        if context.is_cancelled() {
-            return true;
-        }
-        match expr {
-            Expr::Call { name, args } => {
-                if let Some((shadow, arguments_are_reachable)) = self
-                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
-                {
-                    let mut found = false;
-                    if shadow != CallableShadow::CyclicNonCallable
-                        && let Some((id, named)) =
-                            self.resolve_name_expr_with_id_in_context(context, name)
-                        && visited.values.insert(id.clone())
+        crate::calculation::stack::grow(|| {
+            if context.is_cancelled() {
+                return true;
+            }
+            match expr {
+                Expr::Call { name, args } => {
+                    if let Some((shadow, arguments_are_reachable)) = self
+                        .shadowed_call_arguments_are_reachable(
+                            context,
+                            name,
+                            args.len(),
+                            local_names,
+                        )
                     {
-                        found |= self.expr_has_unresolved_dynamic_dependency(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                            visited,
-                            &mut Vec::new(),
-                        );
+                        let mut found = false;
+                        if shadow != CallableShadow::CyclicNonCallable
+                            && let Some((id, named)) =
+                                self.resolve_name_expr_with_id_in_context(context, name)
+                            && visited.values.insert(id.clone())
+                        {
+                            found |= self.expr_has_unresolved_dynamic_dependency(
+                                context
+                                    .without_bindings()
+                                    .with_defined_name_scope(Some(id.scope())),
+                                named,
+                                visited,
+                                &mut Vec::new(),
+                            );
+                        }
+                        return found
+                            || (arguments_are_reachable
+                                && args.iter().any(|arg| {
+                                    self.expr_has_unresolved_dynamic_dependency(
+                                        context,
+                                        arg,
+                                        visited,
+                                        local_names,
+                                    )
+                                }));
                     }
-                    return found
-                        || (arguments_are_reachable
-                            && args.iter().any(|arg| {
-                                self.expr_has_unresolved_dynamic_dependency(
-                                    context,
+                    if !self.builtin_arguments_are_reachable(name, args) {
+                        return false;
+                    }
+                    let normalized = normalize_name(name);
+                    if is_let_function(name) {
+                        let mut found = false;
+                        let result = with_let_scope(
+                            self,
+                            context,
+                            args,
+                            |engine, scoped, arg, final_arg| {
+                                found |= engine.expr_has_unresolved_dynamic_dependency(
+                                    scoped,
                                     arg,
                                     visited,
                                     local_names,
-                                )
-                            }));
-                }
-                if !self.builtin_arguments_are_reachable(name, args) {
-                    return false;
-                }
-                let normalized = normalize_name(name);
-                if is_let_function(name) {
-                    let mut found = false;
-                    let result =
-                        with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
-                            found |= engine.expr_has_unresolved_dynamic_dependency(
-                                scoped,
-                                arg,
-                                visited,
-                                local_names,
-                            );
-                            final_arg.then_some(())
-                        });
-                    return found || result.is_err();
-                }
-                if let Some(DependencyKind::DynamicReference(kind)) =
-                    function_dependency_kind(&normalized)
-                    && self.resolve_dynamic_rect(context, kind, args).is_err()
-                {
-                    return true;
-                }
-                let mut found = false;
-                if walk_local_scope(
-                    name,
-                    args,
-                    local_names,
-                    self.calculation_limits().max_let_bindings(),
-                    |arg, scope| {
-                        found |= self
-                            .expr_has_unresolved_dynamic_dependency(context, arg, visited, scope);
-                    },
-                ) {
-                    return found;
-                }
-                args.iter().any(|arg| {
-                    self.expr_has_unresolved_dynamic_dependency(context, arg, visited, local_names)
-                })
-            }
-            Expr::Invoke { callee, args } => {
-                let callee_has_dependency =
-                    self.builtin_invocation_callee_is_reachable(context, callee, local_names)
-                        && self.expr_has_unresolved_dynamic_dependency(
-                            context,
-                            callee,
-                            visited,
-                            local_names,
+                                );
+                                final_arg.then_some(())
+                            },
                         );
-                callee_has_dependency
-                    || (self.builtin_invocation_arguments_are_reachable(
-                        context,
-                        callee,
+                        return found || result.is_err();
+                    }
+                    if let Some(DependencyKind::DynamicReference(kind)) =
+                        function_dependency_kind(&normalized)
+                        && self.resolve_dynamic_rect(context, kind, args).is_err()
+                    {
+                        return true;
+                    }
+                    let mut found = false;
+                    if walk_local_scope(
+                        name,
                         args,
                         local_names,
-                    ) && args.iter().any(|arg| {
+                        self.calculation_limits().max_let_bindings(),
+                        |arg, scope| {
+                            found |= self.expr_has_unresolved_dynamic_dependency(
+                                context, arg, visited, scope,
+                            );
+                        },
+                    ) {
+                        return found;
+                    }
+                    args.iter().any(|arg| {
                         self.expr_has_unresolved_dynamic_dependency(
                             context,
                             arg,
                             visited,
                             local_names,
                         )
-                    }))
-            }
-            Expr::Name(name) => {
-                let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                else {
-                    return false;
-                };
-                self.expr_has_unresolved_dynamic_dependency(
-                    defined_context,
-                    named,
-                    visited,
-                    &mut Vec::new(),
-                )
-            }
-            Expr::BuiltinCallable(callable) => {
-                let name = callable.canonical_name();
-                let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                else {
-                    return false;
-                };
-                self.expr_has_unresolved_dynamic_dependency(
-                    defined_context,
-                    named,
-                    visited,
-                    &mut Vec::new(),
-                )
-            }
-            Expr::ImplicitIntersection(inner)
-            | Expr::SpillRef(inner)
-            | Expr::Paren(inner)
-            | Expr::Unary { operand: inner, .. } => {
-                self.expr_has_unresolved_dynamic_dependency(context, inner, visited, local_names)
-            }
-            Expr::Binary { left, right, .. }
-            | Expr::ReferenceUnion { left, right }
-            | Expr::ReferenceIntersection { left, right }
-            | Expr::Range {
-                start: left,
-                end: right,
-            } => {
-                self.expr_has_unresolved_dynamic_dependency(context, left, visited, local_names)
-                    || self.expr_has_unresolved_dynamic_dependency(
+                    })
+                }
+                Expr::Invoke { callee, args } => {
+                    let callee_has_dependency =
+                        self.builtin_invocation_callee_is_reachable(context, callee, local_names)
+                            && self.expr_has_unresolved_dynamic_dependency(
+                                context,
+                                callee,
+                                visited,
+                                local_names,
+                            );
+                    callee_has_dependency
+                        || (self.builtin_invocation_arguments_are_reachable(
+                            context,
+                            callee,
+                            args,
+                            local_names,
+                        ) && args.iter().any(|arg| {
+                            self.expr_has_unresolved_dynamic_dependency(
+                                context,
+                                arg,
+                                visited,
+                                local_names,
+                            )
+                        }))
+                }
+                Expr::Name(name) => {
+                    let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
+                    else {
+                        return false;
+                    };
+                    self.expr_has_unresolved_dynamic_dependency(
+                        defined_context,
+                        named,
+                        visited,
+                        &mut Vec::new(),
+                    )
+                }
+                Expr::BuiltinCallable(callable) => {
+                    let name = callable.canonical_name();
+                    let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
+                    else {
+                        return false;
+                    };
+                    self.expr_has_unresolved_dynamic_dependency(
+                        defined_context,
+                        named,
+                        visited,
+                        &mut Vec::new(),
+                    )
+                }
+                Expr::ImplicitIntersection(inner)
+                | Expr::SpillRef(inner)
+                | Expr::Paren(inner)
+                | Expr::Unary { operand: inner, .. } => self
+                    .expr_has_unresolved_dynamic_dependency(context, inner, visited, local_names),
+                Expr::Binary { left, right, .. }
+                | Expr::ReferenceUnion { left, right }
+                | Expr::ReferenceIntersection { left, right }
+                | Expr::Range {
+                    start: left,
+                    end: right,
+                } => {
+                    self.expr_has_unresolved_dynamic_dependency(context, left, visited, local_names)
+                        || self.expr_has_unresolved_dynamic_dependency(
+                            context,
+                            right,
+                            visited,
+                            local_names,
+                        )
+                }
+                Expr::Array(rows) => rows.iter().flatten().any(|element| {
+                    self.expr_has_unresolved_dynamic_dependency(
                         context,
-                        right,
+                        element,
                         visited,
                         local_names,
                     )
+                }),
+                Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Logical(_)
+                | Expr::ErrorLit(_)
+                | Expr::Ref(_)
+                | Expr::StructuredRef(_)
+                | Expr::ExternalReference(_)
+                | Expr::QualifiedName { .. }
+                | Expr::Missing => false,
             }
-            Expr::Array(rows) => rows.iter().flatten().any(|element| {
-                self.expr_has_unresolved_dynamic_dependency(context, element, visited, local_names)
-            }),
-            Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Logical(_)
-            | Expr::ErrorLit(_)
-            | Expr::Ref(_)
-            | Expr::StructuredRef(_)
-            | Expr::ExternalReference(_)
-            | Expr::QualifiedName { .. }
-            | Expr::Missing => false,
-        }
+        })
     }
 
     fn collect_dependencies(
@@ -876,71 +899,21 @@ impl Engine<'_> {
         local_names: &mut Vec<String>,
         output: &mut Vec<DependencyTarget>,
     ) {
-        if context.is_cancelled() {
-            return;
-        }
-        match expr {
-            Expr::Ref(reference) => {
-                if let Ok(span) = self.resolve_reference_span(context.sheet(), reference) {
-                    output.push(DependencyTarget::from_span(span));
-                }
+        crate::calculation::stack::grow(|| {
+            if context.is_cancelled() {
+                return;
             }
-            Expr::StructuredRef(reference) => {
-                if let Some(table) = self.structured_table_dependency(context, reference) {
-                    output.push(DependencyTarget::TableIdentity(table));
+            match expr {
+                Expr::Ref(reference) => {
+                    if let Ok(span) = self.resolve_reference_span(context.sheet(), reference) {
+                        output.push(DependencyTarget::from_span(span));
+                    }
                 }
-                if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
-                    output.extend(
-                        reference
-                            .areas()
-                            .iter()
-                            .map(|area| DependencyTarget::from_span(area.as_span())),
-                    );
-                }
-            }
-            Expr::SpillRef(anchor) => {
-                if let Ok(anchor_cell) = self.resolve_spill_anchor_expr(context, anchor) {
-                    output.push(DependencyTarget::SpillAnchor(anchor_cell));
-                }
-                let mut selection_names = VisitedDefinitions::default();
-                self.collect_reference_selection_inputs(
-                    context,
-                    ReferenceSelectionMode::ReferenceValue,
-                    anchor,
-                    &mut selection_names,
-                    local_names,
-                    output,
-                );
-            }
-            Expr::ReferenceUnion { .. } | Expr::ReferenceIntersection { .. } => {
-                if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
-                    output.extend(
-                        reference
-                            .areas()
-                            .iter()
-                            .map(|area| DependencyTarget::from_span(area.as_span())),
-                    );
-                }
-                let mut selection_names = VisitedDefinitions::default();
-                self.collect_reference_selection_inputs(
-                    context,
-                    ReferenceSelectionMode::ReferenceValue,
-                    expr,
-                    &mut selection_names,
-                    local_names,
-                    output,
-                );
-            }
-            Expr::Range { start, end } => {
-                if let Ok(rect) = self.resolve_rect_expr(context, expr) {
-                    output.push(DependencyTarget::from_span(RectSpan::single(rect)));
-                }
-                self.collect_dependency_targets(context, start, visited, local_names, output);
-                self.collect_dependency_targets(context, end, visited, local_names, output);
-            }
-            Expr::Name(name) => {
-                if let Some(binding) = context.binding(name) {
-                    if let ScopeValue::Reference(reference) = binding {
+                Expr::StructuredRef(reference) => {
+                    if let Some(table) = self.structured_table_dependency(context, reference) {
+                        output.push(DependencyTarget::TableIdentity(table));
+                    }
+                    if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
                         output.extend(
                             reference
                                 .areas()
@@ -948,99 +921,161 @@ impl Engine<'_> {
                                 .map(|area| DependencyTarget::from_span(area.as_span())),
                         );
                     }
-                    return;
                 }
-                if let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                {
-                    self.collect_dependency_targets(
-                        defined_context,
-                        named,
-                        visited,
-                        &mut Vec::new(),
-                        output,
-                    );
-                }
-            }
-            Expr::BuiltinCallable(callable) => {
-                let name = callable.canonical_name();
-                if let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                {
-                    self.collect_dependency_targets(
-                        defined_context,
-                        named,
-                        visited,
-                        &mut Vec::new(),
-                        output,
-                    );
-                }
-            }
-            Expr::ImplicitIntersection(inner) => {
-                if let Ok(rect) = self.resolve_rect_expr(context, expr) {
-                    output.push(DependencyTarget::from_span(RectSpan::single(rect)));
+                Expr::SpillRef(anchor) => {
+                    if let Ok(anchor_cell) = self.resolve_spill_anchor_expr(context, anchor) {
+                        output.push(DependencyTarget::SpillAnchor(anchor_cell));
+                    }
                     let mut selection_names = VisitedDefinitions::default();
                     self.collect_reference_selection_inputs(
                         context,
                         ReferenceSelectionMode::ReferenceValue,
-                        inner,
+                        anchor,
                         &mut selection_names,
                         local_names,
                         output,
                     );
-                } else {
-                    self.collect_dependency_targets(context, inner, visited, local_names, output);
                 }
-            }
-            Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
-                self.collect_dependency_targets(context, inner, visited, local_names, output);
-            }
-            Expr::Binary { left, right, .. } => {
-                self.collect_dependency_targets(context, left, visited, local_names, output);
-                self.collect_dependency_targets(context, right, visited, local_names, output);
-            }
-            Expr::Call { name, args } => {
-                if let Some((shadow, arguments_are_reachable)) = self
-                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
-                {
-                    if shadow != CallableShadow::CyclicNonCallable
-                        && let Some((id, named)) =
-                            self.resolve_name_expr_with_id_in_context(context, name)
-                        && visited.values.insert(id.clone())
+                Expr::ReferenceUnion { .. } | Expr::ReferenceIntersection { .. } => {
+                    if let Ok(reference) = self.resolve_reference_value_expr(context, expr) {
+                        output.extend(
+                            reference
+                                .areas()
+                                .iter()
+                                .map(|area| DependencyTarget::from_span(area.as_span())),
+                        );
+                    }
+                    let mut selection_names = VisitedDefinitions::default();
+                    self.collect_reference_selection_inputs(
+                        context,
+                        ReferenceSelectionMode::ReferenceValue,
+                        expr,
+                        &mut selection_names,
+                        local_names,
+                        output,
+                    );
+                }
+                Expr::Range { start, end } => {
+                    if let Ok(rect) = self.resolve_rect_expr(context, expr) {
+                        output.push(DependencyTarget::from_span(RectSpan::single(rect)));
+                    }
+                    self.collect_dependency_targets(context, start, visited, local_names, output);
+                    self.collect_dependency_targets(context, end, visited, local_names, output);
+                }
+                Expr::Name(name) => {
+                    if let Some(binding) = context.binding(name) {
+                        if let ScopeValue::Reference(reference) = binding {
+                            output.extend(
+                                reference
+                                    .areas()
+                                    .iter()
+                                    .map(|area| DependencyTarget::from_span(area.as_span())),
+                            );
+                        }
+                        return;
+                    }
+                    if let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
                     {
                         self.collect_dependency_targets(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
+                            defined_context,
                             named,
                             visited,
                             &mut Vec::new(),
                             output,
                         );
                     }
-                    if arguments_are_reachable {
-                        for arg in args {
+                }
+                Expr::BuiltinCallable(callable) => {
+                    let name = callable.canonical_name();
+                    if let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
+                    {
+                        self.collect_dependency_targets(
+                            defined_context,
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                            output,
+                        );
+                    }
+                }
+                Expr::ImplicitIntersection(inner) => {
+                    if let Ok(rect) = self.resolve_rect_expr(context, expr) {
+                        output.push(DependencyTarget::from_span(RectSpan::single(rect)));
+                        let mut selection_names = VisitedDefinitions::default();
+                        self.collect_reference_selection_inputs(
+                            context,
+                            ReferenceSelectionMode::ReferenceValue,
+                            inner,
+                            &mut selection_names,
+                            local_names,
+                            output,
+                        );
+                    } else {
+                        self.collect_dependency_targets(
+                            context,
+                            inner,
+                            visited,
+                            local_names,
+                            output,
+                        );
+                    }
+                }
+                Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
+                    self.collect_dependency_targets(context, inner, visited, local_names, output);
+                }
+                Expr::Binary { left, right, .. } => {
+                    self.collect_dependency_targets(context, left, visited, local_names, output);
+                    self.collect_dependency_targets(context, right, visited, local_names, output);
+                }
+                Expr::Call { name, args } => {
+                    if let Some((shadow, arguments_are_reachable)) = self
+                        .shadowed_call_arguments_are_reachable(
+                            context,
+                            name,
+                            args.len(),
+                            local_names,
+                        )
+                    {
+                        if shadow != CallableShadow::CyclicNonCallable
+                            && let Some((id, named)) =
+                                self.resolve_name_expr_with_id_in_context(context, name)
+                            && visited.values.insert(id.clone())
+                        {
                             self.collect_dependency_targets(
-                                context,
-                                arg,
+                                context
+                                    .without_bindings()
+                                    .with_defined_name_scope(Some(id.scope())),
+                                named,
                                 visited,
-                                local_names,
+                                &mut Vec::new(),
                                 output,
                             );
                         }
+                        if arguments_are_reachable {
+                            for arg in args {
+                                self.collect_dependency_targets(
+                                    context,
+                                    arg,
+                                    visited,
+                                    local_names,
+                                    output,
+                                );
+                            }
+                        }
+                        return;
                     }
-                    return;
-                }
-                if !self.builtin_arguments_are_reachable(name, args) {
-                    return;
-                }
-                let normalized = normalize_name(name);
-                if let Some(DependencyKind::ReferenceMetadataOnly(kind)) =
-                    function_dependency_kind(&normalized)
-                {
-                    let mut selection_names = VisitedDefinitions::default();
-                    for arg in args {
-                        if matches!(
+                    if !self.builtin_arguments_are_reachable(name, args) {
+                        return;
+                    }
+                    let normalized = normalize_name(name);
+                    if let Some(DependencyKind::ReferenceMetadataOnly(kind)) =
+                        function_dependency_kind(&normalized)
+                    {
+                        let mut selection_names = VisitedDefinitions::default();
+                        for arg in args {
+                            if matches!(
                             kind,
                             crate::calculation::functions::descriptor::ReferenceMetadataKind::FormulaPredicate
                                 | crate::calculation::functions::descriptor::ReferenceMetadataKind::FormulaText
@@ -1053,102 +1088,113 @@ impl Engine<'_> {
                                 rect.col_start,
                             )));
                         }
-                        self.collect_reference_selection_inputs(
-                            context,
-                            ReferenceSelectionMode::FormulaMetadata,
-                            arg,
-                            &mut selection_names,
-                            local_names,
-                            output,
-                        );
-                    }
-                    return;
-                }
-                if is_let_function(name) {
-                    let _ =
-                        with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
-                            engine.collect_dependency_targets(
-                                scoped,
+                            self.collect_reference_selection_inputs(
+                                context,
+                                ReferenceSelectionMode::FormulaMetadata,
                                 arg,
-                                visited,
+                                &mut selection_names,
                                 local_names,
                                 output,
                             );
-                            final_arg.then_some(())
-                        });
-                    return;
+                        }
+                        return;
+                    }
+                    if is_let_function(name) {
+                        let _ = with_let_scope(
+                            self,
+                            context,
+                            args,
+                            |engine, scoped, arg, final_arg| {
+                                engine.collect_dependency_targets(
+                                    scoped,
+                                    arg,
+                                    visited,
+                                    local_names,
+                                    output,
+                                );
+                                final_arg.then_some(())
+                            },
+                        );
+                        return;
+                    }
+                    if matches!(
+                        function_dependency_kind(&normalized),
+                        Some(DependencyKind::ResizedCriteriaValueRange)
+                    ) && args.len() == 3
+                        && let (Ok(criteria_range), Ok(value_anchor)) = (
+                            self.resolve_rect_expr(context, &args[0]),
+                            self.resolve_rect_expr(context, &args[2]),
+                        )
+                        && let Some(value_range) = value_anchor
+                            .resized_from_anchor(criteria_range.height(), criteria_range.width())
+                    {
+                        output.push(DependencyTarget::from_span(RectSpan::single(value_range)));
+                    }
+                    if let Some(DependencyKind::DynamicReference(kind)) =
+                        function_dependency_kind(&normalized)
+                        && let Ok(rect) = self.resolve_dynamic_rect(context, kind, args)
+                    {
+                        output.push(DependencyTarget::from_span(RectSpan::single(rect)));
+                    }
+                    if walk_local_scope(
+                        name,
+                        args,
+                        local_names,
+                        self.calculation_limits().max_let_bindings(),
+                        |arg, scope| {
+                            self.collect_dependency_targets(context, arg, visited, scope, output);
+                        },
+                    ) {
+                        return;
+                    }
+                    for arg in args {
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
+                    }
                 }
-                if matches!(
-                    function_dependency_kind(&normalized),
-                    Some(DependencyKind::ResizedCriteriaValueRange)
-                ) && args.len() == 3
-                    && let (Ok(criteria_range), Ok(value_anchor)) = (
-                        self.resolve_rect_expr(context, &args[0]),
-                        self.resolve_rect_expr(context, &args[2]),
-                    )
-                    && let Some(value_range) = value_anchor
-                        .resized_from_anchor(criteria_range.height(), criteria_range.width())
-                {
-                    output.push(DependencyTarget::from_span(RectSpan::single(value_range)));
-                }
-                if let Some(DependencyKind::DynamicReference(kind)) =
-                    function_dependency_kind(&normalized)
-                    && let Ok(rect) = self.resolve_dynamic_rect(context, kind, args)
-                {
-                    output.push(DependencyTarget::from_span(RectSpan::single(rect)));
-                }
-                if walk_local_scope(
-                    name,
-                    args,
-                    local_names,
-                    self.calculation_limits().max_let_bindings(),
-                    |arg, scope| {
-                        self.collect_dependency_targets(context, arg, visited, scope, output);
-                    },
-                ) {
-                    return;
-                }
-                for arg in args {
-                    self.collect_dependency_targets(context, arg, visited, local_names, output);
-                }
-            }
-            Expr::Invoke { callee, args } => {
-                if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
-                    self.collect_dependency_targets(context, callee, visited, local_names, output);
-                }
-                if !self.builtin_invocation_arguments_are_reachable(
-                    context,
-                    callee,
-                    args,
-                    local_names,
-                ) {
-                    return;
-                }
-                for arg in args {
-                    self.collect_dependency_targets(context, arg, visited, local_names, output);
-                }
-            }
-            Expr::Array(rows) => {
-                for row in rows {
-                    for element in row {
+                Expr::Invoke { callee, args } => {
+                    if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
                         self.collect_dependency_targets(
                             context,
-                            element,
+                            callee,
                             visited,
                             local_names,
                             output,
                         );
                     }
+                    if !self.builtin_invocation_arguments_are_reachable(
+                        context,
+                        callee,
+                        args,
+                        local_names,
+                    ) {
+                        return;
+                    }
+                    for arg in args {
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
+                    }
                 }
+                Expr::Array(rows) => {
+                    for row in rows {
+                        for element in row {
+                            self.collect_dependency_targets(
+                                context,
+                                element,
+                                visited,
+                                local_names,
+                                output,
+                            );
+                        }
+                    }
+                }
+                Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Logical(_)
+                | Expr::ErrorLit(_)
+                | Expr::ExternalReference(_)
+                | Expr::QualifiedName { .. }
+                | Expr::Missing => {}
             }
-            Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Logical(_)
-            | Expr::ErrorLit(_)
-            | Expr::ExternalReference(_)
-            | Expr::QualifiedName { .. }
-            | Expr::Missing => {}
-        }
+        })
     }
 
     fn collect_reference_selection_inputs(
@@ -1160,106 +1206,71 @@ impl Engine<'_> {
         local_names: &mut Vec<String>,
         output: &mut Vec<DependencyTarget>,
     ) {
-        if context.is_cancelled() {
-            return;
-        }
-        match expr {
-            Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
-                self.collect_reference_selection_inputs(
-                    context,
-                    mode,
-                    inner,
-                    visited,
-                    local_names,
-                    output,
-                );
+        crate::calculation::stack::grow(|| {
+            if context.is_cancelled() {
+                return;
             }
-            Expr::SpillRef(anchor) => {
-                if let Ok(anchor_cell) = self.resolve_spill_anchor_expr(context, anchor) {
-                    output.push(DependencyTarget::SpillAnchor(anchor_cell));
-                }
-                self.collect_reference_selection_inputs(
-                    context,
-                    mode,
-                    anchor,
-                    visited,
-                    local_names,
-                    output,
-                );
-            }
-            Expr::StructuredRef(reference) => {
-                if let Some(table) = self.structured_table_dependency(context, reference) {
-                    output.push(DependencyTarget::TableIdentity(table));
-                }
-            }
-            Expr::Range { start, end }
-            | Expr::ReferenceUnion {
-                left: start,
-                right: end,
-            }
-            | Expr::ReferenceIntersection {
-                left: start,
-                right: end,
-            } => {
-                self.collect_reference_selection_inputs(
-                    context,
-                    mode,
-                    start,
-                    visited,
-                    local_names,
-                    output,
-                );
-                self.collect_reference_selection_inputs(
-                    context,
-                    mode,
-                    end,
-                    visited,
-                    local_names,
-                    output,
-                );
-            }
-            Expr::Name(name) => {
-                if let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                {
+            match expr {
+                Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                     self.collect_reference_selection_inputs(
-                        defined_context,
+                        context,
                         mode,
-                        named,
+                        inner,
                         visited,
-                        &mut Vec::new(),
+                        local_names,
                         output,
                     );
                 }
-            }
-            Expr::BuiltinCallable(callable) => {
-                let name = callable.canonical_name();
-                if let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                {
+                Expr::SpillRef(anchor) => {
+                    if let Ok(anchor_cell) = self.resolve_spill_anchor_expr(context, anchor) {
+                        output.push(DependencyTarget::SpillAnchor(anchor_cell));
+                    }
                     self.collect_reference_selection_inputs(
-                        defined_context,
+                        context,
                         mode,
-                        named,
+                        anchor,
                         visited,
-                        &mut Vec::new(),
+                        local_names,
                         output,
                     );
                 }
-            }
-            Expr::Call { name, args } => {
-                if let Some((shadow, arguments_are_reachable)) = self
-                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
-                {
-                    if shadow != CallableShadow::CyclicNonCallable
-                        && let Some((id, named)) =
-                            self.resolve_name_expr_with_id_in_context(context, name)
-                        && visited.values.insert(id.clone())
+                Expr::StructuredRef(reference) => {
+                    if let Some(table) = self.structured_table_dependency(context, reference) {
+                        output.push(DependencyTarget::TableIdentity(table));
+                    }
+                }
+                Expr::Range { start, end }
+                | Expr::ReferenceUnion {
+                    left: start,
+                    right: end,
+                }
+                | Expr::ReferenceIntersection {
+                    left: start,
+                    right: end,
+                } => {
+                    self.collect_reference_selection_inputs(
+                        context,
+                        mode,
+                        start,
+                        visited,
+                        local_names,
+                        output,
+                    );
+                    self.collect_reference_selection_inputs(
+                        context,
+                        mode,
+                        end,
+                        visited,
+                        local_names,
+                        output,
+                    );
+                }
+                Expr::Name(name) => {
+                    if let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
                     {
                         self.collect_reference_selection_inputs(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
+                            defined_context,
                             mode,
                             named,
                             visited,
@@ -1267,159 +1278,206 @@ impl Engine<'_> {
                             output,
                         );
                     }
-                    if arguments_are_reachable {
-                        for arg in args {
+                }
+                Expr::BuiltinCallable(callable) => {
+                    let name = callable.canonical_name();
+                    if let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
+                    {
+                        self.collect_reference_selection_inputs(
+                            defined_context,
+                            mode,
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                            output,
+                        );
+                    }
+                }
+                Expr::Call { name, args } => {
+                    if let Some((shadow, arguments_are_reachable)) = self
+                        .shadowed_call_arguments_are_reachable(
+                            context,
+                            name,
+                            args.len(),
+                            local_names,
+                        )
+                    {
+                        if shadow != CallableShadow::CyclicNonCallable
+                            && let Some((id, named)) =
+                                self.resolve_name_expr_with_id_in_context(context, name)
+                            && visited.values.insert(id.clone())
+                        {
                             self.collect_reference_selection_inputs(
-                                context,
+                                context
+                                    .without_bindings()
+                                    .with_defined_name_scope(Some(id.scope())),
                                 mode,
-                                arg,
+                                named,
                                 visited,
-                                local_names,
+                                &mut Vec::new(),
                                 output,
                             );
                         }
-                    }
-                    return;
-                }
-                if !self.builtin_arguments_are_reachable(name, args) {
-                    return;
-                }
-                if is_let_function(name) {
-                    let _ =
-                        with_let_scope(self, context, args, |engine, scoped, arg, final_arg| {
-                            if final_arg
-                                || (mode == ReferenceSelectionMode::FormulaMetadata
-                                    && engine.resolve_reference_value_expr(scoped, arg).is_ok())
-                            {
-                                engine.collect_reference_selection_inputs(
-                                    scoped,
+                        if arguments_are_reachable {
+                            for arg in args {
+                                self.collect_reference_selection_inputs(
+                                    context,
                                     mode,
                                     arg,
                                     visited,
                                     local_names,
                                     output,
                                 );
-                            } else {
-                                engine.collect_dependency_targets(
-                                    scoped,
-                                    arg,
+                            }
+                        }
+                        return;
+                    }
+                    if !self.builtin_arguments_are_reachable(name, args) {
+                        return;
+                    }
+                    if is_let_function(name) {
+                        let _ = with_let_scope(
+                            self,
+                            context,
+                            args,
+                            |engine, scoped, arg, final_arg| {
+                                if final_arg
+                                    || (mode == ReferenceSelectionMode::FormulaMetadata
+                                        && engine.resolve_reference_value_expr(scoped, arg).is_ok())
+                                {
+                                    engine.collect_reference_selection_inputs(
+                                        scoped,
+                                        mode,
+                                        arg,
+                                        visited,
+                                        local_names,
+                                        output,
+                                    );
+                                } else {
+                                    engine.collect_dependency_targets(
+                                        scoped,
+                                        arg,
+                                        visited,
+                                        local_names,
+                                        output,
+                                    );
+                                }
+                                final_arg.then_some(())
+                            },
+                        );
+                        return;
+                    }
+                    if mode == ReferenceSelectionMode::FormulaMetadata
+                        && function_evaluator(name)
+                            == Some(Evaluator::Legacy(LegacyFunction::Index))
+                    {
+                        if let Some((source, selectors)) = args.split_first() {
+                            self.collect_reference_selection_inputs(
+                                context,
+                                mode,
+                                source,
+                                visited,
+                                local_names,
+                                output,
+                            );
+                            for selector in selectors {
+                                self.collect_dependency_targets(
+                                    context,
+                                    selector,
                                     visited,
                                     local_names,
                                     output,
                                 );
                             }
-                            final_arg.then_some(())
-                        });
-                    return;
-                }
-                if mode == ReferenceSelectionMode::FormulaMetadata
-                    && function_evaluator(name) == Some(Evaluator::Legacy(LegacyFunction::Index))
-                {
-                    if let Some((source, selectors)) = args.split_first() {
-                        self.collect_reference_selection_inputs(
-                            context,
-                            mode,
-                            source,
-                            visited,
-                            local_names,
-                            output,
-                        );
-                        for selector in selectors {
-                            self.collect_dependency_targets(
+                        }
+                        return;
+                    }
+                    if mode == ReferenceSelectionMode::FormulaMetadata
+                        && function_dependency_kind(name)
+                            == Some(DependencyKind::DynamicReference(
+                                DynamicReferenceKind::Offset,
+                            ))
+                    {
+                        if let Some((base, selectors)) = args.split_first() {
+                            self.collect_reference_selection_inputs(
                                 context,
-                                selector,
+                                mode,
+                                base,
                                 visited,
                                 local_names,
                                 output,
                             );
+                            for selector in selectors {
+                                self.collect_dependency_targets(
+                                    context,
+                                    selector,
+                                    visited,
+                                    local_names,
+                                    output,
+                                );
+                            }
                         }
+                        return;
                     }
-                    return;
+                    if walk_local_scope(
+                        name,
+                        args,
+                        local_names,
+                        self.calculation_limits().max_let_bindings(),
+                        |arg, scope| {
+                            self.collect_dependency_targets(context, arg, visited, scope, output);
+                        },
+                    ) {
+                        return;
+                    }
+                    for arg in args {
+                        self.collect_dependency_targets(context, arg, visited, local_names, output);
+                    }
                 }
-                if mode == ReferenceSelectionMode::FormulaMetadata
-                    && function_dependency_kind(name)
-                        == Some(DependencyKind::DynamicReference(
-                            DynamicReferenceKind::Offset,
-                        ))
-                {
-                    if let Some((base, selectors)) = args.split_first() {
+                Expr::Invoke { callee, args } => {
+                    if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
                         self.collect_reference_selection_inputs(
                             context,
                             mode,
-                            base,
+                            callee,
                             visited,
                             local_names,
                             output,
                         );
-                        for selector in selectors {
-                            self.collect_dependency_targets(
-                                context,
-                                selector,
-                                visited,
-                                local_names,
-                                output,
-                            );
-                        }
                     }
-                    return;
-                }
-                if walk_local_scope(
-                    name,
-                    args,
-                    local_names,
-                    self.calculation_limits().max_let_bindings(),
-                    |arg, scope| {
-                        self.collect_dependency_targets(context, arg, visited, scope, output);
-                    },
-                ) {
-                    return;
-                }
-                for arg in args {
-                    self.collect_dependency_targets(context, arg, visited, local_names, output);
-                }
-            }
-            Expr::Invoke { callee, args } => {
-                if self.builtin_invocation_callee_is_reachable(context, callee, local_names) {
-                    self.collect_reference_selection_inputs(
+                    if !self.builtin_invocation_arguments_are_reachable(
                         context,
-                        mode,
                         callee,
-                        visited,
+                        args,
                         local_names,
-                        output,
-                    );
+                    ) {
+                        return;
+                    }
+                    for arg in args {
+                        self.collect_reference_selection_inputs(
+                            context,
+                            mode,
+                            arg,
+                            visited,
+                            local_names,
+                            output,
+                        );
+                    }
                 }
-                if !self.builtin_invocation_arguments_are_reachable(
-                    context,
-                    callee,
-                    args,
-                    local_names,
-                ) {
-                    return;
-                }
-                for arg in args {
-                    self.collect_reference_selection_inputs(
-                        context,
-                        mode,
-                        arg,
-                        visited,
-                        local_names,
-                        output,
-                    );
-                }
+                Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Logical(_)
+                | Expr::ErrorLit(_)
+                | Expr::Ref(_)
+                | Expr::Unary { .. }
+                | Expr::Binary { .. }
+                | Expr::Array(_)
+                | Expr::ExternalReference(_)
+                | Expr::QualifiedName { .. }
+                | Expr::Missing => {}
             }
-            Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Logical(_)
-            | Expr::ErrorLit(_)
-            | Expr::Ref(_)
-            | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Array(_)
-            | Expr::ExternalReference(_)
-            | Expr::QualifiedName { .. }
-            | Expr::Missing => {}
-        }
+        })
     }
 
     fn expr_contains_dynamic_reference_function(
@@ -1429,161 +1487,172 @@ impl Engine<'_> {
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
     ) -> bool {
-        if context.is_cancelled() {
-            return true;
-        }
-        match expr {
-            Expr::Call { name, args } => {
-                if let Some((shadow, arguments_are_reachable)) = self
-                    .shadowed_call_arguments_are_reachable(context, name, args.len(), local_names)
-                {
-                    let mut found = false;
-                    if shadow != CallableShadow::CyclicNonCallable
-                        && let Some((id, named)) =
-                            self.resolve_name_expr_with_id_in_context(context, name)
-                        && visited.values.insert(id.clone())
-                    {
-                        found |= self.expr_contains_dynamic_reference_function(
-                            context
-                                .without_bindings()
-                                .with_defined_name_scope(Some(id.scope())),
-                            named,
-                            visited,
-                            &mut Vec::new(),
-                        );
-                    }
-                    return found
-                        || (arguments_are_reachable
-                            && args.iter().any(|arg| {
-                                self.expr_contains_dynamic_reference_function(
-                                    context,
-                                    arg,
-                                    visited,
-                                    local_names,
-                                )
-                            }));
-                }
-                if !self.builtin_arguments_are_reachable(name, args) {
-                    return false;
-                }
-                if matches!(
-                    function_dependency_kind(name),
-                    Some(DependencyKind::DynamicReference(_))
-                ) {
-                    return true;
-                }
-                let mut found = false;
-                if walk_local_scope(
-                    name,
-                    args,
-                    local_names,
-                    self.calculation_limits().max_let_bindings(),
-                    |arg, scope| {
-                        found |= self
-                            .expr_contains_dynamic_reference_function(context, arg, visited, scope);
-                    },
-                ) {
-                    return found;
-                }
-                args.iter().any(|arg| {
-                    self.expr_contains_dynamic_reference_function(
-                        context,
-                        arg,
-                        visited,
-                        local_names,
-                    )
-                })
+        crate::calculation::stack::grow(|| {
+            if context.is_cancelled() {
+                return true;
             }
-            Expr::Invoke { callee, args } => {
-                let callee_contains_dynamic =
-                    self.builtin_invocation_callee_is_reachable(context, callee, local_names)
-                        && self.expr_contains_dynamic_reference_function(
+            match expr {
+                Expr::Call { name, args } => {
+                    if let Some((shadow, arguments_are_reachable)) = self
+                        .shadowed_call_arguments_are_reachable(
                             context,
-                            callee,
-                            visited,
+                            name,
+                            args.len(),
                             local_names,
-                        );
-                callee_contains_dynamic
-                    || (self.builtin_invocation_arguments_are_reachable(
-                        context,
-                        callee,
+                        )
+                    {
+                        let mut found = false;
+                        if shadow != CallableShadow::CyclicNonCallable
+                            && let Some((id, named)) =
+                                self.resolve_name_expr_with_id_in_context(context, name)
+                            && visited.values.insert(id.clone())
+                        {
+                            found |= self.expr_contains_dynamic_reference_function(
+                                context
+                                    .without_bindings()
+                                    .with_defined_name_scope(Some(id.scope())),
+                                named,
+                                visited,
+                                &mut Vec::new(),
+                            );
+                        }
+                        return found
+                            || (arguments_are_reachable
+                                && args.iter().any(|arg| {
+                                    self.expr_contains_dynamic_reference_function(
+                                        context,
+                                        arg,
+                                        visited,
+                                        local_names,
+                                    )
+                                }));
+                    }
+                    if !self.builtin_arguments_are_reachable(name, args) {
+                        return false;
+                    }
+                    if matches!(
+                        function_dependency_kind(name),
+                        Some(DependencyKind::DynamicReference(_))
+                    ) {
+                        return true;
+                    }
+                    let mut found = false;
+                    if walk_local_scope(
+                        name,
                         args,
                         local_names,
-                    ) && args.iter().any(|arg| {
+                        self.calculation_limits().max_let_bindings(),
+                        |arg, scope| {
+                            found |= self.expr_contains_dynamic_reference_function(
+                                context, arg, visited, scope,
+                            );
+                        },
+                    ) {
+                        return found;
+                    }
+                    args.iter().any(|arg| {
                         self.expr_contains_dynamic_reference_function(
                             context,
                             arg,
                             visited,
                             local_names,
                         )
-                    }))
-            }
-            Expr::Name(name) => {
-                let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                else {
-                    return false;
-                };
-                self.expr_contains_dynamic_reference_function(
-                    defined_context,
-                    named,
-                    visited,
-                    &mut Vec::new(),
-                )
-            }
-            Expr::BuiltinCallable(callable) => {
-                let name = callable.canonical_name();
-                let Some((defined_context, named)) =
-                    self.reachable_defined_name(context, name, visited, local_names)
-                else {
-                    return false;
-                };
-                self.expr_contains_dynamic_reference_function(
-                    defined_context,
-                    named,
-                    visited,
-                    &mut Vec::new(),
-                )
-            }
-            Expr::ImplicitIntersection(inner)
-            | Expr::SpillRef(inner)
-            | Expr::Paren(inner)
-            | Expr::Unary { operand: inner, .. } => {
-                self.expr_contains_dynamic_reference_function(context, inner, visited, local_names)
-            }
-            Expr::Binary { left, right, .. }
-            | Expr::ReferenceUnion { left, right }
-            | Expr::ReferenceIntersection { left, right }
-            | Expr::Range {
-                start: left,
-                end: right,
-            } => {
-                self.expr_contains_dynamic_reference_function(context, left, visited, local_names)
-                    || self.expr_contains_dynamic_reference_function(
+                    })
+                }
+                Expr::Invoke { callee, args } => {
+                    let callee_contains_dynamic =
+                        self.builtin_invocation_callee_is_reachable(context, callee, local_names)
+                            && self.expr_contains_dynamic_reference_function(
+                                context,
+                                callee,
+                                visited,
+                                local_names,
+                            );
+                    callee_contains_dynamic
+                        || (self.builtin_invocation_arguments_are_reachable(
+                            context,
+                            callee,
+                            args,
+                            local_names,
+                        ) && args.iter().any(|arg| {
+                            self.expr_contains_dynamic_reference_function(
+                                context,
+                                arg,
+                                visited,
+                                local_names,
+                            )
+                        }))
+                }
+                Expr::Name(name) => {
+                    let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
+                    else {
+                        return false;
+                    };
+                    self.expr_contains_dynamic_reference_function(
+                        defined_context,
+                        named,
+                        visited,
+                        &mut Vec::new(),
+                    )
+                }
+                Expr::BuiltinCallable(callable) => {
+                    let name = callable.canonical_name();
+                    let Some((defined_context, named)) =
+                        self.reachable_defined_name(context, name, visited, local_names)
+                    else {
+                        return false;
+                    };
+                    self.expr_contains_dynamic_reference_function(
+                        defined_context,
+                        named,
+                        visited,
+                        &mut Vec::new(),
+                    )
+                }
+                Expr::ImplicitIntersection(inner)
+                | Expr::SpillRef(inner)
+                | Expr::Paren(inner)
+                | Expr::Unary { operand: inner, .. } => self
+                    .expr_contains_dynamic_reference_function(context, inner, visited, local_names),
+                Expr::Binary { left, right, .. }
+                | Expr::ReferenceUnion { left, right }
+                | Expr::ReferenceIntersection { left, right }
+                | Expr::Range {
+                    start: left,
+                    end: right,
+                } => {
+                    self.expr_contains_dynamic_reference_function(
+                        context,
+                        left,
+                        visited,
+                        local_names,
+                    ) || self.expr_contains_dynamic_reference_function(
                         context,
                         right,
                         visited,
                         local_names,
                     )
+                }
+                Expr::Array(rows) => rows.iter().flatten().any(|element| {
+                    self.expr_contains_dynamic_reference_function(
+                        context,
+                        element,
+                        visited,
+                        local_names,
+                    )
+                }),
+                Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Logical(_)
+                | Expr::ErrorLit(_)
+                | Expr::Ref(_)
+                | Expr::StructuredRef(_)
+                | Expr::ExternalReference(_)
+                | Expr::QualifiedName { .. }
+                | Expr::Missing => false,
             }
-            Expr::Array(rows) => rows.iter().flatten().any(|element| {
-                self.expr_contains_dynamic_reference_function(
-                    context,
-                    element,
-                    visited,
-                    local_names,
-                )
-            }),
-            Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Logical(_)
-            | Expr::ErrorLit(_)
-            | Expr::Ref(_)
-            | Expr::StructuredRef(_)
-            | Expr::ExternalReference(_)
-            | Expr::QualifiedName { .. }
-            | Expr::Missing => false,
-        }
+        })
     }
 }
 

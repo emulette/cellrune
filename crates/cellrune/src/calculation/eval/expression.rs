@@ -113,7 +113,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> ScopeValue {
-        match expr {
+        crate::calculation::stack::grow(|| match expr {
             Expr::Missing => ScopeValue::Missing,
             Expr::Paren(inner) => self.eval_scope_value(context, inner),
             Expr::Name(name) => self.eval_name_scope_value(context, name, None),
@@ -163,7 +163,7 @@ impl Engine<'_> {
                         scope_from_array(evaluated)
                     }
                 }),
-        }
+        })
     }
 
     pub(in crate::calculation) fn scalar_from_scope(
@@ -195,33 +195,35 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> ScalarEvaluation {
-        if let Expr::Paren(inner) = expr {
-            return self.eval_final_scalar_with_trace(context, inner);
-        }
-        let may_return_callable = match expr {
-            Expr::Name(_) | Expr::BuiltinCallable(_) | Expr::Invoke { .. } => true,
-            Expr::Call { name, .. } => {
-                function_result_kind(name).is_some_and(|kind| {
-                    matches!(
-                        kind,
-                        FunctionResultKind::Callable | FunctionResultKind::Contextual
-                    )
-                }) || context.binding(name).is_some()
-                    || self
-                        .resolve_name_expr_with_id_in_context(context, name)
-                        .is_some()
+        crate::calculation::stack::grow(|| {
+            if let Expr::Paren(inner) = expr {
+                return self.eval_final_scalar_with_trace(context, inner);
             }
-            _ => false,
-        };
-        if may_return_callable {
-            return match self.eval_scope_value(context, expr) {
-                ScopeValue::Callable(_) => {
-                    ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc))
+            let may_return_callable = match expr {
+                Expr::Name(_) | Expr::BuiltinCallable(_) | Expr::Invoke { .. } => true,
+                Expr::Call { name, .. } => {
+                    function_result_kind(name).is_some_and(|kind| {
+                        matches!(
+                            kind,
+                            FunctionResultKind::Callable | FunctionResultKind::Contextual
+                        )
+                    }) || context.binding(name).is_some()
+                        || self
+                            .resolve_name_expr_with_id_in_context(context, name)
+                            .is_some()
                 }
-                scoped => self.scalar_from_scope(context, &scoped),
+                _ => false,
             };
-        }
-        self.eval_scalar_with_trace(context, expr)
+            if may_return_callable {
+                return match self.eval_scope_value(context, expr) {
+                    ScopeValue::Callable(_) => {
+                        ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc))
+                    }
+                    scoped => self.scalar_from_scope(context, &scoped),
+                };
+            }
+            self.eval_scalar_with_trace(context, expr)
+        })
     }
 
     fn eval_reference_value_with_trace(
@@ -305,7 +307,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ScopeValue, ErrorKind> {
-        match expr {
+        crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) => self.eval_callable_argument_scope_value(context, inner),
             Expr::Ref(_)
             | Expr::StructuredRef(_)
@@ -326,11 +328,11 @@ impl Engine<'_> {
                     .map(ScopeValue::Reference)
             }
             _ => Ok(self.eval_scope_value(context, expr)),
-        }
+        })
     }
 
     fn eval_implicit_intersection(&self, context: EvalContext<'_>, expr: &Expr) -> Value {
-        match expr {
+        crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.eval_implicit_intersection(context, inner)
             }
@@ -383,7 +385,7 @@ impl Engine<'_> {
                         .next()
                         .unwrap_or(Value::Error(ErrorKind::Value))
                 }),
-        }
+        })
     }
 
     pub fn eval_scalar(&self, context: EvalContext<'_>, expr: &Expr) -> Value {
@@ -409,7 +411,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> ScalarEvaluation {
-        match expr {
+        crate::calculation::stack::grow(|| match expr {
             Expr::Number(number) => ScalarEvaluation {
                 value: Value::Number(number.value()),
                 decimal_trace: number.decimal_trace(),
@@ -472,7 +474,7 @@ impl Engine<'_> {
                 self.options.limits().max_text_bytes(),
                 self.arithmetic_semantics(),
             ),
-        }
+        })
     }
 
     /// Resolves the operand of an `@` (implicit intersection) operator down to one scalar.
@@ -486,7 +488,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         operand: &Expr,
     ) -> ScalarEvaluation {
-        match operand {
+        crate::calculation::stack::grow(|| match operand {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.eval_implicit_intersection_with_trace(context, inner)
             }
@@ -512,7 +514,7 @@ impl Engine<'_> {
                 }
             }
             _ => self.first_array_value_with_trace(context, operand),
-        }
+        })
     }
 
     fn first_array_value_with_trace(
@@ -601,7 +603,7 @@ impl Engine<'_> {
         expr: &Expr,
         evaluation: &mut ArrayEvaluationContext,
     ) -> Result<ArrayEvaluation, ErrorKind> {
-        match expr {
+        crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) => self.eval_array_with_trace_at_extent(context, inner, evaluation),
             Expr::ImplicitIntersection(inner) => Ok(ArrayEvaluation::scalar(
                 self.eval_implicit_intersection_with_trace(context, inner),
@@ -763,7 +765,7 @@ impl Engine<'_> {
             _ => Ok(ArrayEvaluation::scalar(
                 self.eval_scalar_with_trace(context, expr),
             )),
-        }
+        })
     }
 
     fn array_from_scope(
@@ -796,39 +798,41 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ArrayEvaluation, ErrorKind> {
-        if let Expr::Paren(inner) = expr {
-            return self.eval_final_array_with_trace(context, inner);
-        }
-        let may_return_callable = match expr {
-            Expr::BuiltinCallable(_) | Expr::Invoke { .. } => true,
-            Expr::Name(name) => {
-                context.binding(name).is_some()
-                    || self
-                        .resolve_name_expr_with_id_in_context(context, name)
-                        .is_some()
+        crate::calculation::stack::grow(|| {
+            if let Expr::Paren(inner) = expr {
+                return self.eval_final_array_with_trace(context, inner);
             }
-            Expr::Call { name, .. } => {
-                function_result_kind(name).is_some_and(|kind| {
-                    matches!(
-                        kind,
-                        FunctionResultKind::Callable | FunctionResultKind::Contextual
-                    )
-                }) || context.binding(name).is_some()
-                    || self
-                        .resolve_name_expr_with_id_in_context(context, name)
-                        .is_some()
-            }
-            _ => false,
-        };
-        if may_return_callable {
-            return match self.eval_scope_value(context, expr) {
-                ScopeValue::Callable(_) => Ok(ArrayEvaluation::scalar(
-                    ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc)),
-                )),
-                scoped => self.array_from_scope_value(context, &scoped),
+            let may_return_callable = match expr {
+                Expr::BuiltinCallable(_) | Expr::Invoke { .. } => true,
+                Expr::Name(name) => {
+                    context.binding(name).is_some()
+                        || self
+                            .resolve_name_expr_with_id_in_context(context, name)
+                            .is_some()
+                }
+                Expr::Call { name, .. } => {
+                    function_result_kind(name).is_some_and(|kind| {
+                        matches!(
+                            kind,
+                            FunctionResultKind::Callable | FunctionResultKind::Contextual
+                        )
+                    }) || context.binding(name).is_some()
+                        || self
+                            .resolve_name_expr_with_id_in_context(context, name)
+                            .is_some()
+                }
+                _ => false,
             };
-        }
-        self.eval_array_with_trace(context, expr)
+            if may_return_callable {
+                return match self.eval_scope_value(context, expr) {
+                    ScopeValue::Callable(_) => Ok(ArrayEvaluation::scalar(
+                        ScalarEvaluation::untracked(Value::Error(ErrorKind::Calc)),
+                    )),
+                    scoped => self.array_from_scope_value(context, &scoped),
+                };
+            }
+            self.eval_array_with_trace(context, expr)
+        })
     }
 
     pub(in crate::calculation) fn array_from_scope_value(
@@ -908,7 +912,7 @@ impl Engine<'_> {
         expr: &Expr,
         names: &mut BTreeSet<DefinedLambdaId>,
     ) -> Option<ArrayExtent> {
-        match expr {
+        crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
                 self.array_extent(context, inner, names)
             }
@@ -998,7 +1002,7 @@ impl Engine<'_> {
             | Expr::Array(_)
             | Expr::Call { .. }
             | Expr::Invoke { .. } => None,
-        }
+        })
     }
 
     fn array_extent_from_reference(&self, reference: &ReferenceValue) -> Option<ArrayExtent> {

@@ -33,7 +33,11 @@ allow = [
     "NCSA",
     "Zlib",
 ]
-exceptions = []
+exceptions = [
+    # Build-time archive writer for psm, which stacker uses to grow the stack of deep
+    # formula recursion. The root policy allows this license for the same crate.
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "ar_archive_writer" },
+]
 
 [sources]
 unknown-registry = "deny"

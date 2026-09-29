@@ -372,13 +372,13 @@ fn direct_sheet_span_error(
 }
 
 fn is_let_expression(expr: &Expr) -> bool {
-    match expr {
+    crate::calculation::stack::grow(|| match expr {
         Expr::Paren(inner) => is_let_expression(inner),
         Expr::Call { name, .. } => {
             function_evaluator(name) == Some(Evaluator::Dynamic(DynamicFunction::Let))
         }
         _ => false,
-    }
+    })
 }
 
 pub(super) fn call_function_array(
@@ -589,7 +589,7 @@ pub(in crate::calculation) fn classify_callable_value<E>(
     max_let_bindings: u64,
     resolve_name: &mut impl FnMut(&str) -> Result<CallableShadow, E>,
 ) -> Result<CallableShadow, E> {
-    match expr {
+    crate::calculation::stack::grow(|| match expr {
         Expr::Paren(inner) => {
             classify_callable_value(inner, locals, max_let_bindings, resolve_name)
         }
@@ -702,15 +702,15 @@ pub(in crate::calculation) fn classify_callable_value<E>(
         | Expr::Binary { .. }
         | Expr::Array(_)
         | Expr::Missing => Ok(CallableShadow::DefinitelyNonCallable),
-    }
+    })
 }
 
 pub(in crate::calculation) fn direct_builtin_callable(expr: &Expr) -> Option<BuiltinCallable> {
-    match expr {
+    crate::calculation::stack::grow(|| match expr {
         Expr::BuiltinCallable(callable) => Some(*callable),
         Expr::Paren(inner) => direct_builtin_callable(inner),
         _ => None,
-    }
+    })
 }
 
 fn call_builtin_callable(

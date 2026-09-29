@@ -398,7 +398,7 @@ impl Parser<'_> {
             ));
         }
         self.parse_depth += 1;
-        let result = self.parse_expr_inner(min_bp, allow_union);
+        let result = super::stack::grow(|| self.parse_expr_inner(min_bp, allow_union));
         self.parse_depth -= 1;
         result
     }

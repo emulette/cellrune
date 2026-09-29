@@ -199,7 +199,7 @@ impl NumberLiteral {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Expr {
     Number(NumberLiteral),
     Text(String),
@@ -248,6 +248,62 @@ pub enum Expr {
     Paren(Box<Expr>),
     Array(Vec<Vec<Expr>>),
     Missing,
+}
+
+// Cloning recurses once per nesting level, so each level runs through the host-stack guard like
+// the other recursive walks over formula syntax.
+impl Clone for Expr {
+    fn clone(&self) -> Self {
+        super::stack::grow(|| match self {
+            Self::Number(number) => Self::Number(*number),
+            Self::Text(text) => Self::Text(text.clone()),
+            Self::Logical(logical) => Self::Logical(*logical),
+            Self::ErrorLit(kind) => Self::ErrorLit(*kind),
+            Self::Ref(reference) => Self::Ref(reference.clone()),
+            Self::StructuredRef(reference) => Self::StructuredRef(reference.clone()),
+            Self::ReferenceUnion { left, right } => Self::ReferenceUnion {
+                left: left.clone(),
+                right: right.clone(),
+            },
+            Self::ReferenceIntersection { left, right } => Self::ReferenceIntersection {
+                left: left.clone(),
+                right: right.clone(),
+            },
+            Self::SpillRef(anchor) => Self::SpillRef(anchor.clone()),
+            Self::ExternalReference(reference) => Self::ExternalReference(reference.clone()),
+            Self::QualifiedName { sheet, name } => Self::QualifiedName {
+                sheet: sheet.clone(),
+                name: name.clone(),
+            },
+            Self::Range { start, end } => Self::Range {
+                start: start.clone(),
+                end: end.clone(),
+            },
+            Self::Name(name) => Self::Name(name.clone()),
+            Self::BuiltinCallable(callable) => Self::BuiltinCallable(*callable),
+            Self::Call { name, args } => Self::Call {
+                name: name.clone(),
+                args: args.clone(),
+            },
+            Self::Invoke { callee, args } => Self::Invoke {
+                callee: callee.clone(),
+                args: args.clone(),
+            },
+            Self::ImplicitIntersection(operand) => Self::ImplicitIntersection(operand.clone()),
+            Self::Unary { op, operand } => Self::Unary {
+                op: *op,
+                operand: operand.clone(),
+            },
+            Self::Binary { op, left, right } => Self::Binary {
+                op: *op,
+                left: left.clone(),
+                right: right.clone(),
+            },
+            Self::Paren(inner) => Self::Paren(inner.clone()),
+            Self::Array(rows) => Self::Array(rows.clone()),
+            Self::Missing => Self::Missing,
+        })
+    }
 }
 
 impl Expr {
@@ -539,7 +595,7 @@ impl Expr {
         formatter: &mut fmt::Formatter<'_>,
         mode: FormulaDisplayMode,
     ) -> fmt::Result {
-        match self {
+        crate::calculation::stack::grow(|| match self {
             Expr::Number(number) => {
                 formatter.write_str(&super::value::number_to_general_text(number.value()))
             }
@@ -709,7 +765,7 @@ impl Expr {
                 formatter.write_str("}")
             }
             Expr::Missing => Ok(()),
-        }
+        })
     }
 }
 

@@ -35,6 +35,7 @@ mod runtime;
 mod scope;
 mod session;
 mod sheet_span;
+mod stack;
 mod structured_reference;
 mod syntax;
 mod targeted;
