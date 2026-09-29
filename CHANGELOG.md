@@ -43,11 +43,13 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 - Stack overflow on small host stacks for formulas, defined-name chains, and recursive `LAMBDA`
   calls within the default calculation limits.
-- `IRR`, `XIRR`, and `RATE` convergence after a Newton step past -1; `LET` and `LAMBDA` locals
-  named `r` or `c`; `XLOOKUP` implicit intersection in legacy formulas; `MATCH` match types
-  selected by sign.
-- Error cells no longer abort exact `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, and `XMATCH` searches;
-  `VLOOKUP`/`HLOOKUP` exact matches and `SEARCH` honor `?`, `*`, and `~` wildcards.
+- `IRR`, `XIRR`, and `RATE` convergence after a Newton step past -1; `LET` locals named `r`, `c`,
+  or with an R1C1 shape such as `R1C1` or `RC`, and `LAMBDA` parameters named `r` or `c`;
+  `XLOOKUP` implicit intersection in legacy formulas; `MATCH` match types selected by sign.
+- Error cells no longer abort exact or linear approximate `MATCH`, `VLOOKUP`, `HLOOKUP`,
+  `XLOOKUP`, and `XMATCH` searches; `VLOOKUP`/`HLOOKUP` exact matches and `SEARCH` honor `?`,
+  `*`, and `~` wildcards.
+- `PERCENTRANK`, `PERCENTRANK.INC`, and `PERCENTRANK.EXC` return 1 for a single matching value.
 - `POISSON.DIST` for large and zero means, `MIRR` with non-numeric cells, overflow in
   `MEDIAN`/`PERCENTILE`/`QUARTILE` interpolation, Unicode case in `UNIQUE`, and a `DATEDIF`
   `"MD"` panic in overflow-checked builds.
