@@ -5,11 +5,13 @@ use super::kernel::DistributionFunction;
 
 mod beta;
 mod binomial;
+mod confidence;
 pub(in crate::calculation::functions) mod f;
 mod gamma;
 mod hypergeometric;
 mod normal;
 pub(in crate::calculation::functions) mod t;
+mod weibull;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -37,6 +39,14 @@ pub(super) fn call(
             binomial::binomial_distribution_range(engine, context, args)
         }
         DistributionFunction::BinomInv => binomial::binomial_inverse(engine, context, args),
+        DistributionFunction::ChiSqDist => gamma::chi_square_distribution(engine, context, args),
+        DistributionFunction::ChiSqDistRt => {
+            gamma::chi_square_distribution_rt(engine, context, args)
+        }
+        DistributionFunction::ConfidenceNorm => {
+            confidence::confidence_normal(engine, context, args)
+        }
+        DistributionFunction::ConfidenceT => confidence::confidence_t(engine, context, args),
         DistributionFunction::FDist => f::f_distribution(engine, context, args),
         DistributionFunction::FDistRt => f::f_distribution_rt(engine, context, args),
         DistributionFunction::FInv => f::f_inverse(engine, context, args),
@@ -63,6 +73,7 @@ pub(super) fn call(
         DistributionFunction::TInv => t::t_inverse(engine, context, args),
         DistributionFunction::TInv2T => t::t_inverse_two_tail(engine, context, args),
         DistributionFunction::TDists => t::tdist(engine, context, args),
+        DistributionFunction::WeibullDist => weibull::weibull_distribution(engine, context, args),
     }
 }
 

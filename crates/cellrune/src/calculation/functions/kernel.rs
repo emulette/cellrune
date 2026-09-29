@@ -433,6 +433,10 @@ function_enum!(DistributionFunction {
     BinomDist,
     BinomDistRange,
     BinomInv,
+    ChiSqDist,
+    ChiSqDistRt,
+    ConfidenceNorm,
+    ConfidenceT,
     FDist,
     FDistRt,
     FInv,
@@ -451,6 +455,7 @@ function_enum!(DistributionFunction {
     TInv,
     TInv2T,
     TDists,
+    WeibullDist,
 });
 
 function_enum!(FinancialFunction {

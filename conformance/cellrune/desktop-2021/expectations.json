@@ -2037,25 +2037,22 @@
     "excel_rich_error": false
   },
   "function:chidist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.26146412994911056",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHIDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chidist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.57240670447087982",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHIDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chidist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHIDIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chiinv": {
     "classification": "not_implemented",
@@ -2079,46 +2076,40 @@
     "note": "CellRune reports calculation.unsupported_function (CHIINV) for this oracle case."
   },
   "function:chisq-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.7385358700508895",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-dist-rt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.26146412994911056",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-dist-rt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.57240670447087982",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-dist-rt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.DIST.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.42759329552912018",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-inv": {
     "classification": "not_implemented",
@@ -2397,67 +2388,58 @@
     "excel_rich_error": false
   },
   "function:confidence": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.4899909961350134",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CONFIDENCE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence-norm": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.4899909961350134",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CONFIDENCE.NORM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence-norm:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CONFIDENCE.NORM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence-norm:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CONFIDENCE.NORM) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence-t": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.49605423789660413",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CONFIDENCE.T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence-t:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CONFIDENCE.T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence-t:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CONFIDENCE.T) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CONFIDENCE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:confidence:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CONFIDENCE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:convert": {
     "classification": "match",
@@ -8835,46 +8817,40 @@
     "excel_rich_error": false
   },
   "function:weibull": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.92958139006927698",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WEIBULL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:weibull-dist": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.92958139006927698",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WEIBULL.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:weibull-dist:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.0485760000000076E-34",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WEIBULL.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:weibull-dist:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.WEIBULL.DIST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:weibull:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.0485760000000076E-34",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WEIBULL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:weibull:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (WEIBULL) for this oracle case."
+    "excel_rich_error": false
   },
   "function:workday": {
     "classification": "match",

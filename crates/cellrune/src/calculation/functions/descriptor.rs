@@ -1091,6 +1091,19 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     // kernel rather than an alias of NEGBINOM.DIST.
     function!(NegBinomDistLegacy, "NEGBINOMDIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
+    function!(ChiSqDist, "CHISQ.DIST", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(ChiSqDistRt, "CHISQ.DIST.RT", Distribution)
+        .with_aliases(&[FunctionAlias::official("CHIDIST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(ConfidenceNorm, "CONFIDENCE.NORM", Distribution)
+        .with_aliases(&[FunctionAlias::official("CONFIDENCE")])
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(ConfidenceT, "CONFIDENCE.T", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(WeibullDist, "WEIBULL.DIST", Distribution)
+        .with_aliases(&[FunctionAlias::official("WEIBULL")])
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(Db, "DB", Financial),
     function!(Ddb, "DDB", Financial).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(Xnpv, "XNPV", Financial).with_minimum_version(CompatibilityVersion::V0_1_20),

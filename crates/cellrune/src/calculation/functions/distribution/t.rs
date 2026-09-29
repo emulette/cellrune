@@ -187,15 +187,26 @@ pub(super) fn t_inverse_two_tail(
     if !(p > 0.0 && p < 1.0) {
         return Value::Error(ErrorKind::Num);
     }
-    // See t_inverse: the quantile is solved in z-space at the kernel's fine
-    // coordinates and restored through x = √(df·w/z).
-    match magnitude_pair(p, df, || {
+    match two_tailed_critical_value(p, df, || {
         poll_cancellation(context)?;
         engine.charge_function_iterations(context, 1)
     }) {
-        Ok((z, w)) => finite(restore_t_coordinate(z, w, df)),
+        Ok(value) => finite(value),
         Err(kind) => Value::Error(quantile_solver_error(kind)),
     }
+}
+
+/// The x ≥ 0 with P(|T| > x) = p for 0 < p < 1; the solver's convergence failure surfaces as
+/// its raw error for the caller to map.
+pub(super) fn two_tailed_critical_value(
+    p: f64,
+    df: f64,
+    on_iteration: impl FnMut() -> Result<(), ErrorKind> + Clone,
+) -> Result<f64, ErrorKind> {
+    // See t_inverse: the quantile is solved in z-space at the kernel's fine
+    // coordinates and restored through x = √(df·w/z).
+    let (z, w) = magnitude_pair(p, df, on_iteration)?;
+    Ok(restore_t_coordinate(z, w, df))
 }
 
 /// TDIST(x, df, tails): the legacy three-argument name. A typed descriptor

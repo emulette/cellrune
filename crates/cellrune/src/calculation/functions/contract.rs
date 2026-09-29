@@ -1622,15 +1622,19 @@ impl DistributionFunction {
             | Self::FDist
             | Self::GammaDist
             | Self::HypgeomDistLegacy
-            | Self::NegBinomDist => CallContract::uniform(Arity::exact(4), SCALAR),
+            | Self::NegBinomDist
+            | Self::WeibullDist => CallContract::uniform(Arity::exact(4), SCALAR),
             Self::BinomInv
+            | Self::ChiSqDist
+            | Self::ConfidenceNorm
+            | Self::ConfidenceT
             | Self::FDistRt
             | Self::FInv
             | Self::FInvRt
             | Self::GammaInv
             | Self::NegBinomDistLegacy => CallContract::uniform(Arity::exact(3), SCALAR),
             Self::TDist | Self::TDists => CallContract::uniform(Arity::exact(3), SCALAR),
-            Self::TDistRt | Self::TDist2T | Self::TInv | Self::TInv2T => {
+            Self::ChiSqDistRt | Self::TDistRt | Self::TDist2T | Self::TInv | Self::TInv2T => {
                 CallContract::uniform(Arity::exact(2), SCALAR)
             }
             Self::BinomDistRange => CallContract::uniform(Arity::range(3, 4), SCALAR),

@@ -5,9 +5,10 @@ use super::super::super::value::{ErrorKind, Value};
 use super::super::array_common::poll_cancellation;
 use super::super::special_functions::{
     DomainPolicy, invert_monotone_cdf, ln_gamma, regularized_gamma_p, regularized_gamma_p_from_log,
-    signed_gamma,
+    regularized_gamma_q, signed_gamma,
 };
 use super::super::util::required_number;
+use super::f::nonnegative_x;
 use super::{finite, quantile_solver_error};
 
 pub(super) fn gamma(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -83,6 +84,77 @@ pub(super) fn gamma_distribution(
         }
     } else {
         density(x, alpha, beta)
+    }
+}
+
+/// CHISQ.DIST(x, df, cumulative): the chi-square distribution is the gamma distribution with
+/// shape df/2 and scale 2.
+pub(super) fn chi_square_distribution(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    let [x, df, cumulative] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let x = match nonnegative_x(engine, context, x) {
+        Ok(value) => value,
+        Err(kind) => return Value::Error(kind),
+    };
+    let df = match chi_square_degrees_of_freedom(engine, context, df) {
+        Ok(value) => value,
+        Err(kind) => return Value::Error(kind),
+    };
+    let cumulative = match to_logical(&engine.eval_scalar(context, cumulative)) {
+        Ok(value) => value,
+        Err(kind) => return Value::Error(kind),
+    };
+    if !cumulative {
+        return density(x, df / 2.0, 2.0);
+    }
+    match regularized_gamma_p(df / 2.0, x / 2.0, || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    }) {
+        Ok(value) => finite(value),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// CHISQ.DIST.RT(x, df), also spelled CHIDIST: the right tail is the upper regularized gamma
+/// Q(df/2, x/2) evaluated directly, so small tails are not lost to 1 − P.
+pub(super) fn chi_square_distribution_rt(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    let [x, df] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let result = nonnegative_x(engine, context, x).and_then(|x| {
+        let df = chi_square_degrees_of_freedom(engine, context, df)?;
+        regularized_gamma_q(df / 2.0, x / 2.0, || {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)
+        })
+    });
+    match result {
+        Ok(value) => finite(value),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// The chi-square functions truncate their degrees of freedom and accept 1 through 10^10.
+fn chi_square_degrees_of_freedom(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    argument: &Expr,
+) -> Result<f64, ErrorKind> {
+    let df = required_number(engine, context, argument)?.trunc();
+    if (1.0..=1e10).contains(&df) {
+        Ok(df)
+    } else {
+        Err(ErrorKind::Num)
     }
 }
 
