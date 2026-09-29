@@ -36,6 +36,10 @@ def assert_catalog_contract() -> None:
             "MDETERM", "RANK.AVG", "FORECAST.LINEAR", "FORECAST",
             "NORM.INV", "NORM.S.INV", "NORMINV", "NORMSINV",
             "LOGNORM.DIST", "LOGNORM.INV", "LOGNORMDIST", "LOGINV",
+            "PERCENTILE.EXC", "QUARTILE.EXC", "PERCENTRANK.EXC", "STDEVA", "STDEVPA",
+            "VARA", "VARPA", "STEYX", "TRIMMEAN", "FISHER", "FISHERINV", "PROB",
+            "CHISQ.DIST", "CHISQ.DIST.RT", "CHIDIST", "WEIBULL.DIST", "WEIBULL",
+            "CONFIDENCE.NORM", "CONFIDENCE", "CONFIDENCE.T", "IMLOG10", "IMLOG2",
             "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST",
             "BINOM.DIST.RANGE", "BINOM.INV", "BINOMDIST", "CRITBINOM", "GAMMA",
             "GAMMA.DIST", "GAMMA.INV", "GAMMADIST", "GAMMAINV", "GAMMALN",
@@ -165,7 +169,7 @@ def main() -> None:
 
         report = workbook.calculate()
         assert report["unavailable_count"] == 0
-        page = workbook.read_range("Sheet1", "A1", "Y2", limit=100)
+        page = workbook.read_range("Sheet1", "A1", "AU2", limit=100)
         values: dict[str, float] = {}
         for cell in page["cells"]:
             result = cell["calculated"]

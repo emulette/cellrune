@@ -95,15 +95,15 @@ fn versioned_corpus_calculates_writes_and_reopens() {
     let report = session
         .calculate(CalculationOptionsDto::default())
         .expect("calculation must succeed");
-    assert_eq!(report.formula_count, 19);
+    assert_eq!(report.formula_count, 41);
     assert_eq!(report.unavailable_count, 0);
-    assert_eq!(report.materialized_cell_count, 22);
+    assert_eq!(report.materialized_cell_count, 44);
 
     let page = session
         .read_range(&RangeRequestDto {
             sheet: "Sheet1".to_owned(),
             start: "A1".to_owned(),
-            end: "Y2".to_owned(),
+            end: "AU2".to_owned(),
             offset: 0,
             limit: 100,
         })
@@ -131,14 +131,14 @@ fn versioned_corpus_calculates_writes_and_reopens() {
         .save_bytes(WriteOptionsDto::default())
         .expect("verified save must succeed");
     assert!(write_report.complete);
-    assert_eq!(write_report.materialized_count, 22);
+    assert_eq!(write_report.materialized_count, 44);
 
     let reopened = WorkbookSession::open_bytes(&bytes).expect("written package must reopen");
     let reopened_page = reopened
         .read_range(&RangeRequestDto {
             sheet: "Sheet1".to_owned(),
             start: "A1".to_owned(),
-            end: "Y2".to_owned(),
+            end: "AU2".to_owned(),
             offset: 0,
             limit: 100,
         })

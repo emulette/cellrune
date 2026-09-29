@@ -17,6 +17,10 @@ function assertCatalogContract() {
     "MDETERM", "RANK.AVG", "FORECAST.LINEAR", "FORECAST",
     "NORM.INV", "NORM.S.INV", "NORMINV", "NORMSINV",
     "LOGNORM.DIST", "LOGNORM.INV", "LOGNORMDIST", "LOGINV",
+    "PERCENTILE.EXC", "QUARTILE.EXC", "PERCENTRANK.EXC", "STDEVA", "STDEVPA", "VARA", "VARPA",
+    "STEYX", "TRIMMEAN", "FISHER", "FISHERINV", "PROB",
+    "CHISQ.DIST", "CHISQ.DIST.RT", "CHIDIST", "WEIBULL.DIST", "WEIBULL",
+    "CONFIDENCE.NORM", "CONFIDENCE", "CONFIDENCE.T", "IMLOG10", "IMLOG2",
     "BETA.DIST", "BETA.INV", "BETADIST", "BETAINV", "BINOM.DIST", "BINOM.DIST.RANGE",
     "BINOM.INV", "BINOMDIST", "CRITBINOM", "GAMMA", "GAMMA.DIST", "GAMMA.INV",
     "GAMMADIST", "GAMMAINV", "GAMMALN", "GAMMALN.PRECISE", "HYPGEOM.DIST",
@@ -95,7 +99,7 @@ async function main() {
   }
   const report = await workbook.calculate();
   assert.equal(report.unavailableCount, 0);
-  const page = workbook.readRange("Sheet1", "A1", "Y2", { limit: 100 });
+  const page = workbook.readRange("Sheet1", "A1", "AU2", { limit: 100 });
   const values = new Map();
   for (const cell of page.cells) {
     const value =
