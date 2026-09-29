@@ -577,16 +577,16 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     if rect.height() > 1 && rect.width() > 1 {
         return Value::Error(ErrorKind::Unsupported);
     }
+    // Excel selects the mode by sign, so any positive type behaves as 1 and any negative as -1.
     let match_type = match args.get(2) {
         Some(expr) => match to_number(&engine.eval_scalar(context, expr)) {
-            Ok(number) => number,
+            Ok(number) if number > 0.0 => 1.0,
+            Ok(number) if number < 0.0 => -1.0,
+            Ok(_) => 0.0,
             Err(kind) => return Value::Error(kind),
         },
         None => 1.0,
     };
-    if !matches!(match_type, -1.0 | 0.0 | 1.0) {
-        return Value::Error(ErrorKind::NA);
-    }
     if lookup.is_blank_like() {
         return Value::Error(ErrorKind::NA);
     }

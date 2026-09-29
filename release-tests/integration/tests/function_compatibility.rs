@@ -355,3 +355,159 @@ fn compatibility_functions_keep_resource_failures_distinct() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
 }
+
+fn sheet_results(
+    values: &[(&str, CellValue)],
+    formulas: &[(&str, &str)],
+    dynamic: &[(&str, &str)],
+) -> Vec<CalculationCellResult> {
+    let mut draft = WorkbookDraft::new();
+    let sheet = draft.workbook().sheets()[0].id();
+    for (address, value) in values {
+        draft
+            .set_cell_value(sheet, CellAddress::from_a1(address).unwrap(), value.clone())
+            .unwrap();
+    }
+    for (address, formula) in formulas {
+        draft
+            .set_cell_formula(
+                sheet,
+                CellAddress::from_a1(address).unwrap(),
+                FormulaText::from_xlsx(*formula).unwrap(),
+            )
+            .unwrap();
+    }
+    for (address, formula) in dynamic {
+        draft
+            .set_cell_dynamic_formula(
+                sheet,
+                CellAddress::from_a1(address).unwrap(),
+                FormulaText::from_xlsx(*formula).unwrap(),
+                None,
+            )
+            .unwrap();
+    }
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    formulas
+        .iter()
+        .chain(dynamic)
+        .map(|(address, _)| {
+            let id = CalculationCellId::new(sheet, CellAddress::from_a1(address).unwrap());
+            calculation.cell(id).unwrap().clone()
+        })
+        .collect()
+}
+
+fn assert_close(actual: &CalculationCellResult, expected: f64, formula: &str) {
+    let CalculationCellResult::Value(CellValue::Number(number)) = actual else {
+        panic!("{formula}: expected a number, got {actual:?}");
+    };
+    let actual = number.get();
+    assert!(
+        (actual - expected).abs() <= 1e-12 * expected.abs().max(1.0),
+        "{formula}: {actual} != {expected}",
+    );
+}
+
+#[test]
+fn rate_solvers_recover_after_stepping_past_the_minus_one_pole() {
+    let cashflows = [
+        -1000.0, 180.0, 220.0, 260.0, 300.0, 340.0, 380.0, -50.0, 420.0, 500.0,
+    ];
+    let values = cashflows
+        .iter()
+        .enumerate()
+        .map(|(row, value)| (format!("A{}", row + 1), CellValue::number(*value).unwrap()))
+        .collect::<Vec<_>>();
+    let values = values
+        .iter()
+        .map(|(address, value)| (address.as_str(), value.clone()))
+        .collect::<Vec<_>>();
+    let formulas = [
+        ("C1", "IRR({-100,1,1,1,1,1},10)"),
+        ("C2", "IRR(A1:A10,\"2\")"),
+        ("C3", "IRR(A1:A10)"),
+        ("C4", "IRR({-100,60,60})"),
+    ];
+    let results = sheet_results(&values, &formulas, &[]);
+    for ((_, formula), (result, expected)) in formulas.iter().zip(results.iter().zip([
+        -0.553_500_302_130_925_5,
+        0.211_724_438_710_438_9,
+        0.211_724_438_710_438_9,
+        0.130_662_386_291_807_6,
+    ])) {
+        assert_close(result, expected, formula);
+    }
+}
+
+#[test]
+fn lambda_and_let_accept_bare_row_and_column_axis_names() {
+    for (formula, expected) in [
+        ("LET(a,2,b,5,c,a*b,c+a)", 12.0),
+        ("LET(r,3,R*2)", 6.0),
+        ("LAMBDA(c,c+1)(2)", 3.0),
+        ("LET(_xlpm.c,4,c)", 4.0),
+    ] {
+        assert_eq!(result(formula, None), number(expected), "{formula}");
+    }
+    for formula in ["LET(RC,1,RC)", "LET(R1C1,1,R1C1)", "LET(A1,1,A1)"] {
+        assert_eq!(result(formula, None), error(ExcelError::Value), "{formula}");
+    }
+}
+
+#[test]
+fn xlookup_intersects_multi_column_results_in_legacy_formulas() {
+    let values = [
+        ("A1", CellValue::Text("K1".into())),
+        ("A2", CellValue::Text("K2".into())),
+        ("E1", CellValue::number(100.0).unwrap()),
+        ("F1", CellValue::number(1.0).unwrap()),
+        ("E2", CellValue::number(200.0).unwrap()),
+        ("F2", CellValue::number(2.0).unwrap()),
+    ];
+    let results = sheet_results(
+        &values,
+        &[
+            ("F5", "XLOOKUP(\"K2\",A1:A2,E1:F2)"),
+            ("E6", "XLOOKUP(\"K2\",A1:A2,E1:F2)"),
+            ("H5", "XLOOKUP(\"K2\",A1:A2,E1:F2)"),
+            ("H6", "XLOOKUP(\"K2\",A1:A2,E1:E2)"),
+            ("H7", "XLOOKUP(\"K9\",A1:A2,E1:F2,\"missing\")"),
+        ],
+        &[("J1", "XLOOKUP(\"K2\",A1:A2,E1:F2)")],
+    );
+    assert_eq!(results[0], number(2.0));
+    assert_eq!(results[1], number(200.0));
+    assert_eq!(results[2], error(ExcelError::Value));
+    assert_eq!(results[3], number(200.0));
+    assert_eq!(
+        results[4],
+        CalculationCellResult::Value(CellValue::Text("missing".into()))
+    );
+    assert_eq!(results[5], number(200.0));
+}
+
+#[test]
+fn match_selects_its_mode_by_the_sign_of_the_match_type() {
+    let values = [
+        ("A1", CellValue::number(10.0).unwrap()),
+        ("A2", CellValue::number(20.0).unwrap()),
+        ("A3", CellValue::number(30.0).unwrap()),
+        ("B1", CellValue::number(30.0).unwrap()),
+        ("B2", CellValue::number(20.0).unwrap()),
+        ("B3", CellValue::number(10.0).unwrap()),
+    ];
+    let formulas = [
+        ("D1", "MATCH(25,A1:A3,\"2\")"),
+        ("D2", "MATCH(25,A1:A3,0.5)"),
+        ("D3", "MATCH(25,B1:B3,-2)"),
+        ("D4", "MATCH(20,A1:A3,-0)"),
+        ("D5", "MATCH(25,A1:A3,0)"),
+    ];
+    let results = sheet_results(&values, &formulas, &[]);
+    assert_eq!(results[0], number(2.0));
+    assert_eq!(results[1], number(2.0));
+    assert_eq!(results[2], number(1.0));
+    assert_eq!(results[3], number(2.0));
+    assert_eq!(results[4], error(ExcelError::NotAvailable));
+}

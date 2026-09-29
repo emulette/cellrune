@@ -168,11 +168,10 @@ fn conflicts_with_a1_reference(name: &str) -> bool {
     column.is_some_and(|column| column <= EXCEL_MAX_COLUMNS) && row <= EXCEL_MAX_ROWS
 }
 
+// Bare `R` and `C` are reserved only for defined names. Excel accepts them as LET and LAMBDA
+// locals, storing them as `_xlpm.r` and `_xlpm.c`, so only row-and-column forms conflict here.
 fn conflicts_with_r1c1_reference(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    if matches!(upper.as_str(), "R" | "C") {
-        return true;
-    }
     let Some(after_r) = upper.strip_prefix('R') else {
         return false;
     };
@@ -360,19 +359,14 @@ mod tests {
 
     #[test]
     fn local_name_validation_rejects_reference_conflicts_and_policy_violations() {
-        for invalid in [
-            "A1",
-            "XFD1048576",
-            "R1C1",
-            "RC",
-            "R",
-            "c",
-            "1name",
-            "has space",
-        ] {
+        for invalid in ["A1", "XFD1048576", "R1C1", "RC", "1name", "has space"] {
             assert!(validate_local_name(invalid, LocalNamePolicy::Let).is_none());
         }
         assert!(validate_local_name("XFE1", LocalNamePolicy::Let).is_some());
+        for bare_axis in ["R", "r", "C", "c"] {
+            assert!(validate_local_name(bare_axis, LocalNamePolicy::Let).is_some());
+            assert!(validate_local_name(bare_axis, LocalNamePolicy::Lambda).is_some());
+        }
         assert!(validate_local_name("_xlpm.total.value", LocalNamePolicy::Let).is_some());
         assert!(validate_local_name("total.value", LocalNamePolicy::Lambda).is_none());
         assert_eq!(

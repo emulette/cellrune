@@ -302,12 +302,16 @@ fn push_sheet_qualifier(output: &mut String, sheet: &str) {
 }
 
 fn xlookup(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    match call_xlookup_array(engine, context, args) {
-        Ok(result) => result
-            .data
-            .into_iter()
-            .next()
-            .unwrap_or(Value::Error(ErrorKind::Value)),
+    // A scalar caller receives the returned reference through implicit intersection, as Excel
+    // applies it to a legacy formula, instead of the first cell of a multi-cell result.
+    match xlookup_outcome(engine, context, args) {
+        Ok(XLookupOutcome::Found(slice)) => engine
+            .implicit_intersection_rect(context, slice)
+            .and_then(|cell| {
+                engine.read_reference_cell(context, (cell.sheet, cell.row_start, cell.col_start))
+            })
+            .unwrap_or_else(Value::Error),
+        Ok(XLookupOutcome::NotFound(value)) => value,
         Err(kind) => Value::Error(kind),
     }
 }
@@ -317,6 +321,22 @@ pub(super) fn call_xlookup_array(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
+    match xlookup_outcome(engine, context, args)? {
+        XLookupOutcome::Found(slice) => xlookup_return_array(engine, context, slice),
+        XLookupOutcome::NotFound(value) => Ok(Array::scalar(value)),
+    }
+}
+
+enum XLookupOutcome {
+    Found(Rect),
+    NotFound(Value),
+}
+
+fn xlookup_outcome(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<XLookupOutcome, ErrorKind> {
     if args.len() < 3 || args.len() > 6 {
         return Err(ErrorKind::Value);
     }
@@ -349,8 +369,12 @@ pub(super) fn call_xlookup_array(
         },
     );
     match match_offset {
-        Ok(offset) => xlookup_return_array(engine, context, return_rect, orientation, offset),
-        Err(ErrorKind::NA) => Ok(Array::scalar(match args.get(3) {
+        Ok(offset) => Ok(XLookupOutcome::Found(xlookup_return_slice(
+            return_rect,
+            orientation,
+            offset,
+        ))),
+        Err(ErrorKind::NA) => Ok(XLookupOutcome::NotFound(match args.get(3) {
             None | Some(Expr::Missing) => Value::Error(ErrorKind::NA),
             Some(if_not_found) => engine.eval_scalar(context, if_not_found),
         })),
@@ -382,23 +406,29 @@ fn lookup_axis_cell(rect: Rect, orientation: XLookupOrientation, offset: u32) ->
     }
 }
 
+fn xlookup_return_slice(result: Rect, orientation: XLookupOrientation, offset: u32) -> Rect {
+    match orientation {
+        XLookupOrientation::Vertical => Rect {
+            row_start: result.row_start + offset,
+            row_end: result.row_start + offset,
+            whole_rows: false,
+            ..result
+        },
+        XLookupOrientation::Horizontal => Rect {
+            col_start: result.col_start + offset,
+            col_end: result.col_start + offset,
+            ..result
+        },
+    }
+}
+
 fn xlookup_return_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    result: Rect,
-    orientation: XLookupOrientation,
-    offset: u32,
+    slice: Rect,
 ) -> Result<Array, ErrorKind> {
-    let (rows, cols) = match orientation {
-        XLookupOrientation::Vertical => (
-            1,
-            u32::try_from(result.width()).map_err(|_| ErrorKind::Num)?,
-        ),
-        XLookupOrientation::Horizontal => (
-            u32::try_from(result.height()).map_err(|_| ErrorKind::Num)?,
-            1,
-        ),
-    };
+    let rows = u32::try_from(slice.height()).map_err(|_| ErrorKind::Num)?;
+    let cols = u32::try_from(slice.width()).map_err(|_| ErrorKind::Num)?;
     let cells = u64::from(rows)
         .checked_mul(u64::from(cols))
         .ok_or(ErrorKind::Num)?;
@@ -409,19 +439,12 @@ fn xlookup_return_array(
         if index % 256 == 0 {
             super::array_common::poll_cancellation(context)?;
         }
-        let cell = match orientation {
-            XLookupOrientation::Vertical => (
-                result.sheet,
-                result.row_start + offset,
-                result.col_start + u32::try_from(index).map_err(|_| ErrorKind::Num)?,
-            ),
-            XLookupOrientation::Horizontal => (
-                result.sheet,
-                result.row_start + u32::try_from(index).map_err(|_| ErrorKind::Num)?,
-                result.col_start + offset,
-            ),
-        };
-        data.push(engine.read_reference_cell(context, cell)?);
+        let row = u32::try_from(index / u64::from(cols)).map_err(|_| ErrorKind::Num)?;
+        let col = u32::try_from(index % u64::from(cols)).map_err(|_| ErrorKind::Num)?;
+        data.push(engine.read_reference_cell(
+            context,
+            (slice.sheet, slice.row_start + row, slice.col_start + col),
+        )?);
     }
     Ok(Array { rows, cols, data })
 }

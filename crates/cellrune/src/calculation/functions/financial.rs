@@ -616,6 +616,12 @@ fn solve_newton(
             return Value::Error(ErrorKind::Num);
         }
         let next = guess - value / derivative;
+        if next <= -1.0 {
+            // A step past the -1 pole moves halfway toward it instead, so the search can recover
+            // from an overshoot without pinning at a fixed point where each step barely moves.
+            guess = f64::midpoint(guess, -1.0);
+            continue;
+        }
         if (next - guess).abs() <= policy.tolerance {
             return financial_value(next);
         }
