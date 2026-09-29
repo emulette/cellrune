@@ -349,11 +349,13 @@ jobs:
             macos_deployment_target: "10.13"
             needs_zig: false
             cargo_tool: ""
+          # Built natively: stacker's psm assembles a C-preprocessed .s file that cargo-xwin's
+          # clang-cl cannot preprocess on Linux, while its Windows C source needs MSVC headers.
           - target: aarch64-pc-windows-msvc
-            runner: ubuntu-24.04
-            flags: --cross-compile
+            runner: windows-11-arm
+            flags: ""
             needs_zig: false
-            cargo_tool: cargo-xwin@0.23.0
+            cargo_tool: ""
           - target: x86_64-pc-windows-msvc
             runner: ubuntu-24.04
             flags: --cross-compile
@@ -383,6 +385,7 @@ jobs:
     timeout-minutes: 90
     defaults:
       run:
+        shell: bash
         working-directory: bindings/node
     steps:
       - name: Check out repository
