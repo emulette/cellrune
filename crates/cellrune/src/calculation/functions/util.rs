@@ -17,6 +17,17 @@ pub(super) struct ArgumentValue {
     pub(super) from_single_cell_reference: bool,
 }
 
+/// Which referenced cells become argument values, and whether their numbers carry the decimal
+/// traces that only Excel-compatible summation consumes.
+struct CellSelection<'filter, F> {
+    include: &'filter F,
+    decimal_traces: bool,
+}
+
+fn include_every_cell(_: CellId) -> bool {
+    true
+}
+
 pub(super) fn collect_argument_values(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -69,7 +80,10 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
         args,
         visited_cells,
         sheet_span_policy,
-        &|_| true,
+        &CellSelection {
+            include: &include_every_cell,
+            decimal_traces: true,
+        },
     )
 }
 
@@ -89,7 +103,10 @@ pub(super) fn collect_argument_values_including(
         args,
         &mut visited_cells,
         sheet_span_policy,
-        include,
+        &CellSelection {
+            include,
+            decimal_traces: true,
+        },
     )
 }
 
@@ -99,7 +116,7 @@ fn collect_filtered_argument_values(
     args: &[Expr],
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
-    include: &impl Fn(CellId) -> bool,
+    cells: &CellSelection<'_, impl Fn(CellId) -> bool>,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut values = Vec::new();
     for arg in args {
@@ -110,7 +127,7 @@ fn collect_filtered_argument_values(
                 scoped,
                 visited_cells,
                 sheet_span_policy,
-                include,
+                cells,
                 &mut values,
             )?;
             continue;
@@ -127,7 +144,7 @@ fn collect_filtered_argument_values(
                 }
             }
             for rect in reference.rects() {
-                collect_rect_values(engine, context, rect, visited_cells, include, &mut values)?;
+                collect_rect_values(engine, context, rect, visited_cells, cells, &mut values)?;
             }
         } else {
             let evaluated = engine.eval_array_with_trace(context, arg)?;
@@ -191,7 +208,10 @@ pub(super) fn collect_callable_argument_values(
             value.clone(),
             &mut visited_cells,
             SheetSpanPolicy::CollectAcrossSheets,
-            &|_| true,
+            &CellSelection {
+                include: &include_every_cell,
+                decimal_traces: true,
+            },
             &mut values,
         )?;
     }
@@ -204,7 +224,7 @@ fn collect_scope_values(
     scoped: ScopeValue,
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
-    include: &impl Fn(CellId) -> bool,
+    cells: &CellSelection<'_, impl Fn(CellId) -> bool>,
     values: &mut Vec<ArgumentValue>,
 ) -> Result<(), ErrorKind> {
     match scoped {
@@ -255,7 +275,7 @@ fn collect_scope_values(
                 }
             }
             for rect in reference.rects() {
-                collect_rect_values(engine, context, rect, visited_cells, include, values)?;
+                collect_rect_values(engine, context, rect, visited_cells, cells, values)?;
             }
         }
         ScopeValue::Callable(_) => return Err(ErrorKind::Value),
@@ -279,7 +299,7 @@ fn collect_rect_values(
     context: EvalContext<'_>,
     rect: Rect,
     visited_cells: &mut u64,
-    include: &impl Fn(CellId) -> bool,
+    selection: &CellSelection<'_, impl Fn(CellId) -> bool>,
     values: &mut Vec<ArgumentValue>,
 ) -> Result<(), ErrorKind> {
     let rows = engine.operation_row_count([&rect]);
@@ -297,12 +317,12 @@ fn collect_rect_values(
         let row = rect.row_start + row_offset;
         for column in rect.col_start..=rect.col_end {
             let cell = (rect.sheet, row, column);
-            if !include(cell) {
+            if !(selection.include)(cell) {
                 continue;
             }
             let value = engine.read_reference_cell(context, cell)?;
             let decimal_trace = match &value {
-                Value::Number(_) => engine.numeric_decimal_trace(cell),
+                Value::Number(_) if selection.decimal_traces => engine.numeric_decimal_trace(cell),
                 _ => None,
             };
             values.push(ArgumentValue {
@@ -448,11 +468,18 @@ pub(super) fn excel_numeric_arguments_with_policy(
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
 ) -> Result<Vec<f64>, ErrorKind> {
-    excel_numbers(collect_argument_values_with_policy(
+    // Statistics convert values to plain numbers, so they skip decimal trace construction.
+    let mut visited_cells = 0_u64;
+    excel_numbers(collect_filtered_argument_values(
         engine,
         context,
         args,
+        &mut visited_cells,
         sheet_span_policy,
+        &CellSelection {
+            include: &include_every_cell,
+            decimal_traces: false,
+        },
     )?)
 }
 
