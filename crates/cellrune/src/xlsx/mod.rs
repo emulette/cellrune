@@ -7,6 +7,7 @@ mod package;
 mod reader;
 mod write;
 mod xml;
+mod xstring;
 
 pub use document::{
     OpenOptions, XlsxDocument, XlsxDocumentKind, open_xlsx_document, open_xlsx_document_bytes,

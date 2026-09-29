@@ -3,6 +3,8 @@ use crate::{
     PhoneticAlignment, PhoneticProperties, PhoneticType, SharedFormulaRole,
 };
 
+use super::super::xml::is_xml_10_character;
+use super::super::xstring::encode_xstring;
 use super::materialization::MaterializationAction;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 
@@ -139,13 +141,15 @@ pub(crate) fn escape_text(value: &str) -> Result<String, XlsxWriteError> {
     escape(value, false)
 }
 
+/// Escapes cell text, encoding characters XML 1.0 cannot carry as `ST_Xstring` escapes.
+fn escape_cell_text(value: &str) -> Result<String, XlsxWriteError> {
+    escape_text(&encode_xstring(value))
+}
+
 fn push_literal_type(output: &mut String, value: &CellValue) -> Result<(), XlsxWriteError> {
     match value {
         CellValue::Blank | CellValue::Number(_) => {}
-        CellValue::Text(text) => {
-            validate_xml_text(text)?;
-            output.push_str(" t=\"inlineStr\"");
-        }
+        CellValue::Text(_) => output.push_str(" t=\"inlineStr\""),
         CellValue::Logical(_) => output.push_str(" t=\"b\""),
         CellValue::Error(_) => output.push_str(" t=\"e\""),
     }
@@ -170,7 +174,7 @@ fn push_literal(
                 output.push_str(" xml:space=\"preserve\"");
             }
             output.push('>');
-            output.push_str(&escape_text(text)?);
+            output.push_str(&escape_cell_text(text)?);
             output.push_str("</t>");
             if let Some(annotation) = presentation.and_then(|state| state.annotation.as_deref()) {
                 for run in annotation.runs() {
@@ -183,7 +187,7 @@ fn push_literal(
                         output.push_str(" xml:space=\"preserve\"");
                     }
                     output.push('>');
-                    output.push_str(&escape_text(run.text())?);
+                    output.push_str(&escape_cell_text(run.text())?);
                     output.push_str("</t></rPh>");
                 }
                 if let Some(properties) = annotation.properties() {
@@ -341,7 +345,7 @@ fn push_cache(output: &mut String, action: &MaterializationAction) -> Result<(),
             );
         }
         CellValue::Number(number) => output.push_str(&number_to_xlsx_text(number.get())),
-        CellValue::Text(text) => output.push_str(&escape_text(text)?),
+        CellValue::Text(text) => output.push_str(&escape_cell_text(text)?),
         CellValue::Logical(value) => output.push_str(if *value { "1" } else { "0" }),
         CellValue::Error(error) => output.push_str(error.as_str()),
     }
@@ -393,13 +397,6 @@ fn validate_xml_text(value: &str) -> Result<(), XlsxWriteError> {
         Err(XlsxWriteError::new(XlsxWriteErrorCode::InvalidGeneratedXml)
             .with_detail(DETAIL_INVALID_XML_CHARACTER))
     }
-}
-
-const fn is_xml_10_character(character: char) -> bool {
-    matches!(
-        character as u32,
-        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
-    )
 }
 
 fn requires_space_preservation(value: &str) -> bool {

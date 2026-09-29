@@ -3,6 +3,7 @@ use quick_xml::events::{BytesCData, BytesDecl, BytesPI, BytesRef, BytesStart, By
 use quick_xml::name::{QName, ResolveResult};
 use quick_xml::reader::NsReader;
 
+use super::error::detail;
 use super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use crate::SourceId;
 
@@ -323,6 +324,14 @@ pub(super) fn decode_cdata(
         .map_err(|error| budget.error(budget.invalid_code).with_cause(error))
 }
 
+/// Returns whether `character` matches the XML 1.0 `Char` production.
+pub(super) const fn is_xml_10_character(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+    )
+}
+
 pub(super) fn decode_reference(
     reference: &BytesRef<'_>,
     budget: &XmlBudget,
@@ -331,6 +340,12 @@ pub(super) fn decode_reference(
         .resolve_char_ref()
         .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?
     {
+        // XML 1.0 well-formedness: a character reference must still match the Char production.
+        if !is_xml_10_character(character) {
+            return Err(budget
+                .error(budget.invalid_code)
+                .with_detail(detail::FORBIDDEN_CHARACTER_REFERENCE));
+        }
         return Ok(character.to_string());
     }
     let name = reference

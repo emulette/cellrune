@@ -1,5 +1,6 @@
 use super::super::error::{compatibility, detail};
 use super::super::xml::{XmlAttributes, XmlBudget};
+use super::super::xstring::XstringDecoder;
 use super::super::{XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
 use super::cell_value::{parse_cell_reference, parse_literal_value};
@@ -34,6 +35,7 @@ pub(super) struct CellBuilder {
     value_depth: Option<u64>,
     inline_depth: Option<u64>,
     text_depth: Option<u64>,
+    text_decoder: XstringDecoder,
     phonetic_depth: Option<u64>,
     phonetics: Option<PhoneticItemBuilder>,
     explicit_phonetic_visibility: Option<bool>,
@@ -106,6 +108,7 @@ impl CellBuilder {
             value_depth: None,
             inline_depth: None,
             text_depth: None,
+            text_decoder: XstringDecoder::default(),
             phonetic_depth: None,
             phonetics: (capture == PresentationCapture::Document)
                 .then(PhoneticItemBuilder::default),
@@ -215,20 +218,29 @@ impl CellBuilder {
                 .push_str(&text);
             Ok(())
         } else if self.text_depth.is_some() {
-            if self.phonetic_depth.is_some() {
-                if self.capture == PresentationCapture::Document {
-                    self.phonetics
-                        .as_mut()
-                        .ok_or_else(|| budget.error(XlsxErrorCode::InvalidPhoneticMetadata))?
-                        .append_run_text(text, budget.limits(), budget)?;
-                }
-            } else {
-                self.inline_text.push_str(&text);
-            }
-            Ok(())
+            let decoded = self.text_decoder.push(&text);
+            self.append_inline_text(decoded, budget)
         } else {
             Ok(())
         }
+    }
+
+    fn append_inline_text(
+        &mut self,
+        text: String,
+        budget: &XmlBudget,
+    ) -> Result<(), XlsxReadError> {
+        if self.phonetic_depth.is_some() {
+            if self.capture == PresentationCapture::Document {
+                self.phonetics
+                    .as_mut()
+                    .ok_or_else(|| budget.error(XlsxErrorCode::InvalidPhoneticMetadata))?
+                    .append_run_text(text, budget.limits(), budget)?;
+            }
+        } else {
+            self.inline_text.push_str(&text);
+        }
+        Ok(())
     }
 
     pub(super) fn process_end(
@@ -245,6 +257,8 @@ impl CellBuilder {
         }
         if self.text_depth == Some(depth) && local_name == TEXT {
             self.text_depth = None;
+            let decoded = self.text_decoder.finish();
+            self.append_inline_text(decoded, budget)?;
         }
         if self.phonetic_depth == Some(depth) && local_name == PHONETIC_RUN {
             if self.capture == PresentationCapture::Document {

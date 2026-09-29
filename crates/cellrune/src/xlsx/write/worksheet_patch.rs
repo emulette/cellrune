@@ -12,6 +12,7 @@ use super::serialization::number_to_xlsx_text;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL};
+use crate::xlsx::xstring::encode_xstring;
 use crate::{CellAddress, CellValue, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
 const DETAIL_MISSING_FORMULA_CELL: &str =
@@ -450,7 +451,7 @@ impl SerializedCache {
             }),
             WorksheetCacheAction::Set(CellValue::Text(text)) => Ok(Self {
                 cell_type: Some("str"),
-                value: Some(text.clone()),
+                value: Some(encode_xstring(text).into_owned()),
             }),
             WorksheetCacheAction::Set(CellValue::Logical(value)) => Ok(Self {
                 cell_type: Some("b"),

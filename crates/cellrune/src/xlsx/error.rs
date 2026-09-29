@@ -37,6 +37,8 @@ pub(crate) mod detail {
     pub(crate) const SHARED_FORMULA_OUTSIDE_RANGE: &str =
         "shared formula follower is outside the anchor range";
     pub(crate) const SHARED_FORMULA_SHIFT_FAILED: &str = "shared formula reference shift failed";
+    pub(crate) const FORBIDDEN_CHARACTER_REFERENCE: &str =
+        "character reference names a character forbidden by XML 1.0";
 }
 
 pub(crate) mod compatibility {

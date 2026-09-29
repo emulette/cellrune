@@ -288,6 +288,166 @@ fn default_cell_text_budget_rejects_amplified_shared_string_references() {
 }
 
 #[test]
+fn xstring_escapes_decode_in_shared_inline_str_and_phonetic_text() {
+    let shared_strings = r#"<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
+  <si><r><t>a_x0002_b</t></r><r><t>_x005F_x0041_</t></r></si>
+  <si><t>ruby_x0009_</t><rPh sb="0" eb="1"><t>_x3042_r</t></rPh></si>
+</sst>"#;
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1">
+    <c r="A1" t="s"><v>0</v></c>
+    <c r="B1" t="s"><v>1</v></c>
+    <c r="C1" t="inlineStr"><is><t>in_x000B_line</t><rPh sb="0" eb="1"><t>_x005F_x0041_</t></rPh></is></c>
+    <c r="D1" t="inlineStr"><is><t>_x00&#52;1_&amp;_x0041</t></is></c>
+    <c r="E1" t="str"><v>s_x0007_</v></c>
+    <c r="F1" t="str"><f>"x"</f><v>_x0008_</v></c>
+  </row></sheetData>
+</worksheet>"#;
+    let archive = build_archive(sheet, shared_strings);
+    let document = open_xlsx_document_bytes(&archive, OpenOptions::default()).expect("document");
+    let first = document.workbook().sheet_by_name("First").expect("first");
+    assert_eq!(
+        literal(first, "A1"),
+        &CellValue::Text("a\u{2}b_x0041_".into())
+    );
+    assert_eq!(literal(first, "B1"), &CellValue::Text("ruby\t".into()));
+    assert_eq!(literal(first, "C1"), &CellValue::Text("in\u{B}line".into()));
+    assert_eq!(literal(first, "D1"), &CellValue::Text("A&_x0041".into()));
+    assert_eq!(literal(first, "E1"), &CellValue::Text("s\u{7}".into()));
+    let CellContent::Formula(formula) = cell(first, "F1").content() else {
+        panic!("fixture formula");
+    };
+    assert_eq!(
+        formula.saved_result(),
+        &SavedResult::Present(CellValue::Text("\u{8}".into()))
+    );
+
+    let sheet_id = SheetId::new(1).expect("sheet");
+    let phonetic_text = |address_value: &str| {
+        document
+            .presentation()
+            .cell_phonetics(sheet_id, address(address_value))
+            .expect("phonetics")
+            .runs()[0]
+            .text()
+            .to_owned()
+    };
+    assert_eq!(phonetic_text("B1"), "あr");
+    assert_eq!(phonetic_text("C1"), "_x0041_");
+}
+
+#[test]
+fn character_references_to_characters_forbidden_by_xml_1_0_are_rejected() {
+    let sheet = |text: &str| {
+        SHEET_ONE.replace(
+            "<t>inline</t>",
+            &format!("<t xml:space=\"preserve\">{text}</t>"),
+        )
+    };
+    let tab = read_xlsx_bytes(
+        &build_archive(&sheet("a&#9;b"), SHARED_STRINGS),
+        ReadOptions::default(),
+    )
+    .expect("tab reference");
+    let first = tab.sheet_by_name("First").expect("first");
+    assert_eq!(literal(first, "B1"), &CellValue::Text("a\tb value".into()));
+
+    for reference in ["&#1;", "&#x1F;", "&#xFFFE;"] {
+        let error = read_xlsx_bytes(
+            &build_archive(&sheet(reference), SHARED_STRINGS),
+            ReadOptions::default(),
+        )
+        .expect_err("forbidden worksheet character reference");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidWorksheet);
+
+        let shared = SHARED_STRINGS.replace("<t>Hello</t>", &format!("<t>{reference}</t>"));
+        let error = read_xlsx_bytes(&build_archive(SHEET_ONE, &shared), ReadOptions::default())
+            .expect_err("forbidden shared-string character reference");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidSharedStrings);
+    }
+}
+
+#[test]
+fn control_characters_and_literal_escapes_survive_write_and_reopen() {
+    const TEXTS: [&str; 3] = ["a\u{2}b", "_x0041_", "\u{FFFF}_x005F_\u{1F}"];
+    let sheet = SHEET_ONE.replace(r#"<c r="I1"/>"#, r#"<c r="I1"><f>CHAR(2)</f></c>"#);
+    let source = build_archive(&sheet, SHARED_STRINGS);
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("document");
+    let sheet_id = SheetId::new(1).expect("sheet");
+    let saved_char = |document: &crate::XlsxDocument| {
+        let first = document.workbook().sheet_by_id(sheet_id).expect("first");
+        let CellContent::Formula(formula) = cell(first, "I1").content() else {
+            panic!("CHAR formula");
+        };
+        formula.saved_result().clone()
+    };
+    let expected_char = SavedResult::Present(CellValue::Text("\u{2}".into()));
+
+    let calculation = calculate_workbook(document.workbook(), crate::CalculationOptions::default());
+    let output = crate::write_recalculated_xlsx_bytes(
+        &document,
+        &calculation,
+        RecalculationWriteOptions::default(),
+    )
+    .expect("recalculated cache with a control character");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    assert_eq!(saved_char(&reopened), expected_char);
+
+    for mut draft in [
+        WorkbookDraft::from_document(&document),
+        WorkbookDraft::from_snapshot_for_test(document.workbook().clone()),
+    ] {
+        for (column, text) in ["J", "K", "L"].into_iter().zip(TEXTS) {
+            draft
+                .set_cell_value(
+                    sheet_id,
+                    address(&format!("{column}1")),
+                    CellValue::Text(text.to_owned()),
+                )
+                .expect("text edit");
+        }
+        draft
+            .set_phonetics(
+                sheet_id,
+                address("J1"),
+                vec![
+                    PhoneticRun::new(PhoneticTextRange::new(0, 1).expect("range"), "_x0041_あ")
+                        .expect("run"),
+                ],
+                PhoneticWriteOptions::show(),
+            )
+            .expect("phonetic edit");
+        let calculation =
+            calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+        let output =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect("draft with control characters");
+        let reopened =
+            open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+        let first = reopened.workbook().sheet_by_id(sheet_id).expect("first");
+        for (column, text) in ["J", "K", "L"].into_iter().zip(TEXTS) {
+            assert_eq!(
+                literal(first, &format!("{column}1")),
+                &CellValue::Text(text.to_owned())
+            );
+        }
+        assert_eq!(
+            reopened
+                .presentation()
+                .cell_phonetics(sheet_id, address("J1"))
+                .expect("phonetics")
+                .runs()[0]
+                .text(),
+            "_x0041_あ"
+        );
+        assert_eq!(saved_char(&reopened), expected_char);
+    }
+}
+
+#[test]
 fn duplicate_sheet_data_is_rejected() {
     let duplicate = SHEET_ONE.replace(
         "</sheetData>",

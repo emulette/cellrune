@@ -1,5 +1,6 @@
 use super::super::error::{compatibility, detail};
 use super::super::xml::XmlBudget;
+use super::super::xstring::decode_xstring;
 use super::super::{XlsxErrorCode, XlsxReadError};
 use super::shared_strings::SharedStrings;
 use crate::{
@@ -25,7 +26,7 @@ pub(super) fn parse_literal_value(
             }
             Ok(inline_text.map(|value| CellValue::Text(value.to_owned())))
         }
-        "str" => Ok(raw_value.map(|value| CellValue::Text(value.to_owned()))),
+        "str" => Ok(raw_value.map(|value| CellValue::Text(decode_xstring(value).into_owned()))),
         "b" => match raw_value.map(str::trim) {
             None => Ok(None),
             Some("0") => Ok(Some(CellValue::Logical(false))),

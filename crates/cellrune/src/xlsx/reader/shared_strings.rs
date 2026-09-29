@@ -7,6 +7,7 @@ use super::super::xml::{
     XmlBudget, decode_cdata, decode_reference, decode_text, is_spreadsheet_element,
     read_attributes, reader, require_spreadsheet_element,
 };
+use super::super::xstring::XstringDecoder;
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
 use super::phonetic::{PhoneticItemBuilder, PhoneticReadBudget};
@@ -62,6 +63,7 @@ pub(super) fn parse(
     let mut current_phonetics = None::<PhoneticItemBuilder>;
     let mut item_depth = None::<u64>;
     let mut text_depth = None::<u64>;
+    let mut text_decoder = XstringDecoder::default();
     let mut phonetic_depth = None::<u64>;
     let mut total_bytes = 0_u64;
 
@@ -188,7 +190,7 @@ pub(super) fn parse(
                     &mut current,
                     &mut current_phonetics,
                     phonetic_depth.is_some(),
-                    decode_text(&text, &budget)?,
+                    text_decoder.push(&decode_text(&text, &budget)?),
                     capture,
                     limits,
                     &budget,
@@ -199,7 +201,7 @@ pub(super) fn parse(
                     &mut current,
                     &mut current_phonetics,
                     phonetic_depth.is_some(),
-                    decode_cdata(&text, &budget)?,
+                    text_decoder.push(&decode_cdata(&text, &budget)?),
                     capture,
                     limits,
                     &budget,
@@ -210,7 +212,7 @@ pub(super) fn parse(
                     &mut current,
                     &mut current_phonetics,
                     phonetic_depth.is_some(),
-                    decode_reference(&reference, &budget)?,
+                    text_decoder.push(&decode_reference(&reference, &budget)?),
                     capture,
                     limits,
                     &budget,
@@ -221,6 +223,15 @@ pub(super) fn parse(
                 let local_name = element.local_name().as_ref().to_vec();
                 if text_depth == Some(depth) && local_name == TEXT {
                     text_depth = None;
+                    append_text(
+                        &mut current,
+                        &mut current_phonetics,
+                        phonetic_depth.is_some(),
+                        text_decoder.finish(),
+                        capture,
+                        limits,
+                        &budget,
+                    )?;
                 }
                 if phonetic_depth == Some(depth) && local_name == PHONETIC_RUN {
                     if capture == PresentationCapture::Document {
