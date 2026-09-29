@@ -8,7 +8,7 @@ use cellrune_integration_tests::oracle::{
     values_match,
 };
 
-use super::{LoadedOracle, observed_result};
+use super::{LoadedOracle, observed_result, observed_text};
 
 pub(super) fn audit_observed_result(
     context: &str,
@@ -277,15 +277,14 @@ fn observed_result_cell_value(
         .resolved_error
         .as_ref()
         .or(cell.rich_error.fallback_error.as_ref())
-        .or(cell.cache_value.as_ref())?
-        .clone();
+        .or(cell.cache_value.as_ref())?;
     let value_type = if cell.rich_error.present {
         "e"
     } else {
         &cell.cache_type
     };
     Some(ObservedValue {
-        value,
+        value: observed_text(value, value_type),
         value_type: value_type.to_owned(),
     })
 }

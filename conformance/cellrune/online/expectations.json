@@ -2177,13 +2177,10 @@
     "excel_rich_error": false
   },
   "function:char:coercion": {
-    "classification": "divergent",
-    "excel_value": "_x0002_",
+    "classification": "match",
+    "excel_value": "\u0002",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "cellrune_value": "\u0002",
-    "cellrune_type": "str",
-    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
+    "excel_rich_error": false
   },
   "function:char:domain": {
     "classification": "match",

@@ -29,6 +29,8 @@ mod rewrite;
 mod selection;
 #[path = "check_excel_oracle/shared.rs"]
 mod shared;
+#[path = "check_excel_oracle/xstring.rs"]
+mod xstring;
 
 const USAGE: &str = "usage: check_excel_oracle [--report <oracle-directory> [output.json]]";
 const METADATA_FILE: &str = "metadata.json";
@@ -1356,9 +1358,18 @@ fn observed_source_value(observation: &ObservedCase) -> Option<ObservedValue> {
             });
     }
     observation.cache_value.as_ref().map(|value| ObservedValue {
-        value: value.clone(),
+        value: observed_text(value, &observation.cache_type),
         value_type: observation.cache_type.clone(),
     })
+}
+
+/// Decodes the `ST_Xstring` escapes Excel stores in string caches; other types are verbatim.
+fn observed_text(value: &str, value_type: &str) -> String {
+    if value_type == "str" {
+        xstring::decode_xstring(value)
+    } else {
+        value.to_owned()
+    }
 }
 
 fn is_host_unsupported_observation(observation: &ObservedCase) -> bool {
