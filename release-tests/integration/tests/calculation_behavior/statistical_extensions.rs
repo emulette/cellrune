@@ -352,6 +352,8 @@ fn prob_sums_the_probabilities_within_inclusive_limits() {
             ("PROB({1,2,3,4},{0.1,0.2,0.3,0.4},2,4)", 0.9),
             ("PROB({1,2,3,4},{0.1,0.2,0.3,0.4},\"2\",4)", 0.9),
             ("PROB({0,1,2,3},{0.2,0.3,0.1,0.4},2)", 0.1),
+            // Excel 16.0 accepts a zero probability despite the documented #NUM!.
+            ("PROB({1,2},{0,1},1,2)", 1.0),
             ("PROB({0,1,2,3},{0.2,0.3,0.1,0.4},1,3)", 0.8),
             ("PROB({0,1,2,3},{0.2,0.3,0.1,0.4},1.5)", 0.0),
             ("PROB({0,1,2,3},{0.2,0.3,0.1,0.4},-5,5)", 1.0),
@@ -362,7 +364,6 @@ fn prob_sums_the_probabilities_within_inclusive_limits() {
         ("PROB({1,2,3,4},{0.1,0.2,0.3,0.4},Z2,4)", ExcelError::Value),
         ("PROB({1,2,3},{0.1,0.2,0.3},1,3)", ExcelError::Number),
         ("PROB({1,2},{1.5,-0.5},1,2)", ExcelError::Number),
-        ("PROB({1,2},{0,1},1,2)", ExcelError::Number),
         ("PROB({1,2,3},{0.5,0.5},1,3)", ExcelError::NotAvailable),
         ("PROB({1,2},{0.5,#DIV/0!},1,2)", ExcelError::DivisionByZero),
     ]);

@@ -30,14 +30,9 @@ pub(super) fn weibull_distribution(
             return Ok(-(-power).exp_m1());
         }
         if x == 0.0 {
-            // At the origin the density is a pole for α < 1, 1/β for α = 1, and zero for α > 1.
-            return if alpha < 1.0 {
-                Err(ErrorKind::Num)
-            } else if alpha == 1.0 {
-                Ok(1.0 / beta)
-            } else {
-                Ok(0.0)
-            };
+            // Excel returns a zero density at the origin for every shape, including α ≤ 1 where
+            // the mathematical density is a pole or 1/β.
+            return Ok(0.0);
         }
         // Log space keeps a large power of x/β from overflowing before exp(−power) shrinks it.
         Ok((alpha.ln() - beta.ln() + (alpha - 1.0) * log_ratio - power).exp())

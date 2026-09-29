@@ -243,8 +243,9 @@ fn probability(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         for (value, probability) in pairs {
             poll_cancellation(context)?;
             engine.charge_function_iterations(context, 1)?;
-            // Microsoft documents #NUM! for any probability at or below 0 or above 1.
-            if probability <= 0.0 || probability > 1.0 {
+            // Microsoft documents #NUM! at or below 0, but Excel accepts a zero probability
+            // (PROB({1,2},{0,1},1,2) is 1 in Excel 16.0), so only values outside [0, 1] fail.
+            if !(0.0..=1.0).contains(&probability) {
                 return Err(ErrorKind::Num);
             }
             total.add_with_trace(probability, None);
@@ -368,9 +369,10 @@ fn percent_rank(
         },
         None => 3,
     };
-    if matches!(interval, RankInterval::Inclusive) && numbers.len() == 1 {
+    // Excel ranks a lone matching value at 1 in PERCENTRANK, .INC, and .EXC alike.
+    if numbers.len() == 1 {
         return if numbers[0] == target {
-            Value::Number(0.0)
+            Value::Number(1.0)
         } else {
             Value::Error(ErrorKind::NA)
         };

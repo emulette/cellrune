@@ -41,12 +41,18 @@ fn weibull_names_share_the_closed_form_cdf_and_density() {
         ("WEIBULL(\"2\",20,100,TRUE)", 1.048_576_000_000_007_6e-34),
         // Shape one is the exponential distribution with mean beta.
         ("WEIBULL.DIST(1,1,2,TRUE)", 0.393_469_340_287_366_6),
-        ("WEIBULL.DIST(0,1,4,FALSE)", 0.25),
     ] {
         assert_formula_number(formula, expected, 1e-13);
     }
     assert_formula_number("WEIBULL.DIST(0,0.5,1,TRUE)", 0.0, 0.0);
-    assert_formula_number("WEIBULL.DIST(0,2,1,FALSE)", 0.0, 0.0);
+    // Excel 16.0 returns a zero density at the origin for every shape.
+    for formula in [
+        "WEIBULL.DIST(0,2,1,FALSE)",
+        "WEIBULL.DIST(0,1,4,FALSE)",
+        "WEIBULL.DIST(0,0.5,1,FALSE)",
+    ] {
+        assert_formula_number(formula, 0.0, 0.0);
+    }
 }
 
 #[test]
@@ -81,7 +87,6 @@ fn new_distributions_reject_invalid_domains_with_excel_errors() {
         ("WEIBULL(-1,20,100,TRUE)", ExcelError::Number),
         ("WEIBULL.DIST(1,0,100,TRUE)", ExcelError::Number),
         ("WEIBULL.DIST(1,20,-1,TRUE)", ExcelError::Number),
-        ("WEIBULL.DIST(0,0.5,1,FALSE)", ExcelError::Number),
         ("WEIBULL.DIST(1,2,3,#N/A)", ExcelError::NotAvailable),
         ("CONFIDENCE(0,2.5,100)", ExcelError::Number),
         ("CONFIDENCE.NORM(0,2.5,100)", ExcelError::Number),

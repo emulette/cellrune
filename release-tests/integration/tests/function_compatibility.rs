@@ -818,3 +818,23 @@ fn selected_order_statistics_match_a_full_sort_bit_for_bit() {
         assert_eq!(actual.get().to_bits(), expected.to_bits(), "{formula}");
     }
 }
+
+#[test]
+fn percent_rank_places_a_lone_matching_value_at_one() {
+    for formula in [
+        "PERCENTRANK({5},5)",
+        "PERCENTRANK.INC({5},5)",
+        "PERCENTRANK.EXC({5},5)",
+        "PERCENTRANK.EXC({5},5,5)",
+    ] {
+        assert_eq!(result(formula, None), number(1.0), "{formula}");
+    }
+    for formula in ["PERCENTRANK.INC({7},5)", "PERCENTRANK.EXC({7},5)"] {
+        assert_eq!(
+            result(formula, None),
+            error(ExcelError::NotAvailable),
+            "{formula}"
+        );
+    }
+    assert_eq!(result("PERCENTRANK.EXC({5,5},5)", None), number(0.333));
+}
