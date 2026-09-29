@@ -173,15 +173,15 @@ where
         };
         let candidate = value_at(offset)?;
         if let Some(pattern) = &wildcard_pattern {
-            match candidate.as_ref() {
-                Value::Text(text) => {
-                    if criteria_runtime.wildcard_matches(pattern, text)? {
-                        return Ok(offset);
-                    }
-                }
-                Value::Error(kind) => return Err(*kind),
-                Value::Blank | Value::Number(_) | Value::Logical(_) => {}
+            if let Value::Text(text) = candidate.as_ref()
+                && criteria_runtime.wildcard_matches(pattern, text)?
+            {
+                return Ok(offset);
             }
+            continue;
+        }
+        // An error cell is never equal to the lookup value, so exact searches pass over it.
+        if match_mode == MatchMode::Exact && matches!(candidate.as_ref(), Value::Error(_)) {
             continue;
         }
         let ordering = criteria_runtime.compare(candidate.as_ref(), lookup)?;

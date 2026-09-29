@@ -8,6 +8,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::{Array, Rect};
 use super::super::value::{ErrorKind, Value};
 use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
+use super::criteria_runtime::CriteriaRuntime;
 use super::descriptor::DynamicReferenceKind;
 use super::lookup_common::VectorView;
 use super::util::{required_number, required_text};
@@ -520,14 +521,14 @@ fn find_lookup_offset(
     };
     engine.ensure_array_cells(length)?;
 
+    if !approximate {
+        return find_exact_lookup_offset(engine, context, lookup, rect, horizontal, length);
+    }
     for offset in 0..length as u32 {
         let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
         if compare(&value, lookup)? == Ordering::Equal {
             return Ok(offset);
         }
-    }
-    if !approximate {
-        return Err(ErrorKind::NA);
     }
 
     let mut candidate = None;
@@ -540,6 +541,40 @@ fn find_lookup_offset(
         }
     }
     candidate.ok_or(ErrorKind::NA)
+}
+
+/// Finds an exact VLOOKUP or HLOOKUP match. Error cells never equal the lookup value, and a text
+/// lookup value containing `?`, `*`, or `~` is a wildcard pattern, as in MATCH.
+fn find_exact_lookup_offset(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    lookup: &Value,
+    rect: Rect,
+    horizontal: bool,
+    length: u64,
+) -> Result<u32, ErrorKind> {
+    let mut criteria_runtime = CriteriaRuntime::new(engine, context);
+    let pattern = match lookup {
+        Value::Text(text) if text.contains(['?', '*', '~']) => {
+            Some(criteria_runtime.compile_wildcard(text)?)
+        }
+        _ => None,
+    };
+    for offset in 0..length as u32 {
+        let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+        let matched = match (&pattern, &value) {
+            (_, Value::Error(_)) => false,
+            (Some(pattern), Value::Text(text)) => {
+                criteria_runtime.wildcard_matches(pattern, text)?
+            }
+            (Some(_), _) => false,
+            (None, _) => compare(&value, lookup)? == Ordering::Equal,
+        };
+        if matched {
+            return Ok(offset);
+        }
+    }
+    Err(ErrorKind::NA)
 }
 
 fn lookup_axis_value(

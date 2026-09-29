@@ -579,3 +579,62 @@ fn subtotal_skips_nested_totals_and_covers_every_documented_function() {
         );
     }
 }
+
+#[test]
+fn exact_lookups_pass_over_error_cells_and_accept_wildcards() {
+    let values = [
+        ("A1", CellValue::Error(ExcelError::DivisionByZero)),
+        ("A2", CellValue::Text("x".into())),
+        ("A3", CellValue::Text("banana".into())),
+        ("B1", CellValue::number(10.0).unwrap()),
+        ("B2", CellValue::number(20.0).unwrap()),
+        ("B3", CellValue::number(30.0).unwrap()),
+        ("A5", CellValue::Error(ExcelError::NotAvailable)),
+        ("B5", CellValue::Text("x".into())),
+        ("A6", CellValue::number(1.0).unwrap()),
+        ("B6", CellValue::number(2.0).unwrap()),
+    ];
+    let formulas = [
+        ("D1", "VLOOKUP(\"x\",A1:B3,2,FALSE)"),
+        ("D2", "HLOOKUP(\"x\",A5:B6,2,FALSE)"),
+        ("D3", "XLOOKUP(\"x\",A1:A3,B1:B3)"),
+        ("D4", "XMATCH(\"x\",A1:A3)"),
+        ("D5", "MATCH(\"x\",A1:A3,0)"),
+        ("D6", "VLOOKUP(\"b*\",A1:B3,2,FALSE)"),
+        ("D7", "VLOOKUP(\"?\",A1:B3,2,FALSE)"),
+        ("D8", "VLOOKUP(\"~*\",A1:B3,2,FALSE)"),
+        ("D9", "XLOOKUP(\"b?nana\",A1:A3,B1:B3,,2)"),
+        ("D10", "VLOOKUP(\"BANANA\",A1:B3,2,FALSE)"),
+    ];
+    let results = sheet_results(&values, &formulas, &[]);
+    for (index, expected) in [20.0, 2.0, 20.0, 2.0, 2.0, 30.0, 20.0]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(results[index], number(expected), "{}", formulas[index].1);
+    }
+    assert_eq!(results[7], error(ExcelError::NotAvailable));
+    assert_eq!(results[8], number(30.0));
+    assert_eq!(results[9], number(30.0));
+}
+
+#[test]
+fn search_treats_question_marks_asterisks_and_tildes_as_wildcards() {
+    for (formula, expected) in [
+        ("SEARCH(\"b?n\",\"banana\")", 1.0),
+        ("SEARCH(\"n*a\",\"banana\")", 3.0),
+        ("SEARCH(\"~*\",\"a*b\")", 2.0),
+        ("SEARCH(\"A?\",\"banana\",3)", 4.0),
+        ("SEARCH(\"*\",\"abc\",2)", 2.0),
+        ("SEARCH(\"N\",\"banana\")", 3.0),
+    ] {
+        assert_eq!(result(formula, None), number(expected), "{formula}");
+    }
+    for formula in [
+        "SEARCH(\"z*\",\"banana\")",
+        "FIND(\"b?n\",\"banana\")",
+        "SEARCH(\"b?n\",\"banana\",2)",
+    ] {
+        assert_eq!(result(formula, None), error(ExcelError::Value), "{formula}");
+    }
+}

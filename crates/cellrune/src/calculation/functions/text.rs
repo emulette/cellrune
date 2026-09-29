@@ -3,6 +3,7 @@ use super::super::coerce::{to_logical, to_text};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
+use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::TextFunction;
 use super::util::{collect_argument_values, required_number, required_text};
 
@@ -138,6 +139,9 @@ fn find(
     if target.is_empty() {
         return Value::Number((start + 1) as f64);
     }
+    if !case_sensitive && needle.contains(['?', '*', '~']) {
+        return search_wildcard(engine, context, &needle, &haystack, start);
+    }
     // `start` indexes the original text, and case folding may have changed the
     // character count before it, so translate it into the folded sequence.
     let folded_start = origins.partition_point(|origin| *origin < start);
@@ -147,6 +151,31 @@ fn find(
         .map_or(Value::Error(ErrorKind::Value), |offset| {
             Value::Number((origins[folded_start + offset] + 1) as f64)
         })
+}
+
+/// SEARCH with `?`, `*`, or `~`: returns the first position from `start` where the pattern
+/// matches a prefix of the remaining text.
+fn search_wildcard(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    needle: &str,
+    haystack: &str,
+    start: usize,
+) -> Value {
+    let mut criteria_runtime = CriteriaRuntime::new(engine, context);
+    let mut pattern = match criteria_runtime.compile_wildcard(needle) {
+        Ok(pattern) => pattern,
+        Err(kind) => return Value::Error(kind),
+    };
+    pattern.push_any_sequence();
+    for (position, (byte, _)) in haystack.char_indices().enumerate().skip(start) {
+        match criteria_runtime.wildcard_matches(&pattern, &haystack[byte..]) {
+            Ok(true) => return Value::Number((position + 1) as f64),
+            Ok(false) => {}
+            Err(kind) => return Value::Error(kind),
+        }
+    }
+    Value::Error(ErrorKind::Value)
 }
 
 /// Returns the characters to compare and, for each of them, the index of the
