@@ -3,7 +3,7 @@ use super::super::ast::Expr;
 use super::super::decimal::{DecimalTrace, RationalTrace, is_excel_near_zero_cancellation};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
-use super::super::runtime::Rect;
+use super::super::runtime::{CellId, Rect};
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
@@ -63,6 +63,44 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
+    collect_filtered_argument_values(
+        engine,
+        context,
+        args,
+        visited_cells,
+        sheet_span_policy,
+        &|_| true,
+    )
+}
+
+/// Collects argument values like [`collect_argument_values_with_policy`], leaving out referenced
+/// cells for which `include` returns false.
+pub(super) fn collect_argument_values_including(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    sheet_span_policy: SheetSpanPolicy,
+    include: &impl Fn(CellId) -> bool,
+) -> Result<Vec<ArgumentValue>, ErrorKind> {
+    let mut visited_cells = 0_u64;
+    collect_filtered_argument_values(
+        engine,
+        context,
+        args,
+        &mut visited_cells,
+        sheet_span_policy,
+        include,
+    )
+}
+
+fn collect_filtered_argument_values(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    visited_cells: &mut u64,
+    sheet_span_policy: SheetSpanPolicy,
+    include: &impl Fn(CellId) -> bool,
+) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut values = Vec::new();
     for arg in args {
         if let Some(scoped) = collection_preserving_scope_value(engine, context, arg) {
@@ -72,7 +110,7 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
                 scoped,
                 visited_cells,
                 sheet_span_policy,
-                true,
+                include,
                 &mut values,
             )?;
             continue;
@@ -89,7 +127,7 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
                 }
             }
             for rect in reference.rects() {
-                collect_rect_values(engine, context, rect, visited_cells, &mut values)?;
+                collect_rect_values(engine, context, rect, visited_cells, include, &mut values)?;
             }
         } else {
             let evaluated = engine.eval_array_with_trace(context, arg)?;
@@ -153,7 +191,7 @@ pub(super) fn collect_callable_argument_values(
             value.clone(),
             &mut visited_cells,
             SheetSpanPolicy::CollectAcrossSheets,
-            true,
+            &|_| true,
             &mut values,
         )?;
     }
@@ -166,7 +204,7 @@ fn collect_scope_values(
     scoped: ScopeValue,
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
-    arrays_are_collections: bool,
+    include: &impl Fn(CellId) -> bool,
     values: &mut Vec<ArgumentValue>,
 ) -> Result<(), ErrorKind> {
     match scoped {
@@ -190,7 +228,6 @@ fn collect_scope_values(
         }
         ScopeValue::Array(evaluated) => {
             charge_array_cells(engine, visited_cells, evaluated.array.data.len() as u64)?;
-            let from_collection = arrays_are_collections || !evaluated.array.is_scalar();
             values.extend(
                 evaluated
                     .array
@@ -201,7 +238,7 @@ fn collect_scope_values(
                     .map(|(value, decimal_trace)| ArgumentValue {
                         value,
                         decimal_trace,
-                        from_collection,
+                        from_collection: true,
                         from_single_cell_reference: false,
                     }),
             );
@@ -218,7 +255,7 @@ fn collect_scope_values(
                 }
             }
             for rect in reference.rects() {
-                collect_rect_values(engine, context, rect, visited_cells, values)?;
+                collect_rect_values(engine, context, rect, visited_cells, include, values)?;
             }
         }
         ScopeValue::Callable(_) => return Err(ErrorKind::Value),
@@ -242,6 +279,7 @@ fn collect_rect_values(
     context: EvalContext<'_>,
     rect: Rect,
     visited_cells: &mut u64,
+    include: &impl Fn(CellId) -> bool,
     values: &mut Vec<ArgumentValue>,
 ) -> Result<(), ErrorKind> {
     let rows = engine.operation_row_count([&rect]);
@@ -259,6 +297,9 @@ fn collect_rect_values(
         let row = rect.row_start + row_offset;
         for column in rect.col_start..=rect.col_end {
             let cell = (rect.sheet, row, column);
+            if !include(cell) {
+                continue;
+            }
             let value = engine.read_reference_cell(context, cell)?;
             let decimal_trace = match &value {
                 Value::Number(_) => engine.numeric_decimal_trace(cell),
@@ -407,12 +448,23 @@ pub(super) fn excel_numeric_arguments_with_policy(
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
 ) -> Result<Vec<f64>, ErrorKind> {
+    excel_numbers(collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        sheet_span_policy,
+    )?)
+}
+
+/// Converts collected values to numbers with the direct-argument coercion of Excel's numeric
+/// statistics: referenced text and logical values are skipped and errors propagate.
+pub(super) fn excel_numbers(values: Vec<ArgumentValue>) -> Result<Vec<f64>, ErrorKind> {
     let mut numbers = Vec::new();
     for ArgumentValue {
         value,
         from_collection,
         ..
-    } in collect_argument_values_with_policy(engine, context, args, sheet_span_policy)?
+    } in values
     {
         match value {
             Value::Number(number) => numbers.push(number),

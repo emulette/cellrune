@@ -540,16 +540,28 @@ fn sample_variance(
     args: &[Expr],
     square_root: bool,
 ) -> Value {
-    let numbers = match numeric_arguments_with_policy(
-        engine,
-        context,
-        args,
-        SheetSpanPolicy::CollectAcrossSheets,
-    ) {
-        Ok(numbers) if numbers.len() >= 2 => numbers,
-        Ok(_) => return Value::Error(ErrorKind::Div0),
-        Err(kind) => return Value::Error(kind),
+    match numeric_arguments_with_policy(engine, context, args, SheetSpanPolicy::CollectAcrossSheets)
+    {
+        Ok(numbers) => variance_value(engine, context, numbers, VarianceKind::Sample, square_root),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// Returns the variance, or with `square_root` the standard deviation, of collected numbers.
+pub(super) fn variance_value(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    numbers: Vec<f64>,
+    kind: VarianceKind,
+    square_root: bool,
+) -> Value {
+    let minimum = match kind {
+        VarianceKind::Sample => 2,
+        VarianceKind::Population => 1,
     };
+    if numbers.len() < minimum {
+        return Value::Error(ErrorKind::Div0);
+    }
     let moments = match NumericMoments::collect_with_work(numbers, || {
         poll_cancellation(context)?;
         engine.charge_function_iterations(context, 1)
@@ -557,7 +569,7 @@ fn sample_variance(
         Ok(moments) => moments,
         Err(kind) => return Value::Error(kind),
     };
-    match moments.variance(VarianceKind::Sample) {
+    match moments.variance(kind) {
         Ok(variance) if square_root => Value::Number(variance.sqrt()),
         Ok(variance) => Value::Number(variance),
         Err(kind) => Value::Error(kind),

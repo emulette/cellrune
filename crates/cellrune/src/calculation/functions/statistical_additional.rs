@@ -3,11 +3,10 @@ use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::array_common::poll_cancellation;
 use super::kernel::StatisticalAdditionalFunction;
-use super::moments::{NumericMoments, VarianceKind};
+use super::moments::VarianceKind;
 use super::special_functions::{standard_normal_density, standard_normal_lower};
-use super::statistical::{numeric_arguments, numeric_arguments_with_policy};
+use super::statistical::{numeric_arguments, numeric_arguments_with_policy, variance_value};
 use super::util::{collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
@@ -176,26 +175,15 @@ fn population_variance(
     args: &[Expr],
     square_root: bool,
 ) -> Value {
-    let numbers = match numeric_arguments_with_policy(
-        engine,
-        context,
-        args,
-        SheetSpanPolicy::CollectAcrossSheets,
-    ) {
-        Ok(numbers) if !numbers.is_empty() => numbers,
-        Ok(_) => return Value::Error(ErrorKind::Div0),
-        Err(kind) => return Value::Error(kind),
-    };
-    let moments = match NumericMoments::collect_with_work(numbers, || {
-        poll_cancellation(context)?;
-        engine.charge_function_iterations(context, 1)
-    }) {
-        Ok(moments) => moments,
-        Err(kind) => return Value::Error(kind),
-    };
-    match moments.variance(VarianceKind::Population) {
-        Ok(variance) if square_root => Value::Number(variance.sqrt()),
-        Ok(variance) => Value::Number(variance),
+    match numeric_arguments_with_policy(engine, context, args, SheetSpanPolicy::CollectAcrossSheets)
+    {
+        Ok(numbers) => variance_value(
+            engine,
+            context,
+            numbers,
+            VarianceKind::Population,
+            square_root,
+        ),
         Err(kind) => Value::Error(kind),
     }
 }

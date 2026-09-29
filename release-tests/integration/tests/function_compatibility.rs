@@ -523,3 +523,59 @@ fn datedif_day_difference_keeps_negative_month_end_counts_without_overflow() {
         assert_eq!(result(formula, None), number(expected), "{formula}");
     }
 }
+
+#[test]
+fn subtotal_skips_nested_totals_and_covers_every_documented_function() {
+    let values = [
+        ("D1", CellValue::number(1.0).unwrap()),
+        ("D2", CellValue::number(2.0).unwrap()),
+        ("E1", CellValue::number(2.0).unwrap()),
+        ("E2", CellValue::number(4.0).unwrap()),
+        ("E3", CellValue::Text("x".into())),
+        ("E4", CellValue::Logical(true)),
+    ];
+    let formulas = [
+        ("D3", "SUBTOTAL(9,D1:D2)"),
+        ("D4", "SUBTOTAL(109,D1:D2)*2"),
+        ("F1", "SUBTOTAL(9,D1:D4)"),
+        ("F2", "SUM(D1:D3)"),
+        ("F3", "SUBTOTAL(6,E1:E4)"),
+        ("F4", "SUBTOTAL(106,E1:E4)"),
+        ("F5", "SUBTOTAL(7,E1:E4)"),
+        ("F6", "SUBTOTAL(8,E1:E4)"),
+        ("F7", "SUBTOTAL(10,E1:E4)"),
+        ("F8", "SUBTOTAL(11,E1:E4)"),
+        ("F9", "SUBTOTAL(2,E1:E4)"),
+        ("F10", "SUBTOTAL(3,E1:E4)"),
+        ("F11", "SUBTOTAL(9.7,E1:E2)"),
+        ("F12", "SUBTOTAL(7,E1)"),
+        ("F13", "SUBTOTAL(8,E1)"),
+    ];
+    let results = sheet_results(&values, &formulas, &[]);
+    assert_eq!(results[2], number(3.0), "nested SUBTOTAL cells are ignored");
+    assert_eq!(
+        results[3],
+        number(6.0),
+        "other aggregates still see SUBTOTAL cells"
+    );
+    assert_eq!(results[4], number(8.0));
+    assert_eq!(results[5], number(8.0));
+    assert_close(&results[6], std::f64::consts::SQRT_2, "SUBTOTAL(7)");
+    assert_eq!(results[7], number(1.0));
+    assert_eq!(results[8], number(2.0));
+    assert_eq!(results[9], number(1.0));
+    assert_eq!(results[10], number(2.0));
+    assert_eq!(results[11], number(4.0));
+    assert_eq!(results[12], number(6.0));
+    assert_eq!(results[13], error(ExcelError::DivisionByZero));
+    assert_eq!(results[14], number(0.0));
+
+    for function in ["0", "12", "100", "112", "209", "-9"] {
+        let formula = format!("SUBTOTAL({function},1)");
+        assert_eq!(
+            result(&formula, None),
+            error(ExcelError::Value),
+            "{formula}"
+        );
+    }
+}

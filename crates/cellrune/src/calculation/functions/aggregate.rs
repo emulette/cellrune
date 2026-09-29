@@ -9,8 +9,12 @@ use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::AggregateFunction;
+use super::moments::VarianceKind;
+use super::normalize_name;
+use super::statistical::variance_value;
 use super::util::{
-    ArgumentValue, ExcelSum, collect_argument_values_with_policy, collect_callable_argument_values,
+    ArgumentValue, ExcelSum, collect_argument_values_including,
+    collect_argument_values_with_policy, collect_callable_argument_values, excel_numbers,
     required_number,
 };
 
@@ -259,18 +263,87 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         return Value::Error(ErrorKind::Value);
     }
     let function = match required_number(engine, context, &args[0]) {
-        Ok(number) => number.trunc() as i32 % 100,
+        Ok(number) => number.trunc(),
         Err(kind) => return Value::Error(kind),
     };
-    match function {
-        1 => aggregate_numbers(engine, context, &args[1..], Aggregate::Average),
-        2 => count_numbers(engine, context, &args[1..]),
-        3 => count_nonblank(engine, context, &args[1..]),
-        4 => aggregate_numbers(engine, context, &args[1..], Aggregate::Max),
-        5 => aggregate_numbers(engine, context, &args[1..], Aggregate::Min),
-        9 => aggregate_numbers(engine, context, &args[1..], Aggregate::Sum),
-        _ => Value::Error(ErrorKind::Unsupported),
+    // 101 to 111 name the same aggregates while also skipping manually hidden rows, which the
+    // workbook model does not represent.
+    let operation = if (1.0..=11.0).contains(&function) {
+        function
+    } else if (101.0..=111.0).contains(&function) {
+        function - 100.0
+    } else {
+        return Value::Error(ErrorKind::Value);
+    };
+    // Excel ignores cells that hold another SUBTOTAL or AGGREGATE so nested totals are not
+    // counted twice.
+    let values = match collect_argument_values_including(
+        engine,
+        context,
+        &args[1..],
+        SheetSpanPolicy::CollectAcrossSheets,
+        &|cell| !engine.parsed_expr(cell).is_some_and(contains_subtotal_call),
+    ) {
+        Ok(values) => values,
+        Err(kind) => return Value::Error(kind),
+    };
+    let variance = |values, kind, square_root| match excel_numbers(values) {
+        Ok(numbers) => variance_value(engine, context, numbers, kind, square_root),
+        Err(kind) => Value::Error(kind),
+    };
+    match operation as u8 {
+        1 => aggregate_collected(engine, values, Aggregate::Average),
+        2 => count_collected(values),
+        3 => count_nonblank_collected(&values),
+        4 => aggregate_collected(engine, values, Aggregate::Max),
+        5 => aggregate_collected(engine, values, Aggregate::Min),
+        6 => aggregate_collected(engine, values, Aggregate::Product),
+        7 => variance(values, VarianceKind::Sample, true),
+        8 => variance(values, VarianceKind::Population, true),
+        9 => aggregate_collected(engine, values, Aggregate::Sum),
+        10 => variance(values, VarianceKind::Sample, false),
+        11 => variance(values, VarianceKind::Population, false),
+        _ => unreachable!("SUBTOTAL operation was validated above"),
     }
+}
+
+fn contains_subtotal_call(root: &Expr) -> bool {
+    let mut pending = vec![root];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            Expr::Call { name, args } => {
+                if matches!(normalize_name(name).as_str(), "SUBTOTAL" | "AGGREGATE") {
+                    return true;
+                }
+                pending.extend(args);
+            }
+            Expr::Invoke { callee, args } => {
+                pending.push(callee);
+                pending.extend(args);
+            }
+            Expr::ReferenceUnion { left, right }
+            | Expr::ReferenceIntersection { left, right }
+            | Expr::Binary { left, right, .. } => pending.extend([&**left, &**right]),
+            Expr::Range { start, end } => pending.extend([&**start, &**end]),
+            Expr::SpillRef(inner)
+            | Expr::ImplicitIntersection(inner)
+            | Expr::Unary { operand: inner, .. }
+            | Expr::Paren(inner) => pending.push(inner),
+            Expr::Array(rows) => pending.extend(rows.iter().flatten()),
+            Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Logical(_)
+            | Expr::ErrorLit(_)
+            | Expr::Ref(_)
+            | Expr::StructuredRef(_)
+            | Expr::ExternalReference(_)
+            | Expr::QualifiedName { .. }
+            | Expr::Name(_)
+            | Expr::BuiltinCallable(_)
+            | Expr::Missing => {}
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, Copy)]
