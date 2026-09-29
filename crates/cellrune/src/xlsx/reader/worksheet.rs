@@ -817,7 +817,8 @@ fn frozen_count(value: Option<&str>, budget: &XmlBudget) -> Result<u32, XlsxRead
             .error(XlsxErrorCode::InvalidFrozenPane)
             .with_cause(error)
     })?;
-    if !number.is_finite() || number <= 0.0 || number.fract() != 0.0 || number > u32::MAX as f64 {
+    // An explicit 0 is the schema default: LibreOffice writes xSplit="0" for a row-only freeze.
+    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > u32::MAX as f64 {
         return Err(budget
             .error(XlsxErrorCode::InvalidFrozenPane)
             .with_detail(value.to_owned()));
