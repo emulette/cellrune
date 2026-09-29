@@ -111,7 +111,7 @@
     {"address": "AL1", "value": 0},
     {"address": "AM1", "value": 1},
     {"address": "AN1", "value": 1},
-    {"address": "AO1", "value": 0.25},
+    {"address": "AO1", "value": 0.0},
     {"address": "AP1", "value": 0},
     {"address": "AQ1", "value": 0.489991},
     {"address": "AR1", "value": 0.489991},
