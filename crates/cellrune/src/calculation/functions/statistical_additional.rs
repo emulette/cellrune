@@ -3,9 +3,12 @@ use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::array_common::poll_cancellation;
 use super::kernel::StatisticalAdditionalFunction;
 use super::moments::VarianceKind;
-use super::special_functions::{standard_normal_density, standard_normal_lower};
+use super::special_functions::{
+    ln_gamma, regularized_gamma_q, standard_normal_density, standard_normal_lower,
+};
 use super::statistical::{numeric_arguments, numeric_arguments_with_policy, variance_value};
 use super::util::{collect_argument_values_with_policy, required_number};
 
@@ -291,12 +294,12 @@ fn poisson_distribution(engine: &Engine<'_>, context: EvalContext<'_>, args: &[E
         return Value::Error(ErrorKind::Value);
     }
     let events = match required_number(engine, context, &args[0]) {
-        Ok(value) if value >= 0.0 => value.trunc() as u64,
+        Ok(value) if value >= 0.0 => value.trunc(),
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
     };
     let mean = match required_number(engine, context, &args[1]) {
-        Ok(value) if value > 0.0 => value,
+        Ok(value) if value >= 0.0 => value,
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
     };
@@ -304,16 +307,29 @@ fn poisson_distribution(engine: &Engine<'_>, context: EvalContext<'_>, args: &[E
         Ok(value) => value,
         Err(kind) => return Value::Error(kind),
     };
-    if let Err(kind) = engine.ensure_function_iterations(events.saturating_add(1)) {
-        return Value::Error(kind);
+    // A zero mean puts all probability on zero events.
+    if mean == 0.0 {
+        return Value::Number(if cumulative || events == 0.0 {
+            1.0
+        } else {
+            0.0
+        });
     }
-    let mut probability = (-mean).exp();
-    let mut total = probability;
-    for event in 1..=events {
-        probability *= mean / event as f64;
-        total += probability;
+    // P(X <= k) is the upper regularized gamma Q(k + 1, mean), and the mass function is evaluated
+    // in log space, so neither underflows exp(-mean) nor iterates once per event.
+    let result = if cumulative {
+        regularized_gamma_q(events + 1.0, mean, || {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)
+        })
+    } else {
+        ln_gamma(events + 1.0)
+            .map(|log_factorial| (events * mean.ln() - mean - log_factorial).exp())
+    };
+    match result {
+        Ok(probability) => finite(probability),
+        Err(kind) => Value::Error(kind),
     }
-    finite(if cumulative { total } else { probability })
 }
 
 fn finite(number: f64) -> Value {

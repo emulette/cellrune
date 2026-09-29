@@ -371,7 +371,8 @@ fn second_expansion_wave_rejects_invalid_domains_and_widths() {
             ExcelError::NotAvailable,
         ),
         error("NORM.DIST(1,0,0,TRUE)", ExcelError::Number),
-        error("POISSON.DIST(1,0,TRUE)", ExcelError::Number),
+        // Only a negative mean is outside the documented domain.
+        number("POISSON.DIST(1,0,TRUE)", 1.0, 0.0),
         text("VALUETOTEXT(1/0,1)", "#DIV/0!"),
         logical("XOR({TRUE,FALSE,TRUE})", false),
     ];

@@ -638,3 +638,97 @@ fn search_treats_question_marks_asterisks_and_tildes_as_wildcards() {
         assert_eq!(result(formula, None), error(ExcelError::Value), "{formula}");
     }
 }
+
+#[test]
+fn poisson_distribution_handles_large_and_zero_means() {
+    for (formula, expected) in [
+        ("POISSON.DIST(1000,1000,FALSE)", 0.012_614_611_348_721_5),
+        ("POISSON.DIST(1000,1000,TRUE)", 0.508_409_367_168_506),
+        ("POISSON.DIST(2,5,FALSE)", 0.084_224_337_488_568_34),
+        ("POISSON.DIST(2,5,TRUE)", 0.124_652_019_483_081_14),
+        ("POISSON(2.9,5,TRUE)", 0.124_652_019_483_081_14),
+    ] {
+        assert_close(&result(formula, None), expected, formula);
+    }
+    for (formula, expected) in [
+        ("POISSON.DIST(0,0,FALSE)", 1.0),
+        ("POISSON.DIST(3,0,FALSE)", 0.0),
+        ("POISSON.DIST(3,0,TRUE)", 1.0),
+    ] {
+        assert_eq!(result(formula, None), number(expected), "{formula}");
+    }
+    for formula in ["POISSON.DIST(-1,5,TRUE)", "POISSON.DIST(1,-5,TRUE)"] {
+        assert_eq!(
+            result(formula, None),
+            error(ExcelError::Number),
+            "{formula}"
+        );
+    }
+}
+
+#[test]
+fn mirr_counts_only_numeric_cash_flows_as_periods() {
+    let values = [
+        ("A1", CellValue::number(-100.0).unwrap()),
+        ("A3", CellValue::number(60.0).unwrap()),
+        ("A4", CellValue::Text("note".into())),
+        ("A5", CellValue::number(60.0).unwrap()),
+        ("B1", CellValue::number(-100.0).unwrap()),
+        ("B2", CellValue::number(0.0).unwrap()),
+        ("B3", CellValue::number(60.0).unwrap()),
+        ("B4", CellValue::number(60.0).unwrap()),
+    ];
+    let results = sheet_results(
+        &values,
+        &[
+            ("C1", "MIRR(A1:A5,0.1,0.12)"),
+            ("C2", "MIRR({-100,60,60},0.1,0.12)"),
+            ("C3", "MIRR(B1:B4,0.1,0.12)"),
+            ("C4", "MIRR({-100,0,60,60},0.1,0.12)"),
+        ],
+        &[],
+    );
+    assert_eq!(results[0], results[1]);
+    assert_eq!(results[2], results[3]);
+    assert_ne!(results[0], results[2]);
+}
+
+#[test]
+fn order_statistics_interpolate_without_intermediate_overflow() {
+    let values = [
+        ("A1", CellValue::number(-1e308).unwrap()),
+        ("A2", CellValue::number(1e308).unwrap()),
+    ];
+    let results = sheet_results(
+        &values,
+        &[
+            ("C1", "MEDIAN(1E308,1.5E308)"),
+            ("C2", "PERCENTILE.INC(A1:A2,0)"),
+            ("C3", "PERCENTILE.INC(A1:A2,0.5)"),
+            ("C4", "PERCENTILE.INC(A1:A2,1)"),
+            ("C5", "QUARTILE.INC(A1:A2,2)"),
+            ("C6", "MEDIAN(1,2)"),
+            ("C7", "PERCENTILE.INC(A1:A2,0.25)"),
+        ],
+        &[],
+    );
+    assert_eq!(results[0], number(1.25e308));
+    assert_eq!(results[1], number(-1e308));
+    assert_eq!(results[2], number(0.0));
+    assert_eq!(results[3], number(1e308));
+    assert_eq!(results[4], number(0.0));
+    assert_eq!(results[5], number(1.5));
+    assert_eq!(results[6], number(-5e307));
+}
+
+#[test]
+fn unique_groups_text_with_unicode_case_folding() {
+    for (formula, expected) in [
+        ("COUNTA(UNIQUE({\"Ä\";\"ä\";\"b\"}))", 2.0),
+        ("COUNTA(UNIQUE({\"K\";\"\u{212A}\";\"k\"}))", 1.0),
+        ("COUNTA(UNIQUE({\"Straße\";\"STRAẞE\"}))", 1.0),
+        ("COUNTA(UNIQUE({\"a\";\"A\";\"b\"},FALSE,TRUE))", 1.0),
+    ] {
+        assert_eq!(result(formula, None), number(expected), "{formula}");
+    }
+}

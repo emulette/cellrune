@@ -25,7 +25,9 @@ pub(super) use incomplete_beta::{
     beta_density_exponent, beta_pair, ln_beta, regularized_incomplete_beta,
     regularized_incomplete_beta_lower, regularized_incomplete_beta_upper,
 };
-pub(super) use incomplete_gamma::{regularized_gamma_p, regularized_gamma_p_from_log};
+pub(super) use incomplete_gamma::{
+    regularized_gamma_p, regularized_gamma_p_from_log, regularized_gamma_q,
+};
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
 pub(super) use normal::{

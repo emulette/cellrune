@@ -1,11 +1,11 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
 
+use super::super::super::coerce::compare_text_case_insensitive;
 use super::super::array_common::poll_cancellation;
 use super::{Array, Engine, ErrorKind, EvalContext, Expr, Value, cell_count, optional_logical};
-
-const TEXT_CHUNK_BYTES: usize = 256;
 
 struct Group {
     first: u32,
@@ -117,14 +117,11 @@ fn item_hash(
             Value::Logical(value) => value.hash(&mut hasher),
             Value::Error(kind) => kind.hash(&mut hasher),
             Value::Text(text) => {
-                text.len().hash(&mut hasher);
-                for chunk in text.as_bytes().chunks(TEXT_CHUNK_BYTES) {
-                    charge_work(engine, context, chunk.len() as u64)?;
-                    let mut normalized = [0_u8; TEXT_CHUNK_BYTES];
-                    let normalized = &mut normalized[..chunk.len()];
-                    normalized.copy_from_slice(chunk);
-                    normalized.make_ascii_lowercase();
-                    hasher.write(normalized);
+                // Hash the same Unicode lowercase form that `items_equal` compares, so letters
+                // outside ASCII group case-insensitively as in COUNTIF and GROUPBY.
+                charge_work(engine, context, text.len() as u64)?;
+                for character in text.chars().flat_map(char::to_lowercase) {
+                    character.hash(&mut hasher);
                 }
             }
         }
@@ -146,18 +143,9 @@ fn items_equal(
         let left = item_value(source, left, offset, by_column);
         let right = item_value(source, right, offset, by_column);
         if let (Value::Text(left), Value::Text(right)) = (left, right) {
-            if left.len() != right.len() {
+            charge_work(engine, context, left.len().max(right.len()) as u64)?;
+            if compare_text_case_insensitive(left, right) != Ordering::Equal {
                 return Ok(false);
-            }
-            for (left, right) in left
-                .as_bytes()
-                .chunks(TEXT_CHUNK_BYTES)
-                .zip(right.as_bytes().chunks(TEXT_CHUNK_BYTES))
-            {
-                charge_work(engine, context, left.len() as u64)?;
-                if !left.eq_ignore_ascii_case(right) {
-                    return Ok(false);
-                }
             }
         } else if left != right {
             return Ok(false);

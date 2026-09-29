@@ -3327,7 +3327,7 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
     ] {
         assert_materialized_number(&calculation, sheet_id, address, expected);
     }
-    for address in ["U2", "U3", "J6", "N12"] {
+    for address in ["U2", "U3", "J6", "N11"] {
         assert_eq!(
             materialized_result(&calculation, sheet_id, address),
             Some(&CalculationCellResult::Value(CellValue::Error(
@@ -3342,8 +3342,8 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
         ("G6", "z"),
         ("N8", "1"),
         ("N9", "A"),
+        // Case-insensitive grouping folds Unicode letters too, so "ä" joins "Ä".
         ("N10", "Ä"),
-        ("N11", "ä"),
     ] {
         assert_eq!(
             materialized_result(&calculation, sheet_id, address),

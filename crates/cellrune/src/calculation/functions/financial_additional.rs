@@ -168,7 +168,17 @@ fn mirr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() != 3 {
         return Value::Error(ErrorKind::Value);
     }
-    let values = match collect_argument_values(engine, context, &args[..1]) {
+    // Text, logical values, and empty cells are ignored rather than counted as periods.
+    let values = match collect_argument_values(engine, context, &args[..1]).and_then(|values| {
+        values
+            .into_iter()
+            .filter_map(|item| match item.value {
+                Value::Number(number) => Some(Ok(number)),
+                Value::Error(kind) => Some(Err(kind)),
+                Value::Blank | Value::Text(_) | Value::Logical(_) => None,
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }) {
         Ok(values) if values.len() >= 2 => values,
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),
@@ -185,20 +195,14 @@ fn mirr(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let periods = values.len();
     let mut present_negative = 0.0;
     let mut future_positive = 0.0;
-    for (period, item) in values.into_iter().enumerate() {
-        match item.value {
-            Value::Number(value) if value < 0.0 => {
-                if finance_rate == -1.0 && period > 0 {
-                    return Value::Error(ErrorKind::Div0);
-                }
-                present_negative += value / (1.0 + finance_rate).powi(period as i32);
+    for (period, value) in values.into_iter().enumerate() {
+        if value < 0.0 {
+            if finance_rate == -1.0 && period > 0 {
+                return Value::Error(ErrorKind::Div0);
             }
-            Value::Number(value) if value > 0.0 => {
-                future_positive +=
-                    value * (1.0 + reinvest_rate).powi((periods - period - 1) as i32);
-            }
-            Value::Number(_) | Value::Blank | Value::Text(_) | Value::Logical(_) => {}
-            Value::Error(kind) => return Value::Error(kind),
+            present_negative += value / (1.0 + finance_rate).powi(period as i32);
+        } else if value > 0.0 {
+            future_positive += value * (1.0 + reinvest_rate).powi((periods - period - 1) as i32);
         }
     }
     if present_negative == 0.0 || future_positive == 0.0 {

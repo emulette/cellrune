@@ -46,11 +46,7 @@ pub(in crate::calculation::functions) fn regularized_gamma_p_from_log(
 }
 
 /// Complement Q(a, x) = 1 − P(a, x), computed on the same branch policy.
-/// Test-gated until a production consumer lands — the statistical wave's
-/// right-tail distributions are the planned first consumer. The branch tests
-/// below exercise it directly.
-#[cfg(test)]
-pub(super) fn regularized_gamma_q(
+pub(in crate::calculation::functions) fn regularized_gamma_q(
     a: f64,
     x: f64,
     on_iteration: impl FnMut() -> Result<(), ErrorKind>,

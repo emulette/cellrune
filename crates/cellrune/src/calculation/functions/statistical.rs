@@ -420,7 +420,7 @@ fn median(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
     numbers.sort_by(f64::total_cmp);
     let middle = numbers.len() / 2;
     if numbers.len().is_multiple_of(2) {
-        Value::Number((numbers[middle - 1] + numbers[middle]) / 2.0)
+        Value::Number(midpoint(numbers[middle - 1], numbers[middle]))
     } else {
         Value::Number(numbers[middle])
     }
@@ -483,7 +483,30 @@ fn percentile(
     let lower = position.floor() as usize;
     let fraction = position - lower as f64;
     let upper = (lower + 1).min(numbers.len() - 1);
-    Value::Number(numbers[lower] + (numbers[upper] - numbers[lower]) * fraction)
+    Value::Number(interpolate(numbers[lower], numbers[upper], fraction))
+}
+
+/// The mean of two finite numbers, halving first only when their sum overflows.
+fn midpoint(lower: f64, upper: f64) -> f64 {
+    let sum = lower + upper;
+    if sum.is_finite() {
+        sum / 2.0
+    } else {
+        lower / 2.0 + upper / 2.0
+    }
+}
+
+/// Linear interpolation that stays finite when the gap between finite endpoints overflows.
+fn interpolate(lower: f64, upper: f64, fraction: f64) -> f64 {
+    if fraction == 0.0 {
+        return lower;
+    }
+    let gap = upper - lower;
+    if gap.is_finite() {
+        lower + gap * fraction
+    } else {
+        lower * (1.0 - fraction) + upper * fraction
+    }
 }
 
 fn rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], average: bool) -> Value {
