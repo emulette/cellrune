@@ -497,20 +497,23 @@ fn table_rename_column_rename_and_resize_are_one_stable_atomic_vertical() {
             .expect("new totals cell")
             .content()
             .formula_text(),
-        Some("SUBTOTAL(109,[[Gross.Amount]])")
+        Some("SUBTOTAL(109,Orders[[Gross.Amount]])")
     );
     assert!(matches!(
         sheet.cell(address("A6")).expect("totals label").content(),
         CellContent::Literal(CellValue::Text(value)) if value == "Total"
     ));
+    // The former totals row is now a data row: its calculated column is filled and its label is
+    // emptied, so no totals formula remains inside the table to reference itself.
     assert_eq!(
         sheet
             .cell(address("B4"))
-            .expect("old totals preserved")
+            .expect("former totals row becomes data")
             .content()
             .formula_text(),
-        Some("SUBTOTAL(109,[[Gross.Amount]])")
+        Some("[@[Gross.Amount]]")
     );
+    assert!(sheet.cell(address("A4")).is_none());
 
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
     let written = write_xlsx_draft_bytes(
@@ -610,7 +613,7 @@ fn table_resize_shrinks_without_deleting_cells_outside_the_new_range() {
             .expect("new total")
             .content()
             .formula_text(),
-        Some("SUBTOTAL(109,[Amount])")
+        Some("SUBTOTAL(109,Sales[Amount])")
     );
     assert!(matches!(
         sheet.cell(address("A4")).expect("old total").content(),

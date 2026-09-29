@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::super::DraftCellMutation;
 use super::super::annotated_text_replacement_required;
 use super::formula_edit::{
     FormulaEditState, TableFormulaLocations, WorkbookFormulaEdit, WorkbookFormulaRename,
@@ -31,11 +32,33 @@ pub(super) struct TableEditState<'a> {
 impl TableEditState<'_> {
     fn mark_cell(&mut self, sheet_id: SheetId, address: CellAddress) {
         mark_upsert(self.mutations, sheet_id, address, false);
+        self.mark_changed(sheet_id, address);
+    }
+
+    fn mark_removed_cell(&mut self, sheet_id: SheetId, address: CellAddress) {
+        self.mutations.insert(
+            CalculationCellId::new(sheet_id, address),
+            DraftCellMutation::Remove,
+        );
+        self.mark_changed(sheet_id, address);
+    }
+
+    fn mark_changed(&mut self, sheet_id: SheetId, address: CellAddress) {
         let cell = CalculationCellId::new(sheet_id, address);
         self.changed_cells.insert(cell);
         self.calculation_changed_cells.insert(cell);
         self.touched_sheets.insert(sheet_id);
     }
+}
+
+/// A cell that a table resize writes, overwrites, or empties.
+enum ResizeTarget {
+    /// Content for a cell that must be empty or already hold the same content.
+    Write(CellContent),
+    /// Content replacing a cell of the table's own former totals row, now a data row.
+    Replace(CellContent),
+    /// Empties a cell of the table's own former totals row, now a data row.
+    Clear,
 }
 
 pub(super) struct TableFormulaEdit<'a, 'cancel> {
@@ -271,8 +294,10 @@ pub(super) fn resize_table_rows(
         &resized,
         materialization_budget,
         true,
-        |address, content| {
-            validate_materialization_target(&sheets[sheet_index], table_id, address, &content)?;
+        |address, target| {
+            if let ResizeTarget::Write(content) = target {
+                validate_materialization_target(&sheets[sheet_index], table_id, address, &content)?;
+            }
             Ok(())
         },
     )?;
@@ -282,7 +307,16 @@ pub(super) fn resize_table_rows(
         &resized,
         materialization_budget,
         false,
-        |address, content| {
+        |address, target| {
+            let content = match target {
+                ResizeTarget::Write(content) | ResizeTarget::Replace(content) => content,
+                ResizeTarget::Clear => {
+                    if sheets[sheet_index].remove_cell_deferred(address) {
+                        state.mark_removed_cell(sheet_id, address);
+                    }
+                    return Ok(());
+                }
+            };
             if content_is_semantically_equal(
                 sheets[sheet_index].cell(address).map(|cell| cell.content()),
                 &content,
@@ -375,7 +409,7 @@ fn visit_resize_materialization_targets(
     resized: &Table,
     budget: &mut TableMaterializationBudget<'_>,
     charge_targets: bool,
-    mut visit: impl FnMut(CellAddress, CellContent) -> Result<(), BatchExecutionError>,
+    mut visit: impl FnMut(CellAddress, ResizeTarget) -> Result<(), BatchExecutionError>,
 ) -> Result<(), BatchExecutionError> {
     budget.check_cancelled()?;
     if resized.header_row_count() > 0
@@ -388,16 +422,43 @@ fn visit_resize_materialization_targets(
             }
             visit(
                 address_for_column(resized, resized.range().start().row(), index),
-                CellContent::Literal(CellValue::Text(column.name().to_owned())),
+                ResizeTarget::Write(CellContent::Literal(CellValue::Text(
+                    column.name().to_owned(),
+                ))),
             )?;
         }
     }
-    if resized.totals_row_count() > 0
-        && resized.range().end().row() != old_table.range().end().row()
-    {
+    // When the totals row moves down, its old row becomes a data row: calculated columns below
+    // replace its formulas and the other cells are emptied, so no totals formula is left inside
+    // the table to reference itself. A totals row that moves up leaves its old row outside the
+    // table untouched, as resizing never deletes cells outside the new range.
+    let moved_totals_row = (resized.totals_row_count() > 0
+        && resized.range().end().row() != old_table.range().end().row())
+    .then(|| old_table.range().end().row());
+    let old_totals_row_becomes_data = moved_totals_row.filter(|old_totals_row| {
+        resized
+            .data_range()
+            .is_some_and(|data| data.end().row() >= *old_totals_row)
+    });
+    if let Some(old_totals_row) = old_totals_row_becomes_data {
+        for (index, column) in old_table.columns().iter().enumerate() {
+            budget.check_cancelled()?;
+            if column.calculated_column_formula().is_some() {
+                continue;
+            }
+            if charge_targets {
+                budget.charge_cell()?;
+            }
+            visit(
+                address_for_column(old_table, old_totals_row, index),
+                ResizeTarget::Clear,
+            )?;
+        }
+    }
+    if moved_totals_row.is_some() {
         for (index, column) in resized.columns().iter().enumerate() {
             budget.check_cancelled()?;
-            let Some(content) = totals_content(resized.id(), column)? else {
+            let Some(content) = totals_content(resized, column)? else {
                 continue;
             };
             if charge_targets {
@@ -405,7 +466,7 @@ fn visit_resize_materialization_targets(
             }
             visit(
                 address_for_column(resized, resized.range().end().row(), index),
-                content,
+                ResizeTarget::Write(content),
             )?;
         }
     }
@@ -429,6 +490,7 @@ fn visit_resize_materialization_targets(
         budget.check_cancelled()?;
         if row >= old_table.range().start().row().get()
             && row <= old_table.range().end().row().get()
+            && old_totals_row_becomes_data.is_none_or(|old_totals_row| old_totals_row.get() != row)
         {
             continue;
         }
@@ -444,9 +506,14 @@ fn visit_resize_materialization_targets(
             if charge_targets {
                 budget.charge_cell()?;
             }
+            let content = formula_content(formula.text().clone());
             visit(
                 address_for_column(resized, row, *index),
-                formula_content(formula.text().clone()),
+                if old_totals_row_becomes_data == Some(row) {
+                    ResizeTarget::Replace(content)
+                } else {
+                    ResizeTarget::Write(content)
+                },
             )?;
         }
     }
@@ -463,9 +530,10 @@ fn address_for_column(table: &Table, row: Row, column_index: usize) -> CellAddre
 }
 
 fn totals_content(
-    table_id: TableId,
+    table: &Table,
     column: &TableColumn,
 ) -> Result<Option<CellContent>, ValidationError> {
+    let table_id = table.id();
     if let Some(label) = column.totals_row_label() {
         return Ok(Some(CellContent::Literal(CellValue::Text(
             label.to_owned(),
@@ -496,8 +564,13 @@ fn totals_content(
         TotalsRowFunction::Var => 110,
         TotalsRowFunction::Custom => unreachable!("custom totals requires a stored formula"),
     };
+    // Excel stores totals as SUBTOTAL(109,Table[Column]); LibreOffice reports #NAME? for the
+    // unqualified [Column] form.
     let column_reference = render_unqualified_structured_column(column.name());
-    let formula = FormulaText::from_xlsx(format!("SUBTOTAL({code},{column_reference})"))?;
+    let formula = FormulaText::from_xlsx(format!(
+        "SUBTOTAL({code},{}{column_reference})",
+        table.display_name().as_str()
+    ))?;
     Ok(Some(formula_content(formula)))
 }
 

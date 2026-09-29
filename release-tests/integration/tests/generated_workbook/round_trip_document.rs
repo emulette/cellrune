@@ -18,8 +18,8 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_formula_fixture,
-    generated_table_reference_fixture, generated_table_topology_fixture, generated_workbook,
-    generated_workbook_with_comment,
+    generated_table_reference_fixture, generated_table_topology_fixture,
+    generated_totals_table_fixture, generated_workbook, generated_workbook_with_comment,
 };
 
 #[test]
@@ -686,4 +686,107 @@ fn workbook_with_relationship_namespace(
         .finish()
         .expect("finish rewritten archive")
         .into_inner()
+}
+
+fn totals_table_cell(workbook: &cellrune::WorkbookSnapshot, address: &str) -> Option<CellContent> {
+    workbook.sheets()[0]
+        .cell(CellAddress::from_a1(address).expect("valid address"))
+        .map(|cell| cell.content().clone())
+}
+
+fn assert_totals_formula(workbook: &cellrune::WorkbookSnapshot, address: &str, expected: &str) {
+    let Some(CellContent::Formula(formula)) = totals_table_cell(workbook, address) else {
+        panic!("{address} must hold a formula");
+    };
+    assert_eq!(
+        formula.text().map(|text| text.as_str()),
+        Some(expected),
+        "{address}"
+    );
+}
+
+fn resize_totals_table(changes: Vec<WorkbookChange>) -> (cellrune::WorkbookSnapshot, Vec<u8>) {
+    let document =
+        open_xlsx_document_bytes(&generated_totals_table_fixture(), OpenOptions::default())
+            .expect("totals table input");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(EditBatch::new(changes))
+        .expect("resize");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("strict write succeeds without circular references");
+    let reopened = open_xlsx_document_bytes(output.bytes(), OpenOptions::default())
+        .expect("reopen resized table");
+    (reopened.workbook().clone(), output.bytes().to_vec())
+}
+
+fn number_at(workbook: &cellrune::WorkbookSnapshot, address: &str) -> f64 {
+    let sheet = workbook.sheets()[0].id();
+    let calculation = calculate_workbook(workbook, CalculationOptions::default());
+    match calculation.cell(CalculationCellId::new(
+        sheet,
+        CellAddress::from_a1(address).expect("valid address"),
+    )) {
+        Some(CalculationCellResult::Value(CellValue::Number(number))) => number.get(),
+        other => panic!("{address}: expected a number, got {other:?}"),
+    }
+}
+
+#[test]
+fn growing_a_totals_table_moves_the_totals_row_and_fills_calculated_columns() {
+    let sheet = SheetId::new(1).expect("sheet");
+    let address = |a1: &str| CellAddress::from_a1(a1).expect("valid address");
+    let (workbook, _) = resize_totals_table(vec![
+        WorkbookChange::resize_table_rows(
+            TableId::new(1).expect("table"),
+            Row::new(2).expect("first data row"),
+            Row::new(5).expect("last data row"),
+        )
+        .expect("valid resize"),
+        WorkbookChange::set_cell_value(sheet, address("A5"), CellValue::number(4.0).unwrap()),
+        WorkbookChange::set_cell_value(sheet, address("B5"), CellValue::Text("d".into())),
+        WorkbookChange::set_cell_value(sheet, address("C5"), CellValue::number(40.0).unwrap()),
+    ]);
+    // The former totals row is a data row with the calculated column.
+    assert_totals_formula(&workbook, "D5", "tblChar[[#This Row],[hp]]*2");
+    assert_eq!(number_at(&workbook, "D5"), 80.0);
+    // The totals row moved below it, naming its table as Excel does.
+    assert_eq!(
+        totals_table_cell(&workbook, "A6"),
+        Some(CellContent::Literal(CellValue::Text("Total".into())))
+    );
+    assert_eq!(totals_table_cell(&workbook, "B6"), None);
+    assert_totals_formula(&workbook, "C6", "SUBTOTAL(109,tblChar[hp])");
+    assert_totals_formula(&workbook, "D6", "SUBTOTAL(109,tblChar[hp2])");
+    assert_eq!(number_at(&workbook, "C6"), 100.0);
+    assert_eq!(number_at(&workbook, "D6"), 200.0);
+}
+
+#[test]
+fn shrinking_a_totals_table_names_its_table_in_the_new_totals_row() {
+    let sheet = SheetId::new(1).expect("sheet");
+    let address = |a1: &str| CellAddress::from_a1(a1).expect("valid address");
+    let mut changes = ["A4", "B4", "C4", "D4"]
+        .into_iter()
+        .map(|cell| WorkbookChange::clear_cell(sheet, address(cell)))
+        .collect::<Vec<_>>();
+    changes.push(
+        WorkbookChange::resize_table_rows(
+            TableId::new(1).expect("table"),
+            Row::new(2).expect("first data row"),
+            Row::new(3).expect("last data row"),
+        )
+        .expect("valid resize"),
+    );
+    let (workbook, _) = resize_totals_table(changes);
+    assert_totals_formula(&workbook, "C4", "SUBTOTAL(109,tblChar[hp])");
+    assert_totals_formula(&workbook, "D4", "SUBTOTAL(109,tblChar[hp2])");
+    assert_eq!(number_at(&workbook, "C4"), 30.0);
+    assert_eq!(number_at(&workbook, "D4"), 60.0);
+    // Resizing never deletes cells outside the new range, so the old totals row stays below.
+    assert_eq!(
+        totals_table_cell(&workbook, "A5"),
+        Some(CellContent::Literal(CellValue::Text("Total".into())))
+    );
 }

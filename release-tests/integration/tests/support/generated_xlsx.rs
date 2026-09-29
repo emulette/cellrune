@@ -278,6 +278,93 @@ pub fn generated_table_topology_fixture(data_rows: u32) -> Vec<u8> {
     )
 }
 
+/// The Prika investigation's totals table: `tblChar` on `A1:D5` with data rows 2..4, a
+/// `hp2` calculated column, and a totals row labelled `Total` that sums `hp` and `hp2`.
+pub fn generated_totals_table_fixture() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Chars" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    let mut rows = String::from(
+        r#"<row r="1">
+      <c r="A1" t="inlineStr"><is><t>id</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>name</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>hp</t></is></c>
+      <c r="D1" t="inlineStr"><is><t>hp2</t></is></c>
+    </row>"#,
+    );
+    for (index, name) in ["a", "b", "c"].into_iter().enumerate() {
+        let row = index + 2;
+        let id = index + 1;
+        let hp = id * 10;
+        rows.push_str(&format!(
+            r#"<row r="{row}">
+      <c r="A{row}"><v>{id}</v></c>
+      <c r="B{row}" t="inlineStr"><is><t>{name}</t></is></c>
+      <c r="C{row}"><v>{hp}</v></c>
+      <c r="D{row}"><f>tblChar[[#This Row],[hp]]*2</f></c>
+    </row>"#,
+        ));
+    }
+    rows.push_str(
+        r#"<row r="5">
+      <c r="A5" t="inlineStr"><is><t>Total</t></is></c>
+      <c r="C5"><f>SUBTOTAL(109,tblChar[hp])</f></c>
+      <c r="D5"><f>SUBTOTAL(109,tblChar[hp2])</f></c>
+    </row>"#,
+    );
+    let worksheet = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>{rows}</sheetData>
+  <tableParts count="1"><tablePart r:id="rId1"/></tableParts>
+</worksheet>"#,
+    );
+    let worksheet_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="tblChar" displayName="tblChar" ref="A1:D5"
+       headerRowCount="1" totalsRowCount="1" totalsRowShown="1">
+  <autoFilter ref="A1:D4"/>
+  <tableColumns count="4">
+    <tableColumn id="1" name="id" totalsRowLabel="Total"/>
+    <tableColumn id="2" name="name"/>
+    <tableColumn id="3" name="hp" totalsRowFunction="sum"/>
+    <tableColumn id="4" name="hp2" totalsRowFunction="sum"><calculatedColumnFormula>tblChar[[#This Row],[hp]]*2</calculatedColumnFormula></tableColumn>
+  </tableColumns>
+</table>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", &worksheet),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                worksheet_relationships,
+            ),
+            ("xl/tables/table1.xml", table),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }
