@@ -627,6 +627,10 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
                 Err(kind) => return Value::Error(kind),
             }
         } else {
+            // Approximate matching passes over error cells, as Excel does.
+            if matches!(value, Value::Error(_)) {
+                continue;
+            }
             let ordering = match matcher.compare(&value, &lookup) {
                 Ok(ordering) => ordering,
                 Err(kind) => return Value::Error(kind),

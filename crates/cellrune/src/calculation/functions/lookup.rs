@@ -524,9 +524,10 @@ fn find_lookup_offset(
     if !approximate {
         return find_exact_lookup_offset(engine, context, lookup, rect, horizontal, length);
     }
+    // Approximate searches pass over error cells as well, as Excel does.
     for offset in 0..length as u32 {
         let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
-        if compare(&value, lookup)? == Ordering::Equal {
+        if !matches!(value, Value::Error(_)) && compare(&value, lookup)? == Ordering::Equal {
             return Ok(offset);
         }
     }
@@ -534,6 +535,9 @@ fn find_lookup_offset(
     let mut candidate = None;
     for offset in 0..length as u32 {
         let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+        if matches!(value, Value::Error(_)) {
+            continue;
+        }
         match compare(&value, lookup)? {
             Ordering::Equal => unreachable!("exact matches returned in the first pass"),
             Ordering::Less => candidate = Some(offset),

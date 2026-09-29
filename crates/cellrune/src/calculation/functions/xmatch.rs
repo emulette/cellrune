@@ -180,8 +180,8 @@ where
             }
             continue;
         }
-        // An error cell is never equal to the lookup value, so exact searches pass over it.
-        if match_mode == MatchMode::Exact && matches!(candidate.as_ref(), Value::Error(_)) {
+        // Error cells are never candidates, in exact and approximate searches alike.
+        if matches!(candidate.as_ref(), Value::Error(_)) {
             continue;
         }
         let ordering = criteria_runtime.compare(candidate.as_ref(), lookup)?;

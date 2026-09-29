@@ -838,3 +838,43 @@ fn percent_rank_places_a_lone_matching_value_at_one() {
     }
     assert_eq!(result("PERCENTRANK.EXC({5,5},5)", None), number(0.333));
 }
+
+#[test]
+fn approximate_lookups_pass_over_error_cells() {
+    // Values measured in Excel 16.0 (build 20326).
+    let values = [
+        ("A1", CellValue::number(10.0).unwrap()),
+        ("A2", CellValue::Error(ExcelError::NotAvailable)),
+        ("A3", CellValue::number(30.0).unwrap()),
+        ("B1", CellValue::number(1.0).unwrap()),
+        ("B3", CellValue::number(2.0).unwrap()),
+        ("C1", CellValue::number(30.0).unwrap()),
+        ("C2", CellValue::Error(ExcelError::NotAvailable)),
+        ("C3", CellValue::number(10.0).unwrap()),
+        ("D1", CellValue::number(10.0).unwrap()),
+        ("D2", CellValue::number(30.0).unwrap()),
+        ("D3", CellValue::Error(ExcelError::NotAvailable)),
+        ("E5", CellValue::number(10.0).unwrap()),
+        ("F5", CellValue::Error(ExcelError::NotAvailable)),
+        ("G5", CellValue::number(30.0).unwrap()),
+    ];
+    let formulas = [
+        ("H1", "MATCH(25,A1:A3,1)"),
+        ("H2", "MATCH(25,A1:A3)"),
+        ("H3", "MATCH(25,C1:C3,-1)"),
+        ("H4", "VLOOKUP(25,A1:B3,2,TRUE)"),
+        ("H5", "VLOOKUP(35,D1:D3,1,TRUE)"),
+        ("H6", "HLOOKUP(25,E5:G5,1,TRUE)"),
+        ("H7", "XLOOKUP(25,A1:A3,A1:A3,\"nf\",-1)"),
+        ("H8", "XLOOKUP(25,A1:A3,A1:A3,\"nf\",1)"),
+        ("H9", "MATCH(5,A1:A3,1)"),
+    ];
+    let results = sheet_results(&values, &formulas, &[]);
+    for (index, expected) in [1.0, 1.0, 1.0, 1.0, 30.0, 10.0, 10.0, 30.0]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(results[index], number(expected), "{}", formulas[index].1);
+    }
+    assert_eq!(results[8], error(ExcelError::NotAvailable));
+}
