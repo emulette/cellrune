@@ -38,6 +38,20 @@ pub(super) fn call(
         StatisticalAdditionalFunction::HarMean => mean(engine, context, args, Mean::Harmonic),
         StatisticalAdditionalFunction::VarP => population_variance(engine, context, args, false),
         StatisticalAdditionalFunction::StDevP => population_variance(engine, context, args, true),
+        StatisticalAdditionalFunction::VarA => {
+            variance_a(engine, context, args, VarianceKind::Sample, false)
+        }
+        StatisticalAdditionalFunction::StDevA => {
+            variance_a(engine, context, args, VarianceKind::Sample, true)
+        }
+        StatisticalAdditionalFunction::VarPA => {
+            variance_a(engine, context, args, VarianceKind::Population, false)
+        }
+        StatisticalAdditionalFunction::StDevPA => {
+            variance_a(engine, context, args, VarianceKind::Population, true)
+        }
+        StatisticalAdditionalFunction::Fisher => fisher(engine, context, args, false),
+        StatisticalAdditionalFunction::FisherInv => fisher(engine, context, args, true),
         StatisticalAdditionalFunction::Standardize => standardize(engine, context, args),
         StatisticalAdditionalFunction::Phi => {
             normal_helper(engine, context, args, NormalHelper::Density)
@@ -103,42 +117,77 @@ fn aggregate_a(
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-    let values = match collect_argument_values_with_policy(
+    let numbers = match numbers_a(engine, context, args) {
+        Ok(numbers) => numbers,
+        Err(kind) => return Value::Error(kind),
+    };
+    match aggregate {
+        AggregateA::Average if numbers.is_empty() => Value::Error(ErrorKind::Div0),
+        AggregateA::Average => finite(numbers.iter().sum::<f64>() / numbers.len() as f64),
+        AggregateA::Maximum => Value::Number(numbers.into_iter().reduce(f64::max).unwrap_or(0.0)),
+        AggregateA::Minimum => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
+    }
+}
+
+/// Collects the values of the *A statistics: logical values count as 1 or 0, text typed directly
+/// as an argument must be numeric, text inside references and arrays counts as 0, and blanks are
+/// skipped.
+fn numbers_a(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Vec<f64>, ErrorKind> {
+    let values = collect_argument_values_with_policy(
         engine,
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
-    ) {
-        Ok(values) => values,
-        Err(kind) => return Value::Error(kind),
-    };
+    )?;
     let mut numbers = Vec::new();
     for item in values {
         match item.value {
             Value::Number(number) => numbers.push(number),
             Value::Logical(logical) => numbers.push(if logical { 1.0 } else { 0.0 }),
             Value::Text(text) if !item.from_collection => {
-                let number = match text
+                let number = text
                     .trim()
                     .parse::<f64>()
                     .ok()
                     .filter(|number| number.is_finite())
-                {
-                    Some(number) => number,
-                    None => return Value::Error(ErrorKind::Value),
-                };
+                    .ok_or(ErrorKind::Value)?;
                 numbers.push(number);
             }
             Value::Text(_) => numbers.push(0.0),
-            Value::Error(kind) => return Value::Error(kind),
+            Value::Error(kind) => return Err(kind),
             Value::Blank => {}
         }
     }
-    match aggregate {
-        AggregateA::Average if numbers.is_empty() => Value::Error(ErrorKind::Div0),
-        AggregateA::Average => finite(numbers.iter().sum::<f64>() / numbers.len() as f64),
-        AggregateA::Maximum => Value::Number(numbers.into_iter().reduce(f64::max).unwrap_or(0.0)),
-        AggregateA::Minimum => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
+    Ok(numbers)
+}
+
+fn variance_a(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    kind: VarianceKind,
+    square_root: bool,
+) -> Value {
+    match numbers_a(engine, context, args) {
+        Ok(numbers) => variance_value(engine, context, numbers, kind, square_root),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// FISHER(x) = atanh(x) for −1 < x < 1, and its inverse FISHERINV(y) = tanh(y).
+fn fisher(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], inverse: bool) -> Value {
+    let [argument] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    match required_number(engine, context, argument) {
+        Ok(y) if inverse => Value::Number(y.tanh()),
+        Ok(x) if x > -1.0 && x < 1.0 => Value::Number(x.atanh()),
+        Ok(_) => Value::Error(ErrorKind::Num),
+        Err(kind) => Value::Error(kind),
     }
 }
 

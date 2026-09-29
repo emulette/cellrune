@@ -16,9 +16,14 @@ use super::special_functions::{
     standard_normal_density, standard_normal_lower, standard_normal_upper,
 };
 use super::util::{
-    collect_argument_values, excel_numeric_arguments, excel_numeric_arguments_with_policy,
-    required_number,
+    ExcelSum, collect_argument_values, excel_numeric_arguments,
+    excel_numeric_arguments_with_policy, required_number,
 };
+
+/// PROB accepts probabilities whose total differs from one by at most this much, the tolerance
+/// LibreOffice applies, so decimal probabilities that sum to one in exact arithmetic are accepted
+/// despite binary rounding.
+const PROBABILITY_TOTAL_TOLERANCE: f64 = 1e-7;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -37,9 +42,29 @@ pub(super) fn call(
         StatisticalFunction::Slope => {
             paired_statistic(engine, context, args, PairedStatistic::Slope)
         }
-        StatisticalFunction::PercentRankInc => percent_rank(engine, context, args),
-        StatisticalFunction::PercentileInc => percentile(engine, context, args, false),
-        StatisticalFunction::QuartileInc => percentile(engine, context, args, true),
+        StatisticalFunction::Steyx => {
+            paired_statistic(engine, context, args, PairedStatistic::StandardError)
+        }
+        StatisticalFunction::PercentRankInc => {
+            percent_rank(engine, context, args, RankInterval::Inclusive)
+        }
+        StatisticalFunction::PercentRankExc => {
+            percent_rank(engine, context, args, RankInterval::Exclusive)
+        }
+        StatisticalFunction::PercentileInc => {
+            percentile(engine, context, args, false, RankInterval::Inclusive)
+        }
+        StatisticalFunction::PercentileExc => {
+            percentile(engine, context, args, false, RankInterval::Exclusive)
+        }
+        StatisticalFunction::QuartileInc => {
+            percentile(engine, context, args, true, RankInterval::Inclusive)
+        }
+        StatisticalFunction::QuartileExc => {
+            percentile(engine, context, args, true, RankInterval::Exclusive)
+        }
+        StatisticalFunction::TrimMean => trim_mean(engine, context, args),
+        StatisticalFunction::Prob => probability(engine, context, args),
         StatisticalFunction::RankEq => rank(engine, context, args, false),
         StatisticalFunction::RankAvg => rank(engine, context, args, true),
         StatisticalFunction::ForecastLinear => forecast(engine, context, args),
@@ -83,7 +108,18 @@ enum PairedStatistic {
     Correlation,
     Slope,
     Intercept,
+    /// STEYX: the standard error of the predicted y for each x of the linear fit.
+    StandardError,
     Covariance(VarianceKind),
+}
+
+/// Which order-statistic positions a percentile or percent rank spans: the .INC functions place
+/// the n sorted values at ranks 0 through n − 1 of an interval with n − 1 gaps, while the .EXC
+/// functions place them at ranks 1 through n of an interval with n + 1 gaps, excluding its ends.
+#[derive(Debug, Clone, Copy)]
+enum RankInterval {
+    Inclusive,
+    Exclusive,
 }
 
 fn paired_statistic(
@@ -104,6 +140,9 @@ fn paired_statistic(
             Ok(covariance) => Value::Number(covariance),
             Err(kind) => Value::Error(kind),
         };
+    }
+    if statistic == PairedStatistic::StandardError && moments.count() < 3 {
+        return Value::Error(ErrorKind::Div0);
     }
     let right_deviation = moments.right_second_moment();
     if right_deviation == 0.0
@@ -127,6 +166,14 @@ fn paired_statistic(
             moments.co_moment() / moments.left_second_moment().sqrt() / right_deviation.sqrt()
         }
         PairedStatistic::Slope => moments.co_moment() / right_deviation,
+        PairedStatistic::StandardError => {
+            // The residual sum of squares of an exact fit can round below zero; clamp it like the
+            // variance kernels clamp their second moment.
+            let residual = (moments.left_second_moment()
+                - moments.co_moment() * (moments.co_moment() / right_deviation))
+                .max(0.0);
+            (residual / (moments.count() - 2) as f64).sqrt()
+        }
         PairedStatistic::Covariance(_) => unreachable!("covariance returned before finalization"),
     };
     if result.is_finite() {
@@ -170,6 +217,44 @@ fn forecast(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         } else {
             Err(ErrorKind::Num)
         }
+    })();
+    match result {
+        Ok(value) => Value::Number(value),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// PROB(x_range, prob_range, lower_limit, [upper_limit]): the total probability of the paired
+/// values within the inclusive limits, or of the values equal to `lower_limit` when the upper
+/// limit is omitted. Every probability must lie in [0, 1] and together they must sum to one.
+fn probability(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    if !(3..=4).contains(&args.len()) {
+        return Value::Error(ErrorKind::Value);
+    }
+    let result = (|| {
+        let pairs = numeric_pairs(engine, context, &args[..2])?;
+        let lower = required_number(engine, context, &args[2])?;
+        let upper = match args.get(3) {
+            Some(expr) => required_number(engine, context, expr)?,
+            None => lower,
+        };
+        let mut total: ExcelSum = ExcelSum::new(engine);
+        let mut within: ExcelSum = ExcelSum::new(engine);
+        for (value, probability) in pairs {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)?;
+            if !(0.0..=1.0).contains(&probability) {
+                return Err(ErrorKind::Num);
+            }
+            total.add_with_trace(probability, None);
+            if (lower..=upper).contains(&value) {
+                within.add_with_trace(probability, None);
+            }
+        }
+        if (total.total() - 1.0).abs() > PROBABILITY_TOTAL_TOLERANCE {
+            return Err(ErrorKind::Num);
+        }
+        Ok(within.total())
     })();
     match result {
         Ok(value) => Value::Number(value),
@@ -256,7 +341,12 @@ fn z_test(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
     }
 }
 
-fn percent_rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+fn percent_rank(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    interval: RankInterval,
+) -> Value {
     if args.len() < 2 || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
     }
@@ -277,7 +367,7 @@ fn percent_rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         },
         None => 3,
     };
-    if numbers.len() == 1 {
+    if matches!(interval, RankInterval::Inclusive) && numbers.len() == 1 {
         return if numbers[0] == target {
             Value::Number(0.0)
         } else {
@@ -303,13 +393,18 @@ fn percent_rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     if !equal && (below == 0 || below == numbers.len()) {
         return Value::Error(ErrorKind::NA);
     }
-    let raw_rank = if equal {
-        below as f64 / (numbers.len() - 1) as f64
-    } else {
-        let lower = below - 1;
-        let fraction = (target - nearest_below) / (nearest_above - nearest_below);
-        (lower as f64 + fraction) / (numbers.len() - 1) as f64
+    let (first_rank, gaps) = match interval {
+        RankInterval::Inclusive => (0, numbers.len() - 1),
+        RankInterval::Exclusive => (1, numbers.len() + 1),
     };
+    let rank = if equal {
+        (first_rank + below) as f64
+    } else {
+        let lower = first_rank + below - 1;
+        let fraction = (target - nearest_below) / (nearest_above - nearest_below);
+        lower as f64 + fraction
+    };
+    let raw_rank = rank / gaps as f64;
     let factor = 10_f64.powi(significance);
     let result = (raw_rank * factor).trunc() / factor;
     if result.is_finite() {
@@ -458,6 +553,41 @@ fn median(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
     }
 }
 
+/// TRIMMEAN(array, percent): the mean after excluding the same number of values from each end,
+/// the trimmed count rounded down to an even number of values.
+fn trim_mean(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [values, percent] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let mut numbers = match numeric_arguments(engine, context, std::slice::from_ref(values)) {
+        Ok(numbers) if !numbers.is_empty() => numbers,
+        Ok(_) => return Value::Error(ErrorKind::Num),
+        Err(kind) => return Value::Error(kind),
+    };
+    let percent = match required_number(engine, context, percent) {
+        Ok(percent) if (0.0..1.0).contains(&percent) => percent,
+        Ok(_) => return Value::Error(ErrorKind::Num),
+        Err(kind) => return Value::Error(kind),
+    };
+    // A percent below one trims fewer than half the values from each end, so some remain.
+    let trimmed = (numbers.len() as f64 * percent / 2.0).floor() as usize;
+    let kept = numbers.len() - 2 * trimmed;
+    select_ascending(&mut numbers, trimmed);
+    let upper = &mut numbers[trimmed..];
+    select_ascending(upper, kept - 1);
+    let moments = match NumericMoments::collect_with_work(upper[..kept].iter().copied(), || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    }) {
+        Ok(moments) => moments,
+        Err(kind) => return Value::Error(kind),
+    };
+    match moments.sum() {
+        Ok(sum) => Value::Number(sum / kept as f64),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
 fn mode(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let values = match collect_argument_values(engine, context, args) {
         Ok(values) => values,
@@ -491,6 +621,7 @@ fn percentile(
     context: EvalContext<'_>,
     args: &[Expr],
     quartile: bool,
+    interval: RankInterval,
 ) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
@@ -507,10 +638,17 @@ fn percentile(
     if quartile {
         probability = probability.trunc() / 4.0;
     }
-    if !(0.0..=1.0).contains(&probability) {
-        return Value::Error(ErrorKind::Num);
-    }
-    let position = (numbers.len() - 1) as f64 * probability;
+    let count = numbers.len() as f64;
+    // Zero-based position of the percentile among the sorted values.
+    let position = match interval {
+        RankInterval::Inclusive if (0.0..=1.0).contains(&probability) => {
+            (count - 1.0) * probability
+        }
+        RankInterval::Exclusive if (1.0..=count).contains(&(probability * (count + 1.0))) => {
+            probability * (count + 1.0) - 1.0
+        }
+        _ => return Value::Error(ErrorKind::Num),
+    };
     let lower = position.floor() as usize;
     let fraction = position - lower as f64;
     let lower_value = select_ascending(&mut numbers, lower);

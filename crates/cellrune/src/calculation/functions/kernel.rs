@@ -379,8 +379,12 @@ function_enum!(StatisticalFunction {
     NormSDist,
     Pearson,
     PercentileInc,
+    PercentileExc,
     PercentRankInc,
+    PercentRankExc,
+    Prob,
     QuartileInc,
+    QuartileExc,
     RankEq,
     RankAvg,
     ForecastLinear,
@@ -388,6 +392,8 @@ function_enum!(StatisticalFunction {
     Slope,
     Small,
     StDevS,
+    Steyx,
+    TrimMean,
     VarS,
 });
 
@@ -396,6 +402,8 @@ function_enum!(StatisticalAdditionalFunction {
     AverageA,
     DevSq,
     ExponDist,
+    Fisher,
+    FisherInv,
     Gauss,
     GeoMean,
     HarMean,
@@ -405,8 +413,12 @@ function_enum!(StatisticalAdditionalFunction {
     Phi,
     PoissonDist,
     Standardize,
+    StDevA,
     StDevP,
+    StDevPA,
+    VarA,
     VarP,
+    VarPA,
 });
 
 function_enum!(DistributionFunction {

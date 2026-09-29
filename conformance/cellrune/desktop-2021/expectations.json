@@ -3965,46 +3965,40 @@
     "excel_rich_error": false
   },
   "function:fisher": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.97295507452765662",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FISHER) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fisher:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FISHER) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fisher:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FISHER) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fisherinv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.71629787019902447",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FISHERINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fisherinv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.9640275800758169",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FISHERINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fisherinv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FISHERINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:fixed": {
     "classification": "not_implemented",
@@ -6388,25 +6382,22 @@
     "excel_rich_error": false
   },
   "function:percentile-exc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "157.5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTILE.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentile-exc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTILE.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentile-exc:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTILE.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentile-inc": {
     "classification": "match",
@@ -6463,25 +6454,22 @@
     "excel_rich_error": false
   },
   "function:percentrank-exc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.47599999999999998",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTRANK.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentrank-exc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTRANK.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentrank-exc:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.PERCENTRANK.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:percentrank-inc": {
     "classification": "match",
@@ -6743,25 +6731,22 @@
     "excel_rich_error": false
   },
   "function:prob": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.9",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (PROB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:prob:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.9",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (PROB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:prob:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (PROB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:product": {
     "classification": "match",
@@ -6818,25 +6803,22 @@
     "excel_rich_error": false
   },
   "function:quartile-exc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "157.5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.QUARTILE.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:quartile-exc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "105",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.QUARTILE.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:quartile-exc:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.QUARTILE.EXC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:quartile-inc": {
     "classification": "match",
@@ -7726,25 +7708,22 @@
     "excel_rich_error": false
   },
   "function:stdeva": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "59.16079783099616",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STDEVA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:stdeva:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STDEVA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:stdeva:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STDEVA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:stdevp": {
     "classification": "match",
@@ -7765,46 +7744,40 @@
     "excel_rich_error": false
   },
   "function:stdevpa": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "57.662812973353979",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STDEVPA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:stdevpa:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STDEVPA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:stdevpa:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STDEVPA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:steyx": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "59.068141865235447",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STEYX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:steyx:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STEYX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:steyx:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (STEYX) for this oracle case."
+    "excel_rich_error": false
   },
   "function:substitute": {
     "classification": "match",
@@ -8475,25 +8448,22 @@
     "excel_rich_error": false
   },
   "function:trimmean": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "105",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TRIMMEAN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:trimmean:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TRIMMEAN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:trimmean:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (TRIMMEAN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:trimrange": {
     "classification": "match",
@@ -8718,25 +8688,22 @@
     "excel_rich_error": false
   },
   "function:vara": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3500",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VARA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:vara:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VARA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:vara:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VARA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:varp": {
     "classification": "match",
@@ -8757,25 +8724,22 @@
     "excel_rich_error": false
   },
   "function:varpa": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3325",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VARPA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:varpa:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VARPA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:varpa:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VARPA) for this oracle case."
+    "excel_rich_error": false
   },
   "function:vdb": {
     "classification": "not_implemented",

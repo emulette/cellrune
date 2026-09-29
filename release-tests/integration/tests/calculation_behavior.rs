@@ -2139,12 +2139,20 @@ fn every_three_d_aggregate_matches_explicit_sheet_arguments() {
             (15, 2, "VAR.P(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
             (16, 1, "VAR.S(Sheet1:Sheet3!Z1:Z2)"),
             (16, 2, "VAR.S(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (17, 1, "STDEVA(Sheet1:Sheet3!Z1:Z2)"),
+            (17, 2, "STDEVA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (18, 1, "STDEVPA(Sheet1:Sheet3!Z1:Z2)"),
+            (18, 2, "STDEVPA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (19, 1, "VARA(Sheet1:Sheet3!Z1:Z2)"),
+            (19, 2, "VARA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
+            (20, 1, "VARPA(Sheet1:Sheet3!Z1:Z2)"),
+            (20, 2, "VARPA(Sheet1!Z1:Z2,Sheet2!Z1:Z2,Sheet3!Z1:Z2)"),
         ],
         &[],
     );
     assert!(scan_formula_capabilities(&workbook).is_supported());
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    for row in 3..=16 {
+    for row in 3..=20 {
         assert_eq!(
             calculation.cell(calculation_cell_id(row, 1)),
             calculation.cell(calculation_cell_id(row, 2)),
@@ -2259,8 +2267,12 @@ fn function_catalog_and_scanner_share_the_explicit_three_d_policy() {
                 | "PRODUCT"
                 | "STDEV.P"
                 | "STDEV.S"
+                | "STDEVA"
+                | "STDEVPA"
                 | "VAR.P"
                 | "VAR.S"
+                | "VARA"
+                | "VARPA"
                 | "INDEX"
                 | "VLOOKUP"
                 | "OFFSET"
@@ -2747,7 +2759,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        432
+        444
     );
     let let_entry = catalog
         .iter()

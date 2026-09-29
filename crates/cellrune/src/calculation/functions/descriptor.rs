@@ -143,6 +143,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_15,
     V0_1_16,
     V0_1_20,
+    V0_1_22,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -949,10 +950,17 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Pearson, "PEARSON", Statistical),
     function!(PercentileInc, "PERCENTILE.INC", Statistical)
         .with_aliases(&[FunctionAlias::official("PERCENTILE")]),
+    function!(PercentileExc, "PERCENTILE.EXC", Statistical)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(PercentRankInc, "PERCENTRANK.INC", Statistical)
         .with_aliases(&[FunctionAlias::official("PERCENTRANK")]),
+    function!(PercentRankExc, "PERCENTRANK.EXC", Statistical)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(Prob, "PROB", Statistical).with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(QuartileInc, "QUARTILE.INC", Statistical)
         .with_aliases(&[FunctionAlias::official("QUARTILE")]),
+    function!(QuartileExc, "QUARTILE.EXC", Statistical)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(RankEq, "RANK.EQ", Statistical).with_aliases(&[FunctionAlias::official("RANK")]),
     function!(RankAvg, "RANK.AVG", Statistical).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(ForecastLinear, "FORECAST.LINEAR", Statistical)
@@ -964,6 +972,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(StDevS, "STDEV.S", Statistical)
         .with_aliases(&[FunctionAlias::official("STDEV")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(Steyx, "STEYX", Statistical).with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(TrimMean, "TRIMMEAN", Statistical)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(VarS, "VAR.S", Statistical)
         .with_aliases(&[FunctionAlias::official("VAR")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
@@ -973,6 +984,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(DevSq, "DEVSQ", StatisticalAdditional),
     function!(ExponDist, "EXPON.DIST", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("EXPONDIST")]),
+    function!(Fisher, "FISHER", StatisticalAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(FisherInv, "FISHERINV", StatisticalAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(Gauss, "GAUSS", StatisticalAdditional),
     function!(GeoMean, "GEOMEAN", StatisticalAdditional),
     function!(HarMean, "HARMEAN", StatisticalAdditional),
@@ -990,6 +1005,18 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(VarP, "VAR.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("VARP")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
+    function!(StDevA, "STDEVA", StatisticalAdditional)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(StDevPA, "STDEVPA", StatisticalAdditional)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(VarA, "VARA", StatisticalAdditional)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(VarPA, "VARPA", StatisticalAdditional)
+        .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
+        .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(BetaDist, "BETA.DIST", Distribution)
         .with_minimum_version(CompatibilityVersion::V0_1_12),
     function!(NormInv, "NORM.INV", Distribution)

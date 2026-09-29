@@ -337,6 +337,11 @@ impl PairedMoments {
         Ok(())
     }
 
+    /// Accepted pair count; STEYX derives its degrees of freedom from it.
+    pub(super) const fn count(self) -> u64 {
+        self.count
+    }
+
     pub(super) fn left_mean(self) -> Result<f64, ErrorKind> {
         if self.count == 0 {
             Err(ErrorKind::Div0)

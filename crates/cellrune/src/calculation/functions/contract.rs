@@ -816,6 +816,11 @@ const PERCENT_RANK_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::Absent,
     ArgumentDefaultValue::Number(3.0),
 )];
+const PROB_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    3,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Omitted,
+)];
 const RANK_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     2,
     DefaultTrigger::AbsentOrMissing,
@@ -1519,16 +1524,21 @@ impl StatisticalFunction {
             | Self::Intercept
             | Self::Pearson
             | Self::Rsq
-            | Self::Slope => CallContract::uniform(Arity::exact(2), ARRAY),
+            | Self::Slope
+            | Self::Steyx => CallContract::uniform(Arity::exact(2), ARRAY),
             // T.TEST carries the tails and type selectors after its two
             // arrays, so it is positional four-argument like the F-family
             // hypothesis tests rather than a paired-statistic pair.
             Self::TTest => {
                 CallContract::positional(Arity::exact(4), &[ARRAY, ARRAY, SCALAR, SCALAR])
             }
-            Self::Large | Self::PercentileInc | Self::QuartileInc | Self::Small => {
-                CallContract::positional(Arity::exact(2), &[ARRAY, SCALAR])
-            }
+            Self::Large
+            | Self::PercentileExc
+            | Self::PercentileInc
+            | Self::QuartileExc
+            | Self::QuartileInc
+            | Self::Small
+            | Self::TrimMean => CallContract::positional(Arity::exact(2), &[ARRAY, SCALAR]),
             Self::MaxIfs | Self::MinIfs => CallContract::repeating(
                 Arity::stepped(3, Some(MAX_EXTREME_IFS_ARGUMENTS), 2),
                 &[REFERENCE],
@@ -1540,9 +1550,14 @@ impl StatisticalFunction {
             }
             Self::NormSDistLegacy => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::NormSDist => CallContract::uniform(Arity::exact(2), SCALAR),
-            Self::PercentRankInc => {
+            Self::PercentRankExc | Self::PercentRankInc => {
                 CallContract::positional(Arity::range(2, 3), &[ARRAY, SCALAR, SCALAR])
                     .with_defaults(PERCENT_RANK_DEFAULTS)
+            }
+            // An omitted upper limit makes PROB the probability of the lower limit alone.
+            Self::Prob => {
+                CallContract::positional(Arity::range(3, 4), &[ARRAY, ARRAY, SCALAR, SCALAR])
+                    .with_defaults(PROB_DEFAULTS)
             }
             Self::ForecastLinear => {
                 CallContract::positional(Arity::exact(3), &[SCALAR, ARRAY, ARRAY])
@@ -1567,9 +1582,15 @@ impl StatisticalAdditionalFunction {
             | Self::HarMean
             | Self::MaxA
             | Self::MinA
+            | Self::StDevA
             | Self::StDevP
-            | Self::VarP => CallContract::uniform(Arity::range(1, MAX_EXCEL_ARGUMENTS), ARRAY),
-            Self::Gauss | Self::Phi => CallContract::uniform(Arity::exact(1), SCALAR),
+            | Self::StDevPA
+            | Self::VarA
+            | Self::VarP
+            | Self::VarPA => CallContract::uniform(Arity::range(1, MAX_EXCEL_ARGUMENTS), ARRAY),
+            Self::Fisher | Self::FisherInv | Self::Gauss | Self::Phi => {
+                CallContract::uniform(Arity::exact(1), SCALAR)
+            }
             Self::Standardize | Self::ExponDist | Self::PoissonDist => {
                 CallContract::uniform(Arity::exact(3), SCALAR)
             }
