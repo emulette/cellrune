@@ -5711,7 +5711,7 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
     );
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    for column in 1..=6 {
+    for column in [1, 2, 3, 5] {
         assert_eq!(
             calculation.cell(cell_id(column)),
             Some(&CalculationCellResult::Value(CellValue::Error(
@@ -5720,6 +5720,9 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
             "unexpected invalid LET result in column {column}",
         );
     }
+    // Bare `c` and `r` are valid LET names; only row-and-column forms such as R1C1 conflict.
+    assert_number(&calculation, 4, 1.0, 0.0);
+    assert_number(&calculation, 6, 1.0, 0.0);
     assert_number(&calculation, 7, 1.0, 0.0);
     assert_number(&calculation, 8, 3.0, 0.0);
     assert_number(&calculation, 9, 4.0, 0.0);
