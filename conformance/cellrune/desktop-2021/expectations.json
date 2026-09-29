@@ -4730,18 +4730,16 @@
     "excel_rich_error": false
   },
   "function:imlog10": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.698970004336019+0.402719196273373i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (IMLOG10) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imlog2": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2.32192809488736+1.33780421245098i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (IMLOG2) for this oracle case."
+    "excel_rich_error": false
   },
   "function:impower": {
     "classification": "match",

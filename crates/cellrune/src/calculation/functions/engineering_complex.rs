@@ -147,6 +147,43 @@ pub(super) fn logarithm(engine: &Engine<'_>, context: EvalContext<'_>, args: &[E
     )
 }
 
+pub(super) fn logarithm_base_10(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    scaled_logarithm(engine, context, args, core::f64::consts::LOG10_E)
+}
+
+pub(super) fn logarithm_base_2(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    scaled_logarithm(engine, context, args, core::f64::consts::LOG2_E)
+}
+
+/// The principal logarithm in another base: the natural logarithm scaled by 1/ln(base).
+fn scaled_logarithm(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    reciprocal_ln_base: f64,
+) -> Value {
+    complex_text(
+        engine,
+        unary_complex(engine, context, args)
+            .and_then(ComplexValue::logarithm)
+            .and_then(|value| {
+                ComplexValue::new(
+                    value.real() * reciprocal_ln_base,
+                    value.imaginary() * reciprocal_ln_base,
+                    value.suffix(),
+                )
+            }),
+    )
+}
+
 pub(super) fn square_root(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     complex_text(
         engine,

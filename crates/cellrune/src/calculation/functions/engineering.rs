@@ -97,6 +97,10 @@ pub(super) fn call(
         EngineeringFunction::ImExp => engineering_complex::exponential(engine, context, args),
         EngineeringFunction::ImImaginary => engineering_complex::imaginary(engine, context, args),
         EngineeringFunction::ImLn => engineering_complex::logarithm(engine, context, args),
+        EngineeringFunction::ImLog10 => {
+            engineering_complex::logarithm_base_10(engine, context, args)
+        }
+        EngineeringFunction::ImLog2 => engineering_complex::logarithm_base_2(engine, context, args),
         EngineeringFunction::ImPower => engineering_complex::power(engine, context, args),
         EngineeringFunction::ImProduct => engineering_complex::product(engine, context, args),
         EngineeringFunction::ImReal => engineering_complex::real(engine, context, args),

@@ -199,6 +199,8 @@ function_enum!(EngineeringFunction {
     ImExp,
     ImImaginary,
     ImLn,
+    ImLog10,
+    ImLog2,
     ImPower,
     ImProduct,
     ImReal,

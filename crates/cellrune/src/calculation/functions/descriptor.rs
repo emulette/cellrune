@@ -672,6 +672,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ImImaginary, "IMAGINARY", Engineering)
         .with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImLn, "IMLN", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImLog10, "IMLOG10", Engineering).with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(ImLog2, "IMLOG2", Engineering).with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(ImPower, "IMPOWER", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImProduct, "IMPRODUCT", Engineering)
         .with_minimum_version(CompatibilityVersion::V0_1_14),

@@ -1167,6 +1167,8 @@ impl EngineeringFunction {
             | Self::ImExp
             | Self::ImImaginary
             | Self::ImLn
+            | Self::ImLog10
+            | Self::ImLog2
             | Self::ImReal
             | Self::ImSqrt => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::ImDiv | Self::ImPower | Self::ImSub => {
