@@ -262,8 +262,10 @@ fn is_token_end(formula: &str, end: usize) -> bool {
         .is_none_or(|byte| !is_identifier_byte(*byte) && !matches!(*byte, b'!' | b'(' | b'['))
 }
 
+/// Returns whether `byte` can continue a name or sheet token. Every byte of a non-ASCII UTF-8
+/// character counts, so the `A1` inside a name such as `매출A1` is not a cell reference.
 fn is_identifier_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'\\')
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'\\') || !byte.is_ascii()
 }
 
 fn is_sheet_range_prefix(formula: &str, end: usize) -> bool {

@@ -212,6 +212,27 @@ fn expands_shared_formulas_and_classifies_formula_containers() {
 }
 
 #[test]
+fn shared_formula_expansion_keeps_non_ascii_names_intact() {
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><f t="shared" ref="A1:A2" si="0">매출A1+B1+売上A1+CaféA1+A1매출+'시트 1'!A1+시트2!B1+표1[금액]+A1+SUM(시트1:시트3!C1)</f></c></row>
+    <row r="2"><c r="A2"><f t="shared" si="0"/></c></row>
+  </sheetData>
+</worksheet>"#;
+    let snapshot = read_xlsx_bytes(&build_archive(sheet, None, false), ReadOptions::default())
+        .expect("non-ASCII shared formula");
+    let sheet = snapshot.sheet_by_name("Sheet1").expect("fixture sheet");
+    assert_eq!(
+        formula(sheet, "A2")
+            .text()
+            .expect("expanded follower")
+            .as_str(),
+        "매출A1+B2+売上A1+CaféA1+A1매출+'시트 1'!A2+시트2!B2+표1[금액]+A2+SUM(시트1:시트3!C2)"
+    );
+}
+
+#[test]
 fn accepts_excel_shared_anchors_inside_ranges_and_empty_normal_formulas() {
     let archive = build_archive(EXCEL_FORMULA_VARIANTS, None, false);
     let snapshot = read_xlsx_bytes(&archive, ReadOptions::default()).expect("formula variants");
