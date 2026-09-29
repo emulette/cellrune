@@ -72,7 +72,9 @@ the search that produced them. From 0.1.3 the search budget is a calculation opt
 | `XIRR` | 100 | `1e-8` | 100 / `1e-10` |
 
 The default reproduces the function-specific iteration budgets and tolerances Microsoft documents.
-When CellRune's Newton search exhausts the applicable budget, it returns `#NUM!`.
+When CellRune's Newton search exhausts the applicable budget, it returns `#NUM!`. From 0.1.22 a
+step that would land at or below -1 moves halfway from the current rate toward -1 instead, so a
+search that overshoots the pole can still converge within the budget.
 
 The default reproduces the budget, not Excel's search itself, which Microsoft does not document.
 Two searches with the same budget can still disagree on which borderline inputs converge.

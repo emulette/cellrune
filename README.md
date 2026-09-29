@@ -8,17 +8,17 @@ transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.21 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.22 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.21
+cargo add cellrune@0.1.22
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.21"
+cellrune = "0.1.22"
 ```
 
 ## Features
@@ -116,6 +116,11 @@ The fixed-income wave on top of 0.1.14 adds exactly 26 official names: `ACCRINT`
 `PRICEMAT`, `RECEIVED`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD`, `YIELD`, `YIELDDISC`, and
 `YIELDMAT`. They share a typed day-count and coupon-schedule model and a safeguarded yield root
 solver that charges the calculation budget and observes cancellation.
+
+CellRune 0.1.22 adds 22 official statistical, distribution, and complex-logarithm names,
+including exclusive percentiles, `TRIMMEAN`, the `A` variances, `STEYX`, `PROB`, chi-square,
+Weibull, and confidence-interval functions, and `IMLOG10`/`IMLOG2`; the exact list is in
+[llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
 `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. Their fixed grammar, lookup modes, calendar rules,
@@ -295,12 +300,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.21 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.22 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.21"
-npm install "@cellrune/node@0.1.21"
+python -m pip install "cellrune==0.1.22"
+npm install "@cellrune/node@0.1.22"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package
@@ -389,6 +394,10 @@ report, including its lowercase `output_sha256` output identity.
 `--max-response-bytes`; an oversized response fails without installing state, so callers can
 retry with fewer targets. It uses the existing request cancellation and session lifetime controls.
 
+`workbook_recalculate` always installs a completed calculation. When its delta exceeds
+`--max-response-bytes`, it reports `mcp.recalculation.response_byte_limit_exceeded` with the
+installed `result_revision` and `delta_cursor`; range reads and Save As use the installed results.
+
 The server also publishes read-only JSON resources at `cellrune://support/functions` and the
 `cellrune://sessions/{session_id}/summary` resource template. Operators can set
 `--max-sessions`, `--session-ttl-seconds`, `--max-response-bytes`, `--max-workbook-bytes`, and
@@ -413,7 +422,8 @@ An MCP client can launch a release binary with configuration equivalent to:
 ```
 
 The server canonicalizes configured roots at startup. Every workbook path supplied to a tool must
-be absolute and resolve inside one of those roots. The server bounds workbook/session/response
+be absolute and resolve inside one of those roots; a path outside every root, including a UNC
+share or device path, is rejected before any filesystem access. The server bounds workbook/session/response
 resources, writes protocol traffic only to stdout, writes diagnostics only to stderr, and never
 provides a remote transport. Inputs are opened through an approved-root capability and read from
 the same file handle under the configured archive-byte ceiling. Existing destinations are

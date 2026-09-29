@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.21, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.22, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -84,7 +84,8 @@ high-level workbook lifecycle, summary, range, usage, capability, batch edit, pr
 recalculation, delta, and Save As operations—not one tool per spreadsheet
 function. Configured filesystem roots are canonicalized at startup; every
 workbook path supplied to a tool must be absolute and resolve inside one of
-those roots. It has no remote transport. The 17 tools are `workbook_create`,
+those roots; paths outside every root, including UNC shares and device paths,
+return `mcp.path.outside_root` before any filesystem access. It has no remote transport. The 17 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
@@ -201,17 +202,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   `XlsxDocument` under the `OpenOptions`/`ReadLimits` budget. The document
   retains no host path and exposes no ZIP or XML types.
 - `ReadOptions::default()` / `ReadOptions::new(ReadLimits)`, `.limits()`
-- `ReadLimits::default()` + 27 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
+- `ReadLimits::default()` + 28 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
   archive bytes, ZIP entry count, per-entry/total uncompressed bytes,
   compression ratio, XML depth/attributes, sheet count, cells per
-  sheet/total, shared string count/bytes/total bytes, defined names,
+  sheet/total, shared string count/bytes/total bytes, total materialized cell
+  text bytes, defined names,
   formula bytes per-cell/total, merged-range declarations, tables,
   table columns, table name bytes, per-table filter declarations, per-table
   filter/sort attribute text, plus phonetic runs, annotated references, and
   phonetic text bytes. Exceeding the merged-range or table budgets fails the
   read with the dedicated `XlsxErrorCode` variants `TooManyMergedRanges`,
   `TooManyTables`, `TooManyTableColumns`, `TableNameTooLarge`,
-  `TooManyTableFilterItems`, or `TableFilterTextTooLarge`.
+  `TooManyTableFilterItems`, or `TableFilterTextTooLarge`. The cell text budget
+  (default 256 MiB) charges every shared-string reference, inline string, and
+  cached text result a cell materializes and fails with `TotalCellTextTooLarge`
+  (`xlsx.total_cell_text_too_large`). Cell text decodes OOXML `_xHHHH_` escapes,
+  and writers escape XML-forbidden characters the same way.
 
 ### Workbook model — read-only, format-neutral
 
@@ -267,7 +273,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   are reported as `xlsx.table.*` warning diagnostics and drop only that
   table. A later table whose range overlaps an already accepted table is
   likewise dropped with `xlsx.table.overlap`; merged-range problems use
-  `xlsx.merged_range.*`.
+  `xlsx.merged_range.*`. Chartsheets, dialogsheets, and macrosheets are not
+  calculation sheets: they are skipped with an `xlsx.sheet.non_worksheet`
+  warning, keep their tab position on save, and count toward `SHEET`/`SHEETS`.
 - `Cell`: `.address()`, `.content() -> &CellContent`, `.number_format()`.
 - `CellContent::Literal(CellValue) | Formula(FormulaCell)`.
 - `CellValue` (`#[non_exhaustive]`): `Blank | Number(FiniteNumber) | Text(String) | Logical(bool) | Error(ExcelError)`.
@@ -535,12 +543,18 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.21 catalog contains 432 official
+  `.is_official()`. The 0.1.22 catalog contains 454 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 433 accepted entries. The descriptor registry
+  dummy-function marker, for 455 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
+- The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
+  `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
+  `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,
+  `CONFIDENCE.NORM`, `CONFIDENCE`, `CONFIDENCE.T`, `IMLOG10`, and `IMLOG2`.
+  `CHIDIST`, `WEIBULL`, and `CONFIDENCE` are legacy aliases. Right tails such as
+  `CHISQ.DIST.RT` are computed directly rather than as one minus the CDF.
 - The sixteen official names added in 0.1.20 are `CODE`, `NUMBERVALUE`, `DDB`,
   `XNPV`, `MDETERM`, `RANK.AVG`, `FORECAST.LINEAR`, `FORECAST`, `NORM.INV`,
   `NORM.S.INV`, `NORMINV`, `NORMSINV`, `LOGNORM.DIST`, `LOGNORM.INV`,

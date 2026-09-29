@@ -10,6 +10,51 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-09-29
+
+### Added
+
+- `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`, `STDEVA`, `STDEVPA`, `VARA`,
+  `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`, `CHISQ.DIST`, `CHISQ.DIST.RT`, `WEIBULL.DIST`,
+  `CONFIDENCE.NORM`, `CONFIDENCE.T`, `IMLOG10`, and `IMLOG2`, with legacy names `CHIDIST`,
+  `WEIBULL`, and `CONFIDENCE`, across Rust, Python, Node.js, and MCP calculation.
+- `ReadLimits::with_max_total_cell_text_bytes` (default 256 MiB) bounds the text that cells
+  materialize from shared strings, inline strings, and cached results. Exceeding it fails with
+  `xlsx.total_cell_text_too_large`.
+- Workbooks containing chartsheets, dialogsheets, or macrosheets now read, calculate, and save.
+  Those tabs are skipped for calculation with an `xlsx.sheet.non_worksheet` warning and keep
+  their position; `SHEET` and `SHEETS` count every tab.
+
+### Changed
+
+- MCP `workbook_recalculate` installs a completed calculation even when its delta exceeds
+  `--max-response-bytes`. It then reports `mcp.recalculation.response_byte_limit_exceeded`
+  with the installed `result_revision` and `delta_cursor`, and Save As and range reads use
+  the installed results. Other tools keep the no-state-change meaning of
+  `mcp.response.byte_limit_exceeded`.
+- MCP input paths outside every allowed root, including UNC shares and device paths, return
+  `mcp.path.outside_root` before any filesystem access, whether or not they exist.
+- `SUBTOTAL` supports function numbers 6, 7, 8, 10, 11, and 106 to 111, ignores referenced
+  cells that hold another `SUBTOTAL` or `AGGREGATE`, and returns `#VALUE!` for other numbers.
+- Faster `LARGE`, `SMALL`, `MEDIAN`, `PERCENTILE`, `QUARTILE`, and `PERCENTRANK`, and less work
+  for statistics over large ranges; faster worksheet reading.
+
+### Fixed
+
+- Stack overflow on small host stacks for formulas, defined-name chains, and recursive `LAMBDA`
+  calls within the default calculation limits.
+- `IRR`, `XIRR`, and `RATE` convergence after a Newton step past -1; `LET` and `LAMBDA` locals
+  named `r` or `c`; `XLOOKUP` implicit intersection in legacy formulas; `MATCH` match types
+  selected by sign.
+- Error cells no longer abort exact `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, and `XMATCH` searches;
+  `VLOOKUP`/`HLOOKUP` exact matches and `SEARCH` honor `?`, `*`, and `~` wildcards.
+- `POISSON.DIST` for large and zero means, `MIRR` with non-numeric cells, overflow in
+  `MEDIAN`/`PERCENTILE`/`QUARTILE` interpolation, Unicode case in `UNIQUE`, and a `DATEDIF`
+  `"MD"` panic in overflow-checked builds.
+- `_xHHHH_` escapes in cell text are decoded on read and written for control characters, so
+  results such as `CHAR(2)` save and reopen.
+- Shared formulas that reference names containing non-ASCII characters expand correctly.
+
 ## [0.1.21] - 2026-09-27
 
 ### Changed
