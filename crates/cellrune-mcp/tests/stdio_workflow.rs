@@ -1230,6 +1230,45 @@ fn retained_preview_tools_are_thin_stdio_lifecycle_adapters() {
     assert!(status.success());
 }
 
+#[test]
+fn input_paths_outside_every_root_are_rejected_regardless_of_existence() {
+    let root = TestDirectory::new("input-boundary-root");
+    let outside = TestDirectory::new("input-boundary-outside");
+    let existing_outside = outside.path.join("existing.xlsx");
+    fs::write(&existing_outside, b"outside root").expect("outside fixture must be written");
+    let mut requests = vec![
+        existing_outside,
+        outside.path.join("missing.xlsx"),
+        root.path.join("..").join("missing.xlsx"),
+    ];
+    if cfg!(windows) {
+        let inside = root.path.join("inside.xlsx");
+        fs::write(&inside, b"inside root").expect("inside fixture must be written");
+        let inside = inside.to_str().expect("path must be UTF-8");
+        requests.extend([
+            PathBuf::from(r"\\127.0.0.1\cellrune-unreachable\book.xlsx"),
+            PathBuf::from(r"\\?\UNC\127.0.0.1\cellrune-unreachable\book.xlsx"),
+            PathBuf::from(format!(r"\\.\{inside}")),
+            PathBuf::from(r"\\?\GLOBALROOT\Device\Null"),
+        ]);
+    }
+
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    for path in requests {
+        let error = failed_tool(mcp.call_tool("workbook_open", json!({"path": path})));
+        assert_eq!(
+            error["code"],
+            "mcp.path.outside_root",
+            "{} must be rejected as outside every root",
+            path.display()
+        );
+    }
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
 fn successful_tool(result: Value) -> Value {
     assert_eq!(
         result["isError"], false,

@@ -229,11 +229,22 @@ impl ServerConfig {
 
     /// Resolves and validates an existing workbook input file.
     ///
+    /// Paths that are not lexically below an allowed root, including UNC shares and device
+    /// namespaces outside every root, are rejected before any filesystem access, so the outcome
+    /// for a path outside every root does not depend on whether it exists. Only a lexical candidate is canonicalized and
+    /// checked again against the canonical roots.
+    ///
     /// # Errors
     ///
     /// Returns a stable path or size-policy error.
     pub fn resolve_input(&self, requested: &str) -> Result<ResolvedInput, McpError> {
         let requested = absolute_path(requested)?;
+        if self
+            .lexical_root(&lexically_normalized(&requested))
+            .is_none()
+        {
+            return Err(McpError::path_outside_root());
+        }
         let canonical = fs::canonicalize(&requested)
             .map_err(|error| McpError::path_invalid(path_detail(&requested, &error)))?;
         let root = self
@@ -286,19 +297,7 @@ impl ServerConfig {
         }
         let requested = absolute_path(requested)?;
         let (root, relative) = self
-            .allowed_roots
-            .iter()
-            .flat_map(|root| {
-                root.match_paths
-                    .iter()
-                    .map(move |match_path| (root, match_path))
-            })
-            .filter_map(|(root, match_path)| {
-                relative_within(&requested, match_path)
-                    .map(|relative| (root, match_path.components().count(), relative))
-            })
-            .max_by_key(|(_, depth, _)| *depth)
-            .map(|(root, _, relative)| (root, relative))
+            .lexical_root(&requested)
             .ok_or_else(McpError::path_outside_root)?;
         let relative = relative.as_path();
         if relative.as_os_str().is_empty()
@@ -340,19 +339,40 @@ impl ServerConfig {
             file_name,
         })
     }
+
+    /// Selects the deepest allowed root that lexically contains `requested`, with the remainder.
+    ///
+    /// Both input and output resolution use this without touching the filesystem, matching the
+    /// absolute and canonical spellings recorded for each root at startup.
+    fn lexical_root(&self, requested: &Path) -> Option<(&AllowedRoot, PathBuf)> {
+        self.allowed_roots
+            .iter()
+            .flat_map(|root| {
+                root.match_paths
+                    .iter()
+                    .map(move |match_path| (root, match_path))
+            })
+            .filter_map(|(root, match_path)| {
+                relative_within(requested, match_path)
+                    .map(|relative| (root, match_path.components().count(), relative))
+            })
+            .max_by_key(|(_, depth, _)| *depth)
+            .map(|(root, _, relative)| (root, relative))
+    }
 }
 
 /// Returns the part of `path` below `root`, or `None` when `path` is not inside it.
 ///
-/// A Save As destination need not exist yet, so it cannot be canonicalized before
+/// A Save As destination need not exist yet, and an input outside every root must be
+/// rejected before the filesystem is consulted, so neither can be canonicalized before
 /// this comparison. On Windows that leaves the caller's casing intact, and an
-/// exact match would reject a destination that names an allowed root with
+/// exact match would reject a path that names an allowed root with
 /// different casing even though it resolves to the same directory. Components are
 /// therefore compared the way the host filesystem compares them.
 ///
 /// This only selects which root a request belongs to. Containment is still
-/// enforced afterwards by reopening the destination through that root's directory
-/// capability, which is what makes the boundary hold.
+/// enforced afterwards by canonicalizing an input, or by reopening a destination
+/// through that root's directory capability, which is what makes the boundary hold.
 fn relative_within(path: &Path, root: &Path) -> Option<PathBuf> {
     let mut components = path.components();
     for expected in root.components() {
@@ -378,6 +398,22 @@ fn components_match(actual: &Component<'_>, expected: &Component<'_>) -> bool {
 #[cfg(not(windows))]
 fn components_match(actual: &Component<'_>, expected: &Component<'_>) -> bool {
     actual == expected
+}
+
+/// Folds `..` components into their parent without consulting the filesystem.
+///
+/// A parent component can move an absolute path out of an allowed root, so it is folded before
+/// the lexical root comparison. Symlinks are resolved later by canonicalizing the original path.
+fn lexically_normalized(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        if component == Component::ParentDir {
+            normalized.pop();
+        } else {
+            normalized.push(component);
+        }
+    }
+    normalized
 }
 
 fn absolute_path(requested: &str) -> Result<PathBuf, McpError> {
