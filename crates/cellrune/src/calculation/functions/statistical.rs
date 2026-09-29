@@ -243,7 +243,8 @@ fn probability(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         for (value, probability) in pairs {
             poll_cancellation(context)?;
             engine.charge_function_iterations(context, 1)?;
-            if !(0.0..=1.0).contains(&probability) {
+            // Microsoft documents #NUM! for any probability at or below 0 or above 1.
+            if probability <= 0.0 || probability > 1.0 {
                 return Err(ErrorKind::Num);
             }
             total.add_with_trace(probability, None);
