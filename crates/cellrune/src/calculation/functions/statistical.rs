@@ -260,7 +260,7 @@ fn percent_rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     if args.len() < 2 || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
     }
-    let mut numbers = match numeric_arguments(engine, context, &args[..1]) {
+    let numbers = match numeric_arguments(engine, context, &args[..1]) {
         Ok(numbers) if !numbers.is_empty() => numbers,
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
@@ -277,7 +277,6 @@ fn percent_rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         },
         None => 3,
     };
-    numbers.sort_by(f64::total_cmp);
     if numbers.len() == 1 {
         return if numbers[0] == target {
             Value::Number(0.0)
@@ -285,17 +284,30 @@ fn percent_rank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             Value::Error(ErrorKind::NA)
         };
     }
-    let first = numbers[0];
-    let last = numbers[numbers.len() - 1];
-    if target < first || target > last {
+    // One pass finds how many values rank below the target and its nearest neighbours, which is
+    // all the sorted position needs.
+    let mut below = 0_usize;
+    let mut equal = false;
+    let mut nearest_below = f64::NEG_INFINITY;
+    let mut nearest_above = f64::INFINITY;
+    for &number in &numbers {
+        if number < target {
+            below += 1;
+            nearest_below = nearest_below.max(number);
+        } else if number > target {
+            nearest_above = nearest_above.min(number);
+        } else {
+            equal = true;
+        }
+    }
+    if !equal && (below == 0 || below == numbers.len()) {
         return Value::Error(ErrorKind::NA);
     }
-    let upper = numbers.partition_point(|number| *number < target);
-    let raw_rank = if upper < numbers.len() && numbers[upper] == target {
-        upper as f64 / (numbers.len() - 1) as f64
+    let raw_rank = if equal {
+        below as f64 / (numbers.len() - 1) as f64
     } else {
-        let lower = upper - 1;
-        let fraction = (target - numbers[lower]) / (numbers[upper] - numbers[lower]);
+        let lower = below - 1;
+        let fraction = (target - nearest_below) / (nearest_above - nearest_below);
         (lower as f64 + fraction) / (numbers.len() - 1) as f64
     };
     let factor = 10_f64.powi(significance);
@@ -400,15 +412,30 @@ fn order_statistic(
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
     };
-    numbers.sort_by(f64::total_cmp);
-    if !ascending {
-        numbers.reverse();
+    if rank > numbers.len() {
+        return Value::Error(ErrorKind::Num);
     }
+    let index = if ascending {
+        rank - 1
+    } else {
+        numbers.len() - rank
+    };
+    Value::Number(select_ascending(&mut numbers, index))
+}
+
+/// Returns the value at `index` of the ascending order and leaves smaller values before it and
+/// larger values after it, without sorting the rest.
+fn select_ascending(numbers: &mut [f64], index: usize) -> f64 {
+    *numbers.select_nth_unstable_by(index, f64::total_cmp).1
+}
+
+/// The smallest value, in ascending order, of a non-empty slice.
+fn minimum(numbers: &[f64]) -> f64 {
     numbers
-        .get(rank - 1)
+        .iter()
         .copied()
-        .map(Value::Number)
-        .unwrap_or(Value::Error(ErrorKind::Num))
+        .min_by(f64::total_cmp)
+        .expect("selection partitions are non-empty")
 }
 
 fn median(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -417,12 +444,17 @@ fn median(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
         Ok(_) => return Value::Error(ErrorKind::Num),
         Err(kind) => return Value::Error(kind),
     };
-    numbers.sort_by(f64::total_cmp);
     let middle = numbers.len() / 2;
+    let upper = select_ascending(&mut numbers, middle);
     if numbers.len().is_multiple_of(2) {
-        Value::Number(midpoint(numbers[middle - 1], numbers[middle]))
+        let lower = numbers[..middle]
+            .iter()
+            .copied()
+            .max_by(f64::total_cmp)
+            .expect("an even count leaves values below the middle");
+        Value::Number(midpoint(lower, upper))
     } else {
-        Value::Number(numbers[middle])
+        Value::Number(upper)
     }
 }
 
@@ -478,12 +510,16 @@ fn percentile(
     if !(0.0..=1.0).contains(&probability) {
         return Value::Error(ErrorKind::Num);
     }
-    numbers.sort_by(f64::total_cmp);
     let position = (numbers.len() - 1) as f64 * probability;
     let lower = position.floor() as usize;
     let fraction = position - lower as f64;
-    let upper = (lower + 1).min(numbers.len() - 1);
-    Value::Number(interpolate(numbers[lower], numbers[upper], fraction))
+    let lower_value = select_ascending(&mut numbers, lower);
+    let upper_value = if lower + 1 < numbers.len() {
+        minimum(&numbers[lower + 1..])
+    } else {
+        lower_value
+    };
+    Value::Number(interpolate(lower_value, upper_value, fraction))
 }
 
 /// The mean of two finite numbers, halving first only when their sum overflows.

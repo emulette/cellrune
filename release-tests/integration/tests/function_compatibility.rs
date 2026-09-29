@@ -732,3 +732,89 @@ fn unique_groups_text_with_unicode_case_folding() {
         assert_eq!(result(formula, None), number(expected), "{formula}");
     }
 }
+
+#[test]
+fn selected_order_statistics_match_a_full_sort_bit_for_bit() {
+    // Deterministic values with duplicates, signed zeros, and a wide magnitude range.
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut numbers = Vec::new();
+    for index in 0..61 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let number = match index % 7 {
+            0 => 0.0,
+            1 => -0.0,
+            2 => 3.25,
+            _ => (state % 20_001) as f64 / 7.0 - 1_000.0,
+        };
+        numbers.push(number);
+    }
+    let values = numbers
+        .iter()
+        .enumerate()
+        .map(|(row, number)| (format!("A{}", row + 1), CellValue::number(*number).unwrap()))
+        .collect::<Vec<_>>();
+    let values = values
+        .iter()
+        .map(|(address, value)| (address.as_str(), value.clone()))
+        .collect::<Vec<_>>();
+    let mut sorted = numbers.clone();
+    sorted.sort_by(f64::total_cmp);
+    let count = sorted.len();
+
+    let mut formulas = Vec::new();
+    let mut expected = Vec::new();
+    for k in [1, 2, 7, 30, 31, 60, 61] {
+        formulas.push(format!("SMALL(A1:A61,{k})"));
+        expected.push(sorted[k - 1]);
+        formulas.push(format!("LARGE(A1:A61,{k})"));
+        expected.push(sorted[count - k]);
+    }
+    formulas.push("MEDIAN(A1:A61)".to_owned());
+    expected.push(sorted[count / 2]);
+    formulas.push("MEDIAN(A1:A60)".to_owned());
+    let mut even = numbers[..60].to_vec();
+    even.sort_by(f64::total_cmp);
+    expected.push((even[29] + even[30]) / 2.0);
+    for probability in [0.0, 0.1, 0.37, 0.5, 0.99, 1.0] {
+        formulas.push(format!("PERCENTILE.INC(A1:A61,{probability})"));
+        let position = (count - 1) as f64 * probability;
+        let lower = position.floor() as usize;
+        let upper = (lower + 1).min(count - 1);
+        let fraction = position - lower as f64;
+        expected.push(if fraction == 0.0 {
+            sorted[lower]
+        } else {
+            sorted[lower] + (sorted[upper] - sorted[lower]) * fraction
+        });
+    }
+    for target in [sorted[0], 3.25, 0.0, sorted[20] + 0.5, sorted[count - 1]] {
+        formulas.push(format!("PERCENTRANK.INC(A1:A61,{target:?},6)"));
+        let below = sorted.partition_point(|number| *number < target);
+        let raw = if sorted[below] == target {
+            below as f64 / (count - 1) as f64
+        } else {
+            let lower = below - 1;
+            (lower as f64 + (target - sorted[lower]) / (sorted[below] - sorted[lower]))
+                / (count - 1) as f64
+        };
+        expected.push((raw * 1e6).trunc() / 1e6);
+    }
+
+    let addresses = (0..formulas.len())
+        .map(|index| format!("C{}", index + 1))
+        .collect::<Vec<_>>();
+    let cells = addresses
+        .iter()
+        .zip(&formulas)
+        .map(|(address, formula)| (address.as_str(), formula.as_str()))
+        .collect::<Vec<_>>();
+    let results = sheet_results(&values, &cells, &[]);
+    for ((formula, result), expected) in formulas.iter().zip(results).zip(expected) {
+        let CalculationCellResult::Value(CellValue::Number(actual)) = result else {
+            panic!("{formula}: {result:?}");
+        };
+        assert_eq!(actual.get().to_bits(), expected.to_bits(), "{formula}");
+    }
+}
