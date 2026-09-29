@@ -354,15 +354,11 @@ jobs:
             flags: --cross-compile
             needs_zig: false
             cargo_tool: cargo-xwin@0.23.0
-            # psm (via stacker) assembles a C-preprocessed .s file for this target. clang-cl makes
-            # psm skip preprocessing on a non-Windows host, so the plain clang driver is used here.
-            xwin_cross_compiler: clang
           - target: x86_64-pc-windows-msvc
             runner: ubuntu-24.04
             flags: --cross-compile
             needs_zig: false
             cargo_tool: cargo-xwin@0.23.0
-            xwin_cross_compiler: clang-cl
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04
             flags: --use-napi-cross
@@ -447,7 +443,6 @@ jobs:
         env:
           CFLAGS_aarch64_unknown_linux_gnu: -std=gnu99
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
-          XWIN_CROSS_COMPILER: ${{ matrix.xwin_cross_compiler }}
           XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin
 
       - name: Strip non-runtime native symbols
