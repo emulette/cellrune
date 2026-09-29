@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::{DraftCellMutation, DraftCellMutationStore, WorkbookDraft, next_revision};
+use crate::workbook::WorkbookSnapshotInput;
 use crate::{
     CalculationCellId, CellAddress, DefinedName, Sheet, SheetId, TableId, ValidationError,
     WorkbookSnapshot, XlsxDocument,
@@ -74,15 +75,16 @@ impl WorkbookDraft {
     ) -> Result<(), ValidationError> {
         let revision = next_revision(self.semantic_revision())?;
         self.workbook = std::sync::Arc::new(
-            WorkbookSnapshot::new_with_metadata(
+            WorkbookSnapshot::new_with_input(WorkbookSnapshotInput {
                 sheets,
+                non_worksheet_tabs: self.workbook.non_worksheet_tabs().clone(),
                 defined_names,
-                self.workbook.diagnostics().to_vec(),
-                self.workbook.date_system(),
-                self.workbook.calculation_hints(),
-                self.workbook.source(),
-                self.workbook.provenance().clone(),
-            )?
+                diagnostics: self.workbook.diagnostics().to_vec(),
+                date_system: self.workbook.date_system(),
+                calculation_hints: self.workbook.calculation_hints(),
+                source: self.workbook.source(),
+                provenance: self.workbook.provenance().clone(),
+            })?
             .with_semantic_revision(revision),
         );
         Ok(())

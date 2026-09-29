@@ -51,6 +51,7 @@ pub(super) struct OpenedPackage<R: Read + Seek> {
     uncompressed_spent: u64,
     workbook_part: PartPath,
     worksheet_parts: BTreeMap<Box<str>, PartPath>,
+    non_worksheet_sheet_relationships: BTreeSet<Box<str>>,
     styles_part: Option<PartPath>,
     shared_strings_part: Option<PartPath>,
     metadata_part: Option<PartPath>,
@@ -85,6 +86,12 @@ impl<R: Read + Seek> OpenedPackage<R> {
 
     pub(super) fn worksheet_count(&self) -> usize {
         self.worksheet_parts.len()
+    }
+
+    /// Returns whether a workbook relationship targets a chartsheet, dialogsheet, or macrosheet.
+    pub(super) fn is_non_worksheet_sheet(&self, relationship_id: &str) -> bool {
+        self.non_worksheet_sheet_relationships
+            .contains(relationship_id)
     }
 
     pub(super) const fn styles_part(&self) -> Option<&PartPath> {
@@ -269,6 +276,11 @@ pub(super) fn open_package<R: Read + Seek>(
         &content_types,
         &workbook_relationships_part,
     )?;
+    let non_worksheet_sheet_relationships = workbook_relationships
+        .iter()
+        .filter(|relationship| relationship_type::is_non_worksheet_sheet(&relationship.kind))
+        .map(|relationship| relationship.id.clone())
+        .collect();
     let styles_part = select_optional_part(
         &workbook_relationships,
         &entries,
@@ -322,6 +334,7 @@ pub(super) fn open_package<R: Read + Seek>(
         uncompressed_spent,
         workbook_part,
         worksheet_parts,
+        non_worksheet_sheet_relationships,
         styles_part,
         shared_strings_part,
         metadata_part,

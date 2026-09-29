@@ -1049,12 +1049,18 @@ impl<'workbook> Engine<'workbook> {
         formula.text().map(crate::FormulaText::as_str)
     }
 
-    pub(super) fn workbook_sheet_count(&self) -> usize {
-        self.workbook.sheets().len()
+    /// Returns the workbook tab count, including tabs that are not worksheets.
+    pub(super) fn workbook_tab_count(&self) -> usize {
+        self.workbook.tab_count()
     }
 
-    pub(super) fn workbook_sheet_index(&self, name: &str) -> Option<usize> {
-        self.workbook.sheet_index_by_name(name)
+    /// Returns the zero-based tab position of the worksheet at calculation index `sheet`.
+    pub(super) fn workbook_tab_position(&self, sheet: usize) -> usize {
+        self.workbook.worksheet_tab_position(sheet)
+    }
+
+    pub(super) fn workbook_tab_position_by_name(&self, name: &str) -> Option<usize> {
+        self.workbook.tab_position_by_name(name)
     }
 
     pub(super) fn parse_failure(&self, cell: CellId) -> Option<&ParseError> {

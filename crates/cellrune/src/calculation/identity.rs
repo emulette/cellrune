@@ -112,6 +112,17 @@ pub(crate) fn workbook_fingerprint_cancellable(
         hash.string(name.formula().as_str());
         hash.boolean(name.hidden());
     }
+    // Tabs that are not worksheets move SHEET and SHEETS results. Only workbooks that schema 7
+    // could not previously represent have them, so appending them leaves earlier digests intact.
+    let tabs = workbook.non_worksheet_tabs();
+    if !tabs.is_empty() {
+        hash.usize(tabs.len());
+        for tab in tabs.iter() {
+            hash.usize(tab.position());
+            hash.u32(tab.id().get());
+            hash.string(tab.name().as_str());
+        }
+    }
     Ok(hash.finish())
 }
 

@@ -50,6 +50,9 @@ pub(crate) mod compatibility {
     pub(crate) const MACRO_CODE: &str = "xlsx.macro";
     pub(crate) const MACRO_MESSAGE: &str =
         "workbook contains a macro relationship that is never executed";
+    pub(crate) const NON_WORKSHEET_SHEET_CODE: &str = "xlsx.sheet.non_worksheet";
+    pub(crate) const NON_WORKSHEET_SHEET_MESSAGE: &str =
+        "chartsheet, dialogsheet, or macrosheet is preserved but excluded from calculation";
     pub(crate) const PHONETIC_OVERLAP_CODE: &str = "xlsx.phonetic.overlap";
     pub(crate) const PHONETIC_OVERLAP_MESSAGE: &str =
         "phonetic runs overlap or are not in ascending order; source order was preserved";

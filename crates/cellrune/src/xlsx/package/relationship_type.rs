@@ -5,6 +5,17 @@ const OFFICE_DOCUMENT_STRICT: &str =
 const WORKSHEET: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 const WORKSHEET_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet";
+const CHARTSHEET: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet";
+const CHARTSHEET_STRICT: &str =
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/chartsheet";
+const DIALOGSHEET: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/dialogsheet";
+const DIALOGSHEET_STRICT: &str =
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/dialogsheet";
+const MACROSHEET: &str = "http://schemas.microsoft.com/office/2006/relationships/xlMacrosheet";
+const INTERNATIONAL_MACROSHEET: &str =
+    "http://schemas.microsoft.com/office/2006/relationships/xlIntlMacrosheet";
 const STYLES: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 const STYLES_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/styles";
 const SHARED_STRINGS: &str =
@@ -32,6 +43,19 @@ pub(super) fn is_office_document(value: &str) -> bool {
 
 pub(super) fn is_worksheet(value: &str) -> bool {
     matches!(value, WORKSHEET | WORKSHEET_STRICT)
+}
+
+/// Returns whether a `<sheet>` relationship targets a chartsheet, dialogsheet, or macrosheet.
+pub(super) fn is_non_worksheet_sheet(value: &str) -> bool {
+    matches!(
+        value,
+        CHARTSHEET
+            | CHARTSHEET_STRICT
+            | DIALOGSHEET
+            | DIALOGSHEET_STRICT
+            | MACROSHEET
+            | INTERNATIONAL_MACROSHEET
+    )
 }
 
 pub(super) fn is_styles(value: &str) -> bool {

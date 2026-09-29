@@ -4,8 +4,10 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
+mod sheet_tabs;
 mod table_index;
 
+pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;
 use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
 
@@ -774,6 +776,7 @@ pub struct WorkbookSnapshot {
     sheet_identity: PersistentRadixMap<Sheet>,
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
+    non_worksheet_tabs: NonWorksheetTabs,
     table_index: TableIndex,
     defined_names: Vec<DefinedName>,
     defined_name_index: BTreeMap<DefinedNameScope, BTreeMap<Box<str>, usize>>,
@@ -794,6 +797,7 @@ pub(crate) enum WorkbookBuildError {
 
 pub(crate) struct WorkbookSnapshotInput {
     pub(crate) sheets: Vec<Sheet>,
+    pub(crate) non_worksheet_tabs: NonWorksheetTabs,
     pub(crate) defined_names: Vec<DefinedName>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) date_system: DateSystem,
@@ -847,6 +851,7 @@ impl WorkbookSnapshot {
             sheets,
             sheet_id_index: clone_map_cancellable(&self.sheet_id_index, cancelled)?,
             sheet_name_index: clone_map_cancellable(&self.sheet_name_index, cancelled)?,
+            non_worksheet_tabs: self.non_worksheet_tabs.clone(),
             table_index: self.table_index.clone_cancellable(cancelled)?,
             defined_names,
             defined_name_index,
@@ -880,6 +885,7 @@ impl WorkbookSnapshot {
             sheets: vec![sheet],
             sheet_id_index,
             sheet_name_index,
+            non_worksheet_tabs: NonWorksheetTabs::default(),
             table_index: TableIndex::default(),
             defined_names: Vec::new(),
             defined_name_index: BTreeMap::new(),
@@ -932,18 +938,21 @@ impl WorkbookSnapshot {
         source: WorkbookSource,
         provenance: Provenance,
     ) -> Result<Self, ValidationError> {
-        match Self::new_with_metadata_cancellable(
-            WorkbookSnapshotInput {
-                sheets,
-                defined_names,
-                diagnostics,
-                date_system,
-                calculation_hints,
-                source,
-                provenance,
-            },
-            &|| false,
-        ) {
+        Self::new_with_input(WorkbookSnapshotInput {
+            sheets,
+            non_worksheet_tabs: NonWorksheetTabs::default(),
+            defined_names,
+            diagnostics,
+            date_system,
+            calculation_hints,
+            source,
+            provenance,
+        })
+    }
+
+    /// Validates and constructs a snapshot from complete crate-internal input.
+    pub(crate) fn new_with_input(input: WorkbookSnapshotInput) -> Result<Self, ValidationError> {
+        match Self::new_with_metadata_cancellable(input, &|| false) {
             Ok(workbook) => Ok(workbook),
             Err(WorkbookBuildError::Validation(error)) => Err(error),
             Err(WorkbookBuildError::Cancelled) => {
@@ -979,6 +988,7 @@ impl WorkbookSnapshot {
     ) -> Result<Self, WorkbookBuildError> {
         let WorkbookSnapshotInput {
             sheets,
+            non_worksheet_tabs,
             defined_names,
             diagnostics,
             date_system,
@@ -1015,6 +1025,23 @@ impl WorkbookSnapshot {
                 .into());
             }
         }
+        let mut tab_ids = BTreeSet::new();
+        let mut tab_names = BTreeSet::new();
+        for tab in non_worksheet_tabs.iter() {
+            if sheet_id_index.contains_key(&tab.id()) || !tab_ids.insert(tab.id()) {
+                return Err(ValidationError::DuplicateSheetId {
+                    value: tab.id().get(),
+                }
+                .into());
+            }
+            let name_key = tab.name().lookup_key();
+            if sheet_name_index.contains_key(name_key) || !tab_names.insert(name_key) {
+                return Err(ValidationError::DuplicateSheetName {
+                    name: tab.name().as_str().to_owned(),
+                }
+                .into());
+            }
+        }
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
         let mut defined_name_keys = std::collections::BTreeSet::<Box<str>>::new();
         for (index, defined_name) in defined_names.iter().enumerate() {
@@ -1023,6 +1050,7 @@ impl WorkbookSnapshot {
             }
             if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope()
                 && !sheet_id_index.contains_key(&sheet_id)
+                && !tab_ids.contains(&sheet_id)
             {
                 return Err(ValidationError::DefinedNameUnknownSheet {
                     sheet_id: sheet_id.get(),
@@ -1075,6 +1103,7 @@ impl WorkbookSnapshot {
             sheets,
             sheet_id_index,
             sheet_name_index,
+            non_worksheet_tabs,
             table_index,
             defined_names,
             defined_name_index,
@@ -1210,6 +1239,45 @@ impl WorkbookSnapshot {
     pub(crate) fn sheet_index_by_name(&self, name: &str) -> Option<usize> {
         let key = case_insensitive_key(name);
         self.sheet_name_index.get(key.as_ref()).copied()
+    }
+
+    /// Returns the tabs that are not worksheets, such as chartsheets, in tab order.
+    pub(crate) const fn non_worksheet_tabs(&self) -> &NonWorksheetTabs {
+        &self.non_worksheet_tabs
+    }
+
+    /// Returns the number of workbook tabs, counting tabs that are not worksheets.
+    pub(crate) fn tab_count(&self) -> usize {
+        self.sheets.len() + self.non_worksheet_tabs.len()
+    }
+
+    /// Returns the zero-based tab position of the worksheet at `worksheet_index`.
+    pub(crate) fn worksheet_tab_position(&self, worksheet_index: usize) -> usize {
+        self.non_worksheet_tabs.worksheet_position(worksheet_index)
+    }
+
+    /// Returns the zero-based tab position of any worksheet or non-worksheet tab.
+    pub(crate) fn sheet_tab_position(&self, id: SheetId) -> Option<usize> {
+        self.sheet_position(id)
+            .map(|index| self.worksheet_tab_position(index))
+            .or_else(|| {
+                self.non_worksheet_tabs
+                    .by_id(id)
+                    .map(NonWorksheetTab::position)
+            })
+    }
+
+    /// Returns the zero-based tab position of the case-insensitively named tab.
+    pub(crate) fn tab_position_by_name(&self, name: &str) -> Option<usize> {
+        let key = case_insensitive_key(name);
+        self.sheet_name_index
+            .get(key.as_ref())
+            .map(|index| self.worksheet_tab_position(*index))
+            .or_else(|| {
+                self.non_worksheet_tabs
+                    .by_lookup_key(key.as_ref())
+                    .map(NonWorksheetTab::position)
+            })
     }
 
     /// Returns the workbook date system.

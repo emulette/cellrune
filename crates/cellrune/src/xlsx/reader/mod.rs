@@ -15,6 +15,8 @@ mod worksheet_cell;
 #[cfg(test)]
 mod formula_tests;
 #[cfg(test)]
+mod sheet_tab_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,7 +30,7 @@ use self::styles::Styles;
 use super::error::{compatibility, detail};
 use super::package::{OpenedPackage, PackageSummary, PartPath, WorkbookPackageKind, open_package};
 use super::{ReadOptions, XlsxErrorCode, XlsxReadError};
-use crate::workbook::TableRangeIndex;
+use crate::workbook::{NonWorksheetTab, NonWorksheetTabs, TableRangeIndex, WorkbookSnapshotInput};
 use crate::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DocumentPresentation, InputHash, Provenance,
     ProviderIdentity, Sheet, SheetId, SourceLocation, TableId, WorkbookSnapshot, WorkbookSource,
@@ -162,15 +164,27 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         return Err(XlsxReadError::new(XlsxErrorCode::TotalFormulaBytesTooLarge)
             .at_source(workbook_part.source_id()));
     }
-    for metadata in workbook.sheets {
-        let worksheet_part = package
-            .worksheet_part(&metadata.relationship_id)
-            .cloned()
-            .ok_or_else(|| {
-                XlsxReadError::new(XlsxErrorCode::MissingSheetRelationship)
+    let mut non_worksheet_tabs = Vec::new();
+    for (position, metadata) in workbook.sheets.into_iter().enumerate() {
+        let Some(worksheet_part) = package.worksheet_part(&metadata.relationship_id).cloned()
+        else {
+            if !package.is_non_worksheet_sheet(&metadata.relationship_id) {
+                return Err(XlsxReadError::new(XlsxErrorCode::MissingSheetRelationship)
                     .with_detail(detail::UNKNOWN_SHEET_RELATIONSHIP)
-                    .at_source(workbook_part.source_id())
-            })?;
+                    .at_source(workbook_part.source_id()));
+            }
+            diagnostics.push(compatibility_diagnostic(
+                compatibility::NON_WORKSHEET_SHEET_CODE,
+                format!(
+                    "{}: {}",
+                    compatibility::NON_WORKSHEET_SHEET_MESSAGE,
+                    metadata.name.as_str()
+                ),
+                &workbook_part,
+            )?);
+            non_worksheet_tabs.push(NonWorksheetTab::new(position, metadata.id, metadata.name));
+            continue;
+        };
         worksheet_parts.insert(metadata.id, worksheet_part.clone());
         used_relationships.insert(metadata.relationship_id);
         let worksheet_bytes = package.read_part(&worksheet_part)?;
@@ -223,15 +237,16 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         .map_err(|error| XlsxReadError::new(XlsxErrorCode::InvalidWorkbook).with_cause(error))?;
     let package_summary = package.summary();
     let package_kind = package.workbook_kind();
-    let workbook = WorkbookSnapshot::new_with_metadata(
+    let workbook = WorkbookSnapshot::new_with_input(WorkbookSnapshotInput {
         sheets,
-        workbook.defined_names,
+        non_worksheet_tabs: NonWorksheetTabs::new(non_worksheet_tabs),
+        defined_names: workbook.defined_names,
         diagnostics,
-        workbook.date_system,
-        workbook.calculation_hints,
-        WorkbookSource::new(source_kind, Some(package.archive_bytes())),
-        Provenance::new(provider, input_hash),
-    )
+        date_system: workbook.date_system,
+        calculation_hints: workbook.calculation_hints,
+        source: WorkbookSource::new(source_kind, Some(package.archive_bytes())),
+        provenance: Provenance::new(provider, input_hash),
+    })
     .map_err(|error| {
         XlsxReadError::new(XlsxErrorCode::InvalidWorkbook)
             .at_source(workbook_part.source_id())
@@ -423,7 +438,7 @@ fn compatibility_diagnostics<R: Read + Seek>(
 
 fn compatibility_diagnostic(
     code: &'static str,
-    message: &'static str,
+    message: impl Into<String>,
     workbook_part: &super::package::PartPath,
 ) -> Result<Diagnostic, XlsxReadError> {
     let code = DiagnosticCode::new(code)

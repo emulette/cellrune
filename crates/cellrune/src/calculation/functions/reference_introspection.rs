@@ -36,23 +36,25 @@ pub(super) fn is_formula(engine: &Engine<'_>, context: EvalContext<'_>, args: &[
 }
 
 pub(super) fn sheet(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let sheet_number =
+        |sheet: usize| Value::Number(engine.workbook_tab_position(sheet) as f64 + 1.0);
     let Some(value) = args.first() else {
-        return Value::Number(context.sheet() as f64 + 1.0);
+        return sheet_number(context.sheet());
     };
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
     match engine.resolve_reference_value_expr(context, value) {
         Ok(reference) => match reference.single_rect() {
-            Ok(rect) => Value::Number(rect.sheet as f64 + 1.0),
+            Ok(rect) => sheet_number(rect.sheet),
             Err(kind) => Value::Error(kind),
         },
         Err(kind) if kind.is_engine_issue() => Value::Error(kind),
         Err(_) => match engine.eval_scalar(context, value) {
             Value::Text(name) => engine
-                .workbook_sheet_index(&name)
-                .map_or(Value::Error(ErrorKind::NA), |index| {
-                    Value::Number(index as f64 + 1.0)
+                .workbook_tab_position_by_name(&name)
+                .map_or(Value::Error(ErrorKind::NA), |position| {
+                    Value::Number(position as f64 + 1.0)
                 }),
             Value::Error(kind) => Value::Error(kind),
             _ => Value::Error(ErrorKind::NA),
@@ -62,10 +64,13 @@ pub(super) fn sheet(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]
 
 pub(super) fn sheets(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let count = match args {
-        [] => engine.workbook_sheet_count(),
+        [] => engine.workbook_tab_count(),
         [reference] => match engine.resolve_reference_value_expr(context, reference) {
             Ok(reference) => match reference.single_area_span() {
-                Ok(span) => span.sheet_count(),
+                Ok(span) => {
+                    let (first, last) = span.sheet_bounds();
+                    engine.workbook_tab_position(last) - engine.workbook_tab_position(first) + 1
+                }
                 Err(kind) if kind.is_engine_issue() => return Value::Error(kind),
                 Err(_) => return Value::Error(ErrorKind::Ref),
             },

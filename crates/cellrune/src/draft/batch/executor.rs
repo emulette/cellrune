@@ -266,7 +266,14 @@ impl WorkbookDraft {
                     }
                     let maximum = sheets
                         .iter()
-                        .map(|sheet| sheet.id().get())
+                        .map(Sheet::id)
+                        .chain(
+                            self.workbook
+                                .non_worksheet_tabs()
+                                .iter()
+                                .map(|tab| tab.id()),
+                        )
+                        .map(SheetId::get)
                         .max()
                         .unwrap_or(0);
                     let next = maximum
@@ -484,6 +491,7 @@ impl WorkbookDraft {
         let workbook = WorkbookSnapshot::new_with_metadata_cancellable_from_previous(
             WorkbookSnapshotInput {
                 sheets,
+                non_worksheet_tabs: self.workbook.non_worksheet_tabs().clone(),
                 defined_names,
                 diagnostics,
                 date_system,

@@ -60,6 +60,7 @@ pub(crate) fn patch_workbook_semantics(
     let mut sheets_name = None::<Vec<u8>>;
     let mut relationship_attribute = None::<RelationshipAttribute>;
     let mut existing_sheet_index = 0_usize;
+    let mut existing_tab_position = 0_usize;
     let mut saw_workbook_properties = false;
     let mut saw_book_views = false;
     let mut inserted_defined_names = !names_changed;
@@ -113,6 +114,11 @@ pub(crate) fn patch_workbook_semantics(
                     }
                     sheets_depth = Some(depth);
                     sheets_name = Some(element.name().as_ref().to_vec());
+                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
+                    && element.local_name().as_ref() == b"sheet"
+                    && is_non_worksheet_tab(original, &mut existing_tab_position)
+                {
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
                     && element.local_name().as_ref() == b"sheet"
@@ -185,6 +191,11 @@ pub(crate) fn patch_workbook_semantics(
                     && element.local_name().as_ref() == b"sheets"
                 {
                     return Err(invalid_generated(source, DETAIL_MISSING_SHEETS));
+                } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
+                    && element.local_name().as_ref() == b"sheet"
+                    && is_non_worksheet_tab(original, &mut existing_tab_position)
+                {
+                    write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                 } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
                     && element.local_name().as_ref() == b"sheet"
                 {
@@ -317,6 +328,14 @@ fn write_book_views(
         Event::End(BytesEnd::new(decode_name(&views_name, source)?)),
         source,
     )
+}
+
+/// Advances past one source `<sheet>` element and reports whether it is a chartsheet,
+/// dialogsheet, or macrosheet tab, which is copied through unchanged.
+fn is_non_worksheet_tab(original: &WorkbookSnapshot, tab_position: &mut usize) -> bool {
+    let position = *tab_position;
+    *tab_position += 1;
+    original.non_worksheet_tabs().contains_position(position)
 }
 
 fn validate_existing_sheet_order(
@@ -514,9 +533,7 @@ fn write_defined_names(
         element.push_attribute(("name", defined_name.name()));
         if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope() {
             let index = workbook
-                .sheets()
-                .iter()
-                .position(|sheet| sheet.id() == sheet_id)
+                .sheet_tab_position(sheet_id)
                 .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
             let index = index.to_string();
             element.push_attribute(("localSheetId", index.as_str()));

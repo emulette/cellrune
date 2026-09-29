@@ -138,8 +138,9 @@ impl RectSpan {
         self.sheets.is_explicit_range()
     }
 
-    pub(super) fn sheet_count(&self) -> usize {
-        self.sheets.iter().count()
+    /// Returns the first and last calculation sheet indices the span covers.
+    pub(super) fn sheet_bounds(&self) -> (usize, usize) {
+        (*self.sheets.sheets.start(), *self.sheets.sheets.end())
     }
 
     pub(super) fn sort_key(&self) -> (usize, usize, bool, u32, u32, u32, u32, bool) {
