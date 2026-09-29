@@ -511,3 +511,15 @@ fn match_selects_its_mode_by_the_sign_of_the_match_type() {
     assert_eq!(results[3], number(2.0));
     assert_eq!(results[4], error(ExcelError::NotAvailable));
 }
+
+#[test]
+fn datedif_day_difference_keeps_negative_month_end_counts_without_overflow() {
+    for (formula, expected) in [
+        ("DATEDIF(DATE(2024,1,31),DATE(2024,3,1),\"MD\")", -1.0),
+        ("DATEDIF(DATE(2023,1,31),DATE(2023,3,1),\"MD\")", -2.0),
+        ("DATEDIF(DATE(2024,1,15),DATE(2024,3,10),\"MD\")", 24.0),
+        ("DATEDIF(DATE(2024,1,15),DATE(2024,3,20),\"MD\")", 5.0),
+    ] {
+        assert_eq!(result(formula, None), number(expected), "{formula}");
+    }
+}

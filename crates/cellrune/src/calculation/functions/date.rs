@@ -484,8 +484,9 @@ fn day_difference_ignoring_months(start: Date, end: Date) -> i32 {
     if end.day >= start.day {
         (end.day - start.day) as i32
     } else {
+        // A start day past the previous month's length yields a negative count, as in Excel.
         let (year, month) = previous_month(end.year, end.month);
-        (days_in_month(year, month) - start.day + end.day) as i32
+        days_in_month(year, month) as i32 - start.day as i32 + end.day as i32
     }
 }
 
