@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU32;
@@ -161,6 +162,13 @@ impl DoubleEndedIterator for CellStoreValues<'_> {
 impl ExactSizeIterator for CellStoreValues<'_> {}
 
 impl CellStore {
+    fn from_sorted(cells: BTreeMap<u128, Cell>) -> Self {
+        let len = cells.len();
+        let cells = PersistentRadixMap::from_sorted_iter_cancellable(cells, &|| false)
+            .expect("non-cancellable radix construction cannot be cancelled");
+        Self { cells, len }
+    }
+
     fn key(address: CellAddress) -> u128 {
         u128::from(address.row().get() - 1) * u128::from(crate::EXCEL_MAX_COLUMNS)
             + u128::from(address.column().get() - 1)
@@ -601,6 +609,61 @@ impl Sheet {
         } else if self.formula_addresses.contains(&address) {
             Arc::make_mut(&mut self.formula_addresses).remove(&address);
         }
+    }
+}
+
+/// Builds a new sheet whose cells arrive one at a time, as a reader produces them.
+///
+/// Cells are kept in address order and the persistent cell store is built once, instead of
+/// path-copying the store for every inserted cell. Cells may arrive in any order; a duplicate
+/// address is rejected when it arrives, as [`Sheet::insert_cell`] rejects it.
+#[derive(Debug)]
+pub(crate) struct SheetBuilder {
+    sheet: Sheet,
+    cells: BTreeMap<u128, Cell>,
+}
+
+impl SheetBuilder {
+    pub(crate) fn new(id: SheetId, name: SheetName, visibility: SheetVisibility) -> Self {
+        Self {
+            sheet: Sheet::new(id, name, visibility),
+            cells: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) const fn id(&self) -> SheetId {
+        self.sheet.id
+    }
+
+    /// Adds a cell with the validation and metadata tracking of [`Sheet::insert_cell`].
+    pub(crate) fn insert_cell_with_number_format(
+        &mut self,
+        address: CellAddress,
+        content: CellContent,
+        number_format: NumberFormat,
+    ) -> Result<(), ValidationError> {
+        let Entry::Vacant(entry) = self.cells.entry(CellStore::key(address)) else {
+            return Err(ValidationError::DuplicateCell {
+                row: address.row().get(),
+                column: address.column().get(),
+            });
+        };
+        self.sheet.track_formula_metadata(address, &content);
+        self.sheet.update_bounds(address);
+        self.sheet.update_column_extent(address);
+        entry.insert(Cell::with_number_format(address, content, number_format));
+        Ok(())
+    }
+
+    pub(crate) fn set_merged_ranges(&mut self, merged_ranges: Vec<CellRange>) {
+        self.sheet.set_merged_ranges(merged_ranges);
+    }
+
+    /// Builds the collected cells into the sheet's store in one sorted pass.
+    pub(crate) fn finish(self) -> Sheet {
+        let Self { mut sheet, cells } = self;
+        sheet.cells = CellStore::from_sorted(cells);
+        sheet
     }
 }
 

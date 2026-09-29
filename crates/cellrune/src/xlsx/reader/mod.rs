@@ -30,7 +30,9 @@ use self::styles::Styles;
 use super::error::{compatibility, detail};
 use super::package::{OpenedPackage, PackageSummary, PartPath, WorkbookPackageKind, open_package};
 use super::{ReadOptions, XlsxErrorCode, XlsxReadError};
-use crate::workbook::{NonWorksheetTab, NonWorksheetTabs, TableRangeIndex, WorkbookSnapshotInput};
+use crate::workbook::{
+    NonWorksheetTab, NonWorksheetTabs, SheetBuilder, TableRangeIndex, WorkbookSnapshotInput,
+};
 use crate::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DocumentPresentation, InputHash, Provenance,
     ProviderIdentity, Sheet, SheetId, SourceLocation, TableId, WorkbookSnapshot, WorkbookSource,
@@ -188,7 +190,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         worksheet_parts.insert(metadata.id, worksheet_part.clone());
         used_relationships.insert(metadata.relationship_id);
         let worksheet_bytes = package.read_part(&worksheet_part)?;
-        let mut sheet = Sheet::new(metadata.id, metadata.name, metadata.visibility);
+        let mut sheet_builder = SheetBuilder::new(metadata.id, metadata.name, metadata.visibility);
         let mut table_relationship_ids = Vec::new();
         worksheet::parse(
             &worksheet_bytes,
@@ -201,7 +203,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             },
             capture,
             worksheet::WorksheetOutput {
-                sheet: &mut sheet,
+                sheet: &mut sheet_builder,
                 total_cells: &mut total_cells,
                 total_formula_bytes: &mut total_formula_bytes,
                 total_cell_text_bytes: &mut total_cell_text_bytes,
@@ -213,6 +215,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 table_relationship_ids: &mut table_relationship_ids,
             },
         )?;
+        let mut sheet = sheet_builder.finish();
         read_sheet_tables(SheetTableContext {
             package: &mut package,
             worksheet_part: &worksheet_part,

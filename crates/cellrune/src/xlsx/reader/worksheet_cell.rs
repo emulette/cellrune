@@ -8,9 +8,10 @@ use super::formula_cell::{FormulaResultInput, RawFormula, SharedFormulaTable, fi
 use super::metadata::CellMetadata;
 use super::phonetic::{PhoneticItemBuilder, PhoneticReadBudget, parse_bool};
 use super::worksheet::WorksheetResources;
+use crate::workbook::SheetBuilder;
 use crate::{
     CellAddress, CellContent, CellValue, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    DocumentPresentation, SavedResult, Sheet, SheetId, SourceLocation,
+    DocumentPresentation, SavedResult, SheetId, SourceLocation,
 };
 
 const FORMULA: &[u8] = b"f";
@@ -48,7 +49,7 @@ pub(super) struct CellFinishContext<'resource, 'state> {
     pub(super) shared_formulas: &'state mut SharedFormulaTable,
     pub(super) total_formula_bytes: &'state mut u64,
     pub(super) total_cell_text_bytes: &'state mut u64,
-    pub(super) sheet: &'state mut Sheet,
+    pub(super) sheet: &'state mut SheetBuilder,
     pub(super) presentation: &'state mut DocumentPresentation,
     pub(super) phonetic_budget: &'state mut PhoneticReadBudget,
     pub(super) budget: &'state XmlBudget,

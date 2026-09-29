@@ -16,9 +16,10 @@ use super::phonetic::{PhoneticReadBudget, parse_bool, parse_properties};
 use super::shared_strings::SharedStrings;
 use super::styles::Styles;
 use super::worksheet_cell::{CellBuilder, CellFinishContext};
+use crate::workbook::SheetBuilder;
 use crate::{
     CellAddress, Column, ColumnPhoneticVisibility, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    DocumentPresentation, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, FrozenPane, Row, Sheet, SheetId,
+    DocumentPresentation, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, FrozenPane, Row, SheetId,
     SourceLocation,
 };
 
@@ -68,7 +69,7 @@ pub(super) struct WorksheetResources<'a> {
 }
 
 pub(super) struct WorksheetOutput<'a> {
-    pub(super) sheet: &'a mut Sheet,
+    pub(super) sheet: &'a mut SheetBuilder,
     pub(super) total_cells: &'a mut u64,
     pub(super) total_formula_bytes: &'a mut u64,
     pub(super) total_cell_text_bytes: &'a mut u64,
