@@ -56,6 +56,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `_xHHHH_` escapes in cell text are decoded on read and written for control characters, so
   results such as `CHAR(2)` save and reopen.
 - Shared formulas that reference names containing non-ASCII characters expand correctly.
+- Documents whose frozen panes write an explicit zero split, as LibreOffice does for a row-only or
+  column-only freeze, open instead of failing with `xlsx.invalid_frozen_pane`.
+- Growing a table that has a totals row no longer leaves the old totals row inside the data area,
+  where its `SUBTOTAL` formulas referenced themselves; that row now receives the calculated columns.
+  New totals formulas name their table, as in `SUBTOTAL(109,Table[Column])`.
 
 ## [0.1.21] - 2026-09-27
 
