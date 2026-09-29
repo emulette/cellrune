@@ -17,7 +17,7 @@ use crate::model::{
     ReadRangeArgs, RecalculateArgs, SaveWorkbookArgs, SessionArgs, SessionClosed, SessionStarted,
     SessionSummary, WorkbookSaved,
 };
-use crate::server::CellruneMcpServer;
+use crate::server::{CellruneMcpServer, json_size};
 
 #[tool_router(vis = "pub(crate)")]
 impl CellruneMcpServer {
@@ -428,7 +428,10 @@ column rename, and table data-row resize operations.",
         output_schema = crate::schema::mcp_schema::<CalculationDeltaDto>(),
         description = "Recalculate formulas already stored in the workbook session. Auto mode \
 chooses a safe incremental pass or falls back to full calculation. The result is a bounded delta \
-with actual mode, reason, revisions, evaluated count, changed cells, and removals.",
+with actual mode, reason, revisions, evaluated count, changed cells, and removals. A completed \
+calculation is always installed; when its delta exceeds the server byte limit, the error \
+mcp.recalculation.response_byte_limit_exceeded reports the installed result_revision and \
+delta_cursor, and range reads and Save As use the installed results.",
         annotations(
             title = "Recalculate workbook",
             read_only_hint = false,
@@ -489,10 +492,10 @@ with actual mode, reason, revisions, evaluated count, changed cells, and removal
         };
         let delta = {
             let mut workbook = handle.workbook().lock().await;
-            self.install_bounded_recalculation(&mut workbook, request_id, completed)?
+            install_recalculation(&mut workbook, request_id, completed)?
         };
         self.sessions.touch(&args.session_id)?;
-        Ok(Json(delta))
+        self.installed_recalculation_json(delta)
     }
 
     /// Return a bounded cursor page of installed recalculation deltas.
@@ -801,31 +804,35 @@ also requires server-level overwrite opt-in. Returns the shared CellRune write r
 }
 
 impl CellruneMcpServer {
-    fn install_bounded_recalculation(
+    /// Returns an installed delta, or reports its installed position when it cannot be sent.
+    fn installed_recalculation_json(
         &self,
-        workbook: &mut WorkbookSession,
-        request_id: u64,
-        completed: CompletedRecalculation,
-    ) -> Result<CalculationDeltaDto, McpError> {
-        let preview = match workbook.preview_recalculation(&completed) {
-            Ok(preview) => preview,
-            Err(error) => {
-                workbook.abandon_recalculation(request_id);
-                return Err(error.into());
-            }
-        };
-        if let Err(error) = self.ensure_json_size(&preview) {
-            workbook.abandon_recalculation(request_id);
-            return Err(error);
+        delta: CalculationDeltaDto,
+    ) -> Result<Json<CalculationDeltaDto>, McpError> {
+        let actual_bytes = json_size(&delta)?;
+        let maximum_bytes = self.config.max_response_bytes();
+        if actual_bytes > maximum_bytes {
+            return Err(McpError::recalculation_response_too_large(
+                delta.result_revision,
+                delta.cursor,
+                actual_bytes as u64,
+                maximum_bytes as u64,
+            ));
         }
-        match workbook.install_recalculation(completed) {
-            Ok(delta) => Ok(delta),
-            Err(error) => {
-                workbook.abandon_recalculation(request_id);
-                Err(error.into())
-            }
-        }
+        Ok(Json(delta))
     }
+}
+
+/// Installs a completed calculation regardless of how large its delta response is.
+fn install_recalculation(
+    workbook: &mut WorkbookSession,
+    request_id: u64,
+    completed: CompletedRecalculation,
+) -> Result<CalculationDeltaDto, McpError> {
+    workbook.install_recalculation(completed).map_err(|error| {
+        workbook.abandon_recalculation(request_id);
+        error.into()
+    })
 }
 
 fn calculation_options(
@@ -972,25 +979,6 @@ mod tests {
 
     #[test]
     fn stale_completed_request_is_abandoned_and_session_remains_usable() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must follow the Unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "cellrune-mcp-stale-calculation-{}-{unique}",
-            std::process::id()
-        ));
-        fs::create_dir(&root).expect("test root must be created");
-        let config = ServerConfig::new(
-            vec![root.clone()],
-            DEFAULT_MAX_SESSIONS,
-            DEFAULT_SESSION_TTL_SECONDS,
-            DEFAULT_MAX_RESPONSE_BYTES,
-            DEFAULT_MAX_WORKBOOK_BYTES,
-            false,
-        )
-        .expect("test configuration must be valid");
-        let server = CellruneMcpServer::new(config);
         let mut workbook = WorkbookSession::create();
         workbook
             .set_formula("Sheet1", "A1", "=1+1", None)
@@ -1012,8 +1000,7 @@ mod tests {
             .expect("concurrent edit must commit");
         assert!(workbook.calculation_active());
 
-        let error = server
-            .install_bounded_recalculation(&mut workbook, request_id, completed)
+        let error = install_recalculation(&mut workbook, request_id, completed)
             .expect_err("the completed calculation must be stale");
 
         assert_eq!(error.payload().code, "session.stale_result");
@@ -1027,8 +1014,6 @@ mod tests {
                 CalculationOptionsDto::default(),
             )
             .expect("the session must accept a later calculation");
-        drop(server);
-        fs::remove_dir_all(root).expect("test root must be removed");
     }
 
     #[tokio::test]

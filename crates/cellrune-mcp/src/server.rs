@@ -51,11 +51,10 @@ impl CellruneMcpServer {
     }
 
     pub(crate) fn ensure_json_size<T: Serialize>(&self, value: &T) -> Result<(), McpError> {
-        let bytes = serde_json::to_vec(value)
-            .map_err(|error| McpError::serialization(error.to_string()))?;
-        if bytes.len() > self.config.max_response_bytes() {
+        let actual_bytes = json_size(value)?;
+        if actual_bytes > self.config.max_response_bytes() {
             return Err(McpError::response_too_large(
-                bytes.len() as u64,
+                actual_bytes as u64,
                 self.config.max_response_bytes() as u64,
             ));
         }
@@ -151,6 +150,13 @@ fn protocol_error(error: McpError) -> ErrorData {
     } else {
         ErrorData::internal_error(error.to_string(), data)
     }
+}
+
+/// Returns the serialized byte count checked against the configured response limit.
+pub(crate) fn json_size<T: Serialize>(value: &T) -> Result<usize, McpError> {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|error| McpError::serialization(error.to_string()))
 }
 
 #[cfg(test)]

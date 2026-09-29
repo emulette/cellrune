@@ -845,7 +845,7 @@ fn calculation_compatibility_modes_are_stdio_visible() {
 }
 
 #[test]
-fn response_limit_failures_do_not_commit_session_edit_calculation_or_file_state() {
+fn response_limit_failures_do_not_commit_session_edit_or_file_state() {
     let root = TestDirectory::new("response-limit");
     let mut mcp = McpProcess::start(&root.path, &["--max-response-bytes", "1024"]);
     mcp.initialize();
@@ -886,33 +886,6 @@ fn response_limit_failures_do_not_commit_session_edit_calculation_or_file_state(
         summary["summary"]["sheets"].as_array().map(Vec::len),
         Some(1)
     );
-
-    successful_tool(mcp.call_tool(
-        "workbook_apply_changes",
-        json!({
-            "session_id": session_id,
-            "expected_revision": 0,
-            "changes": [{
-                "kind": "set_formula",
-                "sheet": "Sheet1",
-                "address": "A1",
-                "formula": format!("=\"{}\"", "x".repeat(2_000))
-            }]
-        }),
-    ));
-    let calculation_error = failed_tool(mcp.call_tool(
-        "workbook_recalculate",
-        json!({"session_id": session_id, "mode": "full"}),
-    ));
-    assert_eq!(
-        calculation_error["code"],
-        "mcp.response.byte_limit_exceeded"
-    );
-    let history = successful_tool(mcp.call_tool(
-        "workbook_changes_since",
-        json!({"session_id": session_id, "cursor": 0, "limit": 100}),
-    ));
-    assert_eq!(history["deltas"].as_array().map(Vec::len), Some(0));
 
     let save_session = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
         .as_str()
@@ -976,6 +949,77 @@ fn response_limit_failures_do_not_commit_session_edit_calculation_or_file_state(
     assert_eq!(
         resources_after, resources_before,
         "a rejected open must not retain a workbook session"
+    );
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn oversized_recalculation_response_still_installs_a_readable_and_savable_calculation() {
+    let root = TestDirectory::new("recalculation-response-limit");
+    let mut mcp = McpProcess::start(&root.path, &["--max-response-bytes", "1024"]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [{
+                "kind": "set_formula",
+                "sheet": "Sheet1",
+                "address": "A1",
+                "formula": "=SEQUENCE(40)",
+                "dynamic_range": "A1:A40"
+            }]
+        }),
+    ));
+
+    let error = failed_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full"}),
+    ));
+    assert_eq!(
+        error["code"],
+        "mcp.recalculation.response_byte_limit_exceeded"
+    );
+    assert_eq!(error["details"]["result_revision"], 1);
+    assert_eq!(error["details"]["delta_cursor"], 1);
+    assert_eq!(error["details"]["maximum_bytes"], 1024);
+    assert!(
+        error["details"]["actual_bytes"]
+            .as_u64()
+            .expect("actual response bytes")
+            > 1024
+    );
+
+    let installed = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({"session_id": session_id, "sheet": "Sheet1", "start": "A40", "end": "A40"}),
+    ));
+    assert_eq!(
+        installed["cells"][0]["calculated"]["value"]["value"],
+        json!(40.0)
+    );
+    let output = root.path.join("oversized-recalculation.xlsx");
+    successful_tool(mcp.call_tool(
+        "workbook_save_as",
+        json!({"session_id": session_id, "path": output}),
+    ));
+    let reopened = successful_tool(mcp.call_tool("workbook_open", json!({"path": output})));
+    let saved = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({
+            "session_id": reopened["session_id"], "sheet": "Sheet1", "start": "A40", "end": "A40"
+        }),
+    ));
+    assert_eq!(
+        saved["cells"][0]["source_value"],
+        json!({"kind": "number", "value": 40.0})
     );
 
     let (status, _, _) = mcp.finish();

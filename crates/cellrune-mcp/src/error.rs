@@ -23,6 +23,8 @@ const MESSAGE_SESSION_CACHE_FULL: &str = "all bounded workbook session slots are
 const MESSAGE_SESSION_ID_EXHAUSTED: &str = "workbook session identifier is exhausted";
 const MESSAGE_SESSION_STATE: &str = "workbook session cache is unavailable";
 const MESSAGE_RESPONSE_TOO_LARGE: &str = "MCP response exceeds the configured byte limit";
+const MESSAGE_RECALCULATION_RESPONSE_TOO_LARGE: &str =
+    "recalculation was installed, but its delta response exceeds the configured byte limit";
 const MESSAGE_SERIALIZATION: &str = "MCP response serialization failed";
 const MESSAGE_WORKER: &str = "blocking workbook operation failed";
 const MESSAGE_RESOURCE_NOT_FOUND: &str = "MCP resource does not exist";
@@ -66,6 +68,10 @@ pub struct McpErrorDetails {
     pub maximum_bytes: Option<u64>,
     /// Observed byte count, when relevant.
     pub actual_bytes: Option<u64>,
+    /// Result revision of an installed calculation whose response could not be returned.
+    pub result_revision: Option<u64>,
+    /// Delta cursor of an installed calculation whose response could not be returned.
+    pub delta_cursor: Option<u64>,
 }
 
 /// Stable error payload returned from a CellRune MCP tool.
@@ -264,6 +270,26 @@ impl McpError {
             McpErrorDetails {
                 maximum_bytes: Some(maximum),
                 actual_bytes: Some(actual),
+                ..McpErrorDetails::default()
+            },
+        )
+    }
+
+    pub(crate) fn recalculation_response_too_large(
+        result_revision: u64,
+        delta_cursor: u64,
+        actual: u64,
+        maximum: u64,
+    ) -> Self {
+        Self::new(
+            McpErrorKind::Policy,
+            "mcp.recalculation.response_byte_limit_exceeded",
+            MESSAGE_RECALCULATION_RESPONSE_TOO_LARGE,
+            McpErrorDetails {
+                maximum_bytes: Some(maximum),
+                actual_bytes: Some(actual),
+                result_revision: Some(result_revision),
+                delta_cursor: Some(delta_cursor),
                 ..McpErrorDetails::default()
             },
         )
