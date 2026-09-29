@@ -19,6 +19,12 @@ impl LocalNamePolicy {
     fn allows_period(self) -> bool {
         matches!(self, Self::Let)
     }
+
+    // Excel 16.0 accepts LET names shaped like R1C1 references (R1C1, R2C3, RC, R1C) and rejects
+    // the partial forms (R1, C5, RC1) at entry. LAMBDA parameters keep the conservative rule.
+    fn rejects_r1c1_forms(self) -> bool {
+        matches!(self, Self::Lambda)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +56,9 @@ pub(super) fn validate_local_name(
     }) {
         return None;
     }
-    if conflicts_with_reference_syntax(&canonical) {
+    if conflicts_with_a1_reference(&canonical)
+        || (policy.rejects_r1c1_forms() && conflicts_with_r1c1_reference(&canonical))
+    {
         return None;
     }
     Some(ValidatedLocalName(canonical))
@@ -142,10 +150,6 @@ where
     }
     walk(final_expr, scope);
     scope.truncate(previous_local_count);
-}
-
-fn conflicts_with_reference_syntax(name: &str) -> bool {
-    conflicts_with_a1_reference(name) || conflicts_with_r1c1_reference(name)
 }
 
 fn conflicts_with_a1_reference(name: &str) -> bool {
@@ -359,8 +363,12 @@ mod tests {
 
     #[test]
     fn local_name_validation_rejects_reference_conflicts_and_policy_violations() {
-        for invalid in ["A1", "XFD1048576", "R1C1", "RC", "1name", "has space"] {
+        for invalid in ["A1", "XFD1048576", "1name", "has space"] {
             assert!(validate_local_name(invalid, LocalNamePolicy::Let).is_none());
+        }
+        for r1c1_form in ["R1C1", "R2C3", "RC", "R1C"] {
+            assert!(validate_local_name(r1c1_form, LocalNamePolicy::Let).is_some());
+            assert!(validate_local_name(r1c1_form, LocalNamePolicy::Lambda).is_none());
         }
         assert!(validate_local_name("XFE1", LocalNamePolicy::Let).is_some());
         for bare_axis in ["R", "r", "C", "c"] {

@@ -5713,7 +5713,7 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
         (1, 11, "LET(1,MYSTERY(),0)"),
         (1, 12, "LET(x,MYSTERY(),X,2,x)"),
         (1, 13, "LET(1,NoSuchName,0)"),
-        (1, 14, "LET(R1C1,MYSTERY(),R1C1)"),
+        (1, 14, "LET(R1,MYSTERY(),R1)"),
     ]);
     assert!(scan_formula_capabilities(&workbook).is_supported());
     assert_eq!(
@@ -5727,7 +5727,7 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
     );
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
-    for column in [1, 2, 3, 5] {
+    for column in [1, 2, 5] {
         assert_eq!(
             calculation.cell(cell_id(column)),
             Some(&CalculationCellResult::Value(CellValue::Error(
@@ -5736,7 +5736,8 @@ fn let_validates_names_duplicates_and_arity_before_evaluation() {
             "unexpected invalid LET result in column {column}",
         );
     }
-    // Bare `c` and `r` are valid LET names; only row-and-column forms such as R1C1 conflict.
+    // Bare `c` and `r` and full R1C1 shapes are valid LET names, as measured in Excel 16.0.
+    assert_number(&calculation, 3, 1.0, 0.0);
     assert_number(&calculation, 4, 1.0, 0.0);
     assert_number(&calculation, 6, 1.0, 0.0);
     assert_number(&calculation, 7, 1.0, 0.0);

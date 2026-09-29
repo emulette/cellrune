@@ -447,10 +447,20 @@ fn lambda_and_let_accept_bare_row_and_column_axis_names() {
         ("LET(r,3,R*2)", 6.0),
         ("LAMBDA(c,c+1)(2)", 3.0),
         ("LET(_xlpm.c,4,c)", 4.0),
+        ("LET(RC,1,RC)", 1.0),
+        ("LET(R1C1,1,R1C1)", 1.0),
+        ("LET(R2C3,1,R2C3+1)", 2.0),
+        ("LET(R1C,1,R1C)", 1.0),
     ] {
         assert_eq!(result(formula, None), number(expected), "{formula}");
     }
-    for formula in ["LET(RC,1,RC)", "LET(R1C1,1,R1C1)", "LET(A1,1,A1)"] {
+    // Excel rejects R1, C5, and RC1 at entry; A1-shaped names remain unsupported here.
+    for formula in [
+        "LET(R1,1,R1)",
+        "LET(RC1,1,RC1)",
+        "LET(A1,1,A1)",
+        "LAMBDA(RC,RC+1)(2)",
+    ] {
         assert_eq!(result(formula, None), error(ExcelError::Value), "{formula}");
     }
 }
