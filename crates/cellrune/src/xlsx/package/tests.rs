@@ -336,6 +336,12 @@ fn read_limits_reject_zero_values() {
         })
     );
     assert_eq!(
+        ReadLimits::default().with_max_total_cell_text_bytes(0),
+        Err(ReadOptionsError::ZeroLimit {
+            name: "max_total_cell_text_bytes"
+        })
+    );
+    assert_eq!(
         ReadLimits::default().with_max_merged_ranges(0),
         Err(ReadOptionsError::ZeroLimit {
             name: "max_merged_ranges"

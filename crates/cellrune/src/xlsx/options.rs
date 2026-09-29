@@ -13,6 +13,7 @@ const MAX_TOTAL_CELLS: &str = "max_total_cells";
 const MAX_SHARED_STRINGS: &str = "max_shared_strings";
 const MAX_SHARED_STRING_BYTES: &str = "max_shared_string_bytes";
 const MAX_TOTAL_SHARED_STRING_BYTES: &str = "max_total_shared_string_bytes";
+const MAX_TOTAL_CELL_TEXT_BYTES: &str = "max_total_cell_text_bytes";
 const MAX_DEFINED_NAMES: &str = "max_defined_names";
 const MAX_FORMULA_BYTES: &str = "max_formula_bytes";
 const MAX_TOTAL_FORMULA_BYTES: &str = "max_total_formula_bytes";
@@ -44,6 +45,7 @@ pub struct ReadLimits {
     max_shared_strings: u64,
     max_shared_string_bytes: u64,
     max_total_shared_string_bytes: u64,
+    max_total_cell_text_bytes: u64,
     max_defined_names: u64,
     max_formula_bytes: u64,
     max_total_formula_bytes: u64,
@@ -133,6 +135,24 @@ impl ReadLimits {
     /// Returns the maximum combined UTF-8 byte length of shared strings.
     pub const fn max_total_shared_string_bytes(self) -> u64 {
         self.max_total_shared_string_bytes
+    }
+
+    /// Returns the maximum combined UTF-8 byte length of text materialized into cells.
+    ///
+    /// Every text value a cell produces is charged: literal shared-string references, inline
+    /// strings, `t="str"` values, and text saved results of formulas. A shared string is charged
+    /// once per referencing cell, so this budget bounds the fan-out that
+    /// [`max_total_shared_string_bytes`](Self::max_total_shared_string_bytes) cannot see: a small
+    /// package whose one large shared string is referenced by many cells.
+    ///
+    /// The default is 256 MiB, the same ceiling as the unique shared-string and materialized
+    /// formula budgets: it admits about 50 bytes of text per cell at the default
+    /// [`max_total_cells`](Self::max_total_cells), while a string table amplified by repeated
+    /// references fails with [`TotalCellTextTooLarge`] instead of allocating without bound.
+    ///
+    /// [`TotalCellTextTooLarge`]: crate::XlsxErrorCode::TotalCellTextTooLarge
+    pub const fn max_total_cell_text_bytes(self) -> u64 {
+        self.max_total_cell_text_bytes
     }
 
     /// Returns the maximum workbook defined-name count.
@@ -345,6 +365,16 @@ impl ReadLimits {
         Ok(self)
     }
 
+    /// Replaces the combined materialized cell-text UTF-8 byte limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadOptionsError::ZeroLimit`] when `value` is zero.
+    pub fn with_max_total_cell_text_bytes(mut self, value: u64) -> Result<Self, ReadOptionsError> {
+        self.max_total_cell_text_bytes = nonzero(MAX_TOTAL_CELL_TEXT_BYTES, value)?;
+        Ok(self)
+    }
+
     /// Replaces the workbook defined-name count limit.
     ///
     /// # Errors
@@ -508,6 +538,7 @@ impl Default for ReadLimits {
             max_shared_strings: 2_000_000,
             max_shared_string_bytes: 1024 * 1024,
             max_total_shared_string_bytes: 256 * 1024 * 1024,
+            max_total_cell_text_bytes: 256 * 1024 * 1024,
             max_defined_names: 100_000,
             max_formula_bytes: 1024 * 1024,
             max_total_formula_bytes: 256 * 1024 * 1024,

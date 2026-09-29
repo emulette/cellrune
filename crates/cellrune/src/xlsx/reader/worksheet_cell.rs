@@ -9,7 +9,7 @@ use super::phonetic::{PhoneticItemBuilder, PhoneticReadBudget, parse_bool};
 use super::worksheet::WorksheetResources;
 use crate::{
     CellAddress, CellContent, CellValue, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    DocumentPresentation, Sheet, SheetId, SourceLocation,
+    DocumentPresentation, SavedResult, Sheet, SheetId, SourceLocation,
 };
 
 const FORMULA: &[u8] = b"f";
@@ -45,6 +45,7 @@ pub(super) struct CellFinishContext<'resource, 'state> {
     pub(super) resources: WorksheetResources<'resource>,
     pub(super) shared_formulas: &'state mut SharedFormulaTable,
     pub(super) total_formula_bytes: &'state mut u64,
+    pub(super) total_cell_text_bytes: &'state mut u64,
     pub(super) sheet: &'state mut Sheet,
     pub(super) presentation: &'state mut DocumentPresentation,
     pub(super) phonetic_budget: &'state mut PhoneticReadBudget,
@@ -265,6 +266,7 @@ impl CellBuilder {
             resources,
             shared_formulas,
             total_formula_bytes,
+            total_cell_text_bytes,
             sheet,
             presentation,
             phonetic_budget,
@@ -305,6 +307,7 @@ impl CellBuilder {
                 .map(CellContent::Literal)
             }
         };
+        charge_cell_text_bytes(content.as_ref(), total_cell_text_bytes, budget)?;
         let mut annotation = None;
         let mut overlaps_or_reorders = false;
         if self.capture == PresentationCapture::Document {
@@ -414,6 +417,28 @@ fn charge_formula_bytes(
     *total_formula_bytes = total_formula_bytes.saturating_add(text_bytes);
     if *total_formula_bytes > budget.limits().max_total_formula_bytes() {
         return Err(budget.error(XlsxErrorCode::TotalFormulaBytesTooLarge));
+    }
+    Ok(())
+}
+
+/// Charges the text a cell materializes, so repeated shared-string references cannot amplify a
+/// small package into unbounded allocation.
+fn charge_cell_text_bytes(
+    content: Option<&CellContent>,
+    total_cell_text_bytes: &mut u64,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    let text = match content {
+        Some(CellContent::Literal(CellValue::Text(text))) => text,
+        Some(CellContent::Formula(formula)) => match formula.saved_result() {
+            SavedResult::Present(CellValue::Text(text)) => text,
+            _ => return Ok(()),
+        },
+        _ => return Ok(()),
+    };
+    *total_cell_text_bytes = total_cell_text_bytes.saturating_add(text.len() as u64);
+    if *total_cell_text_bytes > budget.limits().max_total_cell_text_bytes() {
+        return Err(budget.error(XlsxErrorCode::TotalCellTextTooLarge));
     }
     Ok(())
 }

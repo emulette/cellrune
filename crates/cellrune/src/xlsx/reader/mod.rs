@@ -143,6 +143,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     let mut table_parts = BTreeMap::new();
     let mut used_relationships = BTreeSet::new();
     let mut total_cells = 0_u64;
+    let mut total_cell_text_bytes = 0_u64;
     let mut total_merged_ranges = 0_u64;
     let mut total_tables = 0_u64;
     let defined_name_keys = workbook
@@ -189,6 +190,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 sheet: &mut sheet,
                 total_cells: &mut total_cells,
                 total_formula_bytes: &mut total_formula_bytes,
+                total_cell_text_bytes: &mut total_cell_text_bytes,
                 total_merged_ranges: &mut total_merged_ranges,
                 total_tables: &mut total_tables,
                 presentation: &mut presentation,

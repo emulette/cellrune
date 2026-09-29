@@ -223,6 +223,71 @@ fn shared_string_budgets_apply_to_decoded_rich_text() {
 }
 
 #[test]
+fn cell_text_budget_charges_each_shared_reference_and_inline_string() {
+    // "Hello, 世界" (13 bytes) is referenced from both sheets and "inline value" adds 12 bytes.
+    let read_with = |limit: u64| {
+        let limits = ReadLimits::default()
+            .with_max_total_cell_text_bytes(limit)
+            .expect("nonzero cell text limit");
+        read_xlsx(
+            Cursor::new(build_archive(SHEET_ONE, SHARED_STRINGS)),
+            ReadOptions::new(limits),
+        )
+    };
+    read_with(38).expect("exact cell text budget");
+    let error = read_with(37).expect_err("cell text budget");
+    assert_eq!(error.code(), XlsxErrorCode::TotalCellTextTooLarge);
+}
+
+#[test]
+fn cell_text_budget_charges_text_saved_results_of_formulas() {
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1">
+    <c r="A1" t="s"><f>"Hello, 世界"</f><v>0</v></c>
+    <c r="B1" t="str"><f>"text"</f><v>text</v></c>
+  </row></sheetData>
+</worksheet>"#;
+    let read_with = |limit: u64| {
+        let limits = ReadLimits::default()
+            .with_max_total_cell_text_bytes(limit)
+            .expect("nonzero cell text limit");
+        read_xlsx(
+            Cursor::new(build_archive(sheet, SHARED_STRINGS)),
+            ReadOptions::new(limits),
+        )
+    };
+    read_with(30).expect("exact cell text budget");
+    let error = read_with(29).expect_err("saved result text budget");
+    assert_eq!(error.code(), XlsxErrorCode::TotalCellTextTooLarge);
+}
+
+#[test]
+fn default_cell_text_budget_rejects_amplified_shared_string_references() {
+    let long_text = "x".repeat(256 * 1024);
+    let shared_strings = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2000" uniqueCount="1"><si><t>{long_text}</t></si></sst>"#
+    );
+    let cells = (1..=2_000)
+        .map(|row| format!(r#"<row r="{row}"><c r="A{row}" t="s"><v>0</v></c></row>"#))
+        .collect::<String>();
+    let sheet = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{cells}</sheetData></worksheet>"#
+    );
+    let archive = build_archive_with_sheets(&sheet, SHEET_ONE, &shared_strings);
+    assert!(
+        archive.len() < 512 * 1024,
+        "the amplifying package stays small"
+    );
+
+    let error = read_xlsx_bytes(&archive, ReadOptions::default())
+        .expect_err("amplified shared-string references");
+    assert_eq!(error.code(), XlsxErrorCode::TotalCellTextTooLarge);
+}
+
+#[test]
 fn duplicate_sheet_data_is_rejected() {
     let duplicate = SHEET_ONE.replace(
         "</sheetData>",

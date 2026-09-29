@@ -180,6 +180,8 @@ pub enum XlsxErrorCode {
     SharedStringTooLarge,
     /// Combined decoded shared strings exceed the configured limit.
     TotalSharedStringsTooLarge,
+    /// Text materialized into cells exceeds the configured workbook-wide byte limit.
+    TotalCellTextTooLarge,
     /// Styles XML is malformed or inconsistent.
     InvalidStyles,
     /// A cell references a missing cell-format record.
@@ -271,6 +273,7 @@ impl XlsxErrorCode {
             Self::TooManySharedStrings => "xlsx.too_many_shared_strings",
             Self::SharedStringTooLarge => "xlsx.shared_string_too_large",
             Self::TotalSharedStringsTooLarge => "xlsx.total_shared_strings_too_large",
+            Self::TotalCellTextTooLarge => "xlsx.total_cell_text_too_large",
             Self::InvalidStyles => "xlsx.invalid_styles",
             Self::InvalidStyleIndex => "xlsx.invalid_style_index",
             Self::InvalidWorksheet => "xlsx.invalid_worksheet",
@@ -344,6 +347,9 @@ impl XlsxErrorCode {
             Self::SharedStringTooLarge => "decoded shared string exceeds the configured limit",
             Self::TotalSharedStringsTooLarge => {
                 "combined decoded shared strings exceed the configured limit"
+            }
+            Self::TotalCellTextTooLarge => {
+                "combined materialized cell text exceeds the configured limit"
             }
             Self::InvalidStyles => "invalid workbook styles",
             Self::InvalidStyleIndex => "cell style index is out of range",
