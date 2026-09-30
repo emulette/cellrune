@@ -25,8 +25,8 @@ are not part of this binary notice.
 | `bitflags` | `2.13.1` | `MIT OR Apache-2.0` |
 | `block-buffer` | `0.12.1` | `MIT OR Apache-2.0` |
 | `bytes` | `1.12.1` | `MIT` |
-| `cap-primitives` | `4.0.2` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
-| `cap-std` | `4.0.2` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
+| `cap-primitives` | `4.0.3` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
+| `cap-std` | `4.0.3` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `cfg-if` | `1.0.4` | `MIT OR Apache-2.0` |
 | `chrono` | `0.4.45` | `MIT OR Apache-2.0` |
 | `clap` | `4.6.6` | `MIT OR Apache-2.0` |
@@ -82,7 +82,7 @@ are not part of this binary notice.
 | `quick-xml` | `0.41.0` | `MIT` |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
-| `rmcp` | `3.1.2` | `Apache-2.0` |
+| `rmcp` | `3.4.1` | `Apache-2.0` |
 | `rustix` | `1.1.4` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `rustix-linux-procfs` | `0.1.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `schemars` | `1.2.1` | `MIT` |
@@ -373,7 +373,7 @@ limitations under the License.
 
 ### License text 3
 
-Components: `adler2 2.0.1`, `ambient-authority 0.0.2`, `cap-primitives 4.0.2`, `cap-std 4.0.2`, `dyn-clone
+Components: `adler2 2.0.1`, `ambient-authority 0.0.2`, `cap-primitives 4.0.3`, `cap-std 4.0.3`, `dyn-clone
   1.0.20`, `fs-set-times 0.20.3`, `io-extras 0.19.0`, `io-lifetimes 2.0.4`, `io-lifetimes 3.0.1`,
   `itoa 1.0.18`, `linux-raw-sys 0.12.1`, `once_cell 1.21.4`, `pin-project-lite 0.2.17`, `ref-cast
   1.0.26`, `rustix 1.1.4`, `rustix-linux-procfs 0.1.1`, `serde 1.0.229`, `serde_core 1.0.229`,
@@ -448,7 +448,7 @@ at your option.
 
 ### License text 5
 
-Components: `ambient-authority 0.0.2`, `bitflags 2.13.1`, `cap-primitives 4.0.2`, `cap-std 4.0.2`, `cfg-if
+Components: `ambient-authority 0.0.2`, `bitflags 2.13.1`, `cap-primitives 4.0.3`, `cap-std 4.0.3`, `cfg-if
   1.0.4`, `core-foundation-sys 0.8.7`, `equivalent 1.0.2`, `errno 0.3.14`, `flate2 1.1.9`, `fs-set-
   times 0.20.3`, `hashbrown 0.17.1`, `indexmap 2.14.0`, `io-extras 0.19.0`, `io-lifetimes 2.0.4`,
   `io-lifetimes 3.0.1`, `js-sys 0.3.103`, `lazy_static 1.5.0`, `linux-raw-sys 0.12.1`, `log 0.4.33`,
@@ -664,7 +664,7 @@ limitations under the License.
 
 ### License text 6
 
-Components: `ambient-authority 0.0.2`, `cap-primitives 4.0.2`, `cap-std 4.0.2`, `fs-set-times 0.20.3`, `io-
+Components: `ambient-authority 0.0.2`, `cap-primitives 4.0.3`, `cap-std 4.0.3`, `fs-set-times 0.20.3`, `io-
   extras 0.19.0`, `io-lifetimes 2.0.4`, `io-lifetimes 3.0.1`, `linux-raw-sys 0.12.1`, `rustix
   1.1.4`, `rustix-linux-procfs 0.1.1`, `winx 0.36.4`
 
@@ -1499,7 +1499,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### License text 15
 
-Components: `cap-primitives 4.0.2`
+Components: `cap-primitives 4.0.3`
 
 Source filenames: `COPYRIGHT`
 
@@ -1537,7 +1537,7 @@ at your option.
 
 ### License text 16
 
-Components: `cap-std 4.0.2`
+Components: `cap-std 4.0.3`
 
 Source filenames: `COPYRIGHT`
 
@@ -5010,7 +5010,7 @@ Apache License
 
 ### License text 61
 
-Components: `rmcp 3.1.2`
+Components: `rmcp 3.4.1`
 
 Source filenames: `rmcp-LICENSE`
 
