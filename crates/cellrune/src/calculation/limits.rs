@@ -290,19 +290,34 @@ fn nonzero(name: &'static str, value: u64) -> Result<u64, CalculationOptionsErro
     Ok(value)
 }
 
+/// The [`CalculationLimits`] entry a formula exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum CalculationLimitKind {
+#[non_exhaustive]
+pub enum CalculationLimitKind {
+    /// [`CalculationLimits::max_formula_tokens`].
     FormulaTokens,
+    /// [`CalculationLimits::max_formula_source_bytes`].
     FormulaSourceBytes,
+    /// [`CalculationLimits::max_formula_ast_nodes`].
     FormulaAstNodes,
+    /// [`CalculationLimits::max_formula_nesting_depth`], which also bounds defined-name
+    /// expansion.
     FormulaNestingDepth,
+    /// [`CalculationLimits::max_dependency_edges`].
     DependencyEdges,
+    /// [`CalculationLimits::max_reference_areas`].
     ReferenceAreas,
+    /// [`CalculationLimits::max_array_cells`].
     ArrayCells,
+    /// [`CalculationLimits::max_text_bytes`].
     TextBytes,
+    /// [`CalculationLimits::max_function_iterations`].
     FunctionIterations,
+    /// [`CalculationLimits::max_let_bindings`].
     LetBindings,
+    /// [`CalculationLimits::max_lambda_depth`].
     LambdaDepth,
+    /// [`CalculationLimits::max_lambda_invocations`].
     LambdaInvocations,
 }
 
@@ -323,51 +338,11 @@ impl CalculationLimitKind {
             Self::LambdaInvocations => MAX_LAMBDA_INVOCATIONS,
         }
     }
-
-    pub(super) fn from_detail(value: &str) -> Option<Self> {
-        match value {
-            MAX_FORMULA_TOKENS => Some(Self::FormulaTokens),
-            MAX_FORMULA_SOURCE_BYTES => Some(Self::FormulaSourceBytes),
-            MAX_FORMULA_AST_NODES => Some(Self::FormulaAstNodes),
-            MAX_FORMULA_NESTING_DEPTH => Some(Self::FormulaNestingDepth),
-            MAX_DEPENDENCY_EDGES => Some(Self::DependencyEdges),
-            MAX_REFERENCE_AREAS => Some(Self::ReferenceAreas),
-            MAX_ARRAY_CELLS => Some(Self::ArrayCells),
-            MAX_TEXT_BYTES => Some(Self::TextBytes),
-            MAX_FUNCTION_ITERATIONS => Some(Self::FunctionIterations),
-            MAX_LET_BINDINGS => Some(Self::LetBindings),
-            MAX_LAMBDA_DEPTH => Some(Self::LambdaDepth),
-            MAX_LAMBDA_INVOCATIONS => Some(Self::LambdaInvocations),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_limit_kind_round_trips_through_its_detail() {
-        let kinds = [
-            CalculationLimitKind::FormulaTokens,
-            CalculationLimitKind::FormulaSourceBytes,
-            CalculationLimitKind::FormulaAstNodes,
-            CalculationLimitKind::FormulaNestingDepth,
-            CalculationLimitKind::DependencyEdges,
-            CalculationLimitKind::ReferenceAreas,
-            CalculationLimitKind::ArrayCells,
-            CalculationLimitKind::TextBytes,
-            CalculationLimitKind::FunctionIterations,
-            CalculationLimitKind::LetBindings,
-            CalculationLimitKind::LambdaDepth,
-            CalculationLimitKind::LambdaInvocations,
-        ];
-
-        for kind in kinds {
-            assert_eq!(CalculationLimitKind::from_detail(kind.detail()), Some(kind));
-        }
-    }
 
     #[test]
     fn nesting_configuration_remains_source_compatible_above_internal_safe_depth() {

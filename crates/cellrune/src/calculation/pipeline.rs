@@ -165,7 +165,9 @@ pub(super) fn formula_issues(
     );
     let mut issues = Vec::new();
     if engine.dependency_limit_exceeded() {
-        issues.push(resource_limit_issue(CalculationLimitKind::DependencyEdges));
+        issues.push(CalculationIssue::resource_limit(
+            CalculationLimitKind::DependencyEdges,
+        ));
     }
     let has_name_cycle = engine.has_name_cycle(internal_id);
     let has_name_limit = engine.has_name_limit(internal_id);
@@ -176,7 +178,7 @@ pub(super) fn formula_issues(
         ));
     }
     if has_name_limit {
-        issues.push(resource_limit_issue(
+        issues.push(CalculationIssue::resource_limit(
             CalculationLimitKind::FormulaNestingDepth,
         ));
     }
@@ -205,7 +207,7 @@ pub(super) fn formula_issues(
         )),
         Some(_) => match engine.parse_failure(internal_id) {
             Some(error) => match error.limit {
-                Some(limit) => issues.push(resource_limit_issue(limit)),
+                Some(limit) => issues.push(CalculationIssue::resource_limit(limit)),
                 None => issues.push(CalculationIssue::new(
                     CalculationIssueCode::ParseError,
                     Some(parse_error_detail(error)),
@@ -321,7 +323,7 @@ fn snapshot_from_incremental_engine_cancellable(
         } else {
             match engine.cell_value(internal_id) {
                 Value::Error(ErrorKind::ResourceLimit(limit)) => {
-                    CalculationCellResult::Unavailable(resource_limit_issue(limit))
+                    CalculationCellResult::Unavailable(CalculationIssue::resource_limit(limit))
                 }
                 Value::Error(ErrorKind::Unsupported) => {
                     let missing_volatile_input =
@@ -539,7 +541,7 @@ fn snapshot_from_engine_cancellable(
             } else {
                 match engine.cell_value(internal_id) {
                     Value::Error(ErrorKind::ResourceLimit(limit)) => {
-                        CalculationCellResult::Unavailable(resource_limit_issue(limit))
+                        CalculationCellResult::Unavailable(CalculationIssue::resource_limit(limit))
                     }
                     Value::Error(ErrorKind::Unsupported) => {
                         let missing_volatile_input =
@@ -696,13 +698,6 @@ fn build_materialization_view_cancellable(
         }
     }
     Ok(materialized)
-}
-
-fn resource_limit_issue(limit: CalculationLimitKind) -> CalculationIssue {
-    CalculationIssue::new(
-        CalculationIssueCode::ResourceLimitExceeded,
-        Some(limit.detail().to_owned()),
-    )
 }
 
 fn contains_volatility(
@@ -1531,7 +1526,7 @@ pub(super) fn target_result(
     let direct_unavailable = BTreeSet::new();
     match engine.cell_value(internal_id) {
         Value::Error(ErrorKind::ResourceLimit(limit)) => {
-            CalculationCellResult::Unavailable(resource_limit_issue(limit))
+            CalculationCellResult::Unavailable(CalculationIssue::resource_limit(limit))
         }
         Value::Error(ErrorKind::Unsupported) => {
             let missing_volatile_input = engine.parsed_expr(internal_id).is_some_and(|expr| {

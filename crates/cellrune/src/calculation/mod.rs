@@ -61,8 +61,7 @@ pub use defined_name_analysis::{
     DefinedNameUnsupportedReason, analyze_defined_name, analyze_defined_name_cancellable,
     analyze_defined_name_with_options,
 };
-use limits::CalculationLimitKind;
-pub use limits::{CalculationLimits, CalculationOptionsError};
+pub use limits::{CalculationLimitKind, CalculationLimits, CalculationOptionsError};
 pub use session::{
     ApplyChangesError, CalculationDecisionReason, CalculationDelta, CalculationDeltaCell,
     CalculationDeltaPage, CalculationExecutionMode, CancellationToken, CompletedCalculation,
@@ -175,6 +174,7 @@ impl CalculationIssueCode {
 pub struct CalculationIssue {
     code: CalculationIssueCode,
     detail: Option<Box<str>>,
+    limit: Option<CalculationLimitKind>,
 }
 
 impl CalculationIssue {
@@ -182,6 +182,15 @@ impl CalculationIssue {
         Self {
             code,
             detail: detail.map(String::into_boxed_str),
+            limit: None,
+        }
+    }
+
+    pub(crate) fn resource_limit(limit: CalculationLimitKind) -> Self {
+        Self {
+            code: CalculationIssueCode::ResourceLimitExceeded,
+            detail: Some(limit.detail().into()),
+            limit: Some(limit),
         }
     }
 
@@ -198,6 +207,12 @@ impl CalculationIssue {
     /// Returns source-specific context such as a function name or parser position.
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
+    }
+
+    /// Returns the limit a [`CalculationIssueCode::ResourceLimitExceeded`] issue exceeded, or
+    /// `None` for every other issue.
+    pub const fn limit(&self) -> Option<CalculationLimitKind> {
+        self.limit
     }
 }
 

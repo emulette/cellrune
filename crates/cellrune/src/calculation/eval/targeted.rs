@@ -8,8 +8,8 @@ use crate::calculation::runtime::CellId;
 use crate::calculation::targeted::source_provenance;
 use crate::calculation::value::{ErrorKind, Value};
 use crate::{
-    CalculationCellId, CalculationCellResult, CalculationIssue, CalculationIssueCode,
-    CalculationOptions, CancellationToken, CellAddress, CellContent, TargetCalculationError,
+    CalculationCellId, CalculationCellResult, CalculationIssue, CalculationOptions,
+    CancellationToken, CellAddress, CellContent, TargetCalculationError,
     TargetCalculationErrorCode, TargetCalculationLimits, TargetCalculationResult,
     WorkbookFingerprint, WorkbookSnapshot,
 };
@@ -257,13 +257,8 @@ impl Planner {
         if total as u64 > engine.options.limits().max_dependency_edges() {
             engine.retained_results.insert(
                 cell,
-                CalculationCellResult::Unavailable(CalculationIssue::new(
-                    CalculationIssueCode::ResourceLimitExceeded,
-                    Some(
-                        crate::calculation::CalculationLimitKind::DependencyEdges
-                            .detail()
-                            .to_owned(),
-                    ),
+                CalculationCellResult::Unavailable(CalculationIssue::resource_limit(
+                    crate::calculation::CalculationLimitKind::DependencyEdges,
                 )),
             );
             engine.results.insert(
@@ -356,14 +351,11 @@ impl Planner {
                         if self.edges as u64 > engine.options.limits().max_dependency_edges() {
                             engine.retained_results.insert(
                                 cell,
-                                CalculationCellResult::Unavailable(CalculationIssue::new(
-                                    CalculationIssueCode::ResourceLimitExceeded,
-                                    Some(
-                                        crate::calculation::CalculationLimitKind::DependencyEdges
-                                            .detail()
-                                            .to_owned(),
+                                CalculationCellResult::Unavailable(
+                                    CalculationIssue::resource_limit(
+                                        crate::calculation::CalculationLimitKind::DependencyEdges,
                                     ),
-                                )),
+                                ),
                             );
                             engine.results.insert(
                                 cell,

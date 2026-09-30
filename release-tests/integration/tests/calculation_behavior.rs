@@ -2,13 +2,13 @@ use std::collections::BTreeSet;
 
 use cellrune::{
     ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationHints,
-    CalculationIssueCode, CalculationLimits, CalculationOptions, CalculationOptionsError,
-    CellAddress, CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope,
-    ExcelError, FiniteNumber, FormulaCapability, FormulaCell, FormulaDialect, FormulaMetadata,
-    FormulaText, MaterializedResultOrigin, Provenance, ProviderIdentity, SavedResult, Sheet,
-    SheetId, SheetName, SheetVisibility, WorkbookDraft, WorkbookSnapshot, WorkbookSource,
-    calculate_workbook, scan_formula_capabilities, scan_formula_capabilities_with_options,
-    scan_function_usage, supported_function_catalog,
+    CalculationIssueCode, CalculationLimitKind, CalculationLimits, CalculationOptions,
+    CalculationOptionsError, CellAddress, CellContent, CellRange, CellValue, DateSystem,
+    DefinedName, DefinedNameScope, ExcelError, FiniteNumber, FormulaCapability, FormulaCell,
+    FormulaDialect, FormulaMetadata, FormulaText, MaterializedResultOrigin, Provenance,
+    ProviderIdentity, SavedResult, Sheet, SheetId, SheetName, SheetVisibility, WorkbookDraft,
+    WorkbookSnapshot, WorkbookSource, calculate_workbook, scan_formula_capabilities,
+    scan_formula_capabilities_with_options, scan_function_usage, supported_function_catalog,
 };
 
 #[path = "calculation_behavior/complex_logarithms.rs"]
@@ -880,6 +880,7 @@ fn v0_1_10_grouping_amplification_respects_calculation_limits() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_array_cells"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::ArrayCells));
 
     let iteration_limits = CalculationLimits::default()
         .with_max_function_iterations(20)
@@ -4023,6 +4024,7 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
         CalculationIssueCode::ResourceLimitExceeded,
         Some("max_formula_tokens"),
     );
+    assert_capability_limit(&parser_report, 1, CalculationLimitKind::FormulaTokens);
     let parser_calculation = calculate_workbook(&parser_workbook, parser_options);
     assert_issue(
         &parser_calculation,
@@ -4043,6 +4045,7 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
         CalculationIssueCode::ResourceLimitExceeded,
         Some("max_formula_source_bytes"),
     );
+    assert_capability_limit(&source_report, 1, CalculationLimitKind::FormulaSourceBytes);
 
     let ast_limits = CalculationLimits::default()
         .with_max_formula_ast_nodes(2)
@@ -4057,6 +4060,7 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
         CalculationIssueCode::ResourceLimitExceeded,
         Some("max_formula_ast_nodes"),
     );
+    assert_capability_limit(&ast_report, 1, CalculationLimitKind::FormulaAstNodes);
 
     let depth_limits = CalculationLimits::default()
         .with_max_formula_nesting_depth(1)
@@ -4071,6 +4075,7 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
         CalculationIssueCode::ResourceLimitExceeded,
         Some("max_formula_nesting_depth"),
     );
+    assert_capability_limit(&depth_report, 1, CalculationLimitKind::FormulaNestingDepth);
 
     let dependency_workbook = workbook_with_formulas(&[(1, 1, "1"), (1, 2, "A1"), (1, 3, "A1+B1")]);
     let dependency_limits = CalculationLimits::default()
@@ -4086,6 +4091,11 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
             column,
             CalculationIssueCode::ResourceLimitExceeded,
             Some("max_dependency_edges"),
+        );
+        assert_capability_limit(
+            &dependency_report,
+            column,
+            CalculationLimitKind::DependencyEdges,
         );
     }
 }
@@ -4105,6 +4115,7 @@ fn array_budget_cannot_be_hidden_by_iferror() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_array_cells"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::ArrayCells));
 }
 
 #[test]
@@ -4124,6 +4135,7 @@ fn text_budget_cannot_be_hidden_and_empty_find_is_safe() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_text_bytes"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::TextBytes));
     assert_eq!(
         calculation.cell(cell_id(2)),
         Some(&CalculationCellResult::Value(
@@ -4158,6 +4170,10 @@ fn defined_name_cycles_and_expansion_depth_are_bounded_before_evaluation() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+    assert_eq!(
+        issue.limit(),
+        Some(CalculationLimitKind::FormulaNestingDepth)
+    );
 
     let branching_chain = workbook_with_formulas_and_names(
         &[(1, 1, "Deep+Shallow")],
@@ -4178,6 +4194,10 @@ fn defined_name_cycles_and_expansion_depth_are_bounded_before_evaluation() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+    assert_eq!(
+        issue.limit(),
+        Some(CalculationLimitKind::FormulaNestingDepth)
+    );
 
     let callable_chain = workbook_with_formulas_and_names(
         &[(1, 1, "Reader(0)")],
@@ -4198,6 +4218,10 @@ fn defined_name_cycles_and_expansion_depth_are_bounded_before_evaluation() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+    assert_eq!(
+        issue.limit(),
+        Some(CalculationLimitKind::FormulaNestingDepth)
+    );
 
     let branching_callable_chain = workbook_with_formulas_and_names(
         &[(1, 1, "Deep(0)+Shallow(0)")],
@@ -4219,6 +4243,10 @@ fn defined_name_cycles_and_expansion_depth_are_bounded_before_evaluation() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_formula_nesting_depth"));
+    assert_eq!(
+        issue.limit(),
+        Some(CalculationLimitKind::FormulaNestingDepth)
+    );
 }
 
 #[test]
@@ -4239,6 +4267,10 @@ fn function_iterations_and_extreme_coordinate_arithmetic_are_bounded() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_function_iterations"));
+    assert_eq!(
+        issue.limit(),
+        Some(CalculationLimitKind::FunctionIterations)
+    );
     assert_eq!(
         calculation.cell(cell_id(2)),
         Some(&CalculationCellResult::Value(CellValue::Error(
@@ -5614,6 +5646,10 @@ fn xlookup_reuses_xmatch_modes_and_spills_selected_rows_and_columns() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_function_iterations"));
+    assert_eq!(
+        issue.limit(),
+        Some(CalculationLimitKind::FunctionIterations)
+    );
 }
 
 #[test]
@@ -5878,6 +5914,7 @@ fn let_and_lambda_limits_have_distinct_units_and_stable_details() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_let_bindings"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::LetBindings));
 
     let invocation_limits = CalculationLimits::default()
         .with_max_lambda_invocations(2)
@@ -5892,6 +5929,7 @@ fn let_and_lambda_limits_have_distinct_units_and_stable_details() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_lambda_invocations"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::LambdaInvocations));
 
     let depth_limits = CalculationLimits::default()
         .with_max_lambda_depth(1)
@@ -5909,6 +5947,7 @@ fn let_and_lambda_limits_have_distinct_units_and_stable_details() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_lambda_depth"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::LambdaDepth));
 
     let let_only = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, "LET(x,1,LET(y,2,x+y))")]),
@@ -5963,6 +6002,7 @@ fn let_binding_limit_covers_the_excel_boundary() {
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
     assert_eq!(issue.detail(), Some("max_let_bindings"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::LetBindings));
 }
 
 #[test]
@@ -6294,6 +6334,28 @@ fn assert_capability_issue(
             .iter()
             .any(|issue| issue.code() == expected && issue.detail() == detail),
         "missing issue {expected:?} in column {column}: {issues:?}",
+    );
+}
+
+fn assert_capability_limit(
+    report: &cellrune::FormulaCapabilityReport,
+    column: u32,
+    expected: CalculationLimitKind,
+) {
+    let entry = report
+        .entries()
+        .iter()
+        .find(|entry| entry.cell() == cell_id(column))
+        .expect("formula capability entry");
+    let FormulaCapability::Unsupported(issues) = entry.capability() else {
+        panic!("formula capability must be unsupported in column {column}");
+    };
+    assert!(
+        issues.iter().any(|issue| {
+            issue.code() == CalculationIssueCode::ResourceLimitExceeded
+                && issue.limit() == Some(expected)
+        }),
+        "missing {expected:?} limit in column {column}: {issues:?}",
     );
 }
 

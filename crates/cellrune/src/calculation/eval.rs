@@ -1187,11 +1187,8 @@ fn value_from_calculation_result(result: &CalculationCellResult) -> Value {
     match result {
         CalculationCellResult::Value(value) => value_from_cell(value),
         CalculationCellResult::Unavailable(issue) => {
-            let kind = if issue.code() == CalculationIssueCode::ResourceLimitExceeded {
-                issue
-                    .detail()
-                    .and_then(CalculationLimitKind::from_detail)
-                    .map_or(ErrorKind::Unsupported, ErrorKind::ResourceLimit)
+            let kind = if let Some(limit) = issue.limit() {
+                ErrorKind::ResourceLimit(limit)
             } else if issue.code() == CalculationIssueCode::CircularReference {
                 ErrorKind::Ref
             } else {
@@ -1645,6 +1642,7 @@ mod tests {
         };
         assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
         assert_eq!(issue.detail(), Some("max_reference_areas"));
+        assert_eq!(issue.limit(), Some(CalculationLimitKind::ReferenceAreas));
 
         let limits = crate::CalculationLimits::default()
             .with_max_function_iterations(2)
@@ -1675,6 +1673,10 @@ mod tests {
         };
         assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
         assert_eq!(issue.detail(), Some("max_function_iterations"));
+        assert_eq!(
+            issue.limit(),
+            Some(CalculationLimitKind::FunctionIterations)
+        );
 
         let limits = crate::CalculationLimits::default()
             .with_max_array_cells(3)
@@ -1695,6 +1697,7 @@ mod tests {
             };
             assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
             assert_eq!(issue.detail(), Some("max_array_cells"));
+            assert_eq!(issue.limit(), Some(CalculationLimitKind::ArrayCells));
         }
         for address in ["H29", "H30"] {
             let id = CalculationCellId::new(
@@ -1727,6 +1730,7 @@ mod tests {
         };
         assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
         assert_eq!(issue.detail(), Some("max_reference_areas"));
+        assert_eq!(issue.limit(), Some(CalculationLimitKind::ReferenceAreas));
     }
 
     fn generated_analysis_workbook() -> WorkbookSnapshot {

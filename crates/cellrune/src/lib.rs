@@ -102,9 +102,9 @@ pub use address::{CellAddress, CellRange, Column, EXCEL_MAX_COLUMNS, EXCEL_MAX_R
 pub use calculation::{
     ApplyChangesError, ArithmeticSemantics, CalculationCellId, CalculationCellResult,
     CalculationDecisionReason, CalculationDelta, CalculationDeltaCell, CalculationDeltaPage,
-    CalculationExecutionMode, CalculationIssue, CalculationIssueCode, CalculationLimits,
-    CalculationOptions, CalculationOptionsError, CalculationSnapshot, CancellationToken,
-    CompletedCalculation, CompletedWorkbookTransaction, DefinedNameAnalysis,
+    CalculationExecutionMode, CalculationIssue, CalculationIssueCode, CalculationLimitKind,
+    CalculationLimits, CalculationOptions, CalculationOptionsError, CalculationSnapshot,
+    CancellationToken, CompletedCalculation, CompletedWorkbookTransaction, DefinedNameAnalysis,
     DefinedNameAnalysisError, DefinedNameAnalysisErrorKind, DefinedNameAnalysisLimitKind,
     DefinedNameAnalysisOptions, DefinedNameAnalysisOptionsError, DefinedNameDynamicKind,
     DefinedNameExternalReference, DefinedNameExternalTargetKind, DefinedNameInvalidReason,
