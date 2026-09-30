@@ -432,6 +432,11 @@ fn index_archive<R: Read + Seek>(
 /// the declared length, and `spent` accumulates the bytes actually produced across
 /// the whole package. Together those two checks make the declared metadata that
 /// [`index_archive`] budgets against trustworthy for every part that is read.
+///
+/// [`index_archive`] has already held the declared size to the entry, total, and ratio
+/// limits, so the part buffer is reserved once at that size and never grows. Inflation
+/// stops one byte past it, which is enough to prove an under-declared entry without
+/// allocating what it really expands to.
 fn read_required_part<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     entries: &BTreeMap<PartPath, usize>,
@@ -442,20 +447,30 @@ fn read_required_part<R: Read + Seek>(
     let index = entries.get(part).ok_or_else(|| {
         XlsxReadError::new(XlsxErrorCode::MissingPart).at_source(part.source_id())
     })?;
-    let file = archive.by_index(*index).map_err(zip_error)?;
+    let mut file = archive.by_index(*index).map_err(zip_error)?;
     let declared = file.size();
     let mut bytes = Vec::new();
-    file.take(limits.max_entry_uncompressed_bytes().saturating_add(1))
+    usize::try_from(declared)
+        .map_err(|error| XlsxReadError::new(XlsxErrorCode::EntryTooLarge).with_cause(error))
+        .and_then(|capacity| {
+            bytes
+                .try_reserve_exact(capacity)
+                .map_err(|error| XlsxReadError::new(XlsxErrorCode::EntryTooLarge).with_cause(error))
+        })
+        .map_err(|error| error.at_source(part.source_id()))?;
+    let invalid_zip = |error: std::io::Error| {
+        XlsxReadError::new(XlsxErrorCode::InvalidZip)
+            .at_source(part.source_id())
+            .with_cause(error)
+    };
+    file.by_ref()
+        .take(declared)
         .read_to_end(&mut bytes)
-        .map_err(|error| {
-            XlsxReadError::new(XlsxErrorCode::InvalidZip)
-                .at_source(part.source_id())
-                .with_cause(error)
-        })?;
-    let produced = bytes.len() as u64;
-    if produced > limits.max_entry_uncompressed_bytes() {
-        return Err(XlsxReadError::new(XlsxErrorCode::EntryTooLarge).at_source(part.source_id()));
-    }
+        .map_err(invalid_zip)?;
+    // Reading past the declared size also reaches the end of the entry, where the ZIP
+    // reader validates its CRC.
+    let overflow = file.read(&mut [0_u8; 1]).map_err(invalid_zip)?;
+    let produced = bytes.len() as u64 + overflow as u64;
     if produced != declared {
         return Err(XlsxReadError::new(XlsxErrorCode::DeclaredSizeMismatch)
             .with_detail(format!("declared {declared} bytes, read {produced} bytes"))

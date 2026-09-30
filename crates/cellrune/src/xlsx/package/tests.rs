@@ -246,10 +246,11 @@ fn under_declared_entry_size_is_rejected_when_the_part_is_read() {
     // Every central-directory budget accepts the archive because it declares a
     // single byte. The mismatch is only observable once the entry is inflated,
     // so a `DeclaredSizeMismatch` here proves the read path, not the index path,
-    // is what stops the amplification.
+    // is what stops the amplification, one byte past the declared size.
     let error = inspect_package(Cursor::new(archive), ReadOptions::default())
         .expect_err("an entry that hides its real size must be rejected");
     assert_eq!(error.code(), XlsxErrorCode::DeclaredSizeMismatch, "{error}");
+    assert_eq!(error.detail(), Some("declared 1 bytes, read 2 bytes"));
 }
 
 #[test]
