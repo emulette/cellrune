@@ -10,7 +10,7 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
-## [0.1.22] - 2026-09-29
+## [0.1.22] - 2026-09-30
 
 ### Added
 
