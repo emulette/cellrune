@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.22, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.23, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -218,6 +218,16 @@ than guessing a name from a different XLSX crate (`calamine`,
   cached text result a cell materializes and fails with `TotalCellTextTooLarge`
   (`xlsx.total_cell_text_too_large`). Cell text decodes OOXML `_xHHHH_` escapes,
   and writers escape XML-forbidden characters the same way.
+- A limit failure's `XlsxReadError::observed() -> Option<u64>` is the measured
+  value that exceeded the limit named by its code, in that limit's unit:
+  bytes, a count, a nesting depth, or the uncompressed-to-compressed ratio
+  rounded up. Reading stops at the first value past a limit, so a running total
+  reports that value rather than the size of the whole input. It is `None`
+  for other codes and for failures with no measurement, such as a zero-byte
+  compressed entry or a failed allocation. `TooManyPhoneticRuns` covers two
+  limits; `.phonetic_run_limit()` returns `PhoneticRunLimitKind::PerItem` or
+  `Total` for it. A package part is read into one buffer of its declared size,
+  and inflating past that size fails with `DeclaredSizeMismatch`.
 
 ### Workbook model — read-only, format-neutral
 
@@ -316,10 +326,11 @@ than guessing a name from a different XLSX crate (`calamine`,
 
 ### Package-backed document and preservation writing
 
-- `XlsxDocument`: `.workbook()`, `.input_hash()`, `.kind()`,
+- `XlsxDocument`: `.workbook()`, `.input_hash()`, `.input_bytes()`, `.kind()`,
   `.semantic_revision()`, `.presentation()`, `.presentation_revision()`,
   `.package_summary()`, `.workbook_part()`, `.worksheet_part(SheetId)`, and
-  `.table_part(TableId)`.
+  `.table_part(TableId)`. `.input_bytes() -> &[u8]` borrows the exact archive
+  bytes retained for round-trip writing; `.input_hash()` is their SHA-256.
 - `XlsxDocumentKind`: `Xlsx | Xlsm`. Macro parts are retained but never
   executed.
 - `write_preserved_xlsx_bytes(&XlsxDocument, WriteOptions) ->
@@ -543,7 +554,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.22 catalog contains 454 official
+  `.is_official()`. The 0.1.23 catalog contains 454 official
   Excel-facing names and one non-official compatibility entry for the OOXML
   dummy-function marker, for 455 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
@@ -706,6 +717,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.sheet_not_found`, `.invalid_limits`, `.target_limit_exceeded`, `.evaluation_limit_exceeded`,
   `.cancelled`, or `.stale_result` under the same `calculation.target` prefix. Bindings also use
   existing address/sheet validation and active-request cancellation codes.
+  `TargetCalculationError::requested_cell_count() -> Option<u64>` returns the distinct cells
+  counted when the result-cell limit stopped a request; counting stops at the first target or
+  cell past the limit, and a request stopped by the target-count limit reports `None`.
+  `.evaluated_count() -> Option<usize>` returns the evaluations performed before the work limit
+  stopped a request, counted like `TargetCalculationResult::evaluated_count()`.
 
 - `calculate_workbook(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot` —
   stateless full recalculation and the correctness oracle; never mutates the
@@ -735,7 +751,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   budgets: formula tokens, source bytes, AST nodes, AST nesting depth,
   dependency edges, reference areas, array cells, calculated text bytes,
   data-dependent function iterations, LET bindings, active LAMBDA depth, and
-  cumulative LAMBDA/MAP invocations.
+  cumulative LAMBDA/MAP invocations. A `ResourceLimitExceeded` issue names the
+  exceeded budget through `CalculationIssue::limit() ->
+  Option<CalculationLimitKind>`, one non-exhaustive variant per budget; its
+  `.detail()` remains the `max_*` limit name.
 - `LAMBDA` is a first-class scoped value. Literal, immediate, `LET`-bound,
   workbook-defined, and sheet-local callables share one evaluator with lexical
   capture and caller isolation. `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`,
@@ -825,13 +844,13 @@ than guessing a name from a different XLSX crate (`calamine`,
 | `CalculationOptionsError` | A `CalculationLimits` budget was invalid (zero) | Fails before calculation starts | Match on the enum variant |
 | `DefinedNameAnalysisOptionsError` | A defined-name chain or scan budget was invalid (zero) | Fails before inspection starts | Match the concrete error type |
 | `DefinedNameAnalysisError` | Defined-name inspection saw an unknown current sheet, exhausted a budget, or was cancelled | No semantic inspection result is produced | `.kind()`, optional `.limit()`, and `.detail()` |
-| `XlsxReadError` | No trustworthy `WorkbookSnapshot` could be produced at all | No snapshot | `.code(): XlsxErrorCode`, `.source_id()`, `.detail()` |
+| `XlsxReadError` | No trustworthy `WorkbookSnapshot` could be produced at all | No snapshot | `.code(): XlsxErrorCode`, `.source_id()`, `.detail()`, optional `.observed()` and `.phonetic_run_limit()` |
 | `WriteOptionsError` | A `WriteLimits` budget was invalid (zero) | Fails before writing starts | Match on the enum variant |
 | `XlsxWriteError` | The source/calculation binding, package plan, write budget, destination, or completed output was invalid | No successful output artifact | `.code(): XlsxWriteErrorCode`, `.source_id()`, `.detail()` |
 | `ApplyChangesError` | An atomic session edit failed either session-state or workbook validation | No edit is committed | Match `Session` or `Validation` |
 | `SessionError` | Revision, incremental-safety, cancellation, cursor, or session resource rules rejected an operation | Session remains valid; installation is rejected when applicable | `.code(): SessionErrorCode`, `.detail()` |
 | `Diagnostic` | Read succeeded, but a compatibility caveat exists (e.g. external link, macro) | Snapshot exists, on `.diagnostics()` | `.code(): DiagnosticCode`, `.severity()`, `.location()` |
-| `CalculationIssue` | One specific formula could not be calculated | Independent formulas can still produce results; dependents may report `BlockedByUpstream` | `.code(): CalculationIssueCode`, `.detail()` |
+| `CalculationIssue` | One specific formula could not be calculated | Independent formulas can still produce results; dependents may report `BlockedByUpstream` | `.code(): CalculationIssueCode`, `.detail()`, optional `.limit()` |
 | `CellValue::Error(ExcelError)` | An actual spreadsheet error value (`#DIV/0!`, `#REF!`, ...) | This *is* the cell's value | `.as_str()` on the `ExcelError` |
 
 An unsupported engine capability is never converted into an `ExcelError` and

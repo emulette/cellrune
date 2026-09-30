@@ -8,24 +8,24 @@ transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.22 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.23 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.22
+cargo add cellrune@0.1.23
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.22"
+cellrune = "0.1.23"
 ```
 
 ## Features
 
 - reads `.xlsx` files from paths, byte slices, or `Read + Seek` streams;
-- opens package-backed `.xlsx` and `.xlsm` documents with exact SHA-256 identity and bounded
-  round-trip preservation;
+- opens package-backed `.xlsx` and `.xlsm` documents with exact SHA-256 identity, borrowed access
+  to the retained input bytes, and bounded round-trip preservation;
 - preserves sheet order, sparse cells, formulas, saved results, defined names, and relevant
   number-format metadata;
 - exposes merged ranges and validated worksheet-owned Excel tables, including stable table and
@@ -48,7 +48,8 @@ cellrune = "0.1.22"
 - applies configurable limits to ZIP, XML, workbook, formula, dependency, text, and array work;
 - never executes macros, never follows external links, and never reads the host clock for
   `TODAY()` or `NOW()`;
-- returns stable error and issue codes for programmatic handling;
+- returns stable error and issue codes for programmatic handling; in Rust, resource-limit failures
+  also name the exceeded limit or report the value that exceeded it;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
 - creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name, table rename,
@@ -300,12 +301,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.22 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.23 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.22"
-npm install "@cellrune/node@0.1.22"
+python -m pip install "cellrune==0.1.23"
+npm install "@cellrune/node@0.1.23"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

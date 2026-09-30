@@ -10,6 +10,30 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-09-30
+
+### Added
+
+- `XlsxDocument::input_bytes` borrows the exact archive bytes a document retains for round-trip
+  writing, without copying them; `input_hash` is their SHA-256.
+- `XlsxReadError::observed` returns the measured value that exceeded a read limit, in that limit's
+  unit, and `XlsxReadError::phonetic_run_limit` returns whether `xlsx.too_many_phonetic_runs`
+  exceeded the per-item or total run limit as a `PhoneticRunLimitKind`.
+- `CalculationIssue::limit` returns the `CalculationLimitKind` a
+  `calculation.resource_limit_exceeded` issue exceeded.
+- `TargetCalculationError::requested_cell_count` returns the distinct cells counted when a
+  targeted calculation passed its result-cell limit, and `evaluated_count` returns the evaluations
+  performed before its work limit stopped it.
+
+Existing error codes, details, and messages are unchanged.
+
+### Fixed
+
+- Reading a package part reserves its declared size once and stops inflating one byte past it, so
+  an entry that under-declares its size fails with `xlsx.declared_size_mismatch` without first
+  allocating up to the entry limit. Such an entry now reports that code even when it would inflate
+  past the entry limit, where it previously reported `xlsx.entry_too_large`.
+
 ## [0.1.22] - 2026-09-30
 
 ### Added
@@ -881,7 +905,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/emulette/cellrune/compare/v0.1.22...v0.1.23
+[0.1.22]: https://github.com/emulette/cellrune/compare/v0.1.21...v0.1.22
+[0.1.21]: https://github.com/emulette/cellrune/compare/v0.1.20...v0.1.21
+[0.1.20]: https://github.com/emulette/cellrune/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/emulette/cellrune/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/emulette/cellrune/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/emulette/cellrune/compare/v0.1.16...v0.1.17
