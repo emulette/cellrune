@@ -44,7 +44,7 @@ jobs:
           restore-keys: cargo-registry-${{ runner.os }}-1.92.0-
 
       - name: Install pinned cargo-deny
-        uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
         with:
           tool: cargo-deny@0.20.2
           fallback: none
