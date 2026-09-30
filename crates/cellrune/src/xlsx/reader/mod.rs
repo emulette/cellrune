@@ -164,6 +164,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         .fold(0_u64, u64::saturating_add);
     if total_formula_bytes > limits.max_total_formula_bytes() {
         return Err(XlsxReadError::new(XlsxErrorCode::TotalFormulaBytesTooLarge)
+            .with_observed(total_formula_bytes)
             .at_source(workbook_part.source_id()));
     }
     let mut non_worksheet_tabs = Vec::new();

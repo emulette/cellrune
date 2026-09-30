@@ -635,7 +635,9 @@ fn charge_fragment_resources(
     ) {
         state.filter_item_count = state.filter_item_count.saturating_add(1);
         if state.filter_item_count > limits.max_table_filter_items() {
-            return Err(budget.error(XlsxErrorCode::TooManyTableFilterItems));
+            return Err(budget
+                .error(XlsxErrorCode::TooManyTableFilterItems)
+                .with_observed(state.filter_item_count));
         }
     }
     let attribute_bytes = attributes.iter().fold(0_u64, |total, (_, _, value)| {
@@ -643,7 +645,9 @@ fn charge_fragment_resources(
     });
     state.filter_text_bytes = state.filter_text_bytes.saturating_add(attribute_bytes);
     if state.filter_text_bytes > limits.max_table_filter_text_bytes() {
-        return Err(budget.error(XlsxErrorCode::TableFilterTextTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::TableFilterTextTooLarge)
+            .with_observed(state.filter_text_bytes));
     }
     Ok(())
 }
@@ -1140,7 +1144,9 @@ fn finish_formula(
     }
     *total_formula_bytes = total_formula_bytes.saturating_add(capture.bytes_seen);
     if *total_formula_bytes > budget.limits().max_total_formula_bytes() {
-        return Err(budget.error(XlsxErrorCode::TotalFormulaBytesTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::TotalFormulaBytesTooLarge)
+            .with_observed(*total_formula_bytes));
     }
     let Some(column_index) = capture.column_index else {
         return Ok(());
@@ -1174,7 +1180,9 @@ fn charge_formula_text(
 ) -> Result<(), XlsxReadError> {
     capture.bytes_seen = capture.bytes_seen.saturating_add(value.len() as u64);
     if capture.bytes_seen > budget.limits().max_formula_bytes() {
-        return Err(budget.error(XlsxErrorCode::FormulaTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::FormulaTooLarge)
+            .with_observed(capture.bytes_seen));
     }
     if append {
         capture.text.push_str(value);
@@ -1442,7 +1450,9 @@ fn process_column(
     // ones in a table that has already been marked semantically invalid.
     state.column_count = state.column_count.saturating_add(1);
     if state.column_count > limits.max_table_columns() {
-        return Err(budget.error(XlsxErrorCode::TooManyTableColumns));
+        return Err(budget
+            .error(XlsxErrorCode::TooManyTableColumns)
+            .with_observed(state.column_count));
     }
     if let Some(name) = attributes.unqualified("name") {
         check_name_bytes(name, limits, budget)?;
@@ -1811,7 +1821,9 @@ fn check_name_bytes(
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
     if value.len() as u64 > limits.max_table_name_bytes() {
-        return Err(budget.error(XlsxErrorCode::TableNameTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::TableNameTooLarge)
+            .with_observed(value.len() as u64));
     }
     Ok(())
 }

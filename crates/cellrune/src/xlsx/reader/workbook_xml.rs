@@ -213,8 +213,11 @@ fn process_element(
         && local_name == SHEET
         && state.stack.get(1).map(|name| name.as_ref()) == Some(SHEETS)
     {
-        if state.sheets.len() as u64 >= budget.limits().max_sheets() {
-            return Err(budget.error(XlsxErrorCode::TooManySheets));
+        let count = state.sheets.len() as u64 + 1;
+        if count > budget.limits().max_sheets() {
+            return Err(budget
+                .error(XlsxErrorCode::TooManySheets)
+                .with_observed(count));
         }
         let sheet = parse_sheet(attributes, budget)?;
         if !state.relationship_ids.insert(sheet.relationship_id.clone()) {

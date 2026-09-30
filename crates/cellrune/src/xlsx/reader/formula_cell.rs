@@ -104,7 +104,9 @@ impl RawFormula {
     pub(super) fn append(&mut self, text: String, budget: &XmlBudget) -> Result<(), XlsxReadError> {
         let next_length = self.text.len().saturating_add(text.len()) as u64;
         if next_length > budget.limits().max_formula_bytes() {
-            return Err(budget.error(XlsxErrorCode::FormulaTooLarge));
+            return Err(budget
+                .error(XlsxErrorCode::FormulaTooLarge)
+                .with_observed(next_length));
         }
         self.text.push_str(&text);
         Ok(())
@@ -306,7 +308,9 @@ fn finish_shared(
 
 fn required_formula_text(text: String, budget: &XmlBudget) -> Result<FormulaText, XlsxReadError> {
     if text.len() as u64 > budget.limits().max_formula_bytes() {
-        return Err(budget.error(XlsxErrorCode::FormulaTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::FormulaTooLarge)
+            .with_observed(text.len() as u64));
     }
     FormulaText::from_xlsx(text).map_err(|error| {
         budget

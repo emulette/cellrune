@@ -287,6 +287,8 @@ fn rejects_invalid_formula_metadata_and_enforces_formula_budget() {
     )
     .expect_err("formula byte budget");
     assert_eq!(error.code(), XlsxErrorCode::FormulaTooLarge);
+    // Defined names are read before worksheets.
+    assert_eq!(error.observed(), Some("Sheet1!$A$1".len() as u64));
 
     let limits = ReadLimits::default()
         .with_max_total_formula_bytes(20)
@@ -297,6 +299,8 @@ fn rejects_invalid_formula_metadata_and_enforces_formula_budget() {
     )
     .expect_err("total formula byte budget");
     assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
+    // Both defined names, then `1+1` and `"text"`.
+    assert_eq!(error.observed(), Some(11 + 4 + 3 + 6));
 }
 
 #[test]

@@ -431,7 +431,9 @@ fn charge_formula_bytes(
     let text_bytes = formula.text().map_or(0, |text| text.as_str().len() as u64);
     *total_formula_bytes = total_formula_bytes.saturating_add(text_bytes);
     if *total_formula_bytes > budget.limits().max_total_formula_bytes() {
-        return Err(budget.error(XlsxErrorCode::TotalFormulaBytesTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::TotalFormulaBytesTooLarge)
+            .with_observed(*total_formula_bytes));
     }
     Ok(())
 }
@@ -453,7 +455,9 @@ fn charge_cell_text_bytes(
     };
     *total_cell_text_bytes = total_cell_text_bytes.saturating_add(text.len() as u64);
     if *total_cell_text_bytes > budget.limits().max_total_cell_text_bytes() {
-        return Err(budget.error(XlsxErrorCode::TotalCellTextTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::TotalCellTextTooLarge)
+            .with_observed(*total_cell_text_bytes));
     }
     Ok(())
 }

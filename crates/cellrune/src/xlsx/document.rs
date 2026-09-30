@@ -232,9 +232,9 @@ fn read_bounded_archive<R: Read + Seek>(
         .seek(SeekFrom::End(0))
         .map_err(|error| XlsxReadError::new(XlsxErrorCode::Io).with_cause(error))?;
     if byte_length > maximum {
-        return Err(
-            XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge).with_detail(byte_length.to_string())
-        );
+        return Err(XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge)
+            .with_detail(byte_length.to_string())
+            .with_observed(byte_length));
     }
     reader
         .seek(SeekFrom::Start(0))
@@ -250,9 +250,9 @@ fn read_bounded_archive<R: Read + Seek>(
         .read_to_end(&mut bytes)
         .map_err(|error| XlsxReadError::new(XlsxErrorCode::Io).with_cause(error))?;
     if bytes.len() as u64 > maximum {
-        return Err(
-            XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge).with_detail(bytes.len().to_string())
-        );
+        return Err(XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge)
+            .with_detail(bytes.len().to_string())
+            .with_observed(bytes.len() as u64));
     }
     Ok(bytes)
 }
@@ -308,6 +308,7 @@ mod tests {
             .expect_err("reported length must be bounded before reading");
         assert_eq!(error.code(), XlsxErrorCode::ArchiveTooLarge);
         assert_eq!(error.detail(), Some("5"));
+        assert_eq!(error.observed(), Some(5));
     }
 
     #[test]
@@ -317,6 +318,7 @@ mod tests {
             .expect_err("bytes read must be checked independently");
         assert_eq!(error.code(), XlsxErrorCode::ArchiveTooLarge);
         assert_eq!(error.detail(), Some("5"));
+        assert_eq!(error.observed(), Some(5));
     }
 
     fn options_with_archive_limit(limit: u64) -> ReadOptions {

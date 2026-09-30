@@ -3,7 +3,7 @@ use std::io::{Cursor, Write};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
-use super::super::{ReadLimits, ReadOptions, ReadOptionsError, XlsxErrorCode};
+use super::super::{ReadLimits, ReadOptions, ReadOptionsError, XlsxErrorCode, XlsxReadError};
 use super::inspect_package;
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -190,7 +190,8 @@ fn entry_count_budget_is_enforced_before_xml_parsing() {
     let limits = ReadLimits::default()
         .with_max_entries(4)
         .expect("non-zero limit");
-    assert_error(minimal_entries(), limits, XlsxErrorCode::TooManyEntries);
+    let error = assert_error(minimal_entries(), limits, XlsxErrorCode::TooManyEntries);
+    assert_eq!(error.observed(), Some(5));
 }
 
 #[test]
@@ -199,9 +200,11 @@ fn archive_byte_budget_is_enforced_before_zip_parsing() {
     let limits = ReadLimits::default()
         .with_max_archive_bytes(archive.len() as u64 - 1)
         .expect("non-zero limit");
+    let archive_bytes = archive.len() as u64;
     let error = inspect_package(Cursor::new(archive), ReadOptions::new(limits))
         .expect_err("oversized archive must fail");
     assert_eq!(error.code(), XlsxErrorCode::ArchiveTooLarge);
+    assert_eq!(error.observed(), Some(archive_bytes));
 }
 
 #[test]
@@ -219,7 +222,8 @@ fn entry_size_budget_is_enforced_before_decompression() {
     let limits = ReadLimits::default()
         .with_max_entry_uncompressed_bytes(32)
         .expect("non-zero limit");
-    assert_error(minimal_entries(), limits, XlsxErrorCode::EntryTooLarge);
+    let error = assert_error(minimal_entries(), limits, XlsxErrorCode::EntryTooLarge);
+    assert_eq!(error.observed(), Some(CONTENT_TYPES.len() as u64));
 }
 
 #[test]
@@ -227,11 +231,13 @@ fn total_size_budget_is_enforced_from_central_directory() {
     let limits = ReadLimits::default()
         .with_max_total_uncompressed_bytes(128)
         .expect("non-zero limit");
-    assert_error(
+    let error = assert_error(
         minimal_entries(),
         limits,
         XlsxErrorCode::TotalUncompressedTooLarge,
     );
+    assert_eq!(error.detail(), None);
+    assert_eq!(error.observed(), Some(CONTENT_TYPES.len() as u64));
 }
 
 #[test]
@@ -257,10 +263,16 @@ fn under_declared_entry_size_is_rejected_when_the_part_is_read() {
 fn compression_ratio_budget_blocks_highly_compressible_entries() {
     let mut entries = minimal_entries();
     entries.push(FixtureEntry::deflated("large.bin", vec![0; 64 * 1024]));
+    let compressed = zip::ZipArchive::new(Cursor::new(build_archive(entries.clone())))
+        .expect("fixture archive")
+        .by_name("large.bin")
+        .expect("fixture entry")
+        .compressed_size();
     let limits = ReadLimits::default()
         .with_max_compression_ratio(2)
         .expect("non-zero limit");
-    assert_error(entries, limits, XlsxErrorCode::CompressionRatioExceeded);
+    let error = assert_error(entries, limits, XlsxErrorCode::CompressionRatioExceeded);
+    assert_eq!(error.observed(), Some((64 * 1024_u64).div_ceil(compressed)));
 }
 
 #[test]
@@ -268,20 +280,22 @@ fn xml_depth_and_attribute_budgets_are_enforced() {
     let depth_limits = ReadLimits::default()
         .with_max_xml_depth(1)
         .expect("non-zero limit");
-    assert_error(
+    let error = assert_error(
         minimal_entries(),
         depth_limits,
         XlsxErrorCode::XmlDepthExceeded,
     );
+    assert_eq!(error.observed(), Some(2));
 
     let attribute_limits = ReadLimits::default()
         .with_max_xml_attributes(1)
         .expect("non-zero limit");
-    assert_error(
+    let error = assert_error(
         minimal_entries(),
         attribute_limits,
         XlsxErrorCode::XmlAttributesExceeded,
     );
+    assert_eq!(error.observed(), Some(2));
 }
 
 #[test]
@@ -412,13 +426,18 @@ fn rename_entry(entries: &mut [FixtureEntry], old_name: &str, new_name: &str) {
     entry.name = new_name.to_owned();
 }
 
-fn assert_error(entries: Vec<FixtureEntry>, limits: ReadLimits, expected: XlsxErrorCode) {
+fn assert_error(
+    entries: Vec<FixtureEntry>,
+    limits: ReadLimits,
+    expected: XlsxErrorCode,
+) -> XlsxReadError {
     let error = inspect_package(
         Cursor::new(build_archive(entries)),
         ReadOptions::new(limits),
     )
     .expect_err("fixture must be rejected");
     assert_eq!(error.code(), expected, "{error}");
+    error
 }
 
 /// Rewrites the declared uncompressed size of one entry in both the local file
@@ -480,6 +499,7 @@ fn build_archive(entries: Vec<FixtureEntry>) -> Vec<u8> {
         .into_inner()
 }
 
+#[derive(Clone)]
 struct FixtureEntry {
     name: String,
     contents: Vec<u8>,

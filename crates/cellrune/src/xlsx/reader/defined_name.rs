@@ -36,13 +36,14 @@ impl DefinedNamesState {
         depth: u64,
         budget: &XmlBudget,
     ) -> Result<(), XlsxReadError> {
-        if self.current.is_some() || self.values.len() as u64 >= budget.limits().max_defined_names()
-        {
-            return Err(budget.error(if self.current.is_some() {
-                XlsxErrorCode::InvalidDefinedName
-            } else {
-                XlsxErrorCode::TooManyDefinedNames
-            }));
+        if self.current.is_some() {
+            return Err(budget.error(XlsxErrorCode::InvalidDefinedName));
+        }
+        let count = self.values.len() as u64 + 1;
+        if count > budget.limits().max_defined_names() {
+            return Err(budget
+                .error(XlsxErrorCode::TooManyDefinedNames)
+                .with_observed(count));
         }
         let name = required(attributes.unqualified("name"), "name", budget)?;
         let local_sheet_index = attributes
@@ -72,7 +73,9 @@ impl DefinedNamesState {
         };
         let next_length = current.formula.len().saturating_add(text.len()) as u64;
         if next_length > budget.limits().max_formula_bytes() {
-            return Err(budget.error(XlsxErrorCode::FormulaTooLarge));
+            return Err(budget
+                .error(XlsxErrorCode::FormulaTooLarge)
+                .with_observed(next_length));
         }
         current.formula.push_str(&text);
         Ok(())

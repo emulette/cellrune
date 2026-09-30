@@ -169,12 +169,14 @@ fn semantic_limits_and_invalid_shared_string_indexes_are_rejected() {
     let error =
         read_xlsx(Cursor::new(&archive), ReadOptions::new(limits)).expect_err("sheet limit");
     assert_eq!(error.code(), XlsxErrorCode::TooManySheets);
+    assert_eq!(error.observed(), Some(2));
 
     let limits = ReadLimits::default()
         .with_max_cells_per_sheet(1)
         .expect("nonzero cell limit");
     let error = read_xlsx(Cursor::new(&archive), ReadOptions::new(limits)).expect_err("cell limit");
     assert_eq!(error.code(), XlsxErrorCode::TooManyCellsInSheet);
+    assert_eq!(error.observed(), Some(2));
 
     let limits = ReadLimits::default()
         .with_max_total_cells(1)
@@ -182,6 +184,7 @@ fn semantic_limits_and_invalid_shared_string_indexes_are_rejected() {
     let error =
         read_xlsx(Cursor::new(&archive), ReadOptions::new(limits)).expect_err("total cell limit");
     assert_eq!(error.code(), XlsxErrorCode::TooManyCells);
+    assert_eq!(error.observed(), Some(2));
 
     let invalid_sheet = SHEET_ONE.replacen("<v>0</v>", "<v>99</v>", 1);
     let error = read_xlsx(
@@ -193,6 +196,25 @@ fn semantic_limits_and_invalid_shared_string_indexes_are_rejected() {
 }
 
 #[test]
+fn defined_name_budget_reports_the_count_that_exceeded_it() {
+    let workbook = WORKBOOK.replace(
+        "  <calcPr",
+        "  <definedNames><definedName name=\"One\">1</definedName><definedName name=\"Two\">2</definedName></definedNames>\n  <calcPr",
+    );
+    let archive = build_table_archive_with_workbook(&workbook, SHEET_ONE, &[]);
+    let read_with = |limit: u64| {
+        let limits = ReadLimits::default()
+            .with_max_defined_names(limit)
+            .expect("nonzero defined-name limit");
+        read_xlsx_bytes(&archive, ReadOptions::new(limits))
+    };
+    read_with(2).expect("exact defined-name budget");
+    let error = read_with(1).expect_err("defined-name budget");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyDefinedNames);
+    assert_eq!(error.observed(), Some(2));
+}
+
+#[test]
 fn shared_string_budgets_apply_to_decoded_rich_text() {
     let archive = build_archive(SHEET_ONE, SHARED_STRINGS);
     let limits = ReadLimits::default()
@@ -201,6 +223,8 @@ fn shared_string_budgets_apply_to_decoded_rich_text() {
     let error =
         read_xlsx(Cursor::new(archive), ReadOptions::new(limits)).expect_err("rich string limit");
     assert_eq!(error.code(), XlsxErrorCode::SharedStringTooLarge);
+    // "Hello" fits; appending the ", " run reaches seven bytes.
+    assert_eq!(error.observed(), Some(7));
 
     let archive = build_archive(SHEET_ONE, SHARED_STRINGS);
     let limits = ReadLimits::default()
@@ -209,6 +233,7 @@ fn shared_string_budgets_apply_to_decoded_rich_text() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(limits))
         .expect_err("total rich string limit");
     assert_eq!(error.code(), XlsxErrorCode::TotalSharedStringsTooLarge);
+    assert_eq!(error.observed(), Some("Hello, 世界".len() as u64));
 
     let archive = build_archive(
         SHEET_ONE,
@@ -220,6 +245,7 @@ fn shared_string_budgets_apply_to_decoded_rich_text() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(limits))
         .expect_err("declared shared string count limit");
     assert_eq!(error.code(), XlsxErrorCode::TooManySharedStrings);
+    assert_eq!(error.observed(), Some(2));
 }
 
 #[test]
@@ -237,6 +263,7 @@ fn cell_text_budget_charges_each_shared_reference_and_inline_string() {
     read_with(38).expect("exact cell text budget");
     let error = read_with(37).expect_err("cell text budget");
     assert_eq!(error.code(), XlsxErrorCode::TotalCellTextTooLarge);
+    assert_eq!(error.observed(), Some(38));
 }
 
 #[test]
@@ -717,6 +744,7 @@ fn phonetic_validation_and_reference_limits_are_document_only() {
     )
     .expect_err("two sheets reference the same annotated shared item");
     assert_eq!(error.code(), XlsxErrorCode::TooManyAnnotatedCells);
+    assert_eq!(error.observed(), Some(2));
 
     let shared_once_limits = ReadLimits::default()
         .with_max_total_phonetic_runs(1)
@@ -921,6 +949,7 @@ fn merged_range_budget_fails_the_read_with_a_dedicated_code() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(limits))
         .expect_err("third declaration must exceed the budget");
     assert_eq!(error.code(), XlsxErrorCode::TooManyMergedRanges);
+    assert_eq!(error.observed(), Some(3));
 }
 
 #[test]
@@ -2297,6 +2326,7 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     )
     .expect_err("three columns must exceed a limit of two");
     assert_eq!(error.code(), XlsxErrorCode::TooManyTableColumns);
+    assert_eq!(error.observed(), Some(3));
 
     let name_limit = ReadLimits::default()
         .with_max_table_name_bytes(4)
@@ -2304,6 +2334,7 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(name_limit))
         .expect_err("'Sales' must exceed a four-byte name limit");
     assert_eq!(error.code(), XlsxErrorCode::TableNameTooLarge);
+    assert_eq!(error.observed(), Some("Sales".len() as u64));
 
     let sheet = SHEET_WITH_TABLE.replace(
         r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
@@ -2320,6 +2351,7 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(tables_limit))
         .expect_err("two referenced parts must exceed a limit of one");
     assert_eq!(error.code(), XlsxErrorCode::TooManyTables);
+    assert_eq!(error.observed(), Some(2));
 
     let missing_relationship_ids = SHEET_WITH_TABLE.replace(
         r#"<tableParts count="1"><tablePart r:id="rId7"/></tableParts>"#,
@@ -2361,6 +2393,7 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     )
     .expect_err("table formulas must use the per-formula budget");
     assert_eq!(error.code(), XlsxErrorCode::FormulaTooLarge);
+    assert_eq!(error.observed(), Some("[@Amount]*2".len() as u64));
 
     let total_formula_limit = ReadLimits::default()
         .with_max_total_formula_bytes(20)
@@ -2368,6 +2401,10 @@ fn table_read_limits_fail_the_read_with_dedicated_codes() {
     let error = read_xlsx(Cursor::new(archive), ReadOptions::new(total_formula_limit))
         .expect_err("table formulas must use the workbook formula budget");
     assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
+    assert_eq!(
+        error.observed(),
+        Some(("[@Amount]*2".len() + "SUBTOTAL(109,[Amount])".len()) as u64)
+    );
 
     for invalid_table in [
         TABLE_WITH_METADATA.replacen(r#"id="1""#, r#"id="0""#, 1),
@@ -2432,6 +2469,7 @@ fn table_filter_resource_limits_are_exact_and_apply_to_invalid_tables() {
     )
     .expect_err("two filter items must exceed a limit of one");
     assert_eq!(error.code(), XlsxErrorCode::TooManyTableFilterItems);
+    assert_eq!(error.observed(), Some(2));
 
     let text_limit = ReadLimits::default()
         .with_max_table_filter_text_bytes(8)
@@ -2451,6 +2489,7 @@ fn table_filter_resource_limits_are_exact_and_apply_to_invalid_tables() {
     )
     .expect_err("filter text must use decoded UTF-8 byte length");
     assert_eq!(error.code(), XlsxErrorCode::TableFilterTextTooLarge);
+    assert_eq!(error.observed(), Some(8));
 
     let invalid_table = two_filters.replacen(r#"id="1""#, r#"id="0""#, 1);
     let error = read_xlsx(

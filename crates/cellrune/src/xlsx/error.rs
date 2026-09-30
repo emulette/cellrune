@@ -392,12 +392,24 @@ impl XlsxErrorCode {
     }
 }
 
+/// Which phonetic run limit an [`XlsxErrorCode::TooManyPhoneticRuns`] failure exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PhoneticRunLimitKind {
+    /// [`ReadLimits::max_phonetic_runs_per_item`](crate::ReadLimits::max_phonetic_runs_per_item).
+    PerItem,
+    /// [`ReadLimits::max_total_phonetic_runs`](crate::ReadLimits::max_total_phonetic_runs).
+    Total,
+}
+
 /// A source-linked XLSX read failure with a stable error code.
 #[derive(Debug)]
 pub struct XlsxReadError {
     code: XlsxErrorCode,
     detail: Option<Box<str>>,
     source_id: Option<SourceId>,
+    observed: Option<u64>,
+    phonetic_run_limit: Option<PhoneticRunLimitKind>,
     cause: Option<Box<dyn Error + Send + Sync>>,
 }
 
@@ -407,6 +419,8 @@ impl XlsxReadError {
             code,
             detail: None,
             source_id: None,
+            observed: None,
+            phonetic_run_limit: None,
             cause: None,
         }
     }
@@ -418,6 +432,16 @@ impl XlsxReadError {
 
     pub(crate) fn at_source(mut self, source_id: SourceId) -> Self {
         self.source_id = Some(source_id);
+        self
+    }
+
+    pub(crate) const fn with_observed(mut self, observed: u64) -> Self {
+        self.observed = Some(observed);
+        self
+    }
+
+    pub(crate) const fn with_phonetic_run_limit(mut self, limit: PhoneticRunLimitKind) -> Self {
+        self.phonetic_run_limit = Some(limit);
         self
     }
 
@@ -439,6 +463,25 @@ impl XlsxReadError {
     /// Returns source-specific context that supplements the stable error code.
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
+    }
+
+    /// Returns the measured value that exceeded the [`ReadLimits`](crate::ReadLimits) entry
+    /// named by a limit error code.
+    ///
+    /// The value is in that limit's unit: bytes, a count, a nesting depth, or for
+    /// [`XlsxErrorCode::CompressionRatioExceeded`] the uncompressed-to-compressed ratio
+    /// rounded up. Reading stops as soon as a limit is exceeded, so a running total is the
+    /// value counted at that point rather than the size of the whole input. `None` for other
+    /// codes and for limit failures that have no measurement, such as an entry that compresses
+    /// to zero bytes or a buffer the host could not allocate.
+    pub const fn observed(&self) -> Option<u64> {
+        self.observed
+    }
+
+    /// Returns which limit an [`XlsxErrorCode::TooManyPhoneticRuns`] failure exceeded, or `None`
+    /// for every other failure.
+    pub const fn phonetic_run_limit(&self) -> Option<PhoneticRunLimitKind> {
+        self.phonetic_run_limit
     }
 }
 

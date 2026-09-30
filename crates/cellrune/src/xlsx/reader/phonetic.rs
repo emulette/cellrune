@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::super::xml::{XmlAttributes, XmlBudget};
-use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
+use super::super::{PhoneticRunLimitKind, ReadLimits, XlsxErrorCode, XlsxReadError};
 use crate::presentation::validate_source_runs;
 use crate::{
     PhoneticAlignment, PhoneticAnnotation, PhoneticProperties, PhoneticRun, PhoneticTextRange,
@@ -23,11 +23,17 @@ impl PhoneticReadBudget {
         budget: &XmlBudget,
     ) -> Result<(), XlsxReadError> {
         if runs.len() as u64 > limits.max_phonetic_runs_per_item() {
-            return Err(budget.error(XlsxErrorCode::TooManyPhoneticRuns));
+            return Err(budget
+                .error(XlsxErrorCode::TooManyPhoneticRuns)
+                .with_observed(runs.len() as u64)
+                .with_phonetic_run_limit(PhoneticRunLimitKind::PerItem));
         }
         self.total_runs = self.total_runs.saturating_add(runs.len() as u64);
         if self.total_runs > limits.max_total_phonetic_runs() {
-            return Err(budget.error(XlsxErrorCode::TooManyPhoneticRuns));
+            return Err(budget
+                .error(XlsxErrorCode::TooManyPhoneticRuns)
+                .with_observed(self.total_runs)
+                .with_phonetic_run_limit(PhoneticRunLimitKind::Total));
         }
         let text_bytes = runs
             .iter()
@@ -35,7 +41,9 @@ impl PhoneticReadBudget {
             .fold(0_u64, u64::saturating_add);
         self.total_text_bytes = self.total_text_bytes.saturating_add(text_bytes);
         if self.total_text_bytes > limits.max_total_phonetic_text_bytes() {
-            return Err(budget.error(XlsxErrorCode::TotalPhoneticTextTooLarge));
+            return Err(budget
+                .error(XlsxErrorCode::TotalPhoneticTextTooLarge)
+                .with_observed(self.total_text_bytes));
         }
         Ok(())
     }
@@ -47,7 +55,9 @@ impl PhoneticReadBudget {
     ) -> Result<(), XlsxReadError> {
         self.annotated_cells = self.annotated_cells.saturating_add(1);
         if self.annotated_cells > limits.max_annotated_cells() {
-            return Err(budget.error(XlsxErrorCode::TooManyAnnotatedCells));
+            return Err(budget
+                .error(XlsxErrorCode::TooManyAnnotatedCells)
+                .with_observed(self.annotated_cells));
         }
         Ok(())
     }
@@ -79,10 +89,15 @@ impl PhoneticItemBuilder {
         limits: ReadLimits,
         budget: &XmlBudget,
     ) -> Result<(), XlsxReadError> {
-        if self.current_run.is_some()
-            || self.runs.len() as u64 >= limits.max_phonetic_runs_per_item()
-        {
+        if self.current_run.is_some() {
             return Err(budget.error(XlsxErrorCode::TooManyPhoneticRuns));
+        }
+        let count = self.runs.len() as u64 + 1;
+        if count > limits.max_phonetic_runs_per_item() {
+            return Err(budget
+                .error(XlsxErrorCode::TooManyPhoneticRuns)
+                .with_observed(count)
+                .with_phonetic_run_limit(PhoneticRunLimitKind::PerItem));
         }
         let start = required_u32(attributes.unqualified("sb"), budget)?;
         let end = required_u32(attributes.unqualified("eb"), budget)?;
@@ -108,8 +123,11 @@ impl PhoneticItemBuilder {
             .current_run
             .as_mut()
             .ok_or_else(|| budget.error(XlsxErrorCode::InvalidPhoneticMetadata))?;
-        if current.text.len().saturating_add(text.len()) as u64 > limits.max_phonetic_text_bytes() {
-            return Err(budget.error(XlsxErrorCode::PhoneticTextTooLarge));
+        let next_length = current.text.len().saturating_add(text.len()) as u64;
+        if next_length > limits.max_phonetic_text_bytes() {
+            return Err(budget
+                .error(XlsxErrorCode::PhoneticTextTooLarge)
+                .with_observed(next_length));
         }
         current.text.push_str(&text);
         Ok(())
@@ -235,8 +253,8 @@ mod tests {
     use super::{PhoneticItemBuilder, PhoneticReadBudget, parse_bool, parse_properties};
     use crate::xlsx::xml::{XmlAttributes, XmlBudget, read_attributes, reader};
     use crate::{
-        PhoneticAlignment, PhoneticRun, PhoneticTextRange, PhoneticType, ReadLimits, SourceId,
-        XlsxErrorCode,
+        PhoneticAlignment, PhoneticRun, PhoneticRunLimitKind, PhoneticTextRange, PhoneticType,
+        ReadLimits, SourceId, XlsxErrorCode,
     };
 
     fn budget() -> XmlBudget {
@@ -291,12 +309,14 @@ mod tests {
         read_budget
             .charge_item(std::slice::from_ref(&second), limits, &xml_budget)
             .expect("exact total limits");
+        let error = read_budget
+            .charge_item(std::slice::from_ref(&second), limits, &xml_budget)
+            .expect_err("third run exceeds total");
+        assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+        assert_eq!(error.observed(), Some(3));
         assert_eq!(
-            read_budget
-                .charge_item(std::slice::from_ref(&second), limits, &xml_budget)
-                .expect_err("third run exceeds total")
-                .code(),
-            XlsxErrorCode::TooManyPhoneticRuns
+            error.phonetic_run_limit(),
+            Some(PhoneticRunLimitKind::Total)
         );
 
         read_budget
@@ -305,13 +325,12 @@ mod tests {
         read_budget
             .charge_cell(limits, &xml_budget)
             .expect("exact cell limit");
-        assert_eq!(
-            read_budget
-                .charge_cell(limits, &xml_budget)
-                .expect_err("third cell exceeds total")
-                .code(),
-            XlsxErrorCode::TooManyAnnotatedCells
-        );
+        let error = read_budget
+            .charge_cell(limits, &xml_budget)
+            .expect_err("third cell exceeds total");
+        assert_eq!(error.code(), XlsxErrorCode::TooManyAnnotatedCells);
+        assert_eq!(error.observed(), Some(3));
+        assert_eq!(error.phonetic_run_limit(), None);
     }
 
     #[test]
@@ -327,23 +346,23 @@ mod tests {
         let item = run("ab");
         let mut read_budget = PhoneticReadBudget::default();
 
+        let error = read_budget
+            .charge_item(&[item.clone(), item.clone()], limits, &xml_budget)
+            .expect_err("two runs exceed the per-item limit");
+        assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+        assert_eq!(error.observed(), Some(2));
         assert_eq!(
-            read_budget
-                .charge_item(&[item.clone(), item.clone()], limits, &xml_budget)
-                .expect_err("two runs exceed the per-item limit")
-                .code(),
-            XlsxErrorCode::TooManyPhoneticRuns
+            error.phonetic_run_limit(),
+            Some(PhoneticRunLimitKind::PerItem)
         );
         read_budget
             .charge_item(std::slice::from_ref(&item), limits, &xml_budget)
             .expect("two bytes");
-        assert_eq!(
-            read_budget
-                .charge_item(std::slice::from_ref(&item), limits, &xml_budget)
-                .expect_err("four bytes exceed total")
-                .code(),
-            XlsxErrorCode::TotalPhoneticTextTooLarge
-        );
+        let error = read_budget
+            .charge_item(std::slice::from_ref(&item), limits, &xml_budget)
+            .expect_err("four bytes exceed total");
+        assert_eq!(error.code(), XlsxErrorCode::TotalPhoneticTextTooLarge);
+        assert_eq!(error.observed(), Some(4));
     }
 
     #[test]
@@ -360,30 +379,29 @@ mod tests {
         builder
             .begin_run(&attributes, limits, &xml_budget)
             .expect("first run");
-        assert_eq!(
-            builder
-                .begin_run(&attributes, limits, &xml_budget)
-                .expect_err("a nested run is invalid")
-                .code(),
-            XlsxErrorCode::TooManyPhoneticRuns
-        );
+        let error = builder
+            .begin_run(&attributes, limits, &xml_budget)
+            .expect_err("a nested run is invalid");
+        assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+        assert_eq!(error.observed(), None, "nesting exceeds no limit");
+        assert_eq!(error.phonetic_run_limit(), None);
         builder
             .append_run_text("ab".to_owned(), limits, &xml_budget)
             .expect("exact text limit");
-        assert_eq!(
-            builder
-                .append_run_text("c".to_owned(), limits, &xml_budget)
-                .expect_err("text exceeds limit")
-                .code(),
-            XlsxErrorCode::PhoneticTextTooLarge
-        );
+        let error = builder
+            .append_run_text("c".to_owned(), limits, &xml_budget)
+            .expect_err("text exceeds limit");
+        assert_eq!(error.code(), XlsxErrorCode::PhoneticTextTooLarge);
+        assert_eq!(error.observed(), Some(3));
         builder.finish_run(&xml_budget).expect("finish run");
+        let error = builder
+            .begin_run(&attributes, limits, &xml_budget)
+            .expect_err("second run exceeds item limit");
+        assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+        assert_eq!(error.observed(), Some(2));
         assert_eq!(
-            builder
-                .begin_run(&attributes, limits, &xml_budget)
-                .expect_err("second run exceeds item limit")
-                .code(),
-            XlsxErrorCode::TooManyPhoneticRuns
+            error.phonetic_run_limit(),
+            Some(PhoneticRunLimitKind::PerItem)
         );
     }
 

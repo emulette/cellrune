@@ -743,7 +743,9 @@ fn record_table_part(
 ) -> Result<(), XlsxReadError> {
     *total_tables = total_tables.saturating_add(1);
     if *total_tables > budget.limits().max_tables() {
-        return Err(budget.error(XlsxErrorCode::TooManyTables));
+        return Err(budget
+            .error(XlsxErrorCode::TooManyTables)
+            .with_observed(*total_tables));
     }
     let relationship_id = attributes
         .namespaced(DOCUMENT_RELATIONSHIPS_TRANSITIONAL, "id")
@@ -846,11 +848,15 @@ fn increment_cell_counts(
 ) -> Result<(), XlsxReadError> {
     *sheet_cells = sheet_cells.saturating_add(1);
     if *sheet_cells > limits.max_cells_per_sheet() {
-        return Err(budget.error(XlsxErrorCode::TooManyCellsInSheet));
+        return Err(budget
+            .error(XlsxErrorCode::TooManyCellsInSheet)
+            .with_observed(*sheet_cells));
     }
     *total_cells = total_cells.saturating_add(1);
     if *total_cells > limits.max_total_cells() {
-        return Err(budget.error(XlsxErrorCode::TooManyCells));
+        return Err(budget
+            .error(XlsxErrorCode::TooManyCells)
+            .with_observed(*total_cells));
     }
     Ok(())
 }

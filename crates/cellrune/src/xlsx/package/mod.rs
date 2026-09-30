@@ -352,13 +352,15 @@ fn index_archive<R: Read + Seek>(
     let archive_bytes = reader.seek(SeekFrom::End(0)).map_err(io_error)?;
     if archive_bytes > limits.max_archive_bytes() {
         return Err(XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge)
-            .with_detail(archive_bytes.to_string()));
+            .with_detail(archive_bytes.to_string())
+            .with_observed(archive_bytes));
     }
     reader.seek(SeekFrom::Start(0)).map_err(io_error)?;
     let mut archive = ZipArchive::new(reader).map_err(zip_error)?;
     if archive.len() as u64 > limits.max_entries() {
         return Err(XlsxReadError::new(XlsxErrorCode::TooManyEntries)
-            .with_detail(archive.len().to_string()));
+            .with_detail(archive.len().to_string())
+            .with_observed(archive.len() as u64));
     }
     if archive.has_overlapping_files().map_err(zip_error)? {
         return Err(XlsxReadError::new(XlsxErrorCode::OverlappingEntries));
@@ -395,19 +397,22 @@ fn index_archive<R: Read + Seek>(
         if uncompressed > limits.max_entry_uncompressed_bytes() {
             return Err(XlsxReadError::new(XlsxErrorCode::EntryTooLarge)
                 .with_detail(uncompressed.to_string())
+                .with_observed(uncompressed)
                 .at_source(part.source_id()));
         }
         total_uncompressed += u128::from(uncompressed);
         if total_uncompressed > u128::from(limits.max_total_uncompressed_bytes()) {
-            return Err(XlsxReadError::new(XlsxErrorCode::TotalUncompressedTooLarge));
+            return Err(XlsxReadError::new(XlsxErrorCode::TotalUncompressedTooLarge)
+                .with_observed(u64::try_from(total_uncompressed).unwrap_or(u64::MAX)));
         }
-        if compression_ratio_exceeded(
-            uncompressed,
-            file.compressed_size(),
-            limits.max_compression_ratio(),
-        ) {
-            return Err(XlsxReadError::new(XlsxErrorCode::CompressionRatioExceeded)
-                .at_source(part.source_id()));
+        let compressed = file.compressed_size();
+        if compression_ratio_exceeded(uncompressed, compressed, limits.max_compression_ratio()) {
+            let error = XlsxReadError::new(XlsxErrorCode::CompressionRatioExceeded)
+                .at_source(part.source_id());
+            return Err(match compressed {
+                0 => error,
+                _ => error.with_observed(uncompressed.div_ceil(compressed)),
+            });
         }
         drop(file);
 
@@ -479,7 +484,8 @@ fn read_required_part<R: Read + Seek>(
     *spent = spent.saturating_add(produced);
     if *spent > limits.max_total_uncompressed_bytes() {
         return Err(XlsxReadError::new(XlsxErrorCode::TotalUncompressedTooLarge)
-            .with_detail(spent.to_string()));
+            .with_detail(spent.to_string())
+            .with_observed(*spent));
     }
     Ok(bytes)
 }

@@ -77,7 +77,9 @@ impl XmlBudget {
     pub(super) fn start(&mut self) -> Result<u64, XlsxReadError> {
         let next = self.depth.saturating_add(1);
         if next > self.limits.max_xml_depth() {
-            return Err(self.error(XlsxErrorCode::XmlDepthExceeded));
+            return Err(self
+                .error(XlsxErrorCode::XmlDepthExceeded)
+                .with_observed(next));
         }
         self.depth = next;
         Ok(next)
@@ -86,7 +88,9 @@ impl XmlBudget {
     pub(super) fn empty(&self) -> Result<u64, XlsxReadError> {
         let next = self.depth.saturating_add(1);
         if next > self.limits.max_xml_depth() {
-            return Err(self.error(XlsxErrorCode::XmlDepthExceeded));
+            return Err(self
+                .error(XlsxErrorCode::XmlDepthExceeded)
+                .with_observed(next));
         }
         Ok(next)
     }
@@ -234,8 +238,11 @@ pub(super) fn read_attributes(
 ) -> Result<XmlAttributes, XlsxReadError> {
     let mut values = Vec::new();
     for (index, attribute) in element.attributes().with_checks(true).enumerate() {
-        if index as u64 >= budget.limits().max_xml_attributes() {
-            return Err(budget.error(XlsxErrorCode::XmlAttributesExceeded));
+        let count = index as u64 + 1;
+        if count > budget.limits().max_xml_attributes() {
+            return Err(budget
+                .error(XlsxErrorCode::XmlAttributesExceeded)
+                .with_observed(count));
         }
         let attribute =
             attribute.map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;

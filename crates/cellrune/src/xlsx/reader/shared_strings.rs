@@ -97,7 +97,9 @@ pub(super) fn parse(
                                 .with_cause(error)
                         })?;
                         if declared > limits.max_shared_strings() {
-                            return Err(budget.error(XlsxErrorCode::TooManySharedStrings));
+                            return Err(budget
+                                .error(XlsxErrorCode::TooManySharedStrings)
+                                .with_observed(declared));
                         }
                     }
                 } else if is_spreadsheet {
@@ -320,7 +322,9 @@ fn append_text(
         .ok_or_else(|| budget.error(XlsxErrorCode::InvalidSharedStrings))?;
     let next_len = current.len().saturating_add(text.len()) as u64;
     if next_len > limits.max_shared_string_bytes() {
-        return Err(budget.error(XlsxErrorCode::SharedStringTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::SharedStringTooLarge)
+            .with_observed(next_len));
     }
     current.push_str(&text);
     Ok(())
@@ -335,15 +339,22 @@ fn finish_item(
     phonetic_budget: &mut PhoneticReadBudget,
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
-    if strings.len() as u64 >= limits.max_shared_strings() {
-        return Err(budget.error(XlsxErrorCode::TooManySharedStrings));
+    let count = strings.len() as u64 + 1;
+    if count > limits.max_shared_strings() {
+        return Err(budget
+            .error(XlsxErrorCode::TooManySharedStrings)
+            .with_observed(count));
     }
     if value.len() as u64 > limits.max_shared_string_bytes() {
-        return Err(budget.error(XlsxErrorCode::SharedStringTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::SharedStringTooLarge)
+            .with_observed(value.len() as u64));
     }
     *total_bytes = total_bytes.saturating_add(value.len() as u64);
     if *total_bytes > limits.max_total_shared_string_bytes() {
-        return Err(budget.error(XlsxErrorCode::TotalSharedStringsTooLarge));
+        return Err(budget
+            .error(XlsxErrorCode::TotalSharedStringsTooLarge)
+            .with_observed(*total_bytes));
     }
     let completed = phonetics
         .map(|builder| builder.finish(&value, phonetic_budget, limits, budget))

@@ -241,7 +241,7 @@ fn checked_depth(
 ) -> Result<u64, XlsxReadError> {
     let next = current.saturating_add(1);
     if next > limits.max_xml_depth() {
-        return Err(xml_error(source, XlsxErrorCode::XmlDepthExceeded));
+        return Err(xml_error(source, XlsxErrorCode::XmlDepthExceeded).with_observed(next));
     }
     Ok(next)
 }
@@ -270,8 +270,11 @@ fn read_attributes(
 ) -> Result<BTreeMap<Box<str>, Box<str>>, XlsxReadError> {
     let mut values = BTreeMap::new();
     for (index, attribute) in element.attributes().with_checks(true).enumerate() {
-        if index as u64 >= limits.max_xml_attributes() {
-            return Err(xml_error(source, XlsxErrorCode::XmlAttributesExceeded));
+        let count = index as u64 + 1;
+        if count > limits.max_xml_attributes() {
+            return Err(
+                xml_error(source, XlsxErrorCode::XmlAttributesExceeded).with_observed(count)
+            );
         }
         let attribute = attribute
             .map_err(|error| xml_error(source, XlsxErrorCode::InvalidXml).with_cause(error))?;

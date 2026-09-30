@@ -162,11 +162,12 @@ pub use workbook::{
     WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
 };
 pub use xlsx::{
-    OpenOptions, PackageSummary, ReadLimits, ReadOptions, ReadOptionsError, RecalculatedWorkbook,
-    RecalculationWriteOptions, RecalculationWritePolicy, WriteLimits, WriteOptions,
-    WriteOptionsError, WriteProvenance, WriteReport, XlsxDocument, XlsxDocumentKind, XlsxErrorCode,
-    XlsxReadError, XlsxWriteError, XlsxWriteErrorCode, inspect_package, open_xlsx_document,
-    open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx, read_xlsx_bytes, read_xlsx_path,
-    write_preserved_xlsx_bytes, write_recalculated_xlsx, write_recalculated_xlsx_bytes,
-    write_recalculated_xlsx_path, write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_path,
+    OpenOptions, PackageSummary, PhoneticRunLimitKind, ReadLimits, ReadOptions, ReadOptionsError,
+    RecalculatedWorkbook, RecalculationWriteOptions, RecalculationWritePolicy, WriteLimits,
+    WriteOptions, WriteOptionsError, WriteProvenance, WriteReport, XlsxDocument, XlsxDocumentKind,
+    XlsxErrorCode, XlsxReadError, XlsxWriteError, XlsxWriteErrorCode, inspect_package,
+    open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx,
+    read_xlsx_bytes, read_xlsx_path, write_preserved_xlsx_bytes, write_recalculated_xlsx,
+    write_recalculated_xlsx_bytes, write_recalculated_xlsx_path, write_xlsx_draft,
+    write_xlsx_draft_bytes, write_xlsx_draft_path,
 };

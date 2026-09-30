@@ -35,7 +35,9 @@ impl MergedRangeCollector {
     ) -> Result<(), XlsxReadError> {
         *total_merged_ranges = total_merged_ranges.saturating_add(1);
         if *total_merged_ranges > budget.limits().max_merged_ranges() {
-            return Err(budget.error(XlsxErrorCode::TooManyMergedRanges));
+            return Err(budget
+                .error(XlsxErrorCode::TooManyMergedRanges)
+                .with_observed(*total_merged_ranges));
         }
         let Some(reference) = reference else {
             push_diagnostic(
