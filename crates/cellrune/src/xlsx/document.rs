@@ -71,6 +71,13 @@ impl XlsxDocument {
         self.package.input_hash()
     }
 
+    /// Borrows the exact archive bytes retained for round-trip writing, without copying them.
+    ///
+    /// [`input_hash`](Self::input_hash) is the SHA-256 of these bytes.
+    pub fn input_bytes(&self) -> &[u8] {
+        self.package.bytes()
+    }
+
     /// Returns whether the preserved package is XLSX or macro-enabled XLSM.
     pub const fn kind(&self) -> XlsxDocumentKind {
         self.package.kind()

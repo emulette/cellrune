@@ -405,6 +405,11 @@ fn document_adapters_retain_exact_identity_without_changing_read_only_behavior()
 
     for document in [&from_bytes, &from_reader, &from_path] {
         assert_eq!(document.input_hash().as_bytes(), &expected_hash);
+        assert_eq!(document.input_bytes(), bytes.as_slice());
+        assert_eq!(
+            <[u8; 32]>::from(Sha256::digest(document.input_bytes())),
+            *document.input_hash().as_bytes()
+        );
         assert_eq!(
             document.workbook().provenance().input_hash(),
             Some(document.input_hash())
