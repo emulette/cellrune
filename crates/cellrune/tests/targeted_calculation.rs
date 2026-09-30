@@ -1,8 +1,8 @@
 use cellrune::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationOptions,
-    CalculationTarget, CancellationToken, CellAddress, CellRange, CellValue, FormulaText, SheetId,
-    TargetCalculationErrorCode, TargetCalculationLimits, WorkbookDraft, calculate_targets,
-    calculate_workbook,
+    CalculationTarget, CancellationToken, CellAddress, CellRange, CellValue, EXCEL_MAX_COLUMNS,
+    EXCEL_MAX_ROWS, FormulaText, SheetId, TargetCalculationErrorCode, TargetCalculationLimits,
+    WorkbookDraft, calculate_targets, calculate_workbook,
 };
 
 fn sheet() -> SheetId {
@@ -235,30 +235,38 @@ fn invalid_targets_limits_and_cancellation_fail_without_partial_results() {
         sheet(),
         CellRange::new(address("A1"), address("XFD1048576")).expect("range"),
     );
+    let error = calculate_targets(
+        draft.workbook(),
+        &[huge],
+        options,
+        limits,
+        CancellationToken::new(),
+    )
+    .expect_err("range limit");
     assert_eq!(
-        calculate_targets(
-            draft.workbook(),
-            &[huge],
-            options,
-            limits,
-            CancellationToken::new()
-        )
-        .expect_err("range limit")
-        .code(),
+        error.code(),
         TargetCalculationErrorCode::TargetLimitExceeded
     );
     assert_eq!(
-        calculate_targets(
-            draft.workbook(),
-            &[target("A1")],
-            options,
-            TargetCalculationLimits::new(1, 1, 1).expect("limits"),
-            CancellationToken::new()
-        )
-        .expect_err("work limit")
-        .code(),
+        error.requested_cell_count(),
+        Some(u64::from(EXCEL_MAX_ROWS) * u64::from(EXCEL_MAX_COLUMNS))
+    );
+    assert_eq!(error.evaluated_count(), None);
+    let error = calculate_targets(
+        draft.workbook(),
+        &[target("A1")],
+        options,
+        TargetCalculationLimits::new(1, 1, 1).expect("limits"),
+        CancellationToken::new(),
+    )
+    .expect_err("work limit");
+    assert_eq!(
+        error.code(),
         TargetCalculationErrorCode::EvaluationLimitExceeded
     );
+    // A1 needs B1 prepared first, so the request stops before evaluating either.
+    assert_eq!(error.evaluated_count(), Some(0));
+    assert_eq!(error.requested_cell_count(), None);
     let cancellation = CancellationToken::new();
     cancellation.cancel();
     assert_eq!(
@@ -273,6 +281,58 @@ fn invalid_targets_limits_and_cancellation_fail_without_partial_results() {
         .code(),
         TargetCalculationErrorCode::Cancelled
     );
+}
+
+#[test]
+fn limit_errors_report_the_cells_counted_when_the_request_stopped() {
+    let mut draft = WorkbookDraft::new();
+    formula(&mut draft, "A1", "1+1");
+    formula(&mut draft, "B1", "2+2");
+    let run = |targets: &[CalculationTarget], limits: TargetCalculationLimits| {
+        calculate_targets(
+            draft.workbook(),
+            targets,
+            CalculationOptions::default(),
+            limits,
+            CancellationToken::new(),
+        )
+        .expect_err("request exceeds a limit")
+    };
+
+    let too_many_targets = run(
+        &[target("A1"), target("B1")],
+        TargetCalculationLimits::new(1, 10, 10).expect("limits"),
+    );
+    assert_eq!(
+        too_many_targets.code(),
+        TargetCalculationErrorCode::TargetLimitExceeded
+    );
+    assert_eq!(too_many_targets.requested_cell_count(), None);
+
+    // A1:A2 fits alone; the overlapping A2 adds nothing, and B1 is the third distinct cell.
+    let a1_a2 = CalculationTarget::new(
+        sheet(),
+        CellRange::new(address("A1"), address("A2")).expect("range"),
+    );
+    let too_many_cells = run(
+        &[a1_a2, target("A2"), target("B1")],
+        TargetCalculationLimits::new(10, 2, 10).expect("limits"),
+    );
+    assert_eq!(
+        too_many_cells.code(),
+        TargetCalculationErrorCode::TargetLimitExceeded
+    );
+    assert_eq!(too_many_cells.requested_cell_count(), Some(3));
+
+    let too_much_work = run(
+        &[target("A1"), target("B1")],
+        TargetCalculationLimits::new(10, 10, 1).expect("limits"),
+    );
+    assert_eq!(
+        too_much_work.code(),
+        TargetCalculationErrorCode::EvaluationLimitExceeded
+    );
+    assert_eq!(too_much_work.evaluated_count(), Some(1));
 }
 
 #[test]

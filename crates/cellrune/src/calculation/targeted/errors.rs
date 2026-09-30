@@ -53,15 +53,56 @@ impl TargetCalculationErrorCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetCalculationError {
     code: TargetCalculationErrorCode,
+    requested_cell_count: Option<u64>,
+    evaluated_count: Option<usize>,
 }
 
 impl TargetCalculationError {
     pub(crate) const fn new(code: TargetCalculationErrorCode) -> Self {
-        Self { code }
+        Self {
+            code,
+            requested_cell_count: None,
+            evaluated_count: None,
+        }
     }
+
+    pub(crate) const fn result_limit(requested_cell_count: u64) -> Self {
+        Self {
+            requested_cell_count: Some(requested_cell_count),
+            ..Self::new(TargetCalculationErrorCode::TargetLimitExceeded)
+        }
+    }
+
+    pub(crate) const fn evaluation_limit(evaluated_count: usize) -> Self {
+        Self {
+            evaluated_count: Some(evaluated_count),
+            ..Self::new(TargetCalculationErrorCode::EvaluationLimitExceeded)
+        }
+    }
+
     /// Returns the stable failure category.
     pub const fn code(&self) -> TargetCalculationErrorCode {
         self.code
+    }
+
+    /// Returns the distinct requested cells counted when a
+    /// [`TargetLimitExceeded`](TargetCalculationErrorCode::TargetLimitExceeded) request passed
+    /// its result-cell limit.
+    ///
+    /// Counting stops at the first target or cell past the limit, so the request names at least
+    /// this many cells. `None` when the target-count limit rejected the request before its
+    /// cells were counted, and for every other failure.
+    pub const fn requested_cell_count(&self) -> Option<u64> {
+        self.requested_cell_count
+    }
+
+    /// Returns the evaluations performed before an
+    /// [`EvaluationLimitExceeded`](TargetCalculationErrorCode::EvaluationLimitExceeded) request
+    /// stopped, counted like
+    /// [`TargetCalculationResult::evaluated_count`](crate::TargetCalculationResult::evaluated_count),
+    /// or `None` for every other failure.
+    pub const fn evaluated_count(&self) -> Option<usize> {
+        self.evaluated_count
     }
 }
 

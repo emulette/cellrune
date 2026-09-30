@@ -146,9 +146,7 @@ impl Planner {
     ) -> Result<Frame, TargetCalculationError> {
         if self.loaded.insert(cell) {
             if self.loaded.len() > self.limits.max_evaluated_cells() {
-                return Err(TargetCalculationError::new(
-                    TargetCalculationErrorCode::EvaluationLimitExceeded,
-                ));
+                return Err(TargetCalculationError::evaluation_limit(self.attempts));
             }
             if let Some(source) = cell_at(&engine.workbook.sheets()[cell.0], cell.1, cell.2)
                 && let CellContent::Formula(formula) = source.content()
@@ -326,9 +324,7 @@ impl Planner {
                     Arc::make_mut(&mut engine.blocked_cells).insert(cell);
                 } else {
                     if self.attempts >= self.limits.max_evaluated_cells() {
-                        return Err(TargetCalculationError::new(
-                            TargetCalculationErrorCode::EvaluationLimitExceeded,
-                        ));
+                        return Err(TargetCalculationError::evaluation_limit(self.attempts));
                     }
                     self.attempts += 1;
                     if let Some(pending) = &engine.target_pending {

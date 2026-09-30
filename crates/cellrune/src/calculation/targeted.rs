@@ -196,7 +196,7 @@ pub(super) fn normalize_targets(
         }
         let count = u64::from(target.range.height()) * u64::from(target.range.width());
         if count > limits.max_result_cells as u64 {
-            return Err(TargetCalculationError::new(Code::TargetLimitExceeded));
+            return Err(TargetCalculationError::result_limit(count));
         }
         for row in target.range.start().row().get()..=target.range.end().row().get() {
             for column in target.range.start().column().get()..=target.range.end().column().get() {
@@ -207,7 +207,7 @@ pub(super) fn normalize_targets(
                     .expect(errors::VALIDATED_COORDINATES);
                 cells.insert(CalculationCellId::new(target.sheet_id, address));
                 if cells.len() > limits.max_result_cells {
-                    return Err(TargetCalculationError::new(Code::TargetLimitExceeded));
+                    return Err(TargetCalculationError::result_limit(cells.len() as u64));
                 }
             }
         }
