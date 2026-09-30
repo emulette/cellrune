@@ -38,6 +38,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   cells that hold another `SUBTOTAL` or `AGGREGATE`, and returns `#VALUE!` for other numbers.
 - Faster `LARGE`, `SMALL`, `MEDIAN`, `PERCENTILE`, `QUARTILE`, and `PERCENTRANK`, and less work
   for statistics over large ranges; faster worksheet reading.
+- The Windows ARM64 Node addon is built on a native Windows ARM64 runner.
+- Update `napi` to 3.12.2, `rmcp` to 3.4.1, `cap-std` to 4.0.3, and the build tooling to
+  maturin 1.15.0 and `@napi-rs/cli` 3.10.5.
 
 ### Fixed
 
