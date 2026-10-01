@@ -218,16 +218,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   cached text result a cell materializes and fails with `TotalCellTextTooLarge`
   (`xlsx.total_cell_text_too_large`). Cell text decodes OOXML `_xHHHH_` escapes,
   and writers escape XML-forbidden characters the same way.
-- A limit failure's `XlsxReadError::observed() -> Option<u64>` is the measured
-  value that exceeded the limit named by its code, in that limit's unit:
-  bytes, a count, a nesting depth, or the uncompressed-to-compressed ratio
-  rounded up. Reading stops at the first value past a limit, so a running total
-  reports that value rather than the size of the whole input. It is `None`
-  for other codes and for failures with no measurement, such as a zero-byte
-  compressed entry or a failed allocation. `TooManyPhoneticRuns` covers two
-  limits; `.phonetic_run_limit()` returns `PhoneticRunLimitKind::PerItem` or
-  `Total` for it. A package part is read into one buffer of its declared size,
-  and inflating past that size fails with `DeclaredSizeMismatch`.
+- A limit failure's `XlsxReadError::observed() -> Option<u64>` is the value
+  that exceeded the limit named by its code, in that limit's unit: bytes, a
+  count, a nesting depth, or the uncompressed-to-compressed ratio rounded up.
+  Entry sizes and ratios checked before inflation use the sizes the ZIP
+  central directory declares, and a shared-string `uniqueCount` is reported
+  as declared. Reading stops at the first value past a limit, so a running
+  total reports that value rather than the size of the whole input. It is
+  `None` for other codes and for failures with no measurement: a zero-byte
+  compressed entry, a nested phonetic run, or a buffer the host cannot
+  reserve, which fails with `ArchiveTooLarge` or `EntryTooLarge`.
+  `TooManyPhoneticRuns` covers two limits; `.phonetic_run_limit()` returns
+  `PhoneticRunLimitKind::PerItem` or `Total` for a run-limit failure and
+  `None` for a nested run. A package part is read into one buffer of its
+  declared size, and inflating past that size fails with
+  `DeclaredSizeMismatch`. An entry whose compressed size exceeds the archive
+  length fails with `InvalidZip` while the package is indexed.
 
 ### Workbook model — read-only, format-neutral
 
@@ -717,9 +723,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.sheet_not_found`, `.invalid_limits`, `.target_limit_exceeded`, `.evaluation_limit_exceeded`,
   `.cancelled`, or `.stale_result` under the same `calculation.target` prefix. Bindings also use
   existing address/sheet validation and active-request cancellation codes.
-  `TargetCalculationError::requested_cell_count() -> Option<u64>` returns the distinct cells
-  counted when the result-cell limit stopped a request; counting stops at the first target or
-  cell past the limit, and a request stopped by the target-count limit reports `None`.
+  `TargetCalculationError::requested_cell_count() -> Option<u64>` returns the requested cells
+  counted when the result-cell limit stopped a request, a lower bound on the distinct cells it
+  names: a target larger than the limit reports its own cell count, and otherwise counting stops
+  at the first distinct cell past the limit. A request stopped by the target-count limit reports
+  `None`.
   `.evaluated_count() -> Option<usize>` returns the evaluations performed before the work limit
   stopped a request, counted like `TargetCalculationResult::evaluated_count()`.
 
@@ -753,8 +761,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   data-dependent function iterations, LET bindings, active LAMBDA depth, and
   cumulative LAMBDA/MAP invocations. A `ResourceLimitExceeded` issue names the
   exceeded budget through `CalculationIssue::limit() ->
-  Option<CalculationLimitKind>`, one non-exhaustive variant per budget; its
-  `.detail()` remains the `max_*` limit name.
+  Option<CalculationLimitKind>`, a non-exhaustive enum with one variant per
+  budget; its `.detail()` remains the `max_*` limit name.
 - `LAMBDA` is a first-class scoped value. Literal, immediate, `LET`-bound,
   workbook-defined, and sheet-local callables share one evaluator with lexical
   capture and caller isolation. `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`,

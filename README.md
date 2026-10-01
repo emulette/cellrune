@@ -48,8 +48,8 @@ cellrune = "0.1.23"
 - applies configurable limits to ZIP, XML, workbook, formula, dependency, text, and array work;
 - never executes macros, never follows external links, and never reads the host clock for
   `TODAY()` or `NOW()`;
-- returns stable error and issue codes for programmatic handling; in Rust, resource-limit failures
-  also name the exceeded limit or report the value that exceeded it;
+- returns stable error and issue codes for programmatic handling; in Rust, read, formula, and
+  targeted-calculation limit failures also name the exceeded limit or report the observed value;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
 - creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name, table rename,

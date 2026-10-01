@@ -10,20 +10,20 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
-## [0.1.23] - 2026-09-30
+## [0.1.23] - 2026-10-01
 
 ### Added
 
 - `XlsxDocument::input_bytes` borrows the exact archive bytes a document retains for round-trip
   writing, without copying them; `input_hash` is their SHA-256.
-- `XlsxReadError::observed` returns the measured value that exceeded a read limit, in that limit's
+- `XlsxReadError::observed` returns the value that exceeded a read limit, in that limit's
   unit, and `XlsxReadError::phonetic_run_limit` returns whether `xlsx.too_many_phonetic_runs`
   exceeded the per-item or total run limit as a `PhoneticRunLimitKind`.
 - `CalculationIssue::limit` returns the `CalculationLimitKind` a
   `calculation.resource_limit_exceeded` issue exceeded.
-- `TargetCalculationError::requested_cell_count` returns the distinct cells counted when a
-  targeted calculation passed its result-cell limit, and `evaluated_count` returns the evaluations
-  performed before its work limit stopped it.
+- `TargetCalculationError::requested_cell_count` returns a lower bound on the cells a targeted
+  calculation requested when it passed its result-cell limit, and `evaluated_count` returns the
+  evaluations performed before its work limit stopped it.
 
 Existing error codes, details, and messages are unchanged.
 
@@ -32,7 +32,9 @@ Existing error codes, details, and messages are unchanged.
 - Reading a package part reserves its declared size once and stops inflating one byte past it, so
   an entry that under-declares its size fails with `xlsx.declared_size_mismatch` without first
   allocating up to the entry limit. Such an entry now reports that code even when it would inflate
-  past the entry limit, where it previously reported `xlsx.entry_too_large`.
+  past the entry limit, where it previously reported `xlsx.entry_too_large`. An entry that claims
+  more compressed bytes than the whole archive fails with `xlsx.invalid_zip` before any part is
+  read.
 
 ## [0.1.22] - 2026-09-30
 
