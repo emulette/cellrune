@@ -336,6 +336,37 @@ fn limit_errors_report_the_cells_counted_when_the_request_stopped() {
 }
 
 #[test]
+fn work_limit_counts_reevaluations_of_formulas_that_discover_inputs() {
+    let mut draft = WorkbookDraft::new();
+    formula(&mut draft, "B1", "3+4");
+    // C1 reaches B1 only while it evaluates, so it is evaluated again once B1 is ready.
+    formula(&mut draft, "C1", "LET(f,LAMBDA(x,INDIRECT(x)),f(\"B1\"))");
+    let run = |limits: TargetCalculationLimits| {
+        calculate_targets(
+            draft.workbook(),
+            &[target("C1")],
+            CalculationOptions::default(),
+            limits,
+            CancellationToken::new(),
+        )
+    };
+    let result = run(TargetCalculationLimits::default()).expect("re-evaluated result");
+    assert_eq!(result.cell(id("C1")), Some(&number(7.0)));
+    assert_eq!(result.parsed_formula_count(), 2);
+    assert_eq!(result.evaluated_count(), 3);
+
+    // Both formulas fit the limit, so only the second evaluation of C1 exceeds it.
+    let error =
+        run(TargetCalculationLimits::new(1, 1, 2).expect("limits")).expect_err("work limit");
+    assert_eq!(
+        error.code(),
+        TargetCalculationErrorCode::EvaluationLimitExceeded
+    );
+    assert_eq!(error.evaluated_count(), Some(2));
+    assert_eq!(error.requested_cell_count(), None);
+}
+
+#[test]
 fn long_dependency_chain_uses_an_iterative_schedule() {
     let mut draft = WorkbookDraft::new();
     value(&mut draft, "A1", 1.0);

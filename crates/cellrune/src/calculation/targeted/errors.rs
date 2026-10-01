@@ -85,12 +85,13 @@ impl TargetCalculationError {
         self.code
     }
 
-    /// Returns the distinct requested cells counted when a
+    /// Returns the requested cells counted when a
     /// [`TargetLimitExceeded`](TargetCalculationErrorCode::TargetLimitExceeded) request passed
     /// its result-cell limit.
     ///
-    /// Counting stops at the first target or cell past the limit, so the request names at least
-    /// this many cells. `None` when the target-count limit rejected the request before its
+    /// The count is a lower bound on the distinct cells the request names: a target larger than
+    /// the limit reports its own cell count, and otherwise counting stops at the first distinct
+    /// cell past the limit. `None` when the target-count limit rejected the request before its
     /// cells were counted, and for every other failure.
     pub const fn requested_cell_count(&self) -> Option<u64> {
         self.requested_cell_count
