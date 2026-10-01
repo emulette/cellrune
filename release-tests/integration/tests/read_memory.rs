@@ -40,7 +40,7 @@ fn under_declared_entry_stops_at_its_declared_size() {
     let _serial = serial();
     let declared = 4 * 1024;
     let mut archive = package(CompressionMethod::Deflated);
-    under_declare_uncompressed_size(&mut archive, "[Content_Types].xml", declared);
+    rewrite_declared_sizes(&mut archive, "[Content_Types].xml", None, declared);
 
     let (result, heap) =
         measure(|| inspect_package(Cursor::new(archive.as_slice()), ReadOptions::default()));
@@ -78,6 +78,39 @@ fn declared_entry_is_read_without_growing_its_buffer() {
     );
 }
 
+#[test]
+fn compressed_size_past_the_archive_end_is_rejected_before_reserving() {
+    let _serial = serial();
+    // The content-types part is the last entry, so claiming more compressed bytes than follow it
+    // overlaps no other entry. Its declared size keeps the ratio within the default limit.
+    let mut entries = package_entries(CONTENT_TYPES, CompressionMethod::Stored);
+    entries.reverse();
+    let mut archive = build_archive(&entries);
+    let declared = 60 * 1024 * 1024;
+    rewrite_declared_sizes(
+        &mut archive,
+        "[Content_Types].xml",
+        Some(1024 * 1024),
+        declared,
+    );
+
+    let (result, heap) =
+        measure(|| inspect_package(Cursor::new(archive.as_slice()), ReadOptions::default()));
+
+    let error = result.expect_err("compressed data past the archive end must be rejected");
+    assert_eq!(error.code(), XlsxErrorCode::InvalidZip, "{error}");
+    assert_eq!(
+        error.detail(),
+        Some("ZIP entry compressed size exceeds the archive length")
+    );
+    assert!(
+        heap.peak_bytes < HEAP_SLACK_BYTES,
+        "peak heap {} bytes for a {}-byte archive declaring {declared} bytes",
+        heap.peak_bytes,
+        archive.len()
+    );
+}
+
 struct HeapUse {
     peak_bytes: usize,
     growth_bytes: usize,
@@ -110,10 +143,17 @@ fn package(content_types_compression: CompressionMethod) -> Vec<u8> {
         "\n".repeat(padding % COMMENT.len())
     );
     assert_eq!(content_types.len(), PART_BYTES);
-    let entries = [
+    build_archive(&package_entries(&content_types, content_types_compression))
+}
+
+fn package_entries(
+    content_types: &str,
+    content_types_compression: CompressionMethod,
+) -> [(&str, &str, CompressionMethod); 5] {
+    [
         (
             "[Content_Types].xml",
-            content_types.as_str(),
+            content_types,
             content_types_compression,
         ),
         ("_rels/.rels", ROOT_RELATIONSHIPS, CompressionMethod::Stored),
@@ -128,9 +168,12 @@ fn package(content_types_compression: CompressionMethod) -> Vec<u8> {
             "<worksheet/>",
             CompressionMethod::Stored,
         ),
-    ];
+    ]
+}
+
+fn build_archive(entries: &[(&str, &str, CompressionMethod)]) -> Vec<u8> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    for (name, contents, compression) in entries {
+    for &(name, contents, compression) in entries {
         writer
             .start_file(
                 name,
@@ -147,9 +190,14 @@ fn package(content_types_compression: CompressionMethod) -> Vec<u8> {
         .into_inner()
 }
 
-/// Rewrites the declared uncompressed size of one entry in both the local file header and the
-/// central directory, leaving the compressed data and its CRC intact.
-fn under_declare_uncompressed_size(archive: &mut [u8], name: &str, declared: u32) {
+/// Rewrites the declared sizes of one entry in both the local file header and the central
+/// directory, leaving the stored data and its CRC intact. `compressed` is kept when `None`.
+fn rewrite_declared_sizes(
+    archive: &mut [u8],
+    name: &str,
+    compressed: Option<u32>,
+    uncompressed: u32,
+) {
     const CENTRAL_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
     const LOCAL_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
     const CENTRAL_HEADER_BYTES: usize = 46;
@@ -179,8 +227,13 @@ fn under_declare_uncompressed_size(archive: &mut [u8], name: &str, declared: u32
             LOCAL_SIGNATURE,
             "central directory must point at a local file header"
         );
-        archive[index + 24..index + 28].copy_from_slice(&declared.to_le_bytes());
-        archive[local_offset + 22..local_offset + 26].copy_from_slice(&declared.to_le_bytes());
+        if let Some(compressed) = compressed {
+            archive[index + 20..index + 24].copy_from_slice(&compressed.to_le_bytes());
+            archive[local_offset + 18..local_offset + 22]
+                .copy_from_slice(&compressed.to_le_bytes());
+        }
+        archive[index + 24..index + 28].copy_from_slice(&uncompressed.to_le_bytes());
+        archive[local_offset + 22..local_offset + 26].copy_from_slice(&uncompressed.to_le_bytes());
         return;
     }
     panic!("fixture entry must exist: {name}");

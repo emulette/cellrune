@@ -405,7 +405,15 @@ fn index_archive<R: Read + Seek>(
             return Err(XlsxReadError::new(XlsxErrorCode::TotalUncompressedTooLarge)
                 .with_observed(u64::try_from(total_uncompressed).unwrap_or(u64::MAX)));
         }
+        // The ZIP reader does not check that compressed data lies inside the archive. Holding
+        // the compressed size to the archive length keeps the ratio check, and so every declared
+        // size a part read reserves, tied to bytes the input actually contains.
         let compressed = file.compressed_size();
+        if compressed > archive_bytes {
+            return Err(XlsxReadError::new(XlsxErrorCode::InvalidZip)
+                .with_detail(detail::COMPRESSED_SIZE_EXCEEDS_ARCHIVE)
+                .at_source(part.source_id()));
+        }
         if compression_ratio_exceeded(uncompressed, compressed, limits.max_compression_ratio()) {
             let error = XlsxReadError::new(XlsxErrorCode::CompressionRatioExceeded)
                 .at_source(part.source_id());

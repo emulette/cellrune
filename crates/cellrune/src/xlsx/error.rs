@@ -7,6 +7,8 @@ const MESSAGE_ZERO_LIMIT: &str = "read limit must be greater than zero";
 
 pub(crate) mod detail {
     pub(crate) const ZIP_ENTRY_NAME_NOT_UTF8: &str = "ZIP entry name is not UTF-8";
+    pub(crate) const COMPRESSED_SIZE_EXCEEDS_ARCHIVE: &str =
+        "ZIP entry compressed size exceeds the archive length";
     pub(crate) const CONTENT_TYPE_PART_NOT_ABSOLUTE: &str =
         "Override PartName must be package-absolute";
     pub(crate) const UNEXPECTED_CLOSING_ELEMENT: &str = "unexpected closing element";
