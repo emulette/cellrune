@@ -301,6 +301,18 @@ fn rejects_invalid_formula_metadata_and_enforces_formula_budget() {
     assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
     // Both defined names, then `1+1` and `"text"`.
     assert_eq!(error.observed(), Some(11 + 4 + 3 + 6));
+
+    let limits = ReadLimits::default()
+        .with_max_total_formula_bytes(14)
+        .expect("nonzero total formula limit");
+    let error = read_xlsx_bytes(
+        &build_archive(FORMULA_MATRIX, None, false),
+        ReadOptions::new(limits),
+    )
+    .expect_err("defined names exceed the total formula byte budget");
+    assert_eq!(error.code(), XlsxErrorCode::TotalFormulaBytesTooLarge);
+    // Both defined names, before any worksheet formula is charged.
+    assert_eq!(error.observed(), Some(11 + 4));
 }
 
 #[test]

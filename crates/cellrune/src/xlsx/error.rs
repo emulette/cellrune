@@ -472,16 +472,21 @@ impl XlsxReadError {
     ///
     /// The value is in that limit's unit: bytes, a count, a nesting depth, or for
     /// [`XlsxErrorCode::CompressionRatioExceeded`] the uncompressed-to-compressed ratio
-    /// rounded up. Reading stops as soon as a limit is exceeded, so a running total is the
+    /// rounded up. A limit checked against a size or count the package declares, such as a
+    /// central-directory entry size or a shared-string table's `uniqueCount`, reports the
+    /// declared value. Reading stops as soon as a limit is exceeded, so a running total is the
     /// value counted at that point rather than the size of the whole input. `None` for other
-    /// codes and for limit failures that have no measurement, such as an entry that compresses
-    /// to zero bytes or a buffer the host could not allocate.
+    /// codes and for limit-code failures that have no measurement: an entry that compresses
+    /// to zero bytes, a buffer the host could not allocate, or a phonetic run that starts
+    /// inside another one.
     pub const fn observed(&self) -> Option<u64> {
         self.observed
     }
 
-    /// Returns which limit an [`XlsxErrorCode::TooManyPhoneticRuns`] failure exceeded, or `None`
-    /// for every other failure.
+    /// Returns which limit an [`XlsxErrorCode::TooManyPhoneticRuns`] failure exceeded.
+    ///
+    /// `None` for every other code, and for the same code when a phonetic run starts inside
+    /// another one, which is malformed rather than over a limit.
     pub const fn phonetic_run_limit(&self) -> Option<PhoneticRunLimitKind> {
         self.phonetic_run_limit
     }

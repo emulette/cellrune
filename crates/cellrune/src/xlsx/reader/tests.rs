@@ -6,11 +6,11 @@ use zip::{CompressionMethod, ZipArchive};
 use super::{read_xlsx, read_xlsx_bytes};
 use crate::{
     CalculationMode, CellAddress, CellContent, CellValue, DateSystem, EditBatch, NumberFormatKind,
-    OpenOptions, PhoneticAlignment, PhoneticRun, PhoneticTextRange, PhoneticType,
-    PhoneticWriteOptions, ReadLimits, ReadOptions, RecalculationWriteOptions, SavedResult, SheetId,
-    SheetVisibility, TableColumnId, TableColumnName, TableId, TableName, WorkbookChange,
-    WorkbookDraft, WorkbookSourceKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
-    open_xlsx_document_bytes, write_xlsx_draft_bytes,
+    OpenOptions, PhoneticAlignment, PhoneticRun, PhoneticRunLimitKind, PhoneticTextRange,
+    PhoneticType, PhoneticWriteOptions, ReadLimits, ReadOptions, RecalculationWriteOptions,
+    SavedResult, SheetId, SheetVisibility, TableColumnId, TableColumnName, TableId, TableName,
+    WorkbookChange, WorkbookDraft, WorkbookSourceKind, XlsxErrorCode, XlsxWriteErrorCode,
+    calculate_workbook, open_xlsx_document_bytes, write_xlsx_draft_bytes,
 };
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -246,6 +246,62 @@ fn shared_string_budgets_apply_to_decoded_rich_text() {
         .expect_err("declared shared string count limit");
     assert_eq!(error.code(), XlsxErrorCode::TooManySharedStrings);
     assert_eq!(error.observed(), Some(2));
+
+    let undeclared_items = r#"<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <si><t>A</t></si><si><t>B</t></si>
+</sst>"#;
+    let read_with = |limit: u64| {
+        let limits = ReadLimits::default()
+            .with_max_shared_strings(limit)
+            .expect("nonzero shared string count limit");
+        read_xlsx_bytes(
+            &build_archive(SHEET_ONE, undeclared_items),
+            ReadOptions::new(limits),
+        )
+    };
+    read_with(2).expect("exact shared string item count");
+    let error = read_with(1).expect_err("counted shared string item limit");
+    assert_eq!(error.code(), XlsxErrorCode::TooManySharedStrings);
+    assert_eq!(error.observed(), Some(2));
+}
+
+#[test]
+fn part_xml_budgets_report_the_depth_and_attribute_count_that_exceeded_them() {
+    let archive = build_archive(SHEET_ONE, SHARED_STRINGS);
+    let read_with = |limits: ReadLimits| read_xlsx_bytes(&archive, ReadOptions::new(limits));
+
+    // Package parts nest two levels deep; the workbook's empty `<sheet/>` is the first at three.
+    let limits = ReadLimits::default()
+        .with_max_xml_depth(2)
+        .expect("nonzero depth limit");
+    let error = read_with(limits).expect_err("empty element depth");
+    assert_eq!(error.code(), XlsxErrorCode::XmlDepthExceeded);
+    assert_eq!(
+        error.source_id().map(|source| source.as_str()),
+        Some("xl/workbook.xml")
+    );
+    assert_eq!(error.observed(), Some(3));
+
+    // Worksheet `<v>` elements are the first to open five levels deep.
+    let limits = ReadLimits::default()
+        .with_max_xml_depth(4)
+        .expect("nonzero depth limit");
+    let error = read_with(limits).expect_err("start element depth");
+    assert_eq!(error.code(), XlsxErrorCode::XmlDepthExceeded);
+    assert_eq!(error.observed(), Some(5));
+
+    // Package relationships carry three attributes; the workbook's `<sheet>` carries four.
+    let limits = ReadLimits::default()
+        .with_max_xml_attributes(3)
+        .expect("nonzero attribute limit");
+    let error = read_with(limits).expect_err("attribute count");
+    assert_eq!(error.code(), XlsxErrorCode::XmlAttributesExceeded);
+    assert_eq!(
+        error.source_id().map(|source| source.as_str()),
+        Some("xl/workbook.xml")
+    );
+    assert_eq!(error.observed(), Some(4));
 }
 
 #[test]
@@ -754,6 +810,51 @@ fn phonetic_validation_and_reference_limits_are_document_only() {
         OpenOptions::new(ReadOptions::new(shared_once_limits)),
     )
     .expect("shared annotation storage is charged once");
+}
+
+#[test]
+fn phonetic_run_limits_report_which_limit_and_the_count_that_exceeded_it() {
+    let shared_strings = r#"<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
+  <si><t>AB</t><rPh sb="0" eb="1"><t>a</t></rPh><rPh sb="1" eb="2"><t>b</t></rPh></si>
+  <si><t>C</t><rPh sb="0" eb="1"><t>c</t></rPh></si>
+</sst>"#;
+    let archive = build_archive(SHEET_ONE, shared_strings);
+    let open_with = |limits: ReadLimits| {
+        open_xlsx_document_bytes(&archive, OpenOptions::new(ReadOptions::new(limits)))
+    };
+
+    let limits = ReadLimits::default()
+        .with_max_phonetic_runs_per_item(1)
+        .expect("per-item run limit");
+    let error = open_with(limits).expect_err("second run of the first item");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+    assert_eq!(error.observed(), Some(2));
+    assert_eq!(
+        error.phonetic_run_limit(),
+        Some(PhoneticRunLimitKind::PerItem)
+    );
+
+    let limits = ReadLimits::default()
+        .with_max_total_phonetic_runs(2)
+        .expect("total run limit");
+    let error = open_with(limits).expect_err("run of the second item");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+    assert_eq!(error.observed(), Some(3));
+    assert_eq!(
+        error.phonetic_run_limit(),
+        Some(PhoneticRunLimitKind::Total)
+    );
+
+    let nested = r#"<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="1">
+  <si><t>AB</t><rPh sb="0" eb="1"><t>a</t><rPh sb="1" eb="2"/></rPh></si>
+</sst>"#;
+    let error = open_xlsx_document_bytes(&build_archive(SHEET_ONE, nested), OpenOptions::default())
+        .expect_err("a run inside another run");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyPhoneticRuns);
+    assert_eq!(error.observed(), None);
+    assert_eq!(error.phonetic_run_limit(), None);
 }
 
 #[test]

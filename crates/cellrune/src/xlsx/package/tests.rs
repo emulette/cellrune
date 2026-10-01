@@ -248,12 +248,16 @@ fn under_declared_entry_size_is_rejected_when_the_part_is_read() {
     let mut archive = build_archive(entries);
 
     under_declare_uncompressed_size(&mut archive, "[Content_Types].xml", 1);
+    let limits = ReadLimits::default()
+        .with_max_entry_uncompressed_bytes(64 * 1024)
+        .expect("non-zero limit");
 
     // Every central-directory budget accepts the archive because it declares a
     // single byte. The mismatch is only observable once the entry is inflated,
     // so a `DeclaredSizeMismatch` here proves the read path, not the index path,
-    // is what stops the amplification, one byte past the declared size.
-    let error = inspect_package(Cursor::new(archive), ReadOptions::default())
+    // is what stops the amplification, one byte past the declared size and long
+    // before the entry limit that the real contents exceed.
+    let error = inspect_package(Cursor::new(archive), ReadOptions::new(limits))
         .expect_err("an entry that hides its real size must be rejected");
     assert_eq!(error.code(), XlsxErrorCode::DeclaredSizeMismatch, "{error}");
     assert_eq!(error.detail(), Some("declared 1 bytes, read 2 bytes"));
