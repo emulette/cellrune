@@ -48,8 +48,8 @@ still produce values when another formula is unavailable. Volatile functions
 `CalculationOptions`, or the formula reports `VolatileInputMissing` instead
 of guessing.
 
-For round-trip work, `open_xlsx_document_*` retains the exact input archive
-privately and binds it to a SHA-256 `InputHash`.
+For round-trip work, `open_xlsx_document_*` retains the exact input archive,
+readable through `input_bytes()`, and binds it to a SHA-256 `InputHash`.
 `write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
 `write_recalculated_xlsx_path` materialize a `CalculationSnapshot` made from
 that exact document, preserve unrelated package content, and reopen the output

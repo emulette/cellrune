@@ -331,6 +331,14 @@ It shares XIRR's strict numeric/date validation but does not require both positi
 flows. Rate `-1` is invalid; a rate below `-1` is accepted only when the resulting powers and sum
 remain finite. Neither function uses an iterative financial solver.
 
+### Matching: 0.1.22 functions
+
+The nineteen names added in 0.1.22 and the legacy names `CHIDIST`, `WEIBULL`, and `CONFIDENCE`
+match all 62 function-classified active cases in both frozen CellRune host profiles. Six existing
+cases previously recorded as divergent, including the `CHAR`, `IRR`, and `MATCH` coercion cases,
+also match after the 0.1.22 fixes. These observations cover the recorded inputs; they do not
+establish every function's full domain as Excel-equivalent.
+
 ### Deliberate difference: probability-distribution numeric policies
 
 The policies below are chosen, documented, and pinned by tests. Each one prefers a typed Excel
@@ -403,14 +411,14 @@ documented example.
 
 ### Measured agreement
 
-The 0.1.20 engine audit of the frozen 0.1.8 workbooks records:
+The 0.1.22 engine audit of the frozen 0.1.8 workbooks records:
 
 | Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 250 | 16 | 0 | 0 | 0 |
-| CellRune formula oracle — Excel Online | 1,496 | 1,308 | 25 | 163 | 0 | 0 |
-| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,289 | 21 | 163 | 23 | 0 |
+| CellRune formula oracle — Excel Online | 1,496 | 1,383 | 12 | 101 | 0 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,364 | 8 | 101 | 23 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
@@ -433,10 +441,12 @@ documentation, but no recorded tolerance against the reference oracle. Do not re
 from the verified section as a claim of exactness in either direction.
 
 - statistical distributions and inverse distributions outside the gamma, beta, binomial,
-  hypergeometric, F, t, normal, and lognormal families measured in 0.1.12, 0.1.13, and 0.1.20
+  hypergeometric, F, t, normal, and lognormal families measured in 0.1.12, 0.1.13, and 0.1.20,
+  and the chi-squared and Weibull distributions measured in 0.1.22
 - closed-form financial functions outside the recorded DDB and XNPV cases
 - transcendental math and trigonometric functions, which are evaluated through `libm`
 - engineering functions outside the measured 0.1.14 `CONVERT`, Bessel, and complex-text families
+  and the 0.1.22 `IMLOG10` and `IMLOG2`
 
 Priority for measurement is statistical, then closed-form financial, then math.
 
