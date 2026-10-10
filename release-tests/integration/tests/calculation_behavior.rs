@@ -3254,9 +3254,12 @@ fn unique_large_rows_and_columns_fit_the_actual_work_budget() {
 }
 
 #[test]
-fn unique_text_processing_consumes_work_and_cannot_hide_exhaustion() {
-    let text = "x".repeat(300);
-    let formula = format!("IFERROR(SUM(UNIQUE({{\"{text}\";\"{text}\"}})),0)");
+fn unique_item_processing_consumes_work_and_cannot_hide_exhaustion() {
+    let items = (0..40)
+        .map(|item| format!("\"t{item}\""))
+        .collect::<Vec<_>>()
+        .join(";");
+    let formula = format!("IFERROR(SUM(UNIQUE({{{items}}})),0)");
     let workbook = workbook_with_formulas(&[(1, 1, formula.as_str())]);
     let limits = CalculationLimits::default()
         .with_max_function_iterations(64)

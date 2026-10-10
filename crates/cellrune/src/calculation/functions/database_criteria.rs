@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use super::super::coerce::compare_text_case_insensitive;
-use super::super::criteria::{CompiledWildcardPattern, charge_text_comparison_work};
+use super::super::criteria::{CompiledWildcardPattern, charge_text_comparison};
 use super::super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl CompiledDatabaseCriteria {
             ),
             Value::Blank => (DatabaseCriteriaOp::Eq, DatabaseCriteriaRhs::Blank),
             Value::Text(text) => {
-                on_work(text.len() as u64)?;
+                on_work(1)?;
                 let (op, rest, explicit_operator) = parse_operator(text);
                 let rhs = if rest.is_empty() {
                     DatabaseCriteriaRhs::Blank
@@ -104,7 +104,7 @@ impl CompiledDatabaseCriteria {
             DatabaseCriteriaRhs::Number(expected) => match cell {
                 Value::Number(actual) => Ok(actual == expected),
                 Value::Text(text) => {
-                    on_work(text.len() as u64)?;
+                    on_work(1)?;
                     Ok(text
                         .trim()
                         .parse::<f64>()
@@ -139,7 +139,7 @@ impl CompiledDatabaseCriteria {
                 let actual = match cell {
                     Value::Number(number) => Some(*number),
                     Value::Text(text) => {
-                        on_work(text.len() as u64)?;
+                        on_work(1)?;
                         text.trim().parse::<f64>().ok()
                     }
                     _ => None,
@@ -150,7 +150,7 @@ impl CompiledDatabaseCriteria {
             }
             DatabaseCriteriaRhs::OrderedText(expected) => match cell {
                 Value::Text(text) if !text.is_empty() => {
-                    charge_text_comparison_work(text, expected, on_work)?;
+                    charge_text_comparison(on_work)?;
                     Ok(accept(compare_text_case_insensitive(text, expected)))
                 }
                 _ => Ok(false),

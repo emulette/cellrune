@@ -54,7 +54,7 @@ fn wildcard_work_uses_the_formula_cumulative_limit() {
     let options = CalculationOptions::default().with_limits(limits);
 
     let single = calculate_workbook(
-        &workbook_with_formulas(&[(1, 1, "COUNTIF(A2,\"a*\")"), (2, 1, "\"alpha\"")]),
+        &workbook_with_formulas(&[(1, 1, "COUNTIF(A2,\"a*\")"), (2, 1, "\"alphabetical\"")]),
         options,
     );
     assert_number(&single, 1, 1.0, 0.0);
@@ -62,7 +62,7 @@ fn wildcard_work_uses_the_formula_cumulative_limit() {
     let cumulative = calculate_workbook(
         &workbook_with_formulas(&[
             (1, 1, "COUNTIF(A2,\"a*\")+COUNTIF(A2,\"a*\")"),
-            (2, 1, "\"alpha\""),
+            (2, 1, "\"alphabetical\""),
         ]),
         options,
     );
@@ -72,39 +72,62 @@ fn wildcard_work_uses_the_formula_cumulative_limit() {
         .with_max_function_iterations(10)
         .expect("nonzero cumulative wildcard limit");
     let tight = calculate_workbook(
-        &workbook_with_formulas(&[(1, 1, "COUNTIF(A2,\"a*\")"), (2, 1, "\"alpha\"")]),
+        &workbook_with_formulas(&[(1, 1, "COUNTIF(A2,\"a*\")"), (2, 1, "\"alphabetical\"")]),
         CalculationOptions::default().with_limits(tight_limits),
     );
     assert_issue(&tight, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
 
 #[test]
-fn criteria_and_match_text_scans_are_charged_before_comparison() {
-    let candidate = "a".repeat(64);
-    let lookup = "z".repeat(64);
-    let quoted_candidate = format!("\"{candidate}\"");
-    let countif = format!("COUNTIF(A2,\">{lookup}\")");
-    let legacy_match = format!("MATCH(\"{lookup}\",A2,1)");
-    let xmatch = format!("XMATCH(\"{lookup}\",A2,0)");
-    let workbook = workbook_with_formulas(&[
-        (2, 1, quoted_candidate.as_str()),
-        (1, 2, countif.as_str()),
-        (1, 3, legacy_match.as_str()),
-        (1, 4, xmatch.as_str()),
-    ]);
+fn text_comparisons_cost_one_unit_per_cell_regardless_of_text_length() {
+    let candidate = format!("\"{}\"", "a".repeat(1_000));
+    let lookup = "z".repeat(1_000);
+    let ordered_criterion = format!("\">{lookup}\"");
+    let countif_ordered = format!("COUNTIF(A2:A11,\">{lookup}\")");
+    let countif_exact = format!("COUNTIF(A2:A11,\"{lookup}\")");
+    let countifs = format!("COUNTIFS(A2:A11,\"{lookup}\")");
+    let exact_match = format!("IFNA(MATCH(\"{lookup}\",A2:A11,0),-1)");
+    let xlookup = format!("XLOOKUP(\"{lookup}\",A2:A11,A2:A11,-1)");
+    let mut formulas = vec![
+        (1, 1, "\"Name\""),
+        (1, 3, "\"Name\""),
+        (2, 3, ordered_criterion.as_str()),
+        (1, 4, countif_ordered.as_str()),
+        (1, 5, countif_exact.as_str()),
+        (1, 6, countifs.as_str()),
+        (1, 7, exact_match.as_str()),
+        (1, 8, xlookup.as_str()),
+        (1, 9, "COUNTA(UNIQUE(A2:A11))"),
+        (1, 10, "DCOUNTA(A1:A11,1,C1:C2)"),
+    ];
+    formulas.extend((2..=11).map(|row| (row, 1, candidate.as_str())));
+    let workbook = workbook_with_formulas(&formulas);
     let limits = CalculationLimits::default()
         .with_max_function_iterations(100)
         .expect("nonzero function work limit");
     let calculation =
         calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
 
-    for column in 2..=4 {
-        assert_issue(
-            &calculation,
-            column,
-            CalculationIssueCode::ResourceLimitExceeded,
-        );
+    for (column, expected) in [
+        (4, 0.0),
+        (5, 0.0),
+        (6, 0.0),
+        (7, -1.0),
+        (8, -1.0),
+        (9, 1.0),
+        (10, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
     }
+
+    let cell_limits = CalculationLimits::default()
+        .with_max_function_iterations(5)
+        .expect("nonzero function work limit");
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_limits(cell_limits),
+    );
+    assert_issue(&calculation, 5, CalculationIssueCode::ResourceLimitExceeded);
 }
 
 #[test]
@@ -230,7 +253,7 @@ fn match_preserves_exact_approximate_error_and_resource_contracts() {
         .with_max_function_iterations(10)
         .expect("nonzero MATCH wildcard limit");
     let limited = calculate_workbook(
-        &workbook_with_formulas(&[(1, 1, "MATCH(\"a*\",A2,0)"), (2, 1, "\"alpha\"")]),
+        &workbook_with_formulas(&[(1, 1, "MATCH(\"a*\",A2,0)"), (2, 1, "\"alphabetical\"")]),
         CalculationOptions::default().with_limits(limits),
     );
     assert_issue(&limited, 1, CalculationIssueCode::ResourceLimitExceeded);

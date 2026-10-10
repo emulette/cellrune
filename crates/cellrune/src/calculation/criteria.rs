@@ -52,7 +52,7 @@ pub fn compile_criteria_with_work(
             rhs: CompiledCriteriaRhs::Blank,
         }),
         Value::Text(text) => {
-            charge_preprocessing(text, &mut on_work)?;
+            charge_preprocessing(&mut on_work)?;
             let (op, rest) = if let Some(rest) = text.strip_prefix("<>") {
                 (CriteriaOp::Ne, rest)
             } else if let Some(rest) = text.strip_prefix("<=") {
@@ -95,7 +95,7 @@ impl CompiledCriteria {
             Value::Number(number) => CompiledCriteriaRhs::Number(*number),
             Value::Logical(logical) => CompiledCriteriaRhs::Logical(*logical),
             Value::Text(text) => {
-                charge_preprocessing(text, &mut on_work)?;
+                charge_preprocessing(&mut on_work)?;
                 CompiledCriteriaRhs::EqualityText(CompiledWildcardPattern::compile_precharged(text))
             }
             Value::Blank | Value::Error(_) => return Ok(None),
@@ -139,7 +139,7 @@ impl CompiledCriteria {
             CompiledCriteriaRhs::Number(expected) => match cell {
                 Value::Number(actual) => Ok(actual == expected),
                 Value::Text(text) => {
-                    charge_preprocessing(text, on_work)?;
+                    charge_preprocessing(on_work)?;
                     Ok(text
                         .trim()
                         .parse::<f64>()
@@ -174,7 +174,7 @@ impl CompiledCriteria {
                 let actual = match cell {
                     Value::Number(number) => Some(*number),
                     Value::Text(text) => {
-                        charge_preprocessing(text, on_work)?;
+                        charge_preprocessing(on_work)?;
                         text.trim().parse::<f64>().ok()
                     }
                     _ => None,
@@ -185,7 +185,7 @@ impl CompiledCriteria {
             }
             CompiledCriteriaRhs::OrderedText(expected) => match cell {
                 Value::Text(text) if !text.is_empty() => {
-                    charge_text_comparison_work(text, expected, on_work)?;
+                    charge_text_comparison(on_work)?;
                     Ok(accept(compare_text_case_insensitive(text, expected)))
                 }
                 _ => Ok(false),
@@ -217,6 +217,7 @@ enum PatternToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledWildcardPattern {
     tokens: Vec<PatternToken>,
+    has_wildcard: bool,
 }
 
 impl CompiledWildcardPattern {
@@ -224,13 +225,18 @@ impl CompiledWildcardPattern {
         pattern: &str,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<Self, ErrorKind> {
-        charge_preprocessing(pattern, &mut on_work)?;
+        charge_preprocessing(&mut on_work)?;
         Ok(Self::compile_precharged(pattern))
     }
 
     pub(in crate::calculation) fn compile_precharged(pattern: &str) -> Self {
+        let tokens = compile_pattern(pattern);
+        let has_wildcard = tokens
+            .iter()
+            .any(|token| !matches!(token, PatternToken::Literal(_)));
         Self {
-            tokens: compile_pattern(pattern),
+            tokens,
+            has_wildcard,
         }
     }
 
@@ -238,6 +244,7 @@ impl CompiledWildcardPattern {
         if self.tokens.last() != Some(&PatternToken::AnySequence) {
             self.tokens.push(PatternToken::AnySequence);
         }
+        self.has_wildcard = true;
     }
 
     pub fn matches_with_work(
@@ -245,14 +252,18 @@ impl CompiledWildcardPattern {
         text: &str,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<bool, ErrorKind> {
-        charge_preprocessing(text, &mut on_work)?;
+        charge_preprocessing(&mut on_work)?;
         let characters: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
         let mut token_index = 0_usize;
         let mut char_index = 0_usize;
         let mut star_token: Option<usize> = None;
         let mut star_char = 0_usize;
         while char_index < characters.len() {
-            on_work(1)?;
+            // A pattern without wildcards is one case-insensitive comparison, charged with the
+            // preprocessing above. Only wildcard state transitions are charged per step.
+            if self.has_wildcard {
+                on_work(1)?;
+            }
             let matched = match self.tokens.get(token_index) {
                 Some(PatternToken::AnyOne) => true,
                 Some(PatternToken::Literal(literal)) => *literal == characters[char_index],
@@ -281,14 +292,13 @@ impl CompiledWildcardPattern {
     }
 }
 
-/// Preprocessing uses one conservative work unit per input UTF-8 byte. The charge happens before
-/// allocation or Unicode case folding, covers all linear passes over that input exactly once, and
-/// is followed by separate charges for wildcard state transitions.
+/// Preprocessing one input costs one work unit, as reading one cell does on the other lookup
+/// paths. The charge happens before allocation or Unicode case folding and is followed by
+/// separate charges for wildcard state transitions.
 fn charge_preprocessing(
-    input: &str,
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(), ErrorKind> {
-    on_work(input.len() as u64)
+    on_work(1)
 }
 
 pub fn charge_value_comparison_work(
@@ -297,28 +307,18 @@ pub fn charge_value_comparison_work(
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(), ErrorKind> {
     match (left, right) {
-        (Value::Text(left), Value::Text(right)) => {
-            charge_text_comparison_work(left, right, on_work)
-        }
-        (Value::Text(text), Value::Blank) | (Value::Blank, Value::Text(text)) => {
-            charge_preprocessing(text, on_work)
+        (Value::Text(_), Value::Text(_) | Value::Blank) | (Value::Blank, Value::Text(_)) => {
+            charge_text_comparison(on_work)
         }
         _ => Ok(()),
     }
 }
 
-pub(in crate::calculation) fn charge_text_comparison_work(
-    left: &str,
-    right: &str,
+/// A case-insensitive text comparison costs one work unit regardless of the text lengths.
+pub(in crate::calculation) fn charge_text_comparison(
     on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(), ErrorKind> {
-    let units =
-        (left.len() as u64)
-            .checked_add(right.len() as u64)
-            .ok_or(ErrorKind::ResourceLimit(
-                super::limits::CalculationLimitKind::FunctionIterations,
-            ))?;
-    on_work(units)
+    on_work(1)
 }
 
 fn compile_pattern(pattern: &str) -> Vec<PatternToken> {
@@ -437,7 +437,7 @@ mod tests {
         let mut pattern_work = 0_u64;
         assert_eq!(
             CompiledWildcardPattern::compile_with_work(&long_pattern, |units| {
-                charge(&mut pattern_work, 16, units)
+                charge(&mut pattern_work, 0, units)
             }),
             Err(ErrorKind::ResourceLimit(
                 CalculationLimitKind::FunctionIterations
@@ -489,7 +489,7 @@ mod tests {
             }),
             Ok(true)
         );
-        assert_eq!(numeric_work, 4);
+        assert_eq!(numeric_work, 1);
 
         let ordered = compile_criteria_with_work(&Value::Text(">alpha".to_owned()), |_| Ok(()))
             .expect("ordered criterion");
@@ -501,7 +501,7 @@ mod tests {
             }),
             Ok(true)
         );
-        assert_eq!(ordered_work, ("Beta".len() + "alpha".len()) as u64);
+        assert_eq!(ordered_work, 1);
 
         let mut comparison_work = 0_u64;
         charge_value_comparison_work(
@@ -513,6 +513,6 @@ mod tests {
             },
         )
         .expect("comparison work");
-        assert_eq!(comparison_work, 9);
+        assert_eq!(comparison_work, 1);
     }
 }

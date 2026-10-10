@@ -77,9 +77,6 @@ pub(super) fn unique(
                 source.at(selected[row as usize], column)
             };
             charge_work(engine, context, 1)?;
-            if let Value::Text(text) = value {
-                charge_work(engine, context, text.len() as u64)?;
-            }
             data.push(value.clone());
         }
     }
@@ -119,7 +116,6 @@ fn item_hash(
             Value::Text(text) => {
                 // Hash the same Unicode lowercase form that `items_equal` compares, so letters
                 // outside ASCII group case-insensitively as in COUNTIF and GROUPBY.
-                charge_work(engine, context, text.len() as u64)?;
                 for character in text.chars().flat_map(char::to_lowercase) {
                     character.hash(&mut hasher);
                 }
@@ -143,7 +139,6 @@ fn items_equal(
         let left = item_value(source, left, offset, by_column);
         let right = item_value(source, right, offset, by_column);
         if let (Value::Text(left), Value::Text(right)) = (left, right) {
-            charge_work(engine, context, left.len().max(right.len()) as u64)?;
             if compare_text_case_insensitive(left, right) != Ordering::Equal {
                 return Ok(false);
             }
