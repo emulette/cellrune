@@ -1,12 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::DraftCellMutation;
 use super::super::annotated_text_replacement_required;
 use super::formula_edit::{
     FormulaEditState, TableFormulaLocations, WorkbookFormulaEdit, WorkbookFormulaRename,
     rewrite_workbook_formulas,
 };
-use super::staged::mark_upsert;
+use super::staged::{mark_removed, mark_upsert};
 use super::{BatchExecutionError, TableMaterializationBudget};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, render_unqualified_structured_column,
@@ -27,6 +26,7 @@ pub(super) struct TableEditState<'a> {
     pub(super) touched_sheets: &'a mut BTreeSet<SheetId>,
     pub(super) changed_table_ids: &'a mut BTreeSet<TableId>,
     pub(super) presentation: &'a crate::DocumentPresentation,
+    pub(super) source: Option<&'a crate::WorkbookSnapshot>,
 }
 
 impl TableEditState<'_> {
@@ -36,10 +36,7 @@ impl TableEditState<'_> {
     }
 
     fn mark_removed_cell(&mut self, sheet_id: SheetId, address: CellAddress) {
-        self.mutations.insert(
-            CalculationCellId::new(sheet_id, address),
-            DraftCellMutation::Remove,
-        );
+        mark_removed(self.mutations, self.source, sheet_id, address);
         self.mark_changed(sheet_id, address);
     }
 

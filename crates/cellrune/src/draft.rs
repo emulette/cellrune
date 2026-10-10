@@ -61,6 +61,17 @@ impl DraftCellMutationStore {
         previous
     }
 
+    pub(crate) fn remove(&mut self, id: &CalculationCellId) -> Option<DraftCellMutation> {
+        let key = Self::chunk(*id);
+        let chunk = self.chunks.get_mut(&key)?;
+        let removed = Arc::make_mut(chunk).remove(id)?;
+        if chunk.is_empty() {
+            self.chunks.remove(&key);
+        }
+        self.len -= 1;
+        Some(removed)
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&CalculationCellId, &DraftCellMutation)> {
         self.chunks.values().flat_map(|chunk| chunk.iter())
     }

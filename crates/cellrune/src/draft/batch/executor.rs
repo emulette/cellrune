@@ -1,13 +1,12 @@
 use std::collections::BTreeSet;
 
 use super::super::{
-    DraftCellMutation, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
-    next_revision,
+    WorkbookDraft, annotated_text_replacement_required, case_insensitive_key, next_revision,
 };
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
-use super::staged::{mark_upsert, sheet_by_id_mut};
+use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
 use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
     resize_table_rows, table_locations,
@@ -72,6 +71,10 @@ impl WorkbookDraft {
         let mut defined_names = clone_slice(self.workbook.defined_names(), rewrite_budget)?;
         let mut date_system = self.workbook.date_system();
         let mut calculation_hints = self.workbook.calculation_hints();
+        let source = self
+            .source_document
+            .as_deref()
+            .map(crate::XlsxDocument::workbook);
         let mut cell_mutations = self.cell_mutations.clone();
         let mut presentation = self
             .presentation
@@ -119,10 +122,10 @@ impl WorkbookDraft {
                     }
                     if *value == CellValue::Blank {
                         if sheet.remove_cell_deferred(*address) {
-                            cell_mutations.insert(
-                                CalculationCellId::new(*sheet_id, *address),
-                                DraftCellMutation::Remove,
-                            );
+                            if !mark_removed(&mut cell_mutations, source, *sheet_id, *address) {
+                                presentation_cell_mutations
+                                    .remove(&CalculationCellId::new(*sheet_id, *address));
+                            }
                             changed_cells.insert(CalculationCellId::new(*sheet_id, *address));
                             calculation_changed_cells
                                 .insert(CalculationCellId::new(*sheet_id, *address));
@@ -219,10 +222,10 @@ impl WorkbookDraft {
                         .cell(*address)
                         .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)));
                     if sheet.remove_cell_deferred(*address) {
-                        cell_mutations.insert(
-                            CalculationCellId::new(*sheet_id, *address),
-                            DraftCellMutation::Remove,
-                        );
+                        if !mark_removed(&mut cell_mutations, source, *sheet_id, *address) {
+                            presentation_cell_mutations
+                                .remove(&CalculationCellId::new(*sheet_id, *address));
+                        }
                         changed_cells.insert(CalculationCellId::new(*sheet_id, *address));
                         calculation_changed_cells
                             .insert(CalculationCellId::new(*sheet_id, *address));
@@ -396,6 +399,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
+                                source,
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -425,6 +429,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
+                                source,
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -454,6 +459,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
+                                source,
                             },
                             locations: &table_locations,
                             rewrite_budget,

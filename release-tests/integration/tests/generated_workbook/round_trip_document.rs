@@ -673,6 +673,59 @@ fn cells_added_to_an_empty_sheet_data_element_save_and_reopen() {
 }
 
 #[test]
+fn cells_added_and_removed_in_one_draft_leave_nothing_to_save() {
+    let document = open_xlsx_document_bytes(
+        &generated_workbook_with_sheet_count(1),
+        OpenOptions::default(),
+    )
+    .expect("open workbook");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let address = |text| CellAddress::from_a1(text).expect("address");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            sheet_id,
+            address("C5"),
+            CellValue::number(1.0).expect("finite value"),
+        )
+        .expect("add C5");
+    draft
+        .clear_cell(sheet_id, address("C5"))
+        .expect("remove the added C5");
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_value(
+                sheet_id,
+                address("D5"),
+                CellValue::number(2.0).expect("finite value"),
+            ),
+            WorkbookChange::set_cell_value(sheet_id, address("D5"), CellValue::Blank),
+            WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                CellValue::number(3.0).expect("finite value"),
+            ),
+        ]))
+        .expect("add and blank D5 in one batch");
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("a cell the draft added and removed must not block saving");
+
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen output");
+    let sheet = &reopened.workbook().sheets()[0];
+    assert!(sheet.cell(address("C5")).is_none());
+    assert!(sheet.cell(address("D5")).is_none());
+    assert_eq!(
+        sheet.cell(address("A1")).map(|cell| cell.content().clone()),
+        Some(CellContent::Literal(
+            CellValue::number(3.0).expect("finite value")
+        ))
+    );
+}
+
+#[test]
 fn edited_document_output_is_verified_with_the_source_read_limits() {
     let sheet_count = ReadLimits::default().max_sheets() + 1;
     let bytes = generated_workbook_with_sheet_count(sheet_count);
@@ -853,6 +906,29 @@ fn growing_a_totals_table_moves_the_totals_row_and_fills_calculated_columns() {
     assert_totals_formula(&workbook, "D6", "SUBTOTAL(109,tblChar[hp2])");
     assert_eq!(number_at(&workbook, "C6"), 100.0);
     assert_eq!(number_at(&workbook, "D6"), 200.0);
+}
+
+#[test]
+fn growing_a_totals_table_twice_clears_the_totals_row_the_draft_wrote() {
+    let resize = |last_row| {
+        WorkbookChange::resize_table_rows(
+            TableId::new(1).expect("table"),
+            Row::new(2).expect("first data row"),
+            Row::new(last_row).expect("last data row"),
+        )
+        .expect("valid resize")
+    };
+    // The first resize writes a totals row at row 6, which the source never had. The second
+    // turns row 6 into a data row and clears those cells again.
+    let (workbook, _) = resize_totals_table(vec![resize(5), resize(6)]);
+    let address = |a1: &str| CellAddress::from_a1(a1).expect("valid address");
+    assert_eq!(totals_table_cell(&workbook, "A6"), None);
+    assert_eq!(
+        totals_table_cell(&workbook, "A7"),
+        Some(CellContent::Literal(CellValue::Text("Total".into())))
+    );
+    assert_totals_formula(&workbook, "C7", "SUBTOTAL(109,tblChar[hp])");
+    assert!(workbook.sheets()[0].cell(address("C6")).is_none());
 }
 
 #[test]
