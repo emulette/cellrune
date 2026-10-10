@@ -3090,30 +3090,74 @@ fn cells_created_by_table_and_dynamic_formula_edits_take_their_row_or_column_sty
 }
 
 #[test]
-fn row_column_and_blank_cell_styles_are_resolved_only_in_document_mode() {
-    for sheet in [
-        SHEET_ONE.replace(
-            r#"<sheetData><row r="1">"#,
-            r#"<sheetData><row r="1" s="9" customFormat="1">"#,
-        ),
-        SHEET_ONE.replace(
-            "<sheetData>",
-            r#"<cols><col min="1" max="1" style="9"/></cols><sheetData>"#,
-        ),
-        SHEET_ONE.replace(r#"<c r="I1"/>"#, r#"<c r="I1" s="9"/>"#),
-    ] {
-        let archive = build_archive(&sheet, SHARED_STRINGS);
-        read_xlsx_bytes(&archive, ReadOptions::default()).expect("snapshot ignores the style");
-        let error = open_xlsx_document_bytes(&archive, OpenOptions::default())
-            .expect_err("document resolves the style");
-        assert_eq!(error.code(), XlsxErrorCode::InvalidStyleIndex);
-    }
-    let without_custom_format = SHEET_ONE.replace(r#"<row r="1">"#, r#"<row r="1" s="9">"#);
-    open_xlsx_document_bytes(
-        &build_archive(&without_custom_format, SHARED_STRINGS),
+fn unresolvable_row_column_and_blank_cell_styles_leave_new_cells_the_next_style() {
+    // Row 1 and column B name no cellXfs entry, the second and third spans have an invalid `min`
+    // and `style`, and row 2 has an invalid customFormat. None of them fails the open; a new
+    // cell falls back to the next rule.
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="1" max="1" style="1"/>
+    <col min="2" max="2" style="9"/>
+    <col min="0" max="3" style="2"/>
+    <col min="3" max="3" style="x"/>
+  </cols>
+  <sheetData>
+    <row r="1" s="9" customFormat="1"/>
+    <row r="2" s="2" customFormat="yes"/>
+    <row r="3" s="2" customFormat="1"/>
+  </sheetData>
+</worksheet>"#;
+    let document = open_xlsx_document_bytes(
+        &build_archive(sheet, SHARED_STRINGS),
         OpenOptions::default(),
     )
-    .expect("a row style applies only with customFormat");
+    .expect("unresolvable styles are ignored");
+    let sheet_id = SheetId::new(1).expect("sheet");
+    let value = || CellValue::Number(crate::FiniteNumber::new(1.0).expect("finite"));
+    let mut draft = WorkbookDraft::from_document(&document);
+    for name in ["A1", "B1", "C1", "A2", "B3"] {
+        draft
+            .set_cell_value(sheet_id, address(name), value())
+            .expect("new cell");
+    }
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write");
+    let worksheet = archive_text(output.bytes(), "xl/worksheets/sheet1.xml");
+    for written in [
+        r#"<c r="A1" s="1">"#,
+        r#"<c r="B1">"#,
+        r#"<c r="C1">"#,
+        r#"<c r="A2" s="1">"#,
+        r#"<c r="B3" s="2">"#,
+    ] {
+        assert!(worksheet.contains(written), "{written} in {worksheet}");
+    }
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    let first = reopened.workbook().sheet_by_name("First").expect("sheet");
+    for (name, id) in [("A1", 164), ("B1", 0), ("C1", 0), ("A2", 164), ("B3", 46)] {
+        assert_eq!(cell(first, name).number_format().id(), id, "{name}");
+    }
+
+    // A customFormat row without `r` and a blank cell naming no cellXfs entry record nothing
+    // either.
+    let sheet = sheet.replace(
+        r#"<row r="3" s="2" customFormat="1"/>"#,
+        r#"<row r="3"><c r="D3" s="9"/></row><row s="2" customFormat="1"/>"#,
+    );
+    let document = open_xlsx_document_bytes(
+        &build_archive(&sheet, SHARED_STRINGS),
+        OpenOptions::default(),
+    )
+    .expect("unresolvable styles are ignored");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(sheet_id, address("D3"), value())
+        .expect("new cell");
+    let first = draft.workbook().sheet_by_id(sheet_id).expect("sheet");
+    assert_eq!(cell(first, "D3").number_format().id(), 0);
 }
 
 fn build_archive(sheet_one: &str, shared_strings: &str) -> Vec<u8> {

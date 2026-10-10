@@ -366,9 +366,11 @@ impl CellBuilder {
             self.explicit_phonetic_visibility,
         );
         let Some(content) = content else {
-            // A value written here later keeps the style this blank cell carries.
-            if self.capture == PresentationCapture::Document {
-                let number_format = resources.styles.format(self.style_index, budget)?;
+            // A value written here later keeps the style this blank cell carries. A blank cell's
+            // style was never resolved before, so one naming no `cellXfs` entry records nothing.
+            if self.capture == PresentationCapture::Document
+                && let Some(number_format) = resources.styles.format(self.style_index)
+            {
                 sheet.new_cell_styles_mut().insert_blank_cell(
                     self.address,
                     self.style_index,
@@ -377,7 +379,15 @@ impl CellBuilder {
             }
             return Ok(());
         };
-        let number_format = resources.styles.format(self.style_index, budget)?.clone();
+        let number_format = resources
+            .styles
+            .format(self.style_index)
+            .cloned()
+            .ok_or_else(|| {
+                budget
+                    .error(XlsxErrorCode::InvalidStyleIndex)
+                    .with_detail(self.style_index.to_string())
+            })?;
         sheet
             .insert_cell_with_number_format(self.address, content, number_format)
             .map_err(|error| {
