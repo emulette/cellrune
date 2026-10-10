@@ -119,6 +119,21 @@ pub enum WorkbookChange {
         /// Last one-based data-body row.
         last_data_row: Row,
     },
+    /// Widens one table by columns, naming each new column from the text in its header cell.
+    WidenTableColumns {
+        /// Target table.
+        table_id: TableId,
+        /// New full table range, which keeps the current rows and contains the current range.
+        range: CellRange,
+    },
+    /// Widens a sheet-level auto-filter by columns and aligns its hidden `_xlnm._FilterDatabase`
+    /// name.
+    WidenSheetAutoFilter {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// New filter range, which keeps the current rows and contains the current range.
+        range: CellRange,
+    },
 }
 
 impl WorkbookChange {
@@ -269,6 +284,16 @@ impl WorkbookChange {
             first_data_row,
             last_data_row,
         })
+    }
+
+    /// Constructs a stable-ID table column widening.
+    pub const fn widen_table_columns(table_id: TableId, range: CellRange) -> Self {
+        Self::WidenTableColumns { table_id, range }
+    }
+
+    /// Constructs a sheet-level auto-filter column widening.
+    pub const fn widen_sheet_auto_filter(sheet_id: SheetId, range: CellRange) -> Self {
+        Self::WidenSheetAutoFilter { sheet_id, range }
     }
 }
 

@@ -30,4 +30,18 @@ impl SheetAutoFilter {
     pub fn filter_column_ids(&self) -> &[u32] {
         &self.filter_column_ids
     }
+
+    /// Returns this filter over `range`, which keeps its rows and contains its columns, with each
+    /// filter column renumbered from the new first column.
+    pub(crate) fn widened(&self, range: CellRange) -> Self {
+        let shift = self.range.start().column().get() - range.start().column().get();
+        Self {
+            range,
+            filter_column_ids: self
+                .filter_column_ids
+                .iter()
+                .map(|column_id| column_id + shift)
+                .collect(),
+        }
+    }
 }

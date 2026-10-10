@@ -12,6 +12,7 @@ use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
     resize_table_rows, table_header_column, table_header_edit_error, table_locations,
 };
+use super::widen_edit::{align_filter_database_name, widen_sheet_auto_filter, widen_table_columns};
 use super::{
     BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
 };
@@ -540,6 +541,24 @@ impl WorkbookDraft {
                     )? {
                         topology_changed = true;
                         semantic_changed = true;
+                    }
+                }
+                WorkbookChange::WidenTableColumns { table_id, range } => {
+                    if widen_table_columns(&mut sheets, &table_locations, *table_id, *range)? {
+                        changed_table_ids.insert(*table_id);
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
+                WorkbookChange::WidenSheetAutoFilter { sheet_id, range } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    if widen_sheet_auto_filter(sheet, *range)? {
+                        touched_sheets.insert(*sheet_id);
+                        semantic_changed = true;
+                        if align_filter_database_name(sheet, &mut defined_names)? {
+                            workbook_changed = true;
+                            topology_changed = true;
+                        }
                     }
                 }
             }

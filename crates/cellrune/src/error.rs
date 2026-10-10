@@ -101,6 +101,15 @@ const MESSAGE_TABLE_MATERIALIZATION_COLLISION: &str =
     "table materialization would overwrite non-equivalent worksheet content";
 const MESSAGE_UNSUPPORTED_TABLE_AUTHORING_METADATA: &str =
     "table metadata cannot be preserved safely by this authoring operation";
+const MESSAGE_TABLE_TOTALS_CELL_OCCUPIED: &str =
+    "a new table column requires an empty totals-row cell";
+const MESSAGE_SHEET_AUTO_FILTER_NOT_FOUND: &str =
+    "worksheet does not declare a sheet-level auto-filter";
+const MESSAGE_SHEET_AUTO_FILTER_OVERLAPS_TABLE: &str =
+    "a sheet-level auto-filter must not overlap a table";
+const MESSAGE_COLUMN_WIDENING_RANGE_INVALID: &str =
+    "a widened range must keep the current rows and contain the current range";
+const MESSAGE_COLUMN_WIDENING_OVERLAP: &str = "widened columns must not overlap a merged range, legacy array formula, or declared spill range";
 const MESSAGE_FORMULA_REWRITE_PARSE_FAILED: &str =
     "a formula related to the rename could not be parsed for typed rewriting";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
@@ -261,6 +270,16 @@ pub enum ValidationErrorCode {
     TableMaterializationCollision,
     /// Table metadata cannot be safely authored.
     UnsupportedTableAuthoringMetadata,
+    /// A table widening adds a column whose totals-row cell is not empty.
+    TableTotalsCellOccupied,
+    /// A draft operation targets a sheet without a sheet-level auto-filter.
+    SheetAutoFilterNotFound,
+    /// A sheet-level auto-filter and a table would overlap.
+    SheetAutoFilterOverlapsTable,
+    /// A column widening changes the row span or does not contain the current range.
+    ColumnWideningRangeInvalid,
+    /// Widened columns overlap a merged range, legacy array formula, or declared spill range.
+    ColumnWideningOverlap,
     /// A target-related formula could not be parsed for typed rewriting.
     FormulaRewriteParseFailed,
 }
@@ -354,6 +373,11 @@ impl ValidationErrorCode {
             Self::UnsupportedTableAuthoringMetadata => {
                 "validation.unsupported_table_authoring_metadata"
             }
+            Self::TableTotalsCellOccupied => "validation.table_totals_cell_occupied",
+            Self::SheetAutoFilterNotFound => "validation.sheet_auto_filter_not_found",
+            Self::SheetAutoFilterOverlapsTable => "validation.sheet_auto_filter_overlaps_table",
+            Self::ColumnWideningRangeInvalid => "validation.column_widening_range_invalid",
+            Self::ColumnWideningOverlap => "validation.column_widening_overlap",
             Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
         }
     }
@@ -698,6 +722,38 @@ pub enum ValidationError {
         /// Target table.
         table_id: u32,
     },
+    /// A table widening adds a column whose totals-row cell is not empty.
+    TableTotalsCellOccupied {
+        /// Target table.
+        table_id: u32,
+        /// One-based row of the totals cell.
+        row: u32,
+        /// One-based column of the totals cell.
+        column: u32,
+    },
+    /// A draft operation targets a sheet that declares no sheet-level auto-filter.
+    SheetAutoFilterNotFound {
+        /// Target sheet.
+        sheet_id: u32,
+    },
+    /// A sheet-level auto-filter and a table on one worksheet would overlap.
+    SheetAutoFilterOverlapsTable {
+        /// Worksheet containing both ranges.
+        sheet_id: u32,
+        /// Overlapping table.
+        table_id: u32,
+    },
+    /// A column widening changes the row span or does not contain the current range.
+    ColumnWideningRangeInvalid,
+    /// Widened columns overlap a merged range, legacy array formula, or declared spill range.
+    ColumnWideningOverlap {
+        /// Worksheet containing the overlap.
+        sheet_id: u32,
+        /// One-based top row of the overlapped range.
+        row: u32,
+        /// One-based left column of the overlapped range.
+        column: u32,
+    },
     /// A formula related to a rename could not be parsed for typed rewriting.
     FormulaRewriteParseFailed {
         /// Stable parser error code.
@@ -824,6 +880,13 @@ impl ValidationError {
             Self::UnsupportedTableAuthoringMetadata { .. } => {
                 ValidationErrorCode::UnsupportedTableAuthoringMetadata
             }
+            Self::TableTotalsCellOccupied { .. } => ValidationErrorCode::TableTotalsCellOccupied,
+            Self::SheetAutoFilterNotFound { .. } => ValidationErrorCode::SheetAutoFilterNotFound,
+            Self::SheetAutoFilterOverlapsTable { .. } => {
+                ValidationErrorCode::SheetAutoFilterOverlapsTable
+            }
+            Self::ColumnWideningRangeInvalid => ValidationErrorCode::ColumnWideningRangeInvalid,
+            Self::ColumnWideningOverlap { .. } => ValidationErrorCode::ColumnWideningOverlap,
             Self::FormulaRewriteParseFailed { .. } => {
                 ValidationErrorCode::FormulaRewriteParseFailed
             }
@@ -1094,6 +1157,35 @@ impl fmt::Display for ValidationError {
             Self::UnsupportedTableAuthoringMetadata { table_id } => write!(
                 formatter,
                 "{MESSAGE_UNSUPPORTED_TABLE_AUTHORING_METADATA}: table {table_id}"
+            ),
+            Self::TableTotalsCellOccupied {
+                table_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_TOTALS_CELL_OCCUPIED}: table {table_id}, row {row}, column {column}"
+            ),
+            Self::SheetAutoFilterNotFound { sheet_id } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_SHEET_AUTO_FILTER_NOT_FOUND}: {sheet_id}"
+                )
+            }
+            Self::SheetAutoFilterOverlapsTable { sheet_id, table_id } => write!(
+                formatter,
+                "{MESSAGE_SHEET_AUTO_FILTER_OVERLAPS_TABLE}: sheet {sheet_id}, table {table_id}"
+            ),
+            Self::ColumnWideningRangeInvalid => {
+                formatter.write_str(MESSAGE_COLUMN_WIDENING_RANGE_INVALID)
+            }
+            Self::ColumnWideningOverlap {
+                sheet_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_COLUMN_WIDENING_OVERLAP}: sheet {sheet_id}, row {row}, column {column}"
             ),
             Self::FormulaRewriteParseFailed {
                 parse_code,
@@ -1418,6 +1510,26 @@ mod tests {
             (
                 ValidationErrorCode::UnsupportedTableAuthoringMetadata,
                 "validation.unsupported_table_authoring_metadata",
+            ),
+            (
+                ValidationErrorCode::TableTotalsCellOccupied,
+                "validation.table_totals_cell_occupied",
+            ),
+            (
+                ValidationErrorCode::SheetAutoFilterNotFound,
+                "validation.sheet_auto_filter_not_found",
+            ),
+            (
+                ValidationErrorCode::SheetAutoFilterOverlapsTable,
+                "validation.sheet_auto_filter_overlaps_table",
+            ),
+            (
+                ValidationErrorCode::ColumnWideningRangeInvalid,
+                "validation.column_widening_range_invalid",
+            ),
+            (
+                ValidationErrorCode::ColumnWideningOverlap,
+                "validation.column_widening_overlap",
             ),
             (
                 ValidationErrorCode::FormulaRewriteParseFailed,

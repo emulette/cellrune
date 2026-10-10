@@ -52,7 +52,10 @@ pub(crate) fn patch_table_xml(
     let mut root_depth = None;
     let mut seen_columns = BTreeSet::new();
     let mut auto_filter_depth = None;
+    let mut next_filter_column = 0_usize;
     let mut table_columns_depth = None;
+    let mut table_columns_name = Vec::new();
+    let mut next_column = 0_usize;
     let mut current_column: Option<(u64, &TableColumn)> = None;
     let mut active_formula: Option<ActiveFormula> = None;
     let mut active_sort: Option<ActiveSort<'_>> = None;
@@ -89,7 +92,22 @@ pub(crate) fn patch_table_xml(
                     && local == b"tableColumns"
                 {
                     table_columns_depth = Some(depth);
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                    table_columns_name = element.name().as_ref().to_vec();
+                    let patched = if element
+                        .try_get_attribute("count")
+                        .map_err(|error| invalid_xml(source, error))?
+                        .is_some()
+                    {
+                        replace_changed_attribute(
+                            element,
+                            source,
+                            "count",
+                            table.columns().len().to_string(),
+                        )?
+                    } else {
+                        element.into_owned()
+                    };
+                    write_event(&mut writer, Event::Start(patched), source)?;
                 } else if root_depth.is_some_and(|root| depth == root + 1)
                     && spreadsheet
                     && local == b"autoFilter"
@@ -100,6 +118,14 @@ pub(crate) fn patch_table_xml(
                     let patched =
                         patch_attributes(&element, source, &[("ref", replacement.flatten())])?;
                     auto_filter_depth = Some(depth);
+                    next_filter_column = 0;
+                    write_event(&mut writer, Event::Start(patched), source)?;
+                } else if spreadsheet
+                    && local == b"filterColumn"
+                    && auto_filter_depth.is_some_and(|filter| depth == filter + 1)
+                {
+                    let patched =
+                        patch_filter_column(element, table, &mut next_filter_column, source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if spreadsheet
                     && local == b"sortState"
@@ -148,7 +174,15 @@ pub(crate) fn patch_table_xml(
                     && local == b"tableColumn"
                     && table_columns_depth.is_some_and(|columns| depth == columns + 1)
                 {
-                    let column = column_for_element(&element, table, source)?;
+                    let (index, column) = column_for_element(&element, table, source)?;
+                    insert_new_columns(
+                        &mut writer,
+                        &table_columns_name,
+                        table.columns().get(next_column..index),
+                        &mut seen_columns,
+                        source,
+                    )?;
+                    next_column = index + 1;
                     seen_columns.insert(column.id());
                     let patched = patch_attributes(
                         &element,
@@ -210,6 +244,11 @@ pub(crate) fn patch_table_xml(
                         .map(range_text);
                     patch_attributes(&element, source, &[("ref", replacement)])?
                 } else if spreadsheet
+                    && local == b"filterColumn"
+                    && auto_filter_depth.is_some_and(|filter| element_depth == filter + 1)
+                {
+                    patch_filter_column(element, table, &mut next_filter_column, source)?
+                } else if spreadsheet
                     && local == b"sortState"
                     && (root_depth.is_some_and(|root| element_depth == root + 1)
                         || auto_filter_depth.is_some_and(|filter| element_depth == filter + 1))
@@ -253,7 +292,15 @@ pub(crate) fn patch_table_xml(
                     && local == b"tableColumn"
                     && table_columns_depth.is_some_and(|columns| element_depth == columns + 1)
                 {
-                    let column = column_for_element(&element, table, source)?;
+                    let (index, column) = column_for_element(&element, table, source)?;
+                    insert_new_columns(
+                        &mut writer,
+                        &table_columns_name,
+                        table.columns().get(next_column..index),
+                        &mut seen_columns,
+                        source,
+                    )?;
+                    next_column = index + 1;
                     seen_columns.insert(column.id());
                     patch_attributes(
                         &element,
@@ -291,6 +338,15 @@ pub(crate) fn patch_table_xml(
                     }
                     active_formula = None;
                 }
+                if table_columns_depth == Some(depth) {
+                    insert_new_columns(
+                        &mut writer,
+                        &table_columns_name,
+                        table.columns().get(next_column..),
+                        &mut seen_columns,
+                        source,
+                    )?;
+                }
                 write_event(&mut writer, Event::End(element.into_owned()), source)?;
                 if active_sort.as_ref().is_some_and(|sort| sort.depth == depth) {
                     let sort = active_sort.take().expect("active sort");
@@ -305,6 +361,12 @@ pub(crate) fn patch_table_xml(
                     current_column = None;
                 }
                 if auto_filter_depth == Some(depth) {
+                    if table
+                        .auto_filter()
+                        .is_none_or(|filter| filter.filter_columns().len() != next_filter_column)
+                    {
+                        return Err(invalid_structure(source));
+                    }
                     auto_filter_depth = None;
                 }
                 if table_columns_depth == Some(depth) {
@@ -343,7 +405,7 @@ fn column_for_element<'a>(
     element: &BytesStart<'_>,
     table: &'a Table,
     source: &PartPath,
-) -> Result<&'a TableColumn, XlsxWriteError> {
+) -> Result<(usize, &'a TableColumn), XlsxWriteError> {
     let mut id = None;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
@@ -357,11 +419,74 @@ fn column_for_element<'a>(
     table
         .columns()
         .iter()
-        .find(|column| column.id() == id)
+        .enumerate()
+        .find(|(_, column)| column.id() == id)
         .ok_or_else(|| invalid_structure(source))
 }
 
-fn patch_attributes(
+/// Writes `columns`, which a widening added before the next source column, as new
+/// `<tableColumn>` siblings named like their `<tableColumns>` parent. `None` means a source
+/// column appeared out of the model's column order.
+fn insert_new_columns(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    table_columns_name: &[u8],
+    columns: Option<&[TableColumn]>,
+    seen_columns: &mut BTreeSet<u32>,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    let columns = columns.ok_or_else(|| invalid_structure(source))?;
+    let prefix = table_columns_name
+        .iter()
+        .rposition(|byte| *byte == b':')
+        .map_or(&[][..], |index| &table_columns_name[..=index]);
+    let mut name = prefix.to_vec();
+    name.extend_from_slice(b"tableColumn");
+    let name = std::str::from_utf8(&name).map_err(|error| invalid_xml(source, error))?;
+    for column in columns {
+        let id = column.id().to_string();
+        let column_name = escape_attribute(column.name())?;
+        let mut element = BytesStart::new(name);
+        element.push_attribute((b"id".as_slice(), id.as_bytes()));
+        element.push_attribute((b"name".as_slice(), column_name.as_bytes()));
+        write_event(writer, Event::Empty(element), source)?;
+        seen_columns.insert(column.id());
+    }
+    Ok(())
+}
+
+/// Renumbers the next `<filterColumn>` of the table's auto-filter from the model.
+fn patch_filter_column(
+    element: BytesStart<'_>,
+    table: &Table,
+    next_filter_column: &mut usize,
+    source: &PartPath,
+) -> Result<BytesStart<'static>, XlsxWriteError> {
+    let column = table
+        .auto_filter()
+        .and_then(|filter| filter.filter_columns().get(*next_filter_column))
+        .ok_or_else(|| invalid_structure(source))?;
+    *next_filter_column += 1;
+    replace_changed_attribute(element, source, "colId", column.column_id().to_string())
+}
+
+/// Replaces one attribute only when its source value differs, so an unchanged element keeps
+/// its bytes.
+pub(super) fn replace_changed_attribute(
+    element: BytesStart<'_>,
+    source: &PartPath,
+    name: &str,
+    value: String,
+) -> Result<BytesStart<'static>, XlsxWriteError> {
+    let current = element
+        .try_get_attribute(name)
+        .map_err(|error| invalid_xml(source, error))?;
+    if current.is_some_and(|attribute| attribute.value.as_ref() == value.as_bytes()) {
+        return Ok(element.into_owned());
+    }
+    patch_attributes(&element, source, &[(name, Some(value))])
+}
+
+pub(super) fn patch_attributes(
     element: &BytesStart<'_>,
     source: &PartPath,
     replacements: &[(&str, Option<String>)],
@@ -389,7 +514,7 @@ fn patch_attributes(
     Ok(patched.into_owned())
 }
 
-fn range_text(range: CellRange) -> String {
+pub(super) fn range_text(range: CellRange) -> String {
     if range.start() == range.end() {
         range.start().to_string()
     } else {
@@ -397,7 +522,7 @@ fn range_text(range: CellRange) -> String {
     }
 }
 
-fn is_spreadsheet_element(xml: &NsReader<&[u8]>, name: QName<'_>) -> bool {
+pub(super) fn is_spreadsheet_element(xml: &NsReader<&[u8]>, name: QName<'_>) -> bool {
     matches!(
         xml.resolver().resolve_element(name).0,
         ResolveResult::Bound(namespace)
@@ -489,5 +614,47 @@ mod tests {
         let output = String::from_utf8(output).expect("UTF-8");
         assert!(output.contains(r#"name="Gross&#xA;Amount""#), "{output}");
         assert!(!output.contains("&amp;#xA;"), "{output}");
+    }
+
+    #[test]
+    fn widened_columns_are_inserted_in_column_order_under_the_source_prefix() {
+        let range = |start: &str, end: &str| {
+            CellRange::new(
+                CellAddress::from_a1(start).expect("start"),
+                CellAddress::from_a1(end).expect("end"),
+            )
+            .expect("range")
+        };
+        let column = |id, name| TableColumn::new(id, name, None).expect("column");
+        let mut table = Table::new(
+            TableId::new(1).expect("table ID"),
+            TableName::new("Sales").expect("table name"),
+            TableName::new("Sales").expect("display name"),
+            range("B1", "C2"),
+            1,
+            0,
+            vec![column(1, "Amount"), column(2, "Note")],
+        )
+        .expect("table");
+        table.widen_columns(
+            range("A1", "D2"),
+            vec![
+                column(3, "Code"),
+                column(1, "Amount"),
+                column(2, "Note"),
+                column(4, "Margin & Co"),
+            ],
+        );
+        let source = PartPath::from_archive_name(b"xl/tables/table1.xml").expect("part");
+        let xml = br#"<x:table xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="Sales" ref="B1:C2"><x:tableColumns count="2"><x:tableColumn id="1" name="Amount"/><x:tableColumn id="2" name="Note"/></x:tableColumns></x:table>"#;
+        let output = patch_table_xml(xml, &source, &table, WriteLimits::default()).expect("patch");
+        let output = String::from_utf8(output).expect("UTF-8");
+        assert!(
+            output.contains(
+                r#"<x:tableColumns count="4"><x:tableColumn id="3" name="Code"/><x:tableColumn id="1" name="Amount"/><x:tableColumn id="2" name="Note"/><x:tableColumn id="4" name="Margin &amp; Co"/></x:tableColumns>"#
+            ),
+            "{output}"
+        );
+        assert!(output.contains(r#"ref="A1:D2""#), "{output}");
     }
 }

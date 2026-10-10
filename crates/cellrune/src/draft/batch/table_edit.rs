@@ -392,7 +392,7 @@ pub(super) fn table_locations(sheets: &[Sheet]) -> Result<TableLocations, Valida
     Ok(locations)
 }
 
-fn table_location(
+pub(super) fn table_location(
     locations: &TableLocations,
     table_id: TableId,
 ) -> Result<(usize, usize), ValidationError> {
@@ -665,7 +665,7 @@ fn collision(sheet: &Sheet, table_id: TableId, address: CellAddress) -> Validati
     }
 }
 
-fn ranges_overlap(first: CellRange, second: CellRange) -> bool {
+pub(super) fn ranges_overlap(first: CellRange, second: CellRange) -> bool {
     first.start().row() <= second.end().row()
         && second.start().row() <= first.end().row()
         && first.start().column() <= second.end().column()

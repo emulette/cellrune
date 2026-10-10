@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::auto_filter_patch::patch_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
 use super::materialization::{MaterializationAction, MaterializationPlan};
 use super::package::PackageWritePlan;
@@ -28,7 +29,7 @@ use super::{
 use crate::draft::DraftCellMutation;
 use crate::xlsx::package::PartPath;
 use crate::{
-    CalculationCellId, CalculationSnapshot, MaterializedResultOrigin, SheetId, SourceId,
+    CalculationCellId, CalculationSnapshot, MaterializedResultOrigin, Sheet, SheetId, SourceId,
     WorkbookDraft, XlsxDocument,
 };
 
@@ -44,6 +45,7 @@ const REL_STYLES: &str =
 const DETAIL_CALCULATION_IDENTITY: &str = "calculation does not belong to the current draft";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_MISSING_TABLE_PART: &str = "source table part mapping was not found";
+const DETAIL_MISSING_AUTO_FILTER: &str = "draft sheet auto-filter was not found";
 const DETAIL_EDITED_CELL_COUNT: &str = "max_edited_cells";
 const DETAIL_EDITED_SHEET_COUNT: &str = "max_edited_sheets";
 const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
@@ -72,11 +74,13 @@ pub(crate) fn write_document_draft(
         );
     }
     validate_dynamic_formula_edits(draft, document)?;
+    let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     if !draft.workbook_changed()
         && draft.cell_mutations().is_empty()
         && draft.presentation_cell_mutations().is_empty()
         && draft.presentation_sheet_mutations().is_empty()
         && draft.changed_table_ids().is_empty()
+        && auto_filter_sheets.is_empty()
     {
         return super::recalculation::write_recalculated_xlsx_bytes(document, calculation, options);
     }
@@ -165,6 +169,7 @@ pub(super) fn write_document_package(
     limits: WriteLimits,
 ) -> Result<DocumentPackageOutput, XlsxWriteError> {
     let materialization = plan.materialization;
+    let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
     let shared_strings_source = document
@@ -232,6 +237,7 @@ pub(super) fn write_document_package(
         )
         .chain(materialization.cells().keys().map(|id| id.sheet_id()))
         .chain(draft.presentation_sheet_mutations().iter().copied())
+        .chain(auto_filter_sheets.iter().copied())
         .filter(|sheet_id| !draft.added_sheets().contains(sheet_id))
         .collect::<BTreeSet<_>>();
     enforce_count(
@@ -432,6 +438,12 @@ pub(super) fn write_document_package(
                 limits,
             )?;
         }
+        if auto_filter_sheets.contains(&sheet_id) {
+            let filter = draft_sheet
+                .auto_filter()
+                .ok_or_else(|| invalid_plan(DETAIL_MISSING_AUTO_FILTER))?;
+            bytes = patch_sheet_auto_filter(&bytes, &sheet_source.part, filter, limits)?;
+        }
         replacements.insert(sheet_source.part, bytes);
     }
     rewrite_renamed_sheet_references(
@@ -574,6 +586,22 @@ pub(super) fn write_document_package(
         changed_parts,
         removed_parts,
     })
+}
+
+/// Existing sheets whose sheet-level autoFilter the draft changed.
+fn changed_auto_filter_sheets(draft: &WorkbookDraft, document: &XlsxDocument) -> BTreeSet<SheetId> {
+    draft
+        .workbook()
+        .sheets()
+        .iter()
+        .filter(|sheet| {
+            document
+                .workbook()
+                .sheet_by_id(sheet.id())
+                .is_some_and(|source| source.auto_filter() != sheet.auto_filter())
+        })
+        .map(Sheet::id)
+        .collect()
 }
 
 pub(super) fn validate_dynamic_formula_edits(

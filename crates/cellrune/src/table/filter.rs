@@ -1252,6 +1252,29 @@ impl TableAutoFilter {
         })
     }
 
+    /// Spans the filter over `first_column..=last_column`, which contain its current columns,
+    /// and renumbers its filter columns from the new first column. Sort ranges are absolute and
+    /// stay where they are.
+    pub(crate) fn widened(&self, first_column: crate::Column, last_column: crate::Column) -> Self {
+        let shift = self.range.start().column().get() - first_column.get();
+        Self {
+            range: CellRange::from_ordered(
+                crate::CellAddress::new(self.range.start().row(), first_column),
+                crate::CellAddress::new(self.range.end().row(), last_column),
+            ),
+            range_is_explicit: self.range_is_explicit,
+            filter_columns: self
+                .filter_columns
+                .iter()
+                .map(|column| TableFilterColumn {
+                    column_id: column.column_id + shift,
+                    ..column.clone()
+                })
+                .collect(),
+            sort_state: self.sort_state.clone(),
+        }
+    }
+
     pub(crate) fn resized_from_empty(&self, range: CellRange) -> Self {
         debug_assert!(self.sort_state.is_none());
         Self {

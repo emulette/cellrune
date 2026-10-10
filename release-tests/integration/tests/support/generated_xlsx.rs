@@ -365,6 +365,99 @@ pub fn generated_totals_table_fixture() -> Vec<u8> {
     )
 }
 
+/// Sheet `Data` filters `B1:D10` with a sheet-level auto-filter whose columns 0 and 2 carry
+/// criteria under a sort state, named by the hidden `_xlnm._FilterDatabase`. Sheet `Sales` holds
+/// table `Sales` on `B1:D4` with column IDs 1, 5, and 3 and a filter on its second column; the
+/// text headers `Code` in A1 and `Margin` in E1 sit beside it, and G1:H1 count its headers and
+/// sum its `Margin` column.
+pub fn generated_column_widening_fixture() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Data" sheetId="1" r:id="rId1"/>
+    <sheet name="Sales" sheetId="2" r:id="rId2"/>
+  </sheets>
+  <definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">Data!$B$1:$D$10</definedName></definedNames>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>"#;
+    let mut data_rows = String::from(
+        r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Id</t></is></c><c r="B1" t="inlineStr"><is><t>Region</t></is></c><c r="C1" t="inlineStr"><is><t>Amount</t></is></c><c r="D1" t="inlineStr"><is><t>Note</t></is></c><c r="E1" t="inlineStr"><is><t>Extra</t></is></c></row>"#,
+    );
+    for row in 2..=10 {
+        let region = if row % 2 == 0 { "North" } else { "South" };
+        data_rows.push_str(&format!(
+            r#"<row r="{row}"><c r="A{row}"><v>{id}</v></c><c r="B{row}" t="inlineStr"><is><t>{region}</t></is></c><c r="C{row}"><v>{amount}</v></c><c r="D{row}" t="inlineStr"><is><t>n{row}</t></is></c><c r="E{row}"><v>{row}</v></c></row>"#,
+            id = row - 1,
+            amount = row * 10,
+        ));
+    }
+    let data = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{data_rows}</sheetData>
+  <autoFilter ref="B1:D10"><filterColumn colId="0"><filters><filter val="North"/></filters></filterColumn><filterColumn colId="2"><customFilters><customFilter operator="notEqual" val="n4"/></customFilters></filterColumn><sortState ref="B2:D10"><sortCondition descending="1" ref="C2:C10"/></sortState></autoFilter>
+</worksheet>"#,
+    );
+    let sales = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Code</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Region</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>Amount</t></is></c>
+      <c r="D1" t="inlineStr"><is><t>Note</t></is></c>
+      <c r="E1" t="inlineStr"><is><t>Margin</t></is></c>
+      <c r="G1"><f>COUNTA(Sales[#Headers])</f></c>
+      <c r="H1"><f>SUM(Sales[Margin])</f></c>
+    </row>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>c1</t></is></c><c r="B2" t="inlineStr"><is><t>North</t></is></c><c r="C2"><v>10</v></c><c r="D2" t="inlineStr"><is><t>x</t></is></c><c r="E2"><v>1</v></c></row>
+    <row r="3"><c r="A3" t="inlineStr"><is><t>c2</t></is></c><c r="B3" t="inlineStr"><is><t>South</t></is></c><c r="C3"><v>20</v></c><c r="D3" t="inlineStr"><is><t>y</t></is></c><c r="E3"><v>2</v></c></row>
+    <row r="4"><c r="A4" t="inlineStr"><is><t>c3</t></is></c><c r="B4" t="inlineStr"><is><t>West</t></is></c><c r="C4"><v>30</v></c><c r="D4" t="inlineStr"><is><t>z</t></is></c><c r="E4"><v>3</v></c></row>
+  </sheetData>
+  <tableParts count="1"><tablePart r:id="rId1"/></tableParts>
+</worksheet>"#;
+    let sales_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="Sales" ref="B1:D4" headerRowCount="1">
+  <autoFilter ref="B1:D4"><filterColumn colId="1"><filters><filter val="20"/></filters></filterColumn></autoFilter>
+  <tableColumns count="3">
+    <tableColumn id="1" name="Region"/>
+    <tableColumn id="5" name="Amount"/>
+    <tableColumn id="3" name="Note"/>
+  </tableColumns>
+  <tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>
+</table>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", &data),
+            ("xl/worksheets/sheet2.xml", sales),
+            ("xl/worksheets/_rels/sheet2.xml.rels", sales_relationships),
+            ("xl/tables/table1.xml", table),
+        ],
+        None,
+    )
+}
+
 /// A workbook of `sheet_count` worksheets named `Sheet1`, `Sheet2`, and so on, each holding
 /// 1 in A1.
 pub fn generated_workbook_with_sheet_count(sheet_count: u64) -> Vec<u8> {

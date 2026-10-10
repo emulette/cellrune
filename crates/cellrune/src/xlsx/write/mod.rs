@@ -1,4 +1,5 @@
 mod authoring;
+mod auto_filter_patch;
 mod canonical;
 mod document_authoring;
 mod document_edits;

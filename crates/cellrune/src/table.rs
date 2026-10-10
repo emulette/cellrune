@@ -884,6 +884,18 @@ impl Table {
         Ok(())
     }
 
+    /// Widens the table to `range`, which keeps its rows and contains its columns. `columns` holds
+    /// every column of the widened table in column order.
+    pub(crate) fn widen_columns(&mut self, range: CellRange, columns: Vec<TableColumn>) {
+        debug_assert_eq!(columns.len() as u64, u64::from(range.width()));
+        self.auto_filter = self
+            .auto_filter
+            .as_ref()
+            .map(|filter| filter.widened(range.start().column(), range.end().column()));
+        self.range = range;
+        self.columns = columns;
+    }
+
     pub(crate) fn data_range(&self) -> Option<CellRange> {
         let first = self
             .range
