@@ -254,8 +254,10 @@ pub(super) fn write_document_package(
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let bytes = source_reader.read_part(&part)?;
-        // A cell written over a removed source cell is styled as a new cell, so the removed
-        // cell's style is not read for it.
+        // Only a valued source cell's own style is read. A cell written over a removed source
+        // cell is styled as a new cell, and so is one written over a blank source cell: the
+        // reader records a blank cell's style for new cells unless it names no `cellXfs` entry.
+        let source_sheet = document.workbook().sheet_by_id(sheet_id);
         let targets = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -274,6 +276,7 @@ pub(super) fn write_document_package(
                 )
             })
             .map(|id| id.address())
+            .filter(|address| source_sheet.is_some_and(|sheet| sheet.cell(*address).is_some()))
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
         sheet_sources.insert(
@@ -662,8 +665,8 @@ pub(super) fn validate_dynamic_formula_edits(
     Ok(())
 }
 
-/// Returns the style index a written cell takes: the source cell element's own style, else the
-/// style its empty position carries in the source worksheet, else the default style.
+/// Returns the style index a written cell takes: the valued source cell's own style, else the
+/// style a new cell takes at its position in the source worksheet, else the default style.
 fn source_style_index(
     source_styles: &BTreeMap<crate::CellAddress, usize>,
     sheet: &crate::Sheet,

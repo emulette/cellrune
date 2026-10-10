@@ -1,7 +1,8 @@
 use cellrune::{
     CalculationOptions, CellAddress, CellValue, FormulaText, NumberFormat, NumberFormatKind,
     OpenOptions, PhoneticWriteOptions, RecalculationWriteOptions, SheetName, WorkbookDraft,
-    calculate_workbook, open_xlsx_document_bytes, write_xlsx_draft_bytes,
+    WriteOptions, calculate_workbook, open_xlsx_document_bytes, write_xlsx_draft_bytes,
+    write_xlsx_draft_edits_bytes,
 };
 
 use super::recalculation_write_support as support;
@@ -192,6 +193,55 @@ fn a_cell_written_after_its_source_cell_is_cleared_takes_the_new_cell_format() {
             id,
             "{cell}"
         );
+    }
+}
+
+#[test]
+fn a_cell_written_over_a_blank_cell_with_an_unresolvable_style_takes_the_next_style() {
+    let document = open_xlsx_document_bytes(
+        &generated_row_column_style_workbook(),
+        OpenOptions::default(),
+    )
+    .expect("open");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let address = |text| CellAddress::from_a1(text).expect("address");
+    let mut draft = WorkbookDraft::from_document(&document);
+    for cell in ["E1", "E2"] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                address(cell),
+                CellValue::number(4.0).expect("finite value"),
+            )
+            .expect("value over the blank cell");
+    }
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let calculated =
+        write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+            .expect("calculated output");
+    let edited =
+        write_xlsx_draft_edits_bytes(&draft, WriteOptions::default()).expect("edit-only output");
+
+    // The blank cells' style 9 does not exist, so E1 takes the default style and E2 its
+    // formatted row's style, as new cells there would.
+    for output in [calculated.bytes(), edited.bytes()] {
+        let sheet = support::part_text(output, SHEET_PART);
+        assert_eq!(style_attribute(&sheet, "E1"), None, "{sheet}");
+        assert_eq!(style_attribute(&sheet, "E2"), Some("1"), "{sheet}");
+        let reopened = open_xlsx_document_bytes(output, OpenOptions::default()).expect("reopen");
+        let styled = &reopened.workbook().sheets()[0];
+        for (cell, id) in [("E1", 0), ("E2", 2)] {
+            assert_eq!(
+                styled
+                    .cell(address(cell))
+                    .expect("written cell")
+                    .number_format()
+                    .id(),
+                id,
+                "{cell}"
+            );
+        }
     }
 }
 

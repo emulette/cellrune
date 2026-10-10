@@ -470,7 +470,7 @@ pub fn generated_workbook_with_sheet_count(sheet_count: u64) -> Vec<u8> {
 /// A one-sheet workbook whose column B carries style 2 (`0.00%`), whose rows 2 and 5 carry style 1
 /// (`0.00` in bold) with `customFormat`, and whose row 4 declares style 1 without `customFormat`.
 /// A1 holds a value in style 2 and D2 a value in no style; B1 (no style) and C1 (style 1) are
-/// blank cells.
+/// blank cells, and so are E1 and E2, which name style 9, a `cellXfs` entry that does not exist.
 pub fn generated_row_column_style_workbook() -> Vec<u8> {
     let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -501,8 +501,8 @@ pub fn generated_row_column_style_workbook() -> Vec<u8> {
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <cols><col min="2" max="2" width="12" style="2" customWidth="1"/></cols>
   <sheetData>
-    <row r="1"><c r="A1" s="2"><v>0.5</v></c><c r="B1"/><c r="C1" s="1"/></row>
-    <row r="2" s="1" customFormat="1"><c r="D2"><v>1</v></c></row>
+    <row r="1"><c r="A1" s="2"><v>0.5</v></c><c r="B1"/><c r="C1" s="1"/><c r="E1" s="9"/></row>
+    <row r="2" s="1" customFormat="1"><c r="D2"><v>1</v></c><c r="E2" s="9"/></row>
     <row r="4" s="1"/>
     <row r="5" s="1" customFormat="1"/>
   </sheetData>
