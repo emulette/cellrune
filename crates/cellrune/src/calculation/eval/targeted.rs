@@ -199,7 +199,9 @@ impl Planner {
                         cells.insert(owner);
                     }
                 }
-                DependencyTarget::TableIdentity(_) | DependencyTarget::FormulaContent(_) => {}
+                DependencyTarget::TableIdentity(_)
+                | DependencyTarget::FormulaContent(_)
+                | DependencyTarget::ImpactArea(_) => {}
                 DependencyTarget::Area(span) => {
                     for rect in span.rects() {
                         let start = CellAddress::from_indices(rect.row_start, 1)

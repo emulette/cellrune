@@ -153,10 +153,9 @@ pub(crate) fn affected_formulas(
     let mut affected = direct.clone();
     let mut pending = direct.into_iter().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
-        for dependent in index.reverse_dependents.get(&cell).into_iter().flatten() {
-            charge()?;
-            if affected.insert(*dependent) {
-                pending.push(*dependent);
+        for dependent in index.dependents(cell, &mut charge)? {
+            if affected.insert(dependent) {
+                pending.push(dependent);
             }
         }
     }

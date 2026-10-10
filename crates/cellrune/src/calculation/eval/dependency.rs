@@ -29,7 +29,9 @@ fn is_let_function(name: &str) -> bool {
 
 /// How far the area of a range operator operand can reach before any cell is evaluated.
 enum RangeExtent {
-    /// Every area the operand can take lies inside this rectangle.
+    /// The area does not depend on cell values.
+    Fixed(Rect),
+    /// The area follows cell values but always lies inside this rectangle, as an INDEX end does.
     Bounded(Rect),
     /// The area follows cell values beyond any static bound.
     ValueDependent,
@@ -99,6 +101,9 @@ pub(in crate::calculation) enum DependencyTarget {
     TableIdentity(TableDependency),
     SpillAnchor(super::CellId),
     FormulaContent(super::CellId),
+    /// Every cell a reference end that moves with values can reach. Impact tracking watches it;
+    /// calculation order follows only the cells the reference covers when it is collected.
+    ImpactArea(RectSpan),
 }
 
 impl DependencyTarget {
@@ -125,7 +130,7 @@ impl DependencyTarget {
                 whole_rows: false,
             })),
             Self::Area(span) => Some(span.clone()),
-            Self::TableIdentity(_) => None,
+            Self::TableIdentity(_) | Self::ImpactArea(_) => None,
         }
     }
 }
@@ -137,6 +142,7 @@ fn compare_targets(left: &DependencyTarget, right: &DependencyTarget) -> Orderin
         DependencyTarget::TableIdentity(_) => 2,
         DependencyTarget::SpillAnchor(_) => 3,
         DependencyTarget::FormulaContent(_) => 4,
+        DependencyTarget::ImpactArea(_) => 5,
     };
     rank(left)
         .cmp(&rank(right))
@@ -146,7 +152,8 @@ fn compare_targets(left: &DependencyTarget, right: &DependencyTarget) -> Orderin
             | (DependencyTarget::FormulaContent(left), DependencyTarget::FormulaContent(right)) => {
                 left.cmp(right)
             }
-            (DependencyTarget::Area(left), DependencyTarget::Area(right)) => {
+            (DependencyTarget::Area(left), DependencyTarget::Area(right))
+            | (DependencyTarget::ImpactArea(left), DependencyTarget::ImpactArea(right)) => {
                 left.sort_key().cmp(&right.sort_key())
             }
             (DependencyTarget::TableIdentity(left), DependencyTarget::TableIdentity(right)) => {
@@ -434,93 +441,143 @@ impl Engine<'_> {
 
     /// Bounds the areas a range operator operand can take, whatever the cell values are.
     ///
-    /// An INDEX endpoint always lands inside its first argument, so that argument bounds it even
-    /// though the cell it selects follows values. Endpoints computed by LET, a LAMBDA, OFFSET,
-    /// INDIRECT, or a spill have no such bound.
+    /// An INDEX end always lands inside its first argument, so that argument bounds it even though
+    /// the cell it selects follows values. Ends computed by LET, a LAMBDA, OFFSET, INDIRECT, or a
+    /// spill have no such bound. `visited` holds the defined names being expanded, so a cyclic
+    /// name ends the expansion.
     fn range_extent(
         &self,
         context: EvalContext<'_>,
         expr: &Expr,
         local_names: &[String],
+        visited: &mut Vec<DefinedLambdaId>,
     ) -> RangeExtent {
-        crate::calculation::stack::grow(|| match expr {
-            Expr::Paren(inner) => self.range_extent(context, inner, local_names),
-            Expr::Range { start, end }
-            | Expr::ReferenceUnion {
-                left: start,
-                right: end,
-            } => match (
-                self.range_extent(context, start, local_names),
-                self.range_extent(context, end, local_names),
-            ) {
-                (RangeExtent::Bounded(start), RangeExtent::Bounded(end)) => {
-                    ReferenceValue::from_areas(vec![
-                        ReferenceArea::Rect(start),
-                        ReferenceArea::Rect(end),
+        crate::calculation::stack::grow(|| {
+            if context.is_cancelled() {
+                return RangeExtent::Invalid;
+            }
+            match expr {
+                Expr::Paren(inner) => self.range_extent(context, inner, local_names, visited),
+                Expr::Range { start, end }
+                | Expr::ReferenceUnion {
+                    left: start,
+                    right: end,
+                } => {
+                    let start = self.range_extent(context, start, local_names, visited);
+                    let end = self.range_extent(context, end, local_names, visited);
+                    let (start_rect, end_rect, fixed) = match (start, end) {
+                        (RangeExtent::Fixed(start), RangeExtent::Fixed(end)) => (start, end, true),
+                        (
+                            RangeExtent::Fixed(start) | RangeExtent::Bounded(start),
+                            RangeExtent::Fixed(end) | RangeExtent::Bounded(end),
+                        ) => (start, end, false),
+                        (RangeExtent::ValueDependent, _) | (_, RangeExtent::ValueDependent) => {
+                            return RangeExtent::ValueDependent;
+                        }
+                        _ => return RangeExtent::Invalid,
+                    };
+                    match ReferenceValue::from_areas(vec![
+                        ReferenceArea::Rect(start_rect),
+                        ReferenceArea::Rect(end_rect),
                     ])
                     .bounding_rect()
-                    .map_or(RangeExtent::Invalid, RangeExtent::Bounded)
+                    {
+                        Ok(rect) if fixed => RangeExtent::Fixed(rect),
+                        Ok(rect) => RangeExtent::Bounded(rect),
+                        Err(_) => RangeExtent::Invalid,
+                    }
                 }
-                (RangeExtent::ValueDependent, _) | (_, RangeExtent::ValueDependent) => {
+                // An intersection lies inside its left operand.
+                Expr::ReferenceIntersection { left, .. } => {
+                    self.range_extent(context, left, local_names, visited)
+                }
+                Expr::Call { name, args } => {
+                    if is_local_name(name, local_names)
+                        || self
+                            .resolve_name_expr_with_id_in_context(context, name)
+                            .is_some()
+                    {
+                        return RangeExtent::ValueDependent;
+                    }
+                    match function_evaluator(name) {
+                        Some(Evaluator::Legacy(LegacyFunction::Index)) => {
+                            let Some(prepared) = prepare_evaluator_arguments(
+                                Evaluator::Legacy(LegacyFunction::Index),
+                                args,
+                            ) else {
+                                return RangeExtent::Invalid;
+                            };
+                            match self.range_extent(context, &prepared[0], local_names, visited) {
+                                RangeExtent::Fixed(rect) | RangeExtent::Bounded(rect) => {
+                                    RangeExtent::Bounded(rect)
+                                }
+                                other => other,
+                            }
+                        }
+                        Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
+                            RangeExtent::ValueDependent
+                        }
+                        _ if matches!(
+                            function_dependency_kind(name),
+                            Some(DependencyKind::DynamicReference(_))
+                        ) =>
+                        {
+                            RangeExtent::ValueDependent
+                        }
+                        _ => RangeExtent::Invalid,
+                    }
+                }
+                Expr::Invoke { .. } | Expr::SpillRef(_) => RangeExtent::ValueDependent,
+                Expr::Name(name)
+                    if is_local_name(name, local_names) || context.binding(name).is_some() =>
+                {
                     RangeExtent::ValueDependent
                 }
+                Expr::Name(name) => {
+                    let Some((id, named)) =
+                        self.resolve_name_expr_with_id_in_context(context, name)
+                    else {
+                        return RangeExtent::Invalid;
+                    };
+                    if visited.contains(&id) {
+                        return RangeExtent::Invalid;
+                    }
+                    visited.push(id.clone());
+                    let extent = self.range_extent(
+                        context
+                            .without_bindings()
+                            .with_defined_name_scope(Some(id.scope())),
+                        named,
+                        &[],
+                        visited,
+                    );
+                    visited.pop();
+                    extent
+                }
+                Expr::Ref(_) | Expr::StructuredRef(_) => self
+                    .resolve_reference_value_expr(context, expr)
+                    .and_then(|reference| reference.bounding_rect())
+                    .map_or(RangeExtent::Invalid, RangeExtent::Fixed),
                 _ => RangeExtent::Invalid,
-            },
-            // An intersection lies inside its left operand.
-            Expr::ReferenceIntersection { left, .. } => {
-                self.range_extent(context, left, local_names)
             }
-            Expr::Call { name, args } => {
-                if is_local_name(name, local_names)
-                    || self
-                        .resolve_name_expr_with_id_in_context(context, name)
-                        .is_some()
-                {
-                    return RangeExtent::ValueDependent;
-                }
-                match function_evaluator(name) {
-                    Some(Evaluator::Legacy(LegacyFunction::Index)) => {
-                        match prepare_evaluator_arguments(
-                            Evaluator::Legacy(LegacyFunction::Index),
-                            args,
-                        ) {
-                            Some(prepared) => self.range_extent(context, &prepared[0], local_names),
-                            None => RangeExtent::Invalid,
-                        }
-                    }
-                    Some(Evaluator::Dynamic(DynamicFunction::Let)) => RangeExtent::ValueDependent,
-                    _ if matches!(
-                        function_dependency_kind(name),
-                        Some(DependencyKind::DynamicReference(_))
-                    ) =>
-                    {
-                        RangeExtent::ValueDependent
-                    }
-                    _ => RangeExtent::Invalid,
-                }
-            }
-            Expr::Invoke { .. } | Expr::SpillRef(_) => RangeExtent::ValueDependent,
-            Expr::Name(name)
-                if is_local_name(name, local_names) || context.binding(name).is_some() =>
-            {
-                RangeExtent::ValueDependent
-            }
-            Expr::Name(name) => match self.resolve_name_expr_with_id_in_context(context, name) {
-                Some((id, named)) => self.range_extent(
-                    context
-                        .without_bindings()
-                        .with_defined_name_scope(Some(id.scope())),
-                    named,
-                    &[],
-                ),
-                None => RangeExtent::Invalid,
-            },
-            Expr::Ref(_) | Expr::StructuredRef(_) => self
-                .resolve_reference_value_expr(context, expr)
-                .and_then(|reference| reference.bounding_rect())
-                .map_or(RangeExtent::Invalid, RangeExtent::Bounded),
-            _ => RangeExtent::Invalid,
         })
+    }
+
+    /// Reports whether a formula or an array result lies in `rect`.
+    fn rect_holds_calculated_cells(&self, rect: &Rect) -> bool {
+        let rows = (rect.sheet, rect.row_start, 0)..=(rect.sheet, rect.row_end, u32::MAX);
+        let in_columns = |cell: &super::CellId| (rect.col_start..=rect.col_end).contains(&cell.2);
+        self.asts
+            .range(rows.clone())
+            .any(|(cell, _)| in_columns(cell))
+            || self
+                .parse_failures
+                .range(rows)
+                .any(|(cell, _)| in_columns(cell))
+            || self
+                .array_regions
+                .iter()
+                .any(|region| rects_intersect(&region.rect, rect))
     }
 
     /// Reports whether a formula's references depend on values, as dynamic references do.
@@ -532,6 +589,7 @@ impl Engine<'_> {
         self.asts.get(&cell).is_some_and(|parsed| {
             let budget = EvaluationBudget::default();
             self.expr_contains_dynamic_reference_function(
+                false,
                 EvalContext::for_cancellable(cell, &budget, cancelled),
                 parsed.root(),
                 &mut VisitedDefinitions::default(),
@@ -567,6 +625,7 @@ impl Engine<'_> {
             }
             let budget = EvaluationBudget::default();
             let found = self.expr_contains_dynamic_reference_function(
+                true,
                 EvalContext::for_cancellable(*cell, &budget, cancelled),
                 parsed.root(),
                 &mut VisitedDefinitions::default(),
@@ -802,8 +861,8 @@ impl Engine<'_> {
                 }
                 Expr::Range { .. }
                     if matches!(
-                        self.range_extent(context, expr, local_names),
-                        RangeExtent::ValueDependent
+                        self.range_extent(context, expr, local_names, &mut Vec::new()),
+                        RangeExtent::Bounded(_) | RangeExtent::ValueDependent
                     ) && self.resolve_rect_expr(context, expr).is_err() =>
                 {
                     true
@@ -901,7 +960,9 @@ impl Engine<'_> {
                             cell_dependencies.push(owner);
                         }
                     }
-                    DependencyTarget::TableIdentity(_) | DependencyTarget::FormulaContent(_) => {}
+                    DependencyTarget::TableIdentity(_)
+                    | DependencyTarget::FormulaContent(_)
+                    | DependencyTarget::ImpactArea(_) => {}
                     DependencyTarget::Area(span) => {
                         for rect in span.rects() {
                             if cancelled() {
@@ -1092,16 +1153,16 @@ impl Engine<'_> {
                     );
                 }
                 Expr::Range { start, end } => {
-                    // An endpoint such as INDEX moves with cell values, so the range depends on
-                    // every cell its endpoints can reach, not only on the cells it covers now.
-                    let rect = match self.range_extent(context, expr, local_names) {
-                        RangeExtent::Bounded(rect) => Some(rect),
-                        RangeExtent::ValueDependent | RangeExtent::Invalid => {
-                            self.resolve_rect_expr(context, expr).ok()
-                        }
-                    };
-                    if let Some(rect) = rect {
+                    // Calculation follows the cells the range covers now. An end such as INDEX
+                    // moves with cell values, so impact tracking also watches every cell it can
+                    // reach, and formulas with such a range count as dynamic references.
+                    if let Ok(rect) = self.resolve_rect_expr(context, expr) {
                         output.push(DependencyTarget::from_span(RectSpan::single(rect)));
+                    }
+                    if let RangeExtent::Bounded(rect) =
+                        self.range_extent(context, expr, local_names, &mut Vec::new())
+                    {
+                        output.push(DependencyTarget::ImpactArea(RectSpan::single(rect)));
                     }
                     self.collect_dependency_targets(context, start, visited, local_names, output);
                     self.collect_dependency_targets(context, end, visited, local_names, output);
@@ -1624,8 +1685,15 @@ impl Engine<'_> {
         })
     }
 
+    /// Reports whether `expr` holds a reference whose cells depend on values.
+    ///
+    /// With `bounded_range_ends`, a range with an end such as INDEX also counts when a formula or
+    /// an array result lies in its reach: calculation order follows only the cells the range
+    /// covers when its dependencies are collected, so those cells may be read out of order once
+    /// the end moves. Literal cells in the reach are safe to read in any order.
     fn expr_contains_dynamic_reference_function(
         &self,
+        bounded_range_ends: bool,
         context: EvalContext<'_>,
         expr: &Expr,
         visited: &mut VisitedDefinitions,
@@ -1652,6 +1720,7 @@ impl Engine<'_> {
                             && visited.values.insert(id.clone())
                         {
                             found |= self.expr_contains_dynamic_reference_function(
+                                bounded_range_ends,
                                 context
                                     .without_bindings()
                                     .with_defined_name_scope(Some(id.scope())),
@@ -1664,6 +1733,7 @@ impl Engine<'_> {
                             || (arguments_are_reachable
                                 && args.iter().any(|arg| {
                                     self.expr_contains_dynamic_reference_function(
+                                        bounded_range_ends,
                                         context,
                                         arg,
                                         visited,
@@ -1688,7 +1758,11 @@ impl Engine<'_> {
                         self.calculation_limits().max_let_bindings(),
                         |arg, scope| {
                             found |= self.expr_contains_dynamic_reference_function(
-                                context, arg, visited, scope,
+                                bounded_range_ends,
+                                context,
+                                arg,
+                                visited,
+                                scope,
                             );
                         },
                     ) {
@@ -1696,6 +1770,7 @@ impl Engine<'_> {
                     }
                     args.iter().any(|arg| {
                         self.expr_contains_dynamic_reference_function(
+                            bounded_range_ends,
                             context,
                             arg,
                             visited,
@@ -1707,6 +1782,7 @@ impl Engine<'_> {
                     let callee_contains_dynamic =
                         self.builtin_invocation_callee_is_reachable(context, callee, local_names)
                             && self.expr_contains_dynamic_reference_function(
+                                bounded_range_ends,
                                 context,
                                 callee,
                                 visited,
@@ -1720,6 +1796,7 @@ impl Engine<'_> {
                             local_names,
                         ) && args.iter().any(|arg| {
                             self.expr_contains_dynamic_reference_function(
+                                bounded_range_ends,
                                 context,
                                 arg,
                                 visited,
@@ -1734,6 +1811,7 @@ impl Engine<'_> {
                         return false;
                     };
                     self.expr_contains_dynamic_reference_function(
+                        bounded_range_ends,
                         defined_context,
                         named,
                         visited,
@@ -1748,6 +1826,7 @@ impl Engine<'_> {
                         return false;
                     };
                     self.expr_contains_dynamic_reference_function(
+                        bounded_range_ends,
                         defined_context,
                         named,
                         visited,
@@ -1755,10 +1834,13 @@ impl Engine<'_> {
                     )
                 }
                 Expr::Range { .. }
-                    if matches!(
-                        self.range_extent(context, expr, local_names),
-                        RangeExtent::ValueDependent
-                    ) =>
+                    if match self.range_extent(context, expr, local_names, &mut Vec::new()) {
+                        RangeExtent::Bounded(rect) => {
+                            bounded_range_ends && self.rect_holds_calculated_cells(&rect)
+                        }
+                        RangeExtent::ValueDependent => true,
+                        RangeExtent::Fixed(_) | RangeExtent::Invalid => false,
+                    } =>
                 {
                     true
                 }
@@ -1766,7 +1848,13 @@ impl Engine<'_> {
                 | Expr::SpillRef(inner)
                 | Expr::Paren(inner)
                 | Expr::Unary { operand: inner, .. } => self
-                    .expr_contains_dynamic_reference_function(context, inner, visited, local_names),
+                    .expr_contains_dynamic_reference_function(
+                        bounded_range_ends,
+                        context,
+                        inner,
+                        visited,
+                        local_names,
+                    ),
                 Expr::Binary { left, right, .. }
                 | Expr::ReferenceUnion { left, right }
                 | Expr::ReferenceIntersection { left, right }
@@ -1775,11 +1863,13 @@ impl Engine<'_> {
                     end: right,
                 } => {
                     self.expr_contains_dynamic_reference_function(
+                        bounded_range_ends,
                         context,
                         left,
                         visited,
                         local_names,
                     ) || self.expr_contains_dynamic_reference_function(
+                        bounded_range_ends,
                         context,
                         right,
                         visited,
@@ -1788,6 +1878,7 @@ impl Engine<'_> {
                 }
                 Expr::Array(rows) => rows.iter().flatten().any(|element| {
                     self.expr_contains_dynamic_reference_function(
+                        bounded_range_ends,
                         context,
                         element,
                         visited,

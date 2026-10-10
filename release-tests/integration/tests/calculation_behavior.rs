@@ -4099,6 +4099,29 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
 }
 
 #[test]
+fn range_ends_neither_follow_cyclic_names_nor_order_by_their_whole_reach() {
+    let cyclic = workbook_with_formulas_and_names(&[(10, 3, "SUM(A1:Loop)")], &[("Loop", "Loop")]);
+    let calculation = calculate_workbook(&cyclic, CalculationOptions::default());
+    let Some(CalculationCellResult::Unavailable(issue)) =
+        calculation.cell(calculation_cell_id(10, 3))
+    else {
+        panic!("a range ending in a cyclic name is unavailable");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::UnsupportedName);
+
+    // C10 lies inside D2:D20, the area INDEX can reach, but not inside B2:D2, the range it reads.
+    let indexed = workbook_with_formulas(&[
+        (2, 2, "1"),
+        (2, 3, "2"),
+        (2, 4, "3"),
+        (1, 6, "1"),
+        (10, 3, "SUM(B2:INDEX(D2:D20,F1))"),
+    ]);
+    let calculation = calculate_workbook(&indexed, CalculationOptions::default());
+    assert_number_at(&calculation, 10, 3, 6.0, 0.0);
+}
+
+#[test]
 fn dependency_edge_limit_leaves_formulas_collected_before_it_calculated() {
     // Formulas are collected in cell order: B1 and C1 add one edge each, D1 two and E1 one, so
     // the five-edge total fits the limit; F1's four edges cross it and G1 is never collected.

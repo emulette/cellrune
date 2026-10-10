@@ -162,11 +162,12 @@ impl CompiledWorkbook {
         self.impact_index.formulas_for_cell(changed, charge)
     }
 
-    pub(super) fn dependents(&self, cell: CellId) -> &[CellId] {
-        self.impact_index
-            .reverse_dependents
-            .get(&cell)
-            .map_or(&[], Vec::as_slice)
+    pub(super) fn dependents(
+        &self,
+        cell: CellId,
+        charge: &mut impl FnMut() -> Result<(), ()>,
+    ) -> Result<BTreeSet<CellId>, ()> {
+        self.impact_index.dependents(cell, charge)
     }
 
     pub(super) fn schedule(&self) -> &Schedule {
@@ -468,6 +469,8 @@ impl AreaBvhNode {
 struct DependencyImpactIndex {
     exact: BTreeMap<CellId, Vec<CellId>>,
     areas_by_sheet: BTreeMap<usize, AreaSpatialIndex>,
+    /// The impact areas alone, which calculation order leaves out of `reverse_dependents`.
+    impact_areas_by_sheet: BTreeMap<usize, AreaSpatialIndex>,
     reverse_dependents: BTreeMap<CellId, Vec<CellId>>,
 }
 
@@ -480,6 +483,7 @@ impl DependencyImpactIndex {
     ) -> Result<Self, ()> {
         let mut index = Self::default();
         let mut area_lists = BTreeMap::<usize, Vec<IndexedAreaDependency>>::new();
+        let mut impact_area_lists = BTreeMap::<usize, Vec<IndexedAreaDependency>>::new();
         for (formula, formula_targets) in targets {
             if cancelled() {
                 return Err(());
@@ -503,6 +507,22 @@ impl DependencyImpactIndex {
                                     rect,
                                     formula: *formula,
                                 });
+                        }
+                    }
+                    DependencyTarget::ImpactArea(span) => {
+                        for rect in span.rects() {
+                            let dependency = IndexedAreaDependency {
+                                rect,
+                                formula: *formula,
+                            };
+                            area_lists
+                                .entry(rect.sheet)
+                                .or_default()
+                                .push(dependency.clone());
+                            impact_area_lists
+                                .entry(rect.sheet)
+                                .or_default()
+                                .push(dependency);
                         }
                     }
                     DependencyTarget::TableIdentity(_) => {}
@@ -541,6 +561,11 @@ impl DependencyImpactIndex {
                 .areas_by_sheet
                 .insert(sheet, AreaSpatialIndex::build(areas, cancelled)?);
         }
+        for (sheet, areas) in impact_area_lists {
+            index
+                .impact_areas_by_sheet
+                .insert(sheet, AreaSpatialIndex::build(areas, cancelled)?);
+        }
         for formulas in index.reverse_dependents.values_mut() {
             dedup_sorted_cancellable(formulas, cancelled)?;
         }
@@ -563,6 +588,24 @@ impl DependencyImpactIndex {
             areas.formulas_for_cell(cell.1, cell.2, &mut formulas, charge)?;
         }
         Ok(formulas)
+    }
+
+    /// Returns the formulas whose results can change when the formula at `cell` changes: those
+    /// calculated after it, and those whose impact area reaches it.
+    fn dependents(
+        &self,
+        cell: CellId,
+        charge: &mut impl FnMut() -> Result<(), ()>,
+    ) -> Result<BTreeSet<CellId>, ()> {
+        let mut dependents = BTreeSet::new();
+        for dependent in self.reverse_dependents.get(&cell).into_iter().flatten() {
+            charge()?;
+            dependents.insert(*dependent);
+        }
+        if let Some(areas) = self.impact_areas_by_sheet.get(&cell.0) {
+            areas.formulas_for_cell(cell.1, cell.2, &mut dependents, charge)?;
+        }
+        Ok(dependents)
     }
 }
 

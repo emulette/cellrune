@@ -103,10 +103,9 @@ pub(super) fn affected_formula_impact(
     let mut all = direct.clone();
     let mut pending = direct.iter().copied().collect::<Vec<_>>();
     while let Some(cell) = pending.pop() {
-        for child in compiled.dependents(cell) {
-            charger.charge()?;
-            if all.insert(*child) {
-                pending.push(*child);
+        for child in compiled.dependents(cell, &mut || charger.charge())? {
+            if all.insert(child) {
+                pending.push(child);
             }
         }
     }

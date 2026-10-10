@@ -378,7 +378,7 @@ fn declared_spill_followers_read_a_failed_anchor_the_same_way_incrementally() {
 }
 
 #[test]
-fn a_range_ending_in_index_depends_on_every_cell_the_end_can_reach() {
+fn a_range_ending_in_index_follows_its_end_after_edits() {
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
     let mut changes = (2..=20)
         .map(|row| {
@@ -464,6 +464,64 @@ fn a_range_ending_in_index_depends_on_every_cell_the_end_can_reach() {
             .expect("installed calculation")
             .cell(CalculationCellId::new(sheet_id, address("H1"))),
         Some(&CalculationCellResult::Value(number(3.0)))
+    );
+}
+
+#[test]
+fn a_range_ending_in_index_with_a_formula_in_its_reach_recalculates_in_full() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut changes = (2..=20)
+        .map(|row| {
+            WorkbookChange::set_cell_value(sheet_id, address(&format!("B{row}")), number(1.0))
+        })
+        .collect::<Vec<_>>();
+    changes.extend([
+        WorkbookChange::set_cell_value(sheet_id, address("E1"), number(50.0)),
+        // B8 lies past the range's end until F1 moves it, so calculation order does not place
+        // B8 before H1.
+        WorkbookChange::set_cell_formula(sheet_id, address("B8"), formula("E1*2")),
+        WorkbookChange::set_cell_value(sheet_id, address("F1"), number(3.0)),
+        WorkbookChange::set_cell_formula(
+            sheet_id,
+            address("H1"),
+            formula("SUM(B2:INDEX(D2:D20,F1))"),
+        ),
+    ]);
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("INDEX range workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("F1"), number(10.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("E1"), number(100.0)),
+            ]),
+        )
+        .expect("edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("recalculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed calculation")
+            .cell(CalculationCellId::new(sheet_id, address("H1"))),
+        Some(&CalculationCellResult::Value(number(209.0)))
     );
 }
 
