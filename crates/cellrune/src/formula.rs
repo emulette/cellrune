@@ -29,7 +29,13 @@ impl FormulaText {
         Ok(Self(value.into_boxed_str()))
     }
 
-    /// Validates user-entered formula text and removes its leading `=`.
+    /// Validates user-entered formula text, removes its leading `=`, and adds the prefixes Excel
+    /// stores.
+    ///
+    /// Future functions gain `_xlfn.` (`_xlfn._xlws.` for FILTER and SORT), LET and LAMBDA locals
+    /// gain `_xlpm.`, `B1#` becomes `_xlfn.ANCHORARRAY(B1)`, and `@operand` becomes
+    /// `_xlfn.SINGLE(operand)`. Existing prefixes and every other character, including numeric
+    /// literals and whitespace, are kept as entered, as is text that does not parse.
     ///
     /// # Errors
     ///
@@ -39,7 +45,9 @@ impl FormulaText {
         let Some(normalized) = value.strip_prefix('=') else {
             return Err(ValidationError::UserFormulaMissingLeadingEquals);
         };
-        Self::from_xlsx(normalized.to_owned())
+        Self::from_xlsx(
+            crate::calculation::formula_storage::storage_formula_text(normalized).into_owned(),
+        )
     }
 
     /// Returns XLSX storage-form text without a leading `=`.

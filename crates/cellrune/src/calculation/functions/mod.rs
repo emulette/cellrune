@@ -11,6 +11,7 @@ use super::sheet_span::SheetSpanPolicy;
 use super::value::{ErrorKind, Value};
 pub(in crate::calculation) use descriptor::{BuiltinCallable, FunctionResultKind};
 use descriptor::{CompatibilityVersion, DependencyKind, FunctionDescriptor};
+pub(in crate::calculation) use future_function::future_function_prefix;
 use kernel::ArrayEvaluator;
 pub(in crate::calculation) use kernel::{DynamicFunction, Evaluator};
 
@@ -37,6 +38,7 @@ mod engineering_complex;
 mod financial;
 mod financial_additional;
 mod fixed_income;
+mod future_function;
 mod grouped;
 mod grouping_kernel;
 mod grouping_options;

@@ -235,6 +235,135 @@ fn dynamic_spills_are_calculated_written_and_reopened_with_metadata() {
 }
 
 #[test]
+fn authored_formulas_are_saved_with_excel_storage_prefixes() {
+    const FORMULAS: [(&str, &str); 6] = [
+        ("C1", "=LET(x,2,XLOOKUP(x,A1:A3,B1:B3))&CONCAT(\"a\",\"b\")"),
+        ("C2", "=SUM(FILTER(B1:B3,{1;0;1}))"),
+        ("C3", "=SUM(D1#)"),
+        ("C4", "=1.50E+3 + XLOOKUP(2,A1:A3,B1:B3)"),
+        ("C5", "=Twice(B2)"),
+        ("E2", "=@A1:A3"),
+    ];
+    const SPILL: &str = "=SORT(A1:A3,1,-1)";
+    const NAME: &str = "=LAMBDA(v,v*2)";
+
+    let build = |text: fn(&str) -> FormulaText| {
+        let mut draft = WorkbookDraft::new();
+        let sheet_id = draft.workbook().sheets()[0].id();
+        for (row, value) in (1_u32..).zip([1.0, 2.0, 3.0]) {
+            for (column, scale) in [("A", 1.0), ("B", 10.0)] {
+                draft
+                    .set_cell_value(
+                        sheet_id,
+                        CellAddress::from_a1(&format!("{column}{row}")).expect("input address"),
+                        CellValue::number(value * scale).expect("finite input"),
+                    )
+                    .expect("input cell");
+            }
+        }
+        for (address, formula) in FORMULAS {
+            draft
+                .set_cell_formula(
+                    sheet_id,
+                    CellAddress::from_a1(address).expect("formula address"),
+                    text(formula),
+                )
+                .expect("formula cell");
+        }
+        let anchor = CellAddress::from_a1("D1").expect("D1");
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                anchor,
+                text(SPILL),
+                Some(
+                    CellRange::new(anchor, CellAddress::from_a1("D3").expect("D3")).expect("spill"),
+                ),
+            )
+            .expect("spill formula");
+        draft
+            .set_defined_name(
+                DefinedName::new("Twice", DefinedNameScope::Workbook, text(NAME), false)
+                    .expect("defined name"),
+            )
+            .expect("set defined name");
+        (draft, sheet_id)
+    };
+    let results = |workbook: &cellrune::WorkbookSnapshot, sheet_id| {
+        let calculation = calculate_workbook(workbook, CalculationOptions::default());
+        FORMULAS
+            .iter()
+            .map(|(address, _)| {
+                calculation
+                    .cell(CalculationCellId::new(
+                        sheet_id,
+                        CellAddress::from_a1(address).expect("result address"),
+                    ))
+                    .cloned()
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let (unprefixed, sheet_id) =
+        build(|formula| FormulaText::from_xlsx(&formula[1..]).expect("unprefixed formula"));
+    let expected = results(unprefixed.workbook(), sheet_id);
+    let number = |value: f64| {
+        Some(CalculationCellResult::Value(
+            CellValue::number(value).expect("finite result"),
+        ))
+    };
+    assert_eq!(
+        expected,
+        [
+            Some(CalculationCellResult::Value(CellValue::Text(
+                "20ab".to_owned()
+            ))),
+            number(40.0),
+            number(6.0),
+            number(1_520.0),
+            number(40.0),
+            number(2.0),
+        ]
+    );
+
+    let (draft, sheet_id) =
+        build(|formula| FormulaText::from_user_input(formula).expect("user formula"));
+    assert_eq!(results(draft.workbook(), sheet_id), expected);
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write authored formulas");
+    let sheet_xml = support::part_text(output.bytes(), "xl/worksheets/sheet1.xml");
+    for stored in [
+        "_xlfn.LET(_xlpm.x,2,_xlfn.XLOOKUP(_xlpm.x,A1:A3,B1:B3))",
+        "_xlfn.CONCAT(",
+        "SUM(_xlfn._xlws.FILTER(B1:B3,{1;0;1}))",
+        "SUM(_xlfn.ANCHORARRAY(D1))",
+        "1.50E+3 + _xlfn.XLOOKUP(2,A1:A3,B1:B3)",
+        "_xlfn.SINGLE(A1:A3)",
+        "_xlfn._xlws.SORT(A1:A3,1,-1)",
+    ] {
+        assert!(
+            sheet_xml.contains(stored),
+            "{stored} missing from {sheet_xml}"
+        );
+    }
+    assert!(
+        support::part_text(output.bytes(), "xl/workbook.xml")
+            .contains("_xlfn.LAMBDA(_xlpm.v,_xlpm.v*2)")
+    );
+
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), cellrune::OpenOptions::default()).expect("reopen");
+    assert_eq!(
+        support::formula_at(&reopened, "Sheet1", "C1")
+            .text()
+            .map(FormulaText::as_str),
+        Some("_xlfn.LET(_xlpm.x,2,_xlfn.XLOOKUP(_xlpm.x,A1:A3,B1:B3))&_xlfn.CONCAT(\"a\",\"b\")")
+    );
+    assert_eq!(results(reopened.workbook(), sheet_id), expected);
+}
+
+#[test]
 fn draft_path_save_is_opt_in_and_failed_preparation_preserves_destination() {
     let mut draft = WorkbookDraft::new();
     let sheet_id = draft.workbook().sheets()[0].id();

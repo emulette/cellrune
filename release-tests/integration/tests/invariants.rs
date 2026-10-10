@@ -161,6 +161,84 @@ fn formula_boundaries_normalize_only_the_leading_equals_sign() {
 }
 
 #[test]
+fn user_formulas_gain_excel_storage_prefixes_without_reprinting() {
+    for (entered, stored) in [
+        (
+            "=LET(x,1,XLOOKUP(x,{1},{2}))&CONCAT(\"a\",\"b\")",
+            "_xlfn.LET(_xlpm.x,1,_xlfn.XLOOKUP(_xlpm.x,{1},{2}))&_xlfn.CONCAT(\"a\",\"b\")",
+        ),
+        ("=FILTER(A1:A3,B1:B3)", "_xlfn._xlws.FILTER(A1:A3,B1:B3)"),
+        ("=sort(A1:A3)", "_xlfn._xlws.sort(A1:A3)"),
+        ("=SORTBY(A1:A3,B1:B3)", "_xlfn.SORTBY(A1:A3,B1:B3)"),
+        ("=SUM(B1#)", "SUM(_xlfn.ANCHORARRAY(B1))"),
+        ("=+B1#", "+_xlfn.ANCHORARRAY(B1)"),
+        ("=@A1:A3", "_xlfn.SINGLE(A1:A3)"),
+        ("=@A1#", "_xlfn.SINGLE(_xlfn.ANCHORARRAY(A1))"),
+        ("=@A1,B1", "_xlfn.SINGLE((A1,B1))"),
+        (
+            "= XLOOKUP( 1.50E+3 , A1:A3 ,\tB1:B3 ) + 0.10",
+            " _xlfn.XLOOKUP( 1.50E+3 , A1:A3 ,\tB1:B3 ) + 0.10",
+        ),
+        (
+            "=LET(x,x+1,y,x*2,LET(x,y,x)+x)",
+            "_xlfn.LET(_xlpm.x,x+1,_xlpm.y,_xlpm.x*2,_xlfn.LET(_xlpm.x,_xlpm.y,_xlpm.x)+_xlpm.x)",
+        ),
+        (
+            "=LET(f,LAMBDA(n,n*2),f(3))",
+            "_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.n,_xlpm.n*2),_xlpm.f(3))",
+        ),
+        (
+            "=LAMBDA(x,y,x+y)(1,x)",
+            "_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)(1,x)",
+        ),
+        (
+            "=_xlfn.LET(_xlpm.x,1,x+_xlpm.x)",
+            "_xlfn.LET(_xlpm.x,1,_xlpm.x+_xlpm.x)",
+        ),
+        (
+            "=MAP(A1:A3,LAMBDA(v,v+1))",
+            "_xlfn.MAP(A1:A3,_xlfn.LAMBDA(_xlpm.v,_xlpm.v+1))",
+        ),
+        (
+            "=COVAR(A1:A3,B1:B3)+COVARIANCE.P(A1:A3,B1:B3)",
+            "COVAR(A1:A3,B1:B3)+_xlfn.COVARIANCE.P(A1:A3,B1:B3)",
+        ),
+        (
+            "=XLOOKUP([@Key],Table1[XLOOKUP],Table1[Value])",
+            "_xlfn.XLOOKUP([@Key],Table1[XLOOKUP],Table1[Value])",
+        ),
+    ] {
+        assert_eq!(
+            FormulaText::from_user_input(entered)
+                .expect("user formula")
+                .as_str(),
+            stored,
+            "{entered}"
+        );
+    }
+
+    for unchanged in [
+        "=_xlfn.LET(_xlpm.x,1,_xlfn.XLOOKUP(_xlpm.x,{1},{2}))&_xlfn.CONCAT(\"a\",\"b\")",
+        "=_xlfn._xlws.FILTER(A1:A3,B1:B3)",
+        "=_xlfn.FILTER(A1:A3,B1:B3)",
+        "=SUM(_xlfn.ANCHORARRAY(B1))",
+        "=_xlfn.SINGLE(A1:A3)",
+        "=\"XLOOKUP(1)\"&'XLOOKUP'!A1&XLOOKUP!B1",
+        "=NETWORKDAYS.INTL(A1,B1)+WORKDAY.INTL(A1,1)+ISO.CEILING(A1)",
+        "=SUM(1.50E+3,  A1)",
+        "=XLOOKUP(",
+    ] {
+        assert_eq!(
+            FormulaText::from_user_input(unchanged)
+                .expect("user formula")
+                .as_str(),
+            &unchanged[1..],
+            "{unchanged}"
+        );
+    }
+}
+
+#[test]
 fn formula_saved_result_states_remain_distinct() {
     let text = FormulaText::from_xlsx("1+1").expect("formula");
     let missing = FormulaCell::new(

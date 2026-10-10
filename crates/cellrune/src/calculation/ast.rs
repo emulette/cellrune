@@ -580,7 +580,7 @@ fn write_storage_wrapper(
     formatter.write_str(")")
 }
 
-fn storage_argument_needs_grouping(operand: &Expr) -> bool {
+pub(super) fn storage_argument_needs_grouping(operand: &Expr) -> bool {
     match operand {
         Expr::ReferenceUnion { .. } => true,
         Expr::Unary { operand, .. } => storage_argument_needs_grouping(operand),

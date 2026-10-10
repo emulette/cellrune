@@ -365,7 +365,7 @@ fn charge_parsed_tree(
     Ok(())
 }
 
-fn push_children<'a>(
+pub(super) fn push_children<'a>(
     expr: &'a Expr,
     source_node: &'a NodeSpanTree,
     stack: &mut Vec<(&'a Expr, &'a NodeSpanTree)>,

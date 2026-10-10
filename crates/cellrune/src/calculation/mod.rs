@@ -20,6 +20,7 @@ mod error;
 mod eval;
 mod formula_rebase;
 pub(crate) mod formula_rewrite;
+pub(crate) mod formula_storage;
 mod functions;
 mod graph;
 pub(crate) mod identity;
