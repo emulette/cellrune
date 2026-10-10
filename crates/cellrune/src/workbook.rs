@@ -1309,6 +1309,14 @@ impl WorkbookSnapshot {
         &self.non_worksheet_tabs
     }
 
+    /// Returns the ID of each tab that is not a worksheet, such as a chartsheet, in tab order.
+    ///
+    /// Such a tab holds no cells, but its ID stays taken: an added sheet receives an ID above every
+    /// worksheet and tab ID.
+    pub fn non_worksheet_tab_ids(&self) -> impl ExactSizeIterator<Item = SheetId> {
+        self.non_worksheet_tabs.iter().map(NonWorksheetTab::id)
+    }
+
     /// Returns the number of workbook tabs, counting tabs that are not worksheets.
     pub(crate) fn tab_count(&self) -> usize {
         self.sheets.len() + self.non_worksheet_tabs.len()

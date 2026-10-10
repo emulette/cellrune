@@ -316,7 +316,9 @@ fn convert_edit_batch(
     let mut maximum_sheet_id = workbook
         .sheets()
         .iter()
-        .map(|sheet| sheet.id().get())
+        .map(|sheet| sheet.id())
+        .chain(workbook.non_worksheet_tab_ids())
+        .map(SheetId::get)
         .max()
         .unwrap_or(0);
     let mut changes = Vec::with_capacity(batch.changes.len());
