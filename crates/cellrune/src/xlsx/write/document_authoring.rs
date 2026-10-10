@@ -11,6 +11,7 @@ use super::package_metadata_patch::{
 };
 use super::phonetic_preservation::ensure_phonetic_edit_preservation;
 use super::serialization::validate_phonetic_limits;
+use super::sheet_reference_patch::rewrite_renamed_sheet_references;
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table_patch::patch_table_xml;
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
@@ -360,6 +361,13 @@ pub(crate) fn write_document_draft(
         }
         replacements.insert(sheet_source.part, bytes);
     }
+    rewrite_renamed_sheet_references(
+        document,
+        draft.workbook(),
+        &mut source_reader,
+        &mut replacements,
+        limits,
+    )?;
 
     for (sheet_id, part) in &added_parts {
         let sheet = draft

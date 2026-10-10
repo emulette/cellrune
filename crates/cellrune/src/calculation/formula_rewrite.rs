@@ -18,6 +18,8 @@ pub(crate) enum FormulaRewriteRequest<'a> {
         old_name: &'a str,
         new_name: &'a str,
     },
+    /// Renames several sheets at once, so swapped names rewrite each reference exactly once.
+    Sheets(&'a [(&'a str, &'a str)]),
     Table {
         old_name: &'a str,
         new_name: &'a str,
@@ -28,6 +30,21 @@ pub(crate) enum FormulaRewriteRequest<'a> {
         new_name: &'a str,
         owner_is_target_table: bool,
     },
+}
+
+impl FormulaRewriteRequest<'_> {
+    fn renamed_sheet(&self, name: &str) -> Option<&str> {
+        match self {
+            Self::Sheet { old_name, new_name } => {
+                case_insensitive_eq(name, old_name).then_some(*new_name)
+            }
+            Self::Sheets(renames) => renames
+                .iter()
+                .find(|(old_name, _)| case_insensitive_eq(name, old_name))
+                .map(|(_, new_name)| *new_name),
+            Self::Table { .. } | Self::TableColumn { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,32 +262,26 @@ pub(crate) fn rewrite_formula(
         budget.charge_node()?;
         match expr {
             Expr::Ref(reference) => {
-                if let FormulaRewriteRequest::Sheet { old_name, new_name } = request
-                    && let Some(prefix) = &reference.sheet
-                {
+                if let Some(prefix) = &reference.sheet {
                     plan_sheet_prefix_edits(
                         source,
                         prefix,
                         source_node.components(),
-                        old_name,
-                        new_name,
+                        request,
                         &mut edits,
                         budget,
                     )?;
                 }
             }
             Expr::QualifiedName { sheet, .. } => {
-                if let FormulaRewriteRequest::Sheet { old_name, new_name } = request {
-                    plan_sheet_prefix_edits(
-                        source,
-                        sheet,
-                        source_node.components(),
-                        old_name,
-                        new_name,
-                        &mut edits,
-                        budget,
-                    )?;
-                }
+                plan_sheet_prefix_edits(
+                    source,
+                    sheet,
+                    source_node.components(),
+                    request,
+                    &mut edits,
+                    budget,
+                )?;
             }
             Expr::StructuredRef(reference) => match request {
                 FormulaRewriteRequest::Table { old_name, new_name } => {
@@ -310,7 +321,7 @@ pub(crate) fn rewrite_formula(
                         )?;
                     }
                 }
-                FormulaRewriteRequest::Sheet { .. } => {}
+                FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {}
             },
             Expr::ExternalReference(_) => continue,
             _ => {}
@@ -400,12 +411,11 @@ fn plan_sheet_prefix_edits(
     source: &str,
     prefix: &SheetPrefix,
     components: &[SourceComponent],
-    old_name: &str,
-    new_name: &str,
+    request: &FormulaRewriteRequest<'_>,
     edits: &mut Vec<SourceEdit>,
     budget: &mut FormulaRewriteBudget<'_>,
 ) -> Result<(), FormulaRewriteError> {
-    if case_insensitive_eq(&prefix.name, old_name)
+    if let Some(new_name) = request.renamed_sheet(&prefix.name)
         && let Some(component) = component(components, SourceComponentKind::SheetQualifier)
     {
         budget.charge_edit()?;
@@ -414,10 +424,10 @@ fn plan_sheet_prefix_edits(
             replacement_sheet_name(source, component.span(), new_name),
         ));
     }
-    if prefix
+    if let Some(new_name) = prefix
         .end_name
         .as_deref()
-        .is_some_and(|name| case_insensitive_eq(name, old_name))
+        .and_then(|name| request.renamed_sheet(name))
         && let Some(component) = component(components, SourceComponentKind::SheetRangeEnd)
     {
         budget.charge_edit()?;
@@ -616,7 +626,8 @@ fn formula_may_reference_target(
                 },
                 _ => false,
             }),
-        FormulaRewriteRequest::Sheet { old_name, .. } => {
+        FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {
+            let renamed = |name: &str| request.renamed_sheet(name).is_some();
             lexed.tokens.windows(2).enumerate().any(|(index, tokens)| {
                 let (Token::Ident(name) | Token::QuotedSheet(name), Token::Bang) =
                     (&tokens[0].token, &tokens[1].token)
@@ -624,7 +635,7 @@ fn formula_may_reference_target(
                     return false;
                 };
                 !sheet_token_is_external(&lexed.tokens, index)
-                    && quoted_or_single_sheet_targets(name, old_name)
+                    && quoted_or_single_sheet_targets(name, renamed)
             }) || lexed.tokens.windows(4).enumerate().any(|(index, tokens)| {
                 matches!(
                     (
@@ -639,8 +650,7 @@ fn formula_may_reference_target(
                         Token::Ident(end) | Token::QuotedSheet(end),
                         Token::Bang
                     ) if !sheet_token_is_external(&lexed.tokens, index)
-                        && (case_insensitive_eq(name, old_name)
-                            || case_insensitive_eq(end, old_name))
+                        && (renamed(name) || renamed(end))
                 )
             })
         }
@@ -649,12 +659,10 @@ fn formula_may_reference_target(
     Ok(result)
 }
 
-fn quoted_or_single_sheet_targets(name: &str, old_name: &str) -> bool {
+fn quoted_or_single_sheet_targets(name: &str, renamed: impl Fn(&str) -> bool) -> bool {
     match name.split_once(':') {
-        Some((start, end)) => {
-            case_insensitive_eq(start, old_name) || case_insensitive_eq(end, old_name)
-        }
-        None => case_insensitive_eq(name, old_name),
+        Some((start, end)) => renamed(start) || renamed(end),
+        None => renamed(name),
     }
 }
 
@@ -770,6 +778,18 @@ mod tests {
         assert_eq!(
             rewrite("SUM( Old!A1 , 'Old'!Tax , Old:End!B2 )", request),
             Some("SUM( 'New Sheet'!A1 , 'New Sheet'!Tax , 'New Sheet':End!B2 )".to_owned())
+        );
+    }
+
+    #[test]
+    fn rewrites_simultaneous_sheet_renames_once() {
+        let renames = [("Old", "New"), ("New", "Old")];
+        assert_eq!(
+            rewrite(
+                "Old!A1+'new'!B2+Old:New!C3",
+                FormulaRewriteRequest::Sheets(&renames)
+            ),
+            Some("New!A1+'Old'!B2+New:Old!C3".to_owned())
         );
     }
 

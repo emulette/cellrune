@@ -6,5 +6,6 @@ mod generated_workbook {
     mod recalculation_write;
     mod recalculation_write_support;
     mod round_trip_document;
+    mod sheet_rename_write;
 }
 mod support;

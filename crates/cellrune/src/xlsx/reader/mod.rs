@@ -52,6 +52,8 @@ pub(super) struct ReadWorkbook {
     pub(super) workbook_part: PartPath,
     pub(super) worksheet_parts: BTreeMap<SheetId, PartPath>,
     pub(super) table_parts: BTreeMap<TableId, PartPath>,
+    pub(super) chart_parts: Vec<PartPath>,
+    pub(super) pivot_cache_parts: Vec<PartPath>,
     pub(super) package_kind: WorkbookPackageKind,
 }
 
@@ -263,6 +265,8 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         workbook_part,
         worksheet_parts,
         table_parts,
+        chart_parts: package.chart_parts(),
+        pivot_cache_parts: package.pivot_cache_definition_parts(),
         package_kind,
     })
 }

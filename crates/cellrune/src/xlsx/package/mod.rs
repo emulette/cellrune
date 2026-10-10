@@ -34,6 +34,10 @@ const CONTENT_SHARED_STRINGS: &str =
 const CONTENT_SHEET_METADATA: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml";
 const CONTENT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+const CONTENT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+const CONTENT_CHART_EX: &str = "application/vnd.ms-office.chartex+xml";
+const CONTENT_PIVOT_CACHE_DEFINITION: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WorkbookPackageKind {
@@ -182,6 +186,28 @@ impl<R: Read + Seek> OpenedPackage<R> {
             parts.insert(relationship.id.clone(), part.clone());
         }
         Ok(parts)
+    }
+
+    /// Returns the chart parts, whose series formulas name worksheets outside the workbook model.
+    pub(super) fn chart_parts(&self) -> Vec<PartPath> {
+        self.parts_with_content_type(&[CONTENT_CHART, CONTENT_CHART_EX])
+    }
+
+    /// Returns the pivot cache definition parts, whose worksheet sources name worksheets.
+    pub(super) fn pivot_cache_definition_parts(&self) -> Vec<PartPath> {
+        self.parts_with_content_type(&[CONTENT_PIVOT_CACHE_DEFINITION])
+    }
+
+    fn parts_with_content_type(&self, content_types: &[&str]) -> Vec<PartPath> {
+        self.entries
+            .keys()
+            .filter(|part| {
+                self.content_types
+                    .content_type(part)
+                    .is_some_and(|content_type| content_types.contains(&content_type))
+            })
+            .cloned()
+            .collect()
     }
 
     pub(super) fn summary(&self) -> PackageSummary {

@@ -52,6 +52,8 @@ pub struct XlsxDocument {
     workbook_part: PartPath,
     worksheet_parts: BTreeMap<SheetId, PartPath>,
     table_parts: BTreeMap<TableId, PartPath>,
+    chart_parts: Vec<PartPath>,
+    pivot_cache_parts: Vec<PartPath>,
     package: PreservedPackage,
 }
 
@@ -131,6 +133,14 @@ impl XlsxDocument {
 
     pub(in crate::xlsx) fn table_part_path(&self, table_id: TableId) -> Option<&PartPath> {
         self.table_parts.get(&table_id)
+    }
+
+    pub(in crate::xlsx) fn chart_part_paths(&self) -> &[PartPath] {
+        &self.chart_parts
+    }
+
+    pub(in crate::xlsx) fn pivot_cache_part_paths(&self) -> &[PartPath] {
+        &self.pivot_cache_parts
     }
 }
 
@@ -219,6 +229,8 @@ fn open_with_source<R: Read + Seek>(
         workbook_part: read.workbook_part,
         worksheet_parts: read.worksheet_parts,
         table_parts: read.table_parts,
+        chart_parts: read.chart_parts,
+        pivot_cache_parts: read.pivot_cache_parts,
         package: PreservedPackage::new(bytes, input_hash, kind),
     })
 }
