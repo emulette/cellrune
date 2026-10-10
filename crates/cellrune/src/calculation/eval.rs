@@ -104,7 +104,7 @@ pub(super) struct CompiledWorkbook {
     parse_failures: Arc<BTreeMap<CellId, ParseError>>,
     name_cycle_cells: Arc<BTreeSet<CellId>>,
     name_limit_cells: Arc<BTreeSet<CellId>>,
-    dependency_limit_exceeded: bool,
+    dependency_limit_cells: Arc<BTreeSet<CellId>>,
     cycle_cells: Arc<BTreeSet<CellId>>,
     blocked_cells: Arc<BTreeSet<CellId>>,
     impact_index: DependencyImpactIndex,
@@ -849,7 +849,7 @@ pub struct Engine<'workbook> {
     parse_failures: Arc<BTreeMap<CellId, ParseError>>,
     name_cycle_cells: Arc<BTreeSet<CellId>>,
     name_limit_cells: Arc<BTreeSet<CellId>>,
-    dependency_limit_exceeded: bool,
+    dependency_limit_cells: Arc<BTreeSet<CellId>>,
     pub(super) cycle_cells: Arc<BTreeSet<CellId>>,
     pub(super) blocked_cells: Arc<BTreeSet<CellId>>,
     evaluated_cells: BTreeSet<CellId>,
@@ -879,7 +879,7 @@ impl<'workbook> Engine<'workbook> {
         if self.cycle_cells.contains(&cell) {
             return ValueSource::Error(ErrorKind::Ref);
         }
-        if self.dependency_limit_exceeded {
+        if self.dependency_limit_cells.contains(&cell) {
             return ValueSource::Error(ErrorKind::ResourceLimit(
                 CalculationLimitKind::DependencyEdges,
             ));
@@ -1074,8 +1074,8 @@ impl<'workbook> Engine<'workbook> {
         self.parse_failures.get(&cell)
     }
 
-    pub(super) const fn dependency_limit_exceeded(&self) -> bool {
-        self.dependency_limit_exceeded
+    pub(super) fn has_dependency_limit(&self, cell: CellId) -> bool {
+        self.dependency_limit_cells.contains(&cell)
     }
 
     pub(super) const fn arithmetic_semantics(&self) -> crate::ArithmeticSemantics {
@@ -1223,7 +1223,7 @@ mod tests {
         let engine = Engine::analyze(&workbook, CalculationOptions::default());
 
         assert!(!engine.asts.is_empty());
-        assert!(!engine.dependency_limit_exceeded);
+        assert!(engine.dependency_limit_cells.is_empty());
         assert!(engine.dependencies.is_empty());
         assert!(engine.cycle_cells.is_empty());
         assert!(engine.blocked_cells.is_empty());

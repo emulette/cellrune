@@ -164,7 +164,7 @@ pub(super) fn formula_issues(
         cell.address().column().get(),
     );
     let mut issues = Vec::new();
-    if engine.dependency_limit_exceeded() {
+    if engine.has_dependency_limit(internal_id) {
         issues.push(CalculationIssue::resource_limit(
             CalculationLimitKind::DependencyEdges,
         ));

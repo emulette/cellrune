@@ -4087,19 +4087,45 @@ fn parser_and_dependency_budgets_return_stable_resource_issues() {
     let dependency_options = CalculationOptions::default().with_limits(dependency_limits);
     let dependency_report =
         scan_formula_capabilities_with_options(&dependency_workbook, dependency_options);
-    assert_eq!(dependency_report.unsupported_count(), 3);
-    for column in 1..=3 {
-        assert_capability_issue(
-            &dependency_report,
-            column,
-            CalculationIssueCode::ResourceLimitExceeded,
-            Some("max_dependency_edges"),
-        );
-        assert_capability_limit(
-            &dependency_report,
-            column,
-            CalculationLimitKind::DependencyEdges,
-        );
+    // A1 and B1 fit the one-edge limit; collection stops at C1.
+    assert_eq!(dependency_report.unsupported_count(), 1);
+    assert_capability_issue(
+        &dependency_report,
+        3,
+        CalculationIssueCode::ResourceLimitExceeded,
+        Some("max_dependency_edges"),
+    );
+    assert_capability_limit(&dependency_report, 3, CalculationLimitKind::DependencyEdges);
+}
+
+#[test]
+fn dependency_edge_limit_leaves_formulas_collected_before_it_calculated() {
+    // Formulas are collected in cell order: B1 and C1 add one edge each, D1 two and E1 one, so
+    // the five-edge total fits the limit; F1's four edges cross it and G1 is never collected.
+    let workbook = workbook_with_formulas(&[
+        (1, 1, "1"),
+        (1, 2, "A1+1"),
+        (1, 3, "F1*2"),
+        (1, 4, "SUM(B1:C1)"),
+        (1, 5, "B1*10"),
+        (1, 6, "SUM(B1:E1)"),
+        (1, 7, "1+1"),
+    ]);
+    let limits = CalculationLimits::default()
+        .with_max_dependency_edges(5)
+        .expect("nonzero dependency limit");
+    let calculation =
+        calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+
+    assert_number(&calculation, 2, 2.0, 0.0);
+    assert_number(&calculation, 5, 20.0, 0.0);
+    for column in [3, 4, 6, 7] {
+        let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(cell_id(column))
+        else {
+            panic!("column {column} depends on or is a formula past the dependency limit");
+        };
+        assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+        assert_eq!(issue.limit(), Some(CalculationLimitKind::DependencyEdges));
     }
 }
 

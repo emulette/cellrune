@@ -353,7 +353,8 @@ fn three_d_dependencies_stay_compact_and_cover_every_formula_sheet() {
             CalculationOptions::default().with_limits(limits),
         );
         assert_eq!(
-            limited.dependency_limit_exceeded, exceeded,
+            !limited.dependency_limit_cells.is_empty(),
+            exceeded,
             "max_dependency_edges={max_edges}",
         );
     }

@@ -57,7 +57,7 @@ impl<'workbook> Engine<'workbook> {
             parse_failures: Arc::new(BTreeMap::new()),
             name_cycle_cells: Arc::new(BTreeSet::new()),
             name_limit_cells: Arc::new(BTreeSet::new()),
-            dependency_limit_exceeded: false,
+            dependency_limit_cells: Arc::new(BTreeSet::new()),
             cycle_cells: Arc::new(BTreeSet::new()),
             blocked_cells: Arc::new(BTreeSet::new()),
             evaluated_cells: BTreeSet::new(),
@@ -76,7 +76,7 @@ impl<'workbook> Engine<'workbook> {
         options: CalculationOptions,
     ) -> Self {
         let mut engine = Self::parsed(workbook, options);
-        engine.dependency_limit_exceeded = engine.exceeds_dependency_limit();
+        engine.dependency_limit_cells = Arc::new(engine.dependency_limit_cells_for_analysis());
         engine
     }
 
@@ -94,27 +94,15 @@ impl<'workbook> Engine<'workbook> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
         let mut engine = Self::parsed_cancellable(workbook, options, cancelled)?;
-        let (dependencies, dependency_limit_exceeded) =
-            engine.dependencies_cancellable(cancelled)?;
-        engine.dependency_limit_exceeded = dependency_limit_exceeded;
-        if dependency_limit_exceeded {
-            engine.dependencies = Arc::new(dependencies);
-            return Ok(engine);
-        }
+        let (dependencies, dependency_limit_cells) = engine.dependencies_cancellable(cancelled)?;
+        engine.dependency_limit_cells = Arc::new(dependency_limit_cells);
         let dependencies = if engine.has_unresolved_dynamic_dependencies(cancelled)? {
             if !engine.evaluate_schedule_subset(&dependencies, None, cancelled) {
                 return Err(());
             }
-            let (resolved_dependencies, dependency_limit_exceeded) =
+            let (resolved_dependencies, dependency_limit_cells) =
                 engine.dependencies_cancellable(cancelled)?;
-            engine.dependency_limit_exceeded = dependency_limit_exceeded;
-            if dependency_limit_exceeded {
-                engine.results.clear();
-                Arc::make_mut(&mut engine.cycle_cells).clear();
-                Arc::make_mut(&mut engine.blocked_cells).clear();
-                engine.dependencies = Arc::new(resolved_dependencies);
-                return Ok(engine);
-            }
+            engine.dependency_limit_cells = Arc::new(dependency_limit_cells);
             resolved_dependencies
         } else {
             dependencies
@@ -161,7 +149,7 @@ impl<'workbook> Engine<'workbook> {
             parse_failures: Arc::clone(&self.parse_failures),
             name_cycle_cells: Arc::clone(&self.name_cycle_cells),
             name_limit_cells: Arc::clone(&self.name_limit_cells),
-            dependency_limit_exceeded: self.dependency_limit_exceeded,
+            dependency_limit_cells: Arc::clone(&self.dependency_limit_cells),
             cycle_cells: Arc::clone(&self.cycle_cells),
             blocked_cells: Arc::clone(&self.blocked_cells),
             impact_index,
@@ -201,7 +189,7 @@ impl<'workbook> Engine<'workbook> {
             parse_failures: Arc::clone(&compiled.parse_failures),
             name_cycle_cells: Arc::clone(&compiled.name_cycle_cells),
             name_limit_cells: Arc::clone(&compiled.name_limit_cells),
-            dependency_limit_exceeded: compiled.dependency_limit_exceeded,
+            dependency_limit_cells: Arc::clone(&compiled.dependency_limit_cells),
             cycle_cells: Arc::clone(&compiled.cycle_cells),
             blocked_cells: Arc::clone(&compiled.blocked_cells),
             evaluated_cells: BTreeSet::new(),
@@ -226,9 +214,6 @@ impl<'workbook> Engine<'workbook> {
         };
         engine.previous = previous;
         engine.dirty = internal_dirty.clone();
-        if compiled.dependency_limit_exceeded {
-            return Ok(engine);
-        }
         if !engine.evaluate_compiled_schedule(compiled, internal_dirty.as_ref(), cancelled) {
             return Err(());
         }
@@ -317,6 +302,9 @@ impl<'workbook> Engine<'workbook> {
                 Some(_) if self.name_limit_cells.contains(&cell) => Err(ErrorKind::ResourceLimit(
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
+                Some(_) if self.dependency_limit_cells.contains(&cell) => Err(
+                    ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
+                ),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
                 Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
@@ -334,6 +322,9 @@ impl<'workbook> Engine<'workbook> {
                 Some(_) if self.name_limit_cells.contains(&cell) => Err(ErrorKind::ResourceLimit(
                     CalculationLimitKind::FormulaNestingDepth,
                 )),
+                Some(_) if self.dependency_limit_cells.contains(&cell) => Err(
+                    ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
+                ),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
                 Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
                 None => Err(ErrorKind::Unsupported),
@@ -349,6 +340,9 @@ impl<'workbook> Engine<'workbook> {
         let value = match expr {
             Some(_) if self.name_limit_cells.contains(&cell) => Value::Error(
                 ErrorKind::ResourceLimit(CalculationLimitKind::FormulaNestingDepth),
+            ),
+            Some(_) if self.dependency_limit_cells.contains(&cell) => Value::Error(
+                ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
             ),
             Some(_) if self.name_cycle_cells.contains(&cell) => {
                 Value::Error(ErrorKind::Unsupported)

@@ -380,11 +380,11 @@ impl Engine<'_> {
     pub(super) fn dependencies_cancellable(
         &self,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<(DependencyGraph, bool), ()> {
+    ) -> Result<(DependencyGraph, BTreeSet<super::CellId>), ()> {
         self.collect_dependencies(true, cancelled)
     }
 
-    pub(super) fn exceeds_dependency_limit(&self) -> bool {
+    pub(super) fn dependency_limit_cells_for_analysis(&self) -> BTreeSet<super::CellId> {
         self.collect_dependencies(false, &|| false)
             .expect("non-cancellable dependency collection cannot be cancelled")
             .1
@@ -832,17 +832,23 @@ impl Engine<'_> {
         })
     }
 
+    /// Collects every formula's dependencies until their total reaches `max_dependency_edges`.
+    ///
+    /// The formula that would cross the limit and every formula after it are returned instead of
+    /// collected: their dependencies are unknown, so they report the limit, and formulas that
+    /// depend on them read that error. Formulas collected before the limit calculate normally.
     fn collect_dependencies(
         &self,
         retain_graph: bool,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<(DependencyGraph, bool), ()> {
+    ) -> Result<(DependencyGraph, BTreeSet<super::CellId>), ()> {
         let mut dependencies = BTreeMap::new();
         if cancelled() {
             return Err(());
         }
         let mut edge_count = 0_u64;
-        for (cell, parsed) in self.asts.iter() {
+        let mut formulas = self.asts.iter();
+        while let Some((cell, parsed)) = formulas.next() {
             if cancelled() {
                 return Err(());
             }
@@ -940,26 +946,30 @@ impl Engine<'_> {
             }
             cell_dependencies.sort_unstable();
             cell_dependencies.dedup();
-            edge_count = match edge_count.checked_add(cell_dependencies.len() as u64) {
-                Some(total) => total,
+            match edge_count
+                .checked_add(cell_dependencies.len() as u64)
+                .filter(|total| *total <= self.options.limits().max_dependency_edges())
+            {
+                Some(total) => edge_count = total,
                 None => {
-                    if retain_graph {
-                        dependencies.insert(*cell, cell_dependencies);
+                    let mut limited = BTreeSet::from([*cell]);
+                    for (cell, _) in formulas {
+                        if cancelled() {
+                            return Err(());
+                        }
+                        limited.insert(*cell);
                     }
-                    return Ok((dependencies, true));
+                    if retain_graph {
+                        dependencies.extend(limited.iter().map(|cell| (*cell, Vec::new())));
+                    }
+                    return Ok((dependencies, limited));
                 }
-            };
-            if edge_count > self.options.limits().max_dependency_edges() {
-                if retain_graph {
-                    dependencies.insert(*cell, cell_dependencies);
-                }
-                return Ok((dependencies, true));
             }
             if retain_graph {
                 dependencies.insert(*cell, cell_dependencies);
             }
         }
-        Ok((dependencies, false))
+        Ok((dependencies, BTreeSet::new()))
     }
 
     fn cancellable_array_owner(
