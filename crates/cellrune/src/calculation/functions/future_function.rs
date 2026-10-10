@@ -4,11 +4,13 @@
 //! and SORT as `_xlfn._xlws.NAME`. A bare spelling loads as an unknown user-defined function and
 //! becomes `#NAME?` once Excel recalculates. Every name below was saved with its prefix by Excel
 //! 2021 and Excel for the web. ISO.CEILING, NETWORKDAYS.INTL, and WORKDAY.INTL are absent because
-//! Excel saves them bare.
+//! Excel saves them bare. The list includes functions the catalog cannot calculate, since formulas
+//! that use them are still written.
 
-const FUTURE_FUNCTIONS: [&str; 135] = [
+const FUTURE_FUNCTIONS: [&str; 153] = [
     "ACOT",
     "ACOTH",
+    "AGGREGATE",
     "ARABIC",
     "ARRAYTOTEXT",
     "BASE",
@@ -28,6 +30,9 @@ const FUTURE_FUNCTIONS: [&str; 135] = [
     "CEILING.PRECISE",
     "CHISQ.DIST",
     "CHISQ.DIST.RT",
+    "CHISQ.INV",
+    "CHISQ.INV.RT",
+    "CHISQ.TEST",
     "CHOOSECOLS",
     "CHOOSEROWS",
     "COMBINA",
@@ -54,6 +59,10 @@ const FUTURE_FUNCTIONS: [&str; 135] = [
     "F.TEST",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
+    "FORECAST.ETS",
+    "FORECAST.ETS.CONFINT",
+    "FORECAST.ETS.SEASONALITY",
+    "FORECAST.ETS.STAT",
     "FORECAST.LINEAR",
     "FORMULATEXT",
     "GAMMA",
@@ -66,6 +75,14 @@ const FUTURE_FUNCTIONS: [&str; 135] = [
     "HYPGEOM.DIST",
     "IFNA",
     "IFS",
+    "IMCOSH",
+    "IMCOT",
+    "IMCSC",
+    "IMCSCH",
+    "IMSEC",
+    "IMSECH",
+    "IMSINH",
+    "IMTAN",
     "ISFORMULA",
     "ISOMITTED",
     "ISOWEEKNUM",
@@ -77,6 +94,7 @@ const FUTURE_FUNCTIONS: [&str; 135] = [
     "MAP",
     "MAXIFS",
     "MINIFS",
+    "MODE.MULT",
     "MODE.SNGL",
     "MUNIT",
     "NEGBINOM.DIST",
@@ -110,6 +128,7 @@ const FUTURE_FUNCTIONS: [&str; 135] = [
     "SEQUENCE",
     "SHEET",
     "SHEETS",
+    "SKEW.P",
     "SORTBY",
     "STDEV.P",
     "STDEV.S",
@@ -163,17 +182,50 @@ mod tests {
     use super::{FUTURE_FUNCTIONS, WORKSHEET_FUTURE_FUNCTIONS};
     use crate::calculation::functions::descriptor;
 
+    // Future functions Excel saved with `_xlfn.` that the catalog does not calculate yet.
+    const OUTSIDE_CATALOG: [&str; 18] = [
+        "AGGREGATE",
+        "CHISQ.INV",
+        "CHISQ.INV.RT",
+        "CHISQ.TEST",
+        "FORECAST.ETS",
+        "FORECAST.ETS.CONFINT",
+        "FORECAST.ETS.SEASONALITY",
+        "FORECAST.ETS.STAT",
+        "IMCOSH",
+        "IMCOT",
+        "IMCSC",
+        "IMCSCH",
+        "IMSEC",
+        "IMSECH",
+        "IMSINH",
+        "IMTAN",
+        "MODE.MULT",
+        "SKEW.P",
+    ];
+
     #[test]
-    fn every_future_function_is_a_canonical_catalog_function() {
+    fn future_functions_are_unique_and_catalog_names_resolve() {
         assert!(FUTURE_FUNCTIONS.is_sorted_by(|left, right| left < right));
-        for name in FUTURE_FUNCTIONS.iter().chain(&WORKSHEET_FUTURE_FUNCTIONS) {
+        for name in WORKSHEET_FUTURE_FUNCTIONS {
+            assert!(FUTURE_FUNCTIONS.binary_search(&name).is_err());
+        }
+        for name in OUTSIDE_CATALOG {
+            assert!(FUTURE_FUNCTIONS.binary_search(&name).is_ok(), "{name}");
+            assert!(
+                descriptor::resolve(name).is_none(),
+                "{name} is in the catalog now"
+            );
+        }
+        for name in FUTURE_FUNCTIONS
+            .iter()
+            .chain(&WORKSHEET_FUTURE_FUNCTIONS)
+            .filter(|name| !OUTSIDE_CATALOG.contains(name))
+        {
             assert!(
                 descriptor::descriptor(name).is_some(),
                 "{name} is not a canonical catalog function"
             );
-        }
-        for name in WORKSHEET_FUTURE_FUNCTIONS {
-            assert!(FUTURE_FUNCTIONS.binary_search(&name).is_err());
         }
     }
 }

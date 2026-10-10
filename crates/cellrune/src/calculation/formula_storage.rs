@@ -1,17 +1,21 @@
 //! Excel storage spelling for authored formula text.
 //!
 //! Excel saves some authored syntax in a different spelling: future functions carry `_xlfn.`
-//! (`_xlfn._xlws.` for FILTER and SORT), LET and LAMBDA locals carry `_xlpm.`, `B1#` becomes
-//! `_xlfn.ANCHORARRAY(B1)`, and `@operand` becomes `_xlfn.SINGLE(operand)`. The parser locates
-//! those spots and only that spelling is inserted, so numeric literals, whitespace, and every
-//! other character stay as authored. Re-printing the AST would normalize them.
+//! (`_xlfn._xlws.` for FILTER and SORT), LET and LAMBDA locals carry `_xlpm.`, a function passed
+//! as a LAMBDA argument carries `_xleta.`, `B1#` becomes `_xlfn.ANCHORARRAY(B1)`, and `@operand`
+//! becomes `_xlfn.SINGLE(operand)`. The parser locates those spots and only that spelling is
+//! inserted, so numeric literals, whitespace, and every other character stay as authored.
+//! Re-printing the AST would normalize them.
 
 use std::borrow::Cow;
 
 use super::CalculationLimits;
 use super::ast::{Expr, storage_argument_needs_grouping};
 use super::formula_rewrite::push_children;
-use super::functions::{DynamicFunction, Evaluator, function_evaluator, future_function_prefix};
+use super::functions::{
+    DynamicFunction, Evaluator, function_evaluator, future_function_prefix,
+    storage_builtin_callable,
+};
 use super::lambda::is_local_name;
 use super::parser::parse_formula_with_limits;
 use super::scope::canonical_local_name;
@@ -98,6 +102,8 @@ impl StoragePlanner<'_> {
                 let name = &source[start..node.span().end];
                 if is_local_name(name, &self.scope) {
                     self.prefix_local(name, start);
+                } else if storage_builtin_callable(name).is_none() {
+                    self.edit(SourceSpan::empty(start), "_xleta.");
                 }
             }
             Expr::ImplicitIntersection(operand) if self.source[start..].starts_with('@') => {
@@ -190,7 +196,7 @@ mod tests {
 
     #[test]
     fn generated_formulas_keep_parsing_and_convert_once() {
-        const PIECES: [&str; 12] = [
+        const PIECES: [&str; 13] = [
             "@",
             "#",
             "(",
@@ -198,9 +204,10 @@ mod tests {
             ",",
             "A1",
             "x",
+            "SUM",
             "LET(x,",
             "LAMBDA(x,",
-            "XLOOKUP(",
+            "BYROW(A1,",
             ":",
             " ",
         ];

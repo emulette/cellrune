@@ -33,9 +33,10 @@ impl FormulaText {
     /// stores.
     ///
     /// Future functions gain `_xlfn.` (`_xlfn._xlws.` for FILTER and SORT), LET and LAMBDA locals
-    /// gain `_xlpm.`, `B1#` becomes `_xlfn.ANCHORARRAY(B1)`, and `@operand` becomes
-    /// `_xlfn.SINGLE(operand)`. Existing prefixes and every other character, including numeric
-    /// literals and whitespace, are kept as entered, as is text that does not parse.
+    /// gain `_xlpm.`, a function passed as a LAMBDA argument gains `_xleta.`, `B1#` becomes
+    /// `_xlfn.ANCHORARRAY(B1)`, and `@operand` becomes `_xlfn.SINGLE(operand)`. Existing prefixes
+    /// and every other character, including numeric literals and whitespace, are kept as entered,
+    /// as is text that does not parse.
     ///
     /// # Errors
     ///

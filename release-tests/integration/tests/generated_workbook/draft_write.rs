@@ -236,12 +236,13 @@ fn dynamic_spills_are_calculated_written_and_reopened_with_metadata() {
 
 #[test]
 fn authored_formulas_are_saved_with_excel_storage_prefixes() {
-    const FORMULAS: [(&str, &str); 6] = [
+    const FORMULAS: [(&str, &str); 7] = [
         ("C1", "=LET(x,2,XLOOKUP(x,A1:A3,B1:B3))&CONCAT(\"a\",\"b\")"),
         ("C2", "=SUM(FILTER(B1:B3,{1;0;1}))"),
         ("C3", "=SUM(D1#)"),
         ("C4", "=1.50E+3 + XLOOKUP(2,A1:A3,B1:B3)"),
         ("C5", "=Twice(B2)"),
+        ("C6", "=SUM(BYROW(A1:B3,SUM))"),
         ("E2", "=@A1:A3"),
     ];
     const SPILL: &str = "=SORT(A1:A3,1,-1)";
@@ -322,6 +323,7 @@ fn authored_formulas_are_saved_with_excel_storage_prefixes() {
             number(6.0),
             number(1_520.0),
             number(40.0),
+            number(66.0),
             number(2.0),
         ]
     );
@@ -339,6 +341,7 @@ fn authored_formulas_are_saved_with_excel_storage_prefixes() {
         "SUM(_xlfn._xlws.FILTER(B1:B3,{1;0;1}))",
         "SUM(_xlfn.ANCHORARRAY(D1))",
         "1.50E+3 + _xlfn.XLOOKUP(2,A1:A3,B1:B3)",
+        "SUM(_xlfn.BYROW(A1:B3,_xleta.SUM))",
         "_xlfn.SINGLE(A1:A3)",
         "_xlfn._xlws.SORT(A1:A3,1,-1)",
     ] {

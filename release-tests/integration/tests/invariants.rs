@@ -200,6 +200,23 @@ fn user_formulas_gain_excel_storage_prefixes_without_reprinting() {
             "_xlfn.MAP(A1:A3,_xlfn.LAMBDA(_xlpm.v,_xlpm.v+1))",
         ),
         (
+            "=GROUPBY(A1:A3,B1:B3,SUM)",
+            "_xlfn.GROUPBY(A1:A3,B1:B3,_xleta.SUM)",
+        ),
+        (
+            "=PIVOTBY(A1:A3,B1:B3,C1:C3,percentof)",
+            "_xlfn.PIVOTBY(A1:A3,B1:B3,C1:C3,_xleta.percentof)",
+        ),
+        ("=BYROW(A1:B2,(MAX))", "_xlfn.BYROW(A1:B2,(_xleta.MAX))"),
+        (
+            "=LET(sum,LAMBDA(v,v*2),BYROW(A1:A2,sum))",
+            "_xlfn.LET(_xlpm.sum,_xlfn.LAMBDA(_xlpm.v,_xlpm.v*2),_xlfn.BYROW(A1:A2,_xlpm.sum))",
+        ),
+        (
+            "=AGGREGATE(9,6,A1:A3)+SKEW.P(A1:A3)",
+            "_xlfn.AGGREGATE(9,6,A1:A3)+_xlfn.SKEW.P(A1:A3)",
+        ),
+        (
             "=COVAR(A1:A3,B1:B3)+COVARIANCE.P(A1:A3,B1:B3)",
             "COVAR(A1:A3,B1:B3)+_xlfn.COVARIANCE.P(A1:A3,B1:B3)",
         ),
@@ -223,6 +240,7 @@ fn user_formulas_gain_excel_storage_prefixes_without_reprinting() {
         "=_xlfn.FILTER(A1:A3,B1:B3)",
         "=SUM(_xlfn.ANCHORARRAY(B1))",
         "=_xlfn.SINGLE(A1:A3)",
+        "=_xlfn.GROUPBY(A1:A3,B1:B3,_xleta.SUM)",
         "=\"XLOOKUP(1)\"&'XLOOKUP'!A1&XLOOKUP!B1",
         "=NETWORKDAYS.INTL(A1,B1)+WORKDAY.INTL(A1,1)+ISO.CEILING(A1)",
         "=SUM(1.50E+3,  A1)",
