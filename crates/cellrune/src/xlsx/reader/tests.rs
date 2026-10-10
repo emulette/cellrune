@@ -3007,6 +3007,115 @@ fn merged_ranges_survive_edit_write_reopen() {
     assert!(worksheet.contains("<mergeCells"), "{worksheet}");
 }
 
+#[test]
+fn cells_created_by_table_and_dynamic_formula_edits_take_their_row_or_column_style() {
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cols><col min="2" max="2" style="1"/></cols>
+  <sheetData>
+    <row r="1" s="2" customFormat="1"><c r="B1" t="inlineStr"><is><t>Amount</t></is></c></row>
+    <row r="2"><c r="A2"><v>1</v></c><c r="B2"><f>[@Region]</f><v>1</v></c></row>
+    <row r="3" s="2" customFormat="1"/>
+  </sheetData>
+  <tableParts count="1"><tablePart r:id="rId7"/></tableParts>
+</worksheet>"#;
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="Sales" ref="A1:B2">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Region"/>
+    <tableColumn id="2" name="Amount"><calculatedColumnFormula>[@Region]</calculatedColumnFormula></tableColumn>
+  </tableColumns>
+</table>"#;
+    let source = build_table_archive(
+        sheet,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", SHEET_ONE_TABLE_RELS),
+            ("xl/tables/table1.xml", table),
+        ],
+    );
+    let document =
+        open_xlsx_document_bytes(&source, OpenOptions::default()).expect("source document");
+    let sheet_id = SheetId::new(1).expect("sheet");
+    let table_id = TableId::new(1).expect("table ID");
+
+    // Renaming the first column writes its missing header A1 into row 1, and growing the table
+    // writes its calculated column into B3 (row 3 is formatted) and B4 (only column B is).
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::rename_table_column(
+                table_id,
+                TableColumnId::new(1).expect("column ID"),
+                TableColumnName::new("Area").expect("column name"),
+            ),
+            WorkbookChange::resize_table_rows(
+                table_id,
+                crate::Row::new(2).expect("first row"),
+                crate::Row::new(4).expect("last row"),
+            )
+            .expect("resize"),
+        ]))
+        .expect("table edits");
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write");
+    let worksheet = archive_text(output.bytes(), "xl/worksheets/sheet1.xml");
+    for written in [
+        r#"<c r="A1" s="2""#,
+        r#"<c r="B2" t="n">"#,
+        r#"<c r="B3" s="2""#,
+        r#"<c r="B4" s="1""#,
+    ] {
+        assert!(worksheet.contains(written), "{written} in {worksheet}");
+    }
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    let first = reopened.workbook().sheet_by_name("First").expect("sheet");
+    for (name, id) in [("A1", 46), ("B2", 0), ("B3", 46), ("B4", 164)] {
+        assert_eq!(cell(first, name).number_format().id(), id, "{name}");
+    }
+
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_dynamic_formula(
+            sheet_id,
+            address("D3"),
+            crate::FormulaText::from_xlsx("SEQUENCE(1)").expect("formula"),
+            None,
+        )
+        .expect("dynamic formula");
+    let first = draft.workbook().sheet_by_id(sheet_id).expect("sheet");
+    assert_eq!(cell(first, "D3").number_format().id(), 46);
+}
+
+#[test]
+fn row_column_and_blank_cell_styles_are_resolved_only_in_document_mode() {
+    for sheet in [
+        SHEET_ONE.replace(
+            r#"<sheetData><row r="1">"#,
+            r#"<sheetData><row r="1" s="9" customFormat="1">"#,
+        ),
+        SHEET_ONE.replace(
+            "<sheetData>",
+            r#"<cols><col min="1" max="1" style="9"/></cols><sheetData>"#,
+        ),
+        SHEET_ONE.replace(r#"<c r="I1"/>"#, r#"<c r="I1" s="9"/>"#),
+    ] {
+        let archive = build_archive(&sheet, SHARED_STRINGS);
+        read_xlsx_bytes(&archive, ReadOptions::default()).expect("snapshot ignores the style");
+        let error = open_xlsx_document_bytes(&archive, OpenOptions::default())
+            .expect_err("document resolves the style");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidStyleIndex);
+    }
+    let without_custom_format = SHEET_ONE.replace(r#"<row r="1">"#, r#"<row r="1" s="9">"#);
+    open_xlsx_document_bytes(
+        &build_archive(&without_custom_format, SHARED_STRINGS),
+        OpenOptions::default(),
+    )
+    .expect("a row style applies only with customFormat");
+}
+
 fn build_archive(sheet_one: &str, shared_strings: &str) -> Vec<u8> {
     build_archive_with_sheets(sheet_one, SHEET_TWO, shared_strings)
 }

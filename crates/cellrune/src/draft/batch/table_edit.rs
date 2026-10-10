@@ -12,9 +12,9 @@ use crate::calculation::formula_rewrite::{
 };
 use crate::{
     CalculationCellId, CellAddress, CellContent, CellRange, CellValue, FormulaCell, FormulaDialect,
-    FormulaMetadata, FormulaText, NumberFormat, Row, SavedResult, Sheet, SheetId, Table,
-    TableColumn, TableColumnId, TableColumnName, TableId, TableName, TotalsRowFunction,
-    ValidationError, case_insensitive_eq,
+    FormulaMetadata, FormulaText, Row, SavedResult, Sheet, SheetId, Table, TableColumn,
+    TableColumnId, TableColumnName, TableId, TableName, TotalsRowFunction, ValidationError,
+    case_insensitive_eq,
 };
 
 pub(super) type TableLocations = BTreeMap<TableId, (usize, usize)>;
@@ -326,9 +326,10 @@ pub(super) fn resize_table_rows(
             for follower in sheets[sheet_index].detach_shared_formula_followers(address) {
                 mark_upsert(state.mutations, sheet_id, follower, false);
             }
-            let number_format = sheets[sheet_index]
-                .cell(address)
-                .map_or_else(NumberFormat::default, |cell| cell.number_format().clone());
+            let number_format = sheets[sheet_index].cell(address).map_or_else(
+                || sheets[sheet_index].new_cell_number_format(address),
+                |cell| cell.number_format().clone(),
+            );
             sheets[sheet_index].upsert_cell_deferred(address, content, number_format);
             state.mark_cell(sheet_id, address);
             Ok(())
@@ -426,9 +427,10 @@ fn validate_rename_header(
 }
 
 fn upsert_literal_text(sheet: &mut Sheet, address: CellAddress, value: &str) {
-    let number_format = sheet
-        .cell(address)
-        .map_or_else(NumberFormat::default, |cell| cell.number_format().clone());
+    let number_format = sheet.cell(address).map_or_else(
+        || sheet.new_cell_number_format(address),
+        |cell| cell.number_format().clone(),
+    );
     sheet.upsert_cell_deferred(
         address,
         CellContent::Literal(CellValue::Text(value.to_owned())),

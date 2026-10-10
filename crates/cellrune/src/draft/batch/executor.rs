@@ -183,7 +183,11 @@ impl WorkbookDraft {
                         let content = CellContent::Literal(value.clone());
                         let replacement = match sheet.cell(*address) {
                             Some(cell) => cell.with_replaced_content(content),
-                            None => crate::Cell::new(*address, content),
+                            None => crate::Cell::with_number_format(
+                                *address,
+                                content,
+                                sheet.new_cell_number_format(*address),
+                            ),
                         };
                         sheet.upsert_cell_instance_deferred(replacement);
                         mark_upsert(&mut cell_mutations, *sheet_id, *address, false);

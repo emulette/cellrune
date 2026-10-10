@@ -7,8 +7,8 @@ use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteRequest, rewrite_formula,
 };
 use crate::{
-    CalculationCellId, CellAddress, CellContent, DefinedName, FormulaCell, FormulaText,
-    NumberFormat, Sheet, SheetId, SheetName, TableId, ValidationError,
+    CalculationCellId, CellAddress, CellContent, DefinedName, FormulaCell, FormulaText, Sheet,
+    SheetId, SheetName, TableId, ValidationError,
 };
 
 pub(super) struct FormulaEditState<'a> {
@@ -57,9 +57,10 @@ pub(super) fn upsert_formula(
     formula: FormulaCell,
 ) -> Result<bool, ValidationError> {
     let sheet = sheet_by_id_mut(sheets, sheet_id)?;
-    let number_format = sheet
-        .cell(address)
-        .map_or_else(NumberFormat::default, |cell| cell.number_format().clone());
+    let number_format = sheet.cell(address).map_or_else(
+        || sheet.new_cell_number_format(address),
+        |cell| cell.number_format().clone(),
+    );
     let content = CellContent::Formula(formula);
     if sheet
         .cell(address)

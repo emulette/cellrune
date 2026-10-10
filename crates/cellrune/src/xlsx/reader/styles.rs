@@ -37,8 +37,17 @@ struct StyleParseState {
 }
 
 impl Styles {
-    pub(super) fn format(&self, style_index: usize) -> Option<&NumberFormat> {
-        self.formats.get(style_index)
+    /// Returns the number format of the `cellXfs` entry that a cell, row, or column style names.
+    pub(super) fn format(
+        &self,
+        style_index: usize,
+        budget: &XmlBudget,
+    ) -> Result<&NumberFormat, XlsxReadError> {
+        self.formats.get(style_index).ok_or_else(|| {
+            budget
+                .error(XlsxErrorCode::InvalidStyleIndex)
+                .with_detail(style_index.to_string())
+        })
     }
 
     pub(super) const fn font_count(&self) -> u32 {

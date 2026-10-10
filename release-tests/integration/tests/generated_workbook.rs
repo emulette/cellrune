@@ -4,6 +4,7 @@ mod generated_workbook {
     mod defined_name_write;
     mod draft_edits_write;
     mod draft_write;
+    mod new_cell_style_write;
     mod producer;
     mod recalculation_write;
     mod recalculation_write_support;

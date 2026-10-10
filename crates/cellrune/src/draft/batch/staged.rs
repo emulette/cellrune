@@ -43,17 +43,30 @@ pub(super) fn mark_upsert(
     number_format_changed: bool,
 ) {
     let id = CalculationCellId::new(sheet_id, address);
+    let previous = mutations.get(&id);
     let changed = number_format_changed
         || matches!(
-            mutations.get(&id),
+            previous,
             Some(DraftCellMutation::Upsert {
-                number_format_changed: true
+                number_format_changed: true,
+                ..
             })
         );
+    let replaces_source_cell = matches!(
+        previous,
+        Some(
+            DraftCellMutation::Remove
+                | DraftCellMutation::Upsert {
+                    replaces_source_cell: true,
+                    ..
+                }
+        )
+    );
     mutations.insert(
         id,
         DraftCellMutation::Upsert {
             number_format_changed: changed,
+            replaces_source_cell,
         },
     );
 }

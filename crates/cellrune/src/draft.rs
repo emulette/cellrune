@@ -17,9 +17,15 @@ pub(crate) use batch::{
 pub use batch::{EditBatch, EditReceipt, WorkbookChange};
 
 /// One explicit cell mutation retained for document-backed package patching.
+///
+/// `replaces_source_cell` marks a cell written after the draft removed the source cell at the
+/// same address: it is a new cell and takes no style from the removed one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DraftCellMutation {
-    Upsert { number_format_changed: bool },
+    Upsert {
+        number_format_changed: bool,
+        replaces_source_cell: bool,
+    },
     Remove,
 }
 

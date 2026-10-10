@@ -467,6 +467,59 @@ pub fn generated_workbook_with_sheet_count(sheet_count: u64) -> Vec<u8> {
     )
 }
 
+/// A one-sheet workbook whose column B carries style 2 (`0.00%`), whose rows 2 and 5 carry style 1
+/// (`0.00` in bold) with `customFormat`, and whose row 4 declares style 1 without `customFormat`.
+/// A1 holds a value in style 2 and D2 a value in no style; B1 (no style) and C1 (style 1) are
+/// blank cells.
+pub fn generated_row_column_style_workbook() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Styled" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#;
+    let styles = r#"<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/></font><font><b/><sz val="11"/></font></fonts>
+  <cellXfs count="3">
+    <xf numFmtId="0" fontId="0"/>
+    <xf numFmtId="2" fontId="1" applyNumberFormat="1" applyFont="1"/>
+    <xf numFmtId="10" fontId="0" applyNumberFormat="1"/>
+  </cellXfs>
+</styleSheet>"#;
+    let worksheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols><col min="2" max="2" width="12" style="2" customWidth="1"/></cols>
+  <sheetData>
+    <row r="1"><c r="A1" s="2"><v>0.5</v></c><c r="B1"/><c r="C1" s="1"/></row>
+    <row r="2" s="1" customFormat="1"><c r="D2"><v>1</v></c></row>
+    <row r="4" s="1"/>
+    <row r="5" s="1" customFormat="1"/>
+  </sheetData>
+</worksheet>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/styles.xml", styles),
+            ("xl/worksheets/sheet1.xml", worksheet),
+        ],
+        None,
+    )
+}
+
 /// A one-sheet workbook whose empty cell table is written as `<sheetData/>`, as Excel saves an
 /// empty worksheet.
 pub fn generated_empty_sheet_data_workbook() -> Vec<u8> {

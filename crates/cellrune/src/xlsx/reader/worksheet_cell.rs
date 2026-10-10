@@ -366,17 +366,18 @@ impl CellBuilder {
             self.explicit_phonetic_visibility,
         );
         let Some(content) = content else {
+            // A value written here later keeps the style this blank cell carries.
+            if self.capture == PresentationCapture::Document {
+                let number_format = resources.styles.format(self.style_index, budget)?;
+                sheet.new_cell_styles_mut().insert_blank_cell(
+                    self.address,
+                    self.style_index,
+                    number_format,
+                );
+            }
             return Ok(());
         };
-        let number_format = resources
-            .styles
-            .format(self.style_index)
-            .cloned()
-            .ok_or_else(|| {
-                budget
-                    .error(XlsxErrorCode::InvalidStyleIndex)
-                    .with_detail(self.style_index.to_string())
-            })?;
+        let number_format = resources.styles.format(self.style_index, budget)?.clone();
         sheet
             .insert_cell_with_number_format(self.address, content, number_format)
             .map_err(|error| {

@@ -254,6 +254,8 @@ pub(super) fn write_document_package(
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let bytes = source_reader.read_part(&part)?;
+        // A cell written over a removed source cell is styled as a new cell, so the removed
+        // cell's style is not read for it.
         let targets = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -262,6 +264,15 @@ pub(super) fn write_document_package(
                     .presentation_cell_mutations()
                     .range(sheet_cell_bounds(sheet_id)),
             )
+            .filter(|id| {
+                !matches!(
+                    draft.cell_mutations().get(id),
+                    Some(DraftCellMutation::Upsert {
+                        replaces_source_cell: true,
+                        ..
+                    })
+                )
+            })
             .map(|id| id.address())
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
@@ -291,23 +302,24 @@ pub(super) fn write_document_package(
     for (id, mutation) in draft.cell_mutations().iter() {
         let DraftCellMutation::Upsert {
             number_format_changed: true,
+            ..
         } = mutation
         else {
             continue;
         };
-        let cell = draft
+        let sheet = draft
             .workbook()
             .sheet_by_id(id.sheet_id())
-            .and_then(|sheet| sheet.cell(id.address()))
+            .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+        let cell = sheet
+            .cell(id.address())
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let base_index = if draft.added_sheets().contains(&id.sheet_id()) {
             0
         } else {
-            sheet_sources
-                .get(&id.sheet_id())
-                .and_then(|sheet| sheet.styles.get(&id.address()))
-                .copied()
-                .unwrap_or(0)
+            sheet_sources.get(&id.sheet_id()).map_or(0, |source| {
+                source_style_index(&source.styles, sheet, id.address())
+            })
         };
         style_requests.insert(
             *id,
@@ -391,11 +403,9 @@ pub(super) fn write_document_package(
                     let content_changed = original_cell.map(crate::Cell::content)
                         != Some(cell.content())
                         || draft.presentation_cell_mutations().contains(&id);
-                    let style_index = style_indexes
-                        .get(&id)
-                        .copied()
-                        .or_else(|| sheet_source.styles.get(&address).copied())
-                        .unwrap_or(0);
+                    let style_index = style_indexes.get(&id).copied().unwrap_or_else(|| {
+                        source_style_index(&sheet_source.styles, draft_sheet, address)
+                    });
                     WorksheetSemanticEdit::Upsert {
                         cell,
                         style_index,
@@ -650,6 +660,25 @@ pub(super) fn validate_dynamic_formula_edits(
         }
     }
     Ok(())
+}
+
+/// Returns the style index a written cell takes: the source cell element's own style, else the
+/// style its empty position carries in the source worksheet, else the default style.
+fn source_style_index(
+    source_styles: &BTreeMap<crate::CellAddress, usize>,
+    sheet: &crate::Sheet,
+    address: crate::CellAddress,
+) -> usize {
+    source_styles
+        .get(&address)
+        .copied()
+        .or_else(|| {
+            sheet
+                .new_cell_styles()
+                .style(address)
+                .map(|(index, _)| index)
+        })
+        .unwrap_or(0)
 }
 
 fn sheet_cell_bounds(sheet_id: SheetId) -> std::ops::RangeInclusive<CalculationCellId> {

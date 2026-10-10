@@ -6,10 +6,12 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
 mod auto_filter;
+mod new_cell_styles;
 mod sheet_tabs;
 mod table_index;
 
 pub use auto_filter::SheetAutoFilter;
+pub(crate) use new_cell_styles::NewCellStyles;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;
 use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
@@ -254,6 +256,7 @@ pub struct Sheet {
     merged_ranges: Arc<Vec<CellRange>>,
     tables: Arc<Vec<Table>>,
     auto_filter: Option<SheetAutoFilter>,
+    new_cell_styles: Arc<NewCellStyles>,
     semantic_fingerprint: OnceLock<[u8; 32]>,
 }
 
@@ -278,6 +281,7 @@ impl Sheet {
             merged_ranges: Arc::clone(&self.merged_ranges),
             tables: Arc::clone(&self.tables),
             auto_filter: self.auto_filter.clone(),
+            new_cell_styles: Arc::clone(&self.new_cell_styles),
             semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
     }
@@ -300,6 +304,7 @@ impl Sheet {
             merged_ranges: Arc::new(Vec::new()),
             tables: Arc::new(Vec::new()),
             auto_filter: None,
+            new_cell_styles: Arc::default(),
             semantic_fingerprint: OnceLock::new(),
         }
     }
@@ -553,6 +558,20 @@ impl Sheet {
         self.auto_filter = auto_filter;
     }
 
+    /// Returns the source styles that cells written at empty positions receive.
+    pub(crate) fn new_cell_styles(&self) -> &NewCellStyles {
+        &self.new_cell_styles
+    }
+
+    /// Returns the number format that a cell written at the empty `address` receives.
+    pub(crate) fn new_cell_number_format(&self, address: CellAddress) -> NumberFormat {
+        self.new_cell_styles
+            .style(address)
+            .map_or_else(NumberFormat::default, |(_, number_format)| {
+                number_format.clone()
+            })
+    }
+
     /// Returns the smallest bounding rectangle containing all sparse cells.
     pub fn used_range(&self) -> Option<CellRange> {
         let start = CellAddress::new(self.min_row?, self.min_column?);
@@ -754,6 +773,10 @@ impl SheetBuilder {
 
     pub(crate) fn set_auto_filter(&mut self, auto_filter: Option<SheetAutoFilter>) {
         self.sheet.set_auto_filter(auto_filter);
+    }
+
+    pub(crate) fn new_cell_styles_mut(&mut self) -> &mut NewCellStyles {
+        Arc::make_mut(&mut self.sheet.new_cell_styles)
     }
 
     /// Builds the collected cells into the sheet's store in one sorted pass.

@@ -20,8 +20,8 @@ use super::worksheet_cell::{CellBuilder, CellFinishContext};
 use crate::workbook::SheetBuilder;
 use crate::{
     CellAddress, Column, ColumnPhoneticVisibility, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    DocumentPresentation, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, FrozenPane, Row, SheetId,
-    SourceLocation,
+    DocumentPresentation, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, FrozenPane, NumberFormat, Row,
+    SheetId, SourceLocation,
 };
 
 const WORKSHEET: &[u8] = b"worksheet";
@@ -97,6 +97,8 @@ struct WorksheetStartContext<'budget, 'state> {
     diagnostics: &'state mut Vec<Diagnostic>,
     table_relationship_ids: &'state mut Vec<Box<str>>,
     font_count: u32,
+    styles: &'budget Styles,
+    sheet: &'state mut SheetBuilder,
 }
 
 pub(super) fn parse(
@@ -154,6 +156,8 @@ pub(super) fn parse(
                         diagnostics: &mut *diagnostics,
                         table_relationship_ids: &mut *table_relationship_ids,
                         font_count: resources.styles.font_count(),
+                        styles: resources.styles,
+                        sheet: &mut *sheet,
                     },
                 )?;
             }
@@ -220,6 +224,13 @@ pub(super) fn parse(
                             presentation,
                             &budget,
                         )?;
+                        process_column_style(
+                            &attributes,
+                            capture,
+                            resources.styles,
+                            sheet,
+                            &budget,
+                        )?;
                     } else if depth == 2 && local_name == SHEET_DATA {
                         // An empty sheet is serialized by Excel and every mainstream producer
                         // as a self-closing <sheetData/>, which arrives as an Empty event, not
@@ -282,6 +293,7 @@ pub(super) fn parse(
                             presentation,
                             &budget,
                         )?;
+                        process_row_style(&attributes, capture, resources.styles, sheet, &budget)?;
                     } else if local_name == CELL
                         && state.row_depth.is_some_and(|row| depth == row + 1)
                     {
@@ -420,6 +432,8 @@ fn process_start(
         diagnostics,
         table_relationship_ids,
         font_count,
+        styles,
+        sheet,
     } = context;
     if depth == 1 {
         require_spreadsheet_element(is_spreadsheet, local_name, WORKSHEET, budget)?;
@@ -442,6 +456,7 @@ fn process_start(
         && local_name == COLUMN
     {
         process_column_visibility(&attributes, capture, sheet_id, presentation, budget)?;
+        process_column_style(&attributes, capture, styles, sheet, budget)?;
     } else if depth == 2 && local_name == PHONETIC_PROPERTIES {
         process_worksheet_phonetic_properties(
             &attributes,
@@ -560,6 +575,7 @@ fn process_start(
                 parse_bool(value, budget)?,
             );
         }
+        process_row_style(&attributes, capture, styles, sheet, budget)?;
     } else if state.row_depth.is_some_and(|row| depth == row + 1) && local_name == CELL {
         increment_cell_counts(&mut state.sheet_cells, total_cells, budget.limits(), budget)?;
         if state.current_cell.is_some() {
@@ -607,7 +623,11 @@ fn process_sheet_view(
     if std::mem::replace(&mut state.saw_default_view, true) {
         return Err(budget.error(XlsxErrorCode::InvalidFrozenPane));
     }
-    let right_to_left = optional_bool(attributes.unqualified("rightToLeft"), budget)?;
+    let right_to_left = optional_bool(
+        attributes.unqualified("rightToLeft"),
+        XlsxErrorCode::InvalidFrozenPane,
+        budget,
+    )?;
     presentation.source_right_to_left(sheet_id, right_to_left.unwrap_or(false));
     Ok(())
 }
@@ -647,8 +667,16 @@ fn process_column_visibility(
     let Some(value) = attributes.unqualified("phonetic") else {
         return Ok(());
     };
-    let first = required_column(attributes.unqualified("min"), budget)?;
-    let last = required_column(attributes.unqualified("max"), budget)?;
+    let first = required_column(
+        attributes.unqualified("min"),
+        XlsxErrorCode::InvalidPhoneticMetadata,
+        budget,
+    )?;
+    let last = required_column(
+        attributes.unqualified("max"),
+        XlsxErrorCode::InvalidPhoneticMetadata,
+        budget,
+    )?;
     let visibility = ColumnPhoneticVisibility::new(first, last, parse_bool(value, budget)?)
         .map_err(|error| {
             budget
@@ -691,6 +719,97 @@ fn process_empty_row_visibility(
         parse_bool(value, budget)?,
     );
     Ok(())
+}
+
+/// Records the style of a row that declares `customFormat`, which a cell written into the row
+/// receives ahead of its column's style.
+fn process_row_style(
+    attributes: &XmlAttributes,
+    capture: PresentationCapture,
+    styles: &Styles,
+    sheet: &mut SheetBuilder,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    if capture == PresentationCapture::None
+        || !optional_bool(
+            attributes.unqualified("customFormat"),
+            XlsxErrorCode::InvalidWorksheet,
+            budget,
+        )?
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let row = attributes
+        .unqualified("r")
+        .ok_or_else(|| budget.error(XlsxErrorCode::InvalidWorksheet))?
+        .parse::<u32>()
+        .map_err(|error| {
+            budget
+                .error(XlsxErrorCode::InvalidWorksheet)
+                .with_cause(error)
+        })?;
+    let row = Row::new(row).map_err(|error| {
+        budget
+            .error(XlsxErrorCode::InvalidWorksheet)
+            .with_cause(error)
+    })?;
+    let (index, number_format) = source_style(attributes.unqualified("s"), styles, budget)?;
+    sheet
+        .new_cell_styles_mut()
+        .insert_row(row, index, number_format);
+    Ok(())
+}
+
+/// Records the style of a column span, which a cell written into the span receives when its row
+/// declares no `customFormat`.
+fn process_column_style(
+    attributes: &XmlAttributes,
+    capture: PresentationCapture,
+    styles: &Styles,
+    sheet: &mut SheetBuilder,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    if capture == PresentationCapture::None {
+        return Ok(());
+    }
+    let Some(value) = attributes.unqualified("style") else {
+        return Ok(());
+    };
+    let first = required_column(
+        attributes.unqualified("min"),
+        XlsxErrorCode::InvalidWorksheet,
+        budget,
+    )?;
+    let last = required_column(
+        attributes.unqualified("max"),
+        XlsxErrorCode::InvalidWorksheet,
+        budget,
+    )?;
+    let (index, number_format) = source_style(Some(value), styles, budget)?;
+    sheet
+        .new_cell_styles_mut()
+        .push_columns(first, last, index, number_format);
+    Ok(())
+}
+
+/// Resolves a row `s` or column `style` index, 0 when absent, as a cell's `s` resolves.
+fn source_style<'styles>(
+    value: Option<&str>,
+    styles: &'styles Styles,
+    budget: &XmlBudget,
+) -> Result<(usize, &'styles NumberFormat), XlsxReadError> {
+    let index = value
+        .map(|value| {
+            value.parse::<usize>().map_err(|error| {
+                budget
+                    .error(XlsxErrorCode::InvalidStyleIndex)
+                    .with_cause(error)
+            })
+        })
+        .transpose()?
+        .unwrap_or(0);
+    Ok((index, styles.format(index, budget)?))
 }
 
 fn process_pane(
@@ -784,25 +903,19 @@ fn record_table_part(
     Ok(())
 }
 
-fn required_column(value: Option<&str>, budget: &XmlBudget) -> Result<Column, XlsxReadError> {
+fn required_column(
+    value: Option<&str>,
+    code: XlsxErrorCode,
+    budget: &XmlBudget,
+) -> Result<Column, XlsxReadError> {
     let value = value
-        .ok_or_else(|| budget.error(XlsxErrorCode::InvalidPhoneticMetadata))?
+        .ok_or_else(|| budget.error(code))?
         .parse::<u32>()
-        .map_err(|error| {
-            budget
-                .error(XlsxErrorCode::InvalidPhoneticMetadata)
-                .with_cause(error)
-        })?;
+        .map_err(|error| budget.error(code).with_cause(error))?;
     if value == 0 || value > EXCEL_MAX_COLUMNS {
-        return Err(budget
-            .error(XlsxErrorCode::InvalidPhoneticMetadata)
-            .with_detail(value.to_string()));
+        return Err(budget.error(code).with_detail(value.to_string()));
     }
-    Column::new(value).map_err(|error| {
-        budget
-            .error(XlsxErrorCode::InvalidPhoneticMetadata)
-            .with_cause(error)
-    })
+    Column::new(value).map_err(|error| budget.error(code).with_cause(error))
 }
 
 fn push_presentation_diagnostic(
@@ -850,14 +963,16 @@ fn frozen_count(value: Option<&str>, budget: &XmlBudget) -> Result<u32, XlsxRead
     Ok(number as u32)
 }
 
-fn optional_bool(value: Option<&str>, budget: &XmlBudget) -> Result<Option<bool>, XlsxReadError> {
+fn optional_bool(
+    value: Option<&str>,
+    code: XlsxErrorCode,
+    budget: &XmlBudget,
+) -> Result<Option<bool>, XlsxReadError> {
     value
         .map(|value| match value {
             "0" | "false" => Ok(false),
             "1" | "true" => Ok(true),
-            _ => Err(budget
-                .error(XlsxErrorCode::InvalidFrozenPane)
-                .with_detail(value.to_owned())),
+            _ => Err(budget.error(code).with_detail(value.to_owned())),
         })
         .transpose()
 }

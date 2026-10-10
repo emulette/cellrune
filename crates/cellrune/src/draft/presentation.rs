@@ -3,8 +3,8 @@ use std::sync::Arc;
 use super::WorkbookDraft;
 use crate::presentation::validate_authoring_runs;
 use crate::{
-    CalculationCellId, CellAddress, CellContent, CellValue, NumberFormat, PhoneticAnnotation,
-    PhoneticRun, PhoneticWriteOptions, Sheet, SheetId, ValidationError,
+    CalculationCellId, CellAddress, CellContent, CellValue, PhoneticAnnotation, PhoneticRun,
+    PhoneticWriteOptions, Sheet, SheetId, ValidationError,
 };
 
 impl WorkbookDraft {
@@ -81,9 +81,10 @@ impl WorkbookDraft {
         let sheet = sheet_mut(&mut sheets, sheet_id)?;
         super::ensure_not_array_formula_part(sheet, address)?;
         let detached = sheet.detach_shared_formula_followers(address);
-        let number_format = sheet
-            .cell(address)
-            .map_or_else(NumberFormat::default, |cell| cell.number_format().clone());
+        let number_format = sheet.cell(address).map_or_else(
+            || sheet.new_cell_number_format(address),
+            |cell| cell.number_format().clone(),
+        );
         let content = CellContent::Literal(CellValue::Text(text));
         let semantic_changed = sheet.cell(address).is_none_or(|cell| {
             cell.content() != &content || cell.number_format() != &number_format

@@ -53,17 +53,30 @@ impl WorkbookDraft {
         number_format_changed: bool,
     ) {
         let id = CalculationCellId::new(sheet_id, address);
+        let previous = self.cell_mutations.get(&id);
         let changed = number_format_changed
             || matches!(
-                self.cell_mutations.get(&id),
+                previous,
                 Some(DraftCellMutation::Upsert {
-                    number_format_changed: true
+                    number_format_changed: true,
+                    ..
                 })
             );
+        let replaces_source_cell = matches!(
+            previous,
+            Some(
+                DraftCellMutation::Remove
+                    | DraftCellMutation::Upsert {
+                        replaces_source_cell: true,
+                        ..
+                    }
+            )
+        );
         self.cell_mutations.insert(
             id,
             DraftCellMutation::Upsert {
                 number_format_changed: changed,
+                replaces_source_cell,
             },
         );
     }
