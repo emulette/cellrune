@@ -1,4 +1,7 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use cellrune_interop::InteropError;
+use napi::bindgen_prelude::panic_to_error;
 use napi::{Error, Status};
 
 const ERROR_PREFIX: &str = "CELLRUNE_ERROR:";
@@ -11,4 +14,9 @@ pub(crate) fn napi_error(error: InteropError) -> Error {
         Status::GenericFailure,
         format!("{ERROR_PREFIX}{serialized}"),
     )
+}
+
+/// Gives async task work the panic boundary that `#[napi(catch_unwind)]` gives exported calls.
+pub(crate) fn catch_panic<T>(operation: impl FnOnce() -> napi::Result<T>) -> napi::Result<T> {
+    catch_unwind(AssertUnwindSafe(operation)).unwrap_or_else(|payload| Err(panic_to_error(payload)))
 }

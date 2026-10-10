@@ -26,7 +26,7 @@ pub struct NativeWorkbook {
 
 #[napi]
 impl NativeWorkbook {
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<string>", catch_unwind)]
     pub fn calculate_targets(
         &self,
         request_json: String,
@@ -42,22 +42,22 @@ impl NativeWorkbook {
         }))
     }
 
-    #[napi(getter)]
+    #[napi(getter, catch_unwind)]
     pub fn closed(&self) -> bool {
         self.session.is_closed()
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn close(&self) {
         self.session.close();
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn summary(&self) -> napi::Result<NativeWorkbookSummary> {
         Ok(crate::conversion::workbook_summary(self.lock()?.summary()))
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn read_range(
         &self,
         sheet: String,
@@ -80,7 +80,7 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn inspect_defined_name(
         &self,
         name: String,
@@ -95,14 +95,14 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn function_usage(&self) -> napi::Result<NativeFunctionUsageReport> {
         Ok(crate::conversion::function_usage(
             self.lock()?.function_usage(),
         ))
     }
 
-    #[napi(ts_return_type = "Promise<NativeCalculationReport>")]
+    #[napi(ts_return_type = "Promise<NativeCalculationReport>", catch_unwind)]
     pub fn calculate(
         &self,
         today_serial: Option<f64>,
@@ -121,7 +121,7 @@ impl NativeWorkbook {
         }))
     }
 
-    #[napi(ts_return_type = "Promise<NativeCalculationDelta>")]
+    #[napi(ts_return_type = "Promise<NativeCalculationDelta>", catch_unwind)]
     pub fn recalculate(
         &self,
         mode: String,
@@ -142,7 +142,7 @@ impl NativeWorkbook {
         }))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<string>", catch_unwind)]
     pub fn preview_changes(
         &self,
         expected_revision: String,
@@ -163,7 +163,7 @@ impl NativeWorkbook {
         }))
     }
 
-    #[napi(ts_return_type = "string")]
+    #[napi(ts_return_type = "string", catch_unwind)]
     pub fn preview_changes_page(
         &self,
         preview_id: String,
@@ -190,7 +190,7 @@ impl NativeWorkbook {
         crate::preview_json::serialize(&page)
     }
 
-    #[napi(ts_return_type = "string")]
+    #[napi(ts_return_type = "string", catch_unwind)]
     pub fn commit_preview(&self, preview_id: String) -> napi::Result<String> {
         let preview_id = parse_u64(&preview_id)?;
         let receipt = self
@@ -200,14 +200,14 @@ impl NativeWorkbook {
         crate::preview_json::serialize(&receipt)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn discard_preview(&self, preview_id: String) -> napi::Result<()> {
         self.lock()?
             .discard_preview(parse_u64(&preview_id)?)
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn apply_changes(
         &self,
         expected_revision: String,
@@ -222,7 +222,7 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn apply_changes_v2(
         &self,
         expected_revision: String,
@@ -237,7 +237,7 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn changes_since(
         &self,
         cursor: String,
@@ -251,42 +251,42 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn cancel_calculation(&self) -> napi::Result<bool> {
         Ok(self.lock()?.cancel_calculation())
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn calculation_active(&self) -> napi::Result<bool> {
         Ok(self.lock()?.calculation_active())
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn set_blank(&self, sheet: String, address: String) -> napi::Result<()> {
         self.set_value(&sheet, &address, WritableCellValueDto::Blank)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn set_number(&self, sheet: String, address: String, value: f64) -> napi::Result<()> {
         self.set_value(&sheet, &address, WritableCellValueDto::Number { value })
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn set_text(&self, sheet: String, address: String, value: String) -> napi::Result<()> {
         self.set_value(&sheet, &address, WritableCellValueDto::Text { value })
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn set_logical(&self, sheet: String, address: String, value: bool) -> napi::Result<()> {
         self.set_value(&sheet, &address, WritableCellValueDto::Logical { value })
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn set_error(&self, sheet: String, address: String, value: String) -> napi::Result<()> {
         self.set_value(&sheet, &address, WritableCellValueDto::Error { value })
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn set_formula(
         &self,
         sheet: String,
@@ -299,26 +299,26 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn clear_cell(&self, sheet: String, address: String) -> napi::Result<bool> {
         self.lock()?
             .clear_cell(&sheet, &address)
             .map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn add_sheet(&self, name: String) -> napi::Result<u32> {
         self.lock()?.add_sheet(&name).map_err(napi_error)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn rename_sheet(&self, current_name: String, new_name: String) -> napi::Result<()> {
         self.lock()?
             .rename_sheet(&current_name, &new_name)
             .map_err(napi_error)
     }
 
-    #[napi(ts_return_type = "Promise<Buffer>")]
+    #[napi(ts_return_type = "Promise<Buffer>", catch_unwind)]
     pub fn to_bytes(&self, invalidate_unavailable: bool) -> AsyncTask<BytesTask> {
         AsyncTask::new(BytesTask {
             session: Arc::clone(&self.session),
@@ -329,7 +329,7 @@ impl NativeWorkbook {
         })
     }
 
-    #[napi(ts_return_type = "Promise<NativeWriteReport>")]
+    #[napi(ts_return_type = "Promise<NativeWriteReport>", catch_unwind)]
     pub fn save_path(
         &self,
         path: String,

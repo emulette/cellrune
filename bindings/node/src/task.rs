@@ -8,7 +8,7 @@ use napi::bindgen_prelude::Buffer;
 use napi::{Env, Task};
 
 use crate::conversion::{NativeCalculationDelta, NativeCalculationReport, NativeWriteReport};
-use crate::error::napi_error;
+use crate::error::{catch_panic, napi_error};
 use crate::workbook::NativeWorkbook;
 
 pub struct OpenPathTask {
@@ -26,7 +26,7 @@ impl Task for OpenPathTask {
     type JsValue = NativeWorkbook;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        WorkbookSession::open_path(&self.path).map_err(napi_error)
+        catch_panic(|| WorkbookSession::open_path(&self.path).map_err(napi_error))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -49,7 +49,7 @@ impl Task for OpenBytesTask {
     type JsValue = NativeWorkbook;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        WorkbookSession::open_bytes(&self.bytes).map_err(napi_error)
+        catch_panic(|| WorkbookSession::open_bytes(&self.bytes).map_err(napi_error))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -67,29 +67,31 @@ impl Task for CalculateTask {
     type JsValue = NativeCalculationReport;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        let prepared = {
-            self.session
-                .lock()
-                .map_err(napi_error)?
-                .prepare_recalculation(RecalculationModeDto::Auto, self.options)
-                .map_err(napi_error)?
-        };
-        let request_id = prepared.request_id();
-        let completed = match prepared.run() {
-            Ok(completed) => completed,
-            Err(error) => {
-                match self.session.lock() {
-                    Ok(mut session) => session.abandon_recalculation(request_id),
-                    Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+        catch_panic(|| {
+            let prepared = {
+                self.session
+                    .lock()
+                    .map_err(napi_error)?
+                    .prepare_recalculation(RecalculationModeDto::Auto, self.options)
+                    .map_err(napi_error)?
+            };
+            let request_id = prepared.request_id();
+            let completed = match prepared.run() {
+                Ok(completed) => completed,
+                Err(error) => {
+                    match self.session.lock() {
+                        Ok(mut session) => session.abandon_recalculation(request_id),
+                        Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+                    }
+                    return Err(napi_error(error));
                 }
-                return Err(napi_error(error));
-            }
-        };
-        let mut session = self.session.lock().map_err(napi_error)?;
-        session
-            .install_recalculation(completed)
-            .map_err(napi_error)?;
-        session.calculation_report().map_err(napi_error)
+            };
+            let mut session = self.session.lock().map_err(napi_error)?;
+            session
+                .install_recalculation(completed)
+                .map_err(napi_error)?;
+            session.calculation_report().map_err(napi_error)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -116,49 +118,51 @@ impl Task for PreviewTask {
     type JsValue = String;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        let operation = self.session.cancellable_operation().map_err(napi_error)?;
-        let cancellation = operation.token().clone();
-        let prepared = {
+        catch_panic(|| {
+            let operation = self.session.cancellable_operation().map_err(napi_error)?;
+            let cancellation = operation.token().clone();
+            let prepared = {
+                self.session
+                    .lock()
+                    .map_err(napi_error)?
+                    .prepare_preview_changes_cancellable(
+                        self.expected_revision,
+                        self.batch.clone(),
+                        self.mode,
+                        self.options,
+                        &cancellation,
+                    )
+                    .map_err(napi_error)?
+            };
+            let request_id = prepared.request_id();
+            let completed = match prepared.run() {
+                Ok(completed) => completed,
+                Err(error) => {
+                    match self.session.lock() {
+                        Ok(mut session) => session.abandon_recalculation(request_id),
+                        Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+                    }
+                    return Err(napi_error(error));
+                }
+            };
+            let serialized = match crate::preview_json::serialize(completed.summary()) {
+                Ok(serialized) => serialized,
+                Err(error) => {
+                    match self.session.lock() {
+                        Ok(mut session) => session.abandon_recalculation(request_id),
+                        Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+                    }
+                    return Err(error);
+                }
+            };
             self.session
                 .lock()
                 .map_err(napi_error)?
-                .prepare_preview_changes_cancellable(
-                    self.expected_revision,
-                    self.batch.clone(),
-                    self.mode,
-                    self.options,
-                    &cancellation,
-                )
-                .map_err(napi_error)?
-        };
-        let request_id = prepared.request_id();
-        let completed = match prepared.run() {
-            Ok(completed) => completed,
-            Err(error) => {
-                match self.session.lock() {
-                    Ok(mut session) => session.abandon_recalculation(request_id),
-                    Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
-                }
-                return Err(napi_error(error));
-            }
-        };
-        let serialized = match crate::preview_json::serialize(completed.summary()) {
-            Ok(serialized) => serialized,
-            Err(error) => {
-                match self.session.lock() {
-                    Ok(mut session) => session.abandon_recalculation(request_id),
-                    Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
-                }
-                return Err(error);
-            }
-        };
-        self.session
-            .lock()
-            .map_err(napi_error)?
-            .publish_preview(completed)
-            .map_err(napi_error)?;
-        drop(operation);
-        Ok(serialized)
+                .publish_preview(completed)
+                .map_err(napi_error)?;
+            drop(operation);
+            Ok(serialized)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -171,29 +175,31 @@ impl Task for RecalculateTask {
     type JsValue = NativeCalculationDelta;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        let prepared = {
+        catch_panic(|| {
+            let prepared = {
+                self.session
+                    .lock()
+                    .map_err(napi_error)?
+                    .prepare_recalculation(self.mode, self.options)
+                    .map_err(napi_error)?
+            };
+            let request_id = prepared.request_id();
+            let completed = match prepared.run() {
+                Ok(completed) => completed,
+                Err(error) => {
+                    match self.session.lock() {
+                        Ok(mut session) => session.abandon_recalculation(request_id),
+                        Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
+                    }
+                    return Err(napi_error(error));
+                }
+            };
             self.session
                 .lock()
                 .map_err(napi_error)?
-                .prepare_recalculation(self.mode, self.options)
-                .map_err(napi_error)?
-        };
-        let request_id = prepared.request_id();
-        let completed = match prepared.run() {
-            Ok(completed) => completed,
-            Err(error) => {
-                match self.session.lock() {
-                    Ok(mut session) => session.abandon_recalculation(request_id),
-                    Err(lifecycle_error) => return Err(napi_error(lifecycle_error)),
-                }
-                return Err(napi_error(error));
-            }
-        };
-        self.session
-            .lock()
-            .map_err(napi_error)?
-            .install_recalculation(completed)
-            .map_err(napi_error)
+                .install_recalculation(completed)
+                .map_err(napi_error)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -211,12 +217,14 @@ impl Task for BytesTask {
     type JsValue = Buffer;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        self.session
-            .lock()
-            .map_err(napi_error)?
-            .save_bytes(self.options)
-            .map(|(bytes, _)| bytes)
-            .map_err(napi_error)
+        catch_panic(|| {
+            self.session
+                .lock()
+                .map_err(napi_error)?
+                .save_bytes(self.options)
+                .map(|(bytes, _)| bytes)
+                .map_err(napi_error)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -235,11 +243,13 @@ impl Task for SavePathTask {
     type JsValue = NativeWriteReport;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        self.session
-            .lock()
-            .map_err(napi_error)?
-            .save_path(&self.path, self.options)
-            .map_err(napi_error)
+        catch_panic(|| {
+            self.session
+                .lock()
+                .map_err(napi_error)?
+                .save_path(&self.path, self.options)
+                .map_err(napi_error)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
