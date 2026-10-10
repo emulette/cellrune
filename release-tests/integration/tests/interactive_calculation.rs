@@ -378,6 +378,96 @@ fn declared_spill_followers_read_a_failed_anchor_the_same_way_incrementally() {
 }
 
 #[test]
+fn a_range_ending_in_index_depends_on_every_cell_the_end_can_reach() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut changes = (2..=20)
+        .map(|row| {
+            WorkbookChange::set_cell_value(sheet_id, address(&format!("B{row}")), number(1.0))
+        })
+        .collect::<Vec<_>>();
+    changes.push(WorkbookChange::set_cell_value(
+        sheet_id,
+        address("F1"),
+        number(3.0),
+    ));
+    changes.push(WorkbookChange::set_cell_formula(
+        sheet_id,
+        address("H1"),
+        formula("SUM(B2:INDEX(D2:D20,F1))"),
+    ));
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("INDEX range workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    for (address_text, value, expected) in [("F1", 10.0, 10.0), ("B8", 100.0, 109.0)] {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address(address_text),
+                    number(value),
+                )]),
+            )
+            .expect("edit");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("recalculation");
+        assert_eq!(
+            session
+                .calculation()
+                .expect("installed calculation")
+                .cell(CalculationCellId::new(sheet_id, address("H1"))),
+            Some(&CalculationCellResult::Value(number(expected))),
+            "after editing {address_text}"
+        );
+    }
+
+    let mut computed_end = WorkbookCalculationSession::create();
+    computed_end
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("B2"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("B3"), formula("1+1")),
+                WorkbookChange::set_cell_formula(sheet_id, address("F1"), formula("1+1")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("H1"),
+                    formula("SUM(B2:INDEX(D2:D20,F1))"),
+                ),
+            ]),
+        )
+        .expect("computed INDEX end workbook");
+    computed_end
+        .recalculate(
+            RecalculationMode::Full,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("full calculation");
+    assert_eq!(
+        computed_end
+            .calculation()
+            .expect("installed calculation")
+            .cell(CalculationCellId::new(sheet_id, address("H1"))),
+        Some(&CalculationCellResult::Value(number(3.0)))
+    );
+}
+
+#[test]
 fn index_reference_dependencies_remain_incrementally_safe() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
