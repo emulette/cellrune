@@ -7,6 +7,7 @@ use super::super::{ReadLimits, ReadOptions, ReadOptionsError, XlsxErrorCode, Xls
 use super::inspect_package;
 
 const CENTRAL_HEADER_BYTES: usize = 46;
+const CENTRAL_HEADER_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
 const END_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
 const ZIP64_END_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x06, 0x06];
 const ZIP64_LOCATOR_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
@@ -226,6 +227,40 @@ fn declared_entry_count_is_enforced_before_the_central_directory_is_read() {
         .expect_err("a declared entry count past the limit must fail");
     assert_eq!(error.code(), XlsxErrorCode::TooManyEntries, "{error}");
     assert_eq!(error.observed(), Some(6));
+}
+
+#[test]
+fn end_records_the_reader_falls_back_to_count_toward_the_entry_limit() {
+    let mut archive = build_archive(minimal_entries());
+    let end = end_record_offset(&archive);
+    // One entry more than the central directory holds, as above.
+    archive[end + 8..end + 12].copy_from_slice(&[6, 0, 6, 0]);
+    // A trailing record declaring one entry whose header names more bytes than the input holds:
+    // the ZIP reader fails to parse that header and falls back to the record before it.
+    let header_offset = u32::try_from(archive.len()).expect("small fixture");
+    let mut header = [0_u8; CENTRAL_HEADER_BYTES];
+    header[..4].copy_from_slice(&CENTRAL_HEADER_SIGNATURE);
+    header[28..30].copy_from_slice(&u16::MAX.to_le_bytes());
+    archive.extend_from_slice(&header);
+    archive.extend_from_slice(
+        &[
+            &END_SIGNATURE[..],
+            &[0; 4],
+            &[1, 0, 1, 0],
+            &(CENTRAL_HEADER_BYTES as u32).to_le_bytes(),
+            &header_offset.to_le_bytes(),
+            &[0; 2],
+        ]
+        .concat(),
+    );
+    let limits = ReadLimits::default()
+        .with_max_entries(5)
+        .expect("non-zero limit");
+
+    let error = inspect_package(Cursor::new(archive), ReadOptions::new(limits))
+        .expect_err("the record the reader falls back to declares too many entries");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyEntries, "{error}");
+    assert_eq!(error.observed(), Some(7));
 }
 
 #[test]

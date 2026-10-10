@@ -382,13 +382,12 @@ fn index_archive<R: Read + Seek>(
             .with_detail(archive_bytes.to_string())
             .with_observed(archive_bytes));
     }
-    // Opening the archive reads and keeps every central-directory header, so the declared count
-    // is held to the limit before any is read.
-    if let Some(declared) =
-        central_directory::declared_entry_count(&mut reader, archive_bytes).map_err(io_error)?
-    {
-        ensure_entry_count(declared, limits)?;
-    }
+    // Opening the archive reads every central-directory header of each end record it tries, so
+    // the counts those records declare are held to the limit before any is read.
+    ensure_entry_count(
+        central_directory::declared_entry_total(&mut reader, archive_bytes).map_err(io_error)?,
+        limits,
+    )?;
     reader.seek(SeekFrom::Start(0)).map_err(io_error)?;
     let mut archive = ZipArchive::new(reader).map_err(zip_error)?;
     ensure_entry_count(archive.len() as u64, limits)?;

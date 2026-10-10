@@ -10,29 +10,30 @@ const ZIP64_END_BYTES: usize = 56;
 const CENTRAL_HEADER_BYTES: u64 = 46;
 const SCAN_WINDOW_BYTES: usize = 4 * 1024;
 
-/// Returns the number of entries the ZIP reader will load from the central directory, as
-/// declared by the end record it tries first, or `None` when it would find no usable record.
+/// Returns how many central-directory headers the ZIP reader may read while opening the input:
+/// the entry counts declared by every end record it may load, summed.
 ///
 /// `ZipArchive::new` reads and keeps every central-directory header before its length can be
-/// compared with the entry limit, so the limit has to be held against this declaration instead.
+/// compared with the entry limit, so the limit has to be held against these declarations instead.
 /// The search mirrors the `zip` crate's `spec::find_central_directory` and the retry in
 /// `ZipArchive::get_metadata`: end-record signatures are tried from the end of the input
-/// backwards, and a record the reader skips for failing a consistency check is skipped here too,
-/// so a decoy record cannot stand in for the one the reader loads. The reader also moves on when
-/// a central-directory header fails to parse; that is not mirrored, and the length check after
-/// opening still covers the record it settles on instead.
-pub(super) fn declared_entry_count<R: Read + Seek>(
+/// backwards, and the reader moves on to the next one whenever a record fails a consistency check
+/// or one of its central-directory headers fails to parse. Records failing a consistency check
+/// are skipped here too. Header parsing is not mirrored, so any other record may be one the reader
+/// falls back to, and summing their counts bounds the headers it reads across every retry.
+pub(super) fn declared_entry_total<R: Read + Seek>(
     reader: &mut R,
     archive_bytes: u64,
-) -> io::Result<Option<u64>> {
+) -> io::Result<u64> {
+    let mut total = 0_u64;
     let mut end = archive_bytes;
     while let Some(offset) = rfind_signature(reader, END_SIGNATURE, 0, end)? {
         if let Some(entries) = end_record_entry_count(reader, offset, archive_bytes)? {
-            return Ok(Some(entries));
+            total = total.saturating_add(entries);
         }
         end = offset;
     }
-    Ok(None)
+    Ok(total)
 }
 
 /// Returns the entry count the reader loads through the end record at `offset`, or `None` when
