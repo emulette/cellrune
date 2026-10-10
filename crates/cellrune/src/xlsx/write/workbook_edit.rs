@@ -7,7 +7,9 @@ use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
 
 use super::serialization::escape_text;
-use super::workbook_patch::patch_calculation_properties_with_hints;
+use super::workbook_patch::{
+    follows_calculation_properties, patch_calculation_properties_with_hints,
+};
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL};
@@ -492,19 +494,7 @@ fn maybe_insert_defined_names(
     if names_changed
         && !*inserted
         && workbook_depth.is_some_and(|root| depth == root + 1)
-        && matches!(
-            local_name,
-            b"calcPr"
-                | b"oleSize"
-                | b"customWorkbookViews"
-                | b"pivotCaches"
-                | b"smartTagPr"
-                | b"smartTagTypes"
-                | b"webPublishing"
-                | b"fileRecoveryPr"
-                | b"webPublishObjects"
-                | b"extLst"
-        )
+        && (local_name == b"calcPr" || follows_calculation_properties(local_name))
     {
         let name = qualified_sibling_name(workbook_name.unwrap_or(b"workbook"), b"definedNames");
         write_defined_names(writer, &name, draft, source)?;

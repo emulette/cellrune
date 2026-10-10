@@ -38,3 +38,32 @@ fn missing_calculation_properties_are_inserted_before_extensions() {
     assert!(output.contains(r#"forceFullCalc="0""#));
     assert!(output.contains(r#"<ext uri="preserve"/>"#));
 }
+
+#[test]
+fn missing_calculation_properties_precede_every_later_workbook_child() {
+    for (source, follower) in [
+        (
+            r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets/><definedNames><definedName name="Total">Sheet1!$A$1</definedName></definedNames><fileRecoveryPr repairLoad="1"/><extLst><ext uri="preserve"/></extLst></workbook>"#,
+            "<fileRecoveryPr",
+        ),
+        (
+            r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets/><customWorkbookViews><customWorkbookView name="Review" guid="{00000000-0000-0000-0000-000000000001}" windowWidth="800" windowHeight="600" activeSheetId="1"/></customWorkbookViews><fileRecoveryPr/></workbook>"#,
+            "<customWorkbookViews",
+        ),
+    ] {
+        let output =
+            patch_calculation_properties(source.as_bytes(), &part(), false, WriteLimits::default())
+                .expect("patch");
+        let output = String::from_utf8(output).expect("UTF-8 XML");
+        let calc = output.find("<calcPr").expect("generated calcPr");
+        let follower_position = output.find(follower).expect("preserved follower");
+        assert!(
+            calc < follower_position,
+            "calcPr must precede {follower} in workbook order: {output}"
+        );
+        assert!(
+            output.find("<sheets/>").expect("preserved sheets") < calc,
+            "calcPr must follow sheets in workbook order: {output}"
+        );
+    }
+}

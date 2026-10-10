@@ -61,7 +61,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && spreadsheet
-                    && local.as_ref() == b"extLst"
+                    && follows_calculation_properties(local.as_ref())
                     && !saw_calc_properties
                 {
                     write_generated_calc_properties(
@@ -100,7 +100,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
                 if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
                     && spreadsheet
-                    && element.local_name().as_ref() == b"extLst"
+                    && follows_calculation_properties(element.local_name().as_ref())
                     && !saw_calc_properties
                 {
                     write_generated_calc_properties(
@@ -162,6 +162,22 @@ pub(crate) fn patch_calculation_properties_with_hints(
     let output = writer.into_inner().into_inner();
     enforce_bytes(output.len(), limits, source)?;
     Ok(output)
+}
+
+/// Reports whether the workbook schema orders this child element after `<calcPr>`.
+pub(super) fn follows_calculation_properties(local_name: &[u8]) -> bool {
+    matches!(
+        local_name,
+        b"oleSize"
+            | b"customWorkbookViews"
+            | b"pivotCaches"
+            | b"smartTagPr"
+            | b"smartTagTypes"
+            | b"webPublishing"
+            | b"fileRecoveryPr"
+            | b"webPublishObjects"
+            | b"extLst"
+    )
 }
 
 fn write_generated_calc_properties(
