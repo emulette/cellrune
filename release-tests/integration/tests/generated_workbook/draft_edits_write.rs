@@ -352,21 +352,62 @@ fn edits_require_a_draft_opened_from_a_document() {
     assert_eq!(error.code(), XlsxWriteErrorCode::InvalidPackagePlan);
 }
 
+/// A workbook mixing every formula kind the differential check edits: plain and whole-column
+/// ranges, an `INDEX` range end, defined names, another sheet, a shared formula group (J1:J3), a
+/// legacy array (K1:K2), a declared dynamic array spill (L1:L3), and a table T (N1:O4).
+fn differential_package() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="Other" sheetId="2" r:id="rId2"/></sheets>{RULE_NAMES}<calcPr calcId="191029"/></workbook>"#
+    );
+    let relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+</Relationships>"#;
+    let sheet_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let data = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f>SUM(A1:A3)</f><v>6</v></c><c r="C1"><f>VLOOKUP(2,A1:B3,1,FALSE)</f><v>2</v></c><c r="D1"><f>SUM(A:A)</f><v>6</v></c><c r="E1"><f>B1*D1</f><v>36</v></c><c r="F1"><f>SUM(B2:INDEX(D2:D9,A1))</f><v>0</v></c><c r="G1"><f>COUNT(C2:E9)</f><v>0</v></c><c r="H1"><f>Derived+F1</f><v>2</v></c><c r="I1"><f>MAX(Other!A1:B3)</f><v>15</v></c><c r="J1"><f t="shared" ref="J1:J3" si="0">A1*3</f><v>3</v></c><c r="K1"><f t="array" ref="K1:K2">A1:A2*10</f><v>10</v></c><c r="L1" cm="1"><f t="array" ref="L1:L3">SEQUENCE(3)</f><v>1</v></c><c r="M1"><f>SUM(L:L)+J2</f><v>12</v></c><c r="N1" t="inlineStr"><is><t>Key</t></is></c><c r="O1" t="inlineStr"><is><t>Val</t></is></c><c r="P1"><f>SUM(T[Val])</f><v>6</v></c></row><row r="2"><c r="A2"><v>2</v></c><c r="J2"><f t="shared" si="0"/><v>6</v></c><c r="K2"><v>20</v></c><c r="L2"><v>2</v></c><c r="N2" t="inlineStr"><is><t>a</t></is></c><c r="O2"><v>1</v></c></row><row r="3"><c r="A3"><v>3</v></c><c r="J3"><f t="shared" si="0"/><v>9</v></c><c r="L3"><v>3</v></c><c r="N3" t="inlineStr"><is><t>b</t></is></c><c r="O3"><v>2</v></c></row><row r="4"><c r="N4" t="inlineStr"><is><t>c</t></is></c><c r="O4"><v>3</v></c></row></sheetData><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>"#;
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="N1:O4" headerRowCount="1"><autoFilter ref="N1:O4"/><tableColumns count="2"><tableColumn id="1" name="Key"/><tableColumn id="2" name="Val"/></tableColumns></table>"#;
+    generated_package(&[
+        ("[Content_Types].xml", content_types),
+        ("_rels/.rels", ROOT_RELATIONSHIPS),
+        ("xl/workbook.xml", workbook.as_str()),
+        ("xl/_rels/workbook.xml.rels", relationships),
+        ("xl/worksheets/sheet1.xml", data),
+        ("xl/worksheets/_rels/sheet1.xml.rels", sheet_relationships),
+        ("xl/worksheets/sheet2.xml", OTHER_SHEET),
+        ("xl/metadata.xml", METADATA),
+        ("xl/tables/table1.xml", table),
+    ])
+}
+
 /// The main omission check: every formula whose calculated result changes across a generated
 /// edit sequence must be in the affected set.
 #[test]
 fn affected_formulas_cover_every_result_the_edits_change() {
-    const CELLS: &str = r#"<c r="B1"><f>SUM(A1:A3)</f><v>6</v></c><c r="C1"><f>VLOOKUP(2,A1:B3,1,FALSE)</f><v>2</v></c><c r="D1"><f>SUM(A:A)</f><v>6</v></c><c r="E1"><f>B1*D1</f><v>36</v></c><c r="F1"><f>SUM(B2:INDEX(D2:D9,A1))</f><v>0</v></c><c r="G1"><f>COUNT(C2:E9)</f><v>0</v></c><c r="H1"><f>Derived+F1</f><v>2</v></c><c r="I1"><f>MAX(Other!A1:B3)</f><v>15</v></c>"#;
-    let source = package(
-        CELLS,
-        &["B1", "C1", "D1", "E1", "F1", "G1", "H1", "I1"],
-        RULE_NAMES,
-    );
-    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let document =
+        open_xlsx_document_bytes(&differential_package(), OpenOptions::default()).expect("open");
     let before = calculate_workbook(document.workbook(), CalculationOptions::default());
     let sheet_id = data_sheet(&WorkbookDraft::from_document(&document));
     let other_id = document.workbook().sheets()[1].id();
-    let targets = ["A1", "A2", "A3", "A4", "B2", "C3", "D5", "E7", "C9", "B3"];
+    let targets = [
+        "A1", "A2", "A3", "A4", "B2", "C3", "D5", "E7", "C9", "B3", "J1", "J2", "K2", "L2", "L4",
+        "N1", "O1", "O3", "N5",
+    ];
     let mut state = 0x9e37_79b9_u32;
     let mut next = |bound: usize| {
         state ^= state << 13;
@@ -374,11 +415,12 @@ fn affected_formulas_cover_every_result_the_edits_change() {
         state ^= state << 5;
         state as usize % bound
     };
-    for sequence in 0..40 {
+    let mut saved = 0;
+    for sequence in 0..120 {
         let mut draft = WorkbookDraft::from_document(&document);
         for _ in 0..=next(3) {
             let target = address(targets[next(targets.len())]);
-            let change = match next(5) {
+            let change = match next(6) {
                 0 => WorkbookChange::clear_cell(sheet_id, target),
                 1 => WorkbookChange::set_cell_formula(
                     sheet_id,
@@ -395,6 +437,11 @@ fn affected_formulas_cover_every_result_the_edits_change() {
                     )
                     .expect("name"),
                 ),
+                4 => WorkbookChange::set_cell_value(
+                    sheet_id,
+                    target,
+                    CellValue::Text(format!("h{}", next(9))),
+                ),
                 _ => WorkbookChange::set_cell_value(sheet_id, target, number(next(9) as f64)),
             };
             // An edit the draft rejects simply does not happen.
@@ -403,6 +450,7 @@ fn affected_formulas_cover_every_result_the_edits_change() {
         let after = calculate_workbook(draft.workbook(), CalculationOptions::default());
         let output = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
             .unwrap_or_else(|error| panic!("sequence {sequence} must save: {error}"));
+        saved += 1;
         let affected = affected(output.report().affected_formulas());
         for sheet in draft.workbook().sheets() {
             for cell in sheet.cells() {
@@ -421,6 +469,7 @@ fn affected_formulas_cover_every_result_the_edits_change() {
             }
         }
     }
+    assert_eq!(saved, 120);
 }
 
 fn data_sheet(draft: &WorkbookDraft) -> SheetId {
