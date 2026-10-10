@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sha2::{Digest, Sha256};
 
 use super::{Engine, EvalContext, EvaluationBudget};
-use crate::calculation::ast::{Expr, StructuredReference};
+use crate::calculation::ast::{Expr, SheetPrefix, StructuredReference};
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
 use crate::calculation::functions::kernel::LegacyFunction;
 use crate::calculation::functions::{
@@ -17,7 +17,7 @@ use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan, ReferenceArea, ReferenceValue};
 use crate::calculation::scope::{CallableValue, DefinedLambdaId, ScopeValue};
-use crate::{CellAddress, CellContent, EXCEL_MAX_COLUMNS};
+use crate::{CellAddress, CellContent, DefinedNameScope, EXCEL_MAX_COLUMNS};
 use crate::{SheetId, Table, TableId, WorkbookSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,6 +282,33 @@ impl Engine<'_> {
             return None;
         }
         let (id, named) = self.resolve_name_expr_with_id_in_context(context, name)?;
+        if !visited.values.insert(id.clone()) {
+            return None;
+        }
+        Some((
+            context
+                .without_bindings()
+                .with_defined_name_scope(Some(id.scope())),
+            named,
+        ))
+    }
+
+    /// Resolves a sheet-qualified name such as `Data!Rate` to its definition, in the definition's
+    /// own scope, unless the definition is already being expanded.
+    fn reachable_qualified_name<'engine, 'scope>(
+        &'engine self,
+        context: EvalContext<'scope>,
+        sheet: &SheetPrefix,
+        name: &str,
+        visited: &mut VisitedDefinitions,
+    ) -> Option<(EvalContext<'scope>, &'engine Expr)> {
+        if sheet.end_name.is_some() {
+            return None;
+        }
+        let sheet_index = self.workbook.sheet_index_by_name(&sheet.name)?;
+        let scope = DefinedNameScope::Sheet(self.workbook.sheets()[sheet_index].id());
+        let (id, named) =
+            self.resolve_name_expr_with_id_for_scope(sheet_index, Some(scope), name)?;
         if !visited.values.insert(id.clone()) {
             return None;
         }
@@ -902,8 +929,17 @@ impl Engine<'_> {
                 | Expr::Ref(_)
                 | Expr::StructuredRef(_)
                 | Expr::ExternalReference(_)
-                | Expr::QualifiedName { .. }
                 | Expr::Missing => false,
+                Expr::QualifiedName { sheet, name } => self
+                    .reachable_qualified_name(context, sheet, name, visited)
+                    .is_some_and(|(defined_context, named)| {
+                        self.expr_has_unresolved_dynamic_dependency(
+                            defined_context,
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                        )
+                    }),
             }
         })
     }
@@ -1396,8 +1432,22 @@ impl Engine<'_> {
                 | Expr::Logical(_)
                 | Expr::ErrorLit(_)
                 | Expr::ExternalReference(_)
-                | Expr::QualifiedName { .. }
                 | Expr::Missing => {}
+                // Calculation reports a sheet-qualified name as unsupported, but impact tracking
+                // still follows the cells its definition reads.
+                Expr::QualifiedName { sheet, name } => {
+                    if let Some((defined_context, named)) =
+                        self.reachable_qualified_name(context, sheet, name, visited)
+                    {
+                        self.collect_dependency_targets(
+                            defined_context,
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                            output,
+                        );
+                    }
+                }
             }
         })
     }
@@ -1892,8 +1942,18 @@ impl Engine<'_> {
                 | Expr::Ref(_)
                 | Expr::StructuredRef(_)
                 | Expr::ExternalReference(_)
-                | Expr::QualifiedName { .. }
                 | Expr::Missing => false,
+                Expr::QualifiedName { sheet, name } => self
+                    .reachable_qualified_name(context, sheet, name, visited)
+                    .is_some_and(|(defined_context, named)| {
+                        self.expr_contains_dynamic_reference_function(
+                            bounded_range_ends,
+                            defined_context,
+                            named,
+                            visited,
+                            &mut Vec::new(),
+                        )
+                    }),
             }
         })
     }

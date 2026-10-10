@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::dependency::DependencyTarget;
 use super::{DependencyImpactIndex, Engine};
-use crate::calculation::ast::Expr;
+use crate::calculation::ast::{Expr, SheetPrefix};
 use crate::calculation::functions::{
     function_call_shape_is_valid, function_evaluator, normalize_name,
 };
@@ -50,11 +50,19 @@ pub(crate) fn affected_formulas(
         return all_formulas(draft, cancelled);
     }
     let changed_names = changed_defined_names(source, draft);
-    let sheets_changed = draft.sheets().iter().any(|sheet| {
-        source
-            .sheet_by_id(sheet.id())
-            .is_none_or(|original| original.name() != sheet.name())
-    });
+    // Old and new names of added and renamed sheets: a reference to one of them may resolve
+    // differently now, and the sheet list itself changed.
+    let changed_sheet_names = draft
+        .sheets()
+        .iter()
+        .flat_map(|sheet| match source.sheet_by_id(sheet.id()) {
+            Some(original) if original.name() == sheet.name() => Vec::new(),
+            Some(original) => vec![original.name().as_str(), sheet.name().as_str()],
+            None => vec![sheet.name().as_str()],
+        })
+        .map(case_insensitive_key)
+        .collect::<BTreeSet<_>>();
+    let sheets_changed = !changed_sheet_names.is_empty();
     if edits.changed_cells.is_empty()
         && changed_names.is_empty()
         && edits.changed_tables.is_empty()
@@ -84,7 +92,7 @@ pub(crate) fn affected_formulas(
         draft,
         changed_names,
         &changed_table_names,
-        sheets_changed,
+        &changed_sheet_names,
         cancelled,
     )?;
 
@@ -134,7 +142,7 @@ pub(crate) fn affected_formulas(
                 let tokens = FormulaTokens::of(parsed.root());
                 tokens.references(&affected_names)
                     || tokens.references(&changed_table_names)
-                    || (sheets_changed && tokens.depends_on_sheet_list)
+                    || tokens.reads_sheets(&changed_sheet_names)
             }) || targets.get(&internal).is_some_and(|formula_targets| {
                 formula_targets.iter().any(|target| {
                     matches!(
@@ -206,13 +214,15 @@ fn changed_defined_names(source: &WorkbookSnapshot, draft: &WorkbookSnapshot) ->
 }
 
 /// Closes the changed names over every name whose definition, before or after the edits, refers
-/// to an affected name, a changed table, or (when sheets changed) the sheet list.
+/// to an affected name, a changed table, or a changed sheet or the sheet list. A definition whose
+/// references cannot be known statically (it does not parse, or it holds a call the call contract
+/// rejects) is affected by any edit.
 fn affected_defined_names(
     source: &WorkbookSnapshot,
     draft: &WorkbookSnapshot,
     mut affected: BTreeSet<String>,
     changed_table_names: &BTreeSet<String>,
-    sheets_changed: bool,
+    changed_sheet_names: &BTreeSet<String>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<String>, ()> {
     let mut definitions = Vec::new();
@@ -225,17 +235,16 @@ fn affected_defined_names(
             name.formula().as_str(),
             CalculationOptions::default().limits(),
         ) {
-            Ok(parsed) => definitions.push((key, FormulaTokens::of(parsed.root()))),
-            // A definition that does not parse makes every use of the name unknowable.
-            Err(_) => {
+            Ok(parsed) if !contains_rejected_call(parsed.root()) => {
+                definitions.push((key, FormulaTokens::of(parsed.root())));
+            }
+            Ok(_) | Err(_) => {
                 affected.insert(key);
             }
         }
     }
     for (key, tokens) in &definitions {
-        if tokens.references(changed_table_names)
-            || (sheets_changed && tokens.depends_on_sheet_list)
-        {
+        if tokens.references(changed_table_names) || tokens.reads_sheets(changed_sheet_names) {
             affected.insert(key.clone());
         }
     }
@@ -262,6 +271,7 @@ fn affected_defined_names(
 #[derive(Default)]
 struct FormulaTokens {
     names: BTreeSet<String>,
+    sheet_names: BTreeSet<String>,
     depends_on_sheet_list: bool,
 }
 
@@ -276,7 +286,7 @@ impl FormulaTokens {
                 }
                 Expr::QualifiedName { name, sheet } => {
                     tokens.names.insert(case_insensitive_key(name));
-                    tokens.depends_on_sheet_list |= sheet.end_name.is_some();
+                    tokens.add_sheet(sheet);
                 }
                 Expr::BuiltinCallable(callable) => {
                     tokens
@@ -289,10 +299,9 @@ impl FormulaTokens {
                     }
                 }
                 Expr::Ref(reference) => {
-                    tokens.depends_on_sheet_list |= reference
-                        .sheet
-                        .as_ref()
-                        .is_some_and(|sheet| sheet.end_name.is_some());
+                    if let Some(sheet) = &reference.sheet {
+                        tokens.add_sheet(sheet);
+                    }
                 }
                 Expr::Call { name, args } => {
                     if function_evaluator(name).is_none() {
@@ -332,8 +341,24 @@ impl FormulaTokens {
         tokens
     }
 
+    fn add_sheet(&mut self, sheet: &SheetPrefix) {
+        self.sheet_names.insert(case_insensitive_key(&sheet.name));
+        if let Some(end) = &sheet.end_name {
+            self.sheet_names.insert(case_insensitive_key(end));
+            self.depends_on_sheet_list = true;
+        }
+    }
+
     fn references(&self, names: &BTreeSet<String>) -> bool {
         !self.names.is_disjoint(names)
+    }
+
+    /// Reports whether the formula may read differently after sheets are added or renamed: it
+    /// names one of those sheets, or it reads the sheet list through a 3-D reference or a
+    /// sheet function.
+    fn reads_sheets(&self, changed_sheet_names: &BTreeSet<String>) -> bool {
+        !changed_sheet_names.is_empty()
+            && (self.depends_on_sheet_list || !self.sheet_names.is_disjoint(changed_sheet_names))
     }
 }
 
@@ -402,3 +427,7 @@ fn public_cell(workbook: &WorkbookSnapshot, cell: CellId) -> Option<CalculationC
 fn case_insensitive_key(value: &str) -> String {
     value.chars().flat_map(char::to_lowercase).collect()
 }
+
+#[cfg(test)]
+#[path = "static_impact_tests.rs"]
+mod tests;

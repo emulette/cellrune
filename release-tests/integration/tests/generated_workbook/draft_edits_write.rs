@@ -346,6 +346,45 @@ fn spills_are_affected_by_writes_inside_them_and_by_clears_that_free_them() {
 }
 
 #[test]
+fn qualified_names_added_sheets_and_names_with_rejected_calls_are_traced() {
+    let write = |cells: &str, names: &str, change: &dyn Fn(SheetId) -> WorkbookChange| {
+        let document =
+            open_xlsx_document_bytes(&package(cells, &["B1"], names), OpenOptions::default())
+                .expect("open");
+        let sheet_id = document.workbook().sheets()[0].id();
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .apply_changes(EditBatch::new([change(sheet_id)]))
+            .expect("apply edit");
+        let output = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default()).expect("save");
+        (sheet_id, affected(output.report().affected_formulas()))
+    };
+    let set_a1 = |sheet_id| WorkbookChange::set_cell_value(sheet_id, address("A1"), number(5.0));
+
+    // CellRune does not calculate a sheet-qualified name, but the cells it reads still count.
+    let (sheet_id, qualified) = write(
+        r#"<c r="B1"><f>Data!TaxRate*2</f><v>2</v></c><c r="C1"><f>B1+1</f><v>3</v></c>"#,
+        r#"<definedNames><definedName name="TaxRate" localSheetId="0">Data!$A$1</definedName></definedNames>"#,
+        &set_a1,
+    );
+    assert_eq!(qualified, cells(sheet_id, &["B1", "C1"]));
+
+    let (sheet_id, added_sheet) = write(
+        r#"<c r="B1"><f>IFERROR(New!A1,-1)</f><v>-1</v></c><c r="C1"><f>A1*2</f><v>2</v></c>"#,
+        "",
+        &|_| WorkbookChange::add_sheet(SheetName::new("New").expect("sheet name")),
+    );
+    assert_eq!(added_sheet, cells(sheet_id, &["B1"]));
+
+    let (sheet_id, rejected) = write(
+        r#"<c r="B1"><f>BadCall</f><v>1</v></c><c r="C1"><f>A2*2</f><v>4</v></c>"#,
+        r#"<definedNames><definedName name="BadCall">ROUND(Data!A1)</definedName></definedNames>"#,
+        &set_a1,
+    );
+    assert_eq!(rejected, cells(sheet_id, &["B1"]));
+}
+
+#[test]
 fn edits_require_a_draft_opened_from_a_document() {
     let error = write_xlsx_draft_edits_bytes(&WorkbookDraft::new(), WriteOptions::default())
         .expect_err("a new draft has no package to edit");
