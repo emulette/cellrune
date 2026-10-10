@@ -368,7 +368,22 @@ pub fn generated_totals_table_fixture() -> Vec<u8> {
 /// A workbook of `sheet_count` worksheets named `Sheet1`, `Sheet2`, and so on, each holding
 /// 1 in A1.
 pub fn generated_workbook_with_sheet_count(sheet_count: u64) -> Vec<u8> {
-    let worksheet = r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#;
+    generated_workbook_with_worksheets(
+        sheet_count,
+        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#,
+    )
+}
+
+/// A one-sheet workbook whose empty cell table is written as `<sheetData/>`, as Excel saves an
+/// empty worksheet.
+pub fn generated_empty_sheet_data_workbook() -> Vec<u8> {
+    generated_workbook_with_worksheets(
+        1,
+        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1"/><sheetData/></worksheet>"#,
+    )
+}
+
+fn generated_workbook_with_worksheets(sheet_count: u64, worksheet: &str) -> Vec<u8> {
     let mut content_types = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">

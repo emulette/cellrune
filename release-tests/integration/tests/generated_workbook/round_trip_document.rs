@@ -17,8 +17,8 @@ use zip::read::ZipArchive;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::support::generated_xlsx::{
-    ProducerProfile, TemporaryWorkbook, generated_formula_fixture,
-    generated_table_reference_fixture, generated_table_topology_fixture,
+    ProducerProfile, TemporaryWorkbook, generated_empty_sheet_data_workbook,
+    generated_formula_fixture, generated_table_reference_fixture, generated_table_topology_fixture,
     generated_totals_table_fixture, generated_workbook, generated_workbook_with_comment,
     generated_workbook_with_sheet_count,
 };
@@ -624,6 +624,52 @@ fn document_and_write_limits_fail_with_stable_codes() {
         write_error.code(),
         XlsxWriteErrorCode::ResourceLimitExceeded
     );
+}
+
+#[test]
+fn cells_added_to_an_empty_sheet_data_element_save_and_reopen() {
+    let document = open_xlsx_document_bytes(
+        &generated_empty_sheet_data_workbook(),
+        OpenOptions::default(),
+    )
+    .expect("open empty worksheet");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            sheet_id,
+            CellAddress::from_a1("A1").expect("address"),
+            CellValue::number(7.0).expect("finite value"),
+        )
+        .expect("set value");
+    draft
+        .set_cell_formula(
+            sheet_id,
+            CellAddress::from_a1("B2").expect("address"),
+            cellrune::FormulaText::from_xlsx("A1+1").expect("formula"),
+        )
+        .expect("set formula");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("cells added to an empty sheetData element must save");
+
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen output");
+    let sheet = &reopened.workbook().sheets()[0];
+    assert_eq!(
+        sheet
+            .cell(CellAddress::from_a1("A1").expect("address"))
+            .map(|cell| cell.content().clone()),
+        Some(CellContent::Literal(
+            CellValue::number(7.0).expect("finite value")
+        ))
+    );
+    assert!(matches!(
+        sheet
+            .cell(CellAddress::from_a1("B2").expect("address"))
+            .map(|cell| cell.content().clone()),
+        Some(CellContent::Formula(formula)) if formula.text().map(|text| text.as_str()) == Some("A1+1")
+    ));
 }
 
 #[test]

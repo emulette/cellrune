@@ -192,6 +192,29 @@ pub(crate) fn patch_worksheet_semantics(
                 {
                     let patched = patch_dimension(&element, used_range, source)?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
+                } else if worksheet_depth.is_some_and(|root| depth + 1 == root + 1)
+                    && element.local_name().as_ref() == b"sheetData"
+                {
+                    // Excel writes an empty worksheet's cell table as `<sheetData/>`. Open it so
+                    // added cells have a parent.
+                    let qualified = element.name().as_ref().to_vec();
+                    sheet_data_depth = Some(depth + 1);
+                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                    insert_missing_rows(
+                        &mut writer,
+                        edits,
+                        &mut seen,
+                        0,
+                        u32::MAX,
+                        &qualified,
+                        source,
+                    )?;
+                    write_event(
+                        &mut writer,
+                        Event::End(BytesEnd::new(decode_name(&qualified, source)?)),
+                        source,
+                    )?;
+                    sheet_data_name = Some(qualified);
                 } else if sheet_data_depth == Some(depth) && element.local_name().as_ref() == b"row"
                 {
                     let number = required_u32_attribute(&element, b"r", source)?;
