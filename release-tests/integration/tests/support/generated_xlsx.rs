@@ -365,6 +365,59 @@ pub fn generated_totals_table_fixture() -> Vec<u8> {
     )
 }
 
+/// A workbook of `sheet_count` worksheets named `Sheet1`, `Sheet2`, and so on, each holding
+/// 1 in A1.
+pub fn generated_workbook_with_sheet_count(sheet_count: u64) -> Vec<u8> {
+    let worksheet = r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#;
+    let mut content_types = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#,
+    );
+    let mut sheets = String::new();
+    let mut relationships = String::new();
+    let mut worksheet_names = Vec::new();
+    for index in 1..=sheet_count {
+        content_types.push_str(&format!(
+            r#"<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#
+        ));
+        sheets.push_str(&format!(
+            r#"<sheet name="Sheet{index}" sheetId="{index}" r:id="rId{index}"/>"#
+        ));
+        relationships.push_str(&format!(
+            r#"<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>"#
+        ));
+        worksheet_names.push(format!("xl/worksheets/sheet{index}.xml"));
+    }
+    content_types.push_str("</Types>");
+    let workbook = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>{sheets}</sheets>
+</workbook>"#
+    );
+    let workbook_relationships = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{relationships}</Relationships>"#
+    );
+    let mut entries = vec![
+        ("[Content_Types].xml", content_types.as_str()),
+        ("_rels/.rels", ROOT_RELATIONSHIPS),
+        ("xl/workbook.xml", workbook.as_str()),
+        (
+            "xl/_rels/workbook.xml.rels",
+            workbook_relationships.as_str(),
+        ),
+    ];
+    entries.extend(
+        worksheet_names
+            .iter()
+            .map(|name| (name.as_str(), worksheet)),
+    );
+    build_archive(&entries, None)
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }

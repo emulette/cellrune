@@ -125,6 +125,7 @@ pub(crate) fn write_canonical_draft(
         &bytes,
         &materialization,
         crate::XlsxDocumentKind::Xlsx,
+        crate::ReadLimits::default(),
         limits,
     )?;
 
@@ -618,6 +619,7 @@ pub(super) fn verify_draft_output(
     bytes: &[u8],
     materialization: &MaterializationPlan,
     expected_kind: crate::XlsxDocumentKind,
+    read_limits: crate::ReadLimits,
     limits: WriteLimits,
 ) -> Result<(), XlsxWriteError> {
     enforce_limit(
@@ -625,10 +627,18 @@ pub(super) fn verify_draft_output(
         bytes.len() as u64,
         limits.max_verification_read_bytes(),
     )?;
-    let reopened =
-        crate::open_xlsx_document_bytes(bytes, crate::OpenOptions::default()).map_err(|error| {
+    let read_limits = read_limits
+        .with_max_archive_bytes(limits.max_verification_read_bytes())
+        .map_err(|error| {
             XlsxWriteError::new(XlsxWriteErrorCode::OutputVerificationFailed).with_cause(error)
         })?;
+    let reopened = crate::open_xlsx_document_bytes(
+        bytes,
+        crate::OpenOptions::new(crate::ReadOptions::new(read_limits)),
+    )
+    .map_err(|error| {
+        XlsxWriteError::new(XlsxWriteErrorCode::OutputVerificationFailed).with_cause(error)
+    })?;
     if reopened.kind() != expected_kind
         || !draft_semantics_match(expected, reopened.workbook(), materialization)
         || !expected_presentation.semantics_match(reopened.presentation())

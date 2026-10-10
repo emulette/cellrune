@@ -472,6 +472,7 @@ pub(crate) fn write_document_draft(
         &bytes,
         &materialization,
         document.kind(),
+        document.read_options().limits(),
         limits,
     )?;
     let report = WriteReport::new(

@@ -20,6 +20,7 @@ use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_formula_fixture,
     generated_table_reference_fixture, generated_table_topology_fixture,
     generated_totals_table_fixture, generated_workbook, generated_workbook_with_comment,
+    generated_workbook_with_sheet_count,
 };
 
 #[test]
@@ -622,6 +623,46 @@ fn document_and_write_limits_fail_with_stable_codes() {
     assert_eq!(
         write_error.code(),
         XlsxWriteErrorCode::ResourceLimitExceeded
+    );
+}
+
+#[test]
+fn edited_document_output_is_verified_with_the_source_read_limits() {
+    let sheet_count = ReadLimits::default().max_sheets() + 1;
+    let bytes = generated_workbook_with_sheet_count(sheet_count);
+    let default_error = open_xlsx_document_bytes(&bytes, OpenOptions::default())
+        .expect_err("the default sheet limit must reject the source");
+    assert_eq!(default_error.code(), XlsxErrorCode::TooManySheets);
+
+    let read_options = ReadOptions::new(
+        ReadLimits::default()
+            .with_max_sheets(sheet_count)
+            .expect("positive sheet limit"),
+    );
+    let document = open_xlsx_document_bytes(&bytes, OpenOptions::new(read_options))
+        .expect("the raised sheet limit opens the source");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            document.workbook().sheets()[0].id(),
+            CellAddress::from_a1("A1").expect("address"),
+            CellValue::number(7.0).expect("finite value"),
+        )
+        .expect("set value");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("an edited draft must save under the limits its source was opened with");
+
+    let reopened = open_xlsx_document_bytes(output.bytes(), OpenOptions::new(read_options))
+        .expect("reopen output");
+    assert_eq!(reopened.workbook().sheets().len() as u64, sheet_count);
+    assert_eq!(
+        reopened.workbook().sheets()[0]
+            .cell(CellAddress::from_a1("A1").expect("address"))
+            .map(|cell| cell.content().clone()),
+        Some(CellContent::Literal(
+            CellValue::number(7.0).expect("finite value")
+        ))
     );
 }
 
