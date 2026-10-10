@@ -13,7 +13,9 @@ use super::workbook_patch::{
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL};
-use crate::{DateSystem, DefinedNameScope, Sheet, SheetId, SheetVisibility, WorkbookSnapshot};
+use crate::{
+    DateSystem, DefinedName, DefinedNameScope, Sheet, SheetId, SheetVisibility, WorkbookSnapshot,
+};
 
 const DETAIL_SHEET_COUNT: &str = "workbook sheet metadata does not match the source document";
 const DETAIL_SHEET_ORDER: &str = "draft changed the stable order of existing sheets";
@@ -34,6 +36,71 @@ struct RelationshipAttribute {
     qualified_name: Vec<u8>,
     prefix: Vec<u8>,
     namespace: Vec<u8>,
+}
+
+/// The source `<definedNames>` container, captured so a changed name set is written in draft
+/// order while each retained name keeps its source element and producer attributes.
+#[derive(Debug)]
+struct SourceDefinedNames {
+    depth: u64,
+    container: BytesStart<'static>,
+    elements: Vec<SourceDefinedName>,
+    current: Option<SourceDefinedName>,
+}
+
+/// One source `<definedName>` element. `content` holds every event after the start tag through
+/// the end tag and is empty for a self-closing element.
+#[derive(Debug)]
+struct SourceDefinedName {
+    start: BytesStart<'static>,
+    content: Vec<Event<'static>>,
+}
+
+impl SourceDefinedNames {
+    fn new(container: BytesStart<'static>, depth: u64) -> Self {
+        Self {
+            depth,
+            container,
+            elements: Vec::new(),
+            current: None,
+        }
+    }
+
+    fn capture_start(&mut self, element: BytesStart<'_>, depth: u64, empty: bool) {
+        if let Some(current) = &mut self.current {
+            let element = element.into_owned();
+            current.content.push(if empty {
+                Event::Empty(element)
+            } else {
+                Event::Start(element)
+            });
+        } else if depth == self.depth + 1 && element.local_name().as_ref() == b"definedName" {
+            let defined_name = SourceDefinedName {
+                start: element.into_owned(),
+                content: Vec::new(),
+            };
+            if empty {
+                self.elements.push(defined_name);
+            } else {
+                self.current = Some(defined_name);
+            }
+        }
+    }
+
+    fn capture_end(&mut self, element: BytesEnd<'_>, depth: u64) {
+        if let Some(current) = &mut self.current {
+            current.content.push(Event::End(element.into_owned()));
+            if depth == self.depth + 1 {
+                self.elements.extend(self.current.take());
+            }
+        }
+    }
+
+    fn capture(&mut self, event: Event<'_>) {
+        if let Some(current) = &mut self.current {
+            current.content.push(event.into_owned());
+        }
+    }
 }
 
 pub(crate) fn patch_workbook_semantics(
@@ -66,7 +133,7 @@ pub(crate) fn patch_workbook_semantics(
     let mut saw_workbook_properties = false;
     let mut saw_book_views = false;
     let mut inserted_defined_names = !names_changed;
-    let mut skip_defined_names_depth = None::<u64>;
+    let mut source_defined_names = None::<SourceDefinedNames>;
     loop {
         let event = xml
             .read_event_into(&mut buffer)
@@ -75,7 +142,8 @@ pub(crate) fn patch_workbook_semantics(
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
-                if skip_defined_names_depth.is_some() {
+                if let Some(names) = &mut source_defined_names {
+                    names.capture_start(element, depth, false);
                     buffer.clear();
                     continue;
                 }
@@ -138,9 +206,9 @@ pub(crate) fn patch_workbook_semantics(
                     && element.local_name().as_ref() == b"definedNames"
                     && names_changed
                 {
-                    write_defined_names(&mut writer, element.name().as_ref(), draft, source)?;
+                    source_defined_names =
+                        Some(SourceDefinedNames::new(element.into_owned(), depth));
                     inserted_defined_names = true;
-                    skip_defined_names_depth = Some(depth);
                 } else {
                     maybe_insert_defined_names(
                         &mut writer,
@@ -158,7 +226,8 @@ pub(crate) fn patch_workbook_semantics(
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
-                if skip_defined_names_depth.is_some() {
+                if let Some(names) = &mut source_defined_names {
+                    names.capture_start(element, depth + 1, true);
                     buffer.clear();
                     continue;
                 }
@@ -232,9 +301,19 @@ pub(crate) fn patch_workbook_semantics(
                 }
             }
             Event::End(element) => {
-                if let Some(skipped) = skip_defined_names_depth {
-                    if depth == skipped {
-                        skip_defined_names_depth = None;
+                if let Some(mut names) = source_defined_names.take() {
+                    if depth == names.depth {
+                        write_source_defined_names(
+                            &mut writer,
+                            names,
+                            element,
+                            original,
+                            draft,
+                            source,
+                        )?;
+                    } else {
+                        names.capture_end(element, depth);
+                        source_defined_names = Some(names);
                     }
                     depth = depth.saturating_sub(1);
                     buffer.clear();
@@ -287,7 +366,9 @@ pub(crate) fn patch_workbook_semantics(
             }
             Event::Eof => break,
             other => {
-                if skip_defined_names_depth.is_none() {
+                if let Some(names) = &mut source_defined_names {
+                    names.capture(other);
+                } else {
                     write_event(&mut writer, other.into_owned(), source)?;
                 }
             }
@@ -519,37 +600,122 @@ fn write_defined_names(
     )?;
     let name = qualified_sibling_name(container_name, b"definedName");
     for defined_name in workbook.defined_names() {
-        let mut element = BytesStart::new(decode_name(&name, source)?);
-        element.push_attribute(("name", defined_name.name()));
-        if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope() {
-            let index = workbook
-                .sheet_tab_position(sheet_id)
-                .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
-            let index = index.to_string();
-            element.push_attribute(("localSheetId", index.as_str()));
-        }
-        if defined_name.hidden() {
-            element.push_attribute(("hidden", "1"));
-        }
-        write_event(writer, Event::Start(element), source)?;
-        write_event(
-            writer,
-            Event::Text(BytesText::from_escaped(escape_text(
-                defined_name.formula().as_str(),
-            )?)),
-            source,
-        )?;
-        write_event(
-            writer,
-            Event::End(BytesEnd::new(decode_name(&name, source)?)),
-            source,
-        )?;
+        let element = new_defined_name(&name, workbook, defined_name, source)?;
+        write_defined_name(writer, element, defined_name, source)?;
     }
     write_event(
         writer,
         Event::End(BytesEnd::new(decode_name(container_name, source)?)),
         source,
     )
+}
+
+/// Writes the draft names into the source container in draft order. A name whose identity
+/// matches a source element keeps that element: verbatim when unchanged, otherwise with only its
+/// changed name spelling, `hidden` flag, and formula text rewritten.
+fn write_source_defined_names(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    names: SourceDefinedNames,
+    end: BytesEnd<'_>,
+    original: &WorkbookSnapshot,
+    draft: &WorkbookSnapshot,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    if draft.defined_names().is_empty() {
+        return Ok(());
+    }
+    let name = qualified_sibling_name(names.container.name().as_ref(), b"definedName");
+    write_event(writer, Event::Start(names.container), source)?;
+    for defined_name in draft.defined_names() {
+        let retained = original
+            .defined_name(defined_name.scope(), defined_name.name())
+            .and_then(|(index, source_name)| Some((source_name, names.elements.get(index)?)));
+        match retained {
+            Some((source_name, element)) if source_name == defined_name => {
+                if element.content.is_empty() {
+                    write_event(writer, Event::Empty(element.start.borrow()), source)?;
+                } else {
+                    write_event(writer, Event::Start(element.start.borrow()), source)?;
+                    for event in &element.content {
+                        write_event(writer, event.borrow(), source)?;
+                    }
+                }
+            }
+            Some((source_name, element)) => {
+                let patched =
+                    patch_defined_name(&element.start, source_name, defined_name, source)?;
+                write_defined_name(writer, patched, defined_name, source)?;
+            }
+            None => {
+                let element = new_defined_name(&name, draft, defined_name, source)?;
+                write_defined_name(writer, element, defined_name, source)?;
+            }
+        }
+    }
+    write_event(writer, Event::End(end), source)
+}
+
+fn new_defined_name<'a>(
+    element_name: &'a [u8],
+    workbook: &WorkbookSnapshot,
+    defined_name: &DefinedName,
+    source: &PartPath,
+) -> Result<BytesStart<'a>, XlsxWriteError> {
+    let mut element = BytesStart::new(decode_name(element_name, source)?);
+    element.push_attribute(("name", defined_name.name()));
+    if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope() {
+        let index = workbook
+            .sheet_tab_position(sheet_id)
+            .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
+        let index = index.to_string();
+        element.push_attribute(("localSheetId", index.as_str()));
+    }
+    if defined_name.hidden() {
+        element.push_attribute(("hidden", "1"));
+    }
+    Ok(element)
+}
+
+fn patch_defined_name(
+    element: &BytesStart<'_>,
+    source_name: &DefinedName,
+    defined_name: &DefinedName,
+    source: &PartPath,
+) -> Result<BytesStart<'static>, XlsxWriteError> {
+    let name = decode_name(element.name().as_ref(), source)?.to_owned();
+    let mut patched = BytesStart::new(name);
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        match attribute.key.as_ref() {
+            b"name" if source_name.name() != defined_name.name() => {
+                patched.push_attribute(("name", defined_name.name()));
+            }
+            b"hidden" if source_name.hidden() != defined_name.hidden() => {}
+            _ => patched.push_attribute(attribute),
+        }
+    }
+    if defined_name.hidden() && !source_name.hidden() {
+        patched.push_attribute(("hidden", "1"));
+    }
+    Ok(patched.into_owned())
+}
+
+fn write_defined_name(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    element: BytesStart<'_>,
+    defined_name: &DefinedName,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    let end = element.to_end().into_owned();
+    write_event(writer, Event::Start(element), source)?;
+    write_event(
+        writer,
+        Event::Text(BytesText::from_escaped(escape_text(
+            defined_name.formula().as_str(),
+        )?)),
+        source,
+    )?;
+    write_event(writer, Event::End(end), source)
 }
 
 fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
