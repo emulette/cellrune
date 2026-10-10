@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     CalculationCellId, CalculationCellResult, CalculationSnapshot, CellValue,
@@ -85,6 +85,34 @@ impl MaterializationPlan {
             cells,
             invalidated_cells,
             materialized_count,
+        })
+    }
+
+    /// Plans removing the saved result of every listed formula without computing any value.
+    pub(crate) fn invalidating(
+        formulas: &BTreeSet<CalculationCellId>,
+        limits: WriteLimits,
+    ) -> Result<Self, XlsxWriteError> {
+        enforce_count(
+            DETAIL_MATERIALIZATION_COUNT,
+            formulas.len(),
+            limits.max_materialized_formula_cells(),
+        )?;
+        Ok(Self {
+            cells: formulas
+                .iter()
+                .map(|id| {
+                    (
+                        *id,
+                        PlannedMaterialization {
+                            origin: MaterializedResultOrigin::DirectFormula,
+                            action: MaterializationAction::Invalidate,
+                        },
+                    )
+                })
+                .collect(),
+            invalidated_cells: formulas.iter().copied().collect(),
+            materialized_count: 0,
         })
     }
 

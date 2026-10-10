@@ -18,9 +18,10 @@ pub use options::{ReadLimits, ReadOptions};
 pub use package::{PackageSummary, inspect_package};
 pub use reader::{read_xlsx, read_xlsx_bytes, read_xlsx_path};
 pub use write::{
-    RecalculatedWorkbook, RecalculationWriteOptions, RecalculationWritePolicy, WriteLimits,
-    WriteOptions, WriteOptionsError, WriteProvenance, WriteReport, XlsxWriteError,
-    XlsxWriteErrorCode, write_preserved_xlsx_bytes, write_recalculated_xlsx,
-    write_recalculated_xlsx_bytes, write_recalculated_xlsx_path, write_xlsx_draft,
-    write_xlsx_draft_bytes, write_xlsx_draft_path,
+    EditWriteReport, EditedWorkbook, RecalculatedWorkbook, RecalculationWriteOptions,
+    RecalculationWritePolicy, WriteLimits, WriteOptions, WriteOptionsError, WriteProvenance,
+    WriteReport, XlsxWriteError, XlsxWriteErrorCode, write_preserved_xlsx_bytes,
+    write_recalculated_xlsx, write_recalculated_xlsx_bytes, write_recalculated_xlsx_path,
+    write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_edits, write_xlsx_draft_edits_bytes,
+    write_xlsx_draft_edits_path, write_xlsx_draft_path,
 };

@@ -523,6 +523,23 @@ impl Engine<'_> {
         })
     }
 
+    /// Reports whether a formula's references depend on values, as dynamic references do.
+    pub(super) fn formula_contains_dynamic_reference(
+        &self,
+        cell: super::CellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> bool {
+        self.asts.get(&cell).is_some_and(|parsed| {
+            let budget = EvaluationBudget::default();
+            self.expr_contains_dynamic_reference_function(
+                EvalContext::for_cancellable(cell, &budget, cancelled),
+                parsed.root(),
+                &mut VisitedDefinitions::default(),
+                &mut Vec::new(),
+            )
+        })
+    }
+
     pub(super) fn has_unstable_incremental_dependencies(
         &self,
         cancelled: &impl Fn() -> bool,

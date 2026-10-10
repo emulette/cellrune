@@ -21,7 +21,7 @@ impl<'workbook> Engine<'workbook> {
             .expect("non-cancellable parsing cannot be cancelled")
     }
 
-    fn parsed_cancellable(
+    pub(super) fn parsed_cancellable(
         workbook: &'workbook WorkbookSnapshot,
         options: CalculationOptions,
         cancelled: &impl Fn() -> bool,

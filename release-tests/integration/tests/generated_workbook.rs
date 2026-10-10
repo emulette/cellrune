@@ -1,6 +1,7 @@
 mod generated_workbook {
     mod contract;
     mod defined_name_write;
+    mod draft_edits_write;
     mod draft_write;
     mod producer;
     mod recalculation_write;

@@ -9,6 +9,7 @@ use super::serialization::{
     escape_attribute, escape_text, serialize_cell, serialize_materialized_follower,
     validate_phonetic_limits,
 };
+use super::workbook_patch::HostRecalculation;
 use super::{
     RecalculatedWorkbook, RecalculationWriteOptions, WriteLimits, WriteProvenance, WriteReport,
     XlsxWriteError, XlsxWriteErrorCode,
@@ -120,11 +121,14 @@ pub(crate) fn write_canonical_draft(
     validate_generated_parts(&parts, limits)?;
     let bytes = write_archive(&parts, limits)?;
     verify_draft_output(
-        draft.workbook(),
-        draft.presentation(),
+        &ExpectedDraftOutput {
+            workbook: draft.workbook(),
+            presentation: draft.presentation(),
+            materialization: &materialization,
+            kind: crate::XlsxDocumentKind::Xlsx,
+            host_recalculation: HostRecalculation::requested(request_host_recalculation),
+        },
         &bytes,
-        &materialization,
-        crate::XlsxDocumentKind::Xlsx,
         crate::ReadLimits::default(),
         limits,
     )?;
@@ -613,15 +617,28 @@ fn write_archive(
     Ok(bytes)
 }
 
+/// What a verified draft output must reopen as.
+pub(super) struct ExpectedDraftOutput<'a> {
+    pub(super) workbook: &'a WorkbookSnapshot,
+    pub(super) presentation: &'a crate::DocumentPresentation,
+    pub(super) materialization: &'a MaterializationPlan,
+    pub(super) kind: crate::XlsxDocumentKind,
+    pub(super) host_recalculation: HostRecalculation,
+}
+
 pub(super) fn verify_draft_output(
-    expected: &WorkbookSnapshot,
-    expected_presentation: &crate::DocumentPresentation,
+    expected: &ExpectedDraftOutput<'_>,
     bytes: &[u8],
-    materialization: &MaterializationPlan,
-    expected_kind: crate::XlsxDocumentKind,
     read_limits: crate::ReadLimits,
     limits: WriteLimits,
 ) -> Result<(), XlsxWriteError> {
+    let ExpectedDraftOutput {
+        workbook: expected_workbook,
+        presentation: expected_presentation,
+        materialization,
+        kind: expected_kind,
+        host_recalculation,
+    } = *expected;
     enforce_limit(
         DETAIL_VERIFICATION_BYTES,
         bytes.len() as u64,
@@ -640,7 +657,12 @@ pub(super) fn verify_draft_output(
         XlsxWriteError::new(XlsxWriteErrorCode::OutputVerificationFailed).with_cause(error)
     })?;
     if reopened.kind() != expected_kind
-        || !draft_semantics_match(expected, reopened.workbook(), materialization)
+        || !draft_semantics_match(
+            expected_workbook,
+            reopened.workbook(),
+            materialization,
+            host_recalculation,
+        )
         || !expected_presentation.semantics_match(reopened.presentation())
     {
         return Err(
@@ -702,12 +724,13 @@ fn draft_semantics_match(
     expected: &WorkbookSnapshot,
     actual: &WorkbookSnapshot,
     materialization: &MaterializationPlan,
+    host_recalculation: HostRecalculation,
 ) -> bool {
     if expected.date_system() != actual.date_system()
         || !calculation_hints_match(
             expected.calculation_hints(),
             actual.calculation_hints(),
-            !materialization.is_complete() || !expected.diagnostics().is_empty(),
+            host_recalculation,
         )
         || expected.defined_names() != actual.defined_names()
         || expected.sheets().len() != actual.sheets().len()
@@ -765,26 +788,32 @@ fn tables_semantically_match(expected: &[crate::Table], actual: &[crate::Table])
 fn calculation_hints_match(
     expected: crate::CalculationHints,
     actual: crate::CalculationHints,
-    request_host_recalculation: bool,
+    host_recalculation: HostRecalculation,
 ) -> bool {
+    let full_on_load = match host_recalculation {
+        HostRecalculation::Clear => optional_false_matches(
+            expected.full_calculation_on_load(),
+            actual.full_calculation_on_load(),
+        ),
+        HostRecalculation::OnLoad | HostRecalculation::Full => {
+            actual.full_calculation_on_load() == Some(true)
+        }
+    };
+    let force_full = match host_recalculation {
+        HostRecalculation::Clear | HostRecalculation::OnLoad => optional_false_matches(
+            expected.force_full_calculation(),
+            actual.force_full_calculation(),
+        ),
+        HostRecalculation::Full => actual.force_full_calculation() == Some(true),
+    };
     expected.mode() == actual.mode()
         && expected.calculation_id() == actual.calculation_id()
         && optional_false_matches(
             expected.iterative_calculation(),
             actual.iterative_calculation(),
         )
-        && if request_host_recalculation {
-            actual.full_calculation_on_load() == Some(true)
-                && actual.force_full_calculation() == Some(true)
-        } else {
-            optional_false_matches(
-                expected.full_calculation_on_load(),
-                actual.full_calculation_on_load(),
-            ) && optional_false_matches(
-                expected.force_full_calculation(),
-                actual.force_full_calculation(),
-            )
-        }
+        && full_on_load
+        && force_full
 }
 
 fn optional_false_matches(expected: Option<bool>, actual: Option<bool>) -> bool {

@@ -707,6 +707,11 @@ fn formula_cell(
     format!(r#"<c r="{address}"{value_type}><f>{formula}</f>{saved_result}</c>"#)
 }
 
+/// A package of exactly the given parts, stored uncompressed.
+pub fn generated_package(entries: &[(&str, &str)]) -> Vec<u8> {
+    build_archive(entries, None)
+}
+
 fn build_archive(entries: &[(&str, &str)], archive_comment: Option<&str>) -> Vec<u8> {
     let mut output = Cursor::new(Vec::new());
     {

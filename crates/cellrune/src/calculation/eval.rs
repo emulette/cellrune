@@ -24,6 +24,7 @@ mod materialization;
 mod name_graph;
 mod orchestration;
 mod reference;
+pub(in crate::calculation) mod static_impact;
 mod targeted;
 
 pub(super) use dependency::DependencyTarget;

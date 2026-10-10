@@ -21,6 +21,7 @@ use crate::{
 };
 
 use super::super::materialization::MaterializationPlan;
+use super::super::workbook_patch::HostRecalculation;
 use super::super::{RecalculationWritePolicy, WriteLimits};
 
 fn address(value: &str) -> CellAddress {
@@ -906,7 +907,12 @@ fn base_snapshot() -> WorkbookSnapshot {
 fn semantic_verification_rejects_each_independent_workbook_difference() {
     let expected = base_snapshot();
     let plan = empty_plan(&expected);
-    assert!(draft_semantics_match(&expected, &expected, &plan));
+    assert!(draft_semantics_match(
+        &expected,
+        &expected,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_date = snapshot(
         vec![base_sheet()],
@@ -914,7 +920,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1904,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_date, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_date,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_hints = snapshot(
         vec![base_sheet()],
@@ -922,7 +933,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::new(Some(CalculationMode::Manual), None, None, None),
     );
-    assert!(!draft_semantics_match(&expected, &changed_hints, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_hints,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_names = snapshot(
         vec![base_sheet()],
@@ -938,7 +954,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_names, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_names,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_count = snapshot(
         vec![
@@ -949,7 +970,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_count, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_count,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_id = snapshot(
         vec![sheet(
@@ -966,7 +992,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_id, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_id,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_name = snapshot(
         vec![sheet(
@@ -983,7 +1014,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_name, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_name,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_visibility = snapshot(
         vec![sheet(
@@ -1003,7 +1039,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_visibility,
-        &plan
+        &plan,
+        HostRecalculation::Clear
     ));
 
     let missing_cell = snapshot(
@@ -1012,7 +1049,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &missing_cell, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &missing_cell,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_format = snapshot(
         vec![sheet(
@@ -1029,7 +1071,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_format, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_format,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let changed_content = snapshot(
         vec![sheet(
@@ -1046,7 +1093,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &changed_content, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &changed_content,
+        &plan,
+        HostRecalculation::Clear
+    ));
 
     let extra_cell = snapshot(
         vec![sheet(
@@ -1074,7 +1126,12 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         DateSystem::Excel1900,
         CalculationHints::default(),
     );
-    assert!(!draft_semantics_match(&expected, &extra_cell, &plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &extra_cell,
+        &plan,
+        HostRecalculation::Clear
+    ));
 }
 
 #[test]
@@ -1133,7 +1190,12 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
         WriteLimits::default(),
     )
     .expect("legacy plan");
-    assert!(draft_semantics_match(&expected, &actual, &legacy_plan));
+    assert!(draft_semantics_match(
+        &expected,
+        &actual,
+        &legacy_plan,
+        HostRecalculation::Clear
+    ));
 
     let mut direct_cells = BTreeMap::new();
     direct_cells.insert(
@@ -1163,7 +1225,12 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
         WriteLimits::default(),
     )
     .expect("direct plan");
-    assert!(!draft_semantics_match(&expected, &actual, &direct_plan));
+    assert!(!draft_semantics_match(
+        &expected,
+        &actual,
+        &direct_plan,
+        HostRecalculation::Clear
+    ));
 }
 
 #[test]
@@ -1201,7 +1268,12 @@ fn incomplete_materialization_alone_requires_host_recalculation_flags() {
     )
     .expect("incomplete materialization plan");
 
-    assert!(draft_semantics_match(&expected, &actual, &plan));
+    assert!(draft_semantics_match(
+        &expected,
+        &actual,
+        &plan,
+        HostRecalculation::Full
+    ));
 }
 
 #[test]
@@ -1212,7 +1284,11 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
         Some(true),
         Some(false),
     );
-    assert!(calculation_hints_match(baseline, baseline, false));
+    assert!(calculation_hints_match(
+        baseline,
+        baseline,
+        HostRecalculation::Clear
+    ));
     assert!(!calculation_hints_match(
         baseline,
         CalculationHints::new(
@@ -1221,12 +1297,12 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(true),
             Some(false)
         ),
-        false
+        HostRecalculation::Clear
     ));
     assert!(!calculation_hints_match(
         baseline,
         baseline.with_iterative_calculation(Some(true)),
-        false
+        HostRecalculation::Clear
     ));
     assert!(!calculation_hints_match(
         baseline,
@@ -1236,7 +1312,7 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(true),
             Some(false)
         ),
-        false
+        HostRecalculation::Clear
     ));
     assert!(!calculation_hints_match(
         baseline,
@@ -1246,7 +1322,7 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(false),
             Some(false)
         ),
-        false
+        HostRecalculation::Clear
     ));
     assert!(!calculation_hints_match(
         baseline,
@@ -1256,7 +1332,7 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(true),
             Some(true)
         ),
-        false
+        HostRecalculation::Clear
     ));
 
     let host_expected = CalculationHints::new(Some(CalculationMode::Manual), Some(9), None, None);
@@ -1268,7 +1344,7 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(true),
             Some(true)
         ),
-        true
+        HostRecalculation::Full
     ));
     assert!(!calculation_hints_match(
         host_expected,
@@ -1278,7 +1354,7 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(false),
             Some(true)
         ),
-        true
+        HostRecalculation::Full
     ));
     assert!(!calculation_hints_match(
         host_expected,
@@ -1288,7 +1364,7 @@ fn calculation_hint_comparison_covers_every_flag_branch() {
             Some(true),
             Some(false)
         ),
-        true
+        HostRecalculation::Full
     ));
 }
 

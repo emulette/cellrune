@@ -8,7 +8,7 @@ use super::package::PackageWritePlan;
 use super::package_metadata_patch::{
     remove_calculation_chain_relationship, remove_content_type_overrides,
 };
-use super::workbook_patch::patch_calculation_properties;
+use super::workbook_patch::{HostRecalculation, patch_calculation_properties};
 use super::worksheet_patch::{WorksheetCacheAction, WorksheetCellUpdate, patch_worksheet};
 use super::{
     RecalculatedWorkbook, RecalculationWriteOptions, WriteProvenance, WriteReport, XlsxWriteError,
@@ -113,7 +113,7 @@ pub fn write_recalculated_xlsx_bytes(
         patch_calculation_properties(
             &original_workbook,
             workbook_part,
-            request_host_recalculation,
+            HostRecalculation::requested(request_host_recalculation),
             limits,
         )?,
     );

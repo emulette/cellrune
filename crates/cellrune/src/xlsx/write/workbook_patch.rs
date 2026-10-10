@@ -16,19 +16,36 @@ const DETAIL_MISSING_WORKBOOK_ROOT: &str = "workbook root was not found";
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
+/// What a written workbook asks its host application to recalculate when it opens the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostRecalculation {
+    /// Every saved result is current, so the producer's recalculation requests are cleared.
+    Clear,
+    /// Recalculate every formula once on open, keeping the producer's force-full setting.
+    OnLoad,
+    /// Recalculate every formula on open and on every later calculation.
+    Full,
+}
+
+impl HostRecalculation {
+    pub(crate) const fn requested(full: bool) -> Self {
+        if full { Self::Full } else { Self::Clear }
+    }
+}
+
 pub(crate) fn patch_calculation_properties(
     bytes: &[u8],
     source: &PartPath,
-    request_host_recalculation: bool,
+    host_recalculation: HostRecalculation,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
-    patch_calculation_properties_with_hints(bytes, source, request_host_recalculation, None, limits)
+    patch_calculation_properties_with_hints(bytes, source, host_recalculation, None, limits)
 }
 
 pub(crate) fn patch_calculation_properties_with_hints(
     bytes: &[u8],
     source: &PartPath,
-    request_host_recalculation: bool,
+    host_recalculation: HostRecalculation,
     hints: Option<CalculationHints>,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
@@ -67,7 +84,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                     write_generated_calc_properties(
                         &mut writer,
                         workbook_name.as_deref().unwrap_or(b"workbook"),
-                        request_host_recalculation,
+                        host_recalculation,
                         hints,
                         source,
                     )?;
@@ -84,12 +101,8 @@ pub(crate) fn patch_calculation_properties_with_hints(
                         ));
                     }
                     saw_calc_properties = true;
-                    let patched = patch_calc_properties_start(
-                        &element,
-                        request_host_recalculation,
-                        hints,
-                        source,
-                    )?;
+                    let patched =
+                        patch_calc_properties_start(&element, host_recalculation, hints, source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else {
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
@@ -106,7 +119,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                     write_generated_calc_properties(
                         &mut writer,
                         workbook_name.as_deref().unwrap_or(b"workbook"),
-                        request_host_recalculation,
+                        host_recalculation,
                         hints,
                         source,
                     )?;
@@ -123,12 +136,8 @@ pub(crate) fn patch_calculation_properties_with_hints(
                         ));
                     }
                     saw_calc_properties = true;
-                    let patched = patch_calc_properties_start(
-                        &element,
-                        request_host_recalculation,
-                        hints,
-                        source,
-                    )?;
+                    let patched =
+                        patch_calc_properties_start(&element, host_recalculation, hints, source)?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else {
                     write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
@@ -142,7 +151,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                     write_generated_calc_properties(
                         &mut writer,
                         workbook_name.as_deref().unwrap_or(b"workbook"),
-                        request_host_recalculation,
+                        host_recalculation,
                         hints,
                         source,
                     )?;
@@ -183,40 +192,50 @@ pub(super) fn follows_calculation_properties(local_name: &[u8]) -> bool {
 fn write_generated_calc_properties(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     workbook_name: &[u8],
-    request_host_recalculation: bool,
+    host_recalculation: HostRecalculation,
     hints: Option<CalculationHints>,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
     let qualified = qualified_sibling_name(workbook_name, b"calcPr");
     let mut calc = BytesStart::new(decode_name(&qualified, source)?.to_owned());
-    push_calculation_attributes(&mut calc, request_host_recalculation, hints);
+    push_calculation_attributes(&mut calc, host_recalculation, hints);
     write_event(writer, Event::Empty(calc), source)
 }
 
 fn patch_calc_properties_start(
     element: &BytesStart<'_>,
-    request_host_recalculation: bool,
+    host_recalculation: HostRecalculation,
     hints: Option<CalculationHints>,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
     let name = decode_name(element.name().as_ref(), source)?.to_owned();
     let mut patched = BytesStart::new(name);
+    let keeps_force = keeps_force_full_calculation(host_recalculation, hints);
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        let replace = matches!(attribute.key.as_ref(), b"fullCalcOnLoad" | b"forceFullCalc")
+        let replace = attribute.key.as_ref() == b"fullCalcOnLoad"
+            || (attribute.key.as_ref() == b"forceFullCalc" && !keeps_force)
             || (hints.is_some()
                 && matches!(attribute.key.as_ref(), b"calcMode" | b"calcId" | b"iterate"));
         if !replace {
             patched.push_attribute(attribute);
         }
     }
-    push_calculation_attributes(&mut patched, request_host_recalculation, hints);
+    push_calculation_attributes(&mut patched, host_recalculation, hints);
     Ok(patched.into_owned())
+}
+
+/// Without hints to restate it, an on-load request leaves the producer's `forceFullCalc` as is.
+const fn keeps_force_full_calculation(
+    host_recalculation: HostRecalculation,
+    hints: Option<CalculationHints>,
+) -> bool {
+    matches!(host_recalculation, HostRecalculation::OnLoad) && hints.is_none()
 }
 
 fn push_calculation_attributes(
     element: &mut BytesStart<'_>,
-    request_host_recalculation: bool,
+    host_recalculation: HostRecalculation,
     hints: Option<CalculationHints>,
 ) {
     if let Some(hints) = hints {
@@ -236,14 +255,19 @@ fn push_calculation_attributes(
         if let Some(iterative) = hints.iterative_calculation() {
             element.push_attribute(("iterate", if iterative { "1" } else { "0" }));
         }
-        let full = request_host_recalculation || hints.full_calculation_on_load().unwrap_or(false);
-        let force = request_host_recalculation || hints.force_full_calculation().unwrap_or(false);
+        let full = host_recalculation != HostRecalculation::Clear
+            || hints.full_calculation_on_load().unwrap_or(false);
+        let force = host_recalculation == HostRecalculation::Full
+            || hints.force_full_calculation().unwrap_or(false);
         element.push_attribute(("fullCalcOnLoad", if full { "1" } else { "0" }));
         element.push_attribute(("forceFullCalc", if force { "1" } else { "0" }));
     } else {
-        let value = if request_host_recalculation { "1" } else { "0" };
-        element.push_attribute(("fullCalcOnLoad", value));
-        element.push_attribute(("forceFullCalc", value));
+        let full = host_recalculation != HostRecalculation::Clear;
+        element.push_attribute(("fullCalcOnLoad", if full { "1" } else { "0" }));
+        if !keeps_force_full_calculation(host_recalculation, hints) {
+            let force = host_recalculation == HostRecalculation::Full;
+            element.push_attribute(("forceFullCalc", if force { "1" } else { "0" }));
+        }
     }
 }
 

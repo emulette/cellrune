@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::canonical::{generated_worksheet_xml, verify_draft_output};
+use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
 use super::materialization::{MaterializationAction, MaterializationPlan};
 use super::package::PackageWritePlan;
 use super::package_additions::{
@@ -15,19 +15,21 @@ use super::sheet_reference_patch::rewrite_renamed_sheet_references;
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table_patch::patch_table_xml;
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
+use super::workbook_patch::HostRecalculation;
 use super::worksheet_edit::{
     WorksheetSemanticEdit, patch_worksheet_semantics, read_cell_style_indices,
 };
 use super::worksheet_patch::{WorksheetCacheAction, WorksheetCellUpdate, patch_worksheet};
 use super::worksheet_view_edit::patch_frozen_pane;
 use super::{
-    RecalculatedWorkbook, RecalculationWriteOptions, WriteProvenance, WriteReport, XlsxWriteError,
-    XlsxWriteErrorCode,
+    RecalculatedWorkbook, RecalculationWriteOptions, WriteLimits, WriteProvenance, WriteReport,
+    XlsxWriteError, XlsxWriteErrorCode,
 };
 use crate::draft::DraftCellMutation;
 use crate::xlsx::package::PartPath;
 use crate::{
-    CalculationCellId, CalculationSnapshot, MaterializedResultOrigin, SheetId, WorkbookDraft,
+    CalculationCellId, CalculationSnapshot, MaterializedResultOrigin, SheetId, SourceId,
+    WorkbookDraft, XlsxDocument,
 };
 
 const CONTENT_TYPES_PART: &[u8] = b"[Content_Types].xml";
@@ -79,6 +81,67 @@ pub(crate) fn write_document_draft(
         return super::recalculation::write_recalculated_xlsx_bytes(document, calculation, options);
     }
     let limits = options.write_options().limits();
+    validate_draft_edits(draft, limits)?;
+    let materialization = MaterializationPlan::new(calculation, options.policy(), limits)?;
+    let host_recalculation = HostRecalculation::requested(
+        !materialization.is_complete() || !draft.workbook().diagnostics().is_empty(),
+    );
+    let output = write_document_package(
+        draft,
+        document,
+        &DocumentResultPlan {
+            materialization: &materialization,
+            host_recalculation: Some(host_recalculation),
+            keep_calculation_chain: false,
+        },
+        limits,
+    )?;
+    let report = WriteReport::new(
+        options.policy(),
+        materialization.materialized_count(),
+        materialization.invalidated_cells().to_vec(),
+        super::report::VerifiedOutputReceipt::new(
+            output.changed_parts,
+            output.removed_parts,
+            Vec::new(),
+            &output.bytes,
+        ),
+        WriteProvenance::new(
+            Some(document.input_hash()),
+            draft.semantic_revision(),
+            draft.presentation_revision(),
+            calculation.provenance().provider().clone(),
+            calculation.options(),
+        ),
+    );
+    Ok(RecalculatedWorkbook::new(
+        output.bytes,
+        report,
+        document.kind(),
+    ))
+}
+
+/// How a document draft write treats formula caches, `calcPr`, and the calculation chain.
+pub(super) struct DocumentResultPlan<'a> {
+    pub(super) materialization: &'a MaterializationPlan,
+    /// The recalculation request for `calcPr`; `None` leaves `calcPr` and an otherwise unchanged
+    /// workbook part as they are.
+    pub(super) host_recalculation: Option<HostRecalculation>,
+    /// Keeps `calcChain.xml`, valid only while every formula keeps its cell and array kind.
+    pub(super) keep_calculation_chain: bool,
+}
+
+/// A verified document draft package and the parts the write changed or removed.
+pub(super) struct DocumentPackageOutput {
+    pub(super) bytes: Vec<u8>,
+    pub(super) changed_parts: Vec<SourceId>,
+    pub(super) removed_parts: Vec<SourceId>,
+}
+
+pub(super) fn validate_draft_edits(
+    draft: &WorkbookDraft,
+    limits: WriteLimits,
+) -> Result<(), XlsxWriteError> {
     validate_phonetic_limits(draft.presentation(), limits)?;
     enforce_count(
         DETAIL_EDITED_CELL_COUNT,
@@ -90,8 +153,18 @@ pub(crate) fn write_document_draft(
             .collect::<BTreeSet<_>>()
             .len(),
         limits.max_edited_cells(),
-    )?;
-    let materialization = MaterializationPlan::new(calculation, options.policy(), limits)?;
+    )
+}
+
+/// Patches the edited semantics, the planned formula caches, and the package metadata of a
+/// document draft into its preserved package, leaving every other part byte-for-byte intact.
+pub(super) fn write_document_package(
+    draft: &WorkbookDraft,
+    document: &XlsxDocument,
+    plan: &DocumentResultPlan<'_>,
+    limits: WriteLimits,
+) -> Result<DocumentPackageOutput, XlsxWriteError> {
+    let materialization = plan.materialization;
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
     let shared_strings_source = document
@@ -341,7 +414,7 @@ pub(crate) fn write_document_draft(
                 limits,
             )?
         };
-        let cache_updates = sheet_cache_updates(sheet_id, &materialization)?;
+        let cache_updates = sheet_cache_updates(sheet_id, materialization)?;
         if !cache_updates.is_empty() {
             bytes = patch_worksheet(&bytes, &sheet_source.part, &cache_updates, limits)?;
         }
@@ -398,46 +471,56 @@ pub(crate) fn write_document_draft(
         );
     }
 
-    let request_host_recalculation =
-        !materialization.is_complete() || !draft.workbook().diagnostics().is_empty();
-    let workbook_bytes = source_reader.read_part(workbook_part)?;
-    replacements.insert(
-        workbook_part.clone(),
-        patch_workbook_semantics(
-            &workbook_bytes,
-            workbook_part,
-            document.workbook(),
-            draft.workbook(),
-            &added_relationship_ids,
-            WorkbookPatchOptions {
-                request_host_recalculation,
-                ensure_book_view: draft
-                    .workbook()
-                    .sheets()
-                    .iter()
-                    .any(|sheet| draft.presentation().frozen_pane(sheet.id()).is_some()),
-            },
-            limits,
-        )?,
-    );
+    if plan.host_recalculation.is_some()
+        || draft.workbook_changed()
+        || !draft.presentation_sheet_mutations().is_empty()
+    {
+        let workbook_bytes = source_reader.read_part(workbook_part)?;
+        replacements.insert(
+            workbook_part.clone(),
+            patch_workbook_semantics(
+                &workbook_bytes,
+                workbook_part,
+                document.workbook(),
+                draft.workbook(),
+                &added_relationship_ids,
+                WorkbookPatchOptions {
+                    host_recalculation: plan.host_recalculation,
+                    ensure_book_view: draft
+                        .workbook()
+                        .sheets()
+                        .iter()
+                        .any(|sheet| draft.presentation().frozen_pane(sheet.id()).is_some()),
+                },
+                limits,
+            )?,
+        );
+    }
 
-    let chain = remove_calculation_chain_relationship(
-        &relationship_bytes,
-        &relationship_part,
-        workbook_part,
-        limits,
-    )?;
-    let removals = chain.removed_parts;
-    let relationship_without_chain = chain.relationship_bytes.unwrap_or(relationship_bytes);
-    replacements.insert(
-        relationship_part.clone(),
-        append_relationships(
-            &relationship_without_chain,
+    let (removals, relationship_without_chain) = if plan.keep_calculation_chain {
+        (BTreeSet::new(), None)
+    } else {
+        let chain = remove_calculation_chain_relationship(
+            &relationship_bytes,
             &relationship_part,
-            &new_relationships,
+            workbook_part,
             limits,
-        )?,
-    );
+        )?;
+        (chain.removed_parts, chain.relationship_bytes)
+    };
+    if relationship_without_chain.is_some() || !new_relationships.is_empty() {
+        replacements.insert(
+            relationship_part.clone(),
+            append_relationships(
+                relationship_without_chain
+                    .as_deref()
+                    .unwrap_or(&relationship_bytes),
+                &relationship_part,
+                &new_relationships,
+                limits,
+            )?,
+        );
+    }
 
     if !removals.is_empty() || !new_content_types.is_empty() {
         let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
@@ -466,40 +549,34 @@ pub(crate) fn write_document_draft(
         .map(PartPath::source_id)
         .collect::<Vec<_>>();
     let removed_parts = removals.iter().map(PartPath::source_id).collect::<Vec<_>>();
-    let plan = PackageWritePlan::modified_with_additions(
+    let package_plan = PackageWritePlan::modified_with_additions(
         source,
         replacements,
         additions,
         &removals,
         limits,
     )?;
-    let bytes = plan.write_to_vec(source)?;
+    let bytes = package_plan.write_to_vec(source)?;
     verify_draft_output(
-        draft.workbook(),
-        draft.presentation(),
+        &ExpectedDraftOutput {
+            workbook: draft.workbook(),
+            presentation: draft.presentation(),
+            materialization,
+            kind: document.kind(),
+            host_recalculation: plan.host_recalculation.unwrap_or(HostRecalculation::Clear),
+        },
         &bytes,
-        &materialization,
-        document.kind(),
         document.read_options().limits(),
         limits,
     )?;
-    let report = WriteReport::new(
-        options.policy(),
-        materialization.materialized_count(),
-        materialization.invalidated_cells().to_vec(),
-        super::report::VerifiedOutputReceipt::new(changed_parts, removed_parts, Vec::new(), &bytes),
-        WriteProvenance::new(
-            Some(document.input_hash()),
-            draft.semantic_revision(),
-            draft.presentation_revision(),
-            calculation.provenance().provider().clone(),
-            calculation.options(),
-        ),
-    );
-    Ok(RecalculatedWorkbook::new(bytes, report, document.kind()))
+    Ok(DocumentPackageOutput {
+        bytes,
+        changed_parts,
+        removed_parts,
+    })
 }
 
-fn validate_dynamic_formula_edits(
+pub(super) fn validate_dynamic_formula_edits(
     draft: &WorkbookDraft,
     document: &crate::XlsxDocument,
 ) -> Result<(), XlsxWriteError> {

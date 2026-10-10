@@ -8,7 +8,7 @@ use quick_xml::reader::NsReader;
 
 use super::serialization::escape_text;
 use super::workbook_patch::{
-    follows_calculation_properties, patch_calculation_properties_with_hints,
+    HostRecalculation, follows_calculation_properties, patch_calculation_properties_with_hints,
 };
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
@@ -27,7 +27,8 @@ const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WorkbookPatchOptions {
-    pub(crate) request_host_recalculation: bool,
+    /// The recalculation request written to `calcPr`; `None` leaves `calcPr` as it is.
+    pub(crate) host_recalculation: Option<HostRecalculation>,
     pub(crate) ensure_book_view: bool,
 }
 
@@ -113,7 +114,7 @@ pub(crate) fn patch_workbook_semantics(
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     let WorkbookPatchOptions {
-        request_host_recalculation,
+        host_recalculation,
         ensure_book_view,
     } = options;
     enforce_bytes(bytes.len(), limits, source)?;
@@ -380,13 +381,16 @@ pub(crate) fn patch_workbook_semantics(
     }
     let semantics = writer.into_inner().into_inner();
     enforce_bytes(semantics.len(), limits, source)?;
-    patch_calculation_properties_with_hints(
-        &semantics,
-        source,
-        request_host_recalculation,
-        Some(draft.calculation_hints()),
-        limits,
-    )
+    match host_recalculation {
+        Some(host_recalculation) => patch_calculation_properties_with_hints(
+            &semantics,
+            source,
+            host_recalculation,
+            Some(draft.calculation_hints()),
+            limits,
+        ),
+        None => Ok(semantics),
+    }
 }
 
 fn write_book_views(

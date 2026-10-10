@@ -1,6 +1,8 @@
 mod authoring;
 mod canonical;
 mod document_authoring;
+mod document_edits;
+mod edit_report;
 mod error;
 mod materialization;
 mod options;
@@ -22,7 +24,11 @@ mod worksheet_edit;
 mod worksheet_patch;
 mod worksheet_view_edit;
 
-pub use authoring::{write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_path};
+pub use authoring::{
+    write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_edits, write_xlsx_draft_edits_bytes,
+    write_xlsx_draft_edits_path, write_xlsx_draft_path,
+};
+pub use edit_report::{EditWriteReport, EditedWorkbook};
 pub use error::{XlsxWriteError, XlsxWriteErrorCode};
 pub use options::{
     RecalculationWriteOptions, RecalculationWritePolicy, WriteLimits, WriteOptions,

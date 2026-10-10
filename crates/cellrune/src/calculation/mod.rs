@@ -45,6 +45,7 @@ mod value;
 use crate::calculation::persistent_store::{PersistentRadixEntries, PersistentRadixMap};
 
 pub(crate) use analysis_cache::WorkbookAnalysisCache;
+pub(crate) use eval::static_impact::{DraftEdits, affected_formulas};
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
