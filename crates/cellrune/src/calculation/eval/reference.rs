@@ -512,15 +512,29 @@ impl Engine<'_> {
     /// Clamps a whole-column rect to the greatest populated row inside its own columns.
     ///
     /// Whole-column operations use this so that the result depends only on columns covered by the
-    /// operation's dependency rectangles. See [`ColumnExtents`].
+    /// operation's dependency rectangles. See [`ColumnExtents`]. Array result areas populate their
+    /// columns as stored cells do; dependency collection already links a whole-column operand to
+    /// every array anchor whose area intersects it.
     pub(in crate::calculation) fn whole_column_row_end(&self, rect: &Rect) -> u32 {
         if !rect.whole_rows {
             return rect.row_end;
         }
-        let used = self.column_extents.get(rect.sheet).map_or(0, |extents| {
+        let stored = self.column_extents.get(rect.sheet).map_or(0, |extents| {
             extents.row_end_within(rect.col_start, rect.col_end)
         });
-        rect.row_end.min(used)
+        let arrays = self
+            .array_regions
+            .iter()
+            .map(|region| region.rect)
+            .filter(|area| {
+                area.sheet == rect.sheet
+                    && area.col_start <= rect.col_end
+                    && rect.col_start <= area.col_end
+            })
+            .map(|area| area.row_end)
+            .max()
+            .unwrap_or(0);
+        rect.row_end.min(stored.max(arrays))
     }
 
     /// Returns the shared vertical traversal extent for one operation's participating ranges.

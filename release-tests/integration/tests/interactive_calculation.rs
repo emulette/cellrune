@@ -230,6 +230,88 @@ fn semantic_noop_batch_preserves_revision_topology_and_calculation() {
 }
 
 #[test]
+fn whole_column_references_include_array_result_areas() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut spilled = WorkbookCalculationSession::create();
+    spilled
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("J1"),
+                    formula("SEQUENCE(3)"),
+                    None,
+                )
+                .expect("undeclared spill"),
+                WorkbookChange::set_cell_formula(sheet_id, address("A1"), formula("SUM(J:J)")),
+            ]),
+        )
+        .expect("spill workbook");
+    spilled
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("spill calculation");
+    assert_eq!(
+        spilled
+            .calculation()
+            .expect("installed spill calculation")
+            .cell(CalculationCellId::new(sheet_id, address("A1"))),
+        Some(&CalculationCellResult::Value(number(6.0)))
+    );
+
+    let mut declared = WorkbookCalculationSession::create();
+    declared
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("L1"),
+                    formula("SEQUENCE(3)"),
+                    Some(CellRange::new(address("L1"), address("L3")).expect("declared range")),
+                )
+                .expect("declared spill"),
+                WorkbookChange::set_cell_value(sheet_id, address("L10"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("SUM(L:L)")),
+            ]),
+        )
+        .expect("declared spill workbook");
+    declared
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("declared spill calculation");
+    declared
+        .apply_changes(
+            declared.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::clear_cell(sheet_id, address("L10"))]),
+        )
+        .expect("clear the stored cell below the declared spill");
+    let delta = declared
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental declared spill recalculation");
+
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        declared
+            .calculation()
+            .expect("installed declared spill calculation")
+            .cell(CalculationCellId::new(sheet_id, address("B1"))),
+        Some(&CalculationCellResult::Value(number(6.0)))
+    );
+}
+
+#[test]
 fn index_reference_dependencies_remain_incrementally_safe() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
