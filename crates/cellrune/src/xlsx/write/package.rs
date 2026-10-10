@@ -47,14 +47,14 @@ pub fn write_preserved_xlsx_bytes(
 
 #[derive(Clone)]
 pub(crate) struct PreservedPackage {
-    bytes: Arc<[u8]>,
+    bytes: Arc<Vec<u8>>,
     input_hash: InputHash,
     kind: XlsxDocumentKind,
 }
 
 impl PreservedPackage {
     pub(crate) const fn new(
-        bytes: Arc<[u8]>,
+        bytes: Arc<Vec<u8>>,
         input_hash: InputHash,
         kind: XlsxDocumentKind,
     ) -> Self {
@@ -75,6 +75,11 @@ impl PreservedPackage {
 
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// Returns the retained bytes, moving the allocation out when no other owner shares it.
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        Arc::try_unwrap(self.bytes).unwrap_or_else(|shared| shared.as_ref().clone())
     }
 
     pub(in crate::xlsx) fn reader(&self) -> Result<PackageReader<'_>, XlsxWriteError> {
@@ -771,7 +776,7 @@ mod tests {
     }
 
     fn preserved(bytes: &[u8]) -> PreservedPackage {
-        let bytes: Arc<[u8]> = Arc::from(bytes.to_vec());
+        let bytes = Arc::new(bytes.to_vec());
         PreservedPackage::new(
             Arc::clone(&bytes),
             InputHash::for_bytes(&bytes),

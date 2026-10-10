@@ -628,6 +628,23 @@ fn document_and_write_limits_fail_with_stable_codes() {
 }
 
 #[test]
+fn owned_bytes_over_the_archive_limit_are_rejected_before_opening() {
+    let bytes = generated_workbook_with_sheet_count(1);
+    let length = bytes.len() as u64;
+    let options = OpenOptions::new(ReadOptions::new(
+        ReadLimits::default()
+            .with_max_archive_bytes(length - 1)
+            .expect("positive archive limit"),
+    ));
+
+    let error = cellrune::open_xlsx_document_vec(bytes, options)
+        .expect_err("an archive over the limit must be rejected");
+
+    assert_eq!(error.code(), XlsxErrorCode::ArchiveTooLarge);
+    assert_eq!(error.observed(), Some(length));
+}
+
+#[test]
 fn cells_added_to_an_empty_sheet_data_element_save_and_reopen() {
     let document = open_xlsx_document_bytes(
         &generated_empty_sheet_data_workbook(),

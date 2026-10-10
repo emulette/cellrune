@@ -11,7 +11,7 @@ mod xstring;
 
 pub use document::{
     OpenOptions, XlsxDocument, XlsxDocumentKind, open_xlsx_document, open_xlsx_document_bytes,
-    open_xlsx_document_path,
+    open_xlsx_document_path, open_xlsx_document_vec,
 };
 pub use error::{PhoneticRunLimitKind, ReadOptionsError, XlsxErrorCode, XlsxReadError};
 pub use options::{ReadLimits, ReadOptions};

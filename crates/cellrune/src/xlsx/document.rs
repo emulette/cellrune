@@ -80,6 +80,15 @@ impl XlsxDocument {
         self.package.bytes()
     }
 
+    /// Consumes the document and returns the exact archive bytes it retained.
+    ///
+    /// The allocation is returned without copying when this document is its only owner. A clone of
+    /// the document or a draft created from it shares the bytes, and then they are copied.
+    /// [`input_hash`](Self::input_hash) is the SHA-256 of the returned bytes.
+    pub fn into_input_bytes(self) -> Vec<u8> {
+        self.package.into_bytes()
+    }
+
     /// Returns whether the preserved package is XLSX or macro-enabled XLSM.
     pub const fn kind(&self) -> XlsxDocumentKind {
         self.package.kind()
@@ -187,6 +196,23 @@ pub fn open_xlsx_document_bytes(
     open_with_source(Cursor::new(bytes), options, WorkbookSourceKind::Bytes)
 }
 
+/// Opens a bounded package-backed workbook from owned in-memory XLSX or XLSM bytes.
+///
+/// The allocation of `bytes` becomes the retained archive without being reserved or copied again;
+/// [`XlsxDocument::into_input_bytes`] returns it.
+///
+/// # Errors
+///
+/// Returns an [`XlsxReadError`] when `bytes` exceed the configured archive limit or do not contain
+/// a trustworthy workbook.
+pub fn open_xlsx_document_vec(
+    bytes: Vec<u8>,
+    options: OpenOptions,
+) -> Result<XlsxDocument, XlsxReadError> {
+    ensure_archive_length(bytes.len() as u64, options.read_options())?;
+    open_retained(bytes, options, WorkbookSourceKind::Bytes)
+}
+
 /// Opens a bounded package-backed workbook from a filesystem path without retaining the host path.
 ///
 /// # Errors
@@ -208,10 +234,19 @@ fn open_with_source<R: Read + Seek>(
     source_kind: WorkbookSourceKind,
 ) -> Result<XlsxDocument, XlsxReadError> {
     let bytes = read_bounded_archive(reader, options.read_options())?;
+    open_retained(bytes, options, source_kind)
+}
+
+/// Opens the document over `bytes`, keeping that allocation as the retained archive.
+fn open_retained(
+    bytes: Vec<u8>,
+    options: OpenOptions,
+    source_kind: WorkbookSourceKind,
+) -> Result<XlsxDocument, XlsxReadError> {
     let input_hash = InputHash::for_bytes(&bytes);
-    let bytes: Arc<[u8]> = Arc::from(bytes);
+    let bytes = Arc::new(bytes);
     let read = read_xlsx_with_identity(
-        Cursor::new(Arc::clone(&bytes)),
+        Cursor::new(bytes.as_slice()),
         options.read_options(),
         source_kind,
         Some(input_hash),
@@ -243,11 +278,7 @@ fn read_bounded_archive<R: Read + Seek>(
     let byte_length = reader
         .seek(SeekFrom::End(0))
         .map_err(|error| XlsxReadError::new(XlsxErrorCode::Io).with_cause(error))?;
-    if byte_length > maximum {
-        return Err(XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge)
-            .with_detail(byte_length.to_string())
-            .with_observed(byte_length));
-    }
+    ensure_archive_length(byte_length, options)?;
     reader
         .seek(SeekFrom::Start(0))
         .map_err(|error| XlsxReadError::new(XlsxErrorCode::Io).with_cause(error))?;
@@ -261,12 +292,17 @@ fn read_bounded_archive<R: Read + Seek>(
         .take(maximum.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| XlsxReadError::new(XlsxErrorCode::Io).with_cause(error))?;
-    if bytes.len() as u64 > maximum {
-        return Err(XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge)
-            .with_detail(bytes.len().to_string())
-            .with_observed(bytes.len() as u64));
-    }
+    ensure_archive_length(bytes.len() as u64, options)?;
     Ok(bytes)
+}
+
+fn ensure_archive_length(byte_length: u64, options: ReadOptions) -> Result<(), XlsxReadError> {
+    if byte_length > options.limits().max_archive_bytes() {
+        return Err(XlsxReadError::new(XlsxErrorCode::ArchiveTooLarge)
+            .with_detail(byte_length.to_string())
+            .with_observed(byte_length));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
