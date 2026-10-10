@@ -18,9 +18,10 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_empty_sheet_data_workbook,
-    generated_formula_fixture, generated_legacy_array_workbook, generated_table_reference_fixture,
-    generated_table_topology_fixture, generated_totals_table_fixture, generated_workbook,
-    generated_workbook_with_comment, generated_workbook_with_sheet_count,
+    generated_formula_fixture, generated_legacy_array_workbook, generated_shared_formula_workbook,
+    generated_table_reference_fixture, generated_table_topology_fixture,
+    generated_totals_table_fixture, generated_workbook, generated_workbook_with_comment,
+    generated_workbook_with_sheet_count,
 };
 
 #[test]
@@ -670,6 +671,66 @@ fn cells_added_to_an_empty_sheet_data_element_save_and_reopen() {
             .map(|cell| cell.content().clone()),
         Some(CellContent::Formula(formula)) if formula.text().map(|text| text.as_str()) == Some("A1+1")
     ));
+}
+
+#[test]
+fn replacing_a_shared_formula_anchor_keeps_its_followers_as_formulas() {
+    let document =
+        open_xlsx_document_bytes(&generated_shared_formula_workbook(), OpenOptions::default())
+            .expect("open shared formula workbook");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let address = |text| CellAddress::from_a1(text).expect("address");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            sheet_id,
+            address("B1"),
+            CellValue::number(100.0).expect("finite value"),
+        )
+        .expect("replace the one-column anchor");
+    draft
+        .clear_cell(sheet_id, address("D1"))
+        .expect("clear the two-dimensional anchor");
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("an edited shared formula anchor must save");
+
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen output");
+    let sheet = &reopened.workbook().sheets()[0];
+    for (follower, text) in [
+        ("B2", "A2*2"),
+        ("B3", "A3*2"),
+        ("E1", "$A1+10"),
+        ("D2", "$A2+10"),
+        ("E2", "$A2+10"),
+    ] {
+        let Some(CellContent::Formula(formula)) = sheet
+            .cell(address(follower))
+            .map(|cell| cell.content().clone())
+        else {
+            panic!("{follower} must stay a formula");
+        };
+        assert_eq!(
+            formula.text().map(|text| text.as_str()),
+            Some(text),
+            "{follower}"
+        );
+        assert_eq!(
+            formula.metadata(),
+            &cellrune::FormulaMetadata::Normal,
+            "{follower}"
+        );
+    }
+    assert!(sheet.cell(address("D1")).is_none());
+    let recalculated = calculate_workbook(reopened.workbook(), CalculationOptions::default());
+    assert_eq!(
+        recalculated.cell(CalculationCellId::new(sheet_id, address("B3"))),
+        Some(&CalculationCellResult::Value(
+            CellValue::number(6.0).expect("finite value")
+        ))
+    );
 }
 
 #[test]

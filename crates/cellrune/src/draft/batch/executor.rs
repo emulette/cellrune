@@ -104,6 +104,9 @@ impl WorkbookDraft {
                 } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     ensure_not_array_formula_part(sheet, *address)?;
+                    for follower in sheet.detach_shared_formula_followers(*address) {
+                        mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
+                    }
                     let previous_was_formula = sheet
                         .cell(*address)
                         .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)));
@@ -155,10 +158,11 @@ impl WorkbookDraft {
                     address,
                     formula,
                 } => {
-                    ensure_not_array_formula_part(
-                        sheet_by_id_mut(&mut sheets, *sheet_id)?,
-                        *address,
-                    )?;
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    ensure_not_array_formula_part(sheet, *address)?;
+                    for follower in sheet.detach_shared_formula_followers(*address) {
+                        mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
+                    }
                     if presentation.has_cell_annotation(*sheet_id, *address) {
                         return Err(annotated_text_replacement_required(*sheet_id, *address).into());
                     }
@@ -190,10 +194,11 @@ impl WorkbookDraft {
                     formula,
                     range,
                 } => {
-                    ensure_not_array_formula_part(
-                        sheet_by_id_mut(&mut sheets, *sheet_id)?,
-                        *address,
-                    )?;
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    ensure_not_array_formula_part(sheet, *address)?;
+                    for follower in sheet.detach_shared_formula_followers(*address) {
+                        mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
+                    }
                     if presentation.has_cell_annotation(*sheet_id, *address) {
                         return Err(annotated_text_replacement_required(*sheet_id, *address).into());
                     }
@@ -225,6 +230,9 @@ impl WorkbookDraft {
                 WorkbookChange::ClearCell { sheet_id, address } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     ensure_not_array_formula_part(sheet, *address)?;
+                    for follower in sheet.detach_shared_formula_followers(*address) {
+                        mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
+                    }
                     if presentation.clear_cell_phonetics(*sheet_id, *address)? {
                         presentation_cell_mutations
                             .insert(CalculationCellId::new(*sheet_id, *address));

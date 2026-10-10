@@ -391,6 +391,15 @@ pub fn generated_legacy_array_workbook() -> Vec<u8> {
     )
 }
 
+/// A one-sheet workbook with a one-column shared formula group anchored at B1 over B1:B3 and a
+/// two-dimensional group anchored at D1 over D1:E2.
+pub fn generated_shared_formula_workbook() -> Vec<u8> {
+    generated_workbook_with_worksheets(
+        1,
+        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*2</f><v>2</v></c><c r="D1"><f t="shared" ref="D1:E2" si="1">$A1+10</f><v>11</v></c><c r="E1"><f t="shared" si="1"/><v>11</v></c></row><row r="2"><c r="A2"><v>2</v></c><c r="B2"><f t="shared" si="0"/><v>4</v></c><c r="D2"><f t="shared" si="1"/><v>12</v></c><c r="E2"><f t="shared" si="1"/><v>12</v></c></row><row r="3"><c r="A3"><v>3</v></c><c r="B3"><f t="shared" si="0"/><v>6</v></c></row></sheetData></worksheet>"#,
+    )
+}
+
 fn generated_workbook_with_worksheets(sheet_count: u64, worksheet: &str) -> Vec<u8> {
     let mut content_types = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>

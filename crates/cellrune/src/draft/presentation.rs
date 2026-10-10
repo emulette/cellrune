@@ -80,6 +80,7 @@ impl WorkbookDraft {
         let mut sheets = self.workbook.sheets().to_vec();
         let sheet = sheet_mut(&mut sheets, sheet_id)?;
         super::ensure_not_array_formula_part(sheet, address)?;
+        let detached = sheet.detach_shared_formula_followers(address);
         let number_format = sheet
             .cell(address)
             .map_or_else(NumberFormat::default, |cell| cell.number_format().clone());
@@ -91,6 +92,9 @@ impl WorkbookDraft {
             sheet.upsert_cell(address, content, number_format);
             self.commit(sheets, self.workbook.defined_names().to_vec())?;
             self.mark_upsert(sheet_id, address, false);
+            for follower in detached {
+                self.mark_upsert(sheet_id, follower, false);
+            }
         }
         if presentation_changed {
             self.presentation = presentation;

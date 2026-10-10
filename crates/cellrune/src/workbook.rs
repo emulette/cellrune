@@ -396,6 +396,65 @@ impl Sheet {
             .map(|(anchor, _)| *anchor)
     }
 
+    /// Turns the followers of the shared formula anchored at `anchor` into ordinary formulas and
+    /// returns their addresses.
+    ///
+    /// A follower holds no formula text in the file and needs its group's anchor. Each one keeps the
+    /// text the reader expanded for it, so replacing or removing the anchor leaves them intact.
+    pub(crate) fn detach_shared_formula_followers(
+        &mut self,
+        anchor: CellAddress,
+    ) -> Vec<CellAddress> {
+        let Some(CellContent::Formula(formula)) = self.cell(anchor).map(Cell::content) else {
+            return Vec::new();
+        };
+        let crate::FormulaMetadata::Shared {
+            group_index,
+            role: crate::SharedFormulaRole::Anchor,
+            range: Some(range),
+        } = *formula.metadata()
+        else {
+            return Vec::new();
+        };
+        let followers = self
+            .formula_addresses
+            .range(range.start()..=range.end())
+            .copied()
+            .filter(|address| {
+                range.contains(*address)
+                    && self.cell(*address).is_some_and(|cell| {
+                        matches!(
+                            cell.content(),
+                            CellContent::Formula(formula) if *formula.metadata()
+                                == crate::FormulaMetadata::Shared {
+                                    group_index,
+                                    role: crate::SharedFormulaRole::Follower { anchor },
+                                    range: None,
+                                }
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        for address in &followers {
+            let Some(cell) = self.cell(*address) else {
+                continue;
+            };
+            let CellContent::Formula(formula) = cell.content() else {
+                continue;
+            };
+            let detached = crate::FormulaCell::from_xlsx_parts(
+                formula.dialect(),
+                formula.text().cloned(),
+                formula.saved_result().clone(),
+                crate::FormulaMetadata::Normal,
+                formula.recalculate_always(),
+            );
+            let number_format = cell.number_format().clone();
+            self.upsert_cell_deferred(*address, CellContent::Formula(detached), number_format);
+        }
+        followers
+    }
+
     pub(crate) fn column_max_rows(&self) -> &BTreeMap<u32, u32> {
         &self.column_max_rows
     }

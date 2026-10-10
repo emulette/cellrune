@@ -308,6 +308,9 @@ pub(super) fn resize_table_rows(
             let content = match target {
                 ResizeTarget::Write(content) | ResizeTarget::Replace(content) => content,
                 ResizeTarget::Clear => {
+                    for follower in sheets[sheet_index].detach_shared_formula_followers(address) {
+                        mark_upsert(state.mutations, sheet_id, follower, false);
+                    }
                     if sheets[sheet_index].remove_cell_deferred(address) {
                         state.mark_removed_cell(sheet_id, address);
                     }
@@ -319,6 +322,9 @@ pub(super) fn resize_table_rows(
                 &content,
             ) {
                 return Ok(());
+            }
+            for follower in sheets[sheet_index].detach_shared_formula_followers(address) {
+                mark_upsert(state.mutations, sheet_id, follower, false);
             }
             let number_format = sheets[sheet_index]
                 .cell(address)
