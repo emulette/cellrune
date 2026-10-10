@@ -53,6 +53,8 @@ const MESSAGE_PHONETIC_FONT_ID_UNSUPPORTED: &str =
     "phonetic authoring currently supports only the default font record";
 const MESSAGE_ANNOTATED_TEXT_REPLACEMENT_REQUIRED: &str =
     "annotated text must be cleared or replaced atomically";
+const MESSAGE_ARRAY_FORMULA_PART_EDIT: &str =
+    "a cell inside a legacy array formula cannot be edited apart from its anchor";
 const MESSAGE_FROZEN_ROWS_OUT_OF_RANGE: &str =
     "frozen row count cannot produce a valid top-left cell";
 const MESSAGE_FROZEN_COLUMNS_OUT_OF_RANGE: &str =
@@ -189,6 +191,8 @@ pub enum ValidationErrorCode {
     PhoneticFontIdUnsupported,
     /// A normal value edit would discard an existing annotation.
     AnnotatedTextReplacementRequired,
+    /// A cell edit targets a legacy array formula range away from its anchor.
+    ArrayFormulaPartEdit,
     /// A frozen row count cannot be represented within worksheet bounds.
     FrozenRowsOutOfRange,
     /// A frozen column count cannot be represented within worksheet bounds.
@@ -306,6 +310,7 @@ impl ValidationErrorCode {
             Self::AnnotatedTextReplacementRequired => {
                 "validation.annotated_text_replacement_required"
             }
+            Self::ArrayFormulaPartEdit => "validation.array_formula_part_edit",
             Self::FrozenRowsOutOfRange => "validation.frozen_rows_out_of_range",
             Self::FrozenColumnsOutOfRange => "validation.frozen_columns_out_of_range",
             Self::BuiltInNumberFormatId => "validation.built_in_number_format_id",
@@ -511,6 +516,15 @@ pub enum ValidationError {
         /// One-based row of the annotated cell.
         row: u32,
         /// One-based column of the annotated cell.
+        column: u32,
+    },
+    /// A cell edit targets a legacy array formula range away from its anchor.
+    ArrayFormulaPartEdit {
+        /// Sheet containing the array formula.
+        sheet_id: u32,
+        /// One-based row of the edited cell.
+        row: u32,
+        /// One-based column of the edited cell.
         column: u32,
     },
     /// A frozen row count cannot be represented within Excel worksheet bounds.
@@ -744,6 +758,7 @@ impl ValidationError {
             Self::AnnotatedTextReplacementRequired { .. } => {
                 ValidationErrorCode::AnnotatedTextReplacementRequired
             }
+            Self::ArrayFormulaPartEdit { .. } => ValidationErrorCode::ArrayFormulaPartEdit,
             Self::FrozenRowsOutOfRange { .. } => ValidationErrorCode::FrozenRowsOutOfRange,
             Self::FrozenColumnsOutOfRange { .. } => ValidationErrorCode::FrozenColumnsOutOfRange,
             Self::BuiltInNumberFormatId { .. } => ValidationErrorCode::BuiltInNumberFormatId,
@@ -922,6 +937,14 @@ impl fmt::Display for ValidationError {
             } => write!(
                 formatter,
                 "{MESSAGE_ANNOTATED_TEXT_REPLACEMENT_REQUIRED}: sheet {sheet_id}, row {row}, column {column}"
+            ),
+            Self::ArrayFormulaPartEdit {
+                sheet_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_ARRAY_FORMULA_PART_EDIT}: sheet {sheet_id}, row {row}, column {column}"
             ),
             Self::FrozenRowsOutOfRange { value } => {
                 write!(formatter, "{MESSAGE_FROZEN_ROWS_OUT_OF_RANGE}: {value}")
@@ -1239,6 +1262,10 @@ mod tests {
             (
                 ValidationErrorCode::AnnotatedTextReplacementRequired,
                 "validation.annotated_text_replacement_required",
+            ),
+            (
+                ValidationErrorCode::ArrayFormulaPartEdit,
+                "validation.array_formula_part_edit",
             ),
             (
                 ValidationErrorCode::FrozenRowsOutOfRange,

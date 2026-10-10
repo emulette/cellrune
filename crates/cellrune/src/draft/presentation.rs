@@ -79,6 +79,7 @@ impl WorkbookDraft {
 
         let mut sheets = self.workbook.sheets().to_vec();
         let sheet = sheet_mut(&mut sheets, sheet_id)?;
+        super::ensure_not_array_formula_part(sheet, address)?;
         let number_format = sheet
             .cell(address)
             .map_or_else(NumberFormat::default, |cell| cell.number_format().clone());

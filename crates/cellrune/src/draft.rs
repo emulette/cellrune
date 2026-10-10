@@ -220,6 +220,22 @@ fn annotated_text_replacement_required(sheet_id: SheetId, address: CellAddress) 
     }
 }
 
+/// Rejects a cell edit inside a legacy array formula range away from its anchor, which Excel
+/// edits only as a whole.
+fn ensure_not_array_formula_part(
+    sheet: &crate::Sheet,
+    address: CellAddress,
+) -> Result<(), ValidationError> {
+    if sheet.legacy_array_anchor_covering(address).is_some() {
+        return Err(ValidationError::ArrayFormulaPartEdit {
+            sheet_id: sheet.id().get(),
+            row: address.row().get(),
+            column: address.column().get(),
+        });
+    }
+    Ok(())
+}
+
 impl Default for WorkbookDraft {
     fn default() -> Self {
         Self::new()

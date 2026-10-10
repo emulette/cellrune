@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::super::{
-    WorkbookDraft, annotated_text_replacement_required, case_insensitive_key, next_revision,
+    WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
+    ensure_not_array_formula_part, next_revision,
 };
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
@@ -102,6 +103,7 @@ impl WorkbookDraft {
                     value,
                 } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    ensure_not_array_formula_part(sheet, *address)?;
                     let previous_was_formula = sheet
                         .cell(*address)
                         .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)));
@@ -153,6 +155,10 @@ impl WorkbookDraft {
                     address,
                     formula,
                 } => {
+                    ensure_not_array_formula_part(
+                        sheet_by_id_mut(&mut sheets, *sheet_id)?,
+                        *address,
+                    )?;
                     if presentation.has_cell_annotation(*sheet_id, *address) {
                         return Err(annotated_text_replacement_required(*sheet_id, *address).into());
                     }
@@ -184,6 +190,10 @@ impl WorkbookDraft {
                     formula,
                     range,
                 } => {
+                    ensure_not_array_formula_part(
+                        sheet_by_id_mut(&mut sheets, *sheet_id)?,
+                        *address,
+                    )?;
                     if presentation.has_cell_annotation(*sheet_id, *address) {
                         return Err(annotated_text_replacement_required(*sheet_id, *address).into());
                     }
@@ -214,6 +224,7 @@ impl WorkbookDraft {
                 }
                 WorkbookChange::ClearCell { sheet_id, address } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    ensure_not_array_formula_part(sheet, *address)?;
                     if presentation.clear_cell_phonetics(*sheet_id, *address)? {
                         presentation_cell_mutations
                             .insert(CalculationCellId::new(*sheet_id, *address));

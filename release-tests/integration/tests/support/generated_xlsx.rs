@@ -383,6 +383,14 @@ pub fn generated_empty_sheet_data_workbook() -> Vec<u8> {
     )
 }
 
+/// A one-sheet workbook with the legacy array formula `{=SEQUENCE(2)}` in D1:D2.
+pub fn generated_legacy_array_workbook() -> Vec<u8> {
+    generated_workbook_with_worksheets(
+        1,
+        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="D1"><f t="array" ref="D1:D2">SEQUENCE(2)</f><v>1</v></c></row><row r="2"><c r="D2"><v>2</v></c></row></sheetData></worksheet>"#,
+    )
+}
+
 fn generated_workbook_with_worksheets(sheet_count: u64, worksheet: &str) -> Vec<u8> {
     let mut content_types = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>

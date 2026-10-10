@@ -377,6 +377,25 @@ impl Sheet {
         &self.array_formula_ranges
     }
 
+    /// Returns the anchor of the legacy array formula whose range covers `address` at another
+    /// cell.
+    pub(crate) fn legacy_array_anchor_covering(&self, address: CellAddress) -> Option<CellAddress> {
+        self.array_formula_ranges
+            .iter()
+            .find(|(anchor, range)| {
+                **anchor != address
+                    && range.contains(address)
+                    && self.cell(**anchor).is_some_and(|cell| {
+                        matches!(
+                            cell.content(),
+                            CellContent::Formula(formula)
+                                if matches!(formula.metadata(), crate::FormulaMetadata::Array { .. })
+                        )
+                    })
+            })
+            .map(|(anchor, _)| *anchor)
+    }
+
     pub(crate) fn column_max_rows(&self) -> &BTreeMap<u32, u32> {
         &self.column_max_rows
     }

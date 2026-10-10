@@ -18,9 +18,9 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_empty_sheet_data_workbook,
-    generated_formula_fixture, generated_table_reference_fixture, generated_table_topology_fixture,
-    generated_totals_table_fixture, generated_workbook, generated_workbook_with_comment,
-    generated_workbook_with_sheet_count,
+    generated_formula_fixture, generated_legacy_array_workbook, generated_table_reference_fixture,
+    generated_table_topology_fixture, generated_totals_table_fixture, generated_workbook,
+    generated_workbook_with_comment, generated_workbook_with_sheet_count,
 };
 
 #[test]
@@ -670,6 +670,72 @@ fn cells_added_to_an_empty_sheet_data_element_save_and_reopen() {
             .map(|cell| cell.content().clone()),
         Some(CellContent::Formula(formula)) if formula.text().map(|text| text.as_str()) == Some("A1+1")
     ));
+}
+
+#[test]
+fn edits_inside_a_legacy_array_are_rejected_before_saving() {
+    let document =
+        open_xlsx_document_bytes(&generated_legacy_array_workbook(), OpenOptions::default())
+            .expect("open legacy array workbook");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let follower = CellAddress::from_a1("D2").expect("address");
+    let mut draft = WorkbookDraft::from_document(&document);
+    let errors = [
+        draft
+            .set_cell_value(
+                sheet_id,
+                follower,
+                CellValue::number(5.0).expect("finite value"),
+            )
+            .expect_err("value inside the array"),
+        draft
+            .set_cell_formula(
+                sheet_id,
+                follower,
+                cellrune::FormulaText::from_xlsx("1").expect("formula"),
+            )
+            .expect_err("formula inside the array"),
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                follower,
+                cellrune::FormulaText::from_xlsx("SEQUENCE(1)").expect("formula"),
+                None,
+            )
+            .expect_err("dynamic formula inside the array"),
+        draft
+            .clear_cell(sheet_id, follower)
+            .expect_err("clear inside the array"),
+        draft
+            .set_annotated_text(
+                sheet_id,
+                follower,
+                "text",
+                Vec::new(),
+                cellrune::PhoneticWriteOptions::new(true),
+            )
+            .expect_err("annotated text inside the array"),
+    ];
+    for error in errors {
+        assert_eq!(
+            error.code(),
+            cellrune::ValidationErrorCode::ArrayFormulaPartEdit
+        );
+    }
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("rejected edits leave the draft saveable");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen output");
+    assert_eq!(
+        reopened.workbook().sheets()[0]
+            .cell(follower)
+            .map(|cell| cell.content().clone()),
+        document.workbook().sheets()[0]
+            .cell(follower)
+            .map(|cell| cell.content().clone())
+    );
 }
 
 #[test]
