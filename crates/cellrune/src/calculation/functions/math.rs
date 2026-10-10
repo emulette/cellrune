@@ -169,7 +169,7 @@ fn round(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], mode: Rou
         },
         None => 0,
     };
-    let scale = 10_f64.powi(digits.abs());
+    let scale = 10_f64.powi(digits.saturating_abs());
     let scaled = if digits >= 0 {
         number * scale
     } else {

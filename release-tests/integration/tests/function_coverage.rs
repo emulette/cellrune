@@ -112,6 +112,22 @@ fn new_functions_propagate_excel_errors_at_documented_boundaries() {
 }
 
 #[test]
+fn rounding_digits_below_the_integer_range_return_num() {
+    let cases = [
+        error("ROUND(1.5,-2147483648)", ExcelError::Number),
+        error("ROUNDUP(1.5,-2147483648)", ExcelError::Number),
+        error("ROUNDDOWN(1.5,-2147483648)", ExcelError::Number),
+        error("TRUNC(1.5,-1E10)", ExcelError::Number),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn v0_1_10_text_and_pcre2_functions_match_documented_semantics() {
     let cases = [
         text(
