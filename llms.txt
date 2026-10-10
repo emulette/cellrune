@@ -10,7 +10,7 @@ This file is a condensed, code-accurate reference for coding agents and other
 tools that add `cellrune` as a dependency. It is hand-maintained against the
 `pub use` list in `crates/cellrune/src/lib.rs`; treat a mismatch with that file
 as a bug in this file, not in the crate. The version described by this file is
-0.1.23, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
+0.1.24, uses Semantic Versioning, and requires Rust 1.88 or newer. Runnable,
 task-focused patterns are shipped as `examples/` in the crate package and live
 at `crates/cellrune/examples/` in the repository workspace.
 
@@ -50,6 +50,8 @@ of guessing.
 
 For round-trip work, `open_xlsx_document_*` retains the exact input archive,
 readable through `input_bytes()`, and binds it to a SHA-256 `InputHash`.
+`open_xlsx_document_vec(Vec<u8>, OpenOptions)` keeps the caller's allocation as
+that archive, and `XlsxDocument::into_input_bytes()` returns it.
 `write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
 `write_recalculated_xlsx_path` materialize a `CalculationSnapshot` made from
 that exact document, preserve unrelated package content, and reopen the output
@@ -65,7 +67,10 @@ session. Effective calculation-semantic mutations advance the semantic
 revision; presentation-only mutations use a separate revision, and accepted
 no-ops keep the corresponding revision unchanged. Calculate `draft.workbook()`
 after the final semantic edit, then call `write_xlsx_draft_bytes`,
-`write_xlsx_draft`, or `write_xlsx_draft_path`.
+`write_xlsx_draft`, or `write_xlsx_draft_path`. To write a document draft's
+edits without calculating, call `write_xlsx_draft_edits_bytes`,
+`write_xlsx_draft_edits`, or `write_xlsx_draft_edits_path`: affected formulas
+lose their saved results and the host recalculates them on open.
 
 `open_xlsx_document_*` also captures a separate `DocumentPresentation`.
 It exposes shared/inline phonetic runs, explicit/effective phonetic visibility,
@@ -197,10 +202,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   discovers ZIP/OOXML parts (workbook, worksheets, styles, shared strings,
   external links, macros) under the same resource budget as a full read,
   without interpreting workbook semantics.
-- `open_xlsx_document_path`, `open_xlsx_document_bytes`, and
-  `open_xlsx_document<R: Read + Seek + Send + 'static>` return an
-  `XlsxDocument` under the `OpenOptions`/`ReadLimits` budget. The document
-  retains no host path and exposes no ZIP or XML types.
+- `open_xlsx_document_path`, `open_xlsx_document_bytes`,
+  `open_xlsx_document<R: Read + Seek + Send + 'static>`, and
+  `open_xlsx_document_vec(Vec<u8>, OpenOptions)` return an `XlsxDocument`
+  under the `OpenOptions`/`ReadLimits` budget. The document retains no host
+  path and exposes no ZIP or XML types. `open_xlsx_document_vec` keeps the
+  given allocation as the retained archive after checking its length against
+  `max_archive_bytes`; the other entry points hold one copy while opening.
 - `ReadOptions::default()` / `ReadOptions::new(ReadLimits)`, `.limits()`
 - `ReadLimits::default()` + 28 `.with_max_*(u64) -> Result<Self, ReadOptionsError>` budgets:
   archive bytes, ZIP entry count, per-entry/total uncompressed bytes,
@@ -244,12 +252,18 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.table_column(TableId, &str)` (case-insensitive column name),
   `.containing_table(SheetId, CellAddress)` (unique containing table),
   `.defined_names()`, `.diagnostics()`, `.date_system()`,
-  `.calculation_hints()`, `.source()`, `.provenance()`.
+  `.calculation_hints()`, `.source()`, `.provenance()`, and
+  `.non_worksheet_tab_ids()` (chartsheet, dialogsheet, and macrosheet IDs,
+  which added sheets never reuse).
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
   `.merged_ranges() -> &[CellRange]` (sorted by top-left address),
-  `.tables() -> &[Table]` (XLSX declaration order).
+  `.tables() -> &[Table]` (XLSX declaration order), and
+  `.auto_filter() -> Option<&SheetAutoFilter>` (the worksheet-level
+  autoFilter outside tables: `.range()` and zero-based
+  `.filter_column_ids()`; its criteria and sort XML are preserved, not
+  modeled).
 - `Table`: `.id() -> TableId` (OOXML-valid non-zero, workbook-global stable ID),
   `.name() -> &TableName` (worksheet-local programmatic name),
   `.display_name() -> &TableName` (workbook-global formula/UI name),
@@ -332,11 +346,14 @@ than guessing a name from a different XLSX crate (`calamine`,
 
 ### Package-backed document and preservation writing
 
-- `XlsxDocument`: `.workbook()`, `.input_hash()`, `.input_bytes()`, `.kind()`,
-  `.semantic_revision()`, `.presentation()`, `.presentation_revision()`,
-  `.package_summary()`, `.workbook_part()`, `.worksheet_part(SheetId)`, and
-  `.table_part(TableId)`. `.input_bytes() -> &[u8]` borrows the exact archive
-  bytes retained for round-trip writing; `.input_hash()` is their SHA-256.
+- `XlsxDocument`: `.workbook()`, `.input_hash()`, `.input_bytes()`,
+  `.into_input_bytes()`, `.kind()`, `.semantic_revision()`, `.presentation()`,
+  `.presentation_revision()`, `.package_summary()`, `.workbook_part()`,
+  `.worksheet_part(SheetId)`, and `.table_part(TableId)`. `.input_bytes() ->
+  &[u8]` borrows the exact archive bytes retained for round-trip writing;
+  `.input_hash()` is their SHA-256. `.into_input_bytes() -> Vec<u8>` consumes
+  the document and returns those bytes without copying when it is their only
+  owner; a clone or a draft made from it makes the call copy them.
 - `XlsxDocumentKind`: `Xlsx | Xlsm`. Macro parts are retained but never
   executed.
 - `write_preserved_xlsx_bytes(&XlsxDocument, WriteOptions) ->
@@ -403,6 +420,40 @@ than guessing a name from a different XLSX crate (`calamine`,
   `write_xlsx_draft_path` require a `CalculationSnapshot` produced from the
   current `draft.workbook()`. New drafts produce deterministic canonical
   XLSX; document drafts preserve unrelated XLSX/XLSM parts.
+- `write_xlsx_draft_edits_bytes(&WorkbookDraft, WriteOptions) ->
+  Result<EditedWorkbook, XlsxWriteError>`, `write_xlsx_draft_edits(&draft,
+  &mut impl Write, WriteOptions)`, and `write_xlsx_draft_edits_path(&draft,
+  path, WriteOptions) -> Result<EditWriteReport, XlsxWriteError>` write a
+  document draft's edits without calculating; a new draft fails with
+  `InvalidPackagePlan`. A static analysis of the edited workbook finds the
+  formulas the edits can affect: edited formulas; formulas referring to
+  edited or removed cells, including through ranges, whole columns or rows,
+  and the full reach of an `INDEX` range end; formulas naming a changed
+  defined name, directly, through other names, or while it did not exist;
+  formulas referring to a changed table; `SHEET`, `SHEETS`, `CELL`, and 3-D
+  references when sheets are added or renamed; a spill anchor whose area was
+  written; anchors with a saved `#SPILL!` after a clear; and every dependent
+  of those. Formulas whose references are known only after evaluation
+  (dynamic references, unparsed formulas, rejected calls, formulas without
+  text) are always affected once anything changed, and every formula is
+  affected when the analysis exceeds `max_dependency_edges` or the date
+  system or calculation hints changed. Affected formulas lose their saved
+  results and only then does `calcPr` gain `fullCalcOnLoad="1"`, keeping
+  `forceFullCalc`; other saved results, `calcPr`, `calcChain.xml` while every
+  formula keeps its cell and array kind, and untouched parts keep their
+  bytes. The output is verified before success.
+- `EditWriteReport`: `.affected_formulas()` (cell order),
+  `.requests_host_recalculation()`, `.changed_parts()`, `.removed_parts()`
+  (for example a `calcChain.xml` the edits invalidated), `.output_hash()`,
+  `.input_hash()`, `.semantic_revision()`, `.presentation_revision()`.
+  `EditedWorkbook`: `.bytes()`, `.into_bytes()`, `.report()`,
+  `.into_parts()`, `.save_path(...)`, and with `capability-fs`
+  `.save_in_directory(...)`.
+- A cell a document draft creates takes its row's style when the row has
+  `customFormat="1"`, else its column's `<col style>`, else none; an empty
+  styled `<c>` keeps its own style. Writing text to a table header cell
+  renames the column; edits inside a legacy array other than at its anchor
+  fail with `validation.array_formula_part_edit`.
 - Dynamic formulas can be authored in canonical drafts. Existing
   document-backed dynamic formulas can be recalculated and cache-rewritten,
   but adding or replacing one through a document draft fails with
@@ -462,8 +513,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   `add_sheet`, `rename_sheet`, `set_sheet_visibility`, `set_defined_name`,
   `remove_defined_name`, `set_date_system`, `set_calculation_hints`,
   `rename_table(TableId, TableName)`,
-  `rename_table_column(TableId, TableColumnId, TableColumnName)`, and
-  `resize_table_rows(TableId, first_data_row, last_data_row)`.
+  `rename_table_column(TableId, TableColumnId, TableColumnName)`,
+  `resize_table_rows(TableId, first_data_row, last_data_row)`,
+  `widen_table_columns(TableId, CellRange)`, and
+  `widen_sheet_auto_filter(SheetId, CellRange)`. A widening keeps the row
+  span, contains the old range, keeps filter and sort state, shifts filter
+  column IDs when it grows leftward, names new table columns from their text
+  header cells, and moves `_xlnm._FilterDatabase` with a sheet filter.
 - `EditBatch::new(changes)` preserves operation order.
   `WorkbookDraft::apply_changes(batch)` stages once and commits one semantic
   revision or rolls the complete batch back. If every accepted operation is
@@ -530,7 +586,12 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `FormulaCell`: `.dialect()`, `.text() -> Option<&FormulaText>`,
   `.saved_result() -> &SavedResult`, `.metadata() -> &FormulaMetadata`,
   `.recalculate_always()`.
-- `FormulaText::from_xlsx(String)` / `::from_user_input(String)`, `.as_str()`.
+- `FormulaText::from_xlsx(String)` keeps storage text verbatim;
+  `::from_user_input(String)` removes the leading `=` and adds Excel's
+  storage prefixes (`_xlfn.`, `_xlfn._xlws.` for `FILTER`/`SORT`, `_xlpm.` for
+  `LET`/`LAMBDA` parameters, `_xleta.` for functions passed as `LAMBDA`
+  arguments, `_xlfn.ANCHORARRAY` for `#`, `_xlfn.SINGLE` for `@`) without
+  reprinting anything else; `.as_str()` returns that storage text.
 - `SavedResult`: `Missing | Present(CellValue) | Invalid(SavedResultIssue)` —
   the value the *file itself* cached. `calculate_workbook` never reads or
   writes this; it is a separate, independent fact about the source.
@@ -560,7 +621,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.23 catalog contains 454 official
+  `.is_official()`. The 0.1.24 catalog contains 454 official
   Excel-facing names and one non-official compatibility entry for the OOXML
   dummy-function marker, for 455 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded

@@ -8,28 +8,30 @@ transport.
 
 ## Rust installation
 
-The CellRune Rust crate 0.1.23 requires Rust 1.88 or newer.
+The CellRune Rust crate 0.1.24 requires Rust 1.88 or newer.
 
 ```bash
-cargo add cellrune@0.1.23
+cargo add cellrune@0.1.24
 ```
 
 Or add the dependency directly:
 
 ```toml
 [dependencies]
-cellrune = "0.1.23"
+cellrune = "0.1.24"
 ```
 
 ## Features
 
 - reads `.xlsx` files from paths, byte slices, or `Read + Seek` streams;
 - opens package-backed `.xlsx` and `.xlsm` documents with exact SHA-256 identity, borrowed access
-  to the retained input bytes, and bounded round-trip preservation;
+  to the retained input bytes, and bounded round-trip preservation, including from an owned byte
+  vector that it keeps without copying and can hand back;
 - preserves sheet order, sparse cells, formulas, saved results, defined names, and relevant
   number-format metadata;
-- exposes merged ranges and validated worksheet-owned Excel tables, including stable table and
-  column IDs, complete filter/sort/formula/style metadata, and case-insensitive lookup indexes;
+- exposes merged ranges, worksheet-level autoFilter ranges, and validated worksheet-owned Excel
+  tables, including stable table and column IDs, complete filter/sort/formula/style metadata, and
+  case-insensitive lookup indexes;
 - resolves typed multi-area, 3-D, structured table, current-row, and spill references under
   cumulative reference and dependency budgets;
 - inspects workbook and sheet-local defined names without running a calculation session, preserving
@@ -52,9 +54,11 @@ cellrune = "0.1.23"
   targeted-calculation limit failures also name the exceeded limit or report the observed value;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
+- writes `WorkbookDraft` edits into an existing package without calculating, clearing only the
+  saved results the edits can affect and asking the host to recalculate on open only when needed;
 - creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name, table rename,
-  table-column rename, table-row resize, number-format, date-system, and calculation-property edits
-  through `WorkbookDraft`;
+  table-column rename, table-row resize, table and autoFilter column widening, number-format,
+  date-system, and calculation-property edits through `WorkbookDraft`;
 - reads, queries, preserves, and explicitly authors SpreadsheetML phonetic annotations and default
   frozen panes without mixing presentation state into formula calculation;
 - exposes the same versioned read/edit/calculate/write contract through typed Python and
@@ -259,7 +263,10 @@ Use `analyze_defined_name`, `analyze_defined_name_with_options`, or
 multi-area geometry, a valid empty reference, dynamic formulas, constants, external targets,
 invalid definitions, unsupported expressions, and missing names.
 
-`open_xlsx_document_*` retains the exact input package for writing.
+`open_xlsx_document_*` retains the exact input package for writing. `open_xlsx_document_vec`
+keeps an owned `Vec<u8>` as that package without copying it, and
+`XlsxDocument::into_input_bytes` hands the bytes back, copying them only while a draft or clone
+still shares them.
 `write_recalculated_xlsx_bytes`, `write_recalculated_xlsx`, and
 `write_recalculated_xlsx_path` bind a calculation to that exact input, update typed formula
 caches, remove stale calculation chains, preserve unrelated package content, and reopen the output
@@ -281,6 +288,15 @@ spill region, detects occupied targets, and materializes followers for writing. 
 document-backed dynamic formulas can be recalculated without changing their metadata, while adding
 or replacing one is rejected until source metadata-index merging is implemented.
 
+`write_xlsx_draft_edits_bytes`, `write_xlsx_draft_edits`, and `write_xlsx_draft_edits_path` write
+the edits of a document draft without a calculation. They remove the saved results of the formulas
+the edits can affect, listed by `EditWriteReport::affected_formulas()`, and only then set
+`fullCalcOnLoad` so the host recalculates on open. Every other saved result, `calcChain.xml` while
+the formula layout is unchanged, `calcPr`, and untouched parts keep their source bytes, and an
+uncalculable formula elsewhere does not block the write. Formulas whose references are known only
+after evaluation, such as `INDIRECT` or `OFFSET`, always count as affected when anything changed.
+Cells the draft creates take the style of their row or column, as in Excel.
+
 Package-backed documents expose phonetic annotations and frozen panes through
 `XlsxDocument::presentation()`. `WorkbookDraft` provides atomic `set_annotated_text`,
 `set_phonetics`, `clear_phonetics`, `set_frozen_pane`, and `clear_frozen_pane` mutations.
@@ -301,12 +317,12 @@ Python uses the mainstream PyO3 + maturin native-extension path. Node.js and Typ
 over stable Node-API with Promise-backed native work and exact-version platform packages. Neither
 binding requires a consumer Rust toolchain when installed from a wheel or prebuilt npm artifact.
 
-The 0.1.23 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
+The 0.1.24 release line targets Python 3.10 through 3.14 and Node.js 22 or newer. Install the
 bindings with:
 
 ```bash
-python -m pip install "cellrune==0.1.23"
-npm install "@cellrune/node@0.1.23"
+python -m pip install "cellrune==0.1.24"
+npm install "@cellrune/node@0.1.24"
 ```
 
 The bindings expose the same versioned read, edit, calculate, and write contract. Native package

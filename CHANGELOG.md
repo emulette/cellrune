@@ -10,6 +10,90 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-10-10
+
+### Added
+
+- `write_xlsx_draft_edits_bytes`, `write_xlsx_draft_edits`, and `write_xlsx_draft_edits_path`
+  write the edits of a draft opened from a document without calculating. Formulas the edits can
+  affect lose their saved results and only then does `calcPr` gain `fullCalcOnLoad`; every other
+  saved result, `calcChain.xml` while every formula keeps its cell and array kind, `calcPr`, and
+  untouched parts keep their source bytes. `EditWriteReport::affected_formulas` lists the cleared
+  formulas. Formulas whose references are known only after evaluation, such as `INDIRECT`,
+  `OFFSET`, a formula that does not parse, a call with arguments its function rejects, or a
+  formula without text, count as affected whenever anything changed.
+- `Sheet::auto_filter` returns a worksheet-level autoFilter as a `SheetAutoFilter` with its range
+  and filter column IDs.
+- `WorkbookChange::widen_sheet_auto_filter` and `WorkbookChange::widen_table_columns` widen a
+  sheet autoFilter or a worksheet table by columns. Filter and sort state are kept, filter column
+  IDs shift when the range grows leftward, new table columns take their header text as names, and
+  `_xlnm._FilterDatabase` follows the widened filter. Rejected widenings report
+  `validation.column_widening_range_invalid`, `validation.column_widening_overlap`,
+  `validation.sheet_auto_filter_overlaps_table`, `validation.sheet_auto_filter_not_found`, or
+  `validation.table_totals_cell_occupied`.
+- `open_xlsx_document_vec` keeps a caller's `Vec<u8>` as the retained archive without copying it,
+  and `XlsxDocument::into_input_bytes` returns the retained bytes, without copying them when the
+  document is their only owner. The other `open_xlsx_document_*` entry points now hold one copy of
+  the archive while opening instead of two.
+- `WorkbookSnapshot::non_worksheet_tab_ids` returns the IDs of chartsheets, dialogsheets, and
+  macrosheets.
+
+### Changed
+
+- `WorkbookFingerprint` now covers a worksheet-level autoFilter, so a workbook that declares one
+  gets a different digest than in 0.1.23 under the same schema version.
+
+### Fixed
+
+- `FormulaText::from_user_input` stores formulas in Excel's saved spelling, so a host that
+  recalculates an authored file no longer reports `#NAME?`: future functions gain `_xlfn.`
+  (`_xlfn._xlws.` for `FILTER` and `SORT`), `LET` and `LAMBDA` parameters `_xlpm.`, functions passed
+  as `LAMBDA` arguments `_xleta.`, `B1#` becomes `_xlfn.ANCHORARRAY(B1)`, and `@x` becomes
+  `_xlfn.SINGLE(x)`. Formula text read back through Rust, Python, Node.js, and MCP shows this
+  spelling, as for formulas read from a file.
+- A cell a document draft creates takes the style of its row when the row has `customFormat`, else
+  its column's style, as Excel does; an empty styled cell keeps its own style.
+- Writing, clearing, or table-resizing a shared formula's anchor keeps the other cells of the
+  group as ordinary formulas instead of failing the save.
+- Value, formula, clear, and annotated-text edits to a legacy array formula's cells other than its
+  anchor fail at once with `validation.array_formula_part_edit`.
+- A cell added and then removed in the same draft, including by a table resize, no longer makes
+  every later save fail.
+- Writing text to a table header cell renames that column and its structured references; blank
+  or cleared headers fail with `validation.table_column_name_empty`, and number or formula headers
+  with `validation.table_header_requires_text`.
+- Changing a defined name or renaming a sheet keeps every other `<definedName>` element and the
+  attributes of the changed one, such as `comment`, `function`, and `vbProcedure`.
+- Renaming a sheet also rewrites its name in conditional formatting and data validation formulas,
+  including `x14` ones, sparklines, hyperlink locations, chart series, and pivot cache sources. A
+  chart reference that cannot be rewritten fails the save with `xlsx.write.unsupported_preservation`.
+- A `calcPr` created in a workbook without one is placed in schema order.
+- An edited document is verified under the read limits it was opened with, so a document opened
+  with raised limits saves after an edit, and outputs between 256 and 512 MiB no longer fail
+  verification.
+- A worksheet saved with an empty `<sheetData/>` accepts new cells.
+- Whole-column and whole-row references include spilled and declared array results below the last
+  stored cell.
+- A range ending in `INDEX`, such as `B2:INDEX(D2:D20,F1)`, depends on every cell its end can reach,
+  so editing inside it after the end moves no longer leaves a stale result.
+- Incremental recalculation reads a failed declared spill's area as `#SPILL!`, as full and targeted
+  calculation do.
+- Exceeding `max_dependency_edges` leaves the formulas collected before the limit calculated; only
+  the rest and their dependents report the limit.
+- Criteria functions, exact `MATCH`, `XMATCH`, `XLOOKUP`, database criteria, and `UNIQUE` charge
+  the function work budget once per compared text instead of once per byte, so tens of thousands
+  of text rows no longer exceed the default limit.
+- `ROUND`, `ROUNDUP`, `ROUNDDOWN`, and `TRUNC` with a digit count at or below -2^31 no longer panic
+  in builds with overflow checks.
+- A ZIP whose end record declares more entries than `max_entries` fails with `xlsx.too_many_entries`
+  before its central directory is read, and a ZIP64 entry with a huge compressed size fails with
+  `xlsx.invalid_zip` instead of overflowing.
+- Interop numbers a sheet added in a batch past chartsheet, dialogsheet, and macrosheet IDs, so
+  later changes in the batch find the new sheet.
+- A Rust panic in a Node.js call throws an error instead of aborting the process, and a session left
+  unusable by a panic reports `interop.session.poisoned` in Python and Node.js instead of
+  `interop.session.unavailable`.
+
 ## [0.1.23] - 2026-10-01
 
 ### Added
@@ -907,7 +991,8 @@ Existing error codes, details, and messages are unchanged.
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/emulette/cellrune/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/emulette/cellrune/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/emulette/cellrune/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/emulette/cellrune/compare/v0.1.20...v0.1.21
