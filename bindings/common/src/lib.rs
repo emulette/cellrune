@@ -80,14 +80,14 @@ impl SharedWorkbookSession {
     ///
     /// # Errors
     ///
-    /// Returns the stable closed or unavailable interop error.
+    /// Returns the stable closed or poisoned interop error.
     pub fn cancellable_operation(&self) -> Result<CancellableOperation<'_>, InteropError> {
         self.require_open()?;
         let cancellation = Arc::new(CancellationToken::new());
         let mut operations = self
             .cancellable_operations
             .lock()
-            .map_err(|_| InteropError::session_busy())?;
+            .map_err(|_| InteropError::session_poisoned())?;
         self.require_open()?;
         operations.push(Arc::clone(&cancellation));
         Ok(CancellableOperation {
@@ -100,14 +100,13 @@ impl SharedWorkbookSession {
     ///
     /// # Errors
     ///
-    /// Returns the stable closed or unavailable interop error.
+    /// Returns the stable closed, unavailable, or poisoned interop error.
     pub fn try_lock(&self) -> Result<WorkbookSessionGuard<'_>, InteropError> {
         self.require_open()?;
         let guard = match self.session.try_lock() {
             Ok(guard) => guard,
-            Err(TryLockError::WouldBlock | TryLockError::Poisoned(_)) => {
-                return Err(InteropError::session_busy());
-            }
+            Err(TryLockError::WouldBlock) => return Err(InteropError::session_busy()),
+            Err(TryLockError::Poisoned(_)) => return Err(InteropError::session_poisoned()),
         };
         self.open_guard(guard)
     }
@@ -116,13 +115,13 @@ impl SharedWorkbookSession {
     ///
     /// # Errors
     ///
-    /// Returns the stable closed or unavailable interop error.
+    /// Returns the stable closed or poisoned interop error.
     pub fn lock(&self) -> Result<WorkbookSessionGuard<'_>, InteropError> {
         self.require_open()?;
         let guard = self
             .session
             .lock()
-            .map_err(|_| InteropError::session_busy())?;
+            .map_err(|_| InteropError::session_poisoned())?;
         self.open_guard(guard)
     }
 
@@ -209,6 +208,57 @@ mod tests {
         assert_eq!(error.code(), "interop.session.unavailable");
         drop(guard);
         assert!(shared.try_lock().is_ok());
+    }
+
+    #[test]
+    fn panic_while_locked_reports_a_stable_poisoned_error_until_close() {
+        let shared = Arc::new(SharedWorkbookSession::new(WorkbookSession::create()));
+        let panicking = Arc::clone(&shared);
+        let panicked = thread::spawn(move || {
+            let _guard = panicking.lock().expect("new session must be open");
+            panic!("simulated workbook panic while the session is locked");
+        })
+        .join();
+        assert!(panicked.is_err());
+
+        let blocking = match shared.lock() {
+            Ok(_) => panic!("a poisoned session must not be lockable"),
+            Err(error) => error,
+        };
+        let non_blocking = match shared.try_lock() {
+            Ok(_) => panic!("a poisoned session must not be lockable without waiting"),
+            Err(error) => error,
+        };
+        assert_eq!(blocking.code(), "interop.session.poisoned");
+        assert_eq!(non_blocking.code(), "interop.session.poisoned");
+
+        shared.close();
+        let error = match shared.lock() {
+            Ok(_) => panic!("a closed session must not be recoverable"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), "interop.session.closed");
+    }
+
+    #[test]
+    fn poisoned_cancellation_registry_reports_the_poisoned_error() {
+        let shared = Arc::new(SharedWorkbookSession::new(WorkbookSession::create()));
+        let panicking = Arc::clone(&shared);
+        let panicked = thread::spawn(move || {
+            let _operations = panicking
+                .cancellable_operations
+                .lock()
+                .expect("new cancellation registry must be lockable");
+            panic!("simulated panic while the cancellation registry is locked");
+        })
+        .join();
+        assert!(panicked.is_err());
+
+        let error = match shared.cancellable_operation() {
+            Ok(_) => panic!("a poisoned cancellation registry must reject new work"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), "interop.session.poisoned");
     }
 
     #[test]

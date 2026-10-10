@@ -17,6 +17,7 @@ const MESSAGE_PAGE_LIMIT_INVALID: &str =
 const MESSAGE_CALCULATION_REQUIRED: &str = "calculate the current workbook revision before saving";
 const MESSAGE_SESSION_CLOSED: &str = "workbook session is closed";
 const MESSAGE_SESSION_BUSY: &str = "workbook session state is unavailable";
+const MESSAGE_SESSION_POISONED: &str = "workbook session state is unusable after a native panic";
 const MESSAGE_EXCEL_ERROR: &str = "Excel error value is not recognized";
 const MESSAGE_INVALID_CHANGE: &str = "workbook change failed transport validation";
 const MESSAGE_SHEET_CREATION_FAILED: &str = "sheet identifier allocation failed";
@@ -144,9 +145,14 @@ impl InteropError {
         Self::state("interop.session.closed", MESSAGE_SESSION_CLOSED)
     }
 
-    /// Creates the stable lock-state error used when a shared session is poisoned.
+    /// Creates the stable lock-state error used when concurrent work holds a shared session.
     pub fn session_busy() -> Self {
         Self::state("interop.session.unavailable", MESSAGE_SESSION_BUSY)
+    }
+
+    /// Creates the stable lock-state error used when a panic poisoned a shared session.
+    pub fn session_poisoned() -> Self {
+        Self::state("interop.session.poisoned", MESSAGE_SESSION_POISONED)
     }
 
     pub(crate) fn sheet_not_found() -> Self {
