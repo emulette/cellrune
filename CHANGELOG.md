@@ -52,16 +52,18 @@ inventories, and measurements belong in the linked documentation rather than in 
   `_xlfn.SINGLE(x)`. Formula text read back through Rust, Python, Node.js, and MCP shows this
   spelling, as for formulas read from a file.
 - A cell a document draft creates takes the style of its row when the row has `customFormat`, else
-  its column's style, as Excel does; an empty styled cell keeps its own style.
+  its column's style, as Excel does; an empty styled cell keeps its own style unless that style
+  names no `cellXfs` entry, in which case the cell is styled as a new one.
 - Writing, clearing, or table-resizing a shared formula's anchor keeps the other cells of the
   group as ordinary formulas instead of failing the save.
 - Value, formula, clear, and annotated-text edits to a legacy array formula's cells other than its
   anchor fail at once with `validation.array_formula_part_edit`.
 - A cell added and then removed in the same draft, including by a table resize, no longer makes
   every later save fail.
-- Writing text to a table header cell renames that column and its structured references; blank
-  or cleared headers fail with `validation.table_column_name_empty`, and number or formula headers
-  with `validation.table_header_requires_text`.
+- Writing text to a table header cell, including through `set_annotated_text`, renames that column
+  and its structured references; blank or cleared headers fail with
+  `validation.table_column_name_empty`, and number or formula headers with
+  `validation.table_header_requires_text`.
 - Changing a defined name or renaming a sheet keeps every other `<definedName>` element and the
   attributes of the changed one, such as `comment`, `function`, and `vbProcedure`.
 - Renaming a sheet also rewrites its name in conditional formatting and data validation formulas,
@@ -74,8 +76,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A worksheet saved with an empty `<sheetData/>` accepts new cells.
 - Whole-column and whole-row references include spilled and declared array results below the last
   stored cell.
-- A range ending in `INDEX`, such as `B2:INDEX(D2:D20,F1)`, depends on every cell its end can reach,
-  so editing inside it after the end moves no longer leaves a stale result.
+- A range ending in `INDEX`, such as `B2:INDEX(D2:D20,F1)`, no longer leaves a stale result after
+  its end moves: edit impact covers every cell the end can reach, and a session recalculates in
+  full when a formula or array result lies in that reach. Calculation order follows only the cells
+  the range covers, so a formula inside the reach is not a circular reference.
 - Incremental recalculation reads a failed declared spill's area as `#SPILL!`, as full and targeted
   calculation do.
 - Exceeding `max_dependency_edges` leaves the formulas collected before the limit calculated; only
@@ -85,9 +89,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   of text rows no longer exceed the default limit.
 - `ROUND`, `ROUNDUP`, `ROUNDDOWN`, and `TRUNC` with a digit count at or below -2^31 no longer panic
   in builds with overflow checks.
-- A ZIP whose end record declares more entries than `max_entries` fails with `xlsx.too_many_entries`
-  before its central directory is read, and a ZIP64 entry with a huge compressed size fails with
-  `xlsx.invalid_zip` instead of overflowing.
+- A ZIP whose end records declare more entries than `max_entries` fails with
+  `xlsx.too_many_entries` before its central directory is read. The counts of every end record the
+  ZIP reader may fall back to are summed, so a decoy record that fails to parse cannot hide the one
+  read after it. A ZIP64 entry with a huge compressed size fails with `xlsx.invalid_zip` instead of
+  overflowing.
 - Interop numbers a sheet added in a batch past chartsheet, dialogsheet, and macrosheet IDs, so
   later changes in the batch find the new sheet.
 - A Rust panic in a Node.js call throws an error instead of aborting the process, and a session left

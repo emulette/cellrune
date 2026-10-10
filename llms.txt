@@ -429,15 +429,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   formulas the edits can affect: edited formulas; formulas referring to
   edited or removed cells, including through ranges, whole columns or rows,
   and the full reach of an `INDEX` range end; formulas naming a changed
-  defined name, directly, through other names, or while it did not exist;
-  formulas referring to a changed table; `SHEET`, `SHEETS`, `CELL`, and 3-D
-  references when sheets are added or renamed; a spill anchor whose area was
-  written; anchors with a saved `#SPILL!` after a clear; and every dependent
-  of those. Formulas whose references are known only after evaluation
-  (dynamic references, unparsed formulas, rejected calls, formulas without
-  text) are always affected once anything changed, and every formula is
-  affected when the analysis exceeds `max_dependency_edges` or the date
-  system or calculation hints changed. Affected formulas lose their saved
+  defined name, directly, through other names, through a sheet-qualified
+  name such as `Data!Rate`, or while it did not exist; formulas referring to
+  a changed table; references to an added or renamed sheet, and `SHEET`,
+  `SHEETS`, `CELL`, and 3-D references when sheets are added or renamed; a
+  spill anchor whose area was written; anchors with a saved `#SPILL!` after
+  a clear; and every dependent of those. Formulas whose references are known
+  only after evaluation (dynamic references, unparsed formulas, rejected
+  calls, also inside a defined name they use, formulas without text) are
+  always affected once anything changed, and every formula is affected when
+  the analysis exceeds `max_dependency_edges` or the date system or
+  calculation hints changed. Affected formulas lose their saved
   results and only then does `calcPr` gain `fullCalcOnLoad="1"`, keeping
   `forceFullCalc`; other saved results, `calcPr`, `calcChain.xml` while every
   formula keeps its cell and array kind, and untouched parts keep their
@@ -451,7 +453,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.save_in_directory(...)`.
 - A cell a document draft creates takes its row's style when the row has
   `customFormat="1"`, else its column's `<col style>`, else none; an empty
-  styled `<c>` keeps its own style. Writing text to a table header cell
+  styled `<c>` keeps its own style unless it names no `cellXfs` entry.
+  Writing text to a table header cell, also with `.set_annotated_text`,
   renames the column; edits inside a legacy array other than at its anchor
   fail with `validation.array_formula_part_edit`.
 - Dynamic formulas can be authored in canonical drafts. Existing
