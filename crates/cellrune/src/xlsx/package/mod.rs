@@ -362,9 +362,6 @@ fn index_archive<R: Read + Seek>(
             .with_detail(archive.len().to_string())
             .with_observed(archive.len() as u64));
     }
-    if archive.has_overlapping_files().map_err(zip_error)? {
-        return Err(XlsxReadError::new(XlsxErrorCode::OverlappingEntries));
-    }
 
     let mut entries = BTreeMap::new();
     let mut total_uncompressed = 0_u128;
@@ -372,10 +369,27 @@ fn index_archive<R: Read + Seek>(
         let file = archive.by_index(index).map_err(zip_error)?;
         let raw_name = file.name_raw();
         let normalized_name = raw_name.strip_suffix(b"/").unwrap_or(raw_name);
-        if normalized_name.is_empty() {
-            continue;
+        let part = match normalized_name {
+            [] => None,
+            name => Some(PartPath::from_archive_name(name)?),
+        };
+        // The ZIP reader does not check that compressed data lies inside the archive, and its
+        // overlap check adds each compressed size to the entry's data offset unchecked. Holding
+        // every entry, skipped ones included, to the archive length keeps that sum in range and
+        // the ratio check, and so every declared size a part read reserves, tied to bytes the
+        // input actually contains.
+        let compressed = file.compressed_size();
+        if compressed > archive_bytes {
+            let error = XlsxReadError::new(XlsxErrorCode::InvalidZip)
+                .with_detail(detail::COMPRESSED_SIZE_EXCEEDS_ARCHIVE);
+            return Err(match part {
+                Some(part) => error.at_source(part.source_id()),
+                None => error,
+            });
         }
-        let part = PartPath::from_archive_name(normalized_name)?;
+        let Some(part) = part else {
+            continue;
+        };
         if file.is_dir() {
             continue;
         }
@@ -405,15 +419,6 @@ fn index_archive<R: Read + Seek>(
             return Err(XlsxReadError::new(XlsxErrorCode::TotalUncompressedTooLarge)
                 .with_observed(u64::try_from(total_uncompressed).unwrap_or(u64::MAX)));
         }
-        // The ZIP reader does not check that compressed data lies inside the archive. Holding
-        // the compressed size to the archive length keeps the ratio check, and so every declared
-        // size a part read reserves, tied to bytes the input actually contains.
-        let compressed = file.compressed_size();
-        if compressed > archive_bytes {
-            return Err(XlsxReadError::new(XlsxErrorCode::InvalidZip)
-                .with_detail(detail::COMPRESSED_SIZE_EXCEEDS_ARCHIVE)
-                .at_source(part.source_id()));
-        }
         if compression_ratio_exceeded(uncompressed, compressed, limits.max_compression_ratio()) {
             let error = XlsxReadError::new(XlsxErrorCode::CompressionRatioExceeded)
                 .at_source(part.source_id());
@@ -429,6 +434,9 @@ fn index_archive<R: Read + Seek>(
                 XlsxReadError::new(XlsxErrorCode::DuplicatePart).at_source(part.source_id())
             );
         }
+    }
+    if archive.has_overlapping_files().map_err(zip_error)? {
+        return Err(XlsxReadError::new(XlsxErrorCode::OverlappingEntries));
     }
     Ok(IndexedArchive {
         archive,

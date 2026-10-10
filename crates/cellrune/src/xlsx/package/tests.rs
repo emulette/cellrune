@@ -6,6 +6,9 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 use super::super::{ReadLimits, ReadOptions, ReadOptionsError, XlsxErrorCode, XlsxReadError};
 use super::inspect_package;
 
+const CENTRAL_HEADER_BYTES: usize = 46;
+const END_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
@@ -192,6 +195,37 @@ fn entry_count_budget_is_enforced_before_xml_parsing() {
         .expect("non-zero limit");
     let error = assert_error(minimal_entries(), limits, XlsxErrorCode::TooManyEntries);
     assert_eq!(error.observed(), Some(5));
+}
+
+#[test]
+fn zip64_compressed_size_past_the_archive_is_rejected_before_the_overlap_check() {
+    // A regular part, a directory, and a nameless entry: indexing skips the last two, but the
+    // overlap check still adds every entry's compressed size to its data offset.
+    for (name, source) in [
+        ("[Content_Types].xml", Some("[Content_Types].xml")),
+        ("xl/", Some("xl")),
+        ("/", None),
+    ] {
+        let mut entries = minimal_entries();
+        if name != "[Content_Types].xml" {
+            entries.push(FixtureEntry::stored(name, ""));
+        }
+        let archive = declare_zip64_compressed_size(&build_archive(entries), name, u64::MAX);
+
+        let error = inspect_package(Cursor::new(archive), ReadOptions::default())
+            .expect_err("compressed data past the archive end must be rejected");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidZip, "{name}: {error}");
+        assert_eq!(
+            error.detail(),
+            Some("ZIP entry compressed size exceeds the archive length"),
+            "{name}"
+        );
+        assert_eq!(
+            error.source_id().map(|source| source.as_str()),
+            source,
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -449,9 +483,50 @@ fn assert_error(
 /// intact. A Deflated entry still inflates to its true length, which is how a
 /// crafted archive hides its real cost from central-directory budgets.
 fn under_declare_uncompressed_size(archive: &mut [u8], name: &str, declared: u32) {
-    const CENTRAL_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
     const LOCAL_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
-    const CENTRAL_HEADER_BYTES: usize = 46;
+
+    let index = central_header_offset(archive, name);
+    let local_offset = u32::from_le_bytes([
+        archive[index + 42],
+        archive[index + 43],
+        archive[index + 44],
+        archive[index + 45],
+    ]) as usize;
+    assert_eq!(
+        archive[local_offset..local_offset + 4],
+        LOCAL_SIGNATURE,
+        "central directory must point at a local file header"
+    );
+    archive[index + 24..index + 28].copy_from_slice(&declared.to_le_bytes());
+    archive[local_offset + 22..local_offset + 26].copy_from_slice(&declared.to_le_bytes());
+}
+
+/// Moves one entry's central-directory compressed size into a ZIP64 extra field
+/// holding `compressed`, leaving its local file header and data intact.
+fn declare_zip64_compressed_size(archive: &[u8], name: &str, compressed: u64) -> Vec<u8> {
+    let index = central_header_offset(archive, name);
+    let name_length = u16::from_le_bytes([archive[index + 28], archive[index + 29]]);
+    let extra_length = u16::from_le_bytes([archive[index + 30], archive[index + 31]]);
+    let extra_end = index + CENTRAL_HEADER_BYTES + usize::from(name_length + extra_length);
+    let zip64_extra = [&[1, 0, 8, 0][..], &compressed.to_le_bytes()].concat();
+
+    let mut rewritten = [&archive[..extra_end], &zip64_extra, &archive[extra_end..]].concat();
+    rewritten[index + 20..index + 24].copy_from_slice(&u32::MAX.to_le_bytes());
+    rewritten[index + 30..index + 32]
+        .copy_from_slice(&(extra_length + zip64_extra.len() as u16).to_le_bytes());
+    let end = end_record_offset(&rewritten);
+    let directory_size = u32::from_le_bytes(
+        rewritten[end + 12..end + 16]
+            .try_into()
+            .expect("four bytes"),
+    );
+    rewritten[end + 12..end + 16]
+        .copy_from_slice(&(directory_size + zip64_extra.len() as u32).to_le_bytes());
+    rewritten
+}
+
+fn central_header_offset(archive: &[u8], name: &str) -> usize {
+    const CENTRAL_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
 
     let mut index = 0;
     while index + CENTRAL_HEADER_BYTES <= archive.len() {
@@ -467,22 +542,21 @@ fn under_declare_uncompressed_size(archive: &mut [u8], name: &str, declared: u32
             index += 1;
             continue;
         }
-        let local_offset = u32::from_le_bytes([
-            archive[index + 42],
-            archive[index + 43],
-            archive[index + 44],
-            archive[index + 45],
-        ]) as usize;
-        assert_eq!(
-            archive[local_offset..local_offset + 4],
-            LOCAL_SIGNATURE,
-            "central directory must point at a local file header"
-        );
-        archive[index + 24..index + 28].copy_from_slice(&declared.to_le_bytes());
-        archive[local_offset + 22..local_offset + 26].copy_from_slice(&declared.to_le_bytes());
-        return;
+        return index;
     }
     panic!("fixture entry must exist: {name}");
+}
+
+/// Returns the offset of the end-of-central-directory record, which
+/// [`build_archive`] writes last and without a comment.
+fn end_record_offset(archive: &[u8]) -> usize {
+    let offset = archive.len() - 22;
+    assert_eq!(
+        archive[offset..offset + 4],
+        END_SIGNATURE,
+        "fixture must end with its end-of-central-directory record"
+    );
+    offset
 }
 
 fn build_archive(entries: Vec<FixtureEntry>) -> Vec<u8> {
