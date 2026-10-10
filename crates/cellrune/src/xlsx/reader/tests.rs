@@ -2681,7 +2681,7 @@ fn tables_survive_edit_write_reopen() {
     draft
         .set_cell_value(
             sheet_id,
-            address("A1"),
+            address("A2"),
             CellValue::Number(crate::FiniteNumber::new(9.0).expect("finite")),
         )
         .expect("edit");
@@ -2706,7 +2706,7 @@ fn tables_survive_edit_write_reopen() {
     let first = reopened.workbook().sheet_by_name("First").expect("sheet");
     assert_eq!(first.tables().len(), 1);
     assert_eq!(
-        literal(first, "A1"),
+        literal(first, "A2"),
         &CellValue::Number(crate::FiniteNumber::new(9.0).expect("finite")),
         "the edit itself must survive the rewrite"
     );

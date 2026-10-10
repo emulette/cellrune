@@ -77,6 +77,8 @@ const MESSAGE_TABLE_COLUMNS_EMPTY: &str = "table must declare at least one colum
 const MESSAGE_TABLE_COLUMN_COUNT_MISMATCH: &str =
     "table column count does not match the table range width";
 const MESSAGE_TABLE_COLUMN_NAME_EMPTY: &str = "table column name must not be empty";
+const MESSAGE_TABLE_HEADER_REQUIRES_TEXT: &str =
+    "a table header cell accepts only a text column name";
 const MESSAGE_TABLE_COLUMN_NAME_TOO_LONG: &str = "table column name exceeds 255 UTF-16 code units";
 const MESSAGE_TABLE_COLUMN_NAME_INVALID_CHARACTER: &str =
     "table column name contains a character forbidden by XML 1.0";
@@ -229,6 +231,8 @@ pub enum ValidationErrorCode {
     TableColumnCountMismatch,
     /// A table column name is empty.
     TableColumnNameEmpty,
+    /// A table header cell edit is not a text column name.
+    TableHeaderRequiresText,
     /// A table column name exceeds Excel's length limit.
     TableColumnNameTooLong,
     /// A table column name contains a character forbidden by XML 1.0.
@@ -331,6 +335,7 @@ impl ValidationErrorCode {
             Self::TableColumnsEmpty => "validation.table_columns_empty",
             Self::TableColumnCountMismatch => "validation.table_column_count_mismatch",
             Self::TableColumnNameEmpty => "validation.table_column_name_empty",
+            Self::TableHeaderRequiresText => "validation.table_header_requires_text",
             Self::TableColumnNameTooLong => "validation.table_column_name_too_long",
             Self::TableColumnNameInvalidCharacter => {
                 "validation.table_column_name_invalid_character"
@@ -598,6 +603,15 @@ pub enum ValidationError {
     },
     /// A table column name is empty.
     TableColumnNameEmpty,
+    /// A table header cell edit is not a text column name.
+    TableHeaderRequiresText {
+        /// Table whose header the edit targets.
+        table_id: u32,
+        /// One-based row of the header cell.
+        row: u32,
+        /// One-based column of the header cell.
+        column: u32,
+    },
     /// A table column name is longer than Excel's 255 UTF-16 code-unit limit.
     TableColumnNameTooLong {
         /// Length of the rejected name in UTF-16 code units.
@@ -785,6 +799,7 @@ impl ValidationError {
             Self::TableColumnsEmpty => ValidationErrorCode::TableColumnsEmpty,
             Self::TableColumnCountMismatch { .. } => ValidationErrorCode::TableColumnCountMismatch,
             Self::TableColumnNameEmpty => ValidationErrorCode::TableColumnNameEmpty,
+            Self::TableHeaderRequiresText { .. } => ValidationErrorCode::TableHeaderRequiresText,
             Self::TableColumnNameTooLong { .. } => ValidationErrorCode::TableColumnNameTooLong,
             Self::TableColumnNameInvalidCharacter { .. } => {
                 ValidationErrorCode::TableColumnNameInvalidCharacter
@@ -996,6 +1011,14 @@ impl fmt::Display for ValidationError {
                 "{MESSAGE_TABLE_COLUMN_COUNT_MISMATCH}: {columns} columns, width {width}"
             ),
             Self::TableColumnNameEmpty => formatter.write_str(MESSAGE_TABLE_COLUMN_NAME_EMPTY),
+            Self::TableHeaderRequiresText {
+                table_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_HEADER_REQUIRES_TEXT}: table {table_id}, row {row}, column {column}"
+            ),
             Self::TableColumnNameTooLong { utf16_len } => {
                 write!(
                     formatter,
@@ -1335,6 +1358,10 @@ mod tests {
             (
                 ValidationErrorCode::TableColumnNameEmpty,
                 "validation.table_column_name_empty",
+            ),
+            (
+                ValidationErrorCode::TableHeaderRequiresText,
+                "validation.table_header_requires_text",
             ),
             (
                 ValidationErrorCode::TableColumnNameTooLong,

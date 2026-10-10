@@ -339,6 +339,42 @@ pub(super) fn resize_table_rows(
     Ok(true)
 }
 
+/// Returns the table column whose header cell is `address`.
+pub(super) fn table_header_column(
+    sheet: &Sheet,
+    address: CellAddress,
+) -> Option<(TableId, TableColumnId)> {
+    sheet.tables().iter().find_map(|table| {
+        let range = table.range();
+        if table.header_row_count() == 0
+            || address.row() != range.start().row()
+            || !range.contains(address)
+        {
+            return None;
+        }
+        let index = address.column().get() - range.start().column().get();
+        let column = table.columns().get(usize::try_from(index).ok()?)?;
+        Some((table.id(), column.column_id()))
+    })
+}
+
+/// The error for a header cell edit that cannot become the column's name.
+pub(super) fn table_header_edit_error(
+    table_id: TableId,
+    address: CellAddress,
+    blank: bool,
+) -> ValidationError {
+    if blank {
+        ValidationError::TableColumnNameEmpty
+    } else {
+        ValidationError::TableHeaderRequiresText {
+            table_id: table_id.get(),
+            row: address.row().get(),
+            column: address.column().get(),
+        }
+    }
+}
+
 pub(super) fn table_locations(sheets: &[Sheet]) -> Result<TableLocations, ValidationError> {
     let mut locations = BTreeMap::new();
     for (sheet_index, sheet) in sheets.iter().enumerate() {

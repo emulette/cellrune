@@ -10,7 +10,7 @@ use super::formula_edit::{
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
 use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
-    resize_table_rows, table_locations,
+    resize_table_rows, table_header_column, table_header_edit_error, table_locations,
 };
 use super::{
     BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
@@ -21,7 +21,8 @@ use crate::calculation::formula_rewrite::{
 use crate::workbook::{WorkbookBuildError, WorkbookSnapshotInput};
 use crate::{
     CalculationCellId, CellContent, CellValue, FormulaCell, FormulaDialect, FormulaMetadata,
-    SavedResult, Sheet, SheetId, SheetVisibility, ValidationError, WorkbookSnapshot,
+    SavedResult, Sheet, SheetId, SheetVisibility, TableColumnName, ValidationError,
+    WorkbookSnapshot,
 };
 
 impl WorkbookDraft {
@@ -102,6 +103,46 @@ impl WorkbookDraft {
                     address,
                     value,
                 } => {
+                    // A header cell holds its column's name, so writing one renames the column.
+                    if let Some((table_id, column_id)) =
+                        table_header_column(sheet_by_id_mut(&mut sheets, *sheet_id)?, *address)
+                    {
+                        let CellValue::Text(text) = value else {
+                            return Err(table_header_edit_error(
+                                table_id,
+                                *address,
+                                *value == CellValue::Blank,
+                            )
+                            .into());
+                        };
+                        let new_name = TableColumnName::new(text.as_str())?;
+                        if rename_table_column(
+                            &mut sheets,
+                            &mut defined_names,
+                            TableFormulaEdit {
+                                state: TableEditState {
+                                    mutations: &mut cell_mutations,
+                                    changed_cells: &mut changed_cells,
+                                    calculation_changed_cells: &mut calculation_changed_cells,
+                                    touched_sheets: &mut touched_sheets,
+                                    changed_table_ids: &mut changed_table_ids,
+                                    presentation: &presentation,
+                                    source,
+                                },
+                                locations: &table_locations,
+                                formula_locations: &table_formula_locations,
+                                budget: rewrite_budget,
+                            },
+                            table_id,
+                            column_id,
+                            &new_name,
+                        )? {
+                            workbook_changed = true;
+                            topology_changed = true;
+                            semantic_changed = true;
+                            continue;
+                        }
+                    }
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     ensure_not_array_formula_part(sheet, *address)?;
                     for follower in sheet.detach_shared_formula_followers(*address) {
@@ -160,6 +201,9 @@ impl WorkbookDraft {
                 } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     ensure_not_array_formula_part(sheet, *address)?;
+                    if let Some((table_id, _)) = table_header_column(sheet, *address) {
+                        return Err(table_header_edit_error(table_id, *address, false).into());
+                    }
                     for follower in sheet.detach_shared_formula_followers(*address) {
                         mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
                     }
@@ -196,6 +240,9 @@ impl WorkbookDraft {
                 } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     ensure_not_array_formula_part(sheet, *address)?;
+                    if let Some((table_id, _)) = table_header_column(sheet, *address) {
+                        return Err(table_header_edit_error(table_id, *address, false).into());
+                    }
                     for follower in sheet.detach_shared_formula_followers(*address) {
                         mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
                     }
@@ -230,6 +277,9 @@ impl WorkbookDraft {
                 WorkbookChange::ClearCell { sheet_id, address } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     ensure_not_array_formula_part(sheet, *address)?;
+                    if let Some((table_id, _)) = table_header_column(sheet, *address) {
+                        return Err(table_header_edit_error(table_id, *address, true).into());
+                    }
                     for follower in sheet.detach_shared_formula_followers(*address) {
                         mark_upsert(&mut cell_mutations, *sheet_id, follower, false);
                     }

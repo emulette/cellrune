@@ -1036,6 +1036,66 @@ fn growing_a_totals_table_moves_the_totals_row_and_fills_calculated_columns() {
 }
 
 #[test]
+fn writing_a_table_header_cell_renames_its_column() {
+    let address = |a1: &str| CellAddress::from_a1(a1).expect("valid address");
+    let sheet = SheetId::new(1).expect("sheet");
+    let (workbook, _) = resize_totals_table(vec![WorkbookChange::set_cell_value(
+        sheet,
+        address("C1"),
+        CellValue::Text("health".into()),
+    )]);
+    let table = &workbook.sheets()[0].tables()[0];
+    assert_eq!(table.columns()[2].name(), "health");
+    assert_eq!(
+        totals_table_cell(&workbook, "C1"),
+        Some(CellContent::Literal(CellValue::Text("health".into())))
+    );
+    assert_totals_formula(&workbook, "D2", "tblChar[[#This Row],[health]]*2");
+    assert_totals_formula(&workbook, "C5", "SUBTOTAL(109,tblChar[health])");
+    assert_eq!(number_at(&workbook, "C5"), 60.0);
+
+    let document =
+        open_xlsx_document_bytes(&generated_totals_table_fixture(), OpenOptions::default())
+            .expect("totals table input");
+    let mut draft = WorkbookDraft::from_document(&document);
+    for (change, expected) in [
+        (
+            WorkbookChange::set_cell_value(sheet, address("C1"), CellValue::Blank),
+            cellrune::ValidationErrorCode::TableColumnNameEmpty,
+        ),
+        (
+            WorkbookChange::clear_cell(sheet, address("C1")),
+            cellrune::ValidationErrorCode::TableColumnNameEmpty,
+        ),
+        (
+            WorkbookChange::set_cell_value(
+                sheet,
+                address("C1"),
+                CellValue::number(1.0).expect("finite value"),
+            ),
+            cellrune::ValidationErrorCode::TableHeaderRequiresText,
+        ),
+        (
+            WorkbookChange::set_cell_formula(
+                sheet,
+                address("C1"),
+                cellrune::FormulaText::from_xlsx("\"hp\"").expect("formula"),
+            ),
+            cellrune::ValidationErrorCode::TableHeaderRequiresText,
+        ),
+        (
+            WorkbookChange::set_cell_value(sheet, address("C1"), CellValue::Text("HP2".into())),
+            cellrune::ValidationErrorCode::DuplicateTableColumnName,
+        ),
+    ] {
+        let error = draft
+            .apply_changes(EditBatch::new([change]))
+            .expect_err("invalid header write");
+        assert_eq!(error.code(), expected);
+    }
+}
+
+#[test]
 fn growing_a_totals_table_twice_clears_the_totals_row_the_draft_wrote() {
     let resize = |last_row| {
         WorkbookChange::resize_table_rows(
