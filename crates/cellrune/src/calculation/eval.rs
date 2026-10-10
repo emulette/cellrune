@@ -895,10 +895,17 @@ impl<'workbook> Engine<'workbook> {
             {
                 self.record_target_dependency(owner);
             }
-            return self.results.get(&owner).map_or(
-                ValueSource::Error(ErrorKind::Unsupported),
-                ValueSource::Calculated,
-            );
+            if let Some(value) = self.results.get(&owner) {
+                return ValueSource::Calculated(value);
+            }
+            // An area cell left unmaterialized reads its owner's result. A pass that does not
+            // evaluate the owner reads the result it kept from the previous snapshot instead.
+            if owner != cell
+                && let Some(materialized) = self.previous_materialized(owner)
+            {
+                return ValueSource::Previous(materialized.result());
+            }
+            return ValueSource::Error(ErrorKind::Unsupported);
         }
         let Some(sheet) = self.workbook.sheets().get(cell.0) else {
             return ValueSource::Error(ErrorKind::Ref);

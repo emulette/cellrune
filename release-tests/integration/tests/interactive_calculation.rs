@@ -312,6 +312,72 @@ fn whole_column_references_include_array_result_areas() {
 }
 
 #[test]
+fn declared_spill_followers_read_a_failed_anchor_the_same_way_incrementally() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("A1"),
+                    formula("SEQUENCE(2)"),
+                    Some(CellRange::new(address("A1"), address("A3")).expect("declared range")),
+                )
+                .expect("declared spill that does not fit its result"),
+                WorkbookChange::set_cell_value(sheet_id, address("C1"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("A2+C1")),
+            ]),
+        )
+        .expect("failed declared spill workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("full calculation");
+    let spill_error = Some(&CalculationCellResult::Value(CellValue::Error(
+        cellrune::ExcelError::Spill,
+    )));
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed full calculation")
+            .cell(CalculationCellId::new(sheet_id, address("B1"))),
+        spill_error
+    );
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("C1"),
+                number(2.0),
+            )]),
+        )
+        .expect("unrelated input edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental recalculation");
+
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        session
+            .calculation()
+            .expect("installed incremental calculation")
+            .cell(CalculationCellId::new(sheet_id, address("B1"))),
+        spill_error
+    );
+}
+
+#[test]
 fn index_reference_dependencies_remain_incrementally_safe() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
