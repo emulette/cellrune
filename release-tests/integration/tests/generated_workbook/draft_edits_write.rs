@@ -9,7 +9,7 @@ use cellrune::{
 };
 use zip::read::ZipArchive;
 
-use crate::support::generated_xlsx::generated_package;
+use crate::support::generated_xlsx::{generated_column_widening_fixture, generated_package};
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -244,6 +244,104 @@ fn names_sheets_and_unknowable_references_follow_the_impact_rules() {
             .collect::<Vec<_>>(),
         ["xl/calcChain.xml"],
         "a new formula invalidates the calculation chain"
+    );
+}
+
+#[test]
+fn widening_a_table_affects_the_formulas_that_refer_to_it() {
+    let document =
+        open_xlsx_document_bytes(&generated_column_widening_fixture(), OpenOptions::default())
+            .expect("open");
+    let sales = document.workbook().sheets()[1].id();
+    let table_id = document.workbook().sheets()[1].tables()[0].id();
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::widen_table_columns(
+            table_id,
+            cellrune::CellRange::new(address("B1"), address("E4")).expect("range"),
+        )]))
+        .expect("widen the table");
+
+    let output = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default()).expect("save");
+
+    assert_eq!(
+        affected(output.report().affected_formulas()),
+        cells(sales, &["G1", "H1"])
+    );
+    assert!(output.report().requests_host_recalculation());
+    assert!(
+        output
+            .report()
+            .changed_parts()
+            .iter()
+            .any(|part| part.as_str() == "xl/tables/table1.xml")
+    );
+}
+
+const METADATA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray"><metadataTypes count="1"><metadataType name="XLDAPR"/></metadataTypes><futureMetadata name="XLDAPR" count="1"><bk><extLst><ext uri="dynamic-array"><xda:dynamicArrayProperties fDynamic="1" fCollapsed="0"/></ext></extLst></bk></futureMetadata><cellMetadata count="1"><bk><rc t="1" v="0"/></bk></cellMetadata></metadata>"#;
+
+/// Dynamic arrays: P1 spills SEQUENCE(3) over P1:P3 and Q1 reads P1; R1 failed to spill over R2.
+fn spill_package() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029"/></workbook>"#;
+    let relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+</Relationships>"#;
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="P1" cm="1"><f t="array" ref="P1:P3">SEQUENCE(3)</f><v>1</v></c><c r="Q1"><f>P1*1</f><v>1</v></c><c r="R1" cm="1" t="e"><f t="array" ref="R1">SEQUENCE(2)</f><v>#SPILL!</v></c></row><row r="2"><c r="P2"><v>2</v></c><c r="R2"><v>7</v></c></row><row r="3"><c r="P3"><v>3</v></c></row></sheetData></worksheet>"#;
+    generated_package(&[
+        ("[Content_Types].xml", content_types),
+        ("_rels/.rels", ROOT_RELATIONSHIPS),
+        ("xl/workbook.xml", workbook),
+        ("xl/_rels/workbook.xml.rels", relationships),
+        ("xl/worksheets/sheet1.xml", sheet),
+        ("xl/metadata.xml", METADATA),
+    ])
+}
+
+#[test]
+fn spills_are_affected_by_writes_inside_them_and_by_clears_that_free_them() {
+    let document =
+        open_xlsx_document_bytes(&spill_package(), OpenOptions::default()).expect("open");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let write = |change: WorkbookChange| {
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .apply_changes(EditBatch::new([change]))
+            .expect("apply edit");
+        let output = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default()).expect("save");
+        affected(output.report().affected_formulas())
+    };
+
+    assert_eq!(
+        write(WorkbookChange::set_cell_value(
+            sheet_id,
+            address("P2"),
+            number(5.0)
+        )),
+        cells(sheet_id, &["P1", "Q1"])
+    );
+    assert_eq!(
+        write(WorkbookChange::clear_cell(sheet_id, address("R2"))),
+        cells(sheet_id, &["R1"])
+    );
+    assert_eq!(
+        write(WorkbookChange::set_cell_value(
+            sheet_id,
+            address("A1"),
+            number(2.0)
+        )),
+        BTreeSet::new(),
+        "an edit outside every spill leaves the anchors alone"
     );
 }
 
