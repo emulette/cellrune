@@ -158,8 +158,8 @@ pub use table::{
     TableValueFilters, TotalsRowFunction,
 };
 pub use workbook::{
-    CalculationHints, CalculationMode, DateSystem, Sheet, SheetId, SheetName, SheetVisibility,
-    WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
+    CalculationHints, CalculationMode, DateSystem, Sheet, SheetAutoFilter, SheetId, SheetName,
+    SheetVisibility, WorkbookFingerprint, WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
 };
 pub use xlsx::{
     EditWriteReport, EditedWorkbook, OpenOptions, PackageSummary, PhoneticRunLimitKind, ReadLimits,

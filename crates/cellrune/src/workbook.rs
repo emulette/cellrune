@@ -5,9 +5,11 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
+mod auto_filter;
 mod sheet_tabs;
 mod table_index;
 
+pub use auto_filter::SheetAutoFilter;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;
 use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
@@ -251,6 +253,7 @@ pub struct Sheet {
     max_column: Option<Column>,
     merged_ranges: Arc<Vec<CellRange>>,
     tables: Arc<Vec<Table>>,
+    auto_filter: Option<SheetAutoFilter>,
     semantic_fingerprint: OnceLock<[u8; 32]>,
 }
 
@@ -274,6 +277,7 @@ impl Sheet {
             max_column: self.max_column,
             merged_ranges: Arc::clone(&self.merged_ranges),
             tables: Arc::clone(&self.tables),
+            auto_filter: self.auto_filter.clone(),
             semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
     }
@@ -295,6 +299,7 @@ impl Sheet {
             max_column: None,
             merged_ranges: Arc::new(Vec::new()),
             tables: Arc::new(Vec::new()),
+            auto_filter: None,
             semantic_fingerprint: OnceLock::new(),
         }
     }
@@ -538,6 +543,16 @@ impl Sheet {
         Arc::make_mut(&mut self.tables).as_mut_slice()
     }
 
+    /// Returns the worksheet-level auto-filter, when the sheet declares one outside its tables.
+    pub const fn auto_filter(&self) -> Option<&SheetAutoFilter> {
+        self.auto_filter.as_ref()
+    }
+
+    pub(crate) fn set_auto_filter(&mut self, auto_filter: Option<SheetAutoFilter>) {
+        self.semantic_fingerprint = OnceLock::new();
+        self.auto_filter = auto_filter;
+    }
+
     /// Returns the smallest bounding rectangle containing all sparse cells.
     pub fn used_range(&self) -> Option<CellRange> {
         let start = CellAddress::new(self.min_row?, self.min_column?);
@@ -735,6 +750,10 @@ impl SheetBuilder {
 
     pub(crate) fn set_merged_ranges(&mut self, merged_ranges: Vec<CellRange>) {
         self.sheet.set_merged_ranges(merged_ranges);
+    }
+
+    pub(crate) fn set_auto_filter(&mut self, auto_filter: Option<SheetAutoFilter>) {
+        self.sheet.set_auto_filter(auto_filter);
     }
 
     /// Builds the collected cells into the sheet's store in one sorted pass.

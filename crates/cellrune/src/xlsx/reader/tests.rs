@@ -1097,6 +1097,43 @@ fn duplicate_merge_cells_elements_fail_the_read() {
     assert_eq!(error.code(), XlsxErrorCode::InvalidWorksheet);
 }
 
+#[test]
+fn reads_the_sheet_level_auto_filter_range_and_filter_columns() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<autoFilter ref="A1:I1"><filterColumn colId="3"><filters><filter val="x"/></filters></filterColumn><filterColumn colId="0" hiddenButton="1"/></autoFilter></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    let filter = snapshot
+        .sheet_by_name("First")
+        .and_then(|sheet| sheet.auto_filter())
+        .expect("sheet auto-filter");
+    assert_eq!(
+        format!("{}:{}", filter.range().start(), filter.range().end()),
+        "A1:I1"
+    );
+    assert_eq!(filter.filter_column_ids(), [3, 0]);
+    let second = snapshot.sheet_by_name("Second").expect("sheet");
+    assert!(second.auto_filter().is_none());
+
+    for malformed in [
+        r#"<autoFilter/>"#,
+        r#"<autoFilter ref="NOPE"/>"#,
+        r#"<autoFilter ref="A1:B1"><filterColumn colId="2"/></autoFilter>"#,
+        r#"<autoFilter ref="A1:B1"><filterColumn colId="1"/><filterColumn colId="1"/></autoFilter>"#,
+        r#"<autoFilter ref="A1:B1"><filterColumn/></autoFilter>"#,
+        r#"<autoFilter ref="A1:B1"/><autoFilter ref="A1:C1"/>"#,
+    ] {
+        let sheet = SHEET_ONE.replace("</worksheet>", &format!("{malformed}</worksheet>"));
+        let archive = build_archive(&sheet, SHARED_STRINGS);
+        let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect("a malformed auto-filter does not fail the read");
+        let first = snapshot.sheet_by_name("First").expect("sheet");
+        assert!(first.auto_filter().is_none(), "{malformed}");
+    }
+}
+
 const SHEET_WITH_TABLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">

@@ -1766,7 +1766,7 @@ fn fragment_attributes(local_name: &[u8]) -> Option<&'static [&'static str]> {
     }
 }
 
-fn parse_reference(reference: &str) -> Option<CellRange> {
+pub(super) fn parse_reference(reference: &str) -> Option<CellRange> {
     let mut parts = reference.split(':');
     let start = CellAddress::from_a1(parts.next()?).ok()?;
     let end = match parts.next() {

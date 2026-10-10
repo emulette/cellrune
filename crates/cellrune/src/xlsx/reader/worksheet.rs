@@ -9,6 +9,7 @@ use super::super::xml::{
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
+use super::auto_filter::SheetAutoFilterCollector;
 use super::formula_cell::SharedFormulaTable;
 use super::merge::MergedRangeCollector;
 use super::metadata::CellMetadata;
@@ -37,6 +38,8 @@ const MERGE_CELLS: &[u8] = b"mergeCells";
 const MERGE_CELL: &[u8] = b"mergeCell";
 const TABLE_PARTS: &[u8] = b"tableParts";
 const TABLE_PART: &[u8] = b"tablePart";
+const AUTO_FILTER: &[u8] = b"autoFilter";
+const FILTER_COLUMN: &[u8] = b"filterColumn";
 #[derive(Debug, Default)]
 struct WorksheetParseState {
     saw_root: bool,
@@ -59,6 +62,7 @@ struct WorksheetParseState {
     merged_ranges: MergedRangeCollector,
     table_parts_depth: Option<u64>,
     saw_table_parts: bool,
+    auto_filter: SheetAutoFilterCollector,
 }
 
 #[derive(Clone, Copy)]
@@ -259,6 +263,13 @@ pub(super) fn parse(
                             diagnostics,
                             &budget,
                         )?;
+                    } else if depth == 2 && local_name == AUTO_FILTER {
+                        state.auto_filter.start(attributes.unqualified("ref"), None);
+                    } else if state.auto_filter.is_child_depth(depth) && local_name == FILTER_COLUMN
+                    {
+                        state
+                            .auto_filter
+                            .filter_column(attributes.unqualified("colId"));
                     } else if state
                         .sheet_data_depth
                         .is_some_and(|parent| depth == parent + 1)
@@ -352,6 +363,8 @@ pub(super) fn parse(
                     state.merge_cells_depth = None;
                 } else if state.table_parts_depth == Some(depth) && local_name == TABLE_PARTS {
                     state.table_parts_depth = None;
+                } else if local_name == AUTO_FILTER {
+                    state.auto_filter.end(depth);
                 } else if state.sheet_view_depth == Some(depth) && local_name == SHEET_VIEW {
                     state.sheet_view_depth = None;
                     state.default_view_active = false;
@@ -384,6 +397,7 @@ pub(super) fn parse(
         return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
     }
     sheet.set_merged_ranges(state.merged_ranges.finish(sheet_id, diagnostics, &budget)?);
+    sheet.set_auto_filter(state.auto_filter.finish());
     Ok(())
 }
 
@@ -498,6 +512,14 @@ fn process_start(
             diagnostics,
             budget,
         )?;
+    } else if depth == 2 && local_name == AUTO_FILTER {
+        state
+            .auto_filter
+            .start(attributes.unqualified("ref"), Some(depth));
+    } else if state.auto_filter.is_child_depth(depth) && local_name == FILTER_COLUMN {
+        state
+            .auto_filter
+            .filter_column(attributes.unqualified("colId"));
     } else if state
         .sheet_data_depth
         .is_some_and(|sheet_data| depth == sheet_data + 1)

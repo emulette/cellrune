@@ -744,6 +744,7 @@ fn draft_semantics_match(
         if expected_sheet.name() != actual_sheet.name()
             || expected_sheet.visibility() != actual_sheet.visibility()
             || !tables_semantically_match(expected_sheet.tables(), actual_sheet.tables())
+            || expected_sheet.auto_filter() != actual_sheet.auto_filter()
         {
             return false;
         }

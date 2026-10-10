@@ -82,6 +82,18 @@ pub(crate) fn sheet_fingerprint_cancellable(
         }
         hash.optional_bytes_cancellable(table.opaque_source_xml(), cancelled)?;
     }
+    // A sheet-level auto-filter is folded only when present, so sheets without one keep the
+    // digests schema 7 already gave them.
+    if let Some(filter) = sheet.auto_filter() {
+        hash.range(filter.range());
+        hash.usize(filter.filter_column_ids().len());
+        for column_id in filter.filter_column_ids() {
+            if cancelled() {
+                return Err(());
+            }
+            hash.u32(*column_id);
+        }
+    }
     Ok(hash.finish())
 }
 
@@ -673,11 +685,11 @@ mod tests {
     use crate::{
         CalculationHints, CalculationMode, CellAddress, CellContent, CellRange, CellValue,
         DateSystem, DefinedName, DefinedNameScope, EditBatch, FormulaText, Provenance,
-        ProviderIdentity, Sheet, SheetId, SheetName, SheetVisibility, Table, TableAutoFilter,
-        TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula,
-        TableId, TableName, TableSortCondition, TableSortMethod, TableSortState, TableStyleInfo,
-        TableType, TableValueFilters, TotalsRowFunction, WorkbookChange, WorkbookDraft,
-        WorkbookSnapshot, WorkbookSource,
+        ProviderIdentity, Sheet, SheetAutoFilter, SheetId, SheetName, SheetVisibility, Table,
+        TableAutoFilter, TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem,
+        TableFormula, TableId, TableName, TableSortCondition, TableSortMethod, TableSortState,
+        TableStyleInfo, TableType, TableValueFilters, TotalsRowFunction, WorkbookChange,
+        WorkbookDraft, WorkbookSnapshot, WorkbookSource,
     };
 
     #[test]
@@ -955,6 +967,41 @@ mod tests {
         assert_eq!(
             workbook_fingerprint(&merged),
             workbook_fingerprint(&workbook_with_extras(vec![range("A1", "B2")], Vec::new()))
+        );
+    }
+
+    #[test]
+    fn workbook_fingerprint_folds_sheet_auto_filters_only_when_present() {
+        let filtered = |filter: Option<SheetAutoFilter>| {
+            let base = workbook_with_extras(Vec::new(), Vec::new());
+            let mut sheet = base.sheets()[0].clone();
+            sheet.set_auto_filter(filter);
+            WorkbookSnapshot::new(
+                vec![sheet],
+                base.date_system(),
+                base.calculation_hints(),
+                base.source(),
+                base.provenance().clone(),
+            )
+            .expect("valid workbook")
+        };
+        let base = workbook_with_extras(Vec::new(), Vec::new());
+        let filter = SheetAutoFilter::from_xlsx(range("A1", "C4"), vec![0, 2]);
+
+        assert_eq!(
+            workbook_fingerprint(&filtered(None)),
+            workbook_fingerprint(&base)
+        );
+        assert_ne!(
+            workbook_fingerprint(&filtered(Some(filter.clone()))),
+            workbook_fingerprint(&base)
+        );
+        assert_ne!(
+            workbook_fingerprint(&filtered(Some(filter))),
+            workbook_fingerprint(&filtered(Some(SheetAutoFilter::from_xlsx(
+                range("A1", "D4"),
+                vec![0, 2]
+            ))))
         );
     }
 

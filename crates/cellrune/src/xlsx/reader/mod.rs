@@ -1,3 +1,4 @@
+mod auto_filter;
 mod cell_value;
 mod defined_name;
 mod formula_cell;
