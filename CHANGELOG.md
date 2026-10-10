@@ -99,6 +99,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A Rust panic in a Node.js call throws an error instead of aborting the process, and a session left
   unusable by a panic reports `interop.session.poisoned` in Python and Node.js instead of
   `interop.session.unavailable`.
+- The Node binding requires `napi-derive` 3.6.11 or later. `napi-derive-backend` 6.1.5 moved to
+  `syn` 3, so a freshly resolved graph with an earlier `napi-derive` no longer compiled.
 
 ## [0.1.23] - 2026-10-01
 
