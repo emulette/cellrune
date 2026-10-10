@@ -1,11 +1,7 @@
 use std::collections::BTreeSet;
 
-use super::{DraftCellMutation, DraftCellMutationStore, WorkbookDraft, next_revision};
-use crate::workbook::WorkbookSnapshotInput;
-use crate::{
-    CalculationCellId, CellAddress, DefinedName, Sheet, SheetId, TableId, ValidationError,
-    WorkbookSnapshot, XlsxDocument,
-};
+use super::{DraftCellMutationStore, WorkbookDraft};
+use crate::{CalculationCellId, SheetId, TableId, ValidationError, XlsxDocument};
 
 impl WorkbookDraft {
     pub(crate) fn source_document(&self) -> Option<&XlsxDocument> {
@@ -44,62 +40,5 @@ impl WorkbookDraft {
         } else {
             Ok(())
         }
-    }
-
-    pub(super) fn mark_upsert(
-        &mut self,
-        sheet_id: SheetId,
-        address: CellAddress,
-        number_format_changed: bool,
-    ) {
-        let id = CalculationCellId::new(sheet_id, address);
-        let previous = self.cell_mutations.get(&id);
-        let changed = number_format_changed
-            || matches!(
-                previous,
-                Some(DraftCellMutation::Upsert {
-                    number_format_changed: true,
-                    ..
-                })
-            );
-        let replaces_source_cell = matches!(
-            previous,
-            Some(
-                DraftCellMutation::Remove
-                    | DraftCellMutation::Upsert {
-                        replaces_source_cell: true,
-                        ..
-                    }
-            )
-        );
-        self.cell_mutations.insert(
-            id,
-            DraftCellMutation::Upsert {
-                number_format_changed: changed,
-                replaces_source_cell,
-            },
-        );
-    }
-
-    pub(super) fn commit(
-        &mut self,
-        sheets: Vec<Sheet>,
-        defined_names: Vec<DefinedName>,
-    ) -> Result<(), ValidationError> {
-        let revision = next_revision(self.semantic_revision())?;
-        self.workbook = std::sync::Arc::new(
-            WorkbookSnapshot::new_with_input(WorkbookSnapshotInput {
-                sheets,
-                non_worksheet_tabs: self.workbook.non_worksheet_tabs().clone(),
-                defined_names,
-                diagnostics: self.workbook.diagnostics().to_vec(),
-                date_system: self.workbook.date_system(),
-                calculation_hints: self.workbook.calculation_hints(),
-                source: self.workbook.source(),
-                provenance: self.workbook.provenance().clone(),
-            })?
-            .with_semantic_revision(revision),
-        );
-        Ok(())
     }
 }

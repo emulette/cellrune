@@ -605,6 +605,7 @@ impl Sheet {
             .or_insert(address.row().get());
     }
 
+    #[cfg(test)]
     pub(crate) fn upsert_cell(
         &mut self,
         address: CellAddress,

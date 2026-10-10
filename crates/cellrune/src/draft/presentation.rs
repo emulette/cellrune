@@ -4,7 +4,7 @@ use super::WorkbookDraft;
 use crate::presentation::validate_authoring_runs;
 use crate::{
     CalculationCellId, CellAddress, CellContent, CellValue, PhoneticAnnotation, PhoneticRun,
-    PhoneticWriteOptions, Sheet, SheetId, ValidationError,
+    PhoneticWriteOptions, SheetId, ValidationError,
 };
 
 impl WorkbookDraft {
@@ -48,10 +48,14 @@ impl WorkbookDraft {
 
     /// Atomically replaces a literal text cell and its phonetic annotation.
     ///
+    /// The text is written as [`Self::set_cell_value`] writes it, so a table header cell renames
+    /// its column and rewrites the structured references to it.
+    ///
     /// # Errors
     ///
     /// Returns a [`ValidationError`] when the sheet is missing, a run is outside the base text,
-    /// runs overlap, or either semantic or presentation revision is exhausted.
+    /// runs overlap, the text cannot be written as a cell value, or either semantic or
+    /// presentation revision is exhausted.
     pub fn set_annotated_text(
         &mut self,
         sheet_id: SheetId,
@@ -77,28 +81,17 @@ impl WorkbookDraft {
         let presentation_changed =
             presentation.set_cell_phonetics(sheet_id, address, annotation, options.visible())?;
 
-        let mut sheets = self.workbook.sheets().to_vec();
-        let sheet = sheet_mut(&mut sheets, sheet_id)?;
-        super::ensure_not_array_formula_part(sheet, address)?;
-        let detached = sheet.detach_shared_formula_followers(address);
-        let number_format = sheet.cell(address).map_or_else(
-            || sheet.new_cell_number_format(address),
-            |cell| cell.number_format().clone(),
-        );
-        let content = CellContent::Literal(CellValue::Text(text));
-        let semantic_changed = sheet.cell(address).is_none_or(|cell| {
-            cell.content() != &content || cell.number_format() != &number_format
-        });
-        if semantic_changed {
-            sheet.upsert_cell(address, content, number_format);
-            self.commit(sheets, self.workbook.defined_names().to_vec())?;
-            self.mark_upsert(sheet_id, address, false);
-            for follower in detached {
-                self.mark_upsert(sheet_id, follower, false);
-            }
+        // A value write refuses to replace annotated text, so it runs without the cell's old
+        // annotation, which `presentation` replaces once the write succeeds.
+        let mut released = self.presentation.clone();
+        released.clear_cell_phonetics(sheet_id, address)?;
+        let previous = std::mem::replace(&mut self.presentation, released);
+        if let Err(error) = self.set_cell_value(sheet_id, address, CellValue::Text(text)) {
+            self.presentation = previous;
+            return Err(error);
         }
+        self.presentation = presentation;
         if presentation_changed {
-            self.presentation = presentation;
             self.presentation_cell_mutations
                 .insert(CalculationCellId::new(sheet_id, address));
         }
@@ -187,13 +180,4 @@ fn validate_authoring_properties(options: &PhoneticWriteOptions) -> Result<(), V
         });
     }
     Ok(())
-}
-
-fn sheet_mut(sheets: &mut [Sheet], sheet_id: SheetId) -> Result<&mut Sheet, ValidationError> {
-    sheets
-        .iter_mut()
-        .find(|sheet| sheet.id() == sheet_id)
-        .ok_or(ValidationError::UnknownSheetId {
-            value: sheet_id.get(),
-        })
 }

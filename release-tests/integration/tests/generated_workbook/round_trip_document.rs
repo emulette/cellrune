@@ -1113,6 +1113,58 @@ fn writing_a_table_header_cell_renames_its_column() {
 }
 
 #[test]
+fn annotated_text_in_a_table_header_cell_renames_its_column() {
+    let address = CellAddress::from_a1("C1").expect("valid address");
+    let sheet = SheetId::new(1).expect("sheet");
+    let document =
+        open_xlsx_document_bytes(&generated_totals_table_fixture(), OpenOptions::default())
+            .expect("totals table input");
+    let mut draft = WorkbookDraft::from_document(&document);
+    // The second write replaces annotated header text, which a plain value write refuses.
+    for (text, reading) in [("体力", "たいりょく"), ("健康", "けんこう")] {
+        draft
+            .set_annotated_text(
+                sheet,
+                address,
+                text,
+                vec![
+                    cellrune::PhoneticRun::new(
+                        cellrune::PhoneticTextRange::new(0, 2).expect("range"),
+                        reading,
+                    )
+                    .expect("run"),
+                ],
+                cellrune::PhoneticWriteOptions::show(),
+            )
+            .expect("annotated header text");
+    }
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("renamed table output");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen output");
+    let workbook = reopened.workbook();
+    assert_eq!(workbook.sheets()[0].tables()[0].columns()[2].name(), "健康");
+    assert_eq!(
+        totals_table_cell(workbook, "C1"),
+        Some(CellContent::Literal(CellValue::Text("健康".into())))
+    );
+    assert_totals_formula(workbook, "D2", "tblChar[[#This Row],[健康]]*2");
+    assert_totals_formula(workbook, "C5", "SUBTOTAL(109,tblChar[健康])");
+    assert_eq!(number_at(workbook, "C5"), 60.0);
+    assert_eq!(
+        reopened
+            .presentation()
+            .cell_phonetics(sheet, address)
+            .expect("reopened phonetics")
+            .runs()[0]
+            .text(),
+        "けんこう"
+    );
+}
+
+#[test]
 fn growing_a_totals_table_twice_clears_the_totals_row_the_draft_wrote() {
     let resize = |last_row| {
         WorkbookChange::resize_table_rows(
