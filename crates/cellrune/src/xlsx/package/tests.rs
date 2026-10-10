@@ -8,6 +8,8 @@ use super::inspect_package;
 
 const CENTRAL_HEADER_BYTES: usize = 46;
 const END_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+const ZIP64_END_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x06, 0x06];
+const ZIP64_LOCATOR_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -195,6 +197,78 @@ fn entry_count_budget_is_enforced_before_xml_parsing() {
         .expect("non-zero limit");
     let error = assert_error(minimal_entries(), limits, XlsxErrorCode::TooManyEntries);
     assert_eq!(error.observed(), Some(5));
+}
+
+#[test]
+fn declared_entry_count_is_enforced_before_the_central_directory_is_read() {
+    let mut archive = build_archive(minimal_entries());
+    let end = end_record_offset(&archive);
+    // One entry more than the central directory holds: reading the directory fails, so only
+    // the declared count can produce the entry-count error.
+    archive[end + 8..end + 12].copy_from_slice(&[6, 0, 6, 0]);
+    // The ZIP reader skips a trailing end record whose comment runs past the input, so the
+    // count it declares must not be the one enforced.
+    archive.extend_from_slice(
+        &[
+            &END_SIGNATURE[..],
+            &[0; 4],
+            &[1, 0, 1, 0],
+            &[0; 8],
+            &u16::MAX.to_le_bytes(),
+        ]
+        .concat(),
+    );
+    let limits = ReadLimits::default()
+        .with_max_entries(5)
+        .expect("non-zero limit");
+
+    let error = inspect_package(Cursor::new(archive), ReadOptions::new(limits))
+        .expect_err("a declared entry count past the limit must fail");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyEntries, "{error}");
+    assert_eq!(error.observed(), Some(6));
+}
+
+#[test]
+fn zip64_declared_entry_count_is_enforced_before_the_central_directory_is_read() {
+    let mut archive = build_archive(minimal_entries());
+    let end = end_record_offset(&archive);
+    let directory_size = u64::from(u32::from_le_bytes(
+        archive[end + 12..end + 16].try_into().expect("four bytes"),
+    ));
+    let directory_offset = u64::from(u32::from_le_bytes(
+        archive[end + 16..end + 20].try_into().expect("four bytes"),
+    ));
+    archive.truncate(end);
+    let zip64_end = archive.len() as u64;
+    archive.extend_from_slice(
+        &[
+            &ZIP64_END_SIGNATURE[..],
+            &44_u64.to_le_bytes(),
+            &[45, 0, 45, 0],
+            &[0; 8],
+            &6_u64.to_le_bytes(),
+            &6_u64.to_le_bytes(),
+            &directory_size.to_le_bytes(),
+            &directory_offset.to_le_bytes(),
+            &ZIP64_LOCATOR_SIGNATURE,
+            &[0; 4],
+            &zip64_end.to_le_bytes(),
+            &1_u32.to_le_bytes(),
+            &END_SIGNATURE,
+            &[0; 4],
+            &[0xff; 12],
+            &[0; 2],
+        ]
+        .concat(),
+    );
+    let limits = ReadLimits::default()
+        .with_max_entries(5)
+        .expect("non-zero limit");
+
+    let error = inspect_package(Cursor::new(archive), ReadOptions::new(limits))
+        .expect_err("a declared ZIP64 entry count past the limit must fail");
+    assert_eq!(error.code(), XlsxErrorCode::TooManyEntries, "{error}");
+    assert_eq!(error.observed(), Some(6));
 }
 
 #[test]

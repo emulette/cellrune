@@ -1,3 +1,4 @@
+mod central_directory;
 mod path;
 pub(crate) mod relationship_type;
 mod summary;
@@ -355,13 +356,16 @@ fn index_archive<R: Read + Seek>(
             .with_detail(archive_bytes.to_string())
             .with_observed(archive_bytes));
     }
+    // Opening the archive reads and keeps every central-directory header, so the declared count
+    // is held to the limit before any is read.
+    if let Some(declared) =
+        central_directory::declared_entry_count(&mut reader, archive_bytes).map_err(io_error)?
+    {
+        ensure_entry_count(declared, limits)?;
+    }
     reader.seek(SeekFrom::Start(0)).map_err(io_error)?;
     let mut archive = ZipArchive::new(reader).map_err(zip_error)?;
-    if archive.len() as u64 > limits.max_entries() {
-        return Err(XlsxReadError::new(XlsxErrorCode::TooManyEntries)
-            .with_detail(archive.len().to_string())
-            .with_observed(archive.len() as u64));
-    }
+    ensure_entry_count(archive.len() as u64, limits)?;
 
     let mut entries = BTreeMap::new();
     let mut total_uncompressed = 0_u128;
@@ -591,6 +595,15 @@ fn select_optional_part(
         ensure_part(entries, part)?;
     }
     Ok(selected)
+}
+
+fn ensure_entry_count(entries: u64, limits: ReadLimits) -> Result<(), XlsxReadError> {
+    if entries > limits.max_entries() {
+        return Err(XlsxReadError::new(XlsxErrorCode::TooManyEntries)
+            .with_detail(entries.to_string())
+            .with_observed(entries));
+    }
+    Ok(())
 }
 
 fn ensure_part(entries: &BTreeMap<PartPath, usize>, part: &PartPath) -> Result<(), XlsxReadError> {
