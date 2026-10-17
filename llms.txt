@@ -90,13 +90,15 @@ recalculation, delta, and Save As operations—not one tool per spreadsheet
 function. Configured filesystem roots are canonicalized at startup; every
 workbook path supplied to a tool must be absolute and resolve inside one of
 those roots; paths outside every root, including UNC shares and device paths,
-return `mcp.path.outside_root` before any filesystem access. It has no remote transport. The 17 tools are `workbook_create`,
+return `mcp.path.outside_root` before any filesystem access. It has no remote transport. The 18 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
-`workbook_changes_since`, `workbook_save_as`, `workbook_preview_changes`,
+`workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`, and
-`workbook_discard_preview`.
+`workbook_discard_preview`. `workbook_save_edits_as` is the edits-only write of
+`write_xlsx_draft_edits_bytes` for a session opened from a file. MCP clients
+always use the default read and calculation limits.
 Read-only JSON resources expose the versioned function catalog at
 `cellrune://support/functions` and active session metadata through the
 `cellrune://sessions/{session_id}/summary` template. Operators can bound
@@ -125,6 +127,26 @@ Node returns camel-case DTO fields and `bigint` IDs/cursors. A failed or
 cancelled replacement preserves a previous published preview; pre-commit
 cancellation or resource failure is retryable, while stale and successful
 commits consume the preview.
+
+Both bindings save in two ways. Python `save`/`to_bytes` and Node
+`save`/`toBytes` write calculated results under the strict or invalidating
+policy. Python `save_edits`/`edits_to_bytes` and Node `saveEdits`/`editsToBytes`
+write only the edits of a workbook opened from a package, without calculating,
+and return an edit report (`affected_formulas`/`affectedFormulas`,
+`requests_host_recalculation`/`requestsHostRecalculation`, changed and removed
+parts, input and output SHA-256). Opening takes `read_limits`/`readLimits`, and
+`calculate`, `recalculate`, and previews take
+`calculation_limits`/`calculationLimits`: objects keyed by the Rust limit names
+(snake case in Python, camel case in Node) whose omitted entries keep their
+defaults. A zero fails with `interop.limit.invalid`; an unknown name or a
+non-integer with `interop.limit.payload_invalid`. `scan_capabilities`/
+`scanCapabilities` page through the static capability report. Range cells
+carry `number_format` (`id`, `code`, `kind`); summaries carry each sheet's
+`auto_filter` range and `full_calculation_on_load`, which producers such as
+xlsxwriter set while storing placeholder results. An
+`xlsx.write.incomplete_calculation` error names the first 64 unavailable
+formulas in `details.cells`. Python edits, setters, and `close()` release the
+interpreter lock and wait for the session.
 
 ## Naming conventions
 
@@ -226,6 +248,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   cached text result a cell materializes and fails with `TotalCellTextTooLarge`
   (`xlsx.total_cell_text_too_large`). Cell text decodes OOXML `_xHHHH_` escapes,
   and writers escape XML-forbidden characters the same way.
+- A cell typed `t="d"` holds an ISO 8601 date (`YYYY-MM-DD`), date-time
+  (`YYYY-MM-DDThh:mm[:ss[.fff]]`), or time (`hh:mm[:ss[.fff]]`), optionally
+  followed by `Z`, and reads as a serial number in the workbook's date system;
+  any other value fails with `InvalidCellValue`. A cached formula result of that
+  type reads the same way.
 - A limit failure's `XlsxReadError::observed() -> Option<u64>` is the value
   that exceeded the limit named by its code, in that limit's unit: bytes, a
   count, a nesting depth, or the uncompressed-to-compressed ratio rounded up.
@@ -918,7 +945,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 | `DefinedNameAnalysisError` | Defined-name inspection saw an unknown current sheet, exhausted a budget, or was cancelled | No semantic inspection result is produced | `.kind()`, optional `.limit()`, and `.detail()` |
 | `XlsxReadError` | No trustworthy `WorkbookSnapshot` could be produced at all | No snapshot | `.code(): XlsxErrorCode`, `.source_id()`, `.detail()`, optional `.observed()` and `.phonetic_run_limit()` |
 | `WriteOptionsError` | A `WriteLimits` budget was invalid (zero) | Fails before writing starts | Match on the enum variant |
-| `XlsxWriteError` | The source/calculation binding, package plan, write budget, destination, or completed output was invalid | No successful output artifact | `.code(): XlsxWriteErrorCode`, `.source_id()`, `.detail()` |
+| `XlsxWriteError` | The source/calculation binding, package plan, write budget, destination, or completed output was invalid | No successful output artifact | `.code(): XlsxWriteErrorCode`, `.source_id()`, `.detail()`, and for `IncompleteCalculation` `.unavailable_formulas()` (first 64) |
 | `ApplyChangesError` | An atomic session edit failed either session-state or workbook validation | No edit is committed | Match `Session` or `Validation` |
 | `SessionError` | Revision, incremental-safety, cancellation, cursor, or session resource rules rejected an operation | Session remains valid; installation is rejected when applicable | `.code(): SessionErrorCode`, `.detail()` |
 | `Diagnostic` | Read succeeded, but a compatibility caveat exists (e.g. external link, macro) | Snapshot exists, on `.diagnostics()` | `.code(): DiagnosticCode`, `.severity()`, `.location()` |

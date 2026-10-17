@@ -36,7 +36,7 @@ async function main() {
     workbook.setNumber("Sheet1", "A1", 41);
     workbook.setFormula("Sheet1", "B1", "=A1+1");
     await workbook.calculate();
-    await workbook.save("output.xlsx");
+    await workbook.save("output.xlsx", { replaceExisting: true });
   } finally {
     workbook.close();
   }
@@ -126,6 +126,12 @@ defined-name results. `applyChangesV2` retains every v1 edit shape and adds stab
 table-column rename, and table-row resize operations with `changedTableIds` in its receipt.
 `save()` returns a `WriteReport` whose `outputSha256` is the SHA-256 of the exact verified output
 archive bytes. It is an output identity, not the input document hash.
+`saveEdits()` and `editsToBytes()` write only the edits of a workbook opened from a file, without
+calculating: formulas the edits can affect lose their saved results and the file asks the
+spreadsheet app to recalculate them, and formulas CellRune cannot calculate do not block the save.
+`openPath`/`fromBytes` accept `readLimits` and `calculate`/`recalculate`/`previewChanges` accept
+`calculationLimits` to change individual default limits, and `scanCapabilities()` pages through the
+static per-formula support report.
 `close()` is idempotent. Once it returns, the binding-owned native session has
 been released. An active calculation is cooperatively cancelled, a published preview is discarded,
 and later operations fail with `interop.session.closed`.

@@ -61,8 +61,10 @@ cellrune = "0.1.24"
   date-system, and calculation-property edits through `WorkbookDraft`;
 - reads, queries, preserves, and explicitly authors SpreadsheetML phonetic annotations and default
   frozen panes without mixing presentation state into formula calculation;
-- exposes the same versioned read/edit/calculate/write contract through typed Python and
-  Node.js/TypeScript native packages;
+- exposes the versioned read/edit/calculate/write contract through typed Python and
+  Node.js/TypeScript native packages, including saves of edits without calculating, adjustable
+  read and calculation limits, and capability scans; the table under
+  [Language bindings](#language-bindings) lists what each surface offers;
 - supports atomic typed edit batches, persistent parsed/dependency state, safe incremental
   recalculation, bounded result deltas, cooperative cancellation, stale-result rejection, and
   retained immutable change previews;
@@ -325,9 +327,23 @@ python -m pip install "cellrune==0.1.24"
 npm install "@cellrune/node@0.1.24"
 ```
 
-The bindings expose the same versioned read, edit, calculate, and write contract. Native package
-availability remains platform-specific; package managers must select a wheel or exact-version npm
-platform package compatible with the current runtime.
+The bindings and the MCP server share one versioned interop contract, but not every Rust capability
+reaches every surface:
+
+| Capability | Rust | Python | Node.js | MCP |
+| --- | --- | --- | --- | --- |
+| Open, summary, range read, v1/v2 edits, calculate, recalculate, targeted calculation, previews, function usage, capability scan | yes | yes | yes | yes |
+| Save calculated results | yes | yes | yes | yes |
+| Save edits without calculating | yes | yes | yes | yes |
+| Cell number formats, sheet autoFilter ranges, `fullCalcOnLoad` | yes | yes | yes | yes |
+| Adjustable read and calculation limits | yes | yes | yes | defaults only |
+| Defined-name inspection | yes | yes | yes | no |
+| Sheet autoFilter and table column widening edits | yes | no | no | no |
+| Phonetic annotations and frozen panes | yes | no | no | no |
+| Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | no | no | no |
+
+Native package availability remains platform-specific; package managers must select a wheel or
+exact-version npm platform package compatible with the current runtime.
 Python `inspect_defined_name` and Node.js `inspectDefinedName` expose the typed defined-name query.
 The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separate
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
@@ -356,7 +372,7 @@ with Workbook.create() as workbook:
         arithmetic_semantics="ieee_754",
         financial_solver_semantics="extended_search",
     )
-    workbook.save("output.xlsx")
+    workbook.save("output.xlsx", replace_existing=True)
 ```
 
 In a Node.js ES module, close the workbook in `finally`:
@@ -373,11 +389,53 @@ try {
     arithmeticSemantics: "ieee_754",
     financialSolverSemantics: "extended_search",
   });
-  await workbook.save("output.xlsx");
+  await workbook.save("output.xlsx", { replaceExisting: true });
 } finally {
   workbook.close();
 }
 ```
+
+`save`/`toBytes` write CellRune's calculated results and, unless `invalidate_unavailable` is set,
+fail with `xlsx.write.incomplete_calculation` when any result is unavailable; the error's
+`details.cells` names the first 64 such formulas. To change an existing file without calculating,
+save only the edits instead. Formulas the edits can affect lose their saved results and the file
+asks the spreadsheet app to recalculate them on open; every other saved result and untouched part
+keeps its source bytes, and formulas CellRune cannot calculate do not block the save:
+
+```python
+from cellrune import Workbook
+
+with Workbook.open_path("input.xlsx") as workbook:
+    workbook.set_number("Sheet1", "A1", 42.0)
+    report = workbook.save_edits("edited.xlsx", replace_existing=True)
+    print(report["affected_formulas"], report["requests_host_recalculation"])
+```
+
+```js
+import { Workbook } from "@cellrune/node";
+
+const workbook = await Workbook.openPath("input.xlsx");
+try {
+  workbook.setNumber("Sheet1", "A1", 42);
+  const report = await workbook.saveEdits("edited.xlsx", { replaceExisting: true });
+  console.log(report.affectedFormulas, report.requestsHostRecalculation);
+} finally {
+  workbook.close();
+}
+```
+
+`edits_to_bytes`/`editsToBytes` return the same package in memory. A workbook created rather than
+opened has no package to edit and fails with `xlsx.write.invalid_package_plan`.
+
+Opening takes `read_limits`/`readLimits` and calculating takes
+`calculation_limits`/`calculationLimits` to change individual default limits, for example
+`Workbook.open_path(path, read_limits={"max_entry_uncompressed_bytes": 256 << 20})`. Omitted limits
+keep their defaults; a zero fails with `interop.limit.invalid` and an unknown name or a value that
+is not a positive integer with `interop.limit.payload_invalid`. `scan_capabilities`/
+`scanCapabilities` page through the static per-formula support report. Range cells carry a
+`number_format` with its ID, code, and kind, and the summary reports each sheet's `auto_filter`
+range and the package's `full_calculation_on_load` declaration: xlsxwriter and similar producers
+set it and may store placeholder results, so read such saved results only after calculating.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview
@@ -395,16 +453,19 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 17 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
+Its 18 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
 `workbook_read_range`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
-`workbook_changes_since`, `workbook_save_as`, `workbook_preview_changes`,
+`workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`, and `workbook_discard_preview`.
 The v2 edit tool adds stable-ID table rename, table-column rename, and table-row resize while
 retaining the v1 edit shapes. The four preview tools are the retained immutable transaction
 workflow: preview returns a summary and ID, page returns a byte-bounded core-cursor page, and
 commit or discard consumes the interop-owned preview. `workbook_save_as` returns the shared write
-report, including its lowercase `output_sha256` output identity.
+report, including its lowercase `output_sha256` output identity. `workbook_save_edits_as` writes a
+session's edits into the file it was opened from without calculating, under the same root and
+overwrite rules, and returns the edit report. MCP clients always use the default read and
+calculation limits; raising them is left to the operator.
 
 `workbook_calculate_targets` accepts `session_id`, `targets`, optional `options`, and optional
 `limits`. Its limits are capped at the defaults above. The entire partial response must fit
