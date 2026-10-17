@@ -471,6 +471,24 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     assert_eq!(partial["scope"], "targets");
     assert_eq!(partial["evaluated_count"], 1);
     assert_eq!(partial["cells"][0]["result"]["value"]["value"], 6.0);
+    let raised_limits = mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id": session_id,
+            "targets": [{"sheet":"Sheet1", "start":"A2"}],
+            "options": {"calculation_limits": {"max_array_cells": 2_000_000}}
+        }),
+    );
+    assert_eq!(
+        raised_limits["isError"], true,
+        "clients must not raise calculation limits: {raised_limits}"
+    );
+    assert!(
+        raised_limits["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("unknown field `calculation_limits`")),
+        "{raised_limits}"
+    );
     let empty_history =
         successful_tool(mcp.call_tool("workbook_changes_since", json!({"session_id": session_id})));
     assert_eq!(

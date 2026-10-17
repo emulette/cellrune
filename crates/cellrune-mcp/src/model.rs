@@ -131,10 +131,27 @@ pub(crate) struct CalculateTargetsArgs {
     pub(crate) targets: Vec<cellrune_interop::CalculationTargetDto>,
     /// Deterministic calculation inputs; omission uses the core defaults.
     #[serde(default)]
-    pub(crate) options: cellrune_interop::CalculationOptionsDto,
+    pub(crate) options: TargetCalculationOptionsArgs,
     /// Request limits, capped by the server at 1024 targets, 10000 results, and 100000 evaluator invocations.
     #[serde(default)]
     pub(crate) limits: cellrune_interop::TargetCalculationLimitsDto,
+}
+
+/// Deterministic inputs for a target calculation. Calculation limits are absent because raising
+/// them is the operator's decision, not the client's.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TargetCalculationOptionsArgs {
+    /// Excel serial returned by `TODAY()`.
+    pub(crate) today_serial: Option<f64>,
+    /// Excel serial returned by `NOW()`.
+    pub(crate) now_serial: Option<f64>,
+    /// Policy for cancelling addition and subtraction.
+    #[serde(default)]
+    pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
+    /// Policy for `IRR`, `XIRR`, and `RATE` convergence.
+    #[serde(default)]
+    pub(crate) financial_solver_semantics: FinancialSolverSemanticsDto,
 }
 
 /// Input for a page of installed recalculation deltas.

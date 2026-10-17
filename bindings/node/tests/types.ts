@@ -29,6 +29,8 @@ async function checkTargets(workbook: Workbook): Promise<void> {
   const revision: bigint = result.semanticRevision;
   revision.toString();
   result.cells[0].cell.address.toUpperCase();
+  // @ts-expect-error Targeted calculation keeps the default calculation limits.
+  await workbook.calculateTargets([{sheet: "Sheet1", start: "A1"}], {calculationLimits: {maxArrayCells: 10}});
 }
 void checkTargets;
 import type { Buffer } from "node:buffer";

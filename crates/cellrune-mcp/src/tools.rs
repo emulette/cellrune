@@ -46,7 +46,12 @@ impl CellruneMcpServer {
         let caps = cellrune_interop::TargetCalculationLimitsDto::default();
         let request = cellrune_interop::TargetCalculationRequestDto {
             targets: args.targets,
-            options: args.options,
+            options: calculation_options(
+                args.options.today_serial,
+                args.options.now_serial,
+                args.options.arithmetic_semantics,
+                args.options.financial_solver_semantics,
+            ),
             limits: cellrune_interop::TargetCalculationLimitsDto {
                 max_targets: args.limits.max_targets.min(caps.max_targets),
                 max_result_cells: args.limits.max_result_cells.min(caps.max_result_cells),
@@ -962,7 +967,7 @@ mod tests {
                 start: "A1".to_owned(),
                 end: None,
             }],
-            options: CalculationOptionsDto::default(),
+            options: crate::model::TargetCalculationOptionsArgs::default(),
             limits: cellrune_interop::TargetCalculationLimitsDto::default(),
         };
         let error = match server

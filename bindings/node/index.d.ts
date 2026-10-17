@@ -695,7 +695,8 @@ export interface TargetCalculationLimits {
   readonly maxEvaluatedCells: number;
 }
 
-export interface TargetCalculationOptions extends CalculationOptions {
+/** Targeted calculation keeps the default calculation limits. */
+export interface TargetCalculationOptions extends Omit<CalculationOptions, "calculationLimits"> {
   readonly limits?: Partial<TargetCalculationLimits>;
 }
 
