@@ -50,6 +50,7 @@ mod linear_algebra;
 mod logical;
 mod lookup;
 mod lookup_common;
+mod lookup_index;
 mod math;
 mod modern_array;
 mod modern_text;
@@ -79,6 +80,7 @@ pub(super) use dynamic::{
     helper_array_with_trace, helper_scalar_with_trace, invoke_callable, lambda_scope_value,
     let_reference, let_scope_value, map_scalar_with_trace, reduce_scope_value, with_let_scope,
 };
+pub(super) use lookup_index::LookupIndexCache;
 
 struct CallArguments<'formula> {
     expressions: Cow<'formula, [Expr]>,

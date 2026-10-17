@@ -68,7 +68,7 @@ impl Engine<'_> {
         {
             Ok(evaluated) => evaluated,
             Err(kind) => {
-                self.results.insert(anchor, Value::Error(kind));
+                self.store_result(anchor, Value::Error(kind));
                 return Ok(());
             }
         };
@@ -87,7 +87,7 @@ impl Engine<'_> {
                 } else {
                     Value::Error(ErrorKind::NA)
                 };
-                self.results.insert(
+                self.store_result(
                     (range.sheet, row, column),
                     if matches!(value, Value::Blank) {
                         Value::Number(0.0)
@@ -121,7 +121,7 @@ impl Engine<'_> {
         let evaluated = match result {
             Ok(evaluated) => evaluated,
             Err(kind) => {
-                self.results.insert(anchor, Value::Error(kind));
+                self.store_result(anchor, Value::Error(kind));
                 return Ok(());
             }
         };
@@ -135,13 +135,13 @@ impl Engine<'_> {
             whole_rows: false,
         })
         .resized_from_anchor(u64::from(array.rows), u64::from(array.cols)) else {
-            self.results.insert(anchor, Value::Error(ErrorKind::Spill));
+            self.store_result(anchor, Value::Error(ErrorKind::Spill));
             return Ok(());
         };
         if declared_range.is_some_and(|declared| declared != range)
             || self.dynamic_spill_collides(anchor, range, declared_range, cancelled)?
         {
-            self.results.insert(anchor, Value::Error(ErrorKind::Spill));
+            self.store_result(anchor, Value::Error(ErrorKind::Spill));
             return Ok(());
         }
         for row in range.row_start..=range.row_end {
@@ -152,7 +152,7 @@ impl Engine<'_> {
                 let value = array
                     .at(row - range.row_start, column - range.col_start)
                     .clone();
-                self.results.insert(
+                self.store_result(
                     (range.sheet, row, column),
                     if matches!(value, Value::Blank) {
                         Value::Number(0.0)
@@ -175,6 +175,7 @@ impl Engine<'_> {
                 .iter_mut()
                 .find(|region| region.anchor == anchor)
             {
+                self.lookup_indexes.get_mut().invalidate_rect(&region.rect);
                 region.rect = range;
             } else {
                 self.array_regions.push(ArrayRegion {
@@ -182,6 +183,7 @@ impl Engine<'_> {
                     rect: range,
                     provisional: true,
                 });
+                self.lookup_indexes.get_mut().invalidate_rect(&range);
             }
         }
         Ok(())

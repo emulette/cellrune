@@ -1,10 +1,11 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::ast::Expr;
 use super::convert::value_from_cell;
 use super::decimal::DecimalTrace;
+use super::functions::LookupIndexCache;
 use super::graph::{DependencyGraph, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
@@ -863,6 +864,14 @@ impl<'scope> EvalContext<'scope> {
     pub(super) fn is_cancelled(self) -> bool {
         (self.cancelled)()
     }
+
+    pub(super) const fn function_iterations_used(self) -> u64 {
+        self.budget.function_iterations()
+    }
+
+    pub(super) const fn reference_cells_used(self) -> u64 {
+        self.budget.reference_cells()
+    }
 }
 
 /// Which of a cell's competing sources `Engine::value_source` selected.
@@ -898,6 +907,7 @@ pub struct Engine<'workbook> {
     pub(super) blocked_cells: Arc<BTreeSet<CellId>>,
     evaluated_cells: BTreeSet<CellId>,
     target_pending: Option<std::cell::RefCell<BTreeSet<CellId>>>,
+    lookup_indexes: RefCell<LookupIndexCache>,
     function_iterations: u64,
     reference_cells: u64,
 }
@@ -1185,6 +1195,36 @@ impl<'workbook> Engine<'workbook> {
         cells: u64,
     ) -> Result<(), ErrorKind> {
         context.charge_reference_cells(self.options.limits(), cells)
+    }
+
+    /// Function iterations this evaluation may still charge before its limit.
+    pub(super) fn remaining_function_iterations(&self, context: EvalContext<'_>) -> u64 {
+        self.options
+            .limits()
+            .max_function_iterations()
+            .saturating_sub(context.function_iterations_used())
+    }
+
+    /// Reference cells this evaluation may still read before its limit.
+    pub(super) fn remaining_reference_cells(&self, context: EvalContext<'_>) -> u64 {
+        self.max_array_cells()
+            .saturating_sub(context.reference_cells_used())
+    }
+
+    /// Whether this engine runs a targeted calculation, whose cell reads record the formulas they
+    /// still need.
+    pub(super) const fn is_targeted(&self) -> bool {
+        self.target_pending.is_some()
+    }
+
+    pub(super) const fn lookup_index_cache(&self) -> &RefCell<LookupIndexCache> {
+        &self.lookup_indexes
+    }
+
+    /// Records `cell`'s result, dropping the lookup indexes that read the cell's earlier value.
+    pub(super) fn store_result(&mut self, cell: CellId, value: Value) {
+        self.lookup_indexes.get_mut().invalidate_cell(cell);
+        self.results.insert(cell, value);
     }
 
     pub(super) fn read_reference_cell(

@@ -64,6 +64,7 @@ impl<'workbook> Engine<'workbook> {
             function_iterations: 0,
             reference_cells: 0,
             target_pending: None,
+            lookup_indexes: std::cell::RefCell::default(),
         };
         if cancelled() {
             return Err(());
@@ -196,6 +197,7 @@ impl<'workbook> Engine<'workbook> {
             function_iterations: 0,
             reference_cells: 0,
             target_pending: None,
+            lookup_indexes: std::cell::RefCell::default(),
         };
         let internal_dirty = match dirty {
             Some(cells) => {
@@ -226,6 +228,7 @@ impl<'workbook> Engine<'workbook> {
         dirty: Option<&BTreeSet<CellId>>,
         cancelled: &impl Fn() -> bool,
     ) -> bool {
+        self.lookup_indexes.get_mut().clear();
         if dirty.is_none() {
             self.results.clear();
             self.numeric_decimal_traces.clear();
@@ -261,6 +264,7 @@ impl<'workbook> Engine<'workbook> {
         dirty: Option<&BTreeSet<CellId>>,
         cancelled: &impl Fn() -> bool,
     ) -> bool {
+        self.lookup_indexes.get_mut().clear();
         if dirty.is_none() {
             self.results.clear();
             self.numeric_decimal_traces.clear();
@@ -366,7 +370,7 @@ impl<'workbook> Engine<'workbook> {
             }
             None => Value::Error(ErrorKind::Unsupported),
         };
-        self.results.insert(cell, value);
+        self.store_result(cell, value);
         self.record_evaluation_work(&budget);
         Ok(())
     }

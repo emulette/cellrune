@@ -10,6 +10,7 @@ use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
+use super::lookup_index::{LookupArea, indexed_match_offset};
 use super::util::ExcelSum;
 
 pub(super) fn call_legacy(
@@ -608,6 +609,15 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     };
     if let Err(kind) = engine.ensure_array_cells(length) {
         return Value::Error(kind);
+    }
+    if criterion.is_some()
+        && let Some(area) = LookupArea::new(rect, length, !vertical)
+        && let Some(found) = indexed_match_offset(engine, context, area, &lookup)
+    {
+        return match found {
+            Ok(offset) => Value::Number(f64::from(offset + 1)),
+            Err(kind) => Value::Error(kind),
+        };
     }
     let mut approximate = None;
     for offset in 0..length {

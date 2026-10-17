@@ -11,8 +11,11 @@ use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 use super::criteria_runtime::CriteriaRuntime;
 use super::descriptor::DynamicReferenceKind;
 use super::lookup_common::VectorView;
+use super::lookup_index::{
+    LookupArea, SearchDirection, indexed_lookup_offset, indexed_xlookup_offset,
+};
 use super::util::{required_number, required_text};
-use super::xmatch::{find_match, parse_match_mode, parse_search_mode};
+use super::xmatch::{MatchMode, SearchMode, find_match, parse_match_mode, parse_search_mode};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -357,18 +360,30 @@ fn xlookup_outcome(
     };
     let length = u32::try_from(length).map_err(|_| ErrorKind::Num)?;
     engine.ensure_array_cells(length.into())?;
-    let match_offset = find_match(
-        engine,
-        context,
-        &lookup,
-        length,
-        match_mode,
-        search_mode,
-        |offset| {
-            let cell = lookup_axis_cell(lookup_rect, orientation, offset);
-            engine.read_reference_cell(context, cell).map(Cow::Owned)
-        },
-    );
+    let direction = match (match_mode, search_mode) {
+        (MatchMode::Exact, SearchMode::Forward) => Some(SearchDirection::Forward),
+        (MatchMode::Exact, SearchMode::Reverse) => Some(SearchDirection::Reverse),
+        _ => None,
+    };
+    let indexed = direction.and_then(|direction| {
+        let horizontal = orientation == XLookupOrientation::Horizontal;
+        let area = LookupArea::new(lookup_rect, length.into(), horizontal)?;
+        indexed_xlookup_offset(engine, context, area, &lookup, direction)
+    });
+    let match_offset = indexed.unwrap_or_else(|| {
+        find_match(
+            engine,
+            context,
+            &lookup,
+            length,
+            match_mode,
+            search_mode,
+            |offset| {
+                let cell = lookup_axis_cell(lookup_rect, orientation, offset);
+                engine.read_reference_cell(context, cell).map(Cow::Owned)
+            },
+        )
+    });
     match match_offset {
         Ok(offset) => Ok(XLookupOutcome::Found(xlookup_return_slice(
             return_rect,
@@ -557,6 +572,11 @@ fn find_exact_lookup_offset(
     horizontal: bool,
     length: u64,
 ) -> Result<u32, ErrorKind> {
+    if let Some(area) = LookupArea::new(rect, length, horizontal)
+        && let Some(found) = indexed_lookup_offset(engine, context, area, lookup)
+    {
+        return found;
+    }
     let mut criteria_runtime = CriteriaRuntime::new(engine, context);
     let pattern = match lookup {
         Value::Text(text) if text.contains(['?', '*', '~']) => {
