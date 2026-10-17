@@ -72,7 +72,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
     "fmt",
     "std",
 ] }
-zip = { version = ">=7.2.0, <9", default-features = false, features = [
+zip = { version = ">=7.2.0, <10", default-features = false, features = [
     "deflate-flate2-zlib-rs",
 ] }
 
