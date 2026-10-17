@@ -38,10 +38,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
-- Exact `VLOOKUP`, `HLOOKUP`, `MATCH`, and `XLOOKUP` searches of a range searched before in the same
-  calculation use a shared index instead of scanning, so a column of lookups into a large table
-  takes linear rather than quadratic time. Results, and the work charged against calculation
-  limits, are unchanged.
+- Exact `VLOOKUP`, `HLOOKUP`, `MATCH`, and `XLOOKUP` searches of a range that earlier searches in
+  the same calculation have already scanned several times over use a shared index instead of
+  scanning, so a column of lookups into a large table no longer rescans it for every lookup. A
+  range searched only a few times keeps scanning. Results, and the work charged against
+  calculation limits, are unchanged.
 - `COUNT`, `COUNTA`, `MIN`, `MAX`, `PRODUCT`, and other aggregates that do not sum no longer build
   decimal traces for referenced numbers. Results are unchanged.
 - Python `apply_changes`, `apply_changes_v2`, the cell setters, `clear_cell`, `add_sheet`,

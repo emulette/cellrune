@@ -10,7 +10,9 @@ use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
-use super::lookup_index::{LookupArea, indexed_match_offset};
+use super::lookup_index::{
+    LookupArea, SearchDirection, indexed_match_offset, record_linear_search,
+};
 use super::util::ExcelSum;
 
 pub(super) fn call_legacy(
@@ -610,10 +612,34 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     if let Err(kind) = engine.ensure_array_cells(length) {
         return Value::Error(kind);
     }
-    if criterion.is_some()
-        && let Some(area) = LookupArea::new(rect, length, !vertical)
-        && let Some(found) = indexed_match_offset(engine, context, area, &lookup)
-    {
+    let cell = |offset: u64| {
+        if vertical {
+            (rect.sheet, rect.row_start + offset as u32, rect.col_start)
+        } else {
+            (rect.sheet, rect.row_start, rect.col_start + offset as u32)
+        }
+    };
+    if let Some(criterion) = &criterion {
+        let area = LookupArea::new(rect, length, !vertical);
+        let found = match area.and_then(|area| indexed_match_offset(engine, context, area, &lookup))
+        {
+            Some(found) => found,
+            None => {
+                let found = (|| {
+                    for offset in 0..length {
+                        let value = engine.read_reference_cell(context, cell(offset))?;
+                        if matcher.matches(criterion, &value)? {
+                            return Ok(offset as u32);
+                        }
+                    }
+                    Err(ErrorKind::NA)
+                })();
+                if let Some(area) = area {
+                    record_linear_search(engine, area, SearchDirection::Forward, &found);
+                }
+                found
+            }
+        };
         return match found {
             Ok(offset) => Value::Number(f64::from(offset + 1)),
             Err(kind) => Value::Error(kind),
@@ -621,42 +647,29 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     }
     let mut approximate = None;
     for offset in 0..length {
-        let (row, column) = if vertical {
-            (rect.row_start + offset as u32, rect.col_start)
-        } else {
-            (rect.row_start, rect.col_start + offset as u32)
-        };
-        let value = match engine.read_reference_cell(context, (rect.sheet, row, column)) {
+        let value = match engine.read_reference_cell(context, cell(offset)) {
             Ok(value) => value,
             Err(kind) => return Value::Error(kind),
         };
-        if let Some(criterion) = &criterion {
-            match matcher.matches(criterion, &value) {
-                Ok(true) => return Value::Number((offset + 1) as f64),
-                Ok(false) => continue,
-                Err(kind) => return Value::Error(kind),
-            }
-        } else {
-            // Approximate matching passes over error cells, as Excel does.
-            if matches!(value, Value::Error(_)) {
-                continue;
-            }
-            let ordering = match matcher.compare(&value, &lookup) {
-                Ok(ordering) => ordering,
-                Err(kind) => return Value::Error(kind),
-            };
-            if ordering == std::cmp::Ordering::Equal {
-                return Value::Number((offset + 1) as f64);
-            }
-            if (match_type == 1.0 && ordering == std::cmp::Ordering::Less)
-                || (match_type == -1.0 && ordering == std::cmp::Ordering::Greater)
-            {
-                approximate = Some(offset);
-            } else if (match_type == 1.0 && ordering == std::cmp::Ordering::Greater)
-                || (match_type == -1.0 && ordering == std::cmp::Ordering::Less)
-            {
-                break;
-            }
+        // Approximate matching passes over error cells, as Excel does.
+        if matches!(value, Value::Error(_)) {
+            continue;
+        }
+        let ordering = match matcher.compare(&value, &lookup) {
+            Ok(ordering) => ordering,
+            Err(kind) => return Value::Error(kind),
+        };
+        if ordering == std::cmp::Ordering::Equal {
+            return Value::Number((offset + 1) as f64);
+        }
+        if (match_type == 1.0 && ordering == std::cmp::Ordering::Less)
+            || (match_type == -1.0 && ordering == std::cmp::Ordering::Greater)
+        {
+            approximate = Some(offset);
+        } else if (match_type == 1.0 && ordering == std::cmp::Ordering::Greater)
+            || (match_type == -1.0 && ordering == std::cmp::Ordering::Less)
+        {
+            break;
         }
     }
     approximate.map_or(Value::Error(ErrorKind::NA), |offset| {

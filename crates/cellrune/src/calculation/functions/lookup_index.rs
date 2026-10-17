@@ -1,10 +1,10 @@
 //! Exact-match indexes shared by repeated lookups over one range within a calculation pass.
 //!
-//! A linear exact search reads a range from one end until the first match. When the same range is
-//! searched again, one full read builds an index that answers each later search with the offset
-//! the linear search would stop at. Each indexed search is charged exactly the cell reads and work
-//! units the linear search would have charged, so results and limit failures do not change. An
-//! index is dropped when a result inside its range changes.
+//! A linear exact search reads a range from one end until the first match. Once linear searches of
+//! the same range have read several times its length, one full read builds an index that answers
+//! each later search with the offset the linear search would stop at. Each indexed search is
+//! charged exactly the cell reads and work units the linear search would have charged, so results
+//! and limit failures do not change. An index is dropped when a result inside its range changes.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,8 +16,10 @@ use crate::CalculationLimitKind;
 
 /// Ranges shorter than this are scanned linearly; an index would not pay for itself.
 const MIN_INDEXED_LENGTH: u32 = 32;
-/// A range is indexed once it has been searched this many times in one pass.
-const SEARCHES_BEFORE_INDEXING: u32 = 2;
+/// A range is indexed once linear searches in one pass have read this many times its length, so the
+/// uncharged build costs a fraction of the reads already spent. A range searched only a few times,
+/// such as an expanding range searched twice per row, keeps scanning.
+const SCANNED_LENGTHS_BEFORE_INDEXING: u64 = 8;
 /// Most recently used indexes kept at once.
 const MAX_INDEXES: usize = 16;
 /// Cells covered by all kept indexes together.
@@ -88,13 +90,14 @@ impl LookupArea {
 /// Indexes built during one calculation, most recently used last.
 #[derive(Debug, Default)]
 pub(in crate::calculation) struct LookupIndexCache {
-    searches: HashMap<LookupArea, u32>,
+    /// Cells linear exact searches read in each range since it was last indexed or changed.
+    scanned: HashMap<LookupArea, u64>,
     indexes: Vec<(LookupArea, Arc<ExactLookupIndex>)>,
 }
 
 impl LookupIndexCache {
     pub(in crate::calculation) fn clear(&mut self) {
-        self.searches.clear();
+        self.scanned.clear();
         self.indexes.clear();
     }
 
@@ -103,11 +106,11 @@ impl LookupIndexCache {
         if self.indexes.is_empty() {
             return;
         }
-        let searches = &mut self.searches;
+        let scanned = &mut self.scanned;
         self.indexes.retain(|(area, _)| {
             let keep = !area.contains(cell);
             if !keep {
-                searches.insert(*area, 0);
+                scanned.insert(*area, 0);
             }
             keep
         });
@@ -115,11 +118,11 @@ impl LookupIndexCache {
 
     /// Drops indexes whose range meets `rect`, whose cells are about to read a different owner.
     pub(in crate::calculation) fn invalidate_rect(&mut self, rect: &Rect) {
-        let searches = &mut self.searches;
+        let scanned = &mut self.scanned;
         self.indexes.retain(|(area, _)| {
             let keep = !area.intersects(rect);
             if !keep {
-                searches.insert(*area, 0);
+                scanned.insert(*area, 0);
             }
             keep
         });
@@ -136,11 +139,15 @@ impl LookupIndexCache {
         Some(index)
     }
 
-    /// Counts one search of `area` and returns whether it is now due for an index.
-    fn record_search(&mut self, area: LookupArea) -> bool {
-        let searches = self.searches.entry(area).or_insert(0);
-        *searches = searches.saturating_add(1);
-        *searches >= SEARCHES_BEFORE_INDEXING
+    fn record_linear_reads(&mut self, area: LookupArea, reads: u64) {
+        let scanned = self.scanned.entry(area).or_insert(0);
+        *scanned = scanned.saturating_add(reads);
+    }
+
+    /// Whether linear searches have read enough of `area` to pay for an index.
+    fn is_due(&self, area: LookupArea) -> bool {
+        self.scanned.get(&area).copied().unwrap_or(0)
+            >= u64::from(area.length) * SCANNED_LENGTHS_BEFORE_INDEXING
     }
 
     fn insert(&mut self, area: LookupArea, index: Arc<ExactLookupIndex>) {
@@ -153,6 +160,9 @@ impl LookupIndexCache {
         {
             let (evicted, _) = self.indexes.remove(0);
             cells -= u64::from(evicted.length);
+            // An evicted range earns its index again, so ranges searched in turn do not rebuild
+            // the index each one evicted.
+            self.scanned.insert(evicted, 0);
         }
         self.indexes.push((area, index));
     }
@@ -400,7 +410,7 @@ pub(super) fn indexed_xlookup_offset(
 
 /// Returns the index for `area`, building it once the area is due, or `None` when the search must
 /// scan: during targeted calculation, whose cell reads record pending dependencies, for short
-/// ranges, and for ranges not yet searched often enough.
+/// ranges, and for ranges linear searches have not yet read enough of.
 fn exact_lookup_index(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -413,7 +423,7 @@ fn exact_lookup_index(
     if let Some(index) = cache.get(area) {
         return Some(index);
     }
-    if !cache.record_search(area) {
+    if !cache.is_due(area) {
         return None;
     }
     drop(cache);
@@ -423,6 +433,29 @@ fn exact_lookup_index(
         .borrow_mut()
         .insert(area, Arc::clone(&index));
     Some(index)
+}
+
+/// Records the cells a linear exact search of `area` read before it returned `outcome`, toward
+/// indexing the area. Callers report only searches an index could have answered.
+pub(super) fn record_linear_search(
+    engine: &Engine<'_>,
+    area: LookupArea,
+    direction: SearchDirection,
+    outcome: &Result<u32, ErrorKind>,
+) {
+    if engine.is_targeted() || area.length < MIN_INDEXED_LENGTH {
+        return;
+    }
+    let reads = match (outcome, direction) {
+        (Ok(offset), SearchDirection::Forward) => offset + 1,
+        (Ok(offset), SearchDirection::Reverse) => area.length - offset,
+        (Err(ErrorKind::NA), _) => area.length,
+        (Err(_), _) => return,
+    };
+    engine
+        .lookup_index_cache()
+        .borrow_mut()
+        .record_linear_reads(area, u64::from(reads));
 }
 
 /// Charges an indexed search what the linear search would have charged, or returns `None` when a

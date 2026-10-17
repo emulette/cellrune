@@ -13,6 +13,7 @@ use super::descriptor::DynamicReferenceKind;
 use super::lookup_common::VectorView;
 use super::lookup_index::{
     LookupArea, SearchDirection, indexed_lookup_offset, indexed_xlookup_offset,
+    record_linear_search,
 };
 use super::util::{required_number, required_text};
 use super::xmatch::{MatchMode, SearchMode, find_match, parse_match_mode, parse_search_mode};
@@ -365,13 +366,18 @@ fn xlookup_outcome(
         (MatchMode::Exact, SearchMode::Reverse) => Some(SearchDirection::Reverse),
         _ => None,
     };
-    let indexed = direction.and_then(|direction| {
+    let indexable = direction.and_then(|direction| {
         let horizontal = orientation == XLookupOrientation::Horizontal;
-        let area = LookupArea::new(lookup_rect, length.into(), horizontal)?;
+        Some((
+            LookupArea::new(lookup_rect, length.into(), horizontal)?,
+            direction,
+        ))
+    });
+    let indexed = indexable.and_then(|(area, direction)| {
         indexed_xlookup_offset(engine, context, area, &lookup, direction)
     });
     let match_offset = indexed.unwrap_or_else(|| {
-        find_match(
+        let found = find_match(
             engine,
             context,
             &lookup,
@@ -382,7 +388,11 @@ fn xlookup_outcome(
                 let cell = lookup_axis_cell(lookup_rect, orientation, offset);
                 engine.read_reference_cell(context, cell).map(Cow::Owned)
             },
-        )
+        );
+        if let Some((area, direction)) = indexable {
+            record_linear_search(engine, area, direction, &found);
+        }
+        found
     });
     match match_offset {
         Ok(offset) => Ok(XLookupOutcome::Found(xlookup_return_slice(
@@ -572,7 +582,8 @@ fn find_exact_lookup_offset(
     horizontal: bool,
     length: u64,
 ) -> Result<u32, ErrorKind> {
-    if let Some(area) = LookupArea::new(rect, length, horizontal)
+    let area = LookupArea::new(rect, length, horizontal);
+    if let Some(area) = area
         && let Some(found) = indexed_lookup_offset(engine, context, area, lookup)
     {
         return found;
@@ -584,21 +595,29 @@ fn find_exact_lookup_offset(
         }
         _ => None,
     };
-    for offset in 0..length as u32 {
-        let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
-        let matched = match (&pattern, &value) {
-            (_, Value::Error(_)) => false,
-            (Some(pattern), Value::Text(text)) => {
-                criteria_runtime.wildcard_matches(pattern, text)?
+    let found = (|| {
+        for offset in 0..length as u32 {
+            let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+            let matched = match (&pattern, &value) {
+                (_, Value::Error(_)) => false,
+                (Some(pattern), Value::Text(text)) => {
+                    criteria_runtime.wildcard_matches(pattern, text)?
+                }
+                (Some(_), _) => false,
+                (None, _) => compare(&value, lookup)? == Ordering::Equal,
+            };
+            if matched {
+                return Ok(offset);
             }
-            (Some(_), _) => false,
-            (None, _) => compare(&value, lookup)? == Ordering::Equal,
-        };
-        if matched {
-            return Ok(offset);
         }
+        Err(ErrorKind::NA)
+    })();
+    if let Some(area) = area
+        && pattern.is_none()
+    {
+        record_linear_search(engine, area, SearchDirection::Forward, &found);
     }
-    Err(ErrorKind::NA)
+    found
 }
 
 fn lookup_axis_value(

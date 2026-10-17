@@ -6,6 +6,9 @@ use crate::{
 };
 
 const ROWS: u32 = 120;
+/// Copies of the lookup formulas calculated together, enough for linear searches to earn every
+/// range an index before the last copies search it.
+const SHARED_COPIES: usize = 4;
 
 /// Lookup values covering every equality class: present and absent numbers, zero (which equals a
 /// blank cell under `compare`), numbers stored as text, mixed-case text, empty text, logicals,
@@ -104,11 +107,19 @@ fn address(row: u32, column: u32) -> CellAddress {
     CellAddress::from_indices(row, column).expect("test address")
 }
 
-/// Calculates every formula together, where repeated searches use an index, and each formula
-/// alone, where its only search scans, and requires the same result and the same total work.
+/// The lookup formulas repeated [`SHARED_COPIES`] times.
+fn shared_formulas() -> Vec<String> {
+    let formulas = lookup_formulas();
+    let copies = formulas.len() * SHARED_COPIES;
+    formulas.into_iter().cycle().take(copies).collect()
+}
+
+/// Calculates copies of every formula together, where repeated searches use an index, and each
+/// formula alone, where its only search scans, and requires the same results and the same total
+/// work.
 fn assert_indexed_matches_linear(options: CalculationOptions) {
     let formulas = lookup_formulas();
-    let shared = workbook(&formulas);
+    let shared = workbook(&shared_formulas());
     let (shared_snapshot, _, shared_work) =
         calculate_and_compile(shared.workbook(), options, || false).expect("shared calculation");
     let sheet = SheetId::new(1).expect("default sheet");
@@ -118,28 +129,41 @@ fn assert_indexed_matches_linear(options: CalculationOptions) {
         let alone = workbook(std::slice::from_ref(formula));
         let (alone_snapshot, _, alone_work) =
             calculate_and_compile(alone.workbook(), options, || false).expect("lone calculation");
-        let row = u32::try_from(index).expect("formula row") + 1;
-        assert_eq!(
-            shared_snapshot.cell(CalculationCellId::new(sheet, address(row, 4))),
-            alone_snapshot.cell(CalculationCellId::new(sheet, address(1, 4))),
-            "{formula}"
-        );
+        for copy in 0..SHARED_COPIES {
+            let row = u32::try_from(copy * formulas.len() + index).expect("formula row") + 1;
+            assert_eq!(
+                shared_snapshot.cell(CalculationCellId::new(sheet, address(row, 4))),
+                alone_snapshot.cell(CalculationCellId::new(sheet, address(1, 4))),
+                "{formula} (copy {copy})"
+            );
+        }
         function_iterations += alone_work.function_iterations;
         reference_cells += alone_work.reference_cells;
     }
-    assert_eq!(shared_work.function_iterations, function_iterations);
-    assert_eq!(shared_work.reference_cells, reference_cells);
+    let copies = u64::try_from(SHARED_COPIES).expect("copy count");
+    assert_eq!(
+        shared_work.function_iterations,
+        function_iterations * copies
+    );
+    assert_eq!(shared_work.reference_cells, reference_cells * copies);
 }
 
 #[test]
 fn indexed_exact_lookups_return_and_charge_what_linear_searches_do() {
-    let formulas = lookup_formulas();
-    let shared = workbook(&formulas);
+    let shared = workbook(&shared_formulas());
     let engine = Engine::evaluate(shared.workbook(), CalculationOptions::default());
-    assert!(
-        !engine.lookup_index_cache().borrow().indexes.is_empty(),
-        "repeated searches must build an index"
-    );
+    let cache = engine.lookup_index_cache().borrow();
+    for horizontal in [false, true] {
+        assert!(
+            cache
+                .indexes
+                .iter()
+                .any(|(area, _)| area.horizontal == horizontal),
+            "repeated searches must index the {} range",
+            if horizontal { "horizontal" } else { "vertical" }
+        );
+    }
+    drop(cache);
 
     assert_indexed_matches_linear(CalculationOptions::default());
 }
@@ -182,10 +206,82 @@ fn a_result_written_inside_an_indexed_range_drops_the_index() {
     cache.invalidate_cell((0, 1, 2));
     assert!(cache.get(area).is_some(), "cells outside the range keep it");
 
+    cache.record_linear_reads(area, 40 * super::SCANNED_LENGTHS_BEFORE_INDEXING);
     cache.invalidate_cell((0, 40, 1));
     assert!(cache.get(area).is_none());
     assert!(
-        !cache.record_search(area),
-        "an invalidated range waits for repeated searches again"
+        !cache.is_due(area),
+        "an invalidated range waits for new linear reads"
     );
+}
+
+fn empty_index(length: u32) -> std::sync::Arc<super::ExactLookupIndex> {
+    let prefix = vec![0; length as usize + 1];
+    std::sync::Arc::new(super::ExactLookupIndex {
+        values: std::collections::HashMap::new(),
+        numeric_texts: std::collections::HashMap::new(),
+        blanks: None,
+        contains_nan: false,
+        texts_before: prefix.clone(),
+        nonempty_texts_before: prefix.clone(),
+        blanks_before: prefix,
+    })
+}
+
+#[test]
+fn an_evicted_range_waits_for_new_linear_reads_before_it_is_indexed_again() {
+    // Lookups that search more ranges in turn than the cache holds would otherwise rebuild, on
+    // every search, the index the previous build evicted.
+    let mut cache = super::LookupIndexCache::default();
+    let area = |column| super::LookupArea {
+        sheet: 0,
+        row: 1,
+        column,
+        length: 40,
+        horizontal: false,
+    };
+    cache.record_linear_reads(area(1), 40 * super::SCANNED_LENGTHS_BEFORE_INDEXING);
+    assert!(cache.is_due(area(1)));
+    cache.insert(area(1), empty_index(40));
+    for column in 2..=u32::try_from(super::MAX_INDEXES).expect("index count") + 1 {
+        cache.insert(area(column), empty_index(40));
+    }
+    assert!(
+        cache.get(area(1)).is_none(),
+        "the least recently used index is evicted"
+    );
+    assert!(!cache.is_due(area(1)));
+}
+
+#[test]
+fn an_expanding_range_searched_twice_per_row_keeps_scanning() {
+    // `$A$1:A{n}` is a different range on every row; an index built for its two searches would
+    // cost more than the searches.
+    let mut draft = WorkbookDraft::new();
+    let sheet = SheetId::new(1).expect("default sheet");
+    let rows = 4 * super::MIN_INDEXED_LENGTH;
+    for row in 1..=rows {
+        draft
+            .set_cell_value(
+                sheet,
+                address(row, 1),
+                CellValue::Text(format!("v{}", row % 50)),
+            )
+            .expect("key");
+    }
+    for row in super::MIN_INDEXED_LENGTH + 1..=rows {
+        let previous = row - 1;
+        let formula = format!(
+            "IF(ISNUMBER(MATCH(A{row},$A$1:A{previous},0)),MATCH(A{row},$A$1:A{previous},0),0)"
+        );
+        draft
+            .set_cell_formula(
+                sheet,
+                address(row, 2),
+                FormulaText::from_xlsx(&formula).expect("formula"),
+            )
+            .expect("formula cell");
+    }
+    let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
+    assert!(engine.lookup_index_cache().borrow().indexes.is_empty());
 }
