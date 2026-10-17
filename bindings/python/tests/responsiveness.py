@@ -88,6 +88,50 @@ def main() -> None:
     )
     assert len(page["cells"]) == 10_000
 
+    assert_calls_wait_for_edit()
+
+
+def assert_calls_wait_for_edit() -> None:
+    """Reads, calculation, and saves on another thread wait for an edit instead of failing."""
+    workbook = Workbook.create()
+    edits: list[WorkbookChange] = [
+        {
+            "kind": "set_value",
+            "sheet": "Sheet1",
+            "address": f"B{row}",
+            "value": {"kind": "number", "value": float(row)},
+        }
+        for row in range(1, 30_001)
+    ]
+    edit_errors: list[BaseException] = []
+
+    def edit() -> None:
+        try:
+            workbook.apply_changes(0, edits)
+        except BaseException as error:
+            edit_errors.append(error)
+
+    calls: list[Callable[[], object]] = [
+        workbook.summary,
+        lambda: workbook.read_range("Sheet1", "B1", "B1"),
+        workbook.calculate,
+        workbook.to_bytes,
+    ]
+    thread = threading.Thread(target=edit)
+    thread.start()
+    try:
+        while thread.is_alive():
+            for call in calls:
+                call()
+    finally:
+        thread.join(WORKER_TIMEOUT_SECONDS * 10)
+    assert not thread.is_alive(), "edit thread did not stop"
+    assert edit_errors == []
+    assert workbook.read_range("Sheet1", "B30000", "B30000")["cells"][0]["source_value"] == {
+        "kind": "number",
+        "value": 30_000.0,
+    }
+
 
 def assert_allows_interpreter_progress(
     operation: Callable[[], T],

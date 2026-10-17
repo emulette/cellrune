@@ -94,7 +94,7 @@ impl Workbook {
     }
 
     pub fn summary<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let result = py.detach(|| self.lock_interop().map(|session| session.summary()));
+        let result = py.detach(|| self.lock_interop_wait().map(|session| session.summary()));
         let summary = result.map_err(|error| into_py_error(py, error))?;
         conversion::workbook_summary(py, &summary)
     }
@@ -112,7 +112,7 @@ impl Workbook {
         let offset = page_offset_from_python(offset).map_err(|error| into_py_error(py, error))?;
         let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
         let result = py.detach(move || {
-            self.lock_interop()?.read_range(&RangeRequestDto {
+            self.lock_interop_wait()?.read_range(&RangeRequestDto {
                 sheet,
                 start,
                 end,
@@ -142,7 +142,10 @@ impl Workbook {
                 .map_err(|error| into_py_error(py, error))?,
             ..CalculationOptionsDto::default()
         };
-        let result = py.detach(move || self.lock_interop()?.capabilities(options, offset, limit));
+        let result = py.detach(move || {
+            self.lock_interop_wait()?
+                .capabilities(options, offset, limit)
+        });
         let page = result.map_err(|error| into_py_error(py, error))?;
         conversion::capability_page(py, &page)
     }
@@ -155,7 +158,7 @@ impl Workbook {
         current_sheet: Option<String>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let result = py.detach(move || {
-            self.lock_interop()?
+            self.lock_interop_wait()?
                 .inspect_defined_name(&DefinedNameInspectionRequestDto {
                     name,
                     current_sheet,
@@ -166,7 +169,10 @@ impl Workbook {
     }
 
     pub fn function_usage<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let result = py.detach(|| self.lock_interop().map(|session| session.function_usage()));
+        let result = py.detach(|| {
+            self.lock_interop_wait()
+                .map(|session| session.function_usage())
+        });
         let report = result.map_err(|error| into_py_error(py, error))?;
         conversion::function_usage(py, &report)
     }
@@ -199,18 +205,19 @@ impl Workbook {
         let financial_solver_semantics =
             parse_financial_solver_semantics(financial_solver_semantics)
                 .map_err(|error| into_py_error(py, error))?;
-        let prepared = self
-            .lock(py)?
-            .prepare_recalculation(
-                RecalculationModeDto::Auto,
-                CalculationOptionsDto {
-                    today_serial,
-                    now_serial,
-                    arithmetic_semantics,
-                    financial_solver_semantics,
-                    calculation_limits,
-                },
-            )
+        let prepared = py
+            .detach(|| {
+                self.lock_interop_wait()?.prepare_recalculation(
+                    RecalculationModeDto::Auto,
+                    CalculationOptionsDto {
+                        today_serial,
+                        now_serial,
+                        arithmetic_semantics,
+                        financial_solver_semantics,
+                        calculation_limits,
+                    },
+                )
+            })
             .map_err(|error| into_py_error(py, error))?;
         let request_id = prepared.request_id();
         let completed = match py.detach(move || prepared.run()) {
@@ -266,18 +273,19 @@ impl Workbook {
         let financial_solver_semantics =
             parse_financial_solver_semantics(financial_solver_semantics)
                 .map_err(|error| into_py_error(py, error))?;
-        let prepared = workbook
-            .lock(py)?
-            .prepare_recalculation(
-                mode,
-                CalculationOptionsDto {
-                    today_serial,
-                    now_serial,
-                    arithmetic_semantics,
-                    financial_solver_semantics,
-                    calculation_limits,
-                },
-            )
+        let prepared = py
+            .detach(|| {
+                workbook.lock_interop_wait()?.prepare_recalculation(
+                    mode,
+                    CalculationOptionsDto {
+                        today_serial,
+                        now_serial,
+                        arithmetic_semantics,
+                        financial_solver_semantics,
+                        calculation_limits,
+                    },
+                )
+            })
             .map_err(|error| into_py_error(py, error))?;
         let request_id = prepared.request_id();
         let completed = match py.detach(move || prepared.run()) {
@@ -548,7 +556,7 @@ impl Workbook {
         invalidate_unavailable: bool,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = py.detach(|| {
-            self.lock_interop()?.save_bytes(WriteOptionsDto {
+            self.lock_interop_wait()?.save_bytes(WriteOptionsDto {
                 invalidate_unavailable,
                 replace_existing: false,
             })
@@ -566,7 +574,7 @@ impl Workbook {
         replace_existing: bool,
     ) -> PyResult<Bound<'py, PyDict>> {
         let result = py.detach(move || {
-            self.lock_interop()?.save_path(
+            self.lock_interop_wait()?.save_path(
                 path,
                 WriteOptionsDto {
                     invalidate_unavailable,
@@ -579,7 +587,7 @@ impl Workbook {
     }
 
     pub fn edits_to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let result = py.detach(|| self.lock_interop()?.save_edits_bytes());
+        let result = py.detach(|| self.lock_interop_wait()?.save_edits_bytes());
         let (bytes, _) = result.map_err(|error| into_py_error(py, error))?;
         Ok(PyBytes::new(py, &bytes))
     }
@@ -592,7 +600,7 @@ impl Workbook {
         replace_existing: bool,
     ) -> PyResult<Bound<'py, PyDict>> {
         let result = py.detach(move || {
-            self.lock_interop()?
+            self.lock_interop_wait()?
                 .save_edits_path(path, EditWriteOptionsDto { replace_existing })
         });
         let report = result.map_err(|error| into_py_error(py, error))?;
@@ -618,13 +626,11 @@ impl Workbook {
             .map_err(|error| into_py_error(py, error))
     }
 
+    /// Acquires the session without waiting, for calls that must not block behind other work.
     fn lock<'a>(&'a self, py: Python<'_>) -> PyResult<WorkbookSessionGuard<'a>> {
-        self.lock_interop()
+        self.session
+            .try_lock()
             .map_err(|error| into_py_error(py, error))
-    }
-
-    fn lock_interop(&self) -> Result<WorkbookSessionGuard<'_>, InteropError> {
-        self.session.try_lock()
     }
 
     fn lock_interop_wait(&self) -> Result<WorkbookSessionGuard<'_>, InteropError> {
