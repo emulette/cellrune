@@ -35,6 +35,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   failed a strict save with `xlsx.write.incomplete_calculation`, reporting array and spill cells by
   their owning formula. Interop, Python, Node.js, and MCP carry them as `details.cells`; errors
   without cells keep their previous JSON shape.
+- Python wheels for Linux arm64 (`manylinux_2_28`), Linux x86_64 and arm64 on musl
+  (`musllinux_1_2`), macOS x86_64, and Windows arm64, matching the npm platform packages. Windows
+  arm64 wheels start at Python 3.11, the first CPython with a Windows arm64 build.
 
 ### Changed
 
