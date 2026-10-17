@@ -249,6 +249,36 @@ fn iso_date_cells_read_the_end_of_day_and_dates_outside_the_date_system_as_excel
 }
 
 #[test]
+fn iso_date_cells_keep_their_serials_when_the_date_system_changes() {
+    // A date system change keeps every serial, so a `t="d"` literal, whose calendar date the new
+    // system would read as another serial, is saved as its number.
+    let excel_1900 = WORKBOOK.replace(r#"<workbookPr date1904="1"/>"#, "");
+    let source = build_table_archive_with_workbook(&excel_1900, ISO_DATE_SHEET, &[]);
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("document");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_date_system(DateSystem::Excel1904)
+        .expect("date system");
+    let edits = crate::write_xlsx_draft_edits_bytes(&draft, crate::WriteOptions::default())
+        .expect("edits-only write");
+    let calculation = calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let full = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("full write");
+    for output in [edits.bytes(), full.bytes()] {
+        let reopened = read_xlsx_bytes(output, ReadOptions::default()).expect("reopen");
+        assert_eq!(reopened.date_system(), DateSystem::Excel1904);
+        let sheet = reopened.sheet_by_name("First").expect("first sheet");
+        assert_eq!(number(literal(sheet, "C1")), 45_366.0);
+        assert_eq!(number(literal(sheet, "A1")), 45_366.0 + 8.0 / 24.0);
+        assert_eq!(number(literal(sheet, "D1")), 8.0 / 24.0);
+        assert_eq!(
+            cell(sheet, "C1").number_format().kind(),
+            NumberFormatKind::Date
+        );
+    }
+}
+
+#[test]
 fn iso_date_cells_that_are_not_iso_8601_dates_are_rejected() {
     for value in [
         "2024-02-30",

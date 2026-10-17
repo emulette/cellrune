@@ -68,6 +68,38 @@ pub(crate) fn read_cell_style_indices(
     Ok(output)
 }
 
+/// Returns the cells whose value is stored as an ISO 8601 date (`t="d"`).
+pub(crate) fn read_date_typed_cells(
+    bytes: &[u8],
+    source: &PartPath,
+    limits: WriteLimits,
+) -> Result<BTreeSet<CellAddress>, XlsxWriteError> {
+    enforce_bytes(bytes.len(), limits, source)?;
+    let mut xml = configured_reader(bytes);
+    let mut buffer = Vec::new();
+    let mut output = BTreeSet::new();
+    loop {
+        let event = xml
+            .read_event_into(&mut buffer)
+            .map_err(|error| invalid_xml(source, error))?;
+        if let Event::Start(element) | Event::Empty(element) = &event
+            && element.local_name().as_ref() == b"c"
+        {
+            for attribute in element.attributes().with_checks(true) {
+                let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+                if attribute.key.as_ref() == b"t" && attribute.value.as_ref() == b"d" {
+                    output.insert(required_cell_reference(element, source)?);
+                }
+            }
+        }
+        if matches!(event, Event::Eof) {
+            break;
+        }
+        buffer.clear();
+    }
+    Ok(output)
+}
+
 pub(crate) fn patch_worksheet_semantics(
     bytes: &[u8],
     source: &PartPath,

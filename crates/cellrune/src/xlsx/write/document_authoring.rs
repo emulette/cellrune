@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::auto_filter_patch::patch_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
 use super::materialization::{MaterializationAction, MaterializationPlan};
-use super::package::PackageWritePlan;
+use super::package::{PackageReader, PackageWritePlan};
 use super::package_additions::{
     NewRelationship, RelationshipIdAllocator, append_content_type_overrides, append_relationships,
 };
@@ -19,6 +19,7 @@ use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
 use super::workbook_patch::HostRecalculation;
 use super::worksheet_edit::{
     WorksheetSemanticEdit, patch_worksheet_semantics, read_cell_style_indices,
+    read_date_typed_cells,
 };
 use super::worksheet_patch::{WorksheetCacheAction, WorksheetCellUpdate, patch_worksheet};
 use super::worksheet_view_edit::patch_frozen_pane;
@@ -172,6 +173,8 @@ pub(super) fn write_document_package(
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
+    let date_typed_literals =
+        date_typed_literals_to_rewrite(draft, document, &mut source_reader, limits)?;
     let shared_strings_source = document
         .package_summary()
         .shared_strings_part()
@@ -238,6 +241,7 @@ pub(super) fn write_document_package(
         .chain(materialization.cells().keys().map(|id| id.sheet_id()))
         .chain(draft.presentation_sheet_mutations().iter().copied())
         .chain(auto_filter_sheets.iter().copied())
+        .chain(date_typed_literals.keys().copied())
         .filter(|sheet_id| !draft.added_sheets().contains(sheet_id))
         .collect::<BTreeSet<_>>();
     enforce_count(
@@ -276,6 +280,13 @@ pub(super) fn write_document_package(
                 )
             })
             .map(|id| id.address())
+            .chain(
+                date_typed_literals
+                    .get(&sheet_id)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            )
             .filter(|address| source_sheet.is_some_and(|sheet| sheet.cell(*address).is_some()))
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
@@ -379,6 +390,10 @@ pub(super) fn write_document_package(
                 .zip(shared_strings_source.as_ref()),
             limits,
         )?;
+        let date_typed = date_typed_literals
+            .get(&sheet_id)
+            .cloned()
+            .unwrap_or_default();
         let edit_addresses = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -388,6 +403,7 @@ pub(super) fn write_document_package(
                     .range(sheet_cell_bounds(sheet_id)),
             )
             .map(|id| id.address())
+            .chain(date_typed.iter().copied())
             .collect::<BTreeSet<_>>();
         for address in edit_addresses {
             let id = CalculationCellId::new(sheet_id, address);
@@ -405,7 +421,8 @@ pub(super) fn write_document_package(
                         .and_then(|sheet| sheet.cell(address));
                     let content_changed = original_cell.map(crate::Cell::content)
                         != Some(cell.content())
-                        || draft.presentation_cell_mutations().contains(&id);
+                        || draft.presentation_cell_mutations().contains(&id)
+                        || date_typed.contains(&address);
                     let style_index = style_indexes.get(&id).copied().unwrap_or_else(|| {
                         source_style_index(&sheet_source.styles, draft_sheet, address)
                     });
@@ -602,6 +619,42 @@ pub(super) fn write_document_package(
 }
 
 /// Existing sheets whose sheet-level autoFilter the draft changed.
+/// Returns the unedited literal cells stored as ISO 8601 dates (`t="d"`) once the draft changed the
+/// date system. The draft keeps each cell's serial, which the stored calendar date would read as a
+/// different serial in the new system, so these cells are rewritten as their numbers.
+fn date_typed_literals_to_rewrite(
+    draft: &WorkbookDraft,
+    document: &XlsxDocument,
+    source_reader: &mut PackageReader<'_>,
+    limits: WriteLimits,
+) -> Result<BTreeMap<SheetId, BTreeSet<crate::CellAddress>>, XlsxWriteError> {
+    let mut literals = BTreeMap::new();
+    if draft.workbook().date_system() == document.workbook().date_system() {
+        return Ok(literals);
+    }
+    for sheet in draft.workbook().sheets() {
+        let Some(part) = document.worksheet_part_path(sheet.id()) else {
+            continue;
+        };
+        let cells = read_date_typed_cells(&source_reader.read_part(part)?, part, limits)?
+            .into_iter()
+            .filter(|address| {
+                matches!(
+                    sheet.cell(*address).map(crate::Cell::content),
+                    Some(crate::CellContent::Literal(_))
+                ) && draft
+                    .cell_mutations()
+                    .get(&CalculationCellId::new(sheet.id(), *address))
+                    .is_none()
+            })
+            .collect::<BTreeSet<_>>();
+        if !cells.is_empty() {
+            literals.insert(sheet.id(), cells);
+        }
+    }
+    Ok(literals)
+}
+
 fn changed_auto_filter_sheets(draft: &WorkbookDraft, document: &XlsxDocument) -> BTreeSet<SheetId> {
     draft
         .workbook()

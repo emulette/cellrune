@@ -66,7 +66,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A cell typed `t="d"`, which openpyxl writes with `iso_dates` and SheetJS with `cellDates`, no
   longer fails the read with `xlsx.unsupported_cell_type`: its ISO 8601 date, date-time, or time
   reads as a serial in the workbook's date system, a date before the date system's first day reads
-  as `#VALUE!` as in Excel, and an invalid one fails with `xlsx.invalid_cell_value`.
+  as `#VALUE!` as in Excel, and an invalid one fails with `xlsx.invalid_cell_value`. A save after
+  the date system changes writes such cells as their serial numbers.
 
 ## [0.1.24] - 2026-10-10
 
