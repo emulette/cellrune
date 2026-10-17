@@ -10,7 +10,6 @@ publish = false
 workspace = true
 
 [dependencies]
-calamine.workspace = true
 cellrune = { version = "=0.1.24", path = "../../crates/cellrune", features = ["__internal-transaction-bench"] }
 cellrune-interop = { version = "=0.1.24", path = "../../crates/cellrune-interop" }
 libm.workspace = true

@@ -27,7 +27,6 @@ publish = false
 [workspace.dependencies]
 # These are compatibility floors, not snapshots. The committed lockfile supplies the reproducible
 # graph; the nightly floor and newest-compatible runs exercise both ends of these requirements.
-calamine = { version = "0.36.0", default-features = false }
 # `cap_std::fs::Dir` appears in published signatures, so this public dependency must stay
 # within one semver family: a multi-major range would let a dependent's resolver hand
 # CellRune a different `Dir` than the dependent's own.
@@ -72,7 +71,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
     "fmt",
     "std",
 ] }
-zip = { version = ">=7.2.0, <9", default-features = false, features = [
+zip = { version = ">=9.0.0, <10", default-features = false, features = [
     "deflate-flate2-zlib-rs",
 ] }
 

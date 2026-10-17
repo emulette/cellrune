@@ -46,6 +46,7 @@ are not part of this binary notice.
 | `miniz_oxide` | `0.8.9` | `MIT OR Zlib OR Apache-2.0` |
 | `napi` | `3.12.2` | `MIT` |
 | `napi-sys` | `3.3.0` | `MIT` |
+| `nix` | `0.31.3` | `MIT` |
 | `nohash-hasher` | `0.2.0` | `Apache-2.0 OR MIT` |
 | `pcre2` | `0.2.11` | `Unlicense OR MIT` |
 | `pcre2-sys` | `0.2.10` | `Unlicense OR MIT` |
@@ -75,7 +76,7 @@ are not part of this binary notice.
 | `windows_x86_64_gnu` | `0.53.1` | `MIT OR Apache-2.0` |
 | `windows_x86_64_gnullvm` | `0.53.1` | `MIT OR Apache-2.0` |
 | `windows_x86_64_msvc` | `0.53.1` | `MIT OR Apache-2.0` |
-| `zip` | `8.6.0` | `MIT` |
+| `zip` | `9.0.4` | `MIT` |
 | `zlib-rs` | `0.6.6` | `Zlib` |
 | `zmij` | `1.0.23` | `MIT` |
 
@@ -2524,6 +2525,36 @@ SOFTWARE.
 
 ### License text 33
 
+Components: `nix 0.31.3`
+
+Source filenames: `LICENSE`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Carl Lerche + nix-rust Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### License text 34
+
 Components: `nohash-hasher 0.2.0`
 
 Source filenames: `LICENSE-APACHE`
@@ -2732,7 +2763,7 @@ Apache License
    limitations under the License.
 ```
 
-### License text 34
+### License text 35
 
 Components: `nohash-hasher 0.2.0`
 
@@ -2759,7 +2790,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 35
+### License text 36
 
 Components: `pcre2 0.2.11`, `pcre2-sys 0.2.10`
 
@@ -2789,7 +2820,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 36
+### License text 37
 
 Components: `pcre2-sys 0.2.10`
 
@@ -2833,7 +2864,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### License text 37
+### License text 38
 
 Components: `pcre2-sys 0.2.10`
 
@@ -2865,7 +2896,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING 
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### License text 38
+### License text 39
 
 Components: `psm 0.1.32`
 
@@ -3075,7 +3106,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 39
+### License text 40
 
 Components: `psm 0.1.32`
 
@@ -3100,7 +3131,7 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 40
+### License text 41
 
 Components: `quick-xml 0.41.0`
 
@@ -3132,7 +3163,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 41
+### License text 42
 
 Components: `schemars 1.2.1`
 
@@ -3162,7 +3193,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 42
+### License text 43
 
 Components: `sha2 0.11.0`
 
@@ -3199,7 +3230,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 43
+### License text 44
 
 Components: `simd-adler32 0.3.10`
 
@@ -3229,7 +3260,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 44
+### License text 45
 
 Components: `slab 0.4.12`
 
@@ -3263,7 +3294,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 45
+### License text 46
 
 Components: `typenum 1.20.1`
 
@@ -3273,7 +3304,7 @@ Source filenames: `LICENSE`
 MIT OR Apache-2.0
 ```
 
-### License text 46
+### License text 47
 
 Components: `typenum 1.20.1`
 
@@ -3483,7 +3514,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 47
+### License text 48
 
 Components: `typenum 1.20.1`
 
@@ -3513,7 +3544,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 48
+### License text 49
 
 Components: `windows-link 0.2.1`, `windows-sys 0.60.2`, `windows-targets 0.53.5`, `windows_aarch64_gnullvm
   0.53.1`, `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.53.1`, `windows_i686_gnullvm 0.53.1`,
@@ -3726,7 +3757,7 @@ Apache License
    limitations under the License.
 ```
 
-### License text 49
+### License text 50
 
 Components: `windows-link 0.2.1`, `windows-sys 0.60.2`, `windows-targets 0.53.5`, `windows_aarch64_gnullvm
   0.53.1`, `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.53.1`, `windows_i686_gnullvm 0.53.1`,
@@ -3759,9 +3790,9 @@ MIT License
     SOFTWARE
 ```
 
-### License text 50
+### License text 51
 
-Components: `zip 8.6.0`
+Components: `zip 9.0.4`
 
 Source filenames: `LICENSE`
 
@@ -3789,7 +3820,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 51
+### License text 52
 
 Components: `zlib-rs 0.6.6`
 

@@ -52,9 +52,8 @@ List them with `cargo tree --locked -p cellrune --features capability-fs --edges
 
 ## Development dependencies
 
-`calamine` is used only for differential development audits. `serde` and
-`serde_json` are used only by tests and evidence tooling. They are not linked
-into CellRune's normal library dependency graph. The complete locked graph,
+`serde` and `serde_json` are used only by tests and evidence tooling. They are
+not linked into CellRune's normal library dependency graph. The complete locked graph,
 including all transitive development dependencies, is checked by
 `cargo-deny` against the repository's license, advisory, source, and
 duplicate-version policy.

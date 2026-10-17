@@ -90,7 +90,11 @@ pub(super) fn archive_parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
         }
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("part bytes");
-        assert!(parts.insert(file.name().to_owned(), contents).is_none());
+        assert!(
+            parts
+                .insert(file.name().expect("entry name").into_owned(), contents)
+                .is_none()
+        );
     }
     parts
 }

@@ -170,9 +170,11 @@ pub(super) fn verify_package_invariants(workbook_path: &Path) -> Result<(), Stri
         let entry = archive
             .by_index(index)
             .map_err(|error| format!("{}: {error}", workbook_path.display()))?;
-        let name = entry.name();
+        let name = entry
+            .name()
+            .map_err(|error| format!("{}: {error}", workbook_path.display()))?;
         if name.starts_with("xl/externalLinks/") || name == "xl/externalLinks.xml" {
-            external_parts.push(name.to_owned());
+            external_parts.push(name.into_owned());
         }
     }
     if !external_parts.is_empty() {

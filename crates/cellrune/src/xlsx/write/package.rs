@@ -393,7 +393,10 @@ impl PackageWritePlan {
                     let file = input
                         .by_index(*source_index)
                         .map_err(|error| zip_read_error(error).at_source(source.clone()))?;
-                    let name = file.name().to_owned();
+                    let name = file
+                        .name()
+                        .map_err(|error| zip_read_error(error).at_source(source.clone()))?
+                        .into_owned();
                     let file_options = file.options();
                     drop(file);
                     writer
@@ -565,7 +568,7 @@ mod tests {
                 let mut contents = Vec::new();
                 file.read_to_end(&mut contents).expect("source contents");
                 (
-                    file.name().to_owned(),
+                    file.name().expect("entry name").into_owned(),
                     file.compression(),
                     file.crc32(),
                     contents,
@@ -576,7 +579,7 @@ mod tests {
                 let mut contents = Vec::new();
                 file.read_to_end(&mut contents).expect("output contents");
                 (
-                    file.name().to_owned(),
+                    file.name().expect("entry name").into_owned(),
                     file.compression(),
                     file.crc32(),
                     contents,

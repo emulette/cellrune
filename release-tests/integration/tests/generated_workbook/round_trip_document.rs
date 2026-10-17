@@ -920,7 +920,7 @@ fn archive_manifest(bytes: &[u8]) -> BTreeMap<String, (zip::CompressionMethod, u
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("archive contents");
         let replaced = manifest.insert(
-            file.name().to_owned(),
+            file.name().expect("entry name").into_owned(),
             (file.compression(), file.crc32(), contents),
         );
         assert!(replaced.is_none(), "duplicate fixture entry");
@@ -941,7 +941,7 @@ fn workbook_with_relationship_namespace(
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).expect("source entry");
-        let name = file.name().to_owned();
+        let name = file.name().expect("entry name").into_owned();
         let compression = file.compression();
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("source contents");

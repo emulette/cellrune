@@ -541,7 +541,7 @@ fn archive_parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
         let mut file = archive.by_index(index).expect("entry");
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("entry bytes");
-        parts.insert(file.name().to_owned(), contents);
+        parts.insert(file.name().expect("entry name").into_owned(), contents);
     }
     parts
 }

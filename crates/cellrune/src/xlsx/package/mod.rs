@@ -20,6 +20,9 @@ use super::error::detail;
 use super::{ReadLimits, ReadOptions, XlsxErrorCode, XlsxReadError};
 
 const CONTENT_TYPES_PART: &[u8] = b"[Content_Types].xml";
+/// The message of the error the ZIP reader returns for the first byte past an entry's
+/// declared uncompressed size.
+const ZIP_DECLARED_SIZE_EXCEEDED: &str = "File is larger than its declared uncompressed size";
 const ROOT_RELATIONSHIPS_PART: &[u8] = b"_rels/.rels";
 
 const CONTENT_WORKBOOK: &str =
@@ -476,8 +479,7 @@ fn index_archive<R: Read + Seek>(
 
 /// Reads one required part and charges its real cost against the package budget.
 ///
-/// The central-directory sizes consulted while indexing are attacker-controlled,
-/// and the ZIP reader does not stop a Deflated entry at its declared length. Every
+/// The central-directory sizes consulted while indexing are attacker-controlled. Every
 /// entry is therefore measured as it is inflated: the observed length must match
 /// the declared length, and `spent` accumulates the bytes actually produced across
 /// the whole package. Together those two checks make the declared metadata that
@@ -518,8 +520,18 @@ fn read_required_part<R: Read + Seek>(
         .read_to_end(&mut bytes)
         .map_err(invalid_zip)?;
     // Reading past the declared size also reaches the end of the entry, where the ZIP
-    // reader validates its CRC.
-    let overflow = file.read(&mut [0_u8; 1]).map_err(invalid_zip)?;
+    // reader validates its CRC. The ZIP reader itself refuses the byte past the declared
+    // size, so that refusal is the one-byte overflow this probe looks for.
+    let overflow = match file.read(&mut [0_u8; 1]) {
+        Ok(read) => read,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::InvalidData
+                && error.to_string() == ZIP_DECLARED_SIZE_EXCEEDED =>
+        {
+            1
+        }
+        Err(error) => return Err(invalid_zip(error)),
+    };
     let produced = bytes.len() as u64 + overflow as u64;
     if produced != declared {
         return Err(XlsxReadError::new(XlsxErrorCode::DeclaredSizeMismatch)

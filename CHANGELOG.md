@@ -47,6 +47,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Python `apply_changes`, `apply_changes_v2`, the cell setters, `clear_cell`, `add_sheet`,
   `rename_sheet`, `changes_since`, and `close` release the interpreter lock and wait for the
   workbook session, so concurrent calls on one workbook still run in turn.
+- CellRune requires `zip` 9, the first release free of RUSTSEC-2026-0367, RUSTSEC-2026-0368, and
+  RUSTSEC-2026-0369. Those advisories concern `zip`'s extraction APIs, which CellRune does not call.
 
 ### Fixed
 

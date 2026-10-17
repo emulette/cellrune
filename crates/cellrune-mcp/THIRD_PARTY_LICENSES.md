@@ -72,6 +72,7 @@ are not part of this binary notice.
 | `maybe-owned` | `0.3.4` | `MIT OR Apache-2.0` |
 | `memchr` | `2.8.3` | `Unlicense OR MIT` |
 | `miniz_oxide` | `0.8.9` | `MIT OR Zlib OR Apache-2.0` |
+| `nix` | `0.31.3` | `MIT` |
 | `num-traits` | `0.2.19` | `MIT OR Apache-2.0` |
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` |
 | `once_cell_polyfill` | `1.70.2` | `MIT OR Apache-2.0` |
@@ -134,7 +135,7 @@ are not part of this binary notice.
 | `windows_x86_64_msvc` | `0.52.6` | `MIT OR Apache-2.0` |
 | `windows_x86_64_msvc` | `0.53.1` | `MIT OR Apache-2.0` |
 | `winx` | `0.36.4` | `Apache-2.0 WITH LLVM-exception` |
-| `zip` | `8.6.0` | `MIT` |
+| `zip` | `9.0.4` | `MIT` |
 | `zlib-rs` | `0.6.6` | `Zlib` |
 | `zmij` | `1.0.23` | `MIT` |
 
@@ -4427,6 +4428,36 @@ Apache License
 
 ### License text 54
 
+Components: `nix 0.31.3`
+
+Source filenames: `LICENSE`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Carl Lerche + nix-rust Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### License text 55
+
 Components: `pcre2 0.2.11`, `pcre2-sys 0.2.10`
 
 Source filenames: `LICENSE-MIT`
@@ -4455,7 +4486,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 55
+### License text 56
 
 Components: `pcre2-sys 0.2.10`
 
@@ -4499,7 +4530,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### License text 56
+### License text 57
 
 Components: `pcre2-sys 0.2.10`
 
@@ -4531,7 +4562,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING 
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### License text 57
+### License text 58
 
 Components: `psm 0.1.32`
 
@@ -4741,7 +4772,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 58
+### License text 59
 
 Components: `psm 0.1.32`
 
@@ -4766,7 +4797,7 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 59
+### License text 60
 
 Components: `quick-xml 0.41.0`
 
@@ -4798,7 +4829,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 60
+### License text 61
 
 Components: `r-efi 6.0.0`
 
@@ -5008,7 +5039,7 @@ Apache License
    limitations under the License.
 ```
 
-### License text 61
+### License text 62
 
 Components: `rmcp 3.4.1`
 
@@ -5233,7 +5264,7 @@ CC-BY-4.0. See https://creativecommons.org/licenses/by/4.0/legalcode for
 the full license text.
 ```
 
-### License text 62
+### License text 63
 
 Components: `rustix 1.1.4`
 
@@ -5271,7 +5302,7 @@ is licensed under:
 at your option.
 ```
 
-### License text 63
+### License text 64
 
 Components: `rustix-linux-procfs 0.1.1`
 
@@ -5309,7 +5340,7 @@ is licensed under:
 at your option.
 ```
 
-### License text 64
+### License text 65
 
 Components: `schemars 1.2.1`
 
@@ -5339,7 +5370,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 65
+### License text 66
 
 Components: `sha2 0.11.0`
 
@@ -5376,7 +5407,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 66
+### License text 67
 
 Components: `sharded-slab 0.1.7`
 
@@ -5404,7 +5435,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 67
+### License text 68
 
 Components: `simd-adler32 0.3.10`
 
@@ -5434,7 +5465,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 68
+### License text 69
 
 Components: `slab 0.4.12`
 
@@ -5468,7 +5499,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 69
+### License text 70
 
 Components: `strsim 0.11.1`
 
@@ -5500,7 +5531,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 70
+### License text 71
 
 Components: `thread_local 1.1.10`
 
@@ -5534,7 +5565,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 71
+### License text 72
 
 Components: `tokio 1.53.1`, `tokio-util 0.7.19`
 
@@ -5564,7 +5595,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 72
+### License text 73
 
 Components: `tracing 0.1.44`, `tracing-core 0.1.36`, `tracing-subscriber 0.3.23`
 
@@ -5598,7 +5629,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 73
+### License text 74
 
 Components: `typenum 1.20.1`
 
@@ -5608,7 +5639,7 @@ Source filenames: `LICENSE`
 MIT OR Apache-2.0
 ```
 
-### License text 74
+### License text 75
 
 Components: `typenum 1.20.1`
 
@@ -5818,7 +5849,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 75
+### License text 76
 
 Components: `typenum 1.20.1`
 
@@ -5848,7 +5879,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 76
+### License text 77
 
 Components: `unicode-ident 1.0.24`
 
@@ -5896,7 +5927,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-### License text 77
+### License text 78
 
 Components: `utf8parse 0.2.2`
 
@@ -5930,7 +5961,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 78
+### License text 79
 
 Components: `uuid 1.24.0`
 
@@ -5965,7 +5996,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 79
+### License text 80
 
 Components: `windows-core 0.62.2`, `windows-link 0.2.1`, `windows-result 0.4.1`, `windows-strings 0.5.1`,
   `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-targets 0.52.6`, `windows-targets 0.53.5`,
@@ -6182,7 +6213,7 @@ Apache License
    limitations under the License.
 ```
 
-### License text 80
+### License text 81
 
 Components: `windows-core 0.62.2`, `windows-link 0.2.1`, `windows-result 0.4.1`, `windows-strings 0.5.1`,
   `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-targets 0.52.6`, `windows-targets 0.53.5`,
@@ -6219,9 +6250,9 @@ MIT License
     SOFTWARE
 ```
 
-### License text 81
+### License text 82
 
-Components: `zip 8.6.0`
+Components: `zip 9.0.4`
 
 Source filenames: `LICENSE`
 
@@ -6249,7 +6280,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 82
+### License text 83
 
 Components: `zlib-rs 0.6.6`
 
