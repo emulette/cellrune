@@ -204,29 +204,16 @@ impl Planner {
                 | DependencyTarget::ImpactArea(_) => {}
                 DependencyTarget::Area(span) => {
                     for rect in span.rects() {
-                        let start = CellAddress::from_indices(rect.row_start, 1)
-                            .expect("resolved reference start is a valid row");
-                        let end = CellAddress::from_indices(rect.row_end, crate::EXCEL_MAX_COLUMNS)
-                            .expect("resolved reference end is a valid row");
-                        for address in engine.workbook.sheets()[rect.sheet]
-                            .formula_addresses()
-                            .range(start..=end)
-                        {
+                        for (row, column) in engine.formula_cells_within(&rect) {
                             if cancelled() {
                                 return Err(cancelled_error());
                             }
-                            let row = address.row().get();
-                            let column = address.column().get();
-                            if column >= rect.col_start && column <= rect.col_end {
-                                cells.insert(
-                                    self.owner(engine, (rect.sheet, row, column))
-                                        .unwrap_or((rect.sheet, row, column)),
-                                );
-                                if cells.len() as u64
-                                    > engine.options.limits().max_dependency_edges()
-                                {
-                                    break;
-                                }
+                            cells.insert(
+                                self.owner(engine, (rect.sheet, row, column))
+                                    .unwrap_or((rect.sheet, row, column)),
+                            );
+                            if cells.len() as u64 > engine.options.limits().max_dependency_edges() {
+                                break;
                             }
                         }
                         for region in &engine.array_regions {

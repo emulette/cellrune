@@ -17,7 +17,7 @@ use crate::calculation::graph::DependencyGraph;
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan, ReferenceArea, ReferenceValue};
 use crate::calculation::scope::{CallableValue, DefinedLambdaId, ScopeValue};
-use crate::{CellAddress, CellContent, DefinedNameScope, EXCEL_MAX_COLUMNS};
+use crate::{CellAddress, CellContent, DefinedNameScope};
 use crate::{SheetId, Table, TableId, WorkbookSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1026,25 +1026,11 @@ impl Engine<'_> {
                                 }
                                 continue;
                             }
-                            let start = CellAddress::from_indices(rect.row_start, 1)
-                                .expect("resolved rectangle start");
-                            let end = CellAddress::from_indices(rect.row_end, EXCEL_MAX_COLUMNS)
-                                .expect("resolved rectangle end");
-                            for address in self.workbook.sheets()[rect.sheet]
-                                .formula_addresses()
-                                .range(start..=end)
-                            {
+                            for (row, column) in self.formula_cells_within(&rect) {
                                 if cancelled() {
                                     return Err(());
                                 }
-                                let column = address.column().get();
-                                if column >= rect.col_start && column <= rect.col_end {
-                                    cell_dependencies.push((
-                                        rect.sheet,
-                                        address.row().get(),
-                                        column,
-                                    ));
-                                }
+                                cell_dependencies.push((rect.sheet, row, column));
                             }
                             for region in &self.array_regions {
                                 if cancelled() {

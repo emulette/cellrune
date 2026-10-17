@@ -43,6 +43,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   scanning, so a column of lookups into a large table no longer rescans it for every lookup. A
   range searched only a few times keeps scanning. Results, and the work charged against
   calculation limits, are unchanged.
+- Collecting dependencies reads only the formulas in a range reference's columns, so formulas
+  beside a large table they reference, such as a column of lookups, no longer take quadratic time
+  to prepare. Results are unchanged.
 - `COUNT`, `COUNTA`, `MIN`, `MAX`, `PRODUCT`, and other aggregates that do not sum no longer build
   decimal traces for referenced numbers. Results are unchanged.
 - Python `apply_changes`, `apply_changes_v2`, the cell setters, `clear_cell`, `add_sheet`,

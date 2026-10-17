@@ -21,6 +21,7 @@ use crate::{CellContent, CellValue, DefinedNameScope, FiniteNumber, WorkbookSnap
 
 mod dependency;
 mod expression;
+mod formula_columns;
 mod materialization;
 mod name_graph;
 mod orchestration;
@@ -30,6 +31,7 @@ mod targeted;
 
 pub(super) use dependency::DependencyTarget;
 use dependency::{TableTopologyRevision, table_dependency_by_id_cancellable};
+use formula_columns::FormulaColumns;
 use materialization::ArrayRegion;
 use reference::{ColumnExtents, cell_at};
 
@@ -908,6 +910,7 @@ pub struct Engine<'workbook> {
     evaluated_cells: BTreeSet<CellId>,
     target_pending: Option<std::cell::RefCell<BTreeSet<CellId>>>,
     lookup_indexes: RefCell<LookupIndexCache>,
+    formula_columns: std::cell::OnceCell<Vec<FormulaColumns>>,
     function_iterations: u64,
     reference_cells: u64,
 }
