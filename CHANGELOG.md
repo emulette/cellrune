@@ -10,6 +10,51 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- Python `Workbook.save_edits` and `Workbook.edits_to_bytes`, Node.js `saveEdits` and
+  `editsToBytes`, and the MCP tool `workbook_save_edits_as` write the edits of a workbook opened
+  from a file without calculating, as `write_xlsx_draft_edits_bytes` does, and return an edit report
+  with the affected formulas, whether the host is asked to recalculate, the changed and removed
+  parts, and input and output SHA-256. Interop adds `WorkbookSession::save_edits_bytes`,
+  `prepare_edits_save`, and `save_edits_path` with `EditWriteOptionsDto` and `EditWriteReportDto`.
+  A workbook not opened from a package fails with `xlsx.write.invalid_package_plan`.
+- Python `read_limits` when opening and `calculation_limits` when calculating, recalculating, and
+  previewing, and Node.js `readLimits` and `calculationLimits`, change individual read and
+  calculation limits; omitted limits keep their defaults. Interop adds `ReadLimitOptionsDto`,
+  `CalculationLimitOptionsDto` as `CalculationOptionsDto::calculation_limits`,
+  `WorkbookSession::open_bytes_with_limits`, and `open_path_with_limits`. A zero limit fails with
+  `interop.limit.invalid` and an unreadable limit object with `interop.limit.payload_invalid`. MCP
+  clients keep the default limits.
+- Python `Workbook.scan_capabilities` and Node.js `scanCapabilities` page through the static
+  capability scan that MCP's `workbook_scan_capabilities` returns.
+- Range cells carry a `number_format` with its ID, code, and kind; sheet summaries an `auto_filter`
+  range; and workbook summaries `full_calculation_on_load`, across interop, Python, Node.js, and
+  MCP.
+- `XlsxWriteError::unavailable_formulas` names the first 64 formulas whose unavailable results
+  failed a strict save with `xlsx.write.incomplete_calculation`, reporting array and spill cells by
+  their owning formula. Interop, Python, Node.js, and MCP carry them as `details.cells`; errors
+  without cells keep their previous JSON shape.
+
+### Changed
+
+- Exact `VLOOKUP`, `HLOOKUP`, `MATCH`, and `XLOOKUP` searches of a range searched before in the same
+  calculation use a shared index instead of scanning, so a column of lookups into a large table
+  takes linear rather than quadratic time. Results, and the work charged against calculation
+  limits, are unchanged.
+- `COUNT`, `COUNTA`, `MIN`, `MAX`, `PRODUCT`, and other aggregates that do not sum no longer build
+  decimal traces for referenced numbers. Results are unchanged.
+- Python `apply_changes`, `apply_changes_v2`, the cell setters, `clear_cell`, `add_sheet`,
+  `rename_sheet`, `changes_since`, and `close` release the interpreter lock and wait for the
+  workbook session, so concurrent calls on one workbook still run in turn.
+
+### Fixed
+
+- A cell typed `t="d"`, which openpyxl writes with `iso_dates` and SheetJS with `cellDates`, no
+  longer fails the read with `xlsx.unsupported_cell_type`: its ISO 8601 date, date-time, or time
+  reads as a serial in the workbook's date system, and an invalid one fails with
+  `xlsx.invalid_cell_value`.
+
 ## [0.1.24] - 2026-10-10
 
 ### Added
