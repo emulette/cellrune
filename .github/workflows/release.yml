@@ -231,7 +231,7 @@ jobs:
 
       - name: Download every verified MCP archive
         if: steps.github-release-state.outputs.state != 'complete'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: mcp-*
           path: mcp-bundles
@@ -340,14 +340,14 @@ jobs:
       id-token: write
     steps:
       - name: Download every verified wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: python-wheel-*
           path: dist
           merge-multiple: true
 
       - name: Download the verified source archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: python-source-publication-archive
           path: dist
@@ -384,7 +384,7 @@ jobs:
         run: npm install -g npm@11.18.0
 
       - name: Download verified npm archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: npm-publication-archives
           path: release
