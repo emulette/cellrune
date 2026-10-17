@@ -1,8 +1,8 @@
 use cellrune_interop::{
     CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto,
     CalculationResultDto, CellDto, CellReferenceDto, CellValueDto, EditReceiptDto,
-    EditReceiptV2Dto, FunctionCatalogReportDto, FunctionUsageReportDto, RangePageDto,
-    SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
+    EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto, FunctionUsageReportDto,
+    RangePageDto, SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
 };
 use napi_derive::napi;
 
@@ -202,6 +202,17 @@ pub struct NativeFunctionCatalogReport {
 }
 
 #[napi(object)]
+pub struct NativeEditWriteReport {
+    pub schema_version: u32,
+    pub affected_formulas: Vec<NativeCellReference>,
+    pub requests_host_recalculation: bool,
+    pub changed_parts: Vec<String>,
+    pub removed_parts: Vec<String>,
+    pub input_sha256: String,
+    pub output_sha256: String,
+}
+
+#[napi(object)]
 pub struct NativeWriteReport {
     pub schema_version: u32,
     pub complete: bool,
@@ -391,6 +402,22 @@ pub(crate) fn function_catalog(value: FunctionCatalogReportDto) -> NativeFunctio
                 official: entry.official,
             })
             .collect(),
+    }
+}
+
+pub(crate) fn edit_write_report(value: EditWriteReportDto) -> NativeEditWriteReport {
+    NativeEditWriteReport {
+        schema_version: value.schema_version,
+        affected_formulas: value
+            .affected_formulas
+            .into_iter()
+            .map(cell_reference)
+            .collect(),
+        requests_host_recalculation: value.requests_host_recalculation,
+        changed_parts: value.changed_parts,
+        removed_parts: value.removed_parts,
+        input_sha256: value.input_sha256,
+        output_sha256: value.output_sha256,
     }
 }
 

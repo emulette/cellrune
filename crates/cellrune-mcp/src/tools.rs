@@ -1,9 +1,9 @@
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
     CancellationToken as WorkbookCancellationToken, CapabilityPageDto, CompletedRecalculation,
-    EditReceiptDto, EditReceiptV2Dto, FinancialSolverSemanticsDto, FunctionUsageReportDto,
-    InteropError, PreviewChangesDto, RangePageDto, RangeRequestDto, TransactionImpactPageDto,
-    WorkbookSession, WorkbookTransactionReceiptDto, WriteOptionsDto,
+    EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto,
+    FunctionUsageReportDto, InteropError, PreviewChangesDto, RangePageDto, RangeRequestDto,
+    TransactionImpactPageDto, WorkbookSession, WorkbookTransactionReceiptDto, WriteOptionsDto,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool, tool_router};
@@ -14,8 +14,8 @@ use crate::error::McpError;
 use crate::model::{
     ApplyChangesArgs, ApplyChangesV2Args, CapabilityArgs, ChangesSinceArgs, CreateWorkbookArgs,
     OpenWorkbookArgs, PreviewChangesArgs, PreviewChangesPageArgs, PreviewDiscarded, PreviewIdArgs,
-    ReadRangeArgs, RecalculateArgs, SaveWorkbookArgs, SessionArgs, SessionClosed, SessionStarted,
-    SessionSummary, WorkbookSaved,
+    ReadRangeArgs, RecalculateArgs, SaveEditsArgs, SaveWorkbookArgs, SessionArgs, SessionClosed,
+    SessionStarted, SessionSummary, WorkbookEditsSaved, WorkbookSaved,
 };
 use crate::server::{CellruneMcpServer, json_size};
 
@@ -787,6 +787,59 @@ also requires server-level overwrite opt-in. Returns the shared CellRune write r
                 .await,
         )?;
         let response = WorkbookSaved::new(
+            args.session_id.clone(),
+            destination.display_path().to_string_lossy().into_owned(),
+            prepared.report().clone(),
+        );
+        self.ensure_json_size(&response)?;
+        join_result(
+            tokio::task::spawn_blocking(move || {
+                prepared.commit_in_directory(destination.parent(), destination.file_name())
+            })
+            .await,
+        )?;
+        self.sessions.touch(&args.session_id)?;
+        Ok(Json(response))
+    }
+
+    /// Save the session's edits into its source package without calculating.
+    #[tool(
+        name = "workbook_save_edits_as",
+        input_schema = crate::schema::mcp_schema::<SaveEditsArgs>(),
+        output_schema = crate::schema::mcp_schema::<WorkbookEditsSaved>(),
+        description = "Write this session's edits into the package it was opened from, without \
+calculating, and save it at an explicit absolute destination inside an approved root. Formulas \
+the edits can affect lose their saved results so the spreadsheet app recalculates them on open; \
+every other saved result and untouched part keeps its source bytes, and formulas CellRune cannot \
+calculate do not block the save. Only sessions opened from a file can save edits. Replacement is \
+false by default and also requires server-level overwrite opt-in.",
+        annotations(
+            title = "Save workbook edits as",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_save_edits_as(
+        &self,
+        Parameters(args): Parameters<SaveEditsArgs>,
+    ) -> Result<Json<WorkbookEditsSaved>, McpError> {
+        let destination = self
+            .config
+            .resolve_output(&args.path, args.replace_existing)?;
+        let handle = self.sessions.get(&args.session_id)?;
+        let workbook = handle.workbook().clone();
+        let options = EditWriteOptionsDto {
+            replace_existing: args.replace_existing,
+        };
+        let prepared = join_result(
+            tokio::task::spawn_blocking(move || {
+                workbook.blocking_lock().prepare_edits_save(options)
+            })
+            .await,
+        )?;
+        let response = WorkbookEditsSaved::new(
             args.session_id.clone(),
             destination.display_path().to_string_lossy().into_owned(),
             prepared.report().clone(),

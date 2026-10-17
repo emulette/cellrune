@@ -493,6 +493,16 @@ class FunctionCatalogReport(TypedDict):
     entries: list[FunctionCatalogEntry]
 
 
+class EditWriteReport(TypedDict):
+    schema_version: int
+    affected_formulas: list[CellReference]
+    requests_host_recalculation: bool
+    changed_parts: list[str]
+    removed_parts: list[str]
+    input_sha256: str
+    output_sha256: str
+
+
 class WriteReport(TypedDict):
     schema_version: int
     complete: bool

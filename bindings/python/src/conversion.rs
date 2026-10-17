@@ -2,9 +2,9 @@ use cellrune_interop::{
     CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto, CalculationResultDto,
     CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
-    EditReceiptDto, EditReceiptV2Dto, FunctionCatalogReportDto, FunctionUsageReportDto,
-    PreviewChangesDto, RangePageDto, TransactionImpactPageDto, WorkbookFingerprintDto,
-    WorkbookSummaryDto, WorkbookTransactionReceiptDto, WriteReportDto,
+    EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
+    FunctionUsageReportDto, PreviewChangesDto, RangePageDto, TransactionImpactPageDto,
+    WorkbookFingerprintDto, WorkbookSummaryDto, WorkbookTransactionReceiptDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -401,6 +401,28 @@ pub(crate) fn function_catalog<'py>(
         entries.append(item)?;
     }
     result.set_item("entries", entries)?;
+    Ok(result)
+}
+
+pub(crate) fn edit_write_report<'py>(
+    py: Python<'py>,
+    value: &EditWriteReportDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("schema_version", value.schema_version)?;
+    let affected = PyList::empty(py);
+    for cell in &value.affected_formulas {
+        affected.append(cell_reference(py, cell)?)?;
+    }
+    result.set_item("affected_formulas", affected)?;
+    result.set_item(
+        "requests_host_recalculation",
+        value.requests_host_recalculation,
+    )?;
+    result.set_item("changed_parts", &value.changed_parts)?;
+    result.set_item("removed_parts", &value.removed_parts)?;
+    result.set_item("input_sha256", &value.input_sha256)?;
+    result.set_item("output_sha256", &value.output_sha256)?;
     Ok(result)
 }
 

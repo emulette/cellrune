@@ -23,7 +23,7 @@ pub use preview::{
     CompletedPreview, DEFAULT_PREVIEW_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedPreview,
 };
 pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog};
-pub use save::PreparedWorkbookSave;
+pub use save::{PreparedEditsSave, PreparedWorkbookSave};
 
 /// An owned high-level workbook editing, calculation, and save session.
 #[derive(Debug)]

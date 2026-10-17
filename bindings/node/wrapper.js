@@ -30,6 +30,7 @@ const {
   normalizeTransactionImpactPage,
   normalizeTransactionReceipt,
   normalizeWriteReport,
+  normalizeEditWriteReport,
   parsePreviewJson,
 } = require("./lib/normalization.js");
 const {
@@ -423,6 +424,21 @@ class Workbook {
       ),
     );
     return normalizeWriteReport(await withErrors(task));
+  }
+
+  async editsToBytes() {
+    const task = withSyncErrors(() => this.#session().editsToBytes());
+    return withErrors(task);
+  }
+
+  async saveEdits(path, options = {}) {
+    requireString(path, "path");
+    requireOptions(options);
+    requireOptionalBoolean(options.replaceExisting, "replaceExisting");
+    const task = withSyncErrors(() =>
+      this.#session().saveEditsPath(path, options.replaceExisting ?? false),
+    );
+    return normalizeEditWriteReport(await withErrors(task));
   }
 
   #session() {

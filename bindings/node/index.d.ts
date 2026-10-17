@@ -411,6 +411,21 @@ export interface SaveOptions extends WriteOptions {
   readonly replaceExisting?: boolean;
 }
 
+export interface EditSaveOptions {
+  readonly replaceExisting?: boolean;
+}
+
+export interface EditWriteReport {
+  readonly schemaVersion: number;
+  /** Formulas the edits can affect; their saved results were removed for the app to recalculate. */
+  readonly affectedFormulas: readonly CellReference[];
+  readonly requestsHostRecalculation: boolean;
+  readonly changedParts: readonly string[];
+  readonly removedParts: readonly string[];
+  readonly inputSha256: string;
+  readonly outputSha256: string;
+}
+
 export interface WriteReport {
   readonly schemaVersion: number;
   readonly complete: boolean;
@@ -675,6 +690,9 @@ export class Workbook {
   renameSheet(currentName: string, newName: string): void;
   toBytes(options?: WriteOptions): Promise<Buffer>;
   save(path: string, options?: SaveOptions): Promise<WriteReport>;
+  /** The source package with this session's edits written in, without calculating. */
+  editsToBytes(): Promise<Buffer>;
+  saveEdits(path: string, options?: EditSaveOptions): Promise<EditWriteReport>;
 }
 
 declare const packageExports: {

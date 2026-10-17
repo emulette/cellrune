@@ -2,12 +2,15 @@ use std::sync::Arc;
 
 use cellrune_binding_support::SharedWorkbookSession;
 use cellrune_interop::{
-    CalculationOptionsDto, EditBatchV2Dto, RecalculationModeDto, WorkbookSession, WriteOptionsDto,
+    CalculationOptionsDto, EditBatchV2Dto, EditWriteOptionsDto, RecalculationModeDto,
+    WorkbookSession, WriteOptionsDto,
 };
 use napi::bindgen_prelude::Buffer;
 use napi::{Env, Task};
 
-use crate::conversion::{NativeCalculationDelta, NativeCalculationReport, NativeWriteReport};
+use crate::conversion::{
+    NativeCalculationDelta, NativeCalculationReport, NativeEditWriteReport, NativeWriteReport,
+};
 use crate::error::{catch_panic, napi_error};
 use crate::workbook::NativeWorkbook;
 
@@ -254,5 +257,54 @@ impl Task for SavePathTask {
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
         Ok(crate::conversion::write_report(output))
+    }
+}
+
+pub struct EditsBytesTask {
+    pub(crate) session: Arc<SharedWorkbookSession>,
+}
+
+impl Task for EditsBytesTask {
+    type Output = Vec<u8>;
+    type JsValue = Buffer;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        catch_panic(|| {
+            self.session
+                .lock()
+                .map_err(napi_error)?
+                .save_edits_bytes()
+                .map(|(bytes, _)| bytes)
+                .map_err(napi_error)
+        })
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output.into())
+    }
+}
+
+pub struct SaveEditsPathTask {
+    pub(crate) session: Arc<SharedWorkbookSession>,
+    pub(crate) path: String,
+    pub(crate) options: EditWriteOptionsDto,
+}
+
+impl Task for SaveEditsPathTask {
+    type Output = cellrune_interop::EditWriteReportDto;
+    type JsValue = NativeEditWriteReport;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        catch_panic(|| {
+            self.session
+                .lock()
+                .map_err(napi_error)?
+                .save_edits_path(&self.path, self.options)
+                .map_err(napi_error)
+        })
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(crate::conversion::edit_write_report(output))
     }
 }

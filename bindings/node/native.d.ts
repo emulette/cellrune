@@ -39,6 +39,8 @@ export declare class NativeWorkbook {
   renameSheet(currentName: string, newName: string): void
   toBytes(invalidateUnavailable: boolean): Promise<Buffer>
   savePath(path: string, invalidateUnavailable: boolean, replaceExisting: boolean): Promise<NativeWriteReport>
+  editsToBytes(): Promise<Buffer>
+  saveEditsPath(path: string, replaceExisting: boolean): Promise<NativeEditWriteReport>
 }
 
 export declare function createWorkbook(): NativeWorkbook
@@ -175,6 +177,16 @@ export interface NativeEditReceiptV2 {
   topologyChanged: boolean
   calculationMetadataChanged: boolean
   changedTableIds: Array<number>
+}
+
+export interface NativeEditWriteReport {
+  schemaVersion: number
+  affectedFormulas: Array<NativeCellReference>
+  requestsHostRecalculation: boolean
+  changedParts: Array<string>
+  removedParts: Array<string>
+  inputSha256: string
+  outputSha256: string
 }
 
 export interface NativeFunctionCatalogEntry {

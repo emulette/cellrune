@@ -1,6 +1,7 @@
 use cellrune_interop::{
-    ArithmeticSemanticsDto, EditBatchDto, EditBatchV2Dto, FinancialSolverSemanticsDto,
-    PreviewCursorDto, TransactionDetailSectionDto, WorkbookSummaryDto, WriteReportDto,
+    ArithmeticSemanticsDto, EditBatchDto, EditBatchV2Dto, EditWriteReportDto,
+    FinancialSolverSemanticsDto, PreviewCursorDto, TransactionDetailSectionDto, WorkbookSummaryDto,
+    WriteReportDto,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -205,6 +206,19 @@ pub(crate) struct PreviewIdArgs {
     pub(crate) preview_id: u64,
 }
 
+/// Input for saving a session's edits into its source package without calculating.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SaveEditsArgs {
+    /// Opaque resident workbook session identifier of a workbook opened from a file.
+    pub(crate) session_id: String,
+    /// Absolute destination path with an existing parent beneath an approved root.
+    pub(crate) path: String,
+    /// Replace an existing file; also requires the server's `--allow-overwrite` opt-in.
+    #[serde(default)]
+    pub(crate) replace_existing: bool,
+}
+
 /// Input for a verified, atomic workbook Save As operation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -308,6 +322,31 @@ impl PreviewDiscarded {
             session_id,
             preview_id,
             discarded: true,
+        }
+    }
+}
+
+/// Result of saving a session's edits into its source package without calculating.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkbookEditsSaved {
+    /// Interop schema version.
+    pub(crate) schema_version: u32,
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Normalized destination path beneath the approved root.
+    pub(crate) destination: String,
+    /// Affected formulas, rewritten and removed parts, and package identities.
+    pub(crate) report: EditWriteReportDto,
+}
+
+impl WorkbookEditsSaved {
+    pub(crate) fn new(session_id: String, destination: String, report: EditWriteReportDto) -> Self {
+        Self {
+            schema_version: cellrune_interop::INTEROP_SCHEMA_VERSION,
+            session_id,
+            destination,
+            report,
         }
     }
 }

@@ -441,6 +441,18 @@ function normalizeFunctionCatalog(report) {
   };
 }
 
+function normalizeEditWriteReport(report) {
+  return {
+    schemaVersion: report.schemaVersion,
+    affectedFormulas: report.affectedFormulas.map(normalizeCellReference),
+    requestsHostRecalculation: report.requestsHostRecalculation,
+    changedParts: report.changedParts,
+    removedParts: report.removedParts,
+    inputSha256: report.inputSha256,
+    outputSha256: report.outputSha256,
+  };
+}
+
 function normalizeWriteReport(report) {
   return {
     schemaVersion: report.schemaVersion,
@@ -754,4 +766,5 @@ module.exports = {
   normalizeTransactionReceipt,
   parsePreviewJson,
   normalizeWriteReport,
+  normalizeEditWriteReport,
 };

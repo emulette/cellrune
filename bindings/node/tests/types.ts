@@ -1,4 +1,5 @@
 import {
+  type EditWriteReport,
   type TargetCalculationResult,
   CellRuneError,
   type CalculationDelta,
@@ -128,6 +129,8 @@ async function check(): Promise<void> {
   const writeReport: WriteReport = await workbook.save("typing-check.xlsx");
   writeReport.outputSha256.toUpperCase();
   const reopened: Workbook = await Workbook.fromBytes(bytes);
+  const edited: Buffer = await reopened.editsToBytes();
+  edited.byteLength.toFixed(0);
   reopened.close();
   reopened.close();
   reopened.closed.valueOf();
@@ -138,3 +141,14 @@ void check().catch((error: unknown) => {
     error.code.toUpperCase();
   }
 });
+
+export async function checkEditReport(workbook: Workbook): Promise<void> {
+  const report: EditWriteReport = await workbook.saveEdits("edited.xlsx", {
+    replaceExisting: true,
+  });
+  report.inputSha256.toUpperCase();
+  report.affectedFormulas[0]?.address.toUpperCase();
+  if (report.requestsHostRecalculation) {
+    [...report.changedParts].sort();
+  }
+}

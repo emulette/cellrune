@@ -27,11 +27,11 @@ pub use dto::{
     DefinedNameInspectionDto, DefinedNameInspectionRequestDto, DefinedNameInspectionResultDto,
     DefinedNameInvalidReasonDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
     DefinedNameUnsupportedReasonDto, EditBatchDto, EditBatchV2Dto, EditReceiptDto,
-    EditReceiptV2Dto, FinancialSolverSemanticsDto, FunctionCatalogEntryDto,
-    FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto,
-    MaterializedResultOriginDto, PreviewChangesDto, PreviewCursorDto, ProviderIdentityDto,
-    RangePageDto, RangeRequestDto, RecalculationModeDto, SavedValueStateDto, SheetSummaryDto,
-    TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
+    EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto, FinancialSolverSemanticsDto,
+    FunctionCatalogEntryDto, FunctionCatalogReportDto, FunctionUsageEntryDto,
+    FunctionUsageReportDto, MaterializedResultOriginDto, PreviewChangesDto, PreviewCursorDto,
+    ProviderIdentityDto, RangePageDto, RangeRequestDto, RecalculationModeDto, SavedValueStateDto,
+    SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
     TransactionDetailItemDto, TransactionDetailSectionDto, TransactionImpactCoverageDto,
     TransactionImpactPageDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto,
     WorkbookSummaryDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
@@ -40,8 +40,9 @@ pub use dto::{
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use service::{
     CompletedPreview, CompletedRecalculation, DEFAULT_PAGE_SIZE, DEFAULT_PREVIEW_PAGE_SIZE,
-    MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedChanges, PreparedChangesV2, PreparedPreview,
-    PreparedRecalculation, PreparedWorkbookSave, WorkbookSession, function_catalog,
+    MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedChanges, PreparedChangesV2, PreparedEditsSave,
+    PreparedPreview, PreparedRecalculation, PreparedWorkbookSave, WorkbookSession,
+    function_catalog,
 };
 
 /// Version of the serialized interop contract.

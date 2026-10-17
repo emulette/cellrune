@@ -2,11 +2,16 @@
 
 use std::path::Path;
 
-use cellrune::{RecalculatedWorkbook, WriteOptions, write_xlsx_draft_bytes};
+use cellrune::{
+    EditedWorkbook, RecalculatedWorkbook, WriteOptions, write_xlsx_draft_bytes,
+    write_xlsx_draft_edits_bytes,
+};
 
 use super::WorkbookSession;
-use crate::convert::{write_options, write_report};
-use crate::{InteropError, WriteOptionsDto, WriteReportDto};
+use crate::convert::{edit_write_report, write_options, write_report};
+use crate::{
+    EditWriteOptionsDto, EditWriteReportDto, InteropError, WriteOptionsDto, WriteReportDto,
+};
 
 impl WorkbookSession {
     /// Produces verified XLSX or XLSM bytes from the current calculated revision.
@@ -61,6 +66,57 @@ impl WorkbookSession {
     ) -> Result<WriteReportDto, InteropError> {
         self.prepare_save(options)?.commit_path(path)
     }
+
+    /// Produces the session's source package with its edits written in, without calculating.
+    ///
+    /// Formulas the edits can affect lose their saved results and only then is the spreadsheet
+    /// app asked to recalculate on open; every other saved result and untouched part keeps its
+    /// source bytes. No calculation is required, and formulas CellRune cannot calculate do not
+    /// block the save.
+    ///
+    /// # Errors
+    ///
+    /// Returns `xlsx.write.invalid_package_plan` for a session not opened from a package, or a
+    /// typed write error when an edit cannot be represented safely or the output fails
+    /// verification.
+    pub fn save_edits_bytes(&self) -> Result<(Vec<u8>, EditWriteReportDto), InteropError> {
+        let PreparedEditsSave { output, report, .. } =
+            self.prepare_edits_save(EditWriteOptionsDto::default())?;
+        Ok((output.into_bytes(), report))
+    }
+
+    /// Prepares and verifies the edited package without touching a destination path.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::save_edits_bytes`].
+    pub fn prepare_edits_save(
+        &self,
+        options: EditWriteOptionsDto,
+    ) -> Result<PreparedEditsSave, InteropError> {
+        let write_options = WriteOptions::default().with_replace_existing(options.replace_existing);
+        let output = write_xlsx_draft_edits_bytes(self.engine.draft(), write_options)?;
+        let report = edit_write_report(self.engine.workbook(), output.report());
+        Ok(PreparedEditsSave {
+            output,
+            report,
+            write_options,
+        })
+    }
+
+    /// Saves the edited package to a path.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::save_edits_bytes`] or a typed output-kind, destination, or
+    /// atomic-write error.
+    pub fn save_edits_path(
+        &self,
+        path: impl AsRef<Path>,
+        options: EditWriteOptionsDto,
+    ) -> Result<EditWriteReportDto, InteropError> {
+        self.prepare_edits_save(options)?.commit_path(path)
+    }
 }
 
 /// A verified workbook package prepared for an atomic path commit.
@@ -101,6 +157,47 @@ impl PreparedWorkbookSave {
         directory: &cap_std::fs::Dir,
         destination: impl AsRef<Path>,
     ) -> Result<WriteReportDto, InteropError> {
+        self.output
+            .save_in_directory(directory, destination, self.write_options)?;
+        Ok(self.report)
+    }
+}
+
+/// A verified edited package prepared for an atomic path commit.
+#[derive(Debug)]
+pub struct PreparedEditsSave {
+    output: EditedWorkbook,
+    report: EditWriteReportDto,
+    write_options: WriteOptions,
+}
+
+impl PreparedEditsSave {
+    /// Returns the exact edit report that a successful path commit will return.
+    pub const fn report(&self) -> &EditWriteReportDto {
+        &self.report
+    }
+
+    /// Atomically installs the prepared package at a destination path.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed output-kind, destination, or atomic-write error.
+    pub fn commit_path(self, path: impl AsRef<Path>) -> Result<EditWriteReportDto, InteropError> {
+        self.output.save_path(path, self.write_options)?;
+        Ok(self.report)
+    }
+
+    /// Atomically installs the prepared package beneath an open directory capability.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed output-kind, destination, or atomic-write error.
+    #[cfg(feature = "capability-fs")]
+    pub fn commit_in_directory(
+        self,
+        directory: &cap_std::fs::Dir,
+        destination: impl AsRef<Path>,
+    ) -> Result<EditWriteReportDto, InteropError> {
         self.output
             .save_in_directory(directory, destination, self.write_options)?;
         Ok(self.report)

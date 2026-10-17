@@ -64,8 +64,53 @@ async function assertIncompleteSaveNamesCells() {
   });
 }
 
+async function assertEditsSave() {
+  const source = Workbook.create();
+  source.setNumber("Sheet1", "A1", 2);
+  source.setFormula("Sheet1", "B1", "=A1*2");
+  source.setFormula("Sheet1", "C1", "=MYSTERY(D1)");
+  await source.calculate();
+  const workbook = await Workbook.fromBytes(
+    await source.toBytes({ invalidateUnavailable: true }),
+  );
+  workbook.setNumber("Sheet1", "A1", 3);
+
+  const edited = await workbook.editsToBytes();
+  const temporaryDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "cellrune-binding-"),
+  );
+  const savedPath = path.join(temporaryDirectory, "edited.xlsx");
+  const report = await workbook.saveEdits(savedPath);
+  assert.deepEqual(fs.readFileSync(savedPath), edited);
+  await assert.rejects(workbook.saveEdits(savedPath), (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, "xlsx.write.destination_exists");
+    return true;
+  });
+  await workbook.saveEdits(savedPath, { replaceExisting: true });
+  fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+  assert.deepEqual(report.affectedFormulas, [
+    { sheetId: 1, sheetName: "Sheet1", address: "B1" },
+  ]);
+  assert.equal(report.requestsHostRecalculation, true);
+  assert.equal(
+    report.outputSha256,
+    crypto.createHash("sha256").update(edited).digest("hex"),
+  );
+  const reopened = await Workbook.fromBytes(edited);
+  const cell = reopened.readRange("Sheet1", "A1", "A1").cells[0];
+  assert.deepEqual(cell.sourceValue, { kind: "number", value: 3 });
+
+  await assert.rejects(Workbook.create().editsToBytes(), (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, "xlsx.write.invalid_package_plan");
+    return true;
+  });
+}
+
 async function main() {
   await assertIncompleteSaveNamesCells();
+  await assertEditsSave();
   require("./function-usage.cjs")();
   await require("./compatibility.cjs")();
   assertCatalogContract();

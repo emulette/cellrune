@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
-    RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    EditBatchV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError,
+    PreviewCursorDto, RangeRequestDto, RecalculationModeDto, TransactionDetailSectionDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -518,6 +518,27 @@ impl Workbook {
         });
         let report = result.map_err(|error| into_py_error(py, error))?;
         conversion::write_report(py, &report)
+    }
+
+    pub fn edits_to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let result = py.detach(|| self.lock_interop()?.save_edits_bytes());
+        let (bytes, _) = result.map_err(|error| into_py_error(py, error))?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    #[pyo3(signature = (path, *, replace_existing=false))]
+    pub fn save_edits<'py>(
+        &self,
+        py: Python<'py>,
+        path: PathBuf,
+        replace_existing: bool,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let result = py.detach(move || {
+            self.lock_interop()?
+                .save_edits_path(path, EditWriteOptionsDto { replace_existing })
+        });
+        let report = result.map_err(|error| into_py_error(py, error))?;
+        conversion::edit_write_report(py, &report)
     }
 }
 

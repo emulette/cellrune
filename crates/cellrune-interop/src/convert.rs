@@ -14,12 +14,12 @@ use crate::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationIssueDto, CalculationLimitsDto, CalculationOptionsDto, CalculationOptionsReportDto,
     CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto, CellValueDto,
-    EditReceiptDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION, InteropError,
-    MaterializedResultOriginDto, ProviderIdentityDto, RecalculationModeDto, SavedValueStateDto,
-    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
-    TransactionImpactCoverageDto, TransactionImpactPageDto, WorkbookFingerprintDto,
-    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
-    WriteOptionsDto, WriteReportDto,
+    EditReceiptDto, EditWriteReportDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION,
+    InteropError, MaterializedResultOriginDto, ProviderIdentityDto, RecalculationModeDto,
+    SavedValueStateDto, TransactionDetailCountsDto, TransactionDetailItemDto,
+    TransactionDetailSectionDto, TransactionImpactCoverageDto, TransactionImpactPageDto,
+    WorkbookFingerprintDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
+    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 
 pub(crate) fn workbook_fingerprint(value: WorkbookFingerprint) -> WorkbookFingerprintDto {
@@ -606,6 +606,33 @@ pub(crate) fn cell_reference(
         sheet_id: id.sheet_id().get(),
         sheet_name,
         address: id.address().to_string(),
+    }
+}
+
+pub(crate) fn edit_write_report(
+    workbook: &WorkbookSnapshot,
+    report: &cellrune::EditWriteReport,
+) -> EditWriteReportDto {
+    EditWriteReportDto {
+        schema_version: INTEROP_SCHEMA_VERSION,
+        affected_formulas: report
+            .affected_formulas()
+            .iter()
+            .map(|cell| cell_reference(workbook, *cell))
+            .collect(),
+        requests_host_recalculation: report.requests_host_recalculation(),
+        changed_parts: report
+            .changed_parts()
+            .iter()
+            .map(|source| source.as_str().to_owned())
+            .collect(),
+        removed_parts: report
+            .removed_parts()
+            .iter()
+            .map(|source| source.as_str().to_owned())
+            .collect(),
+        input_sha256: hex_bytes(report.input_hash().as_bytes()),
+        output_sha256: hex_bytes(report.output_hash().as_bytes()),
     }
 }
 

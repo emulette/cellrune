@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use cellrune::{CellAddress, CellValue, OpenOptions, SheetId};
 use cellrune_interop::{
-    CalculationOptionsDto, CalculationResultDto, CellValueDto, INTEROP_SCHEMA_VERSION,
-    InteropError, InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, RecalculationModeDto,
-    WorkbookFingerprintDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
-    function_catalog,
+    CalculationOptionsDto, CalculationResultDto, CellValueDto, EditWriteOptionsDto,
+    INTEROP_SCHEMA_VERSION, InteropError, InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto,
+    RecalculationModeDto, WorkbookFingerprintDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto, function_catalog,
 };
 
 #[test]
@@ -661,4 +662,100 @@ fn summary_exposes_tables_and_merged_ranges() {
         serde_json::from_value(legacy).expect("legacy payload must deserialize");
     assert!(deserialized.merged_ranges.is_empty());
     assert!(deserialized.tables.is_empty());
+}
+
+#[test]
+fn edits_save_without_calculation_and_match_the_core_edit_writer() {
+    let mut source = WorkbookSession::create();
+    source
+        .set_value("Sheet1", "A1", WritableCellValueDto::Number { value: 2.0 })
+        .expect("input");
+    source
+        .set_formula("Sheet1", "B1", "=A1*2", None)
+        .expect("dependent formula");
+    source
+        .set_formula("Sheet1", "C1", "=MYSTERY(D1)", None)
+        .expect("formula CellRune cannot calculate");
+    source
+        .set_value("Sheet1", "D1", WritableCellValueDto::Number { value: 5.0 })
+        .expect("unrelated input");
+    source
+        .calculate(CalculationOptionsDto::default())
+        .expect("source calculation");
+    let (source_bytes, _) = source
+        .save_bytes(WriteOptionsDto {
+            invalidate_unavailable: true,
+            replace_existing: false,
+        })
+        .expect("source package");
+
+    let mut session = WorkbookSession::open_bytes(&source_bytes).expect("source session");
+    session
+        .set_value("Sheet1", "A1", WritableCellValueDto::Number { value: 3.0 })
+        .expect("edit");
+    let (edited, report) = session
+        .save_edits_bytes()
+        .expect("an edits save needs no calculation and ignores unrelated unavailable formulas");
+    assert_eq!(report.schema_version, INTEROP_SCHEMA_VERSION);
+    assert!(report.requests_host_recalculation);
+    assert_eq!(
+        report
+            .affected_formulas
+            .iter()
+            .map(|cell| (cell.sheet_name.as_str(), cell.address.as_str()))
+            .collect::<Vec<_>>(),
+        [("Sheet1", "B1")]
+    );
+
+    let document = cellrune::open_xlsx_document_bytes(&source_bytes, OpenOptions::default())
+        .expect("core document");
+    let mut draft = cellrune::WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            SheetId::new(1).expect("sheet ID"),
+            CellAddress::from_a1("A1").expect("address"),
+            CellValue::number(3.0).expect("finite"),
+        )
+        .expect("core edit");
+    let core = cellrune::write_xlsx_draft_edits_bytes(&draft, cellrune::WriteOptions::default())
+        .expect("core edit write");
+    assert_eq!(
+        edited,
+        core.bytes(),
+        "interop writes what the core writer writes"
+    );
+    assert_eq!(
+        report.output_sha256,
+        hex(core.report().output_hash().as_bytes())
+    );
+    assert_eq!(report.input_sha256, hex(document.input_hash().as_bytes()));
+
+    let path = unique_test_path();
+    let saved = session
+        .save_edits_path(&path, EditWriteOptionsDto::default())
+        .expect("path save");
+    assert_eq!(saved, report);
+    let error = session
+        .save_edits_path(&path, EditWriteOptionsDto::default())
+        .expect_err("an existing destination needs replacement permission");
+    assert_eq!(error.code(), "xlsx.write.destination_exists");
+    session
+        .save_edits_path(
+            &path,
+            EditWriteOptionsDto {
+                replace_existing: true,
+            },
+        )
+        .expect("explicit replacement");
+    std::fs::remove_file(&path).expect("remove test output");
+
+    let created = WorkbookSession::create()
+        .save_edits_bytes()
+        .expect_err("a created workbook has no source package to edit");
+    assert_eq!(created.code(), "xlsx.write.invalid_package_plan");
+    assert_eq!(created.kind(), InteropErrorKind::Write);
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

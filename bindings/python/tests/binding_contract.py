@@ -141,8 +141,47 @@ def assert_incomplete_save_names_cells() -> None:
         raise AssertionError("an incomplete save did not raise CellRuneError")
 
 
+def assert_edits_save() -> None:
+    source = Workbook.create()
+    source.set_number("Sheet1", "A1", 2.0)
+    source.set_formula("Sheet1", "B1", "=A1*2")
+    source.set_formula("Sheet1", "C1", "=MYSTERY(D1)")
+    source.calculate()
+    workbook = Workbook.from_bytes(source.to_bytes(invalidate_unavailable=True))
+    workbook.set_number("Sheet1", "A1", 3.0)
+
+    edited = workbook.edits_to_bytes()
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        saved_path = pathlib.Path(temporary_directory) / "edited.xlsx"
+        report = workbook.save_edits(saved_path)
+        assert saved_path.read_bytes() == edited
+        try:
+            workbook.save_edits(saved_path)
+        except CellRuneError as error:
+            assert error.code == "xlsx.write.destination_exists"
+        else:
+            raise AssertionError("an existing destination was replaced without permission")
+        workbook.save_edits(saved_path, replace_existing=True)
+    assert report["affected_formulas"] == [
+        {"sheet_id": 1, "sheet_name": "Sheet1", "address": "B1"}
+    ]
+    assert report["requests_host_recalculation"] is True
+    assert report["output_sha256"] == hashlib.sha256(edited).hexdigest()
+    reopened = Workbook.from_bytes(edited)
+    cell = reopened.read_range("Sheet1", "A1", "A1")["cells"][0]
+    assert cell["source_value"] == {"kind": "number", "value": 3.0}
+
+    try:
+        Workbook.create().edits_to_bytes()
+    except CellRuneError as error:
+        assert error.code == "xlsx.write.invalid_package_plan"
+    else:
+        raise AssertionError("a created workbook saved edits without a source package")
+
+
 def main() -> None:
     assert_incomplete_save_names_cells()
+    assert_edits_save()
     assert_function_usage()
     assert_compatibility()
     assert_catalog_contract()

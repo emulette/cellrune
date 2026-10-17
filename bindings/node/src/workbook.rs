@@ -3,9 +3,9 @@ use std::sync::Arc;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    EditBatchV2Dto, FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
-    RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    EditBatchV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError,
+    PreviewCursorDto, RangeRequestDto, RecalculationModeDto, TransactionDetailSectionDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
@@ -17,7 +17,10 @@ use crate::conversion::{
 };
 use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
-use crate::task::{BytesTask, CalculateTask, PreviewTask, RecalculateTask, SavePathTask};
+use crate::task::{
+    BytesTask, CalculateTask, EditsBytesTask, PreviewTask, RecalculateTask, SaveEditsPathTask,
+    SavePathTask,
+};
 
 #[napi]
 pub struct NativeWorkbook {
@@ -343,6 +346,26 @@ impl NativeWorkbook {
                 invalidate_unavailable,
                 replace_existing,
             },
+        })
+    }
+
+    #[napi(ts_return_type = "Promise<Buffer>", catch_unwind)]
+    pub fn edits_to_bytes(&self) -> AsyncTask<EditsBytesTask> {
+        AsyncTask::new(EditsBytesTask {
+            session: Arc::clone(&self.session),
+        })
+    }
+
+    #[napi(ts_return_type = "Promise<NativeEditWriteReport>", catch_unwind)]
+    pub fn save_edits_path(
+        &self,
+        path: String,
+        replace_existing: bool,
+    ) -> AsyncTask<SaveEditsPathTask> {
+        AsyncTask::new(SaveEditsPathTask {
+            session: Arc::clone(&self.session),
+            path,
+            options: EditWriteOptionsDto { replace_existing },
         })
     }
 }

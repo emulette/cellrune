@@ -5,9 +5,9 @@ use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitSta
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cellrune_interop::{
-    CalculationDeltaDto, CalculationOptionsDto, EditBatchDto, RecalculationModeDto,
-    WorkbookChangeDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
-    function_catalog,
+    CalculationDeltaDto, CalculationOptionsDto, EditBatchDto, EditWriteOptionsDto,
+    EditWriteReportDto, RecalculationModeDto, WorkbookChangeDto, WorkbookSession,
+    WritableCellValueDto, WriteOptionsDto, WriteReportDto, function_catalog,
 };
 use serde_json::{Value, json};
 
@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 17);
+    assert_eq!(tools.len(), 18);
     assert!(
         tools
             .iter()
@@ -535,6 +535,61 @@ fn stdio_workflow_matches_the_rust_interop_session() {
         }),
     ));
     assert_eq!(overwrite_error["code"], "mcp.output.overwrite_disallowed");
+
+    let edit = vec![WorkbookChangeDto::SetValue {
+        sheet: "Sheet1".to_owned(),
+        address: "A1".to_owned(),
+        value: WritableCellValueDto::Number { value: 5.0 },
+    }];
+    let mut direct_source = WorkbookSession::open_path(&mcp_output).expect("direct source");
+    let source_revision = direct_source.summary().semantic_revision;
+    direct_source
+        .apply_changes(
+            source_revision,
+            EditBatchDto {
+                changes: edit.clone(),
+            },
+        )
+        .expect("direct source edit");
+    let direct_edit_report = direct_source
+        .save_edits_path(
+            root.path.join("rust-edits.xlsx"),
+            EditWriteOptionsDto::default(),
+        )
+        .expect("direct edits save");
+    let opened = successful_tool(mcp.call_tool("workbook_open", json!({"path": mcp_output})));
+    let source_id = opened["session_id"]
+        .as_str()
+        .expect("open must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": source_id,
+            "expected_revision": opened["summary"]["semantic_revision"],
+            "changes": edit
+        }),
+    ));
+    let mcp_edits = root.path.join("mcp-edits.xlsx");
+    let edits_saved = successful_tool(mcp.call_tool(
+        "workbook_save_edits_as",
+        json!({"session_id": source_id, "path": mcp_edits}),
+    ));
+    let mcp_edit_report: EditWriteReportDto = serde_json::from_value(edits_saved["report"].clone())
+        .expect("edit report must match the shared DTO");
+    assert_eq!(mcp_edit_report, direct_edit_report);
+    assert_eq!(mcp_edit_report.affected_formulas[0].address, "A2");
+    assert!(mcp_edits.is_file());
+    let edits_overwrite = failed_tool(mcp.call_tool(
+        "workbook_save_edits_as",
+        json!({"session_id": source_id, "path": mcp_edits, "replace_existing": true}),
+    ));
+    assert_eq!(edits_overwrite["code"], "mcp.output.overwrite_disallowed");
+    let created_edits = failed_tool(mcp.call_tool(
+        "workbook_save_edits_as",
+        json!({"session_id": session_id, "path": root.path.join("created-edits.xlsx")}),
+    ));
+    assert_eq!(created_edits["code"], "xlsx.write.invalid_package_plan");
 
     let outside_error = failed_tool(mcp.call_tool("workbook_open", json!({"path": outside_input})));
     assert_eq!(outside_error["code"], "mcp.path.outside_root");

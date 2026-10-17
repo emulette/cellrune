@@ -218,6 +218,7 @@ mod tests {
                 "workbook_read_range",
                 "workbook_recalculate",
                 "workbook_save_as",
+                "workbook_save_edits_as",
                 "workbook_scan_capabilities",
                 "workbook_summary",
             ]
@@ -309,6 +310,7 @@ mod tests {
             ("workbook_read_range", true, false, true, false),
             ("workbook_recalculate", false, true, false, false),
             ("workbook_save_as", false, true, false, false),
+            ("workbook_save_edits_as", false, true, false, false),
             ("workbook_scan_capabilities", true, false, true, false),
             ("workbook_summary", true, false, true, false),
         ];

@@ -13,6 +13,7 @@ from ._types import (
     DefinedNameInspection,
     EditReceipt,
     EditReceiptV2,
+    EditWriteReport,
     ErrorDetails,
     FunctionCatalogReport,
     FunctionUsageReport,
@@ -168,3 +169,10 @@ class Workbook:
         invalidate_unavailable: bool = False,
         replace_existing: bool = False,
     ) -> WriteReport: ...
+    def edits_to_bytes(self) -> bytes: ...
+    def save_edits(
+        self,
+        path: str | PathLike[str],
+        *,
+        replace_existing: bool = False,
+    ) -> EditWriteReport: ...

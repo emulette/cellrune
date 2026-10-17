@@ -251,6 +251,15 @@ pub struct EditReceiptV2Dto {
     pub changed_table_ids: Vec<u32>,
 }
 
+/// Options for saving a session's edits into its source package without calculating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditWriteOptionsDto {
+    /// Whether a path save may replace an existing destination.
+    #[serde(default)]
+    pub replace_existing: bool,
+}
+
 /// Save behavior exposed across language boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1211,6 +1220,28 @@ pub struct FunctionCatalogReportDto {
     pub schema_version: u32,
     /// Deterministically ordered accepted names.
     pub entries: Vec<FunctionCatalogEntryDto>,
+}
+
+/// Result of saving a session's edits into its source package without calculating.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditWriteReportDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Formulas the edits can affect, in cell order. Their saved results were removed so the
+    /// spreadsheet app recalculates them; every other formula keeps its saved result.
+    pub affected_formulas: Vec<CellReferenceDto>,
+    /// Whether the output asks the spreadsheet app to recalculate when it opens the file, which
+    /// happens exactly when a formula is affected.
+    pub requests_host_recalculation: bool,
+    /// Package parts rewritten.
+    pub changed_parts: Vec<String>,
+    /// Stale package parts intentionally removed.
+    pub removed_parts: Vec<String>,
+    /// Lowercase hexadecimal SHA-256 identity of the source package the session was opened from.
+    pub input_sha256: String,
+    /// Lowercase hexadecimal SHA-256 identity of the exact verified output bytes.
+    pub output_sha256: String,
 }
 
 /// Result of saving a verified workbook package.

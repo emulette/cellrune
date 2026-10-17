@@ -6,6 +6,7 @@ from cellrune import (
     DefinedNameInspection,
     EditReceipt,
     EditReceiptV2,
+    EditWriteReport,
     FunctionCatalogReport,
     PreviewChanges,
     PreviewCursor,
@@ -100,9 +101,19 @@ def check() -> None:
         value["value"].is_integer()
     output: bytes = workbook.to_bytes()
     reopened: Workbook = Workbook.from_bytes(output)
+    edited: bytes = reopened.edits_to_bytes()
+    edited.hex()
     reopened.close()
     write_report: WriteReport = workbook.save("typing-check.xlsx")
     write_report["output_sha256"].upper()
+
+
+def check_edit_report(workbook: Workbook) -> None:
+    report: EditWriteReport = workbook.save_edits("edited.xlsx", replace_existing=True)
+    report["input_sha256"].upper()
+    report["affected_formulas"][0]["address"].upper()
+    if report["requests_host_recalculation"]:
+        report["changed_parts"].sort()
 
 
 def check_v2_types(workbook: Workbook, revision: int) -> None:
