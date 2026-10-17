@@ -1,4 +1,6 @@
 from cellrune import (
+    CalculationLimitOptions,
+    ReadLimitOptions,
     TargetCalculationResult,
     CalculationDelta,
     CellRuneError,
@@ -100,7 +102,10 @@ def check() -> None:
     if value["kind"] == "number":
         value["value"].is_integer()
     output: bytes = workbook.to_bytes()
-    reopened: Workbook = Workbook.from_bytes(output)
+    limits: CalculationLimitOptions = {"max_array_cells": 2_000_000}
+    workbook.calculate(calculation_limits=limits)
+    read_limits: ReadLimitOptions = {"max_entry_uncompressed_bytes": 1 << 27}
+    reopened: Workbook = Workbook.from_bytes(output, read_limits=read_limits)
     edited: bytes = reopened.edits_to_bytes()
     edited.hex()
     reopened.close()

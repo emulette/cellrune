@@ -5,6 +5,7 @@ from ._native import (
     function_catalog as function_catalog,
 )
 from ._types import (
+    CalculationLimitOptions as CalculationLimitOptions,
     CalculationTarget as CalculationTarget,
     TargetCalculationCell as TargetCalculationCell,
     TargetCalculationLimitOptions as TargetCalculationLimitOptions,
@@ -56,6 +57,7 @@ from ._types import (
     PreviewCursor as PreviewCursor,
     ProviderIdentity as ProviderIdentity,
     RangePage as RangePage,
+    ReadLimitOptions as ReadLimitOptions,
     RemoveDefinedNameChange as RemoveDefinedNameChange,
     RenameTableChange as RenameTableChange,
     RenameTableColumnChange as RenameTableColumnChange,
@@ -97,6 +99,7 @@ __all__ = [
     "CalculationDeltaCell",
     "CalculationDeltaPage",
     "CalculationIssue",
+    "CalculationLimitOptions",
     "CalculationLimits",
     "CalculationReport",
     "CalculationResult",
@@ -138,6 +141,7 @@ __all__ = [
     "PreviewCursor",
     "ProviderIdentity",
     "RangePage",
+    "ReadLimitOptions",
     "RemoveDefinedNameChange",
     "RenameTableChange",
     "RenameTableColumnChange",

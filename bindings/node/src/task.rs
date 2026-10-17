@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use cellrune_binding_support::SharedWorkbookSession;
 use cellrune_interop::{
-    CalculationOptionsDto, EditBatchV2Dto, EditWriteOptionsDto, RecalculationModeDto,
-    WorkbookSession, WriteOptionsDto,
+    CalculationOptionsDto, EditBatchV2Dto, EditWriteOptionsDto, ReadLimitOptionsDto,
+    RecalculationModeDto, WorkbookSession, WriteOptionsDto,
 };
 use napi::bindgen_prelude::Buffer;
 use napi::{Env, Task};
@@ -16,11 +16,12 @@ use crate::workbook::NativeWorkbook;
 
 pub struct OpenPathTask {
     path: String,
+    limits: ReadLimitOptionsDto,
 }
 
 impl OpenPathTask {
-    pub const fn new(path: String) -> Self {
-        Self { path }
+    pub const fn new(path: String, limits: ReadLimitOptionsDto) -> Self {
+        Self { path, limits }
     }
 }
 
@@ -29,7 +30,9 @@ impl Task for OpenPathTask {
     type JsValue = NativeWorkbook;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        catch_panic(|| WorkbookSession::open_path(&self.path).map_err(napi_error))
+        catch_panic(|| {
+            WorkbookSession::open_path_with_limits(&self.path, self.limits).map_err(napi_error)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -39,11 +42,12 @@ impl Task for OpenPathTask {
 
 pub struct OpenBytesTask {
     bytes: Vec<u8>,
+    limits: ReadLimitOptionsDto,
 }
 
 impl OpenBytesTask {
-    pub const fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes }
+    pub const fn new(bytes: Vec<u8>, limits: ReadLimitOptionsDto) -> Self {
+        Self { bytes, limits }
     }
 }
 
@@ -52,7 +56,9 @@ impl Task for OpenBytesTask {
     type JsValue = NativeWorkbook;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        catch_panic(|| WorkbookSession::open_bytes(&self.bytes).map_err(napi_error))
+        catch_panic(|| {
+            WorkbookSession::open_bytes_with_limits(&self.bytes, self.limits).map_err(napi_error)
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {

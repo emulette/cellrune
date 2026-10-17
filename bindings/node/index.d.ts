@@ -196,6 +196,58 @@ export interface WorkbookSummary {
   readonly sheets: readonly SheetSummary[];
 }
 
+/** Calculation resource limits to change; each omitted limit keeps its default. */
+export interface CalculationLimitOptions {
+  readonly maxFormulaTokens?: number;
+  readonly maxFormulaSourceBytes?: number;
+  readonly maxFormulaAstNodes?: number;
+  readonly maxFormulaNestingDepth?: number;
+  readonly maxDependencyEdges?: number;
+  readonly maxReferenceAreas?: number;
+  readonly maxArrayCells?: number;
+  readonly maxTextBytes?: number;
+  readonly maxFunctionIterations?: number;
+  readonly maxLetBindings?: number;
+  readonly maxLambdaDepth?: number;
+  readonly maxLambdaInvocations?: number;
+}
+
+/** Package and semantic read limits to change; each omitted limit keeps its default. */
+export interface ReadLimitOptions {
+  readonly maxArchiveBytes?: number;
+  readonly maxEntries?: number;
+  readonly maxEntryUncompressedBytes?: number;
+  readonly maxTotalUncompressedBytes?: number;
+  readonly maxCompressionRatio?: number;
+  readonly maxXmlDepth?: number;
+  readonly maxXmlAttributes?: number;
+  readonly maxSheets?: number;
+  readonly maxCellsPerSheet?: number;
+  readonly maxTotalCells?: number;
+  readonly maxSharedStrings?: number;
+  readonly maxSharedStringBytes?: number;
+  readonly maxTotalSharedStringBytes?: number;
+  readonly maxTotalCellTextBytes?: number;
+  readonly maxDefinedNames?: number;
+  readonly maxFormulaBytes?: number;
+  readonly maxTotalFormulaBytes?: number;
+  readonly maxMergedRanges?: number;
+  readonly maxTables?: number;
+  readonly maxTableColumns?: number;
+  readonly maxTableNameBytes?: number;
+  readonly maxTableFilterItems?: number;
+  readonly maxTableFilterTextBytes?: number;
+  readonly maxPhoneticRunsPerItem?: number;
+  readonly maxTotalPhoneticRuns?: number;
+  readonly maxAnnotatedCells?: number;
+  readonly maxPhoneticTextBytes?: number;
+  readonly maxTotalPhoneticTextBytes?: number;
+}
+
+export interface OpenOptions {
+  readonly readLimits?: ReadLimitOptions;
+}
+
 export interface CalculationOptions {
   readonly todaySerial?: number;
   readonly nowSerial?: number;
@@ -203,6 +255,7 @@ export interface CalculationOptions {
   readonly financialSolverSemantics?:
     | "excel_iteration_budget"
     | "extended_search";
+  readonly calculationLimits?: CalculationLimitOptions;
 }
 
 export interface CalculationReport {
@@ -626,8 +679,8 @@ export interface TargetCalculationResult {
 export class Workbook {
   private constructor();
   static create(): Workbook;
-  static openPath(path: string): Promise<Workbook>;
-  static fromBytes(bytes: Buffer | Uint8Array): Promise<Workbook>;
+  static openPath(path: string, options?: OpenOptions): Promise<Workbook>;
+  static fromBytes(bytes: Buffer | Uint8Array, options?: OpenOptions): Promise<Workbook>;
   get closed(): boolean;
   close(): void;
   summary(): WorkbookSummary;

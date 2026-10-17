@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    EditBatchV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError,
-    PreviewCursorDto, RangeRequestDto, RecalculationModeDto, TransactionDetailSectionDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
+    DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
+    FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
+    RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
@@ -112,6 +113,7 @@ impl NativeWorkbook {
         now_serial: Option<f64>,
         arithmetic_semantics: Option<String>,
         financial_solver_semantics: Option<String>,
+        limits_json: Option<String>,
     ) -> napi::Result<AsyncTask<CalculateTask>> {
         Ok(AsyncTask::new(CalculateTask {
             session: Arc::clone(&self.session),
@@ -120,6 +122,7 @@ impl NativeWorkbook {
                 now_serial,
                 arithmetic_semantics.as_deref(),
                 financial_solver_semantics.as_deref(),
+                limits_json.as_deref(),
             )?,
         }))
     }
@@ -132,6 +135,7 @@ impl NativeWorkbook {
         now_serial: Option<f64>,
         arithmetic_semantics: Option<String>,
         financial_solver_semantics: Option<String>,
+        limits_json: Option<String>,
     ) -> napi::Result<AsyncTask<RecalculateTask>> {
         Ok(AsyncTask::new(RecalculateTask {
             session: Arc::clone(&self.session),
@@ -141,6 +145,7 @@ impl NativeWorkbook {
                 now_serial,
                 arithmetic_semantics.as_deref(),
                 financial_solver_semantics.as_deref(),
+                limits_json.as_deref(),
             )?,
         }))
     }
@@ -381,6 +386,8 @@ struct PreviewOptionsInput {
     arithmetic_semantics: ArithmeticSemanticsDto,
     #[serde(default)]
     financial_solver_semantics: FinancialSolverSemanticsDto,
+    #[serde(default)]
+    calculation_limits: CalculationLimitOptionsDto,
 }
 
 impl PreviewOptionsInput {
@@ -390,6 +397,7 @@ impl PreviewOptionsInput {
             now_serial: self.now_serial,
             arithmetic_semantics: self.arithmetic_semantics,
             financial_solver_semantics: self.financial_solver_semantics,
+            calculation_limits: self.calculation_limits,
         }
     }
 }
@@ -466,7 +474,9 @@ fn calculation_options(
     now_serial: Option<f64>,
     arithmetic_semantics: Option<&str>,
     financial_solver_semantics: Option<&str>,
+    limits_json: Option<&str>,
 ) -> napi::Result<CalculationOptionsDto> {
+    let calculation_limits = limit_options::<CalculationLimitOptionsDto>(limits_json)?;
     let arithmetic_semantics = match arithmetic_semantics.unwrap_or("excel_near_zero") {
         "excel_near_zero" => ArithmeticSemanticsDto::ExcelNearZero,
         "ieee_754" => ArithmeticSemanticsDto::Ieee754,
@@ -487,5 +497,19 @@ fn calculation_options(
         now_serial,
         arithmetic_semantics,
         financial_solver_semantics,
+        calculation_limits,
     })
+}
+
+/// Reads a limit object serialized by the JavaScript wrapper; `None` keeps every default.
+pub(crate) fn limit_options<T: serde::de::DeserializeOwned + Default>(
+    json: Option<&str>,
+) -> napi::Result<T> {
+    json.map_or_else(
+        || Ok(T::default()),
+        |json| {
+            serde_json::from_str(json)
+                .map_err(|error| napi_error(InteropError::invalid_limit_payload(error.to_string())))
+        },
+    )
 }

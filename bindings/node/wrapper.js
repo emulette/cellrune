@@ -34,6 +34,8 @@ const {
   parsePreviewJson,
 } = require("./lib/normalization.js");
 const {
+  limitObject,
+  limitsJson,
   requireFinite,
   requireNonNegativeInteger,
   requireOptionalBoolean,
@@ -56,18 +58,26 @@ class Workbook {
     return new Workbook(native.createWorkbook());
   }
 
-  static async openPath(path) {
+  static async openPath(path, options = {}) {
     requireString(path, "path");
-    return new Workbook(await withErrors(native.openWorkbookPath(path)));
+    requireOptions(options);
+    requireOptionKeys(options, ["readLimits"]);
+    const limits = limitsJson(options.readLimits, "readLimits");
+    const task = withSyncErrors(() => native.openWorkbookPath(path, limits));
+    return new Workbook(await withErrors(task));
   }
 
-  static async fromBytes(bytes) {
+  static async fromBytes(bytes, options = {}) {
     if (!(bytes instanceof Uint8Array)) {
       throw inputError("bytes must be a Buffer or Uint8Array");
     }
-    return new Workbook(
-      await withErrors(native.openWorkbookBytes(Buffer.from(bytes))),
+    requireOptions(options);
+    requireOptionKeys(options, ["readLimits"]);
+    const limits = limitsJson(options.readLimits, "readLimits");
+    const task = withSyncErrors(() =>
+      native.openWorkbookBytes(Buffer.from(bytes), limits),
     );
+    return new Workbook(await withErrors(task));
   }
 
   get closed() {
@@ -139,6 +149,7 @@ class Workbook {
         options.nowSerial ?? null,
         options.arithmeticSemantics ?? null,
         options.financialSolverSemantics ?? null,
+        limitsJson(options.calculationLimits, "calculationLimits"),
       ),
     );
     return normalizeCalculationReport(await withErrors(task));
@@ -170,6 +181,7 @@ class Workbook {
         options.nowSerial ?? null,
         options.arithmeticSemantics ?? null,
         options.financialSolverSemantics ?? null,
+        limitsJson(options.calculationLimits, "calculationLimits"),
       ),
     );
     return normalizeCalculationDelta(await withErrors(task));
@@ -187,6 +199,7 @@ class Workbook {
       "nowSerial",
       "arithmeticSemantics",
       "financialSolverSemantics",
+      "calculationLimits",
     ]);
     const mode = options.mode ?? "auto";
     if (!["auto", "incremental", "full"].includes(mode)) {
@@ -215,6 +228,8 @@ class Workbook {
           arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
           financial_solver_semantics:
             options.financialSolverSemantics ?? "excel_iteration_budget",
+          calculation_limits:
+            limitObject(options.calculationLimits, "calculationLimits") ?? {},
         }),
       ),
     );

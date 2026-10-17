@@ -38,6 +38,142 @@ pub struct CalculationOptionsDto {
     /// Policy for `IRR`, `XIRR`, and `RATE` convergence.
     #[serde(default)]
     pub financial_solver_semantics: FinancialSolverSemanticsDto,
+    /// Resource limits to change for this calculation; omitted limits keep their defaults.
+    #[serde(default)]
+    pub calculation_limits: CalculationLimitOptionsDto,
+}
+
+/// Calculation resource limits to change; each omitted limit keeps its core default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalculationLimitOptionsDto {
+    /// Maximum lexical tokens in one formula.
+    #[serde(default)]
+    pub max_formula_tokens: Option<u64>,
+    /// Maximum UTF-8 source bytes in one formula.
+    #[serde(default)]
+    pub max_formula_source_bytes: Option<u64>,
+    /// Maximum AST nodes in one formula.
+    #[serde(default)]
+    pub max_formula_ast_nodes: Option<u64>,
+    /// Maximum parser nesting depth in one formula.
+    #[serde(default)]
+    pub max_formula_nesting_depth: Option<u64>,
+    /// Maximum dependency edges in one workbook calculation.
+    #[serde(default)]
+    pub max_dependency_edges: Option<u64>,
+    /// Maximum identity-preserving areas in one reference.
+    #[serde(default)]
+    pub max_reference_areas: Option<u64>,
+    /// Maximum array cells or reference traversal cells in one evaluation.
+    #[serde(default)]
+    pub max_array_cells: Option<u64>,
+    /// Maximum UTF-8 bytes in one calculated text value.
+    #[serde(default)]
+    pub max_text_bytes: Option<u64>,
+    /// Maximum function iterations in one formula-cell evaluation.
+    #[serde(default)]
+    pub max_function_iterations: Option<u64>,
+    /// Maximum bindings in one `LET` expression.
+    #[serde(default)]
+    pub max_let_bindings: Option<u64>,
+    /// Maximum simultaneous lambda-body depth.
+    #[serde(default)]
+    pub max_lambda_depth: Option<u64>,
+    /// Maximum lambda-body invocations in one formula-cell evaluation.
+    #[serde(default)]
+    pub max_lambda_invocations: Option<u64>,
+}
+
+/// Package and semantic read limits to change when opening a workbook; each omitted limit keeps
+/// its core default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReadLimitOptionsDto {
+    /// Maximum input archive bytes.
+    #[serde(default)]
+    pub max_archive_bytes: Option<u64>,
+    /// Maximum ZIP entries.
+    #[serde(default)]
+    pub max_entries: Option<u64>,
+    /// Maximum uncompressed bytes of one ZIP entry.
+    #[serde(default)]
+    pub max_entry_uncompressed_bytes: Option<u64>,
+    /// Maximum uncompressed bytes of all read entries.
+    #[serde(default)]
+    pub max_total_uncompressed_bytes: Option<u64>,
+    /// Maximum compression ratio of one entry.
+    #[serde(default)]
+    pub max_compression_ratio: Option<u64>,
+    /// Maximum XML element depth.
+    #[serde(default)]
+    pub max_xml_depth: Option<u64>,
+    /// Maximum attributes on one XML element.
+    #[serde(default)]
+    pub max_xml_attributes: Option<u64>,
+    /// Maximum worksheets.
+    #[serde(default)]
+    pub max_sheets: Option<u64>,
+    /// Maximum cells in one worksheet.
+    #[serde(default)]
+    pub max_cells_per_sheet: Option<u64>,
+    /// Maximum cells in all worksheets.
+    #[serde(default)]
+    pub max_total_cells: Option<u64>,
+    /// Maximum shared strings.
+    #[serde(default)]
+    pub max_shared_strings: Option<u64>,
+    /// Maximum UTF-8 bytes of one shared string.
+    #[serde(default)]
+    pub max_shared_string_bytes: Option<u64>,
+    /// Maximum UTF-8 bytes of all shared strings.
+    #[serde(default)]
+    pub max_total_shared_string_bytes: Option<u64>,
+    /// Maximum text bytes materialized into cells.
+    #[serde(default)]
+    pub max_total_cell_text_bytes: Option<u64>,
+    /// Maximum defined names.
+    #[serde(default)]
+    pub max_defined_names: Option<u64>,
+    /// Maximum UTF-8 bytes of one formula.
+    #[serde(default)]
+    pub max_formula_bytes: Option<u64>,
+    /// Maximum UTF-8 bytes of all formulas.
+    #[serde(default)]
+    pub max_total_formula_bytes: Option<u64>,
+    /// Maximum merged ranges.
+    #[serde(default)]
+    pub max_merged_ranges: Option<u64>,
+    /// Maximum tables.
+    #[serde(default)]
+    pub max_tables: Option<u64>,
+    /// Maximum columns in one table.
+    #[serde(default)]
+    pub max_table_columns: Option<u64>,
+    /// Maximum UTF-8 bytes of one table or column name.
+    #[serde(default)]
+    pub max_table_name_bytes: Option<u64>,
+    /// Maximum filter items in one table.
+    #[serde(default)]
+    pub max_table_filter_items: Option<u64>,
+    /// Maximum filter text bytes in one table.
+    #[serde(default)]
+    pub max_table_filter_text_bytes: Option<u64>,
+    /// Maximum phonetic runs in one string.
+    #[serde(default)]
+    pub max_phonetic_runs_per_item: Option<u64>,
+    /// Maximum phonetic runs in the workbook.
+    #[serde(default)]
+    pub max_total_phonetic_runs: Option<u64>,
+    /// Maximum cells with phonetic annotations.
+    #[serde(default)]
+    pub max_annotated_cells: Option<u64>,
+    /// Maximum phonetic text bytes in one string.
+    #[serde(default)]
+    pub max_phonetic_text_bytes: Option<u64>,
+    /// Maximum phonetic text bytes in the workbook.
+    #[serde(default)]
+    pub max_total_phonetic_text_bytes: Option<u64>,
 }
 
 /// Requested stateful recalculation policy.

@@ -84,7 +84,33 @@ function requireOptionKeys(value, allowedKeys) {
   }
 }
 
+/**
+ * Converts a camelCase limit object to the snake_case object native code reads, or returns
+ * undefined when no limits were given. Native code rejects unknown names and values that are not
+ * positive integers.
+ */
+function limitObject(value, name) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw inputError(`${name} must be an object`);
+  }
+  const converted = {};
+  for (const [key, limit] of Object.entries(value)) {
+    converted[key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)] = limit;
+  }
+  return converted;
+}
+
+function limitsJson(value, name) {
+  const converted = limitObject(value, name);
+  return converted === undefined ? null : JSON.stringify(converted);
+}
+
 module.exports = {
+  limitObject,
+  limitsJson,
   requireFinite,
   requireNonNegativeInteger,
   requireObject,

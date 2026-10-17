@@ -24,6 +24,52 @@ class TargetCalculationLimits(TypedDict):
     max_evaluated_cells: int
 
 
+class CalculationLimitOptions(TypedDict, total=False):
+    max_formula_tokens: int
+    max_formula_source_bytes: int
+    max_formula_ast_nodes: int
+    max_formula_nesting_depth: int
+    max_dependency_edges: int
+    max_reference_areas: int
+    max_array_cells: int
+    max_text_bytes: int
+    max_function_iterations: int
+    max_let_bindings: int
+    max_lambda_depth: int
+    max_lambda_invocations: int
+
+
+class ReadLimitOptions(TypedDict, total=False):
+    max_archive_bytes: int
+    max_entries: int
+    max_entry_uncompressed_bytes: int
+    max_total_uncompressed_bytes: int
+    max_compression_ratio: int
+    max_xml_depth: int
+    max_xml_attributes: int
+    max_sheets: int
+    max_cells_per_sheet: int
+    max_total_cells: int
+    max_shared_strings: int
+    max_shared_string_bytes: int
+    max_total_shared_string_bytes: int
+    max_total_cell_text_bytes: int
+    max_defined_names: int
+    max_formula_bytes: int
+    max_total_formula_bytes: int
+    max_merged_ranges: int
+    max_tables: int
+    max_table_columns: int
+    max_table_name_bytes: int
+    max_table_filter_items: int
+    max_table_filter_text_bytes: int
+    max_phonetic_runs_per_item: int
+    max_total_phonetic_runs: int
+    max_annotated_cells: int
+    max_phonetic_text_bytes: int
+    max_total_phonetic_text_bytes: int
+
+
 class ErrorDetails(TypedDict):
     source_code: str | None
     source_id: str | None

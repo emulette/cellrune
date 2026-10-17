@@ -4,6 +4,7 @@ from types import TracebackType
 from typing import Literal
 
 from ._types import (
+    CalculationLimitOptions,
     CalculationTarget,
     TargetCalculationLimitOptions,
     TargetCalculationResult,
@@ -20,6 +21,7 @@ from ._types import (
     PreviewChanges,
     PreviewCursor,
     RangePage,
+    ReadLimitOptions,
     TransactionImpactPage,
     WorkbookChange,
     WorkbookChangeV2,
@@ -51,9 +53,13 @@ class Workbook:
     @staticmethod
     def create() -> Workbook: ...
     @staticmethod
-    def open_path(path: str | PathLike[str]) -> Workbook: ...
+    def open_path(
+        path: str | PathLike[str], *, read_limits: ReadLimitOptions | None = None
+    ) -> Workbook: ...
     @staticmethod
-    def from_bytes(bytes: bytes) -> Workbook: ...
+    def from_bytes(
+        bytes: bytes, *, read_limits: ReadLimitOptions | None = None
+    ) -> Workbook: ...
     @property
     def closed(self) -> bool: ...
     def close(self) -> None: ...
@@ -90,6 +96,7 @@ class Workbook:
         financial_solver_semantics: Literal[
             "excel_iteration_budget", "extended_search"
         ] = "excel_iteration_budget",
+        calculation_limits: CalculationLimitOptions | None = None,
     ) -> CalculationReport: ...
     def recalculate(
         self,
@@ -101,6 +108,7 @@ class Workbook:
         financial_solver_semantics: Literal[
             "excel_iteration_budget", "extended_search"
         ] = "excel_iteration_budget",
+        calculation_limits: CalculationLimitOptions | None = None,
     ) -> CalculationDelta: ...
     def preview_changes(
         self,
@@ -114,6 +122,7 @@ class Workbook:
         financial_solver_semantics: Literal[
             "excel_iteration_budget", "extended_search"
         ] = "excel_iteration_budget",
+        calculation_limits: CalculationLimitOptions | None = None,
     ) -> PreviewChanges: ...
     def preview_changes_page(
         self,

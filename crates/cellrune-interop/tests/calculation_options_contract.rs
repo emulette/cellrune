@@ -1,6 +1,7 @@
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationOptionsDto, CalculationResultDto, CellValueDto,
-    FinancialSolverSemanticsDto, RangeRequestDto, WorkbookSession,
+    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
+    CalculationResultDto, CellValueDto, FinancialSolverSemanticsDto, RangeRequestDto,
+    ReadLimitOptionsDto, WorkbookSession,
 };
 
 #[test]
@@ -97,4 +98,87 @@ fn calculated_results(session: &WorkbookSession) -> Vec<CalculationResultDto> {
         .into_iter()
         .map(|cell| cell.calculated.expect("calculated value"))
         .collect()
+}
+
+#[test]
+fn calculation_and_read_limits_cross_the_transport_boundary() {
+    let omitted: CalculationOptionsDto =
+        serde_json::from_str("{}").expect("a payload without limits keeps every default");
+    assert_eq!(
+        omitted.calculation_limits,
+        CalculationLimitOptionsDto::default()
+    );
+
+    let mut session = WorkbookSession::create();
+    session
+        .set_formula("Sheet1", "A1", "=SUM(B1:B200)", None)
+        .expect("range formula");
+    let limited = CalculationOptionsDto {
+        calculation_limits: CalculationLimitOptionsDto {
+            max_array_cells: Some(100),
+            ..CalculationLimitOptionsDto::default()
+        },
+        ..CalculationOptionsDto::default()
+    };
+    let report = session.calculate(limited).expect("limited calculation");
+    assert_eq!(
+        report.unavailable_count, 1,
+        "a lowered limit stops the formula"
+    );
+    let report = session
+        .calculate(CalculationOptionsDto::default())
+        .expect("default calculation");
+    assert_eq!(report.unavailable_count, 0);
+
+    let zero = CalculationOptionsDto {
+        calculation_limits: CalculationLimitOptionsDto {
+            max_text_bytes: Some(0),
+            ..CalculationLimitOptionsDto::default()
+        },
+        ..CalculationOptionsDto::default()
+    };
+    let error = session
+        .calculate(zero)
+        .expect_err("a zero limit is rejected");
+    assert_eq!(error.code(), "interop.limit.invalid");
+    assert!(
+        error
+            .details()
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("max_text_bytes"))
+    );
+
+    let mut source = WorkbookSession::create();
+    source
+        .set_value(
+            "Sheet1",
+            "A1",
+            cellrune_interop::WritableCellValueDto::Number { value: 1.0 },
+        )
+        .expect("value");
+    source
+        .calculate(CalculationOptionsDto::default())
+        .expect("source calculation");
+    let (bytes, _) = source
+        .save_bytes(cellrune_interop::WriteOptionsDto::default())
+        .expect("source package");
+    let tight = ReadLimitOptionsDto {
+        max_entry_uncompressed_bytes: Some(64),
+        ..ReadLimitOptionsDto::default()
+    };
+    let error = WorkbookSession::open_bytes_with_limits(&bytes, tight)
+        .expect_err("a lowered read limit rejects the package");
+    assert_eq!(error.code(), "xlsx.entry_too_large");
+    WorkbookSession::open_bytes_with_limits(&bytes, ReadLimitOptionsDto::default())
+        .expect("default read limits open the package");
+    let error = WorkbookSession::open_bytes_with_limits(
+        &bytes,
+        ReadLimitOptionsDto {
+            max_sheets: Some(0),
+            ..ReadLimitOptionsDto::default()
+        },
+    )
+    .expect_err("a zero read limit is rejected");
+    assert_eq!(error.code(), "interop.limit.invalid");
 }

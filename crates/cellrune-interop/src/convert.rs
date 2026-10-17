@@ -1,25 +1,27 @@
 use cellrune::{
     ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
     CalculationDelta, CalculationDeltaPage, CalculationExecutionMode, CalculationIssue,
-    CalculationOptions, CalculationSnapshot, CellAddress, CellContent, CellValue, EditReceipt,
-    ExcelError, FinancialSolverSemantics, FiniteNumber, InstallDeltaBasisReason,
-    MaterializedResultOrigin, RecalculationMode, RecalculationWriteOptions,
-    RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility, TransactionDetailItem,
-    TransactionDetailSection, TransactionImpactCause, TransactionImpactCoverage,
-    TransactionIssueChangeKind, WorkbookDraft, WorkbookFingerprint, WorkbookSnapshot,
-    WorkbookTransactionReceipt, WorkbookTransactionReport, WriteOptions, XlsxDocumentKind,
+    CalculationLimits, CalculationOptions, CalculationSnapshot, CellAddress, CellContent,
+    CellValue, EditReceipt, ExcelError, FinancialSolverSemantics, FiniteNumber,
+    InstallDeltaBasisReason, MaterializedResultOrigin, ReadLimits, RecalculationMode,
+    RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility,
+    TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
+    TransactionImpactCoverage, TransactionIssueChangeKind, WorkbookDraft, WorkbookFingerprint,
+    WorkbookSnapshot, WorkbookTransactionReceipt, WorkbookTransactionReport, WriteOptions,
+    XlsxDocumentKind,
 };
 
 use crate::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
-    CalculationIssueDto, CalculationLimitsDto, CalculationOptionsDto, CalculationOptionsReportDto,
-    CalculationReportDto, CalculationResultDto, CellDto, CellReferenceDto, CellValueDto,
-    EditReceiptDto, EditWriteReportDto, FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION,
-    InteropError, MaterializedResultOriginDto, ProviderIdentityDto, RecalculationModeDto,
-    SavedValueStateDto, TransactionDetailCountsDto, TransactionDetailItemDto,
-    TransactionDetailSectionDto, TransactionImpactCoverageDto, TransactionImpactPageDto,
-    WorkbookFingerprintDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    CalculationIssueDto, CalculationLimitOptionsDto, CalculationLimitsDto, CalculationOptionsDto,
+    CalculationOptionsReportDto, CalculationReportDto, CalculationResultDto, CellDto,
+    CellReferenceDto, CellValueDto, EditReceiptDto, EditWriteReportDto,
+    FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION, InteropError, MaterializedResultOriginDto,
+    ProviderIdentityDto, ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto,
+    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
+    TransactionImpactCoverageDto, TransactionImpactPageDto, WorkbookFingerprintDto,
+    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
+    WriteOptionsDto, WriteReportDto,
 };
 
 pub(crate) fn workbook_fingerprint(value: WorkbookFingerprint) -> WorkbookFingerprintDto {
@@ -49,7 +51,221 @@ pub(crate) fn calculation_options(
     if let Some(value) = options.now_serial {
         converted = converted.with_now_serial(FiniteNumber::new(value)?);
     }
-    Ok(converted)
+    Ok(converted.with_limits(calculation_limits(options.calculation_limits)?))
+}
+
+/// Applies the supplied limits over the core defaults.
+fn calculation_limits(
+    options: CalculationLimitOptionsDto,
+) -> Result<CalculationLimits, InteropError> {
+    let mut limits = CalculationLimits::default();
+    if let Some(value) = options.max_formula_tokens {
+        limits = limits
+            .with_max_formula_tokens(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_formula_source_bytes {
+        limits = limits
+            .with_max_formula_source_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_formula_ast_nodes {
+        limits = limits
+            .with_max_formula_ast_nodes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_formula_nesting_depth {
+        limits = limits
+            .with_max_formula_nesting_depth(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_dependency_edges {
+        limits = limits
+            .with_max_dependency_edges(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_reference_areas {
+        limits = limits
+            .with_max_reference_areas(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_array_cells {
+        limits = limits
+            .with_max_array_cells(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_text_bytes {
+        limits = limits
+            .with_max_text_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_function_iterations {
+        limits = limits
+            .with_max_function_iterations(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_let_bindings {
+        limits = limits
+            .with_max_let_bindings(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_lambda_depth {
+        limits = limits
+            .with_max_lambda_depth(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_lambda_invocations {
+        limits = limits
+            .with_max_lambda_invocations(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    Ok(limits)
+}
+
+/// Applies the supplied read limits over the core defaults.
+pub(crate) fn read_limits(options: ReadLimitOptionsDto) -> Result<ReadLimits, InteropError> {
+    let mut limits = ReadLimits::default();
+    if let Some(value) = options.max_archive_bytes {
+        limits = limits
+            .with_max_archive_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_entries {
+        limits = limits
+            .with_max_entries(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_entry_uncompressed_bytes {
+        limits = limits
+            .with_max_entry_uncompressed_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_uncompressed_bytes {
+        limits = limits
+            .with_max_total_uncompressed_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_compression_ratio {
+        limits = limits
+            .with_max_compression_ratio(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_xml_depth {
+        limits = limits
+            .with_max_xml_depth(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_xml_attributes {
+        limits = limits
+            .with_max_xml_attributes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_sheets {
+        limits = limits
+            .with_max_sheets(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_cells_per_sheet {
+        limits = limits
+            .with_max_cells_per_sheet(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_cells {
+        limits = limits
+            .with_max_total_cells(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_shared_strings {
+        limits = limits
+            .with_max_shared_strings(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_shared_string_bytes {
+        limits = limits
+            .with_max_shared_string_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_shared_string_bytes {
+        limits = limits
+            .with_max_total_shared_string_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_cell_text_bytes {
+        limits = limits
+            .with_max_total_cell_text_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_defined_names {
+        limits = limits
+            .with_max_defined_names(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_formula_bytes {
+        limits = limits
+            .with_max_formula_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_formula_bytes {
+        limits = limits
+            .with_max_total_formula_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_merged_ranges {
+        limits = limits
+            .with_max_merged_ranges(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_tables {
+        limits = limits
+            .with_max_tables(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_table_columns {
+        limits = limits
+            .with_max_table_columns(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_table_name_bytes {
+        limits = limits
+            .with_max_table_name_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_table_filter_items {
+        limits = limits
+            .with_max_table_filter_items(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_table_filter_text_bytes {
+        limits = limits
+            .with_max_table_filter_text_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_phonetic_runs_per_item {
+        limits = limits
+            .with_max_phonetic_runs_per_item(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_phonetic_runs {
+        limits = limits
+            .with_max_total_phonetic_runs(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_annotated_cells {
+        limits = limits
+            .with_max_annotated_cells(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_phonetic_text_bytes {
+        limits = limits
+            .with_max_phonetic_text_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    if let Some(value) = options.max_total_phonetic_text_bytes {
+        limits = limits
+            .with_max_total_phonetic_text_bytes(value)
+            .map_err(InteropError::invalid_limit)?;
+    }
+    Ok(limits)
 }
 
 pub(crate) const fn recalculation_mode(mode: RecalculationModeDto) -> RecalculationMode {

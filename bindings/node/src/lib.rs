@@ -28,11 +28,19 @@ pub fn create_workbook() -> NativeWorkbook {
 }
 
 #[napi(ts_return_type = "Promise<NativeWorkbook>", catch_unwind)]
-pub fn open_workbook_path(path: String) -> AsyncTask<OpenPathTask> {
-    AsyncTask::new(OpenPathTask::new(path))
+pub fn open_workbook_path(
+    path: String,
+    limits_json: Option<String>,
+) -> napi::Result<AsyncTask<OpenPathTask>> {
+    let limits = workbook::limit_options(limits_json.as_deref())?;
+    Ok(AsyncTask::new(OpenPathTask::new(path, limits)))
 }
 
 #[napi(ts_return_type = "Promise<NativeWorkbook>", catch_unwind)]
-pub fn open_workbook_bytes(bytes: Buffer) -> AsyncTask<OpenBytesTask> {
-    AsyncTask::new(OpenBytesTask::new(bytes.into()))
+pub fn open_workbook_bytes(
+    bytes: Buffer,
+    limits_json: Option<String>,
+) -> napi::Result<AsyncTask<OpenBytesTask>> {
+    let limits = workbook::limit_options(limits_json.as_deref())?;
+    Ok(AsyncTask::new(OpenBytesTask::new(bytes.into(), limits)))
 }

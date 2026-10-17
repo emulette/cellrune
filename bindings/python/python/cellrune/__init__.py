@@ -2,6 +2,7 @@
 
 from ._native import SCHEMA_VERSION, CellRuneError, Workbook, function_catalog
 from ._types import (
+    CalculationLimitOptions,
     CalculationTarget,
     TargetCalculationCell,
     TargetCalculationLimitOptions,
@@ -50,6 +51,7 @@ from ._types import (
     MaterializedResultOrigin,
     NumberValue,
     RangePage,
+    ReadLimitOptions,
     RemoveDefinedNameChange,
     RenameTableChange,
     RenameTableColumnChange,
@@ -86,6 +88,7 @@ from ._types import (
 )
 
 __all__ = [
+    "CalculationLimitOptions",
     "CalculationTarget",
     "TargetCalculationCell",
     "TargetCalculationLimitOptions",
@@ -140,6 +143,7 @@ __all__ = [
     "PreviewCursor",
     "ProviderIdentity",
     "RangePage",
+    "ReadLimitOptions",
     "RemoveDefinedNameChange",
     "RenameTableChange",
     "RenameTableColumnChange",

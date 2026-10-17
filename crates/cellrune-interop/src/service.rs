@@ -15,7 +15,8 @@ use cellrune::{
     WorkbookCalculationSession, WorkbookDraft, open_xlsx_document_bytes, open_xlsx_document_path,
 };
 
-use crate::InteropError;
+use crate::convert::read_limits;
+use crate::{InteropError, ReadLimitOptionsDto};
 
 pub use calculation::{CompletedRecalculation, PreparedRecalculation};
 pub use edit::{PreparedChanges, PreparedChangesV2};
@@ -67,6 +68,42 @@ impl WorkbookSession {
             .with_max_archive_bytes(max_archive_bytes)
             .map_err(|_| InteropError::invalid_archive_limit())?;
         let document = open_xlsx_document_bytes(bytes, OpenOptions::new(ReadOptions::new(limits)))?;
+        Ok(Self::from_engine(WorkbookCalculationSession::new(
+            WorkbookDraft::from_document(&document),
+        )))
+    }
+
+    /// Opens an XLSX or XLSM package from memory with the supplied read limits; each omitted
+    /// limit keeps its core default.
+    ///
+    /// # Errors
+    ///
+    /// Returns `interop.limit.invalid` for a zero limit, or a typed read error if the package
+    /// cannot be trusted within the limits.
+    pub fn open_bytes_with_limits(
+        bytes: &[u8],
+        limits: ReadLimitOptionsDto,
+    ) -> Result<Self, InteropError> {
+        let limits = read_limits(limits)?;
+        let document = open_xlsx_document_bytes(bytes, OpenOptions::new(ReadOptions::new(limits)))?;
+        Ok(Self::from_engine(WorkbookCalculationSession::new(
+            WorkbookDraft::from_document(&document),
+        )))
+    }
+
+    /// Opens an XLSX or XLSM package from a path with the supplied read limits; each omitted
+    /// limit keeps its core default.
+    ///
+    /// # Errors
+    ///
+    /// Returns `interop.limit.invalid` for a zero limit, or a typed read error if the file cannot
+    /// be opened or trusted within the limits.
+    pub fn open_path_with_limits(
+        path: impl AsRef<Path>,
+        limits: ReadLimitOptionsDto,
+    ) -> Result<Self, InteropError> {
+        let limits = read_limits(limits)?;
+        let document = open_xlsx_document_path(path, OpenOptions::new(ReadOptions::new(limits)))?;
         Ok(Self::from_engine(WorkbookCalculationSession::new(
             WorkbookDraft::from_document(&document),
         )))

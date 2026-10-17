@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationOptionsDto, DefinedNameInspectionRequestDto, EditBatchDto,
-    EditBatchV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError,
-    PreviewCursorDto, RangeRequestDto, RecalculationModeDto, TransactionDetailSectionDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
+    DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
+    FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
+    ReadLimitOptionsDto, RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession,
+    WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -40,16 +41,28 @@ impl Workbook {
     }
 
     #[staticmethod]
-    pub fn open_path(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
-        py.detach(move || WorkbookSession::open_path(path))
+    #[pyo3(signature = (path, *, read_limits=None))]
+    pub fn open_path(
+        py: Python<'_>,
+        path: PathBuf,
+        read_limits: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let limits = limits_from_python::<ReadLimitOptionsDto>(py, read_limits)?;
+        py.detach(move || WorkbookSession::open_path_with_limits(path, limits))
             .map(Self::new)
             .map_err(|error| into_py_error(py, error))
     }
 
     #[staticmethod]
-    pub fn from_bytes(py: Python<'_>, bytes: &Bound<'_, PyBytes>) -> PyResult<Self> {
+    #[pyo3(signature = (bytes, *, read_limits=None))]
+    pub fn from_bytes(
+        py: Python<'_>,
+        bytes: &Bound<'_, PyBytes>,
+        read_limits: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let limits = limits_from_python::<ReadLimitOptionsDto>(py, read_limits)?;
         let owned = bytes.as_bytes().to_vec();
-        py.detach(move || WorkbookSession::open_bytes(&owned))
+        py.detach(move || WorkbookSession::open_bytes_with_limits(&owned, limits))
             .map(Self::new)
             .map_err(|error| into_py_error(py, error))
     }
@@ -139,7 +152,8 @@ impl Workbook {
         today_serial=None,
         now_serial=None,
         arithmetic_semantics="excel_near_zero",
-        financial_solver_semantics="excel_iteration_budget"
+        financial_solver_semantics="excel_iteration_budget",
+        calculation_limits=None
     ))]
     pub fn calculate<'py>(
         &self,
@@ -148,7 +162,10 @@ impl Workbook {
         now_serial: Option<&Bound<'_, PyAny>>,
         arithmetic_semantics: &str,
         financial_solver_semantics: &str,
+        calculation_limits: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyDict>> {
+        let calculation_limits =
+            limits_from_python::<CalculationLimitOptionsDto>(py, calculation_limits)?;
         let today_serial =
             optional_number_from_python(today_serial).map_err(|error| into_py_error(py, error))?;
         let now_serial =
@@ -167,6 +184,7 @@ impl Workbook {
                     now_serial,
                     arithmetic_semantics,
                     financial_solver_semantics,
+                    calculation_limits,
                 },
             )
             .map_err(|error| into_py_error(py, error))?;
@@ -198,17 +216,22 @@ impl Workbook {
         today_serial=None,
         now_serial=None,
         arithmetic_semantics="excel_near_zero",
-        financial_solver_semantics="excel_iteration_budget"
+        financial_solver_semantics="excel_iteration_budget",
+        calculation_limits=None
     ))]
     pub fn recalculate<'py>(
-        &self,
-        py: Python<'py>,
+        slf: PyRef<'py, Self>,
         mode: &str,
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
         arithmetic_semantics: &str,
         financial_solver_semantics: &str,
+        calculation_limits: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyDict>> {
+        let py = slf.py();
+        let workbook: &Self = &slf;
+        let calculation_limits =
+            limits_from_python::<CalculationLimitOptionsDto>(py, calculation_limits)?;
         let mode = parse_recalculation_mode(mode).map_err(|error| into_py_error(py, error))?;
         let today_serial =
             optional_number_from_python(today_serial).map_err(|error| into_py_error(py, error))?;
@@ -219,7 +242,7 @@ impl Workbook {
         let financial_solver_semantics =
             parse_financial_solver_semantics(financial_solver_semantics)
                 .map_err(|error| into_py_error(py, error))?;
-        let prepared = self
+        let prepared = workbook
             .lock(py)?
             .prepare_recalculation(
                 mode,
@@ -228,6 +251,7 @@ impl Workbook {
                     now_serial,
                     arithmetic_semantics,
                     financial_solver_semantics,
+                    calculation_limits,
                 },
             )
             .map_err(|error| into_py_error(py, error))?;
@@ -236,14 +260,19 @@ impl Workbook {
             Ok(completed) => completed,
             Err(error) => {
                 let cleanup = py.detach(|| {
-                    self.lock_interop_wait()
+                    workbook
+                        .lock_interop_wait()
                         .map(|mut session| session.abandon_recalculation(request_id))
                 });
                 return Err(into_py_error(py, cleanup.err().unwrap_or(error)));
             }
         };
         let delta = py
-            .detach(move || self.lock_interop_wait()?.install_recalculation(completed))
+            .detach(move || {
+                workbook
+                    .lock_interop_wait()?
+                    .install_recalculation(completed)
+            })
             .map_err(|error| into_py_error(py, error))?;
         conversion::calculation_delta(py, &delta)
     }
@@ -675,6 +704,7 @@ fn preview_options_from_python(
         "now_serial",
         "arithmetic_semantics",
         "financial_solver_semantics",
+        "calculation_limits",
     ];
     for key in options.keys().iter() {
         let key = key
@@ -707,6 +737,11 @@ fn preview_options_from_python(
     )?;
     let today_serial = options.get_item("today_serial")?;
     let now_serial = options.get_item("now_serial")?;
+    let calculation_limits = options.get_item("calculation_limits")?;
+    let calculation_limits = limits_from_python::<CalculationLimitOptionsDto>(
+        py,
+        calculation_limits.as_ref().filter(|value| !value.is_none()),
+    )?;
     Ok(PreviewOptionsInput {
         mode: parse_recalculation_mode(&mode).map_err(|error| into_py_error(py, error))?,
         calculation_options: CalculationOptionsDto {
@@ -724,8 +759,29 @@ fn preview_options_from_python(
                 &financial_solver_semantics,
             )
             .map_err(|error| into_py_error(py, error))?,
+            calculation_limits,
         },
     })
+}
+
+/// Reads a limit mapping as the interop limit object, so unknown names, non-integers, and
+/// negative values fail as one stable input error. `None` keeps every default.
+fn limits_from_python<T: serde::de::DeserializeOwned + Default>(
+    py: Python<'_>,
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<T> {
+    let Some(value) = value else {
+        return Ok(T::default());
+    };
+    let json = py
+        .import("json")?
+        .call_method1("dumps", (value,))
+        .and_then(|dumped| dumped.extract::<String>())
+        .map_err(|error| {
+            into_py_error(py, InteropError::invalid_limit_payload(error.to_string()))
+        })?;
+    serde_json::from_str(&json)
+        .map_err(|error| into_py_error(py, InteropError::invalid_limit_payload(error.to_string())))
 }
 
 fn option_text(

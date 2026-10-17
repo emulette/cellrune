@@ -1,4 +1,6 @@
 import {
+  type CalculationLimitOptions,
+  type ReadLimitOptions,
   type EditWriteReport,
   type TargetCalculationResult,
   CellRuneError,
@@ -128,7 +130,10 @@ async function check(): Promise<void> {
   const bytes: Buffer = await workbook.toBytes();
   const writeReport: WriteReport = await workbook.save("typing-check.xlsx");
   writeReport.outputSha256.toUpperCase();
-  const reopened: Workbook = await Workbook.fromBytes(bytes);
+  const limits: CalculationLimitOptions = { maxArrayCells: 2_000_000 };
+  await workbook.calculate({ calculationLimits: limits });
+  const readLimits: ReadLimitOptions = { maxEntryUncompressedBytes: 1 << 27 };
+  const reopened: Workbook = await Workbook.fromBytes(bytes, { readLimits });
   const edited: Buffer = await reopened.editsToBytes();
   edited.byteLength.toFixed(0);
   reopened.close();

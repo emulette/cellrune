@@ -108,8 +108,47 @@ async function assertEditsSave() {
   });
 }
 
+async function assertLimits() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "A1", "=SUM(B1:B200)");
+  const limited = await workbook.calculate({
+    calculationLimits: { maxArrayCells: 100 },
+  });
+  assert.equal(limited.unavailableCount, 1);
+  assert.equal((await workbook.calculate()).unavailableCount, 0);
+  for (const [limits, code] of [
+    [{ maxArayCells: 100 }, "interop.limit.payload_invalid"],
+    [{ maxArrayCells: -1 }, "interop.limit.payload_invalid"],
+    [{ maxArrayCells: 0 }, "interop.limit.invalid"],
+  ]) {
+    await assert.rejects(workbook.calculate({ calculationLimits: limits }), (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, code);
+      assert.equal(error.kind, "input");
+      return true;
+    });
+  }
+
+  const source = Workbook.create();
+  source.setNumber("Sheet1", "A1", 1);
+  await source.calculate();
+  const bytes = await source.toBytes();
+  await assert.rejects(
+    Workbook.fromBytes(bytes, { readLimits: { maxEntryUncompressedBytes: 64 } }),
+    (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, "xlsx.entry_too_large");
+      return true;
+    },
+  );
+  await Workbook.fromBytes(bytes, {
+    readLimits: { maxEntryUncompressedBytes: 1 << 20 },
+  });
+}
+
 async function main() {
   await assertIncompleteSaveNamesCells();
+  await assertLimits();
   await assertEditsSave();
   require("./function-usage.cjs")();
   await require("./compatibility.cjs")();

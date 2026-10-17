@@ -179,8 +179,40 @@ def assert_edits_save() -> None:
         raise AssertionError("a created workbook saved edits without a source package")
 
 
+def assert_limits() -> None:
+    workbook = Workbook.create()
+    workbook.set_formula("Sheet1", "A1", "=SUM(B1:B200)")
+    assert workbook.calculate(calculation_limits={"max_array_cells": 100})["unavailable_count"] == 1
+    assert workbook.calculate()["unavailable_count"] == 0
+    for limits, code in [
+        ({"max_aray_cells": 100}, "interop.limit.payload_invalid"),
+        ({"max_array_cells": -1}, "interop.limit.payload_invalid"),
+        ({"max_array_cells": 0}, "interop.limit.invalid"),
+    ]:
+        try:
+            workbook.calculate(calculation_limits=limits)
+        except CellRuneError as error:
+            assert error.code == code, (limits, error.code)
+            assert error.kind == "input"
+        else:
+            raise AssertionError(f"{limits} was accepted")
+
+    source = Workbook.create()
+    source.set_number("Sheet1", "A1", 1.0)
+    source.calculate()
+    package = source.to_bytes()
+    try:
+        Workbook.from_bytes(package, read_limits={"max_entry_uncompressed_bytes": 64})
+    except CellRuneError as error:
+        assert error.code == "xlsx.entry_too_large"
+    else:
+        raise AssertionError("a lowered read limit did not reject the package")
+    Workbook.from_bytes(package, read_limits={"max_entry_uncompressed_bytes": 1 << 20})
+
+
 def main() -> None:
     assert_incomplete_save_names_cells()
+    assert_limits()
     assert_edits_save()
     assert_function_usage()
     assert_compatibility()

@@ -39,6 +39,9 @@ const MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID: &str =
 const MESSAGE_NUMBER_INVALID: &str =
     "number must be an integer or floating-point value; booleans are not accepted";
 const MESSAGE_ARCHIVE_LIMIT_INVALID: &str = "archive byte limit must be greater than zero";
+const MESSAGE_LIMIT_INVALID: &str = "resource limit must be greater than zero";
+const MESSAGE_LIMIT_PAYLOAD_INVALID: &str =
+    "resource limits must map known limit names to positive integers";
 const MESSAGE_DEFINED_NAME_SHEET_IDENTITY: &str =
     "defined-name analysis returned an unknown sheet identity";
 const MESSAGE_PREVIEW_NOT_FOUND: &str = "workbook preview is not published in this session";
@@ -279,6 +282,32 @@ impl InteropError {
     /// Creates the stable numeric type error used by dynamically typed bindings.
     pub fn invalid_number() -> Self {
         Self::input("interop.value.number_invalid", MESSAGE_NUMBER_INVALID)
+    }
+
+    /// Converts a rejected read or calculation limit, naming the limit in the detail.
+    pub(crate) fn invalid_limit(error: impl fmt::Display) -> Self {
+        Self::new(
+            InteropErrorKind::Input,
+            "interop.limit.invalid",
+            MESSAGE_LIMIT_INVALID,
+            ErrorDetails {
+                detail: Some(error.to_string()),
+                ..ErrorDetails::default()
+            },
+        )
+    }
+
+    /// Creates the stable error for a limit object a binding could not read.
+    pub fn invalid_limit_payload(detail: String) -> Self {
+        Self::new(
+            InteropErrorKind::Input,
+            "interop.limit.payload_invalid",
+            MESSAGE_LIMIT_PAYLOAD_INVALID,
+            ErrorDetails {
+                detail: Some(detail),
+                ..ErrorDetails::default()
+            },
+        )
     }
 
     pub(crate) fn invalid_archive_limit() -> Self {

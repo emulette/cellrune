@@ -1,5 +1,6 @@
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationOptionsDto,
+    ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto,
+    CalculationLimitOptionsDto, CalculationOptionsDto,
     CancellationToken as WorkbookCancellationToken, CapabilityPageDto, CompletedRecalculation,
     EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto,
     FunctionUsageReportDto, InteropError, PreviewChangesDto, RangePageDto, RangeRequestDto,
@@ -894,11 +895,13 @@ fn calculation_options(
     arithmetic_semantics: ArithmeticSemanticsDto,
     financial_solver_semantics: FinancialSolverSemanticsDto,
 ) -> CalculationOptionsDto {
+    // Clients keep the default limits; raising them is the operator's decision, not the client's.
     CalculationOptionsDto {
         today_serial,
         now_serial,
         arithmetic_semantics,
         financial_solver_semantics,
+        calculation_limits: CalculationLimitOptionsDto::default(),
     }
 }
 
