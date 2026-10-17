@@ -5,7 +5,7 @@ import threading
 from collections.abc import Callable
 from typing import TypeVar
 
-from cellrune import Workbook, WorkbookChange
+from cellrune import CellRuneError, Workbook, WorkbookChange
 
 
 T = TypeVar("T")
@@ -117,12 +117,20 @@ def assert_calls_wait_for_edit() -> None:
         workbook.calculate,
         workbook.to_bytes,
     ]
+    # An edit that lands while a calculation runs makes its result stale, and a save after that
+    # edit needs a new calculation; both are the session contract. Only a call refused because
+    # the session is busy fails this test.
+    interleaving_codes = {"session.stale_result", "interop.calculation.required"}
     thread = threading.Thread(target=edit)
     thread.start()
     try:
         while thread.is_alive():
             for call in calls:
-                call()
+                try:
+                    call()
+                except CellRuneError as error:
+                    if error.code not in interleaving_codes:
+                        raise
     finally:
         thread.join(WORKER_TIMEOUT_SECONDS * 10)
     assert not thread.is_alive(), "edit thread did not stop"
