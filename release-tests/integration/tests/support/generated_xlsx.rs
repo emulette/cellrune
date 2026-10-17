@@ -278,8 +278,8 @@ pub fn generated_table_topology_fixture(data_rows: u32) -> Vec<u8> {
     )
 }
 
-/// The Prika investigation's totals table: `tblChar` on `A1:D5` with data rows 2..4, a
-/// `hp2` calculated column, and a totals row labelled `Total` that sums `hp` and `hp2`.
+/// A table with a totals row: `tblChar` on `A1:D5` with data rows 2..4, a `hp2` calculated
+/// column, and a totals row labelled `Total` that sums `hp` and `hp2`.
 pub fn generated_totals_table_fixture() -> Vec<u8> {
     let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
