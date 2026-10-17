@@ -54,6 +54,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- A structured reference whose selector list names a column without brackets, such as the
+  `[[#This Row],Qty]` that xlsxwriter writes for `[@Qty]` in calculated columns, no longer fails
+  with `calculation.parse_error`, so such workbooks calculate and an unrelated edits-only save no
+  longer asks the host to recalculate. Excel reads this spelling; a bracketless item or a name
+  with escapes in a list still fails.
 - A cell typed `t="d"`, which openpyxl writes with `iso_dates` and SheetJS with `cellDates`, no
   longer fails the read with `xlsx.unsupported_cell_type`: its ISO 8601 date, date-time, or time
   reads as a serial in the workbook's date system, a date before the date system's first day reads

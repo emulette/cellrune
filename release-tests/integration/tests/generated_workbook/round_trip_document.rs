@@ -1022,6 +1022,63 @@ fn number_at(workbook: &cellrune::WorkbookSnapshot, address: &str) -> f64 {
     }
 }
 
+/// The totals-table fixture as xlsxwriter writes its `[@hp]` calculated column: the column name
+/// follows `[#This Row]` without its own brackets.
+fn xlsxwriter_totals_table_fixture() -> Vec<u8> {
+    let source = generated_totals_table_fixture();
+    let mut archive = ZipArchive::new(Cursor::new(&source)).expect("fixture archive");
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).expect("fixture entry");
+        let name = file.name().expect("entry name").into_owned();
+        let mut text = String::new();
+        file.read_to_string(&mut text).expect("fixture entry text");
+        writer
+            .start_file(name, SimpleFileOptions::default())
+            .expect("start entry");
+        writer
+            .write_all(
+                text.replace("tblChar[[#This Row],[hp]]", "[[#This Row],hp]")
+                    .as_bytes(),
+            )
+            .expect("write entry");
+    }
+    writer.finish().expect("finish archive").into_inner()
+}
+
+#[test]
+fn xlsxwriter_calculated_columns_calculate_and_an_unrelated_edit_keeps_saved_results() {
+    let document =
+        open_xlsx_document_bytes(&xlsxwriter_totals_table_fixture(), OpenOptions::default())
+            .expect("xlsxwriter table");
+    assert_eq!(number_at(document.workbook(), "D2"), 20.0);
+    assert_eq!(number_at(document.workbook(), "D4"), 60.0);
+    assert_eq!(number_at(document.workbook(), "D5"), 120.0);
+
+    let sheet = SheetId::new(1).expect("sheet");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
+            sheet,
+            CellAddress::from_a1("F1").expect("F1"),
+            CellValue::number(1.0).expect("number"),
+        )]))
+        .expect("unrelated edit");
+    let edited = cellrune::write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+        .expect("edits-only write");
+    assert!(edited.report().affected_formulas().is_empty());
+    assert!(!edited.report().requests_host_recalculation());
+
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
+            sheet,
+            CellAddress::from_a1("C1").expect("C1"),
+            CellValue::Text("hit.points".into()),
+        )]))
+        .expect("rename the column");
+    assert_totals_formula(draft.workbook(), "D2", "[[#This Row],[hit.points]]*2");
+}
+
 #[test]
 fn growing_a_totals_table_moves_the_totals_row_and_fills_calculated_columns() {
     let sheet = SheetId::new(1).expect("sheet");

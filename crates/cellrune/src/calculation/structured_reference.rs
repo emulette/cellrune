@@ -225,13 +225,10 @@ pub(super) fn parse_structured_reference(
         });
     }
 
-    let grouped = trimmed_outer.starts_with('[');
     let selector = trimmed_outer;
-    let components = if grouped {
-        split_top_level(selector, ',')
-    } else {
-        vec![selector]
-    };
+    let listed = split_top_level(selector, ',');
+    let grouped = selector.starts_with('[') || listed.len() > 1;
+    let components = if grouped { listed } else { vec![selector] };
     let mut items = Vec::new();
     let mut columns = None;
     for component in components {
@@ -240,6 +237,26 @@ pub(super) fn parse_structured_reference(
         } else {
             component
         };
+        // Excel reads a list member without its own brackets, as xlsxwriter writes
+        // `[[#This Row],Qty]`, only as a single column name without escapes.
+        if grouped && !component.starts_with('[') {
+            if columns.is_some() {
+                return Err(StructuredReferenceError::TooManyColumns);
+            }
+            if component.starts_with('#') {
+                return Err(StructuredReferenceError::InvalidItem);
+            }
+            if component.contains('\'') {
+                return Err(StructuredReferenceError::UnescapedSpecialCharacter);
+            }
+            source_components.push(source_component(
+                raw,
+                SourceComponentKind::StructuredColumn { grouped: false },
+                component,
+            ));
+            columns = Some(StructuredColumns::Single(ungrouped_column(component)?));
+            continue;
+        }
         let ranges = split_top_level(component, ':');
         if ranges.len() > 2 {
             return Err(StructuredReferenceError::TooManyColumns);
@@ -324,6 +341,7 @@ pub(super) fn parse_structured_reference(
 mod tests {
     use super::parse_structured_reference;
     use crate::calculation::ast::{StructuredColumns, StructuredItem};
+    use crate::calculation::syntax::SourceComponentKind;
 
     #[test]
     fn parses_items_columns_ranges_and_escapes() {
@@ -427,10 +445,66 @@ mod tests {
             [StructuredItem::Headers, StructuredItem::Data]
         );
 
+        for invalid in ["Table1[[Col1]:Col2]", "Table1[[#Headers],\t[Amount]]"] {
+            assert!(parse_structured_reference(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn selector_lists_accept_a_column_name_without_brackets_as_excel_does() {
+        for (input, items, column) in [
+            (
+                "[[#This Row],Qty]",
+                [StructuredItem::ThisRow].as_slice(),
+                "Qty",
+            ),
+            ("Orders[[#This Row],Qty]", &[StructuredItem::ThisRow], "Qty"),
+            (
+                "Orders[[#Data], Unit Price]",
+                &[StructuredItem::Data],
+                "Unit Price",
+            ),
+            ("Orders[Qty,[#Data]]", &[StructuredItem::Data], "Qty"),
+            (
+                "Orders[[#Headers],[#Data],Qty]",
+                &[StructuredItem::Headers, StructuredItem::Data],
+                "Qty",
+            ),
+        ] {
+            let parsed = parse_structured_reference(input).expect(input);
+            assert_eq!(parsed.reference.items, items, "{input}");
+            assert_eq!(
+                parsed.reference.columns,
+                Some(StructuredColumns::Single(column.into())),
+                "{input}"
+            );
+            let component = parsed
+                .components
+                .iter()
+                .find(|component| {
+                    matches!(
+                        component.kind(),
+                        SourceComponentKind::StructuredColumn { .. }
+                    )
+                })
+                .expect("column component");
+            assert_eq!(
+                component.kind(),
+                SourceComponentKind::StructuredColumn { grouped: false },
+                "{input}"
+            );
+            assert_eq!(
+                &input[component.span().start..component.span().end],
+                column,
+                "{input}"
+            );
+        }
+
         for invalid in [
-            "Table1[[Col1]:Col2]",
-            "Table1[[#Data],Col]",
-            "Table1[[#Headers],\t[Amount]]",
+            "Orders[#Data,Qty]",
+            "Orders[[#Data],Odd'#Name]",
+            "Orders[[Qty],Price]",
+            "Orders[[#Data],#Bogus]",
         ] {
             assert!(parse_structured_reference(invalid).is_err(), "{invalid}");
         }

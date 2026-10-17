@@ -905,11 +905,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   span is expanded only while building graph edges, and
   `max_dependency_edges` still counts the distinct edges produced.
 - Structured table references (`Table1[Amount]`, `[@Amount]`, item selectors,
-  column spans, and nested/escaped column spellings) are typed and resolved
-  against stable table/column identities. Empty data or totals bands remain a
-  valid empty reference, while `#This Row` uses the formula's actual table
-  row. Dependencies retain table identity and topology, so table rename or
-  resize forces a safe graph rebuild rather than reusing stale geometry.
+  column spans, nested/escaped column spellings, and a selector list's column
+  name without brackets, as in xlsxwriter's `[[#This Row],Qty]`) are typed and
+  resolved against stable table/column identities. Empty data or totals bands
+  remain a valid empty reference, while `#This Row` uses the formula's actual
+  table row. Dependencies retain table identity and topology, so table rename
+  or resize forces a safe graph rebuild rather than reusing stale geometry.
 - Reference union, intersection, and range operators preserve ordered
   multi-area identity. `AREAS` is in the official catalog; consumers that
   require one rectangle fail with the documented Excel error rather than
