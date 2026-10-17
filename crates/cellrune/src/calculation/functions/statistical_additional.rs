@@ -10,7 +10,7 @@ use super::special_functions::{
     ln_gamma, regularized_gamma_q, standard_normal_density, standard_normal_lower,
 };
 use super::statistical::{numeric_arguments, numeric_arguments_with_policy, variance_value};
-use super::util::{collect_argument_values_with_policy, required_number};
+use super::util::{DecimalTraces, collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -142,6 +142,7 @@ fn numbers_a(
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
+        DecimalTraces::Skip,
     )?;
     let mut numbers = Vec::new();
     for item in values {

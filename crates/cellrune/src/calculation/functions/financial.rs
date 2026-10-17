@@ -2,13 +2,14 @@ use super::super::FinancialSolverSemantics;
 use super::super::ast::Expr;
 use super::super::decimal::{DecimalTrace, RationalTrace};
 use super::super::eval::{Engine, EvalContext};
+use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
 use super::calendar::date_from_serial;
 use super::kernel::FinancialFunction;
 use super::util::{
-    ExcelSum, collect_argument_values, collect_argument_values_with_counter, required_number,
-    required_number_with_trace,
+    DecimalTraces, ExcelSum, collect_argument_values_with_counter,
+    collect_argument_values_with_policy, required_number, required_number_with_trace,
 };
 
 pub(super) fn call(
@@ -543,7 +544,14 @@ fn numeric_cashflows_with_trace(
     args: &[Expr],
 ) -> Result<Vec<(f64, Option<DecimalTrace>)>, ErrorKind> {
     let mut values = Vec::new();
-    for item in collect_argument_values(engine, context, args)? {
+    let items = collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::Unsupported,
+        DecimalTraces::Collect,
+    )?;
+    for item in items {
         match item.value {
             Value::Number(number) => values.push((number, item.decimal_trace)),
             Value::Error(kind) => return Err(kind),

@@ -17,11 +17,18 @@ pub(super) struct ArgumentValue {
     pub(super) from_single_cell_reference: bool,
 }
 
-/// Which referenced cells become argument values, and whether their numbers carry the decimal
-/// traces that only Excel-compatible summation consumes.
+/// Whether referenced numbers carry the decimal traces that only Excel-compatible summation
+/// consumes. Building a trace costs a decimal conversion and an allocation per cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DecimalTraces {
+    Collect,
+    Skip,
+}
+
+/// Which referenced cells become argument values, and whether their numbers carry decimal traces.
 struct CellSelection<'filter, F> {
     include: &'filter F,
-    decimal_traces: bool,
+    decimal_traces: DecimalTraces,
 }
 
 fn include_every_cell(_: CellId) -> bool {
@@ -33,7 +40,13 @@ pub(super) fn collect_argument_values(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
-    collect_argument_values_with_policy(engine, context, args, SheetSpanPolicy::Unsupported)
+    collect_argument_values_with_policy(
+        engine,
+        context,
+        args,
+        SheetSpanPolicy::Unsupported,
+        DecimalTraces::Skip,
+    )
 }
 
 pub(super) fn collect_argument_values_with_policy(
@@ -41,6 +54,7 @@ pub(super) fn collect_argument_values_with_policy(
     context: EvalContext<'_>,
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
+    decimal_traces: DecimalTraces,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut visited_cells = 0_u64;
     collect_argument_values_with_counter_and_policy(
@@ -49,6 +63,7 @@ pub(super) fn collect_argument_values_with_policy(
         args,
         &mut visited_cells,
         sheet_span_policy,
+        decimal_traces,
     )
 }
 
@@ -64,6 +79,7 @@ pub(super) fn collect_argument_values_with_counter(
         args,
         visited_cells,
         SheetSpanPolicy::Unsupported,
+        DecimalTraces::Skip,
     )
 }
 
@@ -73,6 +89,7 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
     args: &[Expr],
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
+    decimal_traces: DecimalTraces,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     collect_filtered_argument_values(
         engine,
@@ -82,7 +99,7 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
         sheet_span_policy,
         &CellSelection {
             include: &include_every_cell,
-            decimal_traces: true,
+            decimal_traces,
         },
     )
 }
@@ -95,6 +112,7 @@ pub(super) fn collect_argument_values_including(
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
     include: &impl Fn(CellId) -> bool,
+    decimal_traces: DecimalTraces,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut visited_cells = 0_u64;
     collect_filtered_argument_values(
@@ -105,7 +123,7 @@ pub(super) fn collect_argument_values_including(
         sheet_span_policy,
         &CellSelection {
             include,
-            decimal_traces: true,
+            decimal_traces,
         },
     )
 }
@@ -210,7 +228,7 @@ pub(super) fn collect_callable_argument_values(
             SheetSpanPolicy::CollectAcrossSheets,
             &CellSelection {
                 include: &include_every_cell,
-                decimal_traces: true,
+                decimal_traces: DecimalTraces::Collect,
             },
             &mut values,
         )?;
@@ -322,7 +340,9 @@ fn collect_rect_values(
             }
             let value = engine.read_reference_cell(context, cell)?;
             let decimal_trace = match &value {
-                Value::Number(_) if selection.decimal_traces => engine.numeric_decimal_trace(cell),
+                Value::Number(_) if selection.decimal_traces == DecimalTraces::Collect => {
+                    engine.numeric_decimal_trace(cell)
+                }
                 _ => None,
             };
             values.push(ArgumentValue {
@@ -478,7 +498,7 @@ pub(super) fn excel_numeric_arguments_with_policy(
         sheet_span_policy,
         &CellSelection {
             include: &include_every_cell,
-            decimal_traces: false,
+            decimal_traces: DecimalTraces::Skip,
         },
     )?)
 }

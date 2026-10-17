@@ -13,7 +13,7 @@ use super::moments::VarianceKind;
 use super::normalize_name;
 use super::statistical::variance_value;
 use super::util::{
-    ArgumentValue, ExcelSum, collect_argument_values_including,
+    ArgumentValue, DecimalTraces, ExcelSum, collect_argument_values_including,
     collect_argument_values_with_policy, collect_callable_argument_values, excel_numbers,
     required_number,
 };
@@ -90,6 +90,16 @@ enum Aggregate {
     Product,
 }
 
+impl Aggregate {
+    /// Only summation consults decimal traces, to cancel decimal residue near zero.
+    const fn decimal_traces(self) -> DecimalTraces {
+        match self {
+            Self::Sum | Self::Average => DecimalTraces::Collect,
+            Self::Min | Self::Max | Self::Product => DecimalTraces::Skip,
+        }
+    }
+}
+
 fn aggregate_numbers(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -104,6 +114,7 @@ fn aggregate_numbers(
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
+        aggregate.decimal_traces(),
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
@@ -177,6 +188,7 @@ fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
+        DecimalTraces::Skip,
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
@@ -213,6 +225,7 @@ fn count_nonblank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) 
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
+        DecimalTraces::Skip,
     ) {
         Ok(values) => count_nonblank_collected(&values),
         Err(kind) => Value::Error(kind),
@@ -283,6 +296,12 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         &args[1..],
         SheetSpanPolicy::CollectAcrossSheets,
         &|cell| !engine.parsed_expr(cell).is_some_and(contains_subtotal_call),
+        // Operations 1 and 9 are AVERAGE and SUM, the only ones that sum.
+        if operation == 1.0 || operation == 9.0 {
+            DecimalTraces::Collect
+        } else {
+            DecimalTraces::Skip
+        },
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
