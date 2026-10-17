@@ -199,16 +199,69 @@ fn reads_iso_8601_date_cells_as_serials_in_the_workbook_date_system() {
 }
 
 #[test]
+fn iso_date_cells_read_the_end_of_day_and_dates_outside_the_date_system_as_excel_does() {
+    let excel_1900 = WORKBOOK.replace(r#"<workbookPr date1904="1"/>"#, "");
+    for (workbook, value, expected) in [
+        (excel_1900.as_str(), "1900-02-29", CellValue::number(60.0)),
+        (excel_1900.as_str(), "24:00:00", CellValue::number(1.0)),
+        (
+            excel_1900.as_str(),
+            "2024-03-15T24:00",
+            CellValue::number(45_367.0),
+        ),
+        (
+            excel_1900.as_str(),
+            "1899-12-31",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+        (
+            excel_1900.as_str(),
+            "1899-12-31T12:00:00",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+        (WORKBOOK, "1904-01-01T00:00:00", CellValue::number(0.0)),
+        (
+            WORKBOOK,
+            "1903-12-31T23:00:00",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+        (
+            WORKBOOK,
+            "1900-02-29",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+        (
+            WORKBOOK,
+            "0001-01-01",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+    ] {
+        let sheet = ISO_DATE_SHEET.replacen("2024-03-15T08:00:00", value, 1);
+        let archive = build_table_archive_with_workbook(workbook, &sheet, &[]);
+        let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect(value);
+        let sheet = snapshot.sheet_by_name("First").expect("first sheet");
+        assert_eq!(
+            literal(sheet, "A1"),
+            &expected.expect("expected value"),
+            "{value}"
+        );
+    }
+}
+
+#[test]
 fn iso_date_cells_that_are_not_iso_8601_dates_are_rejected() {
     for value in [
         "2024-02-30",
         "2024/03/15",
         "2024-3-15",
-        "24:00:00",
+        "24:00:00.5",
+        "24:00:01",
+        "25:00",
         "08:60",
         "2024-03-15T08:00:00+09:00",
+        "2024-03-15t08:00:00z",
         "08:00.5",
-        "1899-12-30",
+        "1899-12-32",
         "",
     ] {
         let sheet = ISO_DATE_SHEET.replacen("2024-03-15T08:00:00", value, 1);

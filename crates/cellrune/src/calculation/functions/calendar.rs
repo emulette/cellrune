@@ -87,18 +87,27 @@ pub(super) fn serial_from_date(date: Date, system: DateSystem) -> Option<f64> {
     serial_from_unix_days(days_from_civil(date.year, date.month, date.day), system)
 }
 
-/// Returns the serial of a proleptic Gregorian calendar date in `system`, or `None` when the date
-/// does not exist or lies outside the system's range.
+/// Whether a date exists in Excel's calendar: the proleptic Gregorian calendar plus the
+/// 1900-02-29 that the 1900 date system counts.
+pub(crate) fn calendar_date_exists(year: i32, month: u32, day: u32) -> bool {
+    (1..=12).contains(&month)
+        && day != 0
+        && (day <= days_in_month(year, month) || (year, month, day) == (1900, 2, 29))
+}
+
+/// Returns the serial of a date that [`calendar_date_exists`] accepts, or `None` when it lies
+/// before the first day of `system` (1900-01-01 or 1904-01-01) or after 9999-12-31.
 pub(crate) fn serial_from_calendar_date(
     year: i32,
     month: u32,
     day: u32,
     system: DateSystem,
 ) -> Option<f64> {
-    if !(1..=12).contains(&month) || day == 0 || day > days_in_month(year, month) {
-        return None;
-    }
-    serial_from_date(Date { year, month, day }, system)
+    let first_serial = match system {
+        DateSystem::Excel1900 => 1.0,
+        DateSystem::Excel1904 => 0.0,
+    };
+    serial_from_date(Date { year, month, day }, system).filter(|serial| *serial >= first_serial)
 }
 
 pub(super) fn serial_from_unix_days(days: i64, system: DateSystem) -> Option<f64> {

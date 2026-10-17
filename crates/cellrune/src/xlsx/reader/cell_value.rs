@@ -3,7 +3,7 @@ use super::super::xml::XmlBudget;
 use super::super::xstring::decode_xstring;
 use super::super::{XlsxErrorCode, XlsxReadError};
 use super::shared_strings::SharedStrings;
-use crate::calculation::serial_from_calendar_date;
+use crate::calculation::{calendar_date_exists, serial_from_calendar_date};
 use crate::{
     CellAddress, CellRange, CellValue, DateSystem, DiagnosticCode, EXCEL_MAX_COLUMNS,
     EXCEL_MAX_ROWS, ExcelError, SavedResult, SavedResultIssue,
@@ -197,7 +197,9 @@ fn parse_number(value: &str, budget: &XmlBudget) -> Result<CellValue, XlsxReadEr
 /// Reads an ISO 8601 date cell (`t="d"`) as a serial in the workbook's date system.
 ///
 /// Accepts `YYYY-MM-DD`, `YYYY-MM-DDThh:mm[:ss[.fff]]`, and `hh:mm[:ss[.fff]]`, each optionally
-/// followed by the UTC designator `Z`, which spreadsheet serials have no zone to apply to.
+/// followed by the UTC designator `Z`, which spreadsheet serials have no zone to apply to. As in
+/// Excel, `24:00[:00]` is the end of the day, 1900-02-29 exists, and a date before the first day of
+/// the date system reads as `#VALUE!`.
 fn parse_iso_date(
     value: &str,
     date_system: DateSystem,
@@ -215,26 +217,31 @@ fn parse_iso_date(
         None if unzoned.contains(':') => (None, Some(unzoned)),
         None => (Some(unzoned), None),
     };
-    let days = match date {
-        Some(date) => parse_iso_calendar_date(date, date_system).ok_or_else(invalid)?,
-        None => 0.0,
-    };
+    let date = date
+        .map(|date| parse_iso_calendar_date(date).ok_or_else(invalid))
+        .transpose()?;
     let fraction = match time {
         Some(time) => parse_iso_time_fraction(time).ok_or_else(invalid)?,
+        None => 0.0,
+    };
+    let days = match date {
+        Some((year, month, day)) => {
+            match serial_from_calendar_date(year, month, day, date_system) {
+                Some(days) => days,
+                None => return Ok(CellValue::Error(ExcelError::Value)),
+            }
+        }
         None => 0.0,
     };
     CellValue::number(days + fraction).map_err(|error| invalid().with_cause(error))
 }
 
-fn parse_iso_calendar_date(value: &str, date_system: DateSystem) -> Option<f64> {
+fn parse_iso_calendar_date(value: &str) -> Option<(i32, u32, u32)> {
     let mut parts = value.split('-');
-    let year = fixed_digits(parts.next()?, 4)?;
+    let year = i32::try_from(fixed_digits(parts.next()?, 4)?).ok()?;
     let month = fixed_digits(parts.next()?, 2)?;
     let day = fixed_digits(parts.next()?, 2)?;
-    if parts.next().is_some() {
-        return None;
-    }
-    serial_from_calendar_date(i32::try_from(year).ok()?, month, day, date_system)
+    (parts.next().is_none() && calendar_date_exists(year, month, day)).then_some((year, month, day))
 }
 
 fn parse_iso_time_fraction(value: &str) -> Option<f64> {
@@ -246,7 +253,8 @@ fn parse_iso_time_fraction(value: &str) -> Option<f64> {
     let hours = fixed_digits(parts.next()?, 2)?;
     let minutes = fixed_digits(parts.next()?, 2)?;
     let seconds = parts.next().map_or(Some(0), |part| fixed_digits(part, 2))?;
-    if parts.next().is_some() || hours > 23 || minutes > 59 || seconds > 59 {
+    let end_of_day = hours == 24 && minutes == 0 && seconds == 0 && fraction.is_none();
+    if parts.next().is_some() || (hours > 23 && !end_of_day) || minutes > 59 || seconds > 59 {
         return None;
     }
     if fraction.is_some() && clock.len() != "hh:mm:ss".len() {

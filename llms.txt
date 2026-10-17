@@ -250,7 +250,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   and writers escape XML-forbidden characters the same way.
 - A cell typed `t="d"` holds an ISO 8601 date (`YYYY-MM-DD`), date-time
   (`YYYY-MM-DDThh:mm[:ss[.fff]]`), or time (`hh:mm[:ss[.fff]]`), optionally
-  followed by `Z`, and reads as a serial number in the workbook's date system;
+  followed by `Z`, and reads as a serial number in the workbook's date system.
+  As in Excel, `24:00[:00]` ends the day, 1900-02-29 exists, and a date before
+  the date system's first day (1900-01-01 or 1904-01-01) reads as `#VALUE!`;
   any other value fails with `InvalidCellValue`. A cached formula result of that
   type reads the same way.
 - A limit failure's `XlsxReadError::observed() -> Option<u64>` is the value
