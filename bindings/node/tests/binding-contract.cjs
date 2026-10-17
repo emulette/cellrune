@@ -123,6 +123,9 @@ async function assertLimits() {
   for (const [limits, code] of [
     [{ maxArayCells: 100 }, "interop.limit.payload_invalid"],
     [{ maxArrayCells: -1 }, "interop.limit.payload_invalid"],
+    [{ maxArrayCells: 100n }, "interop.limit.payload_invalid"],
+    [{ maxArrayCells: Number.NaN }, "interop.limit.payload_invalid"],
+    [{ maxArrayCells: Number.POSITIVE_INFINITY }, "interop.limit.payload_invalid"],
     [{ maxArrayCells: 0 }, "interop.limit.invalid"],
   ]) {
     await assert.rejects(workbook.calculate({ calculationLimits: limits }), (error) => {
@@ -142,6 +145,14 @@ async function assertLimits() {
     (error) => {
       assert.ok(error instanceof CellRuneError);
       assert.equal(error.code, "xlsx.entry_too_large");
+      return true;
+    },
+  );
+  await assert.rejects(
+    Workbook.fromBytes(bytes, { readLimits: { maxEntries: 100n } }),
+    (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, "interop.limit.payload_invalid");
       return true;
     },
   );

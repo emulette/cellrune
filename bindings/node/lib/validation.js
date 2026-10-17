@@ -1,6 +1,6 @@
 "use strict";
 
-const { inputError, protocolError } = require("./errors.js");
+const { inputError, limitPayloadError, protocolError } = require("./errors.js");
 
 function requireObject(value, name) {
   if (value === null || typeof value !== "object") {
@@ -86,7 +86,8 @@ function requireOptionKeys(value, allowedKeys) {
 
 /**
  * Converts a camelCase limit object to the snake_case object native code reads, or returns
- * undefined when no limits were given. Native code rejects unknown names and values that are not
+ * undefined when no limits were given. Values JSON cannot carry unchanged, such as bigints and
+ * non-finite numbers, fail here; native code rejects unknown names and values that are not
  * positive integers.
  */
 function limitObject(value, name) {
@@ -98,6 +99,12 @@ function limitObject(value, name) {
   }
   const converted = {};
   for (const [key, limit] of Object.entries(value)) {
+    if (limit === undefined) {
+      continue;
+    }
+    if (typeof limit !== "number" || !Number.isFinite(limit)) {
+      throw limitPayloadError(`${name}.${key} must be a finite number`);
+    }
     converted[key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)] = limit;
   }
   return converted;

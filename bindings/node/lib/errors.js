@@ -4,6 +4,10 @@ const ERROR_PREFIX = "CELLRUNE_ERROR:";
 const ERROR = Object.freeze({
   CLOSED: ["interop.session.closed", "workbook session is closed"],
   ARGUMENT: ["interop.input.invalid", "argument failed runtime validation"],
+  LIMIT_PAYLOAD: [
+    "interop.limit.payload_invalid",
+    "resource limits must map known limit names to positive integers",
+  ],
   PROTOCOL: [
     "interop.binding.protocol",
     "native binding returned an invalid typed value",
@@ -98,6 +102,15 @@ function inputError(detail) {
   });
 }
 
+function limitPayloadError(detail) {
+  return new CellRuneError(
+    ERROR.LIMIT_PAYLOAD[1],
+    ERROR.LIMIT_PAYLOAD[0],
+    "input",
+    { detail },
+  );
+}
+
 function protocolError(detail) {
   return new CellRuneError(ERROR.PROTOCOL[1], ERROR.PROTOCOL[0], "state", {
     detail,
@@ -110,6 +123,7 @@ module.exports = {
   PROTOCOL_DETAIL,
   closedError,
   inputError,
+  limitPayloadError,
   protocolError,
   withErrors,
   withSyncErrors,
