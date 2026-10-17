@@ -527,6 +527,21 @@ class FunctionUsageEntry(TypedDict):
     sample_cells: list[CellReference]
 
 
+class CapabilityEntry(TypedDict):
+    cell: CellReference
+    supported: bool
+    issue_codes: list[str]
+
+
+class CapabilityPage(TypedDict):
+    schema_version: int
+    formula_count: int
+    supported_count: int
+    offset: int
+    next_offset: int | None
+    entries: list[CapabilityEntry]
+
+
 class FunctionUsageReport(TypedDict):
     schema_version: int
     formula_count: int

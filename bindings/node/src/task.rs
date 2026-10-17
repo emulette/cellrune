@@ -9,7 +9,8 @@ use napi::bindgen_prelude::Buffer;
 use napi::{Env, Task};
 
 use crate::conversion::{
-    NativeCalculationDelta, NativeCalculationReport, NativeEditWriteReport, NativeWriteReport,
+    NativeCalculationDelta, NativeCalculationReport, NativeCapabilityPage, NativeEditWriteReport,
+    NativeWriteReport,
 };
 use crate::error::{catch_panic, napi_error};
 use crate::workbook::NativeWorkbook;
@@ -312,5 +313,31 @@ impl Task for SaveEditsPathTask {
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
         Ok(crate::conversion::edit_write_report(output))
+    }
+}
+
+pub struct CapabilityTask {
+    pub(crate) session: Arc<SharedWorkbookSession>,
+    pub(crate) options: CalculationOptionsDto,
+    pub(crate) offset: u64,
+    pub(crate) limit: u32,
+}
+
+impl Task for CapabilityTask {
+    type Output = cellrune_interop::CapabilityPageDto;
+    type JsValue = NativeCapabilityPage;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        catch_panic(|| {
+            self.session
+                .lock()
+                .map_err(napi_error)?
+                .capabilities(self.options, self.offset, self.limit)
+                .map_err(napi_error)
+        })
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(crate::conversion::capability_page(output))
     }
 }

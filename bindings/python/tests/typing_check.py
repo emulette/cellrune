@@ -1,4 +1,5 @@
 from cellrune import (
+    CapabilityPage,
     CalculationLimitOptions,
     ReadLimitOptions,
     TargetCalculationResult,
@@ -107,6 +108,9 @@ def check() -> None:
     read_limits: ReadLimitOptions = {"max_entry_uncompressed_bytes": 1 << 27}
     reopened: Workbook = Workbook.from_bytes(output, read_limits=read_limits)
     edited: bytes = reopened.edits_to_bytes()
+    capabilities: CapabilityPage = reopened.scan_capabilities(limit=10)
+    for entry in capabilities["entries"]:
+        entry["cell"]["address"].upper()
     edited.hex()
     reopened.close()
     write_report: WriteReport = workbook.save("typing-check.xlsx")

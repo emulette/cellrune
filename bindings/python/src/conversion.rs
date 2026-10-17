@@ -1,6 +1,6 @@
 use cellrune_interop::{
     CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto, CalculationResultDto,
-    CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
+    CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
     FunctionUsageReportDto, PreviewChangesDto, RangePageDto, TransactionImpactPageDto,
@@ -400,6 +400,28 @@ pub(crate) fn function_catalog<'py>(
         item.set_item("alias", entry.alias)?;
         item.set_item("returns_array", entry.returns_array)?;
         item.set_item("official", entry.official)?;
+        entries.append(item)?;
+    }
+    result.set_item("entries", entries)?;
+    Ok(result)
+}
+
+pub(crate) fn capability_page<'py>(
+    py: Python<'py>,
+    value: &CapabilityPageDto,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("schema_version", value.schema_version)?;
+    result.set_item("formula_count", value.formula_count)?;
+    result.set_item("supported_count", value.supported_count)?;
+    result.set_item("offset", value.offset)?;
+    result.set_item("next_offset", value.next_offset)?;
+    let entries = PyList::empty(py);
+    for entry in &value.entries {
+        let item = PyDict::new(py);
+        item.set_item("cell", cell_reference(py, &entry.cell)?)?;
+        item.set_item("supported", entry.supported)?;
+        item.set_item("issue_codes", &entry.issue_codes)?;
         entries.append(item)?;
     }
     result.set_item("entries", entries)?;

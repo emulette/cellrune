@@ -448,6 +448,21 @@ function normalizeFunctionCatalog(report) {
   };
 }
 
+function normalizeCapabilityPage(page) {
+  return {
+    schemaVersion: page.schemaVersion,
+    formulaCount: page.formulaCount,
+    supportedCount: page.supportedCount,
+    offset: page.offset,
+    nextOffset: page.nextOffset ?? null,
+    entries: page.entries.map((entry) => ({
+      cell: normalizeCellReference(entry.cell),
+      supported: entry.supported,
+      issueCodes: entry.issueCodes,
+    })),
+  };
+}
+
 function normalizeEditWriteReport(report) {
   return {
     schemaVersion: report.schemaVersion,
@@ -774,4 +789,5 @@ module.exports = {
   parsePreviewJson,
   normalizeWriteReport,
   normalizeEditWriteReport,
+  normalizeCapabilityPage,
 };

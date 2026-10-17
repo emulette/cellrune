@@ -464,6 +464,28 @@ export interface FunctionUsageEntry {
   readonly sampleCells: readonly CellReference[];
 }
 
+export interface CapabilityEntry {
+  readonly cell: CellReference;
+  readonly supported: boolean;
+  readonly issueCodes: readonly string[];
+}
+
+export interface CapabilityPage {
+  readonly schemaVersion: number;
+  readonly formulaCount: number;
+  readonly supportedCount: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly CapabilityEntry[];
+}
+
+export interface CapabilityScanOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly todaySerial?: number;
+  readonly nowSerial?: number;
+}
+
 export interface FunctionUsageReport {
   readonly schemaVersion: number;
   readonly formulaCount: number;
@@ -711,6 +733,8 @@ export class Workbook {
     options?: { readonly currentSheet?: string },
   ): DefinedNameInspection;
   functionUsage(): FunctionUsageReport;
+  /** Statically reports whether each formula can be calculated, one bounded page at a time. */
+  scanCapabilities(options?: CapabilityScanOptions): Promise<CapabilityPage>;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;
   calculateTargets(targets: readonly CalculationTarget[], options?: TargetCalculationOptions): Promise<TargetCalculationResult>;
   recalculate(options?: RecalculationOptions): Promise<CalculationDelta>;

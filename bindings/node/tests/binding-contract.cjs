@@ -150,8 +150,30 @@ async function assertLimits() {
   });
 }
 
+async function assertCapabilityScan() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "A1", "=SUM(1,2)");
+  workbook.setFormula("Sheet1", "A2", "=MYSTERY(1)");
+  workbook.setFormula("Sheet1", "A3", "=TODAY()");
+  const page = await workbook.scanCapabilities({ limit: 2 });
+  assert.deepEqual([page.formulaCount, page.supportedCount], [3, 2]);
+  assert.deepEqual(
+    page.entries.map((entry) => entry.cell.address),
+    ["A1", "A2"],
+  );
+  assert.deepEqual(page.entries[1].issueCodes, [
+    "calculation.unsupported_function",
+  ]);
+  assert.equal(page.nextOffset, 2);
+  const rest = await workbook.scanCapabilities({ offset: 2, todaySerial: 45000 });
+  assert.equal(rest.supportedCount, 2);
+  assert.equal(rest.entries[0].supported, true);
+  assert.equal(rest.nextOffset, null);
+}
+
 async function main() {
   await assertIncompleteSaveNamesCells();
+  await assertCapabilityScan();
   await assertLimits();
   await assertEditsSave();
   require("./function-usage.cjs")();

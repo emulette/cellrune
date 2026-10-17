@@ -31,6 +31,7 @@ const {
   normalizeTransactionReceipt,
   normalizeWriteReport,
   normalizeEditWriteReport,
+  normalizeCapabilityPage,
   parsePreviewJson,
 } = require("./lib/normalization.js");
 const {
@@ -111,6 +112,26 @@ class Workbook {
         this.#session().readRange(sheet, start, end, offset, limit),
       ),
     );
+  }
+
+  async scanCapabilities(options = {}) {
+    requireOptions(options);
+    requireOptionKeys(options, ["offset", "limit", "todaySerial", "nowSerial"]);
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? 0;
+    requireNonNegativeInteger(offset, "offset");
+    requireNonNegativeInteger(limit, "limit");
+    requireOptionalFinite(options.todaySerial, "todaySerial");
+    requireOptionalFinite(options.nowSerial, "nowSerial");
+    const task = withSyncErrors(() =>
+      this.#session().scanCapabilities(
+        offset,
+        limit,
+        options.todaySerial ?? null,
+        options.nowSerial ?? null,
+      ),
+    );
+    return normalizeCapabilityPage(await withErrors(task));
   }
 
   inspectDefinedName(name, options = {}) {

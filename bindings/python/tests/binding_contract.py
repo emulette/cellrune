@@ -214,8 +214,25 @@ def assert_limits() -> None:
     Workbook.from_bytes(package, read_limits={"max_entry_uncompressed_bytes": 1 << 20})
 
 
+def assert_capability_scan() -> None:
+    workbook = Workbook.create()
+    workbook.set_formula("Sheet1", "A1", "=SUM(1,2)")
+    workbook.set_formula("Sheet1", "A2", "=MYSTERY(1)")
+    workbook.set_formula("Sheet1", "A3", "=TODAY()")
+    page = workbook.scan_capabilities(limit=2)
+    assert (page["formula_count"], page["supported_count"]) == (3, 2)
+    assert [entry["cell"]["address"] for entry in page["entries"]] == ["A1", "A2"]
+    assert page["entries"][1]["issue_codes"] == ["calculation.unsupported_function"]
+    assert page["next_offset"] == 2
+    rest = workbook.scan_capabilities(offset=2, today_serial=45_000)
+    assert rest["supported_count"] == 2
+    assert rest["entries"][0]["supported"] is True
+    assert rest["next_offset"] is None
+
+
 def main() -> None:
     assert_incomplete_save_names_cells()
+    assert_capability_scan()
     assert_limits()
     assert_edits_save()
     assert_function_usage()

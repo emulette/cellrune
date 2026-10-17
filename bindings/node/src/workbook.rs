@@ -19,8 +19,8 @@ use crate::conversion::{
 use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
 use crate::task::{
-    BytesTask, CalculateTask, EditsBytesTask, PreviewTask, RecalculateTask, SaveEditsPathTask,
-    SavePathTask,
+    BytesTask, CalculateTask, CapabilityTask, EditsBytesTask, PreviewTask, RecalculateTask,
+    SaveEditsPathTask, SavePathTask,
 };
 
 #[napi]
@@ -82,6 +82,26 @@ impl NativeWorkbook {
             })
             .map(crate::conversion::range_page)
             .map_err(napi_error)
+    }
+
+    #[napi(ts_return_type = "Promise<NativeCapabilityPage>", catch_unwind)]
+    pub fn scan_capabilities(
+        &self,
+        offset: f64,
+        limit: f64,
+        today_serial: Option<f64>,
+        now_serial: Option<f64>,
+    ) -> napi::Result<AsyncTask<CapabilityTask>> {
+        Ok(AsyncTask::new(CapabilityTask {
+            session: Arc::clone(&self.session),
+            options: CalculationOptionsDto {
+                today_serial,
+                now_serial,
+                ..CalculationOptionsDto::default()
+            },
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        }))
     }
 
     #[napi(catch_unwind)]

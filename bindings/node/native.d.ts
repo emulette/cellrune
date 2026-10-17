@@ -15,6 +15,7 @@ export declare class NativeWorkbook {
   close(): void
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
   functionUsage(): NativeFunctionUsageReport
   calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationReport>
@@ -91,6 +92,21 @@ export interface NativeCalculationResult {
   code?: string
   message?: string
   detail?: string
+}
+
+export interface NativeCapabilityEntry {
+  cell: NativeCellReference
+  supported: boolean
+  issueCodes: Array<string>
+}
+
+export interface NativeCapabilityPage {
+  schemaVersion: number
+  formulaCount: number
+  supportedCount: number
+  offset: number
+  nextOffset?: number
+  entries: Array<NativeCapabilityEntry>
 }
 
 export interface NativeCell {

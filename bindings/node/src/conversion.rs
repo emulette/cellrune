@@ -1,8 +1,8 @@
 use cellrune_interop::{
     CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto,
-    CalculationResultDto, CellDto, CellReferenceDto, CellValueDto, EditReceiptDto,
-    EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto, FunctionUsageReportDto,
-    RangePageDto, SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
+    CalculationResultDto, CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto,
+    EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
+    FunctionUsageReportDto, RangePageDto, SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
 };
 use napi_derive::napi;
 
@@ -212,6 +212,23 @@ pub struct NativeFunctionCatalogReport {
 }
 
 #[napi(object)]
+pub struct NativeCapabilityEntry {
+    pub cell: NativeCellReference,
+    pub supported: bool,
+    pub issue_codes: Vec<String>,
+}
+
+#[napi(object)]
+pub struct NativeCapabilityPage {
+    pub schema_version: u32,
+    pub formula_count: f64,
+    pub supported_count: f64,
+    pub offset: f64,
+    pub next_offset: Option<f64>,
+    pub entries: Vec<NativeCapabilityEntry>,
+}
+
+#[napi(object)]
 pub struct NativeEditWriteReport {
     pub schema_version: u32,
     pub affected_formulas: Vec<NativeCellReference>,
@@ -412,6 +429,25 @@ pub(crate) fn function_catalog(value: FunctionCatalogReportDto) -> NativeFunctio
                 alias: entry.alias,
                 returns_array: entry.returns_array,
                 official: entry.official,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn capability_page(value: CapabilityPageDto) -> NativeCapabilityPage {
+    NativeCapabilityPage {
+        schema_version: value.schema_version,
+        formula_count: value.formula_count as f64,
+        supported_count: value.supported_count as f64,
+        offset: value.offset as f64,
+        next_offset: value.next_offset.map(|offset| offset as f64),
+        entries: value
+            .entries
+            .into_iter()
+            .map(|entry| NativeCapabilityEntry {
+                cell: cell_reference(entry.cell),
+                supported: entry.supported,
+                issue_codes: entry.issue_codes,
             })
             .collect(),
     }

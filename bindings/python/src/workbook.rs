@@ -123,6 +123,29 @@ impl Workbook {
         conversion::range_page(py, &page)
     }
 
+    #[pyo3(signature = (*, offset=None, limit=None, today_serial=None, now_serial=None))]
+    pub fn scan_capabilities<'py>(
+        &self,
+        py: Python<'py>,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+        today_serial: Option<&Bound<'_, PyAny>>,
+        now_serial: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let offset = page_offset_from_python(offset).map_err(|error| into_py_error(py, error))?;
+        let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
+        let options = CalculationOptionsDto {
+            today_serial: optional_number_from_python(today_serial)
+                .map_err(|error| into_py_error(py, error))?,
+            now_serial: optional_number_from_python(now_serial)
+                .map_err(|error| into_py_error(py, error))?,
+            ..CalculationOptionsDto::default()
+        };
+        let result = py.detach(move || self.lock_interop()?.capabilities(options, offset, limit));
+        let page = result.map_err(|error| into_py_error(py, error))?;
+        conversion::capability_page(py, &page)
+    }
+
     #[pyo3(signature = (name, *, current_sheet=None))]
     pub fn inspect_defined_name<'py>(
         &self,

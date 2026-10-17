@@ -1,4 +1,5 @@
 import {
+  type CapabilityPage,
   type CalculationLimitOptions,
   type ReadLimitOptions,
   type EditWriteReport,
@@ -135,6 +136,8 @@ async function check(): Promise<void> {
   const readLimits: ReadLimitOptions = { maxEntryUncompressedBytes: 1 << 27 };
   const reopened: Workbook = await Workbook.fromBytes(bytes, { readLimits });
   const edited: Buffer = await reopened.editsToBytes();
+  const capabilities: CapabilityPage = await reopened.scanCapabilities({ limit: 10 });
+  capabilities.entries[0]?.cell.address.toUpperCase();
   edited.byteLength.toFixed(0);
   reopened.close();
   reopened.close();
