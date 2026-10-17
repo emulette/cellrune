@@ -56,12 +56,25 @@ export type CalculationResult =
       readonly detail: string | null;
     };
 
+export interface NumberFormat {
+  readonly id: number;
+  readonly code: string | null;
+  readonly kind:
+    | "general"
+    | "number"
+    | "date"
+    | "time"
+    | "date_time"
+    | "duration";
+}
+
 export interface Cell {
   readonly address: string;
   readonly formula: string | null;
   readonly sourceValue: CellValue;
   readonly sourceValueState: "literal" | "saved" | "missing" | "invalid";
   readonly calculated: CalculationResult | null;
+  readonly numberFormat: NumberFormat;
 }
 
 export interface RangePage {
@@ -178,6 +191,7 @@ export interface SheetSummary {
   readonly usedRange: string | null;
   readonly mergedRanges: readonly string[];
   readonly tables: readonly TableSummary[];
+  readonly autoFilter: string | null;
 }
 
 export interface WorkbookFingerprint {
@@ -193,6 +207,8 @@ export interface WorkbookSummary {
   readonly documentKind: "xlsx" | "xlsm" | "new_xlsx" | "open_xml";
   readonly dateSystem: "excel_1900" | "excel_1904";
   readonly diagnosticCount: number;
+  /** Whether the package asks the app to recalculate on open; saved results may be placeholders. */
+  readonly fullCalculationOnLoad: boolean | null;
   readonly sheets: readonly SheetSummary[];
 }
 

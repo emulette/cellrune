@@ -130,12 +130,19 @@ class UnavailableValue(TypedDict):
 CalculationResult = CalculatedValue | UnavailableValue
 
 
+class NumberFormat(TypedDict):
+    id: int
+    code: str | None
+    kind: Literal["general", "number", "date", "time", "date_time", "duration"]
+
+
 class Cell(TypedDict):
     address: str
     formula: str | None
     source_value: CellValue
     source_value_state: Literal["literal", "saved", "missing", "invalid"]
     calculated: CalculationResult | None
+    number_format: NumberFormat
 
 
 class RangePage(TypedDict):
@@ -280,6 +287,7 @@ class SheetSummary(TypedDict):
     used_range: str | None
     merged_ranges: list[str]
     tables: list[TableSummary]
+    auto_filter: str | None
 
 
 class WorkbookFingerprint(TypedDict):
@@ -295,6 +303,7 @@ class WorkbookSummary(TypedDict):
     document_kind: Literal["xlsx", "xlsm", "new_xlsx", "open_xml"]
     date_system: Literal["excel_1900", "excel_1904"]
     diagnostic_count: int
+    full_calculation_on_load: bool | None
     sheets: list[SheetSummary]
 
 

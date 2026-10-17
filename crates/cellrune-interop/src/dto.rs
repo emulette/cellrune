@@ -879,6 +879,21 @@ pub struct CellDto {
     pub source_value_state: SavedValueStateDto,
     /// Current calculation result, including dynamic spill followers, when calculated.
     pub calculated: Option<CalculationResultDto>,
+    /// Number format the cell displays its value with; a date or time kind marks a serial.
+    pub number_format: NumberFormatDto,
+}
+
+/// Number format of one cell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NumberFormatDto {
+    /// Built-in or custom `numFmtId`.
+    pub id: u32,
+    /// Format code, when known: custom formats carry theirs, and built-in formats read from a
+    /// package carry the code the reader resolved.
+    pub code: Option<String>,
+    /// `general`, `number`, `date`, `time`, `date_time`, or `duration`.
+    pub kind: String,
 }
 
 /// Bounded range-read request.
@@ -1216,6 +1231,9 @@ pub struct SheetSummaryDto {
     /// `#[serde(default)]` is deliberate for the same reason as `merged_ranges`.
     #[serde(default)]
     pub tables: Vec<TableSummaryDto>,
+    /// Worksheet-level autoFilter range in A1 notation, when the sheet declares one.
+    #[serde(default)]
+    pub auto_filter: Option<String>,
 }
 
 /// Transport-safe versioned workbook semantic fingerprint.
@@ -1246,6 +1264,11 @@ pub struct WorkbookSummaryDto {
     pub date_system: String,
     /// Read-time compatibility diagnostic count.
     pub diagnostic_count: u64,
+    /// The package's `fullCalcOnLoad` declaration, when present. A producer that sets it, such
+    /// as xlsxwriter, may store placeholder formula results for the spreadsheet app to replace,
+    /// so saved results are not reliable without calculating.
+    #[serde(default)]
+    pub full_calculation_on_load: Option<bool>,
     /// Sheets in workbook order.
     pub sheets: Vec<SheetSummaryDto>,
 }

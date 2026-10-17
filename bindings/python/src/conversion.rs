@@ -55,6 +55,7 @@ pub(crate) fn workbook_summary<'py>(
     result.set_item("document_kind", &value.document_kind)?;
     result.set_item("date_system", &value.date_system)?;
     result.set_item("diagnostic_count", value.diagnostic_count)?;
+    result.set_item("full_calculation_on_load", value.full_calculation_on_load)?;
     let sheets = PyList::empty(py);
     for sheet in &value.sheets {
         let item = PyDict::new(py);
@@ -86,6 +87,7 @@ pub(crate) fn workbook_summary<'py>(
             tables.append(table_item)?;
         }
         item.set_item("tables", tables)?;
+        item.set_item("auto_filter", sheet.auto_filter.as_deref())?;
         sheets.append(item)?;
     }
     result.set_item("sheets", sheets)?;
@@ -472,6 +474,11 @@ fn cell_dict<'py>(py: Python<'py>, cell: &CellDto) -> PyResult<Bound<'py, PyDict
             .map(|calculated| calculation_result(py, calculated))
             .transpose()?,
     )?;
+    let number_format = PyDict::new(py);
+    number_format.set_item("id", cell.number_format.id)?;
+    number_format.set_item("code", cell.number_format.code.as_deref())?;
+    number_format.set_item("kind", &cell.number_format.kind)?;
+    result.set_item("number_format", number_format)?;
     Ok(result)
 }
 

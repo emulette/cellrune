@@ -148,6 +148,9 @@ def assert_edits_save() -> None:
     source.set_formula("Sheet1", "C1", "=MYSTERY(D1)")
     source.calculate()
     workbook = Workbook.from_bytes(source.to_bytes(invalidate_unavailable=True))
+    summary = workbook.summary()
+    assert summary["full_calculation_on_load"] is True
+    assert summary["sheets"][0]["auto_filter"] is None
     workbook.set_number("Sheet1", "A1", 3.0)
 
     edited = workbook.edits_to_bytes()
@@ -170,6 +173,7 @@ def assert_edits_save() -> None:
     reopened = Workbook.from_bytes(edited)
     cell = reopened.read_range("Sheet1", "A1", "A1")["cells"][0]
     assert cell["source_value"] == {"kind": "number", "value": 3.0}
+    assert cell["number_format"] == {"id": 0, "code": "General", "kind": "general"}
 
     try:
         Workbook.create().edits_to_bytes()

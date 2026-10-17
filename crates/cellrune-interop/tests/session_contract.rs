@@ -586,6 +586,7 @@ fn summary_exposes_tables_and_merged_ranges() {
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row></sheetData>
+  <autoFilter ref="D10:E12"/>
   <mergeCells count="2"><mergeCell ref="D5:E6"/><mergeCell ref="A3:B4"/></mergeCells>
   <tableParts count="1"><tablePart r:id="rId7"/></tableParts>
 </worksheet>"#;
@@ -628,6 +629,8 @@ fn summary_exposes_tables_and_merged_ranges() {
     let summary = session.summary();
     let sheet = &summary.sheets[0];
     assert_eq!(sheet.merged_ranges, vec!["A3:B4", "D5:E6"]);
+    assert_eq!(sheet.auto_filter.as_deref(), Some("D10:E12"));
+    assert_eq!(summary.full_calculation_on_load, None);
     assert_eq!(sheet.tables.len(), 1);
     let table = &sheet.tables[0];
     assert_eq!(table.id, 1);
@@ -662,6 +665,7 @@ fn summary_exposes_tables_and_merged_ranges() {
         serde_json::from_value(legacy).expect("legacy payload must deserialize");
     assert!(deserialized.merged_ranges.is_empty());
     assert!(deserialized.tables.is_empty());
+    assert!(deserialized.auto_filter.is_none());
 }
 
 #[test]
@@ -690,6 +694,11 @@ fn edits_save_without_calculation_and_match_the_core_edit_writer() {
         .expect("source package");
 
     let mut session = WorkbookSession::open_bytes(&source_bytes).expect("source session");
+    assert_eq!(
+        session.summary().full_calculation_on_load,
+        Some(true),
+        "a save that invalidated a result asks the app to recalculate"
+    );
     session
         .set_value("Sheet1", "A1", WritableCellValueDto::Number { value: 3.0 })
         .expect("edit");
@@ -758,4 +767,49 @@ fn edits_save_without_calculation_and_match_the_core_edit_writer() {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[test]
+fn cells_report_their_number_format() {
+    let mut session = WorkbookSession::create();
+    session
+        .set_value(
+            "Sheet1",
+            "A1",
+            WritableCellValueDto::Number { value: 45_366.0 },
+        )
+        .expect("date serial");
+    let revision = session.summary().semantic_revision;
+    session
+        .apply_changes(
+            revision,
+            cellrune_interop::EditBatchDto {
+                changes: vec![cellrune_interop::WorkbookChangeDto::SetNumberFormat {
+                    sheet: "Sheet1".to_owned(),
+                    address: "A1".to_owned(),
+                    id: 164,
+                    code: Some("yyyy-mm-dd".to_owned()),
+                    format_kind: "date".to_owned(),
+                }],
+            },
+        )
+        .expect("date format");
+    let page = session
+        .read_range(&RangeRequestDto {
+            sheet: "Sheet1".to_owned(),
+            start: "A1".to_owned(),
+            end: "B1".to_owned(),
+            offset: 0,
+            limit: 2,
+        })
+        .expect("range");
+    let date = &page.cells[0].number_format;
+    assert_eq!(date.id, 164);
+    assert_eq!(date.code.as_deref(), Some("yyyy-mm-dd"));
+    assert_eq!(date.kind, "date");
+    let blank = &page.cells[1].number_format;
+    assert_eq!(
+        (blank.id, blank.code.as_deref(), blank.kind.as_str()),
+        (0, None, "general")
+    );
 }

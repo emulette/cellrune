@@ -3,9 +3,9 @@ use cellrune::{
     CalculationDelta, CalculationDeltaPage, CalculationExecutionMode, CalculationIssue,
     CalculationLimits, CalculationOptions, CalculationSnapshot, CellAddress, CellContent,
     CellValue, EditReceipt, ExcelError, FinancialSolverSemantics, FiniteNumber,
-    InstallDeltaBasisReason, MaterializedResultOrigin, ReadLimits, RecalculationMode,
-    RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility,
-    TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
+    InstallDeltaBasisReason, MaterializedResultOrigin, NumberFormat, NumberFormatKind, ReadLimits,
+    RecalculationMode, RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId,
+    SheetVisibility, TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
     TransactionImpactCoverage, TransactionIssueChangeKind, WorkbookDraft, WorkbookFingerprint,
     WorkbookSnapshot, WorkbookTransactionReceipt, WorkbookTransactionReport, WriteOptions,
     XlsxDocumentKind,
@@ -17,11 +17,11 @@ use crate::{
     CalculationOptionsReportDto, CalculationReportDto, CalculationResultDto, CellDto,
     CellReferenceDto, CellValueDto, EditReceiptDto, EditWriteReportDto,
     FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION, InteropError, MaterializedResultOriginDto,
-    ProviderIdentityDto, ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto,
-    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
-    TransactionImpactCoverageDto, TransactionImpactPageDto, WorkbookFingerprintDto,
-    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
-    WriteOptionsDto, WriteReportDto,
+    NumberFormatDto, ProviderIdentityDto, ReadLimitOptionsDto, RecalculationModeDto,
+    SavedValueStateDto, TransactionDetailCountsDto, TransactionDetailItemDto,
+    TransactionDetailSectionDto, TransactionImpactCoverageDto, TransactionImpactPageDto,
+    WorkbookFingerprintDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
+    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 
 pub(crate) fn workbook_fingerprint(value: WorkbookFingerprint) -> WorkbookFingerprintDto {
@@ -338,12 +338,31 @@ pub(crate) fn cell_dto(
             .materialized_cell(id)
             .map(|cell| result_to_dto(cell.result()))
     });
+    let number_format =
+        cell.map_or_else(NumberFormat::default, |cell| cell.number_format().clone());
     CellDto {
         address: address.to_string(),
         formula,
         source_value,
         source_value_state,
         calculated,
+        number_format: number_format_dto(&number_format),
+    }
+}
+
+fn number_format_dto(format: &NumberFormat) -> NumberFormatDto {
+    NumberFormatDto {
+        id: format.id(),
+        code: format.code().map(str::to_owned),
+        kind: match format.kind() {
+            NumberFormatKind::General => "general",
+            NumberFormatKind::Number => "number",
+            NumberFormatKind::Date => "date",
+            NumberFormatKind::Time => "time",
+            NumberFormatKind::DateTime => "date_time",
+            NumberFormatKind::Duration => "duration",
+        }
+        .to_owned(),
     }
 }
 

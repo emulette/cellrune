@@ -31,6 +31,14 @@ pub struct NativeCell {
     pub source_value: NativeCellValue,
     pub source_value_state: String,
     pub calculated: Option<NativeCalculationResult>,
+    pub number_format: NativeNumberFormat,
+}
+
+#[napi(object)]
+pub struct NativeNumberFormat {
+    pub id: u32,
+    pub code: Option<String>,
+    pub kind: String,
 }
 
 #[napi(object)]
@@ -72,6 +80,7 @@ pub struct NativeSheetSummary {
     pub used_range: Option<String>,
     pub merged_ranges: Vec<String>,
     pub tables: Vec<NativeTableSummary>,
+    pub auto_filter: Option<String>,
 }
 
 #[napi(object)]
@@ -83,6 +92,7 @@ pub struct NativeWorkbookSummary {
     pub document_kind: String,
     pub date_system: String,
     pub diagnostic_count: f64,
+    pub full_calculation_on_load: Option<bool>,
     pub sheets: Vec<NativeSheetSummary>,
 }
 
@@ -237,6 +247,7 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
         document_kind: value.document_kind,
         date_system: value.date_system,
         diagnostic_count: value.diagnostic_count as f64,
+        full_calculation_on_load: value.full_calculation_on_load,
         sheets: value
             .sheets
             .into_iter()
@@ -247,6 +258,7 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
                 cell_count: sheet.cell_count as f64,
                 used_range: sheet.used_range,
                 merged_ranges: sheet.merged_ranges,
+                auto_filter: sheet.auto_filter,
                 tables: sheet
                     .tables
                     .into_iter()
@@ -452,6 +464,11 @@ fn cell(value: CellDto) -> NativeCell {
         }
         .to_owned(),
         calculated: value.calculated.map(calculation_result),
+        number_format: NativeNumberFormat {
+            id: value.number_format.id,
+            code: value.number_format.code,
+            kind: value.number_format.kind,
+        },
     }
 }
 

@@ -29,14 +29,14 @@ pub use dto::{
     DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, EditBatchDto, EditBatchV2Dto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto,
     FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
-    FunctionUsageEntryDto, FunctionUsageReportDto, MaterializedResultOriginDto, PreviewChangesDto,
-    PreviewCursorDto, ProviderIdentityDto, RangePageDto, RangeRequestDto, ReadLimitOptionsDto,
-    RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto, TableColumnDto,
-    TableSummaryDto, TransactionDetailCountsDto, TransactionDetailItemDto,
-    TransactionDetailSectionDto, TransactionImpactCoverageDto, TransactionImpactPageDto,
-    WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto, WorkbookSummaryDto,
-    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
-    WriteOptionsDto, WriteReportDto,
+    FunctionUsageEntryDto, FunctionUsageReportDto, MaterializedResultOriginDto, NumberFormatDto,
+    PreviewChangesDto, PreviewCursorDto, ProviderIdentityDto, RangePageDto, RangeRequestDto,
+    ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto, SheetSummaryDto,
+    TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
+    TransactionDetailItemDto, TransactionDetailSectionDto, TransactionImpactCoverageDto,
+    TransactionImpactPageDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto,
+    WorkbookSummaryDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
+    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use service::{

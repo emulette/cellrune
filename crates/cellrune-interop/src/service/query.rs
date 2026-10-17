@@ -73,6 +73,7 @@ impl WorkbookSession {
             }
             .to_owned(),
             diagnostic_count: count_u64(workbook.diagnostics().len()),
+            full_calculation_on_load: workbook.calculation_hints().full_calculation_on_load(),
             sheets: workbook
                 .sheets()
                 .iter()
@@ -90,6 +91,9 @@ impl WorkbookSession {
                         .map(|range| range_text(range.start(), range.end()))
                         .collect(),
                     tables: sheet.tables().iter().map(table_summary).collect(),
+                    auto_filter: sheet
+                        .auto_filter()
+                        .map(|filter| range_text(filter.range().start(), filter.range().end())),
                 })
                 .collect(),
         }

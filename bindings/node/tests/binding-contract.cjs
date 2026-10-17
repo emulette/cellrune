@@ -73,6 +73,9 @@ async function assertEditsSave() {
   const workbook = await Workbook.fromBytes(
     await source.toBytes({ invalidateUnavailable: true }),
   );
+  const summary = workbook.summary();
+  assert.equal(summary.fullCalculationOnLoad, true);
+  assert.equal(summary.sheets[0].autoFilter, null);
   workbook.setNumber("Sheet1", "A1", 3);
 
   const edited = await workbook.editsToBytes();
@@ -100,6 +103,7 @@ async function assertEditsSave() {
   const reopened = await Workbook.fromBytes(edited);
   const cell = reopened.readRange("Sheet1", "A1", "A1").cells[0];
   assert.deepEqual(cell.sourceValue, { kind: "number", value: 3 });
+  assert.deepEqual(cell.numberFormat, { id: 0, code: "General", kind: "general" });
 
   await assert.rejects(Workbook.create().editsToBytes(), (error) => {
     assert.ok(error instanceof CellRuneError);

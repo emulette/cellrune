@@ -99,6 +99,7 @@ export interface NativeCell {
   sourceValue: NativeCellValue
   sourceValueState: string
   calculated?: NativeCalculationResult
+  numberFormat: NativeNumberFormat
 }
 
 export interface NativeCellReference {
@@ -218,6 +219,12 @@ export interface NativeFunctionUsageReport {
   entries: Array<NativeFunctionUsageEntry>
 }
 
+export interface NativeNumberFormat {
+  id: number
+  code?: string
+  kind: string
+}
+
 export interface NativeRangePage {
   schemaVersion: number
   sheet: string
@@ -237,6 +244,7 @@ export interface NativeSheetSummary {
   usedRange?: string
   mergedRanges: Array<string>
   tables: Array<NativeTableSummary>
+  autoFilter?: string
 }
 
 export interface NativeTableColumn {
@@ -268,6 +276,7 @@ export interface NativeWorkbookSummary {
   documentKind: string
   dateSystem: string
   diagnosticCount: number
+  fullCalculationOnLoad?: boolean
   sheets: Array<NativeSheetSummary>
 }
 

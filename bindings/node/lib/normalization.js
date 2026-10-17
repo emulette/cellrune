@@ -114,6 +114,11 @@ function normalizeRangePage(page) {
       sourceValue: normalizeValue(cell.sourceValue),
       sourceValueState: cell.sourceValueState,
       calculated: normalizeResult(cell.calculated),
+      numberFormat: {
+        id: cell.numberFormat.id,
+        code: cell.numberFormat.code ?? null,
+        kind: cell.numberFormat.kind,
+      },
     })),
   };
 }
@@ -276,6 +281,7 @@ function normalizeSummary(summary) {
     documentKind: summary.documentKind,
     dateSystem: summary.dateSystem,
     diagnosticCount: summary.diagnosticCount,
+    fullCalculationOnLoad: summary.fullCalculationOnLoad ?? null,
     sheets: summary.sheets.map((sheet) => ({
       id: sheet.id,
       name: sheet.name,
@@ -283,6 +289,7 @@ function normalizeSummary(summary) {
       cellCount: sheet.cellCount,
       usedRange: sheet.usedRange ?? null,
       mergedRanges: sheet.mergedRanges,
+      autoFilter: sheet.autoFilter ?? null,
       tables: sheet.tables.map((table) => ({
         id: table.id,
         name: table.name,
