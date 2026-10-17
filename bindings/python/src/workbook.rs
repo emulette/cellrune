@@ -72,8 +72,8 @@ impl Workbook {
         self.session.is_closed()
     }
 
-    pub fn close(&self) {
-        self.session.close();
+    pub fn close(&self, py: Python<'_>) {
+        py.detach(|| self.session.close());
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
@@ -85,11 +85,12 @@ impl Workbook {
 
     fn __exit__(
         &self,
+        py: Python<'_>,
         _exception_type: Option<&Bound<'_, PyAny>>,
         _exception: Option<&Bound<'_, PyAny>>,
         _traceback: Option<&Bound<'_, PyAny>>,
     ) {
-        self.close();
+        self.close(py);
     }
 
     pub fn summary<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
@@ -309,9 +310,11 @@ impl Workbook {
         let expected_revision =
             revision_from_python(expected_revision).map_err(|error| into_py_error(py, error))?;
         let batch = edit_batch_from_python(py, changes)?;
-        let receipt = self
-            .lock(py)?
-            .apply_changes(expected_revision, batch)
+        let receipt = py
+            .detach(move || {
+                self.lock_interop_wait()?
+                    .apply_changes(expected_revision, batch)
+            })
             .map_err(|error| into_py_error(py, error))?;
         conversion::edit_receipt(py, &receipt)
     }
@@ -325,9 +328,11 @@ impl Workbook {
         let expected_revision =
             revision_from_python(expected_revision).map_err(|error| into_py_error(py, error))?;
         let batch = edit_batch_v2_from_python(py, changes)?;
-        let receipt = self
-            .lock(py)?
-            .apply_changes_v2(expected_revision, batch)
+        let receipt = py
+            .detach(move || {
+                self.lock_interop_wait()?
+                    .apply_changes_v2(expected_revision, batch)
+            })
             .map_err(|error| into_py_error(py, error))?;
         conversion::edit_receipt_v2(py, &receipt)
     }
@@ -443,9 +448,8 @@ impl Workbook {
             .map_err(|error| into_py_error(py, error))?
             .unwrap_or(0);
         let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
-        let page = self
-            .lock(py)?
-            .changes_since(cursor, limit)
+        let page = py
+            .detach(move || self.lock_interop_wait()?.changes_since(cursor, limit))
             .map_err(|error| into_py_error(py, error))?;
         conversion::calculation_delta_page(py, &page)
     }
@@ -512,27 +516,29 @@ impl Workbook {
         formula: &str,
         dynamic_range: Option<&str>,
     ) -> PyResult<()> {
-        self.lock(py)?
-            .set_formula(sheet, address, formula, dynamic_range)
-            .map_err(|error| into_py_error(py, error))
+        py.detach(|| {
+            self.lock_interop_wait()?
+                .set_formula(sheet, address, formula, dynamic_range)
+        })
+        .map_err(|error| into_py_error(py, error))
     }
 
     pub fn clear_cell(&self, py: Python<'_>, sheet: &str, address: &str) -> PyResult<bool> {
-        self.lock(py)?
-            .clear_cell(sheet, address)
+        py.detach(|| self.lock_interop_wait()?.clear_cell(sheet, address))
             .map_err(|error| into_py_error(py, error))
     }
 
     pub fn add_sheet(&self, py: Python<'_>, name: &str) -> PyResult<u32> {
-        self.lock(py)?
-            .add_sheet(name)
+        py.detach(|| self.lock_interop_wait()?.add_sheet(name))
             .map_err(|error| into_py_error(py, error))
     }
 
     pub fn rename_sheet(&self, py: Python<'_>, current_name: &str, new_name: &str) -> PyResult<()> {
-        self.lock(py)?
-            .rename_sheet(current_name, new_name)
-            .map_err(|error| into_py_error(py, error))
+        py.detach(|| {
+            self.lock_interop_wait()?
+                .rename_sheet(current_name, new_name)
+        })
+        .map_err(|error| into_py_error(py, error))
     }
 
     #[pyo3(signature = (*, invalidate_unavailable=false))]
@@ -608,8 +614,7 @@ impl Workbook {
         address: &str,
         value: WritableCellValueDto,
     ) -> PyResult<()> {
-        self.lock(py)?
-            .set_value(sheet, address, value)
+        py.detach(move || self.lock_interop_wait()?.set_value(sheet, address, value))
             .map_err(|error| into_py_error(py, error))
     }
 

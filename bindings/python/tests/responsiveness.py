@@ -36,6 +36,23 @@ def main() -> None:
         )
     workbook.apply_changes(0, changes)
 
+    # A batch short enough to finish within one switch interval, so only a released interpreter
+    # lock lets the worker run.
+    edits: list[WorkbookChange] = [
+        {
+            "kind": "set_value",
+            "sheet": "Sheet1",
+            "address": f"B{row}",
+            "value": {"kind": "number", "value": float(row)},
+        }
+        for row in range(1, 2_001)
+    ]
+    edited = Workbook.create()
+    assert_allows_interpreter_progress(
+        lambda: edited.apply_changes(0, edits),
+        "native edit retained the Python interpreter lock",
+    )
+
     report = assert_allows_interpreter_progress(
         workbook.calculate,
         "native calculation retained the Python interpreter lock",
