@@ -3,21 +3,28 @@ use super::super::xml::XmlBudget;
 use super::super::xstring::decode_xstring;
 use super::super::{XlsxErrorCode, XlsxReadError};
 use super::shared_strings::SharedStrings;
+use crate::calculation::serial_from_calendar_date;
 use crate::{
-    CellAddress, CellRange, CellValue, DiagnosticCode, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS,
-    ExcelError, SavedResult, SavedResultIssue,
+    CellAddress, CellRange, CellValue, DateSystem, DiagnosticCode, EXCEL_MAX_COLUMNS,
+    EXCEL_MAX_ROWS, ExcelError, SavedResult, SavedResultIssue,
 };
+
+const SECONDS_PER_DAY: f64 = 86_400.0;
 
 pub(super) fn parse_literal_value(
     cell_type: &str,
     raw_value: Option<&str>,
     inline_text: Option<&str>,
     shared_strings: Option<&SharedStrings>,
+    date_system: DateSystem,
     budget: &XmlBudget,
 ) -> Result<Option<CellValue>, XlsxReadError> {
     match cell_type {
         "n" => raw_value
             .map(|value| parse_number(value, budget))
+            .transpose(),
+        "d" => raw_value
+            .map(|value| parse_iso_date(value, date_system, budget))
             .transpose(),
         "s" => parse_shared_string(raw_value, shared_strings, budget),
         "inlineStr" => {
@@ -111,6 +118,7 @@ pub(super) fn parse_saved_result(
     raw_value: Option<&str>,
     inline_text: Option<&str>,
     shared_strings: Option<&SharedStrings>,
+    date_system: DateSystem,
     budget: &XmlBudget,
 ) -> Result<SavedResult, XlsxReadError> {
     if raw_value.is_none() && inline_text.is_none() {
@@ -119,11 +127,17 @@ pub(super) fn parse_saved_result(
     if cell_type == "n" && raw_value == Some("") && inline_text.is_none() {
         return Ok(SavedResult::Missing);
     }
-    let supported_type = matches!(cell_type, "n" | "s" | "str" | "b" | "e");
+    let supported_type = matches!(cell_type, "n" | "s" | "str" | "b" | "e" | "d");
     if inline_text.is_none()
         && supported_type
-        && let Ok(Some(value)) =
-            parse_literal_value(cell_type, raw_value, None, shared_strings, budget)
+        && let Ok(Some(value)) = parse_literal_value(
+            cell_type,
+            raw_value,
+            None,
+            shared_strings,
+            date_system,
+            budget,
+        )
     {
         return Ok(SavedResult::Present(value));
     }
@@ -178,6 +192,81 @@ fn parse_number(value: &str, budget: &XmlBudget) -> Result<CellValue, XlsxReadEr
             .error(XlsxErrorCode::InvalidCellValue)
             .with_cause(error)
     })
+}
+
+/// Reads an ISO 8601 date cell (`t="d"`) as a serial in the workbook's date system.
+///
+/// Accepts `YYYY-MM-DD`, `YYYY-MM-DDThh:mm[:ss[.fff]]`, and `hh:mm[:ss[.fff]]`, each optionally
+/// followed by the UTC designator `Z`, which spreadsheet serials have no zone to apply to.
+fn parse_iso_date(
+    value: &str,
+    date_system: DateSystem,
+    budget: &XmlBudget,
+) -> Result<CellValue, XlsxReadError> {
+    let invalid = || {
+        budget
+            .error(XlsxErrorCode::InvalidCellValue)
+            .with_detail(value.to_owned())
+    };
+    let trimmed = value.trim();
+    let unzoned = trimmed.strip_suffix('Z').unwrap_or(trimmed);
+    let (date, time) = match unzoned.split_once('T') {
+        Some((date, time)) => (Some(date), Some(time)),
+        None if unzoned.contains(':') => (None, Some(unzoned)),
+        None => (Some(unzoned), None),
+    };
+    let days = match date {
+        Some(date) => parse_iso_calendar_date(date, date_system).ok_or_else(invalid)?,
+        None => 0.0,
+    };
+    let fraction = match time {
+        Some(time) => parse_iso_time_fraction(time).ok_or_else(invalid)?,
+        None => 0.0,
+    };
+    CellValue::number(days + fraction).map_err(|error| invalid().with_cause(error))
+}
+
+fn parse_iso_calendar_date(value: &str, date_system: DateSystem) -> Option<f64> {
+    let mut parts = value.split('-');
+    let year = fixed_digits(parts.next()?, 4)?;
+    let month = fixed_digits(parts.next()?, 2)?;
+    let day = fixed_digits(parts.next()?, 2)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    serial_from_calendar_date(i32::try_from(year).ok()?, month, day, date_system)
+}
+
+fn parse_iso_time_fraction(value: &str) -> Option<f64> {
+    let (clock, fraction) = match value.split_once('.') {
+        Some((clock, fraction)) => (clock, Some(fraction)),
+        None => (value, None),
+    };
+    let mut parts = clock.split(':');
+    let hours = fixed_digits(parts.next()?, 2)?;
+    let minutes = fixed_digits(parts.next()?, 2)?;
+    let seconds = parts.next().map_or(Some(0), |part| fixed_digits(part, 2))?;
+    if parts.next().is_some() || hours > 23 || minutes > 59 || seconds > 59 {
+        return None;
+    }
+    if fraction.is_some() && clock.len() != "hh:mm:ss".len() {
+        return None;
+    }
+    let fraction = match fraction {
+        Some(digits) if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) => {
+            format!("0.{digits}").parse::<f64>().ok()?
+        }
+        Some(_) => return None,
+        None => 0.0,
+    };
+    let seconds = f64::from(hours * 3_600 + minutes * 60 + seconds) + fraction;
+    Some(seconds / SECONDS_PER_DAY)
+}
+
+fn fixed_digits(value: &str, width: usize) -> Option<u32> {
+    (value.len() == width && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.parse().ok())
+        .flatten()
 }
 
 fn parse_error(value: &str, budget: &XmlBudget) -> Result<ExcelError, XlsxReadError> {

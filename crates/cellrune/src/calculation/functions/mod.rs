@@ -74,6 +74,7 @@ mod trigonometry;
 mod util;
 mod xmatch;
 
+pub(crate) use calendar::serial_from_calendar_date;
 pub(super) use dynamic::{
     helper_array_with_trace, helper_scalar_with_trace, invoke_callable, lambda_scope_value,
     let_reference, let_scope_value, map_scalar_with_trace, reduce_scope_value, with_let_scope,

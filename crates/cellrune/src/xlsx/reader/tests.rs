@@ -160,6 +160,84 @@ fn bytes_adapter_records_the_input_kind() {
     assert_eq!(snapshot.source().kind(), WorkbookSourceKind::Bytes);
 }
 
+const ISO_DATE_SHEET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1">
+    <c r="A1" s="1" t="d"><v>2024-03-15T08:00:00</v></c>
+    <c r="B1" s="1" t="d"><v>2024-03-15T09:00:00.000Z</v></c>
+    <c r="C1" s="1" t="d"><v>2024-03-15</v></c>
+    <c r="D1" s="2" t="d"><v>08:00:00</v></c>
+    <c r="E1" s="1" t="d"><f>DATE(2024,3,15)</f><v>2024-03-15</v></c>
+  </row></sheetData>
+</worksheet>"#;
+
+#[test]
+fn reads_iso_8601_date_cells_as_serials_in_the_workbook_date_system() {
+    let excel_1900 = WORKBOOK.replace(r#"<workbookPr date1904="1"/>"#, "");
+    for (workbook, date_serial) in [(excel_1900.as_str(), 45_366.0), (WORKBOOK, 43_904.0)] {
+        let archive = build_table_archive_with_workbook(workbook, ISO_DATE_SHEET, &[]);
+        let snapshot =
+            read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("ISO date workbook");
+        let sheet = snapshot.sheet_by_name("First").expect("first sheet");
+
+        assert_eq!(number(literal(sheet, "A1")), date_serial + 8.0 / 24.0);
+        assert_eq!(number(literal(sheet, "B1")), date_serial + 9.0 / 24.0);
+        assert_eq!(number(literal(sheet, "C1")), date_serial);
+        assert_eq!(number(literal(sheet, "D1")), 8.0 / 24.0);
+        assert_eq!(
+            cell(sheet, "C1").number_format().kind(),
+            NumberFormatKind::Date
+        );
+        let CellContent::Formula(formula) = cell(sheet, "E1").content() else {
+            panic!("E1 formula");
+        };
+        let SavedResult::Present(value) = formula.saved_result() else {
+            panic!("E1 saved date result");
+        };
+        assert_eq!(number(value), date_serial);
+    }
+}
+
+#[test]
+fn iso_date_cells_that_are_not_iso_8601_dates_are_rejected() {
+    for value in [
+        "2024-02-30",
+        "2024/03/15",
+        "2024-3-15",
+        "24:00:00",
+        "08:60",
+        "2024-03-15T08:00:00+09:00",
+        "08:00.5",
+        "1899-12-30",
+        "",
+    ] {
+        let sheet = ISO_DATE_SHEET.replacen("2024-03-15T08:00:00", value, 1);
+        let error = read_xlsx(
+            Cursor::new(build_archive(&sheet, SHARED_STRINGS)),
+            ReadOptions::default(),
+        )
+        .expect_err(value);
+        assert_eq!(error.code(), XlsxErrorCode::InvalidCellValue, "{value}");
+    }
+
+    let sheet = ISO_DATE_SHEET.replacen(
+        "<v>2024-03-15</v></c>\n  </row>",
+        "<v>soon</v></c>\n  </row>",
+        1,
+    );
+    let snapshot = read_xlsx(
+        Cursor::new(build_archive(&sheet, SHARED_STRINGS)),
+        ReadOptions::default(),
+    )
+    .expect("an unreadable saved date leaves the formula readable");
+    let CellContent::Formula(formula) =
+        cell(snapshot.sheet_by_name("First").expect("first"), "E1").content()
+    else {
+        panic!("E1 formula");
+    };
+    assert!(matches!(formula.saved_result(), SavedResult::Invalid(_)));
+}
+
 #[test]
 fn semantic_limits_and_invalid_shared_string_indexes_are_rejected() {
     let archive = build_archive(SHEET_ONE, SHARED_STRINGS);

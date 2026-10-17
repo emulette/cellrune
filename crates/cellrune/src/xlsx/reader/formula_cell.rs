@@ -7,7 +7,7 @@ use super::cell_value::{parse_cell_range, parse_cell_reference, parse_saved_resu
 use super::formula_reference::shift_formula;
 use super::shared_strings::SharedStrings;
 use crate::{
-    CellAddress, CellRange, FormulaCell, FormulaDialect, FormulaMetadata, FormulaText,
+    CellAddress, CellRange, DateSystem, FormulaCell, FormulaDialect, FormulaMetadata, FormulaText,
     SharedFormulaRole,
 };
 
@@ -149,6 +149,7 @@ pub(super) struct FormulaResultInput<'a> {
     pub(super) raw_value: Option<&'a str>,
     pub(super) inline_text: Option<&'a str>,
     pub(super) shared_strings: Option<&'a SharedStrings>,
+    pub(super) date_system: DateSystem,
     pub(super) dynamic_array: bool,
 }
 
@@ -163,6 +164,7 @@ pub(super) fn finish_formula(
         input.raw_value,
         input.inline_text,
         input.shared_strings,
+        input.date_system,
         budget,
     )?;
     let (text, metadata) = if input.dynamic_array {

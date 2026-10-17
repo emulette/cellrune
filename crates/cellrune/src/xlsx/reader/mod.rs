@@ -202,6 +202,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             limits,
             worksheet::WorksheetResources {
                 shared_strings: shared_strings.as_ref(),
+                date_system: workbook.date_system,
                 styles: &styles,
                 cell_metadata: cell_metadata.as_ref(),
             },

@@ -302,6 +302,7 @@ impl CellBuilder {
                         raw_value: self.value.as_deref(),
                         inline_text,
                         shared_strings: resources.shared_strings,
+                        date_system: resources.date_system,
                         dynamic_array,
                     },
                     shared_formulas,
@@ -317,6 +318,7 @@ impl CellBuilder {
                     self.value.as_deref(),
                     inline_text,
                     resources.shared_strings,
+                    resources.date_system,
                     budget,
                 )?
                 .map(CellContent::Literal)

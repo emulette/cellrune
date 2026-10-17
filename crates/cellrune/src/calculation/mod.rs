@@ -46,6 +46,7 @@ use crate::calculation::persistent_store::{PersistentRadixEntries, PersistentRad
 
 pub(crate) use analysis_cache::WorkbookAnalysisCache;
 pub(crate) use eval::static_impact::{DraftEdits, affected_formulas};
+pub(crate) use functions::serial_from_calendar_date;
 
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,

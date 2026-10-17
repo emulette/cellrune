@@ -87,6 +87,20 @@ pub(super) fn serial_from_date(date: Date, system: DateSystem) -> Option<f64> {
     serial_from_unix_days(days_from_civil(date.year, date.month, date.day), system)
 }
 
+/// Returns the serial of a proleptic Gregorian calendar date in `system`, or `None` when the date
+/// does not exist or lies outside the system's range.
+pub(crate) fn serial_from_calendar_date(
+    year: i32,
+    month: u32,
+    day: u32,
+    system: DateSystem,
+) -> Option<f64> {
+    if !(1..=12).contains(&month) || day == 0 || day > days_in_month(year, month) {
+        return None;
+    }
+    serial_from_date(Date { year, month, day }, system)
+}
+
 pub(super) fn serial_from_unix_days(days: i64, system: DateSystem) -> Option<f64> {
     let offset = match system {
         DateSystem::Excel1900 if days < days_from_civil(1900, 3, 1) => EXCEL_1900_PRE_LEAP_OFFSET,

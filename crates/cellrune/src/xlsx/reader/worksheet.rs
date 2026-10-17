@@ -19,9 +19,9 @@ use super::styles::Styles;
 use super::worksheet_cell::{CellBuilder, CellFinishContext};
 use crate::workbook::SheetBuilder;
 use crate::{
-    CellAddress, Column, ColumnPhoneticVisibility, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    DocumentPresentation, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, FrozenPane, NumberFormat, Row,
-    SheetId, SourceLocation,
+    CellAddress, Column, ColumnPhoneticVisibility, DateSystem, Diagnostic, DiagnosticCode,
+    DiagnosticSeverity, DocumentPresentation, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, FrozenPane,
+    NumberFormat, Row, SheetId, SourceLocation,
 };
 
 const WORKSHEET: &[u8] = b"worksheet";
@@ -68,6 +68,7 @@ struct WorksheetParseState {
 #[derive(Clone, Copy)]
 pub(super) struct WorksheetResources<'a> {
     pub(super) shared_strings: Option<&'a SharedStrings>,
+    pub(super) date_system: DateSystem,
     pub(super) styles: &'a Styles,
     pub(super) cell_metadata: Option<&'a CellMetadata>,
 }
