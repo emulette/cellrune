@@ -3,9 +3,12 @@ use std::fmt;
 
 use cellrune::{
     ApplyChangesError, DefinedNameAnalysisError, DefinedNameAnalysisErrorKind, SessionError,
-    ValidationError, XlsxReadError, XlsxWriteError,
+    ValidationError, WorkbookSnapshot, XlsxReadError, XlsxWriteError,
 };
 use schemars::JsonSchema;
+
+use crate::CellReferenceDto;
+use crate::convert::cell_reference;
 use serde::{Deserialize, Serialize};
 
 const MESSAGE_SHEET_NOT_FOUND: &str = "workbook does not contain the requested sheet";
@@ -72,6 +75,10 @@ pub struct ErrorDetails {
     pub source_id: Option<String>,
     /// Source-specific detail that does not change the code.
     pub detail: Option<String>,
+    /// Formula cells the failure concerns: for `xlsx.write.incomplete_calculation`, the first 64
+    /// formulas whose results were unavailable. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<CellReferenceDto>,
 }
 
 /// Stable error object shared by Rust, Python, Node.js, and MCP.
@@ -394,6 +401,7 @@ impl From<XlsxReadError> for InteropError {
                 source_code: Some(code.to_owned()),
                 source_id: error.source_id().map(|value| value.as_str().to_owned()),
                 detail: error.detail().map(str::to_owned),
+                cells: Vec::new(),
             },
         )
     }
@@ -410,8 +418,23 @@ impl From<XlsxWriteError> for InteropError {
                 source_code: Some(code.to_owned()),
                 source_id: error.source_id().map(|value| value.as_str().to_owned()),
                 detail: error.detail().map(str::to_owned),
+                cells: Vec::new(),
             },
         )
+    }
+}
+
+impl InteropError {
+    /// Converts a write failure, naming its unavailable formulas with `workbook`'s sheet names.
+    pub(crate) fn from_write(error: XlsxWriteError, workbook: &WorkbookSnapshot) -> Self {
+        let cells = error
+            .unavailable_formulas()
+            .iter()
+            .map(|id| cell_reference(workbook, *id))
+            .collect();
+        let mut converted = Self::from(error);
+        converted.details.cells = cells;
+        converted
     }
 }
 

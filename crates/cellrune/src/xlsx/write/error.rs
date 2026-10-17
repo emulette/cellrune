@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::SourceId;
+use crate::{CalculationCellId, SourceId};
 
 const MESSAGE_IO: &str = "failed to write XLSX output";
 const MESSAGE_INVALID_PACKAGE_PLAN: &str = "invalid XLSX package write plan";
@@ -114,6 +114,7 @@ pub struct XlsxWriteError {
     code: XlsxWriteErrorCode,
     detail: Option<Box<str>>,
     source_id: Option<SourceId>,
+    unavailable_formulas: Vec<CalculationCellId>,
     cause: Option<Box<dyn Error + Send + Sync>>,
 }
 
@@ -123,8 +124,14 @@ impl XlsxWriteError {
             code,
             detail: None,
             source_id: None,
+            unavailable_formulas: Vec::new(),
             cause: None,
         }
+    }
+
+    pub(crate) fn with_unavailable_formulas(mut self, formulas: Vec<CalculationCellId>) -> Self {
+        self.unavailable_formulas = formulas;
+        self
     }
 
     pub(crate) fn with_detail(mut self, detail: impl Into<String>) -> Self {
@@ -156,7 +163,17 @@ impl XlsxWriteError {
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
     }
+
+    /// Returns, for [`XlsxWriteErrorCode::IncompleteCalculation`], the first 64 formula cells
+    /// whose results were unavailable, in sheet and row-major order. A cell of an array or spill
+    /// area is reported as the formula that owns the area. The slice is empty for every other code.
+    pub fn unavailable_formulas(&self) -> &[CalculationCellId] {
+        &self.unavailable_formulas
+    }
 }
+
+/// The most unavailable formulas an incomplete-calculation write error reports.
+pub(crate) const MAX_REPORTED_UNAVAILABLE_FORMULAS: usize = 64;
 
 impl fmt::Display for XlsxWriteError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

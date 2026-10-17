@@ -180,6 +180,11 @@ fn strict_and_invalidating_policies_are_transactional_and_explicit() {
         .expect("invalidating output");
     assert!(!output.report().is_complete());
     assert_eq!(output.report().invalidated_cells().len(), 1);
+    assert_eq!(
+        strict_error.unavailable_formulas(),
+        output.report().invalidated_cells(),
+        "the strict error names the formula the invalidating write clears"
+    );
     assert_eq!(output.report().diagnostics().len(), 1);
     assert_eq!(
         output.report().diagnostics()[0].code().as_str(),

@@ -40,7 +40,8 @@ def main() -> None:
     except CellRuneError as error:
         assert error.code == "validation.row_out_of_range"
         assert error.kind == "validation"
-        assert set(error.details) == {"source_code", "source_id", "detail"}
+        assert set(error.details) == {"source_code", "source_id", "detail", "cells"}
+        assert error.details["cells"] == []
     else:
         raise AssertionError("typed exception was not raised")
 

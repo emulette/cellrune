@@ -28,6 +28,7 @@ class ErrorDetails(TypedDict):
     source_code: str | None
     source_id: str | None
     detail: str | None
+    cells: list["CellReference"]
 
 
 class BlankValue(TypedDict):

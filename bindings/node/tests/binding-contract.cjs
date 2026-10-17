@@ -50,7 +50,22 @@ function assertCatalogContract() {
   }
 }
 
+async function assertIncompleteSaveNamesCells() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "B2", "=MYSTERY(1)");
+  await workbook.calculate();
+  await assert.rejects(workbook.toBytes(), (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, "xlsx.write.incomplete_calculation");
+    assert.deepEqual(error.details.cells, [
+      { sheetId: 1, sheetName: "Sheet1", address: "B2" },
+    ]);
+    return true;
+  });
+}
+
 async function main() {
+  await assertIncompleteSaveNamesCells();
   require("./function-usage.cjs")();
   await require("./compatibility.cjs")();
   assertCatalogContract();

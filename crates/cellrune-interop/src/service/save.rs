@@ -38,7 +38,8 @@ impl WorkbookSession {
             .current_calculation()
             .ok_or_else(InteropError::calculation_required)?;
         let converted_options = write_options(options, options.replace_existing);
-        let output = write_xlsx_draft_bytes(self.engine.draft(), calculation, converted_options)?;
+        let output = write_xlsx_draft_bytes(self.engine.draft(), calculation, converted_options)
+            .map_err(|error| InteropError::from_write(error, self.engine.workbook()))?;
         let report = write_report(self.engine.workbook(), output.report());
         Ok(PreparedWorkbookSave {
             output,

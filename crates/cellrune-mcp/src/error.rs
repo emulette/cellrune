@@ -1,7 +1,9 @@
 use std::error::Error;
 use std::fmt;
 
-use cellrune_interop::{ErrorDetails as InteropErrorDetails, InteropError, InteropErrorKind};
+use cellrune_interop::{
+    CellReferenceDto, ErrorDetails as InteropErrorDetails, InteropError, InteropErrorKind,
+};
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::model::{CallToolResponse, CallToolResult};
 use schemars::JsonSchema;
@@ -72,6 +74,10 @@ pub struct McpErrorDetails {
     pub result_revision: Option<u64>,
     /// Delta cursor of an installed calculation whose response could not be returned.
     pub delta_cursor: Option<u64>,
+    /// Formula cells the failure concerns, such as the first 64 formulas an
+    /// incomplete-calculation save could not write. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<CellReferenceDto>,
 }
 
 /// Stable error payload returned from a CellRune MCP tool.
@@ -374,6 +380,7 @@ impl From<InteropError> for McpError {
             source_code,
             source_id,
             detail,
+            cells,
         } = error.details().clone();
         Self {
             payload: Box::new(McpErrorPayload {
@@ -385,6 +392,7 @@ impl From<InteropError> for McpError {
                     source_code,
                     source_id,
                     detail,
+                    cells,
                     ..McpErrorDetails::default()
                 },
             }),

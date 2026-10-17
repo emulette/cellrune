@@ -28,6 +28,8 @@ export interface ErrorDetails {
   readonly sourceCode: string | null;
   readonly sourceId: string | null;
   readonly detail: string | null;
+  /** Formula cells the failure concerns, such as those an incomplete calculation could not save. */
+  readonly cells: readonly CellReference[];
 }
 
 export class CellRuneError extends Error {

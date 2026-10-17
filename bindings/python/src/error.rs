@@ -2,7 +2,9 @@ use cellrune_interop::{InteropError, InteropErrorKind};
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
+
+use crate::conversion::cell_reference;
 
 create_exception!(
     cellrune,
@@ -18,6 +20,13 @@ pub(crate) fn into_py_error(py: Python<'_>, error: InteropError) -> PyErr {
     let _ = details.set_item("source_code", error.details().source_code.as_deref());
     let _ = details.set_item("source_id", error.details().source_id.as_deref());
     let _ = details.set_item("detail", error.details().detail.as_deref());
+    let cells = PyList::empty(py);
+    for cell in &error.details().cells {
+        if let Ok(cell) = cell_reference(py, cell) {
+            let _ = cells.append(cell);
+        }
+    }
+    let _ = details.set_item("cells", cells);
     let _ = value.setattr("code", error.code());
     let _ = value.setattr("kind", error_kind(error.kind()));
     let _ = value.setattr("details", details);

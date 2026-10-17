@@ -31,6 +31,7 @@ class CellRuneError extends Error {
       sourceCode: details.sourceCode ?? null,
       sourceId: details.sourceId ?? null,
       detail: details.detail ?? null,
+      cells: details.cells ?? [],
     };
   }
 }
@@ -71,6 +72,13 @@ function convertError(error) {
           sourceCode: payload.details.source_code,
           sourceId: payload.details.source_id,
           detail: payload.details.detail,
+          cells: Array.isArray(payload.details.cells)
+            ? payload.details.cells.map((cell) => ({
+                sheetId: cell.sheet_id,
+                sheetName: cell.sheet_name,
+                address: cell.address,
+              }))
+            : [],
         });
       }
     } catch {

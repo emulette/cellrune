@@ -477,7 +477,10 @@ fn calculation_result<'py>(
     Ok(result)
 }
 
-fn cell_reference<'py>(py: Python<'py>, value: &CellReferenceDto) -> PyResult<Bound<'py, PyDict>> {
+pub(crate) fn cell_reference<'py>(
+    py: Python<'py>,
+    value: &CellReferenceDto,
+) -> PyResult<Bound<'py, PyDict>> {
     let result = PyDict::new(py);
     result.set_item("sheet_id", value.sheet_id)?;
     result.set_item("sheet_name", &value.sheet_name)?;

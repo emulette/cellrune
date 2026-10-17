@@ -5,6 +5,7 @@ use crate::{
     MaterializedResultOrigin,
 };
 
+use super::error::MAX_REPORTED_UNAVAILABLE_FORMULAS;
 use super::{RecalculationWritePolicy, WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 
 const DETAIL_INCOMPLETE_CALCULATION: &str =
@@ -64,7 +65,8 @@ impl MaterializationPlan {
                     RecalculationWritePolicy::RequireComplete => {
                         return Err(
                             XlsxWriteError::new(XlsxWriteErrorCode::IncompleteCalculation)
-                                .with_detail(DETAIL_INCOMPLETE_CALCULATION),
+                                .with_detail(DETAIL_INCOMPLETE_CALCULATION)
+                                .with_unavailable_formulas(unavailable_formulas(calculation)),
                         );
                     }
                     RecalculationWritePolicy::InvalidateUnavailable => {
@@ -141,4 +143,24 @@ fn enforce_count(name: &'static str, actual: usize, maximum: u64) -> Result<(), 
         );
     }
     Ok(())
+}
+
+/// The formulas owning materialized cells without a current value, in sheet and row-major order.
+fn unavailable_formulas(calculation: &CalculationSnapshot) -> Vec<CalculationCellId> {
+    let mut formulas = BTreeSet::new();
+    for (id, materialized) in calculation.materialized_cells() {
+        if !matches!(materialized.result(), CalculationCellResult::Unavailable(_)) {
+            continue;
+        }
+        let owner = match materialized.origin() {
+            MaterializedResultOrigin::DirectFormula => id,
+            MaterializedResultOrigin::LegacyArray { anchor, .. }
+            | MaterializedResultOrigin::DynamicSpill { anchor, .. } => anchor,
+        };
+        formulas.insert(owner);
+        if formulas.len() == MAX_REPORTED_UNAVAILABLE_FORMULAS {
+            break;
+        }
+    }
+    formulas.into_iter().collect()
 }

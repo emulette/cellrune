@@ -126,7 +126,23 @@ def recalculate_with_invalid_solver_semantics(
     )
 
 
+def assert_incomplete_save_names_cells() -> None:
+    workbook = Workbook.create()
+    workbook.set_formula("Sheet1", "B2", "=MYSTERY(1)")
+    workbook.calculate()
+    try:
+        workbook.to_bytes()
+    except CellRuneError as error:
+        assert error.code == "xlsx.write.incomplete_calculation"
+        assert error.details["cells"] == [
+            {"sheet_id": 1, "sheet_name": "Sheet1", "address": "B2"}
+        ]
+    else:
+        raise AssertionError("an incomplete save did not raise CellRuneError")
+
+
 def main() -> None:
+    assert_incomplete_save_names_cells()
     assert_function_usage()
     assert_compatibility()
     assert_catalog_contract()

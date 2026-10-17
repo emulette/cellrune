@@ -3,8 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cellrune_interop::{
     CalculationOptionsDto, CalculationResultDto, CellValueDto, INTEROP_SCHEMA_VERSION,
-    InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, RecalculationModeDto, WorkbookFingerprintDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto, function_catalog,
+    InteropError, InteropErrorKind, MAX_PAGE_SIZE, RangeRequestDto, RecalculationModeDto,
+    WorkbookFingerprintDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    function_catalog,
 };
 
 #[test]
@@ -425,6 +426,22 @@ fn capability_usage_catalog_and_incomplete_write_contracts_are_explicit() {
         .save_bytes(WriteOptionsDto::default())
         .expect_err("strict save must reject an unavailable result");
     assert_eq!(strict_error.kind(), InteropErrorKind::Write);
+    assert_eq!(strict_error.code(), "xlsx.write.incomplete_calculation");
+    let cells = &strict_error.details().cells;
+    assert_eq!(cells.len(), 1, "the error names the unavailable formula");
+    assert_eq!(cells[0].sheet_name, "Sheet1");
+    assert_eq!(cells[0].address, "A2");
+    let serialized = serde_json::to_value(&strict_error).expect("error serializes");
+    assert_eq!(serialized["details"]["cells"][0]["address"], "A2");
+    let other = session
+        .save_path("", WriteOptionsDto::default())
+        .expect_err("an incomplete save fails before the destination is checked");
+    assert_eq!(other.details().cells, *cells);
+    let unrelated = serde_json::to_value(InteropError::session_closed()).expect("serializes");
+    assert!(
+        unrelated["details"].get("cells").is_none(),
+        "errors without cells keep their 0.1.24 shape"
+    );
 
     let (_, invalidated) = session
         .save_bytes(WriteOptionsDto {
