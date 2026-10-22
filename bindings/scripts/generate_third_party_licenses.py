@@ -38,7 +38,7 @@ LICENSE_PREFIXES = ("LICENSE", "COPYING", "NOTICE", "COPYRIGHT")
 # its alternatives but does not include a license file in the published crate.
 FALLBACK_LICENSES = {
     "napi": (
-        "2763e12efc855748485129952a6ccb97ac991c06",
+        "d9cb526c15e63ba30e06b4d169068c9854180595",
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-derive": (
@@ -50,7 +50,7 @@ FALLBACK_LICENSES = {
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-sys": (
-        "37109f133043aff379a38edfb8b1548e7e9309e5",
+        "d9cb526c15e63ba30e06b4d169068c9854180595",
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "r-efi": (

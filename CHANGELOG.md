@@ -44,6 +44,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   proceeds instead of failing with `session.incremental_unsafe`. Workbooks with uncertain dynamic
   references still recalculate in full when such a formula is dirty, and any other option change
   still recalculates in full. Results are unchanged.
+- The Node binding requires `napi` 3.15.0 and `napi-build` 2.6.0 or later. `napi-derive-backend`
+  6.1.6 generates calls to `napi::bindgen_prelude::defer_native_borrow_scope`, which `napi` 3.15.0
+  added, and `napi` 3.15.0 builds with `napi-build` 2.6.0, so a freshly resolved graph with the
+  earlier floors no longer compiled.
 
 ### Fixed
 
