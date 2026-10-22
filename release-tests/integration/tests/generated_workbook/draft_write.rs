@@ -2,9 +2,10 @@ use cellrune::{
     CalculationCellId, CalculationCellResult, CalculationHints, CalculationMode,
     CalculationOptions, CellAddress, CellContent, CellRange, CellValue, DefinedName,
     DefinedNameScope, ExcelError, FiniteNumber, FormulaMetadata, FormulaText, NumberFormat,
-    NumberFormatKind, RecalculationWriteOptions, SavedResult, SheetName, SheetVisibility,
-    WorkbookDraft, WriteOptions, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
-    write_recalculated_xlsx_bytes, write_xlsx_draft_bytes, write_xlsx_draft_path,
+    NumberFormatKind, RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetName,
+    SheetVisibility, WorkbookDraft, WriteOptions, XlsxWriteErrorCode, calculate_workbook,
+    open_xlsx_document_bytes, write_recalculated_xlsx_bytes, write_xlsx_draft_bytes,
+    write_xlsx_draft_path,
 };
 
 use sha2::{Digest, Sha256};
@@ -364,6 +365,58 @@ fn authored_formulas_are_saved_with_excel_storage_prefixes() {
         Some("_xlfn.LET(_xlpm.x,2,_xlfn.XLOOKUP(_xlpm.x,A1:A3,B1:B3))&_xlfn.CONCAT(\"a\",\"b\")")
     );
     assert_eq!(results(reopened.workbook(), sheet_id), expected);
+}
+
+#[test]
+fn authored_functions_without_a_calculation_are_saved_with_the_future_function_prefix() {
+    const FORMULAS: [(&str, &str, &str); 5] = [
+        ("A1", "=IMAGE(B1)", "_xlfn.IMAGE(B1)"),
+        ("A2", "=STOCKHISTORY(B1,B2)", "_xlfn.STOCKHISTORY(B1,B2)"),
+        ("A3", "=TRANSLATE(B1,B2,B3)", "_xlfn.TRANSLATE(B1,B2,B3)"),
+        ("A4", "=detectLanguage(B1)", "_xlfn.detectLanguage(B1)"),
+        ("A5", "=FIELDVALUE(B1,B2)", "_xlfn.FIELDVALUE(B1,B2)"),
+    ];
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, authored, _) in FORMULAS {
+        draft
+            .set_cell_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("formula address"),
+                FormulaText::from_user_input(authored).expect("user formula"),
+            )
+            .expect("formula cell");
+    }
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        RecalculationWriteOptions::default()
+            .with_policy(RecalculationWritePolicy::InvalidateUnavailable),
+    )
+    .expect("write authored formulas");
+    let sheet_xml = support::part_text(output.bytes(), "xl/worksheets/sheet1.xml");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), cellrune::OpenOptions::default()).expect("reopen");
+    for (address, _, stored) in FORMULAS {
+        assert!(
+            sheet_xml.contains(&format!("<f>{stored}</f>")),
+            "{stored} missing from {sheet_xml}"
+        );
+        assert_eq!(
+            support::formula_at(&reopened, "Sheet1", address)
+                .text()
+                .map(FormulaText::as_str),
+            Some(stored)
+        );
+    }
+    // The prefixed formulas read back as the functions that were authored.
+    assert_eq!(
+        calculate_workbook(reopened.workbook(), CalculationOptions::default())
+            .cells()
+            .collect::<Vec<_>>(),
+        calculation.cells().collect::<Vec<_>>()
+    );
 }
 
 #[test]

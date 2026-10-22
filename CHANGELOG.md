@@ -48,6 +48,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   `Orders[unit_price]` and `Orders[a@b]`, instead of `Orders[[unit_price]]` and `Orders[[a'@b]]`; a
   leading `@` keeps its escape. As in Excel, a selector list still needs the name bracketed, as in
   `Orders[[#This Row],[unit_price]]`.
+- Formulas authored with `IMAGE`, `STOCKHISTORY`, `TRANSLATE`, `DETECTLANGUAGE`, or `FIELDVALUE`
+  gain the `_xlfn.` prefix Excel stores, so Excel no longer reports `#NAME?` when it recalculates
+  them. Such a formula reads back as `_xlfn.IMAGE(...)`, and its unsupported-function detail is
+  `_XLFN.IMAGE`, as for `AGGREGATE`.
 
 ## [0.1.25] - 2026-10-18
 

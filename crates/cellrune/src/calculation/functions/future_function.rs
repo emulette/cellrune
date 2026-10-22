@@ -3,11 +3,11 @@
 //! Excel saves functions introduced after the Excel 2007 file format as `_xlfn.NAME`, and FILTER
 //! and SORT as `_xlfn._xlws.NAME`. A bare spelling loads as an unknown user-defined function and
 //! becomes `#NAME?` once Excel recalculates. Every name below was saved with its prefix by Excel
-//! 2021 and Excel for the web. ISO.CEILING, NETWORKDAYS.INTL, and WORKDAY.INTL are absent because
-//! Excel saves them bare. The list includes functions the catalog cannot calculate, since formulas
-//! that use them are still written.
+//! 2021, Excel for the web, or Excel for Mac. ISO.CEILING, NETWORKDAYS.INTL, and WORKDAY.INTL are
+//! absent because Excel saves them bare. The list includes functions the catalog cannot calculate,
+//! since formulas that use them are still written.
 
-const FUTURE_FUNCTIONS: [&str; 153] = [
+const FUTURE_FUNCTIONS: [&str; 158] = [
     "ACOT",
     "ACOTH",
     "AGGREGATE",
@@ -47,6 +47,7 @@ const FUTURE_FUNCTIONS: [&str; 153] = [
     "CSCH",
     "DAYS",
     "DECIMAL",
+    "DETECTLANGUAGE",
     "DROP",
     "ERF.PRECISE",
     "ERFC.PRECISE",
@@ -57,6 +58,7 @@ const FUTURE_FUNCTIONS: [&str; 153] = [
     "F.INV",
     "F.INV.RT",
     "F.TEST",
+    "FIELDVALUE",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
     "FORECAST.ETS",
@@ -75,6 +77,7 @@ const FUTURE_FUNCTIONS: [&str; 153] = [
     "HYPGEOM.DIST",
     "IFNA",
     "IFS",
+    "IMAGE",
     "IMCOSH",
     "IMCOT",
     "IMCSC",
@@ -132,6 +135,7 @@ const FUTURE_FUNCTIONS: [&str; 153] = [
     "SORTBY",
     "STDEV.P",
     "STDEV.S",
+    "STOCKHISTORY",
     "SWITCH",
     "T.DIST",
     "T.DIST.2T",
@@ -146,6 +150,7 @@ const FUTURE_FUNCTIONS: [&str; 153] = [
     "TEXTSPLIT",
     "TOCOL",
     "TOROW",
+    "TRANSLATE",
     "TRIMRANGE",
     "UNICHAR",
     "UNICODE",
@@ -183,15 +188,18 @@ mod tests {
     use crate::calculation::functions::descriptor;
 
     // Future functions Excel saved with `_xlfn.` that the catalog does not calculate yet.
-    const OUTSIDE_CATALOG: [&str; 18] = [
+    const OUTSIDE_CATALOG: [&str; 23] = [
         "AGGREGATE",
         "CHISQ.INV",
         "CHISQ.INV.RT",
         "CHISQ.TEST",
+        "DETECTLANGUAGE",
+        "FIELDVALUE",
         "FORECAST.ETS",
         "FORECAST.ETS.CONFINT",
         "FORECAST.ETS.SEASONALITY",
         "FORECAST.ETS.STAT",
+        "IMAGE",
         "IMCOSH",
         "IMCOT",
         "IMCSC",
@@ -202,6 +210,8 @@ mod tests {
         "IMTAN",
         "MODE.MULT",
         "SKEW.P",
+        "STOCKHISTORY",
+        "TRANSLATE",
     ];
 
     #[test]
