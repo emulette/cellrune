@@ -126,6 +126,12 @@ async function assertLimits() {
     [{ maxArrayCells: 100n }, "interop.limit.payload_invalid"],
     [{ maxArrayCells: Number.NaN }, "interop.limit.payload_invalid"],
     [{ maxArrayCells: Number.POSITIVE_INFINITY }, "interop.limit.payload_invalid"],
+    [{ max_array_cells: 100 }, "interop.limit.payload_invalid"],
+    [[100], "interop.limit.payload_invalid"],
+    ["100", "interop.limit.payload_invalid"],
+    [new Map([["maxArrayCells", 100]]), "interop.limit.payload_invalid"],
+    [new Date(0), "interop.limit.payload_invalid"],
+    [new (class Limits { maxArrayCells = 100; })(), "interop.limit.payload_invalid"],
     [{ maxArrayCells: 0 }, "interop.limit.invalid"],
   ]) {
     await assert.rejects(workbook.calculate({ calculationLimits: limits }), (error) => {
@@ -134,6 +140,31 @@ async function assertLimits() {
       assert.equal(error.kind, "input");
       return true;
     });
+  }
+  const revision = workbook.summary().semanticRevision;
+  const changes = [
+    { kind: "setValue", sheet: "Sheet1", address: "B1", value: { kind: "number", value: 1 } },
+  ];
+  const preview = await workbook.previewChanges(revision, changes, {
+    calculationLimits: { maxArrayCells: 1000 },
+  });
+  assert.equal(preview.report.calculationOptions.limits.maxArrayCells, 1000);
+  workbook.discardPreview(preview.previewId);
+  for (const [limits, code] of [
+    [{ maxArayCells: 100 }, "interop.limit.payload_invalid"],
+    [{ maxArrayCells: -1 }, "interop.limit.payload_invalid"],
+    [{ max_array_cells: 100 }, "interop.limit.payload_invalid"],
+    [[100], "interop.limit.payload_invalid"],
+    [{ maxArrayCells: 0 }, "interop.limit.invalid"],
+  ]) {
+    await assert.rejects(
+      workbook.previewChanges(revision, changes, { calculationLimits: limits }),
+      (error) => {
+        assert.ok(error instanceof CellRuneError);
+        assert.equal(error.code, code, JSON.stringify(limits));
+        return true;
+      },
+    );
   }
 
   const source = Workbook.create();
@@ -148,14 +179,18 @@ async function assertLimits() {
       return true;
     },
   );
-  await assert.rejects(
-    Workbook.fromBytes(bytes, { readLimits: { maxEntries: 100n } }),
-    (error) => {
+  for (const readLimits of [
+    { maxEntries: 100n },
+    { max_entries: 1 },
+    [1],
+    new Map([["maxEntries", 1]]),
+  ]) {
+    await assert.rejects(Workbook.fromBytes(bytes, { readLimits }), (error) => {
       assert.ok(error instanceof CellRuneError);
       assert.equal(error.code, "interop.limit.payload_invalid");
       return true;
-    },
-  );
+    });
+  }
   await Workbook.fromBytes(bytes, {
     readLimits: { maxEntryUncompressedBytes: 1 << 20 },
   });

@@ -35,7 +35,6 @@ const {
   parsePreviewJson,
 } = require("./lib/normalization.js");
 const {
-  limitObject,
   limitsJson,
   requireFinite,
   requireNonNegativeInteger,
@@ -249,9 +248,8 @@ class Workbook {
           arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
           financial_solver_semantics:
             options.financialSolverSemantics ?? "excel_iteration_budget",
-          calculation_limits:
-            limitObject(options.calculationLimits, "calculationLimits") ?? {},
         }),
+        limitsJson(options.calculationLimits, "calculationLimits"),
       ),
     );
     return normalizePreviewChanges(parsePreviewJson(await withErrors(task)));

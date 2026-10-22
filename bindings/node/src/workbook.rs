@@ -176,18 +176,21 @@ impl NativeWorkbook {
         expected_revision: String,
         batch_json: String,
         options_json: String,
+        limits_json: Option<String>,
     ) -> napi::Result<AsyncTask<PreviewTask>> {
         let expected_revision = parse_u64(&expected_revision)?;
         let batch = serde_json::from_str::<EditBatchV2Dto>(&batch_json)
             .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
         let options = serde_json::from_str::<PreviewOptionsInput>(&options_json)
             .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
+        let calculation_limits =
+            limit_options::<CalculationLimitOptionsDto>(limits_json.as_deref())?;
         Ok(AsyncTask::new(PreviewTask {
             session: Arc::clone(&self.session),
             expected_revision,
             batch,
             mode: options.mode,
-            options: options.calculation_options(),
+            options: options.calculation_options(calculation_limits),
         }))
     }
 
@@ -406,18 +409,19 @@ struct PreviewOptionsInput {
     arithmetic_semantics: ArithmeticSemanticsDto,
     #[serde(default)]
     financial_solver_semantics: FinancialSolverSemanticsDto,
-    #[serde(default)]
-    calculation_limits: CalculationLimitOptionsDto,
 }
 
 impl PreviewOptionsInput {
-    const fn calculation_options(&self) -> CalculationOptionsDto {
+    const fn calculation_options(
+        &self,
+        calculation_limits: CalculationLimitOptionsDto,
+    ) -> CalculationOptionsDto {
         CalculationOptionsDto {
             today_serial: self.today_serial,
             now_serial: self.now_serial,
             arithmetic_semantics: self.arithmetic_semantics,
             financial_solver_semantics: self.financial_solver_semantics,
-            calculation_limits: self.calculation_limits,
+            calculation_limits,
         }
     }
 }

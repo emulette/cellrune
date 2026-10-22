@@ -20,7 +20,7 @@ export declare class NativeWorkbook {
   functionUsage(): NativeFunctionUsageReport
   calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationReport>
   recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationDelta>
-  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string): Promise<string>
+  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string, limitsJson?: string | undefined | null): Promise<string>
   previewChangesPage(previewId: string, section: string, cursorJson: string | undefined | null, limit: number): string
   commitPreview(previewId: string): string
   discardPreview(previewId: string): void

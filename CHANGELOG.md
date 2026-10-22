@@ -36,6 +36,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Python `read_limits` and `calculation_limits` fail with `interop.limit.payload_invalid` when given
   a list, tuple, or other object that is not a `dict`, which set limits by position, or a limit
   whose value is `None`, which kept its default.
+- Node.js `previewChanges` reports an invalid `calculationLimits` with
+  `interop.limit.payload_invalid` instead of `interop.change.payload_invalid`. `readLimits` and
+  `calculationLimits` that are not plain objects fail with `interop.limit.payload_invalid` instead
+  of `interop.input.invalid` or being read as no limits, and a snake_case limit name such as
+  `max_sheets`, which was applied, fails as an unknown name.
 
 ## [0.1.25] - 2026-10-18
 

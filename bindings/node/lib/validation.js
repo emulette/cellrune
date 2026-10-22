@@ -86,21 +86,29 @@ function requireOptionKeys(value, allowedKeys) {
 
 /**
  * Converts a camelCase limit object to the snake_case object native code reads, or returns
- * undefined when no limits were given. Values JSON cannot carry unchanged, such as bigints and
- * non-finite numbers, fail here; native code rejects unknown names and values that are not
- * positive integers.
+ * undefined when no limits were given. A value that is not a plain object, a snake_case name,
+ * which native code would read as that limit, and values JSON cannot carry unchanged, such as
+ * bigints and non-finite numbers, fail here; native code rejects unknown names and values that
+ * are not positive integers.
  */
 function limitObject(value, name) {
   if (value === undefined || value === null) {
     return undefined;
   }
   if (typeof value !== "object" || Array.isArray(value)) {
-    throw inputError(`${name} must be an object`);
+    throw limitPayloadError(`${name} must be an object`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw limitPayloadError(`${name} must be a plain object`);
   }
   const converted = {};
   for (const [key, limit] of Object.entries(value)) {
     if (limit === undefined) {
       continue;
+    }
+    if (key.includes("_")) {
+      throw limitPayloadError(`${name}.${key} is not a limit name`);
     }
     if (typeof limit !== "number" || !Number.isFinite(limit)) {
       throw limitPayloadError(`${name}.${key} must be a finite number`);
@@ -116,7 +124,6 @@ function limitsJson(value, name) {
 }
 
 module.exports = {
-  limitObject,
   limitsJson,
   requireFinite,
   requireNonNegativeInteger,
