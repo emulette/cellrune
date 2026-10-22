@@ -197,9 +197,10 @@ fn parse_number(value: &str, budget: &XmlBudget) -> Result<CellValue, XlsxReadEr
 /// Reads an ISO 8601 date cell (`t="d"`) as a serial in the workbook's date system.
 ///
 /// Accepts `YYYY-MM-DD`, `YYYY-MM-DDThh:mm[:ss[.fff]]`, and `hh:mm[:ss[.fff]]`, each optionally
-/// followed by the UTC designator `Z`, which spreadsheet serials have no zone to apply to. As in
-/// Excel, `24:00[:00]` is the end of the day, 1900-02-29 exists, and a date before the first day of
-/// the date system reads as `#VALUE!`.
+/// followed by the UTC designator `Z`, which spreadsheet serials have no zone to apply to, and
+/// surrounded by ASCII whitespace. As in Excel, `24:00[:00]` is the end of the day, the end of
+/// 9999-12-31 reads as 0, 1900-02-29 exists, and a date before the first day of the date system
+/// reads as `#VALUE!`.
 fn parse_iso_date(
     value: &str,
     date_system: DateSystem,
@@ -210,7 +211,7 @@ fn parse_iso_date(
             .error(XlsxErrorCode::InvalidCellValue)
             .with_detail(value.to_owned())
     };
-    let trimmed = value.trim();
+    let trimmed = value.trim_ascii();
     let unzoned = trimmed.strip_suffix('Z').unwrap_or(trimmed);
     let (date, time) = match unzoned.split_once('T') {
         Some((date, time)) => (Some(date), Some(time)),
@@ -220,20 +221,22 @@ fn parse_iso_date(
     let date = date
         .map(|date| parse_iso_calendar_date(date).ok_or_else(invalid))
         .transpose()?;
-    let fraction = match time {
+    let (fraction, end_of_day) = match time {
         Some(time) => parse_iso_time_fraction(time).ok_or_else(invalid)?,
-        None => 0.0,
+        None => (0.0, false),
     };
-    let days = match date {
+    let serial = match date {
+        // The end of 9999-12-31 lies past the last serial; Excel reads it as 0 in either system.
+        Some((9_999, 12, 31)) if end_of_day => 0.0,
         Some((year, month, day)) => {
             match serial_from_calendar_date(year, month, day, date_system) {
-                Some(days) => days,
+                Some(days) => days + fraction,
                 None => return Ok(CellValue::Error(ExcelError::Value)),
             }
         }
-        None => 0.0,
+        None => fraction,
     };
-    CellValue::number(days + fraction).map_err(|error| invalid().with_cause(error))
+    CellValue::number(serial).map_err(|error| invalid().with_cause(error))
 }
 
 fn parse_iso_calendar_date(value: &str) -> Option<(i32, u32, u32)> {
@@ -244,7 +247,9 @@ fn parse_iso_calendar_date(value: &str) -> Option<(i32, u32, u32)> {
     (parts.next().is_none() && calendar_date_exists(year, month, day)).then_some((year, month, day))
 }
 
-fn parse_iso_time_fraction(value: &str) -> Option<f64> {
+/// Returns the day fraction of `hh:mm[:ss[.fff]]` and whether the value is the `24:00[:00]` end of
+/// the day.
+fn parse_iso_time_fraction(value: &str) -> Option<(f64, bool)> {
     let (clock, fraction) = match value.split_once('.') {
         Some((clock, fraction)) => (clock, Some(fraction)),
         None => (value, None),
@@ -268,7 +273,7 @@ fn parse_iso_time_fraction(value: &str) -> Option<f64> {
         None => 0.0,
     };
     let seconds = f64::from(hours * 3_600 + minutes * 60 + seconds) + fraction;
-    Some(seconds / SECONDS_PER_DAY)
+    Some((seconds / SECONDS_PER_DAY, end_of_day))
 }
 
 fn fixed_digits(value: &str, width: usize) -> Option<u32> {

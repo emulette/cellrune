@@ -255,7 +255,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - A cell typed `t="d"` holds an ISO 8601 date (`YYYY-MM-DD`), date-time
   (`YYYY-MM-DDThh:mm[:ss[.fff]]`), or time (`hh:mm[:ss[.fff]]`), optionally
   followed by `Z`, and reads as a serial number in the workbook's date system.
-  As in Excel, `24:00[:00]` ends the day, 1900-02-29 exists, and a date before
+  Surrounding ASCII whitespace is ignored. As in Excel, `24:00[:00]` ends the
+  day, `9999-12-31T24:00` reads as 0, 1900-02-29 exists, and a date before
   the date system's first day (1900-01-01 or 1904-01-01) reads as `#VALUE!`;
   any other value fails with `InvalidCellValue`. A cached formula result of that
   type reads the same way. Once a draft changes the date system, saving it writes

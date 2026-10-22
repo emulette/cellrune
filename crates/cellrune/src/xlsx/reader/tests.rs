@@ -220,7 +220,44 @@ fn iso_date_cells_read_the_end_of_day_and_dates_outside_the_date_system_as_excel
             "1899-12-31T12:00:00",
             Ok(CellValue::Error(crate::ExcelError::Value)),
         ),
+        (
+            excel_1900.as_str(),
+            "1899-12-31T24:00",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+        (
+            excel_1900.as_str(),
+            "9999-12-30T24:00",
+            CellValue::number(2_958_465.0),
+        ),
+        (
+            excel_1900.as_str(),
+            "9999-12-31T24:00",
+            CellValue::number(0.0),
+        ),
+        (
+            excel_1900.as_str(),
+            "9999-12-31T24:00:00",
+            CellValue::number(0.0),
+        ),
+        // Rounds to the end of the day without being `24:00`, so it keeps the following serial.
+        (
+            excel_1900.as_str(),
+            "9999-12-31T23:59:59.999999999999",
+            CellValue::number(2_958_466.0),
+        ),
+        (
+            excel_1900.as_str(),
+            " 2024-03-15T12:00 ",
+            CellValue::number(45_366.5),
+        ),
         (WORKBOOK, "1904-01-01T00:00:00", CellValue::number(0.0)),
+        (
+            WORKBOOK,
+            "1903-12-31T24:00",
+            Ok(CellValue::Error(crate::ExcelError::Value)),
+        ),
+        (WORKBOOK, "9999-12-31T24:00", CellValue::number(0.0)),
         (
             WORKBOOK,
             "1903-12-31T23:00:00",
@@ -394,6 +431,11 @@ fn iso_date_cells_that_are_not_iso_8601_dates_are_rejected() {
         "2024-03-15t08:00:00z",
         "08:00.5",
         "1899-12-32",
+        "10000-01-01T00:00",
+        "\u{a0}2024-03-15T08:00:00",
+        "2024-03-15T08:00:00\u{a0}",
+        "\u{3000}2024-03-15",
+        "2024-03-15\u{3000}",
         "",
     ] {
         let sheet = ISO_DATE_SHEET.replacen("2024-03-15T08:00:00", value, 1);

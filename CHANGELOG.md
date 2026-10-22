@@ -52,6 +52,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   gain the `_xlfn.` prefix Excel stores, so Excel no longer reports `#NAME?` when it recalculates
   them. Such a formula reads back as `_xlfn.IMAGE(...)`, and its unsupported-function detail is
   `_XLFN.IMAGE`, as for `AGGREGATE`.
+- A `t="d"` cell holding `9999-12-31T24:00` or `9999-12-31T24:00:00` reads as 0 in either date
+  system, as in Excel, instead of 2958466 (1900) or 2957004 (1904). A `t="d"` value wrapped in a
+  non-ASCII space such as U+00A0 or U+3000, which Excel offers to repair and 0.1.25 accepted, fails
+  the read with `xlsx.invalid_cell_value`; surrounding ASCII spaces are still ignored.
 
 ## [0.1.25] - 2026-10-18
 
