@@ -199,17 +199,43 @@ async function assertLimits() {
   });
 }
 
-async function assertExactSerials() {
+async function assertExactNumbers() {
+  // Both have 17 significant digits; a JSON parser without correct rounding reads them one
+  // ULP away.
   const serial = 45158.311281307004;
+  const number = 1234.5678901234567;
   const workbook = Workbook.create();
   workbook.setFormula("Sheet1", "A1", "=NOW()");
   workbook.setFormula("Sheet1", "A2", "=TODAY()");
   const read = () =>
     workbook.readRange("Sheet1", "A1", "A2").cells.map((cell) => cell.calculated.value.value);
+  const targeted = await workbook.calculateTargets(
+    [{ sheet: "Sheet1", start: "A1", end: "A2" }],
+    { nowSerial: serial, todaySerial: serial },
+  );
+  assert.deepEqual(targeted.cells.map((cell) => cell.result.value.value), [serial, serial]);
   await workbook.calculate({ nowSerial: serial, todaySerial: serial });
   assert.deepEqual(read(), [serial, serial]);
   await workbook.recalculate({ mode: "full", nowSerial: serial, todaySerial: serial });
   assert.deepEqual(read(), [serial, serial]);
+
+  const setNumber = (address) => [
+    { kind: "setValue", sheet: "Sheet1", address, value: { kind: "number", value: number } },
+  ];
+  const preview = await workbook.previewChanges(
+    workbook.summary().semanticRevision,
+    setNumber("B1"),
+    { mode: "full", nowSerial: serial, todaySerial: serial },
+  );
+  assert.equal(preview.report.calculationOptions.nowSerial, serial);
+  workbook.commitPreview(preview.previewId);
+  assert.deepEqual(read(), [serial, serial]);
+  workbook.applyChanges(workbook.summary().semanticRevision, setNumber("B2"));
+  workbook.applyChangesV2(workbook.summary().semanticRevision, setNumber("B3"));
+  assert.deepEqual(
+    workbook.readRange("Sheet1", "B1", "B3").cells.map((cell) => cell.sourceValue.value),
+    [number, number, number],
+  );
 }
 
 async function assertRandomSeed() {
@@ -330,7 +356,7 @@ async function main() {
   await require("./compatibility.cjs")();
   assertCatalogContract();
   await assertPreviewContract();
-  await assertExactSerials();
+  await assertExactNumbers();
   await assertRandomSeed();
   await assertVolatileInputRecalculation();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");

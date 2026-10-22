@@ -1066,6 +1066,79 @@ fn random_seed_is_a_stdio_calculation_argument() {
 }
 
 #[test]
+fn stdio_numbers_reach_the_workbook_exactly() {
+    // Both have 17 significant digits; a JSON parser without correct rounding reads them one
+    // ULP away.
+    let serial = 45_158.311_281_307_004;
+    let number = 1_234.567_890_123_456_7;
+    let root = TestDirectory::new("exact-numbers");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A1",
+                    "formula": "=NOW()",
+                    "dynamic_range": null
+                },
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A2",
+                    "formula": "=TODAY()",
+                    "dynamic_range": null
+                },
+                {
+                    "kind": "set_value",
+                    "sheet": "Sheet1",
+                    "address": "B1",
+                    "value": {"kind": "number", "value": number}
+                }
+            ]
+        }),
+    ));
+
+    let targeted = successful_tool(mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id": session_id,
+            "targets": [{"sheet": "Sheet1", "start": "A1", "end": "A2"}],
+            "options": {"now_serial": serial, "today_serial": serial}
+        }),
+    ));
+    assert_eq!(
+        targeted["cells"]
+            .as_array()
+            .expect("targeted cells")
+            .iter()
+            .map(|cell| cell["result"]["value"]["value"].as_f64())
+            .collect::<Vec<_>>(),
+        [Some(serial), Some(serial)]
+    );
+    let range = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({"session_id": session_id, "sheet": "Sheet1", "start": "B1", "end": "B1"}),
+    ));
+    assert_eq!(
+        range["cells"][0]["source_value"]["value"].as_f64(),
+        Some(number)
+    );
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
 fn response_limit_failures_do_not_commit_session_edit_or_file_state() {
     let root = TestDirectory::new("response-limit");
     let mut mcp = McpProcess::start(&root.path, &["--max-response-bytes", "1024"]);

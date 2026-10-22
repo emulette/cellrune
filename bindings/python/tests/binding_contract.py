@@ -172,6 +172,46 @@ def assert_random_seed() -> None:
         )
 
 
+def assert_exact_numbers() -> None:
+    # Both have 17 significant digits; a JSON parser without correct rounding reads them one
+    # ULP away.
+    serial = 45158.311281307004
+    number = 1234.5678901234567
+    workbook = Workbook.create()
+    workbook.set_formula("Sheet1", "A1", "=NOW()")
+    workbook.set_formula("Sheet1", "A2", "=TODAY()")
+    targeted = workbook.calculate_targets(
+        [{"sheet": "Sheet1", "start": "A1", "end": "A2"}],
+        now_serial=serial,
+        today_serial=serial,
+    )
+    assert [cell["result"]["value"]["value"] for cell in targeted["cells"]] == [
+        serial,
+        serial,
+    ]
+
+    def set_number(address: str) -> list[dict[str, object]]:
+        return [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": address,
+                "value": {"kind": "number", "value": number},
+            }
+        ]
+
+    preview = workbook.preview_changes(
+        workbook.summary()["semantic_revision"], set_number("B1")
+    )
+    workbook.commit_preview(preview["preview_id"])
+    workbook.apply_changes(workbook.summary()["semantic_revision"], set_number("B2"))
+    workbook.apply_changes_v2(workbook.summary()["semantic_revision"], set_number("B3"))
+    assert [
+        cell["source_value"]["value"]
+        for cell in workbook.read_range("Sheet1", "B1", "B3")["cells"]
+    ] == [number, number, number]
+
+
 def assert_volatile_input_recalculation() -> None:
     workbook = Workbook.create()
     workbook.set_number("Sheet1", "A1", 1.0)
@@ -339,6 +379,7 @@ def main() -> None:
     assert_catalog_contract()
     assert_preview_contract()
     assert_random_seed()
+    assert_exact_numbers()
     assert_volatile_input_recalculation()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(

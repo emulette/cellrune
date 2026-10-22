@@ -51,7 +51,9 @@ rmcp = { version = ">=3.0.1, <4", default-features = false, features = [
 ] }
 schemars = "1.0.0"
 serde = { version = "1.0.194", features = ["derive"] }
-serde_json = "1.0.127"
+# Node.js, Python, and MCP read user numbers from JSON; without `float_roundtrip` a number with
+# 16 or 17 significant digits can parse one ULP away from the value the caller wrote.
+serde_json = { version = "1.0.127", features = ["float_roundtrip"] }
 # 0.10.0 is yanked, so 0.10.1 is the lowest version this range can actually resolve — a floor
 # below it would claim a configuration no suite (and no dependent) can ever build.
 sha2 = { version = ">=0.10.1, <0.12", default-features = false }

@@ -95,6 +95,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   is a list, tuple, or other object that is not a `dict`, and MCP `workbook_calculate_targets`
   rejects a `limits` array as invalid arguments, as both already did for a string or number. Both
   set target limits by position, so `[1]` set `max_targets` and `[]` passed.
+- Node.js `calculateTargets`, `previewChanges`, `applyChanges`, and `applyChangesV2`, Python
+  `calculate_targets`, `preview_changes`, `apply_changes`, and `apply_changes_v2`, and MCP tools
+  read `TODAY()` and `NOW()` serials and numeric cell values exactly, instead of up to one ULP away
+  when the number has 16 or 17 significant digits, such as a `NOW()` serial of 45158.311281307004
+  calculated as 45158.31128130701.
 
 ## [0.1.25] - 2026-10-18
 
