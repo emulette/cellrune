@@ -7,7 +7,7 @@
 //! absent because Excel saves them bare. The list includes functions the catalog cannot calculate,
 //! since formulas that use them are still written.
 
-const FUTURE_FUNCTIONS: [&str; 158] = [
+const FUTURE_FUNCTIONS: [&str; 159] = [
     "ACOT",
     "ACOTH",
     "AGGREGATE",
@@ -118,6 +118,7 @@ const FUTURE_FUNCTIONS: [&str; 158] = [
     "POISSON.DIST",
     "QUARTILE.EXC",
     "QUARTILE.INC",
+    "RANDARRAY",
     "RANK.AVG",
     "RANK.EQ",
     "REDUCE",

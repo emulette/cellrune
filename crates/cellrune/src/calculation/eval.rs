@@ -9,6 +9,7 @@ use super::functions::LookupIndexCache;
 use super::graph::{DependencyGraph, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
+use super::random::{RandomDraws, RandomPath};
 use super::runtime::{CellId, Rect};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
 use super::syntax::ParsedFormula;
@@ -732,6 +733,7 @@ pub(super) struct EvalContext<'scope> {
     budget: &'scope EvaluationBudget,
     cancelled: &'scope dyn Fn() -> bool,
     charge_reference_work: bool,
+    random: RandomPath,
 }
 
 #[cfg(test)]
@@ -749,6 +751,7 @@ impl<'scope> EvalContext<'scope> {
             budget,
             cancelled: &never_cancelled,
             charge_reference_work: true,
+            random: RandomPath::ROOT,
         }
     }
 
@@ -764,6 +767,7 @@ impl<'scope> EvalContext<'scope> {
             budget,
             cancelled,
             charge_reference_work: true,
+            random: RandomPath::ROOT,
         }
     }
 
@@ -805,6 +809,7 @@ impl<'scope> EvalContext<'scope> {
             budget: self.budget,
             cancelled: self.cancelled,
             charge_reference_work: self.charge_reference_work,
+            random: self.random,
         }
     }
 
@@ -838,6 +843,49 @@ impl<'scope> EvalContext<'scope> {
 
     pub(super) const fn charges_reference_work(self) -> bool {
         self.charge_reference_work
+    }
+
+    /// Records evaluation stepping into `expr` on the path random draws are keyed by.
+    ///
+    /// Every function that dispatches on an expression's shape enters it first, so an operand
+    /// reached through any of them sits at the same path.
+    pub(super) fn enter(self, expr: &Expr) -> Self {
+        Self {
+            random: self.random.enter(expr),
+            ..self
+        }
+    }
+
+    /// Points operand positions at the prepared copy of a call's arguments.
+    pub(super) fn with_arguments(self, args: &[Expr]) -> Self {
+        Self {
+            random: self.random.with_arguments(args),
+            ..self
+        }
+    }
+
+    /// Records the index at which a LAMBDA helper calls its function.
+    pub(super) fn at_iteration(self, index: u64) -> Self {
+        Self {
+            random: self.random.iteration(index),
+            ..self
+        }
+    }
+
+    /// Records the group a grouped aggregation call summarizes.
+    pub(super) fn at_group(self, column: u32, members: &[u32]) -> Self {
+        Self {
+            random: self.random.group(column, members),
+            ..self
+        }
+    }
+
+    /// Records entry into the body of an invoked LAMBDA.
+    pub(super) fn in_lambda_body(self) -> Self {
+        Self {
+            random: self.random.lambda_body(),
+            ..self
+        }
     }
 
     pub(super) fn enter_lambda(
@@ -1086,6 +1134,17 @@ impl<'workbook> Engine<'workbook> {
 
     pub fn now_serial(&self) -> Option<f64> {
         self.options.now_serial().map(FiniteNumber::get)
+    }
+
+    /// Returns the draws of the random call at `context`, or `None` without a seed.
+    pub(super) fn random_draws(&self, context: EvalContext<'_>) -> Option<RandomDraws> {
+        let seed = self.options.random_seed()?;
+        let sheet = self.workbook.sheets().get(context.sheet())?.id().get();
+        Some(
+            context
+                .random
+                .draws(seed, sheet, context.row(), context.column()),
+        )
     }
 
     pub(super) fn parsed_expr(&self, cell: CellId) -> Option<&Expr> {

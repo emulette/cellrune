@@ -44,9 +44,9 @@ XLSX file's own saved results. Calculation attempts every formula and returns
 either a typed `CalculationCellResult::Value` or a structured
 `CalculationCellResult::Unavailable` issue for each one. Independent formulas
 still produce values when another formula is unavailable. Volatile functions
-`TODAY()` and `NOW()` require explicit deterministic inputs through
-`CalculationOptions`, or the formula reports `VolatileInputMissing` instead
-of guessing.
+`TODAY()`, `NOW()`, `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` require
+explicit deterministic inputs through `CalculationOptions`, or the formula
+reports `VolatileInputMissing` instead of guessing.
 
 For round-trip work, `open_xlsx_document_*` retains the exact input archive,
 readable through `input_bytes()`, and binds it to a SHA-256 `InputHash`.
@@ -188,7 +188,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `ReadOptions::new`, `WriteOptions::new`,
   `RecalculationWriteOptions::new`,
   `CalculationOptions::with_today_serial`,
-  `CalculationOptions::with_now_serial`, and
+  `CalculationOptions::with_now_serial`,
+  `CalculationOptions::with_random_seed`, and
   `CalculationOptions::with_limits` return `Self` directly.
 - **Getters are bare nouns, never `get_`-prefixed,** and are frequently
   `const fn` (`.code()`, `.severity()`, `.limits()`,
@@ -669,6 +670,21 @@ than guessing a name from a different XLSX crate (`calamine`,
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
+- The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
+  `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
+  `[0, 1)`. `RANDBETWEEN(bottom, top)` returns `#NUM!` when `bottom` exceeds
+  `top` or the span between them is too wide for a double; otherwise it returns
+  an integer from `bottom` rounded up through `top`
+  rounded down, both included, or `bottom` rounded up when no integer lies
+  between them (`RANDBETWEEN(1.5,1.6)` is 2). `RANDARRAY([rows], [columns],
+  [min], [max], [whole_number])` spills a `rows` by `columns` array (default 1
+  by 1, truncated) of numbers from `min` up to `max` (default 0 and 1), or of
+  the integers from `min` through `max` when `whole_number` is true; `min` may
+  equal `max`. It returns `#VALUE!` for a negative dimension, `min` above `max`,
+  or a fractional `min` or `max` with `whole_number`, `#CALC!` for a dimension
+  that truncates to zero, and `#NUM!` when the span from `min` to `max` is too
+  wide for a double. Authored `RANDARRAY` formulas are stored as
+  `_xlfn.RANDARRAY`.
 - The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
   `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
   `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,
@@ -837,9 +853,25 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `calculate_workbook(&WorkbookSnapshot, CalculationOptions) -> CalculationSnapshot` —
   stateless full recalculation and the correctness oracle; never mutates the
   source snapshot.
-- `CalculationOptions::default().with_today_serial(FiniteNumber).with_now_serial(FiniteNumber).with_limits(CalculationLimits).with_arithmetic_semantics(ArithmeticSemantics).with_financial_solver_semantics(FinancialSolverSemantics)` —
-  `TODAY()` and `NOW()` never read the host clock. Omitting the corresponding
-  serial makes that formula report `VolatileInputMissing`.
+- `CalculationOptions::default().with_today_serial(FiniteNumber).with_now_serial(FiniteNumber).with_random_seed(u32).with_limits(CalculationLimits).with_arithmetic_semantics(ArithmeticSemantics).with_financial_solver_semantics(FinancialSolverSemantics)` —
+  `TODAY()` and `NOW()` never read the host clock, and `RAND()`,
+  `RANDBETWEEN()`, and `RANDARRAY()` never read host randomness. Omitting the
+  corresponding serial or seed makes that formula report
+  `VolatileInputMissing`; `.random_seed() -> Option<u32>` returns the seed.
+  A draw is keyed by the seed, the formula cell's stable sheet ID and
+  address, the call's position in the formula (followed through defined-name
+  references and LAMBDA calls), the `MAKEARRAY`/`MAP`/`BYROW`/`BYCOL`/`SCAN`/
+  `REDUCE` iteration or `GROUPBY`/`PIVOTBY` group that reached it, the
+  computed database-criteria record, and the `RANDARRAY` element. It never
+  depends on calculation order: wherever full calculation produces a value,
+  targeted, incremental, and preview calculation produce the same one, and
+  edits to unrelated cells leave a draw unchanged; supply a new seed for a new
+  draw. A dynamic reference whose position is drawn inside a defined name used
+  more than once or inside a `LAMBDA` body can still be reported as
+  unsupported by full calculation, as one driven by a `LAMBDA` parameter is.
+  `=RAND()-RAND()` uses two positions and is not zero, while a `LET` binding
+  draws once. The generator is a small SplitMix64-style counter mixer, not a
+  cryptographically secure source.
 - **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
   than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
   applies Excel's narrow correction only when the exact decimal/rational trace
@@ -985,8 +1017,9 @@ calculate. Out of scope for the current version:
 - Macro, add-in, external-workbook, query, or data-connection execution.
 - 3-D references outside the audited direct-consumer policy described under
   Calculation, and data-table calculation.
-- Iterative calculation and automatic host-time or random inputs (`TODAY()`
-  and `NOW()` are supported only through explicit `CalculationOptions` inputs).
+- Iterative calculation and automatic host-time or random inputs (`TODAY()`,
+  `NOW()`, `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` are supported only
+  through explicit `CalculationOptions` inputs).
 
 ## Development verification
 

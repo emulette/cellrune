@@ -194,6 +194,7 @@ fn collection_preserving_scope_value(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Option<ScopeValue> {
+    let context = context.enter(expr);
     crate::calculation::stack::grow(|| match expr {
         Expr::Paren(inner) => collection_preserving_scope_value(engine, context, inner),
         Expr::Array(_) | Expr::Name(_) | Expr::BuiltinCallable(_) => {

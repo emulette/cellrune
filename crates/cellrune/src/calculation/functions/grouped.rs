@@ -445,7 +445,14 @@ pub(super) fn invoke_aggregate(
             all_members,
         )?);
     }
-    let result = dynamic::invoke_callable_values(engine, context, &aggregate.callable, arguments);
+    // The draw follows the group alone: sorting and output compare a group against different
+    // relative rows, and both must show the same draw.
+    let result = dynamic::invoke_callable_values(
+        engine,
+        context.at_group(column, subset_members),
+        &aggregate.callable,
+        arguments,
+    );
     if let Some(kind) = result.engine_issue() {
         return Err(kind);
     }

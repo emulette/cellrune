@@ -31,6 +31,7 @@ pub(super) fn call_array(
         ArrayFunction::WrapRows => super::array_reshape::wrap_rows(engine, context, args),
         ArrayFunction::MMult => mmult(engine, context, args),
         ArrayFunction::MUnit => munit(engine, context, args),
+        ArrayFunction::RandArray => super::random::randarray(engine, context, args),
         ArrayFunction::Sequence => sequence(engine, context, args),
         ArrayFunction::Transpose => transpose(engine, context, args),
     }

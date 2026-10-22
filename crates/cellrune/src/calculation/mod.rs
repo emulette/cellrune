@@ -31,6 +31,7 @@ mod operators;
 mod parser;
 pub(crate) mod persistent_store;
 mod pipeline;
+mod random;
 mod reference_resolution;
 mod runtime;
 mod scope;
@@ -500,6 +501,7 @@ pub enum FinancialSolverSemantics {
 pub struct CalculationOptions {
     today_serial: Option<FiniteNumber>,
     now_serial: Option<FiniteNumber>,
+    random_seed: Option<u32>,
     limits: CalculationLimits,
     arithmetic: ArithmeticSemantics,
     financial_solver: FinancialSolverSemantics,
@@ -526,6 +528,24 @@ impl CalculationOptions {
     /// Returns the configured deterministic `NOW()` value, when present.
     pub const fn now_serial(self) -> Option<FiniteNumber> {
         self.now_serial
+    }
+
+    /// Supplies the seed that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` draw from.
+    ///
+    /// Each draw is derived from the seed, the formula cell's stable sheet ID and address, the
+    /// call's position in the formula (through defined names and LAMBDA calls), the LAMBDA
+    /// iteration or aggregated group that reached it, and the array element, never from
+    /// calculation order. Wherever full calculation produces a value, targeted, incremental, and
+    /// preview calculation with the same seed produce the same one; supply a different seed for a
+    /// new draw. The generator is a small counter-based mixer and is not cryptographically secure.
+    pub const fn with_random_seed(mut self, random_seed: u32) -> Self {
+        self.random_seed = Some(random_seed);
+        self
+    }
+
+    /// Returns the configured seed for the random functions, when present.
+    pub const fn random_seed(self) -> Option<u32> {
+        self.random_seed
     }
 
     /// Replaces the formula calculation resource limits.

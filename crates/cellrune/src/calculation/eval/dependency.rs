@@ -479,6 +479,7 @@ impl Engine<'_> {
         local_names: &[String],
         visited: &mut Vec<DefinedLambdaId>,
     ) -> RangeExtent {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if context.is_cancelled() {
                 return RangeExtent::Invalid;
@@ -744,6 +745,7 @@ impl Engine<'_> {
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
     ) -> bool {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if context.is_cancelled() {
                 return true;
@@ -1118,6 +1120,7 @@ impl Engine<'_> {
         local_names: &mut Vec<String>,
         output: &mut Vec<DependencyTarget>,
     ) {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if context.is_cancelled() {
                 return;
@@ -1447,6 +1450,7 @@ impl Engine<'_> {
         local_names: &mut Vec<String>,
         output: &mut Vec<DependencyTarget>,
     ) {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if context.is_cancelled() {
                 return;
@@ -1735,6 +1739,7 @@ impl Engine<'_> {
         visited: &mut VisitedDefinitions,
         local_names: &mut Vec<String>,
     ) -> bool {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if context.is_cancelled() {
                 return true;

@@ -313,17 +313,17 @@ fn kernel_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
     }
 }
 
-struct CriteriaPairs {
+struct CriteriaPairs<'formula> {
     rects: Vec<Rect>,
-    criteria_exprs: Vec<Expr>,
+    criteria_exprs: Vec<&'formula Expr>,
 }
 
-fn split_pairs(
+fn split_pairs<'formula>(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    args: &[Expr],
+    args: &'formula [Expr],
     single_pair: bool,
-) -> Result<CriteriaPairs, ErrorKind> {
+) -> Result<CriteriaPairs<'formula>, ErrorKind> {
     let expected_len_ok = if single_pair {
         args.len() == 2
     } else {
@@ -337,7 +337,7 @@ fn split_pairs(
     for pair in args.chunks(2) {
         let rect = reference_rect(engine, context, &pair[0])?;
         rects.push(rect);
-        criteria_exprs.push(pair[1].clone());
+        criteria_exprs.push(&pair[1]);
     }
     let first = rects[0];
     for rect in &rects {
@@ -444,7 +444,7 @@ fn countifs_array(
 fn countifs_broadcast(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    pairs: &CriteriaPairs,
+    pairs: &CriteriaPairs<'_>,
 ) -> Result<Array, ErrorKind> {
     let mut criteria_arrays = Vec::with_capacity(pairs.criteria_exprs.len());
     for expr in &pairs.criteria_exprs {

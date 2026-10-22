@@ -473,7 +473,12 @@ fn parse_conditional_arguments(
             return Err(ErrorKind::Value);
         }
         let criteria_range = engine.resolve_rect_expr(context, &args[0])?;
-        let value_anchor = engine.resolve_rect_expr(context, args.get(2).unwrap_or(&args[0]))?;
+        // An omitted sum range is the criteria range already resolved, not a second resolution
+        // of its expression.
+        let value_anchor = match args.get(2) {
+            Some(sum_range) => engine.resolve_rect_expr(context, sum_range)?,
+            None => criteria_range,
+        };
         let value_range = value_anchor
             .resized_from_anchor(criteria_range.height(), criteria_range.width())
             .ok_or(ErrorKind::Ref)?;

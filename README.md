@@ -48,8 +48,9 @@ cellrune = "0.1.25"
 - evaluates audited 3-D aggregate references across workbook tab order, including hidden sheets and
   reverse-written endpoints, without expanding the sheet span into dependency edges;
 - applies configurable limits to ZIP, XML, workbook, formula, dependency, text, and array work;
-- never executes macros, never follows external links, and never reads the host clock for
-  `TODAY()` or `NOW()`;
+- never executes macros, never follows external links, never reads the host clock for
+  `TODAY()` or `NOW()`, and draws `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` from an explicit
+  seed instead of host randomness;
 - returns stable error and issue codes for programmatic handling; in Rust, read, formula, and
   targeted-calculation limit failures also name the exceeded limit or report the observed value;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
@@ -102,7 +103,10 @@ successfully calculated cells contain a typed `Value`, while a cell that cannot 
 contains a structured `Unavailable(CalculationIssue)`. One unavailable formula does not suppress
 independent results; dependent formulas report `BlockedByUpstream` when applicable.
 Volatile functions require deterministic inputs through `CalculationOptions`:
-`with_today_serial` for `TODAY()` and `with_now_serial` for `NOW()`. Use
+`with_today_serial` for `TODAY()`, `with_now_serial` for `NOW()`, and `with_random_seed` for
+`RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`. A draw depends only on the seed, the cell, and the
+call's position in its formula, so wherever full calculation produces a value the other
+calculation modes produce the same one; the generator is not cryptographically secure. Use
 `with_arithmetic_semantics` and `with_financial_solver_semantics` to opt into the raw IEEE-754 and
 extended-search behavior shipped through 0.1.2; the defaults select Excel-compatible cancellation
 and Microsoft's function-specific solver budgets. Use
@@ -128,6 +132,8 @@ CellRune 0.1.22 adds 22 official statistical, distribution, and complex-logarith
 including exclusive percentiles, `TRIMMEAN`, the `A` variances, `STEYX`, `PROB`, chi-square,
 Weibull, and confidence-interval functions, and `IMLOG10`/`IMLOG2`; the exact list is in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
+
+CellRune 0.1.26 adds the seeded random functions `RAND`, `RANDBETWEEN`, and `RANDARRAY`.
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
 `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. Their fixed grammar, lookup modes, calendar rules,

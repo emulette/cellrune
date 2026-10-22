@@ -43,6 +43,8 @@ pub(super) fn call(
         MathFunction::MRound => mround(engine, context, args),
         MathFunction::Pi if args.is_empty() => Value::Number(std::f64::consts::PI),
         MathFunction::Pi => Value::Error(ErrorKind::Value),
+        MathFunction::Rand => super::random::rand(engine, context),
+        MathFunction::RandBetween => super::random::randbetween(engine, context, args),
         MathFunction::Quotient => {
             checked_binary(engine, context, args, |numerator, denominator| {
                 if denominator == 0.0 {

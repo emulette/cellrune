@@ -1,11 +1,11 @@
 use cellrune::{
     ApplyChangesError, ArithmeticSemantics, CalculationCellId, CalculationCellResult,
     CalculationDecisionReason, CalculationExecutionMode, CalculationHints, CalculationIssueCode,
-    CalculationLimits, CalculationMode, CalculationOptions, CancellationToken, CellAddress,
-    CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope, EditBatch,
-    FiniteNumber, FormulaText, NumberFormat, NumberFormatKind, RecalculationMode, SessionErrorCode,
-    SessionLimits, SheetId, SheetName, SheetVisibility, WorkbookCalculationSession, WorkbookChange,
-    calculate_workbook,
+    CalculationLimits, CalculationMode, CalculationOptions, CalculationTarget, CancellationToken,
+    CellAddress, CellContent, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope,
+    EditBatch, FiniteNumber, FormulaText, NumberFormat, NumberFormatKind, RecalculationMode,
+    SessionErrorCode, SessionLimits, SheetId, SheetName, SheetVisibility, TargetCalculationLimits,
+    WorkbookCalculationSession, WorkbookChange, calculate_targets, calculate_workbook,
 };
 
 #[test]
@@ -3028,6 +3028,101 @@ fn session_batch_history_and_delta_limits_accept_exact_boundaries_and_reject_exc
         )
         .expect_err("delta above limit is rejected");
     assert_eq!(error.code(), SessionErrorCode::DeltaLimitExceeded);
+}
+
+#[test]
+fn random_draws_agree_across_full_targeted_incremental_and_preview_calculation() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let options = CalculationOptions::default().with_random_seed(42);
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("RAND()")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("C1"),
+                    formula("RANDBETWEEN(1,100)+A1"),
+                ),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("D1"),
+                    formula("SUM(MAKEARRAY(2,2,LAMBDA(r,c,RAND())))"),
+                ),
+                WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("B1*2")),
+            ]),
+        )
+        .expect("random workbook");
+    let full = session
+        .recalculate(RecalculationMode::Full, options, CancellationToken::new())
+        .expect("full calculation");
+    assert_eq!(full.mode(), CalculationExecutionMode::Full);
+    let first = calculate_workbook(session.workbook(), options);
+    assert_calculations_equal(session.calculation().expect("installed full"), &first);
+    let targeted = calculate_targets(
+        session.workbook(),
+        &[CalculationTarget::new(
+            sheet_id,
+            CellRange::new(address("B1"), address("E1")).expect("valid target range"),
+        )],
+        options,
+        TargetCalculationLimits::default(),
+        CancellationToken::new(),
+    )
+    .expect("targeted calculation");
+    for column in ["B1", "C1", "D1", "E1"] {
+        let cell = CalculationCellId::new(sheet_id, address(column));
+        assert_eq!(targeted.cell(cell), first.cell(cell), "{column}");
+    }
+
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(5.0),
+            )]),
+        )
+        .expect("unrelated edit");
+    let incremental = session
+        .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+        .expect("incremental calculation");
+    assert_eq!(incremental.reason(), CalculationDecisionReason::DirtySubset);
+    assert_eq!(incremental.evaluated_count(), 1);
+    let installed = session.calculation().expect("installed incremental");
+    assert_calculations_equal(installed, &calculate_workbook(session.workbook(), options));
+    for column in ["B1", "D1", "E1"] {
+        let cell = CalculationCellId::new(sheet_id, address(column));
+        assert_eq!(installed.cell(cell), first.cell(cell), "{column}");
+    }
+
+    let mut preview = session
+        .prepare_transaction(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A1"),
+                number(9.0),
+            )]),
+            RecalculationMode::Auto,
+            options,
+            CancellationToken::new(),
+        )
+        .expect("preview prepares")
+        .run()
+        .expect("preview runs");
+    session
+        .install_transaction(&mut preview)
+        .expect("preview installs");
+    let installed = session.calculation().expect("installed preview");
+    assert_calculations_equal(installed, &calculate_workbook(session.workbook(), options));
+    for column in ["B1", "D1", "E1"] {
+        let cell = CalculationCellId::new(sheet_id, address(column));
+        assert_eq!(installed.cell(cell), first.cell(cell), "{column}");
+    }
 }
 
 fn chain_session() -> WorkbookCalculationSession {

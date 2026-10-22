@@ -135,6 +135,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ReferenceValue, ErrorKind> {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             let reference = match expr {
                 Expr::Paren(inner) => return self.resolve_reference_value_expr(context, inner),
@@ -284,6 +285,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<Rect, ErrorKind> {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             match expr {
                 Expr::Paren(inner) => self.resolve_rect_expr(context, inner),
@@ -362,6 +364,7 @@ impl Engine<'_> {
         let prepared = prepare_evaluator_arguments(Evaluator::Legacy(LegacyFunction::Index), args)
             .ok_or(ErrorKind::Value)?;
         let args = prepared.as_ref();
+        let context = context.with_arguments(args);
         let reference = self.resolve_reference_value_expr(context, &args[0])?;
         let area_index = match args.get(3) {
             Some(Expr::Missing) | None => 1.0,
@@ -427,6 +430,7 @@ impl Engine<'_> {
         };
         let prepared = prepare_evaluator_arguments(evaluator, args).ok_or(ErrorKind::Value)?;
         let args = prepared.as_ref();
+        let context = context.with_arguments(args);
         if dynamic_kind == DynamicReferenceKind::Indirect {
             if let Some(style) = args.get(1)
                 && !to_logical(&self.eval_scalar(context, style))?

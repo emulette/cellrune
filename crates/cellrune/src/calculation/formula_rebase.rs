@@ -65,7 +65,7 @@ impl FormulaCriteria {
         let mut rebased = self.root.clone();
         let origin_context = self.origin.context(context);
         shift_expr_rows(engine, origin_context, &mut rebased, row_delta)?;
-        match engine.eval_scalar(origin_context, &rebased) {
+        match engine.eval_scalar(origin_context.at_iteration(u64::from(row_delta)), &rebased) {
             Value::Logical(value) => Ok(value),
             Value::Error(kind) => Err(kind),
             Value::Blank | Value::Number(_) | Value::Text(_) => Err(ErrorKind::Value),

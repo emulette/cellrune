@@ -56,6 +56,7 @@ mod modern_array;
 mod modern_text;
 mod moments;
 mod number_value;
+mod random;
 mod reference_introspection;
 mod regex_common;
 mod regex_options;
@@ -98,7 +99,7 @@ impl<'formula> CallArguments<'formula> {
             else {
                 continue;
             };
-            if let Some(expression) = materialize_default(value, prepared.as_ref()) {
+            if let Some(expression) = materialize_default(value) {
                 prepared.to_mut()[position] = expression;
             }
         }
@@ -108,7 +109,7 @@ impl<'formula> CallArguments<'formula> {
                 else {
                     break;
                 };
-                let Some(expression) = materialize_default(value, prepared.as_ref()) else {
+                let Some(expression) = materialize_default(value) else {
                     break;
                 };
                 prepared.to_mut().push(expression);
@@ -124,7 +125,7 @@ impl<'formula> CallArguments<'formula> {
     }
 }
 
-fn materialize_default(value: contract::ArgumentDefaultValue, args: &[Expr]) -> Option<Expr> {
+fn materialize_default(value: contract::ArgumentDefaultValue) -> Option<Expr> {
     match value {
         contract::ArgumentDefaultValue::Omitted => None,
         contract::ArgumentDefaultValue::Number(number) => Some(Expr::number(number)),
@@ -132,11 +133,11 @@ fn materialize_default(value: contract::ArgumentDefaultValue, args: &[Expr]) -> 
         contract::ArgumentDefaultValue::Logical(logical) => Some(Expr::Logical(logical)),
         contract::ArgumentDefaultValue::NotAvailable => Some(Expr::ErrorLit(ErrorKind::NA)),
         contract::ArgumentDefaultValue::CalculationError => Some(Expr::ErrorLit(ErrorKind::Calc)),
-        contract::ArgumentDefaultValue::CriteriaRange => args.first().cloned(),
         // These defaults describe evaluator context rather than a value expression. Preserving the
         // original omission lets the typed kernel distinguish an omitted argument from an explicit
         // expression with the same source value.
         contract::ArgumentDefaultValue::CallerReference
+        | contract::ArgumentDefaultValue::CriteriaRange
         | contract::ArgumentDefaultValue::EmptyCollection
         | contract::ArgumentDefaultValue::IndexColumn
         | contract::ArgumentDefaultValue::LinkLocation
@@ -167,6 +168,7 @@ pub(in crate::calculation) fn call_function_with_trace(
     }
     let prepared = CallArguments::prepare(descriptor, args);
     let args = prepared.as_slice();
+    let context = context.with_arguments(args);
     if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
         return super::scope::ScalarEvaluation::untracked(Value::Error(kind));
     }
@@ -398,6 +400,7 @@ pub(super) fn call_function_array(
     }
     let prepared = CallArguments::prepare(descriptor, args);
     let args = prepared.as_slice();
+    let context = context.with_arguments(args);
     match descriptor.array_evaluator()? {
         ArrayEvaluator::Legacy(function) => {
             legacy::call_legacy_array(engine, context, function, args)
@@ -776,7 +779,7 @@ pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy
 }
 
 pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
-    let version = CompatibilityVersion::V0_1_22;
+    let version = CompatibilityVersion::V0_1_26;
     let mut entries = descriptor::descriptors()
         .iter()
         .copied()
@@ -881,9 +884,9 @@ mod tests {
 
         let sumif_descriptor = descriptor::descriptor("SUMIF").expect("SUMIF descriptor");
         let criteria_range = Expr::Name("criteria_range".to_owned());
-        let sumif_args = vec![criteria_range.clone(), Expr::Text(">0".to_owned())];
+        let sumif_args = vec![criteria_range, Expr::Text(">0".to_owned())];
         let prepared = super::CallArguments::prepare(sumif_descriptor, &sumif_args);
-        assert_eq!(prepared.as_slice()[2], criteria_range);
+        assert_eq!(prepared.as_slice(), sumif_args);
 
         let address_descriptor = descriptor::descriptor("ADDRESS").expect("ADDRESS descriptor");
         let address_args = vec![Expr::number(1.0), Expr::number(1.0)];
@@ -989,10 +992,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 455);
+        assert_eq!(catalog.len(), 458);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            454
+            457
         );
         assert!(
             catalog
@@ -1132,12 +1135,29 @@ mod tests {
         ] {
             assert!(catalog.iter().any(|entry| entry.name() == name), "{name}");
         }
-        for name in ["GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "TREND"] {
+        for name in [
+            "GROWTH",
+            "LINEST",
+            "LOGEST",
+            "MINVERSE",
+            "MUNIT",
+            "RANDARRAY",
+            "TREND",
+        ] {
             assert!(
                 catalog
                     .iter()
                     .find(|entry| entry.name() == name)
                     .is_some_and(|entry| entry.returns_array()),
+                "{name}",
+            );
+        }
+        for name in ["RAND", "RANDBETWEEN"] {
+            assert!(
+                catalog
+                    .iter()
+                    .find(|entry| entry.name() == name)
+                    .is_some_and(|entry| entry.is_official() && !entry.returns_array()),
                 "{name}",
             );
         }

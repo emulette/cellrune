@@ -105,6 +105,7 @@ pub(in crate::calculation) enum Volatility {
     None,
     Today,
     Now,
+    Random,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +145,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_16,
     V0_1_20,
     V0_1_22,
+    V0_1_26,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -587,6 +589,12 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Pi, "PI", Math),
     function!(Power, "POWER", Math),
     function!(Quotient, "QUOTIENT", Math),
+    function!(Rand, "RAND", Math)
+        .with_volatility(Volatility::Random)
+        .with_minimum_version(CompatibilityVersion::V0_1_26),
+    function!(RandBetween, "RANDBETWEEN", Math)
+        .with_volatility(Volatility::Random)
+        .with_minimum_version(CompatibilityVersion::V0_1_26),
     function!(Round, "ROUND", Math),
     function!(RoundDown, "ROUNDDOWN", Math),
     function!(RoundUp, "ROUNDUP", Math),
@@ -886,6 +894,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(MUnit, "MUNIT", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MUnit))
         .with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(RandArray, "RANDARRAY", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::RandArray))
+        .with_volatility(Volatility::Random)
+        .with_minimum_version(CompatibilityVersion::V0_1_26),
     function!(Sequence, "SEQUENCE", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sequence)),
     function!(Sort, "SORT", Array).with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Sort)),
@@ -1654,6 +1666,41 @@ mod tests {
             actual, "8e1982322a0208193bfe6966b21fd17ab5f6bab13696194c79c9847f5eed8c5e",
             "stable v0.1.16 semantic snapshot changed:\n{snapshot}",
         );
+    }
+
+    #[test]
+    fn v0_1_26_random_descriptors_read_the_seed_input() {
+        for name in ["RAND", "RANDBETWEEN", "RANDARRAY"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_26,
+                "{name}",
+            );
+            assert_eq!(descriptor.volatility(), Volatility::Random, "{name}");
+            assert_eq!(
+                descriptor.storage_prefix_policy(),
+                StoragePrefixPolicy::ExcelNamespaces,
+                "{name}",
+            );
+        }
+
+        let rand = descriptor("RAND").expect("RAND descriptor");
+        assert!(rand.call_contract().arity().accepts(0));
+        assert!(!rand.call_contract().arity().accepts(1));
+        assert!(!rand.catalog_returns_array());
+
+        let randbetween = descriptor("RANDBETWEEN").expect("RANDBETWEEN descriptor");
+        assert!(randbetween.call_contract().arity().accepts(2));
+        assert!(!randbetween.call_contract().arity().accepts(1));
+        assert!(!randbetween.call_contract().arity().accepts(3));
+        assert!(!randbetween.catalog_returns_array());
+
+        let randarray = descriptor("RANDARRAY").expect("RANDARRAY descriptor");
+        assert!((0..=5).all(|arity| randarray.call_contract().arity().accepts(arity)));
+        assert!(!randarray.call_contract().arity().accepts(6));
+        assert!(randarray.catalog_returns_array());
+        assert_eq!(randarray.result_kind(), FunctionResultKind::Array);
     }
 
     #[test]

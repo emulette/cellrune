@@ -745,6 +745,33 @@ const SEQUENCE_DEFAULTS: &[ArgumentDefault] = &[
         ArgumentDefaultValue::Number(1.0),
     ),
 ];
+const RANDARRAY_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        0,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(1.0),
+    ),
+    ArgumentDefault::new(
+        1,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(1.0),
+    ),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(0.0),
+    ),
+    ArgumentDefault::new(
+        3,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(1.0),
+    ),
+    ArgumentDefault::new(
+        4,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Logical(false),
+    ),
+];
 const REGRESSION_STATISTICS_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(1, DefaultTrigger::Absent, ArgumentDefaultValue::Omitted),
     ArgumentDefault::new(
@@ -1072,6 +1099,7 @@ impl MathFunction {
             | Self::MRound
             | Self::Power
             | Self::Quotient
+            | Self::RandBetween
             | Self::Round
             | Self::RoundUp => CallContract::uniform(Arity::exact(2), SCALAR),
             Self::RoundDown | Self::Trunc => {
@@ -1080,7 +1108,7 @@ impl MathFunction {
             }
             Self::Log => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                 .with_defaults(LOG_DEFAULTS),
-            Self::Pi => CallContract::uniform(Arity::exact(0), SCALAR),
+            Self::Pi | Self::Rand => CallContract::uniform(Arity::exact(0), SCALAR),
             Self::CeilingMath | Self::FloorMath => {
                 CallContract::positional(Arity::range(1, 3), &[SCALAR, SCALAR, SCALAR])
                     .with_defaults(MODERN_MULTIPLE_DEFAULTS)
@@ -1465,6 +1493,11 @@ impl ArrayFunction {
             Self::MInverse => CallContract::uniform(Arity::exact(1), ARRAY),
             Self::MMult => CallContract::uniform(Arity::exact(2), ARRAY),
             Self::MUnit => CallContract::uniform(Arity::exact(1), SCALAR),
+            Self::RandArray => CallContract::positional(
+                Arity::range(0, 5),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(RANDARRAY_DEFAULTS),
             Self::Sequence => {
                 CallContract::positional(Arity::range(1, 4), &[SCALAR, SCALAR, SCALAR, SCALAR])
                     .with_defaults(SEQUENCE_DEFAULTS)

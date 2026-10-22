@@ -113,6 +113,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> ScopeValue {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| match expr {
             Expr::Missing => ScopeValue::Missing,
             Expr::Paren(inner) => self.eval_scope_value(context, inner),
@@ -195,6 +196,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> ScalarEvaluation {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if let Expr::Paren(inner) = expr {
                 return self.eval_final_scalar_with_trace(context, inner);
@@ -307,6 +309,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ScopeValue, ErrorKind> {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) => self.eval_callable_argument_scope_value(context, inner),
             Expr::Ref(_)
@@ -332,6 +335,7 @@ impl Engine<'_> {
     }
 
     fn eval_implicit_intersection(&self, context: EvalContext<'_>, expr: &Expr) -> Value {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.eval_implicit_intersection(context, inner)
@@ -411,6 +415,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> ScalarEvaluation {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| match expr {
             Expr::Number(number) => ScalarEvaluation {
                 value: Value::Number(number.value()),
@@ -488,6 +493,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         operand: &Expr,
     ) -> ScalarEvaluation {
+        let context = context.enter(operand);
         crate::calculation::stack::grow(|| match operand {
             Expr::Paren(inner) | Expr::ImplicitIntersection(inner) => {
                 self.eval_implicit_intersection_with_trace(context, inner)
@@ -588,6 +594,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ArrayEvaluation, ErrorKind> {
+        let context = context.enter(expr);
         let extent = self.array_extent(
             context.without_reference_work_charge(),
             expr,
@@ -603,6 +610,7 @@ impl Engine<'_> {
         expr: &Expr,
         evaluation: &mut ArrayEvaluationContext,
     ) -> Result<ArrayEvaluation, ErrorKind> {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) => self.eval_array_with_trace_at_extent(context, inner, evaluation),
             Expr::ImplicitIntersection(inner) => Ok(ArrayEvaluation::scalar(
@@ -798,6 +806,7 @@ impl Engine<'_> {
         context: EvalContext<'_>,
         expr: &Expr,
     ) -> Result<ArrayEvaluation, ErrorKind> {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| {
             if let Expr::Paren(inner) = expr {
                 return self.eval_final_array_with_trace(context, inner);
@@ -912,6 +921,7 @@ impl Engine<'_> {
         expr: &Expr,
         names: &mut BTreeSet<DefinedLambdaId>,
     ) -> Option<ArrayExtent> {
+        let context = context.enter(expr);
         crate::calculation::stack::grow(|| match expr {
             Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
                 self.array_extent(context, inner, names)

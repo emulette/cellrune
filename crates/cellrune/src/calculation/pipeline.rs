@@ -326,23 +326,9 @@ fn snapshot_from_incremental_engine_cancellable(
                     CalculationCellResult::Unavailable(CalculationIssue::resource_limit(limit))
                 }
                 Value::Error(ErrorKind::Unsupported) => {
-                    let missing_volatile_input =
-                        engine.parsed_expr(internal_id).is_some_and(|expr| {
-                            (options.today_serial().is_none()
-                                && contains_volatility(
-                                    engine,
-                                    internal_id.0,
-                                    expr,
-                                    Volatility::Today,
-                                ))
-                                || (options.now_serial().is_none()
-                                    && contains_volatility(
-                                        engine,
-                                        internal_id.0,
-                                        expr,
-                                        Volatility::Now,
-                                    ))
-                        });
+                    let missing_volatile_input = engine
+                        .parsed_expr(internal_id)
+                        .is_some_and(|expr| misses_volatile_input(engine, internal_id.0, expr));
                     let code = if missing_volatile_input {
                         CalculationIssueCode::VolatileInputMissing
                     } else if engine.has_unavailable_dependency(internal_id, &BTreeSet::new()) {
@@ -544,23 +530,9 @@ fn snapshot_from_engine_cancellable(
                         CalculationCellResult::Unavailable(CalculationIssue::resource_limit(limit))
                     }
                     Value::Error(ErrorKind::Unsupported) => {
-                        let missing_volatile_input =
-                            engine.parsed_expr(internal_id).is_some_and(|expr| {
-                                (options.today_serial().is_none()
-                                    && contains_volatility(
-                                        engine,
-                                        sheet_index,
-                                        expr,
-                                        Volatility::Today,
-                                    ))
-                                    || (options.now_serial().is_none()
-                                        && contains_volatility(
-                                            engine,
-                                            sheet_index,
-                                            expr,
-                                            Volatility::Now,
-                                        ))
-                            });
+                        let missing_volatile_input = engine
+                            .parsed_expr(internal_id)
+                            .is_some_and(|expr| misses_volatile_input(engine, sheet_index, expr));
                         let code = if missing_volatile_input {
                             CalculationIssueCode::VolatileInputMissing
                         } else if engine
@@ -698,6 +670,18 @@ fn build_materialization_view_cancellable(
         }
     }
     Ok(materialized)
+}
+
+/// Reports whether `expr` calls a volatile function whose deterministic input the options omit.
+fn misses_volatile_input(engine: &Engine<'_>, sheet: usize, expr: &Expr) -> bool {
+    let options = engine.calculation_options();
+    [
+        (options.today_serial().is_none(), Volatility::Today),
+        (options.now_serial().is_none(), Volatility::Now),
+        (options.random_seed().is_none(), Volatility::Random),
+    ]
+    .into_iter()
+    .any(|(missing, volatility)| missing && contains_volatility(engine, sheet, expr, volatility))
 }
 
 fn contains_volatility(
@@ -1522,19 +1506,15 @@ pub(super) fn target_result(
             None,
         ));
     }
-    let options = engine.calculation_options();
     let direct_unavailable = BTreeSet::new();
     match engine.cell_value(internal_id) {
         Value::Error(ErrorKind::ResourceLimit(limit)) => {
             CalculationCellResult::Unavailable(CalculationIssue::resource_limit(limit))
         }
         Value::Error(ErrorKind::Unsupported) => {
-            let missing_volatile_input = engine.parsed_expr(internal_id).is_some_and(|expr| {
-                (options.today_serial().is_none()
-                    && contains_volatility(engine, sheet_index, expr, Volatility::Today))
-                    || (options.now_serial().is_none()
-                        && contains_volatility(engine, sheet_index, expr, Volatility::Now))
-            });
+            let missing_volatile_input = engine
+                .parsed_expr(internal_id)
+                .is_some_and(|expr| misses_volatile_input(engine, sheet_index, expr));
             let code = if missing_volatile_input {
                 CalculationIssueCode::VolatileInputMissing
             } else if engine.has_unavailable_dependency(internal_id, &direct_unavailable) {

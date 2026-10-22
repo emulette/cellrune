@@ -210,7 +210,8 @@ pub(in crate::calculation) fn invoke_lambda_values(
     engine.eval_scope_value(
         context
             .with_bindings(&bindings)
-            .with_defined_name_scope(closure.lookup_scope),
+            .with_defined_name_scope(closure.lookup_scope)
+            .in_lambda_body(),
         &closure.body,
     )
 }
@@ -262,7 +263,9 @@ pub(super) fn map_array_with_trace(
                     })
                 })
                 .collect();
-            let scoped = invoke_callable_values(engine, context, &callable, values);
+            let iteration = u64::from(row) * u64::from(cols) + u64::from(col);
+            let scoped =
+                invoke_callable_values(engine, context.at_iteration(iteration), &callable, values);
             let evaluated = lambda_result_scalar(engine, context, &scoped)?;
             if let Some(kind) = evaluated.engine_issue() {
                 return Err(kind);
@@ -393,7 +396,12 @@ fn byrow(
                 .map(|col| input.decimal_at(row, col))
                 .collect(),
         }));
-        let result = invoke_callable_values(engine, context, &callable, vec![row_value]);
+        let result = invoke_callable_values(
+            engine,
+            context.at_iteration(u64::from(row)),
+            &callable,
+            vec![row_value],
+        );
         let scalar = lambda_result_scalar(engine, context, &result)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
@@ -445,7 +453,12 @@ fn bycol(
                 .map(|row| input.decimal_at(row, col))
                 .collect(),
         }));
-        let result = invoke_callable_values(engine, context, &callable, vec![col_value]);
+        let result = invoke_callable_values(
+            engine,
+            context.at_iteration(u64::from(col)),
+            &callable,
+            vec![col_value],
+        );
         let scalar = lambda_result_scalar(engine, context, &result)?;
         if let Some(kind) = scalar.engine_issue() {
             return Err(kind);
@@ -518,7 +531,7 @@ fn reduce(
     for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
         accumulator = invoke_callable_values(
             engine,
-            context,
+            context.at_iteration(index as u64),
             &callable,
             vec![
                 accumulator,
@@ -594,7 +607,7 @@ pub(in crate::calculation) fn reduce_scope_value(
     for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
         accumulator = invoke_callable_values(
             engine,
-            context,
+            context.at_iteration(index as u64),
             &callable,
             vec![
                 accumulator,
@@ -637,9 +650,10 @@ fn makearray(
     let mut decimal_traces = Vec::with_capacity(cells as usize);
     for row in 1..=rows {
         for col in 1..=cols {
+            let iteration = u64::from(row - 1) * u64::from(cols) + u64::from(col - 1);
             let result = invoke_callable_values(
                 engine,
-                context,
+                context.at_iteration(iteration),
                 &callable,
                 vec![
                     scalar_scope(Value::Number(f64::from(row))),
@@ -719,6 +733,7 @@ pub(in crate::calculation) fn with_let_scope<ResultValue>(
         super::prepare_evaluator_arguments(Evaluator::Dynamic(DynamicFunction::Let), args)
             .ok_or(ErrorKind::Value)?;
     let args = prepared.as_ref();
+    let context = context.with_arguments(args);
     if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(ErrorKind::Value);
     }

@@ -10,6 +10,22 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- `RAND`, `RANDBETWEEN`, and `RANDARRAY` calculate from an explicit seed set with
+  `CalculationOptions::with_random_seed(u32)`; without one they report
+  `calculation.volatile_input_missing` as `TODAY` and `NOW` do, and CellRune never reads host
+  randomness. A draw depends only on the seed, the formula cell's sheet ID and address, the call's
+  position in its formula (through defined names and `LAMBDA` calls), the `MAKEARRAY`, `MAP`,
+  `BYROW`, `BYCOL`, `SCAN`, or `REDUCE` iteration or the `GROUPBY` or `PIVOTBY` group, the computed
+  database-criteria record, and the array element, so wherever full calculation produces a value,
+  targeted, incremental, and preview calculation produce the same one. The generator is not
+  cryptographically secure. Argument edges follow Excel: `RANDBETWEEN` returns `#NUM!` when the
+  bottom exceeds the top, and `RANDARRAY` returns `#VALUE!` for a negative dimension, a minimum
+  above the maximum, or a fractional bound with `whole_number`, and `#CALC!` for a zero dimension;
+  both return `#NUM!` for a span too wide for a double. Authored `RANDARRAY` formulas are stored as
+  `_xlfn.RANDARRAY`, and the catalog grows to 457 official names and 458 accepted entries.
+
 ### Changed
 
 - CellRune requires `quick-xml` 0.42. For valid UTF-8 input, read errors, written bytes, and

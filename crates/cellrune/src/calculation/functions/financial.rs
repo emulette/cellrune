@@ -108,13 +108,25 @@ fn nper(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
 }
 
 fn ipmt(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    if args.len() < 4 || args.len() > 6 {
-        return Value::Error(ErrorKind::Value);
+    match period_arguments(engine, context, args) {
+        Ok(values) => interest_payment(&values),
+        Err(kind) => Value::Error(kind),
     }
-    let values = match scalar_arguments(engine, context, args, 6) {
-        Ok(values) => values,
-        Err(kind) => return Value::Error(kind),
-    };
+}
+
+/// Evaluates the `rate, per, nper, pv, [fv], [type]` arguments of `IPMT` and `PPMT` once.
+fn period_arguments(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Vec<f64>, ErrorKind> {
+    if args.len() < 4 || args.len() > 6 {
+        return Err(ErrorKind::Value);
+    }
+    scalar_arguments(engine, context, args, 6)
+}
+
+fn interest_payment(values: &[f64]) -> Value {
     let (rate, period, periods, present, future, payment_type) = (
         values[0], values[1], values[2], values[3], values[4], values[5],
     );
@@ -139,24 +151,17 @@ fn ipmt(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
 }
 
 fn ppmt(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    let interest = ipmt(engine, context, args);
+    let values = match period_arguments(engine, context, args) {
+        Ok(values) => values,
+        Err(kind) => return Value::Error(kind),
+    };
+    let interest = interest_payment(&values);
     let Value::Number(interest) = interest else {
         return interest;
     };
-    let mut payment_args = Vec::with_capacity(5);
-    payment_args.push(args[0].clone());
-    payment_args.push(args[2].clone());
-    payment_args.push(args[3].clone());
-    if let Some(future) = args.get(4) {
-        payment_args.push(future.clone());
-    }
-    if let Some(payment_type) = args.get(5) {
-        if payment_args.len() == 3 {
-            payment_args.push(Expr::number(0.0));
-        }
-        payment_args.push(payment_type.clone());
-    }
-    match pmt(engine, context, &payment_args) {
+    match financial_value(payment(
+        values[0], values[2], values[3], values[4], values[5],
+    )) {
         Value::Number(payment) => financial_value(payment - interest),
         other => other,
     }

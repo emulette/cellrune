@@ -814,3 +814,78 @@ fn document_draft_allocates_relationship_ids_without_clobbering_source_ids() {
         open_xlsx_document_bytes(output.bytes(), cellrune::OpenOptions::default()).expect("reopen");
     assert!(reopened.workbook().sheet_by_name("Added").is_some());
 }
+
+#[test]
+fn seeded_random_results_are_saved_and_reopen_with_the_same_draws() {
+    let options = CalculationOptions::default().with_random_seed(13);
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    let address = |text: &str| CellAddress::from_a1(text).expect("valid address");
+    for (cell, text) in [("B1", "=RAND()"), ("C1", "=RANDBETWEEN(1,6)")] {
+        draft
+            .set_cell_formula(
+                sheet_id,
+                address(cell),
+                FormulaText::from_user_input(text).expect("formula"),
+            )
+            .expect("random formula");
+    }
+    draft
+        .set_cell_dynamic_formula(
+            sheet_id,
+            address("A3"),
+            FormulaText::from_user_input("=RANDARRAY(2,2)").expect("formula"),
+            Some(CellRange::new(address("A3"), address("B4")).expect("spill range")),
+        )
+        .expect("random spill");
+    let calculation = calculate_workbook(draft.workbook(), options);
+    let calculated = |cell: &str| match calculation
+        .materialized_cell(CalculationCellId::new(sheet_id, address(cell)))
+        .map(|materialized| materialized.result())
+    {
+        Some(CalculationCellResult::Value(value)) => value.clone(),
+        other => panic!("expected a value at {cell}, got {other:?}"),
+    };
+
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write random workbook");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), cellrune::OpenOptions::default()).expect("reopen");
+    let sheet = reopened.workbook().sheet_by_id(sheet_id).expect("sheet");
+    for cell in ["B1", "C1", "A3"] {
+        let CellContent::Formula(formula) = sheet.cell(address(cell)).expect("formula").content()
+        else {
+            panic!("{cell} must remain a formula");
+        };
+        assert_eq!(
+            formula.saved_result(),
+            &SavedResult::Present(calculated(cell)),
+            "{cell}"
+        );
+        if cell == "A3" {
+            assert_eq!(
+                formula.text().map(FormulaText::as_str),
+                Some("_xlfn.RANDARRAY(2,2)")
+            );
+        }
+    }
+    for cell in ["B3", "A4", "B4"] {
+        assert_eq!(
+            sheet.cell(address(cell)).expect("spill follower").content(),
+            &CellContent::Literal(calculated(cell)),
+            "{cell}"
+        );
+    }
+
+    let recalculation = calculate_workbook(reopened.workbook(), options);
+    for cell in ["B1", "C1", "A3", "B3", "A4", "B4"] {
+        let id = CalculationCellId::new(sheet_id, address(cell));
+        assert_eq!(
+            recalculation
+                .materialized_cell(id)
+                .map(|cell| cell.result()),
+            calculation.materialized_cell(id).map(|cell| cell.result()),
+            "{cell}"
+        );
+    }
+}

@@ -94,6 +94,7 @@ const fn volatility_name(volatility: Volatility) -> &'static str {
         Volatility::None => "none",
         Volatility::Today => "today",
         Volatility::Now => "now",
+        Volatility::Random => "random",
     }
 }
 
@@ -143,5 +144,6 @@ const fn compatibility_version_name(version: CompatibilityVersion) -> &'static s
         CompatibilityVersion::V0_1_16 => "0.1.16",
         CompatibilityVersion::V0_1_20 => "0.1.20",
         CompatibilityVersion::V0_1_22 => "0.1.22",
+        CompatibilityVersion::V0_1_26 => "0.1.26",
     }
 }
