@@ -1569,6 +1569,101 @@ fn retained_preview_tools_are_thin_stdio_lifecycle_adapters() {
 }
 
 #[test]
+fn payload_objects_are_not_read_from_arrays() {
+    let root = TestDirectory::new("object-payload-root");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let created = successful_tool(mcp.call_tool("workbook_create", json!({})));
+    let session_id = created["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "number", "value": 1.0}},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "B1", "formula": "=A1+1"},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "B2", "formula": "=A1+2"}
+            ]
+        }),
+    ));
+
+    let target = json!({"sheet": "Sheet1", "start": "B1"});
+    rejected_arguments(
+        mcp.call_tool(
+            "workbook_calculate_targets",
+            json!({"session_id": session_id, "targets": [target], "options": [null, null, 7]}),
+        ),
+        "invalid type: sequence, expected struct TargetCalculationOptionsArgs",
+    );
+    rejected_arguments(
+        mcp.call_tool(
+            "workbook_calculate_targets",
+            json!({"session_id": session_id, "targets": [["Sheet1", "B1"]]}),
+        ),
+        "invalid type: sequence, expected struct CalculationTargetDto",
+    );
+    let value = json!({"kind": "number", "value": 1.0});
+    for changes in [
+        json!([["set_value", "Sheet1", "C1", value]]),
+        json!([{"kind": "set_value", "sheet": "Sheet1", "address": "C1", "value": ["number", 1.0]}]),
+        json!([["rename_table", 1, "Renamed"]]),
+    ] {
+        let arguments =
+            json!({"session_id": session_id, "expected_revision": 1, "changes": changes});
+        rejected_arguments(
+            mcp.call_tool("workbook_apply_changes", arguments.clone()),
+            "invalid type: sequence, expected internally tagged enum",
+        );
+        for tool in ["workbook_apply_changes_v2", "workbook_preview_changes"] {
+            rejected_arguments(
+                mcp.call_tool(tool, arguments.clone()),
+                "data did not match any variant of untagged enum WorkbookChangeV2Dto",
+            );
+        }
+    }
+    let unchanged =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    assert_eq!(unchanged["summary"]["semantic_revision"], 1);
+
+    let preview = successful_tool(mcp.call_tool(
+        "workbook_preview_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "number", "value": 2.0}}]
+        }),
+    ));
+    let page = |cursor: Value| {
+        json!({
+            "session_id": session_id,
+            "preview_id": preview["preview_id"],
+            "section": "affected",
+            "cursor": cursor,
+            "limit": 1
+        })
+    };
+    let first = successful_tool(mcp.call_tool("workbook_preview_changes_page", page(Value::Null)));
+    let cursor = first["next_cursor"].clone();
+    assert!(cursor.is_object(), "{first}");
+    rejected_arguments(
+        mcp.call_tool(
+            "workbook_preview_changes_page",
+            page(json!([cursor["preview_id"], cursor["token"]])),
+        ),
+        "invalid type: sequence, expected struct PreviewCursorDto",
+    );
+    let second = successful_tool(mcp.call_tool("workbook_preview_changes_page", page(cursor)));
+    assert_ne!(second["items"], first["items"]);
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
 fn input_paths_outside_every_root_are_rejected_regardless_of_existence() {
     let root = TestDirectory::new("input-boundary-root");
     let outside = TestDirectory::new("input-boundary-outside");
@@ -1613,6 +1708,19 @@ fn successful_tool(result: Value) -> Value {
         "tool unexpectedly failed: {result}"
     );
     result["structuredContent"].clone()
+}
+
+fn rejected_arguments(result: Value, expected: &str) {
+    assert_eq!(
+        result["isError"], true,
+        "arguments were unexpectedly accepted: {result}"
+    );
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains(expected)),
+        "{result}"
+    );
 }
 
 fn failed_tool(result: Value) -> Value {

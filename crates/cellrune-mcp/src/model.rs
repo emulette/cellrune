@@ -4,7 +4,7 @@ use cellrune_interop::{
     WriteReportDto,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Empty input for creating a canonical workbook session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -130,27 +130,15 @@ pub(crate) struct CalculateTargetsArgs {
     /// Opaque resident workbook session identifier.
     pub(crate) session_id: String,
     /// Cells and inclusive rectangles to return, deduplicated in sheet-ID and row-major order.
+    #[serde(deserialize_with = "cellrune_interop::deserialize_objects")]
     #[schemars(length(min = 1, max = 1024))]
     pub(crate) targets: Vec<cellrune_interop::CalculationTargetDto>,
     /// Deterministic calculation inputs; omission uses the core defaults.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "cellrune_interop::deserialize_object")]
     pub(crate) options: TargetCalculationOptionsArgs,
     /// Request limits, capped by the server at 1024 targets, 10000 results, and 100000 evaluator invocations.
-    #[serde(default, deserialize_with = "target_limits_object")]
+    #[serde(default, deserialize_with = "cellrune_interop::deserialize_object")]
     pub(crate) limits: cellrune_interop::TargetCalculationLimitsDto,
-}
-
-/// Reads target limits only from a JSON object; serde's derived struct deserializer would also
-/// fill them from an array by field position.
-fn target_limits_object<'de, D>(
-    deserializer: D,
-) -> Result<cellrune_interop::TargetCalculationLimitsDto, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let limits = serde_json::Map::deserialize(deserializer)?;
-    cellrune_interop::TargetCalculationLimitsDto::deserialize(serde_json::Value::Object(limits))
-        .map_err(serde::de::Error::custom)
 }
 
 /// Deterministic inputs for a target calculation. Calculation limits are absent because raising
@@ -227,6 +215,13 @@ pub(crate) struct PreviewChangesPageArgs {
     /// Report detail section to page.
     pub(crate) section: TransactionDetailSectionDto,
     /// Opaque cursor returned by the preceding page for this same preview.
+    // `default` only restores the omitted-cursor reading that `deserialize_with` removes, so the
+    // schema keeps no default.
+    #[serde(
+        default,
+        deserialize_with = "cellrune_interop::deserialize_optional_object"
+    )]
+    #[schemars(!default)]
     pub(crate) cursor: Option<PreviewCursorDto>,
     /// Item count; omitted or zero selects the interop default, with a hard maximum of 1,000.
     #[serde(default)]

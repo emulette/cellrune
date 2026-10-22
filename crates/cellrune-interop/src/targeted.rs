@@ -47,12 +47,13 @@ impl Default for TargetCalculationLimitsDto {
 #[serde(deny_unknown_fields)]
 pub struct TargetCalculationRequestDto {
     /// Requested cells and rectangles; overlap is deduplicated.
+    #[serde(deserialize_with = "crate::deserialize_objects")]
     pub targets: Vec<CalculationTargetDto>,
     /// Deterministic numeric and volatile-function inputs.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::deserialize_object")]
     pub options: CalculationOptionsDto,
     /// Request-wide resource limits.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::deserialize_object")]
     pub limits: TargetCalculationLimitsDto,
 }
 

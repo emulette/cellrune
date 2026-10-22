@@ -9,6 +9,7 @@
 mod convert;
 mod dto;
 mod error;
+mod json_object;
 mod service;
 mod targeted;
 mod usage_count;
@@ -39,6 +40,7 @@ pub use dto::{
     WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
+pub use json_object::{deserialize_object, deserialize_objects, deserialize_optional_object};
 pub use service::{
     CompletedPreview, CompletedRecalculation, DEFAULT_PAGE_SIZE, DEFAULT_PREVIEW_PAGE_SIZE,
     MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedChanges, PreparedChangesV2, PreparedEditsSave,

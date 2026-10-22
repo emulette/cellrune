@@ -47,6 +47,13 @@ def main() -> None:
             pass
         else:
             raise AssertionError("boolean limit accepted")
+        for target in (["Sheet1", "B1"], ("Sheet1", "B1"), "Sheet1"):
+            try:
+                workbook.calculate_targets([target])
+            except CellRuneError as error:
+                assert error.code == "interop.calculation.target.invalid_payload", (target, error.code)
+            else:
+                raise AssertionError(f"{target} accepted as a target")
         for limits in ([1], [], "1", 1):
             try:
                 workbook.calculate_targets(targets, limits=limits)

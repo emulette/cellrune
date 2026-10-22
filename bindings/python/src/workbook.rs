@@ -743,9 +743,13 @@ fn preview_cursor_from_python(
     let Some(value) = value else {
         return Ok(None);
     };
+    // JSON would carry a sequence into the cursor by position.
+    let cursor = value
+        .cast::<PyDict>()
+        .map_err(|_| into_py_error(py, InteropError::preview_cursor_invalid()))?;
     let serialized = py
         .import("json")?
-        .call_method1("dumps", (value,))?
+        .call_method1("dumps", (cursor,))?
         .extract::<String>()?;
     serde_json::from_str(&serialized)
         .map(Some)

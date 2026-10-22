@@ -49,6 +49,43 @@ fn package_backed_structured_references_match_full_without_saved_cache_trust() {
     }
     assert!(checked > 0);
 }
+
+#[test]
+fn request_targets_options_and_limits_are_read_only_from_objects() {
+    let target = serde_json::json!({"sheet": "Sheet1", "start": "A1"});
+    serde_json::from_value::<TargetCalculationRequestDto>(serde_json::json!({
+        "targets": [target],
+        "options": {"random_seed": 7, "calculation_limits": {"max_array_cells": 1}},
+        "limits": {"max_targets": 1}
+    }))
+    .expect("objects");
+    for (request, expected) in [
+        (
+            serde_json::json!({"targets": [["Sheet1", "A1"]]}),
+            "struct CalculationTargetDto",
+        ),
+        (
+            serde_json::json!({"targets": [target], "options": [null, null, 7]}),
+            "struct CalculationOptionsDto",
+        ),
+        (
+            serde_json::json!({"targets": [target], "options": {"calculation_limits": [1]}}),
+            "struct CalculationLimitOptionsDto",
+        ),
+        (
+            serde_json::json!({"targets": [target], "limits": [1]}),
+            "struct TargetCalculationLimitsDto",
+        ),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<TargetCalculationRequestDto>(request)
+                .expect_err("only objects")
+                .to_string(),
+            format!("invalid type: sequence, expected {expected}")
+        );
+    }
+}
+
 fn session() -> WorkbookSession {
     let mut session = WorkbookSession::create();
     session

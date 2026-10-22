@@ -378,6 +378,7 @@ def main() -> None:
     assert_compatibility()
     assert_catalog_contract()
     assert_preview_contract()
+    assert_object_payloads()
     assert_random_seed()
     assert_exact_numbers()
     assert_volatile_input_recalculation()
@@ -765,6 +766,74 @@ def assert_preview_contract() -> None:
         assert error.code == "interop.preview.not_found"
     else:
         raise AssertionError("committed preview remained pageable")
+
+
+def assert_object_payloads() -> None:
+    """Rejects a sequence where a payload expects an object; JSON would fill it by position."""
+    workbook = Workbook.create()
+    value = {"kind": "number", "value": 1.0}
+    revision = workbook.apply_changes(
+        0,
+        [
+            {"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": value},
+            {"kind": "set_formula", "sheet": "Sheet1", "address": "B1", "formula": "=A1+1"},
+            {"kind": "set_formula", "sheet": "Sheet1", "address": "B2", "formula": "=A1+2"},
+        ],
+    )["result_revision"]
+    for changes in (
+        [["set_value", "Sheet1", "C1", value]],
+        [("set_value", "Sheet1", "C1", value)],
+        [{"kind": "set_value", "sheet": "Sheet1", "address": "C1", "value": ["number", 1.0]}],
+    ):
+        assert_error(
+            "interop.change.payload_invalid",
+            lambda: workbook.apply_changes(revision, changes),
+        )
+        assert_error(
+            "interop.change.payload_invalid",
+            lambda: workbook.apply_changes_v2(revision, changes),
+        )
+        assert_error(
+            "interop.change.payload_invalid",
+            lambda: workbook.preview_changes(revision, changes),
+        )
+    assert_error(
+        "interop.change.payload_invalid",
+        lambda: workbook.apply_changes_v2(revision, [["rename_table", 1, "Renamed"]]),
+    )
+    assert workbook.summary()["semantic_revision"] == revision
+    assert workbook.read_range("Sheet1", "C1", "C1")["cells"][0]["source_value"] == {
+        "kind": "blank"
+    }
+    preview = workbook.preview_changes(
+        revision,
+        [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "A1",
+                "value": {"kind": "number", "value": 2.0},
+            }
+        ],
+    )
+    page = workbook.preview_changes_page(
+        preview["preview_id"], section="affected", limit=1
+    )
+    cursor = page["next_cursor"]
+    assert cursor is not None
+    for sequence in (
+        [cursor["preview_id"], cursor["token"]],
+        (cursor["preview_id"], cursor["token"]),
+    ):
+        assert_error(
+            "interop.preview.cursor_invalid",
+            lambda: workbook.preview_changes_page(
+                preview["preview_id"], section="affected", cursor=sequence, limit=1
+            ),
+        )
+    assert workbook.preview_changes_page(
+        preview["preview_id"], section="affected", cursor=cursor, limit=1
+    )["items"]
 
 
 def assert_table_authoring_result(

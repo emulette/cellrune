@@ -100,6 +100,15 @@ inventories, and measurements belong in the linked documentation rather than in 
   read `TODAY()` and `NOW()` serials and numeric cell values exactly, instead of up to one ULP away
   when the number has 16 or 17 significant digits, such as a `NOW()` serial of 45158.311281307004
   calculated as 45158.31128130701.
+- Python `calculate_targets`, `apply_changes`, `apply_changes_v2`, `preview_changes`, and
+  `preview_changes_page` and MCP `workbook_calculate_targets`, `workbook_apply_changes`,
+  `workbook_apply_changes_v2`, `workbook_preview_changes`, and `workbook_preview_changes_page`
+  reject a list or tuple (MCP: an array) given for a target, a change or its `value`, a preview
+  cursor, or MCP target `options`, with the error each already uses for a malformed payload: Python
+  `interop.calculation.target.invalid_payload`, `interop.change.payload_invalid`, or
+  `interop.preview.cursor_invalid`, and MCP invalid arguments. These were read by position, so
+  `["Sheet1", "A1"]` was a target, MCP options `[null, null, 7]` set the random seed, and a `value`
+  of `["number", 1.0]` was applied.
 
 ## [0.1.25] - 2026-10-18
 

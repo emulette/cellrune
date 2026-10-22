@@ -41,7 +41,7 @@ pub struct CalculationOptionsDto {
     #[serde(default)]
     pub financial_solver_semantics: FinancialSolverSemanticsDto,
     /// Resource limits to change for this calculation; omitted limits keep their defaults.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::deserialize_object")]
     pub calculation_limits: CalculationLimitOptionsDto,
 }
 
@@ -202,6 +202,7 @@ pub enum WorkbookChangeDto {
         /// Unqualified A1 address.
         address: String,
         /// New typed value.
+        #[serde(deserialize_with = "crate::deserialize_object")]
         value: WritableCellValueDto,
     },
     /// Sets a normal or dynamic formula.
@@ -297,6 +298,7 @@ pub enum WorkbookChangeDto {
 #[serde(deny_unknown_fields)]
 pub struct EditBatchDto {
     /// Operations in caller-declared order.
+    #[serde(deserialize_with = "crate::deserialize_objects")]
     #[schemars(length(min = 1))]
     pub changes: Vec<WorkbookChangeDto>,
 }
@@ -364,8 +366,10 @@ pub enum TableChangeV2Dto {
 #[serde(untagged)]
 pub enum WorkbookChangeV2Dto {
     /// An unchanged edit-schema-v1 operation.
+    #[serde(deserialize_with = "crate::deserialize_object")]
     V1(WorkbookChangeDto),
     /// A table-authoring operation introduced by edit schema v2.
+    #[serde(deserialize_with = "crate::deserialize_object")]
     Table(TableChangeV2Dto),
 }
 
@@ -1434,8 +1438,10 @@ pub struct WriteReportDto {
 #[cfg(test)]
 mod tests {
     use super::{
-        DefinedNameInspectionResultDto, TableChangeV2Dto, WorkbookChangeDto, WorkbookChangeV2Dto,
+        DefinedNameInspectionResultDto, EditBatchDto, EditBatchV2Dto, TableChangeV2Dto,
+        WorkbookChangeDto, WorkbookChangeV2Dto,
     };
+    use serde_json::json;
 
     /// The DTOs carry `deny_unknown_fields`, so adding a field to a variant would be a breaking
     /// change to the JSON boundary if a missing one were also rejected. It is not: serde reads an
@@ -1514,5 +1520,45 @@ mod tests {
             "unexpected": true
         }))
         .expect_err("v2 table variants remain closed");
+    }
+
+    #[test]
+    fn changes_and_their_values_are_read_only_from_objects() {
+        let value = json!({"kind": "number", "value": 1.0});
+        let change =
+            json!({"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": value});
+        serde_json::from_value::<EditBatchDto>(json!({"changes": [change]})).expect("v1 objects");
+        serde_json::from_value::<EditBatchV2Dto>(json!({"changes": [change]})).expect("v2 objects");
+        for (changes, v1_error) in [
+            (
+                json!([["set_value", "Sheet1", "A1", value]]),
+                "invalid type: sequence, expected internally tagged enum WorkbookChangeDto",
+            ),
+            (
+                json!([{"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": ["number", 1.0]}]),
+                "invalid type: sequence, expected internally tagged enum WritableCellValueDto",
+            ),
+        ] {
+            assert_eq!(
+                serde_json::from_value::<EditBatchDto>(json!({"changes": changes}))
+                    .expect_err("v1 reads only objects")
+                    .to_string(),
+                v1_error
+            );
+            assert_eq!(
+                serde_json::from_value::<EditBatchV2Dto>(json!({"changes": changes}))
+                    .expect_err("v2 reads only objects")
+                    .to_string(),
+                "data did not match any variant of untagged enum WorkbookChangeV2Dto"
+            );
+        }
+        assert_eq!(
+            serde_json::from_value::<EditBatchV2Dto>(
+                json!({"changes": [["rename_table", 7, "T"]]})
+            )
+            .expect_err("v2 table operations read only objects")
+            .to_string(),
+            "data did not match any variant of untagged enum WorkbookChangeV2Dto"
+        );
     }
 }

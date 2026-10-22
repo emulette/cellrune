@@ -12,6 +12,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TargetRequestInput {
+    #[serde(deserialize_with = "cellrune_interop::deserialize_objects")]
     targets: Vec<CalculationTargetDto>,
     #[serde(default)]
     options: TargetOptionsInput,
