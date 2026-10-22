@@ -1,6 +1,6 @@
 use super::ast::{
     StructuredColumns, StructuredItem, StructuredReference,
-    structured_column_character_needs_grouping,
+    structured_column_character_needs_grouping, structured_simple_column_character_needs_grouping,
 };
 use super::syntax::{SourceComponent, SourceComponentKind, SourceSpan};
 
@@ -32,7 +32,12 @@ fn source_component(raw: &str, kind: SourceComponentKind, value: &str) -> Source
     SourceComponent::new(kind, source_span(raw, value))
 }
 
-fn ungrouped_column(value: &str) -> Result<Box<str>, StructuredReferenceError> {
+/// Reads a column name written without its own brackets, which `needs_grouping` characters require.
+fn ungrouped_column(
+    value: &str,
+    needs_grouping: fn(char) -> bool,
+) -> Result<Box<str>, StructuredReferenceError> {
+    let mut name = String::with_capacity(value.len());
     let mut characters = value.chars();
     while let Some(character) = characters.next() {
         if character == '\'' {
@@ -42,11 +47,18 @@ fn ungrouped_column(value: &str) -> Result<Box<str>, StructuredReferenceError> {
             if !matches!(escaped, '[' | ']' | '#' | '\'' | '@') {
                 return Err(StructuredReferenceError::UnescapedSpecialCharacter);
             }
-        } else if structured_column_character_needs_grouping(character) {
+            name.push(escaped);
+        } else if needs_grouping(character) {
             return Err(StructuredReferenceError::InvalidBrackets);
+        } else {
+            name.push(character);
         }
     }
-    Ok(unescape_name(value)?.into_boxed_str())
+    if name.is_empty() {
+        Err(StructuredReferenceError::MissingSelector)
+    } else {
+        Ok(name.into_boxed_str())
+    }
 }
 
 fn unescape_name(value: &str) -> Result<String, StructuredReferenceError> {
@@ -193,7 +205,10 @@ pub(super) fn parse_structured_reference(
                     SourceComponentKind::StructuredColumn { grouped: false },
                     single,
                 ));
-                StructuredColumns::Single(ungrouped_column(single)?)
+                StructuredColumns::Single(ungrouped_column(
+                    single,
+                    structured_column_character_needs_grouping,
+                )?)
             }
             [start, end] => {
                 let start = trim_syntax_spaces(unwrap_component(start)?);
@@ -254,7 +269,10 @@ pub(super) fn parse_structured_reference(
                 SourceComponentKind::StructuredColumn { grouped: false },
                 component,
             ));
-            columns = Some(StructuredColumns::Single(ungrouped_column(component)?));
+            columns = Some(StructuredColumns::Single(ungrouped_column(
+                component,
+                structured_column_character_needs_grouping,
+            )?));
             continue;
         }
         let ranges = split_top_level(component, ':');
@@ -311,8 +329,10 @@ pub(super) fn parse_structured_reference(
             ));
             columns = Some(StructuredColumns::Single(if grouped {
                 unescape_name(component)?.into_boxed_str()
+            } else if table.is_some() {
+                ungrouped_column(component, structured_simple_column_character_needs_grouping)?
             } else {
-                ungrouped_column(component)?
+                ungrouped_column(component, structured_column_character_needs_grouping)?
             }));
         } else {
             return Err(StructuredReferenceError::TooManyColumns);
@@ -411,18 +431,63 @@ mod tests {
             "Table1[@#Headers]",
             "Table1[A:B]",
             "Table1[Col,1]",
-            "Table1[Col.1]",
-            "Table1[Under_score]",
-            "Table1[Col%]",
             "Table1[@% Commission]",
             "Table1['#ok,comma]",
-            "Table1['#ok.period]",
         ] {
             assert!(
                 parse_structured_reference(invalid).is_err(),
                 "{invalid} must require the structured-reference escape grammar"
             );
         }
+    }
+
+    #[test]
+    fn a_table_qualified_single_column_reads_the_characters_excel_leaves_bare() {
+        for (input, expected) in [
+            ("Table1[Under_score]", "Under_score"),
+            ("Table1[a\\b]", "a\\b"),
+            ("Table1[a!b]", "a!b"),
+            ("Table1[a(b)]", "a(b)"),
+            ("Table1[Col%]", "Col%"),
+            ("Table1[a?b;c~d`e]", "a?b;c~d`e"),
+            ("Table1[Col.1]", "Col.1"),
+            ("Table1[a-b]", "a-b"),
+            ("Table1[a@b]", "a@b"),
+            ("Table1[a&b=c]", "a&b=c"),
+        ] {
+            let parsed = parse_structured_reference(input).expect(input);
+            assert!(parsed.reference.items.is_empty(), "{input}");
+            assert_eq!(
+                parsed.reference.columns,
+                Some(StructuredColumns::Single(expected.into())),
+                "{input}"
+            );
+        }
+
+        // A selector list, `@`, and a reference without a table still need the brackets.
+        for invalid in [
+            "Table1[[#Data],Under_score]",
+            "[[#This Row],a.b]",
+            "Table1[@Under_score]",
+            "[Under_score]",
+            "Table1[a/b]",
+            "Table1[a#b]",
+        ] {
+            assert!(parse_structured_reference(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_table_qualified_single_column_combines_escapes_with_bare_characters() {
+        // Not measured as a combination: the escape follows the documented single-bracket form
+        // `Table1['#Name]`, and the `.` the measured `Table1[a.b]`.
+        assert_eq!(
+            parse_structured_reference("Table1['#ok.period]")
+                .expect("escape beside a bare period")
+                .reference
+                .columns,
+            Some(StructuredColumns::Single("#ok.period".into()))
+        );
     }
 
     #[test]

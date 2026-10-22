@@ -41,6 +41,13 @@ inventories, and measurements belong in the linked documentation rather than in 
   `calculationLimits` that are not plain objects fail with `interop.limit.payload_invalid` instead
   of `interop.input.invalid` or being read as no limits, and a snake_case limit name such as
   `max_sheets`, which was applied, fails as an unknown name.
+- A table-qualified structured reference to one column whose name holds an underscore, `\ ! ( ) % ?
+  ; ~`, a backtick, or `. - @ & =`, such as `Orders[unit_price]`, no longer fails with
+  `calculation.parse_error`, so such formulas calculate and renaming any column of their table no
+  longer fails the batch. A column rename writes such a reference as Excel saves it,
+  `Orders[unit_price]` and `Orders[a@b]`, instead of `Orders[[unit_price]]` and `Orders[[a'@b]]`; a
+  leading `@` keeps its escape. As in Excel, a selector list still needs the name bracketed, as in
+  `Orders[[#This Row],[unit_price]]`.
 
 ## [0.1.25] - 2026-10-18
 

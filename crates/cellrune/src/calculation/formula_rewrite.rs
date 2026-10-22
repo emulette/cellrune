@@ -1,5 +1,6 @@
 use super::ast::{
     Expr, SheetPrefix, StructuredColumns, StructuredReference, structured_column_needs_grouping,
+    structured_simple_column_needs_grouping,
 };
 use super::error::ParseErrorCode;
 use super::lexer::{Token, lex_spanned};
@@ -485,7 +486,8 @@ fn plan_column_edits(
                 )
             }) {
                 budget.charge_edit()?;
-                edits.push(column_edit(*component, new_name));
+                let simple = reference.table.is_some() && reference.items.is_empty();
+                edits.push(column_edit(*component, new_name, simple));
             }
         }
         Some(StructuredColumns::Range { start, end }) => {
@@ -498,7 +500,7 @@ fn plan_column_edits(
                 })
             {
                 budget.charge_edit()?;
-                edits.push(column_edit(*component, new_name));
+                edits.push(column_edit(*component, new_name, false));
             }
             if case_insensitive_eq(end, old_name)
                 && let Some(component) = components.iter().find(|component| {
@@ -509,7 +511,7 @@ fn plan_column_edits(
                 })
             {
                 budget.charge_edit()?;
-                edits.push(column_edit(*component, new_name));
+                edits.push(column_edit(*component, new_name, false));
             }
         }
         _ => {}
@@ -517,26 +519,38 @@ fn plan_column_edits(
     Ok(())
 }
 
-fn column_edit(component: SourceComponent, new_name: &str) -> SourceEdit {
+/// `simple` marks a table-qualified reference to one column, such as `Table1[unit_price]`, which
+/// Excel saves with fewer names bracketed than a selector list needs.
+fn column_edit(component: SourceComponent, new_name: &str, simple: bool) -> SourceEdit {
     let grouped = match component.kind() {
         SourceComponentKind::StructuredColumn { grouped }
         | SourceComponentKind::StructuredColumnStart { grouped }
         | SourceComponentKind::StructuredColumnEnd { grouped } => grouped,
         _ => false,
     };
-    let escaped = escape_structured_name(new_name);
-    let replacement = if !grouped && structured_column_needs_grouping(new_name) {
-        format!("[{escaped}]")
+    let needs_grouping = if simple {
+        structured_simple_column_needs_grouping(new_name)
     } else {
-        escaped
+        structured_column_needs_grouping(new_name)
+    };
+    let replacement = if grouped {
+        escape_structured_name(new_name, false)
+    } else if needs_grouping {
+        format!("[{}]", escape_structured_name(new_name, false))
+    } else {
+        // Excel saves `Table1[a@b]` with a bare `@`; a leading one would mean this row.
+        escape_structured_name(new_name, simple)
     };
     SourceEdit::new(component.span(), replacement)
 }
 
-fn escape_structured_name(name: &str) -> String {
+/// Escapes `[`, `]`, `#`, `'`, and `@` with `'`, leaving an `@` after the first character bare
+/// when `bare_inner_at` is set.
+fn escape_structured_name(name: &str, bare_inner_at: bool) -> String {
     let mut escaped = String::with_capacity(name.len());
-    for character in name.chars() {
-        if matches!(character, '[' | ']' | '#' | '\'' | '@') {
+    for (index, character) in name.char_indices() {
+        let bare = bare_inner_at && index > 0 && character == '@';
+        if matches!(character, '[' | ']' | '#' | '\'' | '@') && !bare {
             escaped.push('\'');
         }
         escaped.push(character);
@@ -545,7 +559,7 @@ fn escape_structured_name(name: &str) -> String {
 }
 
 pub(crate) fn render_unqualified_structured_column(name: &str) -> String {
-    let escaped = escape_structured_name(name);
+    let escaped = escape_structured_name(name, false);
     if structured_column_needs_grouping(name) {
         format!("[[{escaped}]]")
     } else {
@@ -749,10 +763,48 @@ mod tests {
                 request
             ),
             Some(
-                "SUM(Sales[[Gross.Amount]],Other[Amount],[Amount],Sales[[Gross.Amount]:[Tax]])"
+                "SUM(Sales[Gross.Amount],Other[Amount],[Amount],Sales[[Gross.Amount]:[Tax]])"
                     .to_owned()
             )
         );
+
+        let request = FormulaRewriteRequest::TableColumn {
+            table_name: "Sales",
+            old_name: "Amount",
+            new_name: "unit_price",
+            owner_is_target_table: true,
+        };
+        assert_eq!(
+            rewrite(
+                "Sales[Amount]+[Amount]+Sales[[#Data],Amount]+Sales[@Amount]",
+                request
+            ),
+            Some(
+                "Sales[unit_price]+[[unit_price]]+Sales[[#Data],[unit_price]]+Sales[@[unit_price]]"
+                    .to_owned()
+            )
+        );
+
+        // Only a leading `@`, which would mean this row, keeps its escape in a simple reference.
+        for (new_name, rewritten) in [
+            ("a@b", "Sales[a@b]+Sales[[a'@b]]+Sales[[#Data],[a'@b]]"),
+            ("@b", "Sales['@b]+Sales[['@b]]+Sales[[#Data],['@b]]"),
+        ] {
+            let request = FormulaRewriteRequest::TableColumn {
+                table_name: "Sales",
+                old_name: "Amount",
+                new_name,
+                owner_is_target_table: false,
+            };
+            assert_eq!(
+                rewrite(
+                    "Sales[Amount]+Sales[[Amount]]+Sales[[#Data],Amount]",
+                    request
+                ),
+                Some(rewritten.to_owned()),
+                "{new_name}"
+            );
+        }
     }
 
     #[test]

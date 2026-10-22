@@ -481,7 +481,7 @@ fn table_rename_column_rename_and_resize_are_one_stable_atomic_vertical() {
             .expect("qualified formula")
             .content()
             .formula_text(),
-        Some("SUM(Orders[[Gross.Amount]])+[@Amount]")
+        Some("SUM(Orders[Gross.Amount])+[@Amount]")
     );
     assert_eq!(
         sheet

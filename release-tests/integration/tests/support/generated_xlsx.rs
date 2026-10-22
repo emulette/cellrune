@@ -365,6 +365,117 @@ pub fn generated_totals_table_fixture() -> Vec<u8> {
     )
 }
 
+/// Table `Orders` from `A1` on sheet `Data` with the given column names, IDs from 1, and three data
+/// rows in which column `n` holds `n`, `2n`, and `3n`; sheet `Calc` holds the formulas in `A1` down.
+pub fn generated_named_columns_table_fixture(columns: &[&str], formulas: &[&str]) -> Vec<u8> {
+    assert!(
+        (1..=26).contains(&columns.len()),
+        "the fixture spells columns A to Z"
+    );
+    let escape = |text: &str| {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let letter = |index: usize| char::from(b'A' + u8::try_from(index).expect("column letter"));
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Data" sheetId="1" r:id="rId1"/>
+    <sheet name="Calc" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>"#;
+    let mut data_rows = String::from(r#"<row r="1">"#);
+    let mut table_columns = String::new();
+    for (index, name) in columns.iter().enumerate() {
+        let name = escape(name);
+        data_rows.push_str(&format!(
+            r#"<c r="{}1" t="inlineStr"><is><t>{name}</t></is></c>"#,
+            letter(index)
+        ));
+        table_columns.push_str(&format!(
+            r#"<tableColumn id="{}" name="{name}"/>"#,
+            index + 1
+        ));
+    }
+    data_rows.push_str("</row>");
+    for row in 2..=4 {
+        data_rows.push_str(&format!(r#"<row r="{row}">"#));
+        for index in 0..columns.len() {
+            data_rows.push_str(&format!(
+                r#"<c r="{}{row}"><v>{}</v></c>"#,
+                letter(index),
+                (index + 1) * (row - 1)
+            ));
+        }
+        data_rows.push_str("</row>");
+    }
+    let data = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>{data_rows}</sheetData>
+  <tableParts count="1"><tablePart r:id="rId1"/></tableParts>
+</worksheet>"#
+    );
+    let data_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let last = letter(columns.len() - 1);
+    let table = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="Orders" displayName="Orders" ref="A1:{last}4" headerRowCount="1">
+  <autoFilter ref="A1:{last}4"/>
+  <tableColumns count="{}">{table_columns}</tableColumns>
+</table>"#,
+        columns.len()
+    );
+    let calc_rows = formulas
+        .iter()
+        .zip(1..)
+        .map(|(formula, row)| {
+            format!(
+                r#"<row r="{row}"><c r="A{row}"><f>{}</f></c></row>"#,
+                escape(formula)
+            )
+        })
+        .collect::<String>();
+    let calc = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{calc_rows}</sheetData>
+</worksheet>"#
+    );
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", &data),
+            ("xl/worksheets/_rels/sheet1.xml.rels", data_relationships),
+            ("xl/worksheets/sheet2.xml", &calc),
+            ("xl/tables/table1.xml", &table),
+        ],
+        None,
+    )
+}
+
 /// Sheet `Data` filters `B1:D10` with a sheet-level auto-filter whose columns 0 and 2 carry
 /// criteria under a sort state, named by the hidden `_xlnm._FilterDatabase`. Sheet `Sales` holds
 /// table `Sales` on `B1:D4` with column IDs 1, 5, and 3 and a filter on its second column; the

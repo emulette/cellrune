@@ -3,10 +3,10 @@ use std::io::{Cursor, Read, Write};
 
 use cellrune::{
     ApplyChangesError, CalculationCellId, CalculationCellResult, CalculationDecisionReason,
-    CalculationExecutionMode, CalculationOptions, CancellationToken, CellAddress, CellContent,
-    CellValue, EditBatch, OpenOptions, ReadLimits, ReadOptions, RecalculationMode,
-    RecalculationWriteOptions, Row, SessionErrorCode, SessionLimits, SheetId, SheetName,
-    SheetVisibility, TableColumnId, TableColumnName, TableId, TableName,
+    CalculationExecutionMode, CalculationIssueCode, CalculationOptions, CancellationToken,
+    CellAddress, CellContent, CellValue, EditBatch, OpenOptions, ReadLimits, ReadOptions,
+    RecalculationMode, RecalculationWriteOptions, Row, SessionErrorCode, SessionLimits, SheetId,
+    SheetName, SheetVisibility, TableColumnId, TableColumnName, TableId, TableName,
     WorkbookCalculationSession, WorkbookChange, WorkbookDraft, WorkbookSourceKind, WriteLimits,
     WriteOptions, XlsxDocumentKind, XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook,
     open_xlsx_document, open_xlsx_document_bytes, open_xlsx_document_path, read_xlsx_bytes,
@@ -18,7 +18,8 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::support::generated_xlsx::{
     ProducerProfile, TemporaryWorkbook, generated_empty_sheet_data_workbook,
-    generated_formula_fixture, generated_legacy_array_workbook, generated_shared_formula_workbook,
+    generated_formula_fixture, generated_legacy_array_workbook,
+    generated_named_columns_table_fixture, generated_shared_formula_workbook,
     generated_table_reference_fixture, generated_table_topology_fixture,
     generated_totals_table_fixture, generated_workbook, generated_workbook_with_comment,
     generated_workbook_with_sheet_count,
@@ -1077,6 +1078,150 @@ fn xlsxwriter_calculated_columns_calculate_and_an_unrelated_edit_keeps_saved_res
         )]))
         .expect("rename the column");
     assert_totals_formula(draft.workbook(), "D2", "[[#This Row],[hit.points]]*2");
+}
+
+/// Column names that Excel reads and saves in a single-bracket reference such as
+/// `Orders[unit_price]`, most with a character that a selector list brackets.
+const SINGLE_BRACKET_COLUMNS: [&str; 18] = [
+    "qty",
+    "unit_price",
+    "a\\b",
+    "a!b",
+    "a(b",
+    "a)b",
+    "a%b",
+    "a?b",
+    "a;b",
+    "a~b",
+    "a`b",
+    "a.b",
+    "a-b",
+    "a@b",
+    "a&b",
+    "a=b",
+    "a b",
+    "가격",
+];
+
+fn calc_cell(row: u32) -> CalculationCellId {
+    CalculationCellId::new(
+        SheetId::new(2).expect("Calc sheet"),
+        CellAddress::from_indices(row, 1).expect("Calc cell"),
+    )
+}
+
+#[test]
+fn simple_table_references_read_column_names_a_selector_list_brackets() {
+    // Excel deletes these formulas on open: in a selector list, the names need brackets.
+    let listed = [
+        "Orders[[#This Row],unit_price]",
+        "[[#This Row],unit_price]",
+        "Orders[[#This Row],a(b]",
+        "Orders[[#This Row],a.b]",
+        "Orders[[#This Row],a-b]",
+        "Orders[[#This Row],a@b]",
+        "Orders[[#This Row],a&b]",
+        "Orders[[#This Row],a=b]",
+    ];
+    let sums = SINGLE_BRACKET_COLUMNS
+        .iter()
+        .map(|name| format!("SUM(Orders[{name}])"))
+        .collect::<Vec<_>>();
+    let formulas = sums
+        .iter()
+        .map(String::as_str)
+        .chain(listed)
+        .collect::<Vec<_>>();
+    let bytes = generated_named_columns_table_fixture(&SINGLE_BRACKET_COLUMNS, &formulas);
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table document");
+    let calculation = calculate_workbook(document.workbook(), CalculationOptions::default());
+    for (row, formula) in (1..).zip(&sums) {
+        assert_eq!(
+            calculation.cell(calc_cell(row)),
+            Some(&CalculationCellResult::Value(
+                CellValue::number(f64::from(6 * row)).expect("column sum")
+            )),
+            "{formula}"
+        );
+    }
+    for (row, formula) in (1..).skip(sums.len()).zip(listed) {
+        let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(calc_cell(row))
+        else {
+            panic!("{formula} must not calculate");
+        };
+        assert_eq!(issue.code(), CalculationIssueCode::ParseError, "{formula}");
+    }
+}
+
+#[test]
+fn renaming_a_column_writes_simple_references_with_single_brackets() {
+    let formulas = [
+        "SUM(Orders[qty])",
+        "SUM(Orders[[qty]])",
+        "SUM(Orders[[#Data],qty])",
+        "SUM(Orders[[#Data],[qty]])",
+        "SUM(Orders[price])",
+        "SUM(Orders[cost])",
+        "SUM(Orders[unit_price])",
+    ];
+    let bytes =
+        generated_named_columns_table_fixture(&["qty", "price", "cost", "unit_price"], &formulas);
+    let document =
+        open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("table document");
+    let table_id = TableId::new(1).expect("table");
+    let rename = |column_id, name| {
+        WorkbookChange::rename_table_column(
+            table_id,
+            TableColumnId::new(column_id).expect("column ID"),
+            TableColumnName::new(name).expect("column name"),
+        )
+    };
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(EditBatch::new([
+            rename(1, "qty_ordered"),
+            rename(2, "price+tax"),
+            rename(3, "a@b"),
+        ]))
+        .expect("rename columns");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("renamed output");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen output");
+    let calculation = calculate_workbook(reopened.workbook(), CalculationOptions::default());
+    let calc = reopened
+        .workbook()
+        .sheet_by_name("Calc")
+        .expect("Calc sheet");
+    for (row, (formula, sum)) in (1..).zip([
+        ("SUM(Orders[qty_ordered])", 6.0),
+        ("SUM(Orders[[qty_ordered]])", 6.0),
+        ("SUM(Orders[[#Data],[qty_ordered]])", 6.0),
+        ("SUM(Orders[[#Data],[qty_ordered]])", 6.0),
+        ("SUM(Orders[[price+tax]])", 12.0),
+        ("SUM(Orders[a@b])", 18.0),
+        ("SUM(Orders[unit_price])", 24.0),
+    ]) {
+        let address = CellAddress::from_indices(row, 1).expect("Calc cell");
+        let Some(CellContent::Formula(written)) = calc.cell(address).map(|cell| cell.content())
+        else {
+            panic!("Calc row {row} must hold a formula");
+        };
+        assert_eq!(
+            written.text().map(|text| text.as_str()),
+            Some(formula),
+            "Calc row {row}"
+        );
+        assert_eq!(
+            calculation.cell(calc_cell(row)),
+            Some(&CalculationCellResult::Value(
+                CellValue::number(sum).expect("column sum")
+            )),
+            "{formula}"
+        );
+    }
 }
 
 #[test]

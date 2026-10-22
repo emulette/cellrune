@@ -475,6 +475,36 @@ pub(super) const fn structured_column_character_needs_grouping(character: char) 
     )
 }
 
+pub(super) fn structured_simple_column_needs_grouping(column: &str) -> bool {
+    column
+        .chars()
+        .any(structured_simple_column_character_needs_grouping)
+}
+
+/// Whether a character needs a column's own brackets in a table-qualified reference to one column,
+/// such as `Table1[unit_price]`. Excel reads and saves the underscore, `\ ! ( ) % ? ; ~`, the
+/// backtick, and `. - @ & =` there as written, though a selector list needs them bracketed.
+pub(super) const fn structured_simple_column_character_needs_grouping(character: char) -> bool {
+    structured_column_character_needs_grouping(character)
+        && !matches!(
+            character,
+            '_' | '\\'
+                | '!'
+                | '('
+                | ')'
+                | '%'
+                | '?'
+                | ';'
+                | '~'
+                | '`'
+                | '.'
+                | '-'
+                | '@'
+                | '&'
+                | '='
+        )
+}
+
 fn write_structured_reference(
     formatter: &mut fmt::Formatter<'_>,
     reference: &StructuredReference,
