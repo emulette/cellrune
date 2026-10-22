@@ -47,6 +47,14 @@ def main() -> None:
             pass
         else:
             raise AssertionError("boolean limit accepted")
+        # Targeted calculation keeps the default calculation limits.
+        for options in ({"calculation_limits": {"max_array_cells": 1}}, {"unknown_option": 1}):
+            try:
+                workbook.calculate_targets(targets, **options)
+            except CellRuneError as error:
+                assert error.code == "interop.calculation.target.invalid_payload", error.code
+            else:
+                raise AssertionError(f"{options} accepted")
 
 
 if __name__ == "__main__":

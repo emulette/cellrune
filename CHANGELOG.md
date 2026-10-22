@@ -30,6 +30,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `xlsx.write.output_verification_failed` when the draft also changed the number format of a `t="d"`
   date cell, changed its value and back, or cleared and re-entered it: such cells are written as
   their serial numbers too.
+- Python `calculate_targets` rejects `calculation_limits` with
+  `interop.calculation.target.invalid_payload`, like any other unknown option, instead of applying
+  it. Targeted calculation keeps the default calculation limits, as in Node.js and MCP.
 
 ## [0.1.25] - 2026-10-18
 
