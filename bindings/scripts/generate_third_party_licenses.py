@@ -38,7 +38,7 @@ LICENSE_PREFIXES = ("LICENSE", "COPYING", "NOTICE", "COPYRIGHT")
 # its alternatives but does not include a license file in the published crate.
 FALLBACK_LICENSES = {
     "napi": (
-        "444bf29b8534216dd1cec4695a71e5996a173e87",
+        "2763e12efc855748485129952a6ccb97ac991c06",
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-derive": (
@@ -50,7 +50,7 @@ FALLBACK_LICENSES = {
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "napi-sys": (
-        "679eb79f5cf3c7c6b2850f4ab46092126f23dc5c",
+        "37109f133043aff379a38edfb8b1548e7e9309e5",
         "bindings/licenses/napi-rs-LICENSE",
     ),
     "r-efi": (
@@ -58,11 +58,11 @@ FALLBACK_LICENSES = {
         "LICENSE-APACHE",
     ),
     "rmcp": (
-        "9427a929959e665e0d12e9395f674026baf4bd48",
+        "79437f291b2c44053d00dcd5db969fd0cca7c887",
         "bindings/licenses/rmcp-LICENSE",
     ),
     "rmcp-macros": (
-        "0cde3c5cf3e6aff0cc852ce6045f107e95991f48",
+        "79437f291b2c44053d00dcd5db969fd0cca7c887",
         "bindings/licenses/rmcp-LICENSE",
     ),
 }
