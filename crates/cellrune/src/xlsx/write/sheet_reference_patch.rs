@@ -574,6 +574,37 @@ mod tests {
     }
 
     #[test]
+    fn chart_elements_may_each_declare_up_to_256_namespaces() {
+        let declarations = |prefix: &str, count: usize| {
+            (0..count)
+                .map(|index| format!(r#" xmlns:{prefix}{index}="urn:{prefix}{index}""#))
+                .collect::<String>()
+        };
+        let chart = |space: &str, plot: &str| {
+            format!(
+                r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"{space}><c:chart{plot}><c:f>Data!$A$1</c:f></c:chart></c:chartSpace>"#
+            )
+        };
+        let nested = chart(&declarations("a", 255), &declarations("b", 256));
+        assert_eq!(
+            patch(ReferencePart::Chart, &nested),
+            Some(nested.replace("Data!$A$1", "'New Data'!$A$1"))
+        );
+
+        let source = PartPath::from_archive_name(b"xl/charts/chart1.xml").expect("part");
+        let error = patch_sheet_references(
+            chart(&declarations("a", 256), "").as_bytes(),
+            &source,
+            ReferencePart::Chart,
+            RENAMES,
+            WriteLimits::default(),
+        )
+        .expect_err("257 declarations on one element");
+        assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
+        assert_eq!(error.detail(), None);
+    }
+
+    #[test]
     fn formula_text_with_markup_is_refused_only_when_it_needs_a_rewrite() {
         let source = PartPath::from_archive_name(b"xl/worksheets/sheet1.xml").expect("part");
         let worksheet = |formula: &str| {

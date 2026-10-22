@@ -2213,6 +2213,409 @@ fn table_xml_declarations_comments_and_whitespace_fail_closed() {
 }
 
 #[test]
+fn invalid_utf8_in_a_required_part_reports_the_part_code_without_detail() {
+    let cases: [(&str, &str, &[u8], XlsxErrorCode); 12] = [
+        (
+            "xl/worksheets/sheet1.xml",
+            "<v>1</v>",
+            b"<v>1\xFF</v>",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<v>2</v>",
+            b"<v>2\xC3</v>",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<c r="A1">"#,
+            b"<c r=\"A1\xC0\xAF\">",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<c r="B1">"#,
+            b"<c r=\"B1\" \xFF=\"1\">",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "</sheetData>",
+            b"</sheetData\xFF>",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/sharedStrings.xml",
+            "<t>Hello</t>",
+            b"<t>Hello\xED\xA0\x80</t>",
+            XlsxErrorCode::InvalidSharedStrings,
+        ),
+        (
+            "xl/workbook.xml",
+            r#"name="First""#,
+            b"name=\"First\xFF\"",
+            XlsxErrorCode::InvalidWorkbook,
+        ),
+        (
+            "xl/styles.xml",
+            r#"formatCode="yyyy-mm-dd""#,
+            b"formatCode=\"yyyy-mm-dd\xFF\"",
+            XlsxErrorCode::InvalidStyles,
+        ),
+        (
+            "[Content_Types].xml",
+            r#"PartName="/xl/workbook.xml""#,
+            b"PartName=\"/xl/workbook.xml\xFF\"",
+            XlsxErrorCode::InvalidXml,
+        ),
+        (
+            "_rels/.rels",
+            r#"Target="xl/workbook.xml""#,
+            b"Target=\"xl/workbook.xml\xFF\"",
+            XlsxErrorCode::InvalidXml,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"Target="styles.xml""#,
+            b"Target=\"styles.xml\xFF\"",
+            XlsxErrorCode::InvalidXml,
+        ),
+        (
+            "xl/tables/table1.xml",
+            r#"name="Sales""#,
+            b"name=\"Sales\xFF\"",
+            XlsxErrorCode::InvalidXml,
+        ),
+    ];
+    for (part, needle, replacement, code) in cases {
+        let archive = archive_with_replaced_part_bytes(part, needle, replacement);
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect_err("invalid UTF-8 must fail the read");
+        assert_eq!(
+            (
+                error.code(),
+                error.detail(),
+                error.source_id().map(|source| source.as_str())
+            ),
+            (code, None, Some(part)),
+            "{part}: {}",
+            String::from_utf8_lossy(replacement)
+        );
+    }
+}
+
+#[test]
+fn each_element_may_declare_up_to_256_namespaces_however_deeply_nested() {
+    // The worksheet root already declares the default and `r` namespaces; `xmlns:xml` counts.
+    let worksheet = |root: usize, sheet_data: &str| {
+        let root = (0..root)
+            .map(|index| format!(r#" xmlns:a{index}="urn:a{index}""#))
+            .collect::<String>();
+        SHEET_WITH_TABLE
+            .replacen("<worksheet ", &format!("<worksheet{root} "), 1)
+            .replacen("<sheetData>", &format!("<sheetData{sheet_data}>"), 1)
+    };
+    let declarations = |count: usize| {
+        (0..count)
+            .map(|index| format!(r#" xmlns:b{index}="urn:b{index}""#))
+            .collect::<String>()
+    };
+    let xml_declaration = r#" xmlns:xml="http://www.w3.org/XML/1998/namespace""#;
+    let read = |worksheet: String| {
+        read_xlsx(
+            Cursor::new(archive_with_replaced_part_bytes(
+                "xl/worksheets/sheet1.xml",
+                SHEET_WITH_TABLE,
+                worksheet.as_bytes(),
+            )),
+            ReadOptions::default(),
+        )
+    };
+
+    for (root, sheet_data) in [(0, 255), (200, 55), (100, 200), (254, 256)] {
+        let snapshot = read(worksheet(root, &declarations(sheet_data)))
+            .unwrap_or_else(|error| panic!("{root} and {sheet_data} declarations: {error}"));
+        let first = snapshot.sheet_by_name("First").expect("sheet");
+        assert_eq!(number(literal(first, "A1")), 1.0);
+    }
+    for worksheet in [
+        worksheet(255, ""),
+        worksheet(0, &declarations(257)),
+        worksheet(0, &format!("{}{xml_declaration}", declarations(256))),
+    ] {
+        let error = read(worksheet).expect_err("257 declarations on one element");
+        assert_eq!(
+            (
+                error.code(),
+                error.detail(),
+                error.source_id().map(|source| source.as_str())
+            ),
+            (
+                XlsxErrorCode::InvalidWorksheet,
+                None,
+                Some("xl/worksheets/sheet1.xml")
+            )
+        );
+    }
+}
+
+#[test]
+fn utf8_byte_order_marks_and_declared_encodings_keep_every_part_readable() {
+    for part in ARCHIVE_PART_NAMES {
+        for (needle, replacement) in [
+            (r#"<?xml version="1.0""#, "\u{feff}<?xml version=\"1.0\""),
+            (r#"encoding="UTF-8""#, r#"encoding="UTF-16""#),
+            (r#"encoding="UTF-8""#, r#"encoding="ISO-8859-1""#),
+        ] {
+            let archive = archive_with_replaced_part_bytes(part, needle, replacement.as_bytes());
+            let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default())
+                .unwrap_or_else(|error| panic!("{part} with {replacement}: {error}"));
+            let first = snapshot.sheet_by_name("First").expect("sheet");
+            assert_eq!(number(literal(first, "A1")), 1.0, "{part}");
+            assert!(snapshot.table("SalesDisplay").is_some(), "{part}");
+        }
+    }
+}
+
+#[test]
+fn utf16_parts_and_non_utf8_bytes_under_a_declared_encoding_are_rejected() {
+    let codes = [
+        ("[Content_Types].xml", XlsxErrorCode::InvalidXml),
+        ("_rels/.rels", XlsxErrorCode::InvalidXml),
+        ("xl/workbook.xml", XlsxErrorCode::InvalidWorkbook),
+        ("xl/_rels/workbook.xml.rels", XlsxErrorCode::InvalidXml),
+        ("xl/styles.xml", XlsxErrorCode::InvalidStyles),
+        ("xl/sharedStrings.xml", XlsxErrorCode::InvalidSharedStrings),
+        ("xl/worksheets/sheet1.xml", XlsxErrorCode::InvalidWorksheet),
+        ("xl/worksheets/sheet2.xml", XlsxErrorCode::InvalidWorksheet),
+        (
+            "xl/worksheets/_rels/sheet1.xml.rels",
+            XlsxErrorCode::InvalidXml,
+        ),
+        ("xl/tables/table1.xml", XlsxErrorCode::InvalidXml),
+    ];
+    for (part, code) in codes {
+        for big_endian in [false, true] {
+            let text = String::from_utf8(archive_part_bytes(part))
+                .expect("fixture part")
+                .replace(r#"encoding="UTF-8""#, r#"encoding="UTF-16""#);
+            let mut utf16 = if big_endian {
+                vec![0xFE, 0xFF]
+            } else {
+                vec![0xFF, 0xFE]
+            };
+            for unit in text.encode_utf16() {
+                utf16.extend(if big_endian {
+                    unit.to_be_bytes()
+                } else {
+                    unit.to_le_bytes()
+                });
+            }
+            let archive = archive_with_part_bytes(part, &utf16);
+            let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+                .expect_err("UTF-16 part must fail the read");
+            assert_eq!(
+                (
+                    error.code(),
+                    error.detail(),
+                    error.source_id().map(|source| source.as_str())
+                ),
+                (code, None, Some(part)),
+                "{part}, big endian: {big_endian}"
+            );
+        }
+    }
+
+    for (part, needle, replacement, code) in [
+        (
+            "xl/worksheets/sheet1.xml",
+            "<v>1</v>",
+            b"<v>1\xE9</v>".as_slice(),
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/sharedStrings.xml",
+            "<t>Hello</t>",
+            b"<t>H\xE9llo</t>".as_slice(),
+            XlsxErrorCode::InvalidSharedStrings,
+        ),
+    ] {
+        let mut contents = archive_part_bytes(part);
+        replace_first(
+            &mut contents,
+            br#"encoding="UTF-8""#,
+            br#"encoding="ISO-8859-1""#,
+        );
+        replace_first(&mut contents, needle.as_bytes(), replacement);
+        let archive = archive_with_part_bytes(part, &contents);
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect_err("ISO-8859-1 bytes must fail the read");
+        assert_eq!(
+            (
+                error.code(),
+                error.detail(),
+                error.source_id().map(|source| source.as_str())
+            ),
+            (code, None, Some(part))
+        );
+    }
+}
+
+#[test]
+fn xml_syntax_errors_in_required_parts_keep_their_codes_and_details() {
+    let cases = [
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<tablePart r:id="rId7"/></tableParts>"#,
+            r#"<tablePart r:id="rI"#,
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "</row>",
+            "</rows>",
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            "<!-- open<sheetData>",
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            "<!-- a -- b --><sheetData>",
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<v>1</v>",
+            "<v>1 & 2</v>",
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<v>1</v>",
+            "<v>&bogus;</v>",
+            XlsxErrorCode::InvalidWorksheet,
+            Some("bogus"),
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            "<p:extra/><sheetData>",
+            XlsxErrorCode::InvalidWorksheet,
+            Some("p"),
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<c r="A1">"#,
+            r#"<c r="A1" r="A1">"#,
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<c r="A1">"#,
+            "<c r=A1>",
+            XlsxErrorCode::InvalidWorksheet,
+            None,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<worksheet ",
+            "<!DOCTYPE worksheet><worksheet ",
+            XlsxErrorCode::ForbiddenXmlConstruct,
+            None,
+        ),
+        (
+            "[Content_Types].xml",
+            "</Types>",
+            "</Type>",
+            XlsxErrorCode::InvalidXml,
+            None,
+        ),
+        (
+            "[Content_Types].xml",
+            "<Types ",
+            "<!-- open<Types ",
+            XlsxErrorCode::InvalidXml,
+            None,
+        ),
+        (
+            "_rels/.rels",
+            r#"Id="rId1""#,
+            "Id=rId1",
+            XlsxErrorCode::InvalidXml,
+            None,
+        ),
+        (
+            "xl/sharedStrings.xml",
+            "</si>",
+            "</s>",
+            XlsxErrorCode::InvalidSharedStrings,
+            None,
+        ),
+        (
+            "xl/sharedStrings.xml",
+            "<t>Hello</t>",
+            "<t>&bogus;</t>",
+            XlsxErrorCode::InvalidSharedStrings,
+            Some("bogus"),
+        ),
+        (
+            "xl/workbook.xml",
+            r#"name="First""#,
+            r#"name="A & B""#,
+            XlsxErrorCode::InvalidWorkbook,
+            None,
+        ),
+        (
+            "xl/styles.xml",
+            "<cellXfs ",
+            "<p:extra/><cellXfs ",
+            XlsxErrorCode::InvalidStyles,
+            Some("p"),
+        ),
+        (
+            "xl/tables/table1.xml",
+            r#"name="Region""#,
+            r#"name="&bogus;""#,
+            XlsxErrorCode::InvalidXml,
+            None,
+        ),
+        (
+            "xl/tables/table1.xml",
+            "</tableColumns>",
+            "</tableColumn>",
+            XlsxErrorCode::InvalidXml,
+            None,
+        ),
+    ];
+    for (part, needle, replacement, code, detail) in cases {
+        let archive = archive_with_replaced_part_bytes(part, needle, replacement.as_bytes());
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect_err("malformed XML must fail the read");
+        assert_eq!(
+            (
+                error.code(),
+                error.detail(),
+                error.source_id().map(|source| source.as_str())
+            ),
+            (code, detail, Some(part)),
+            "{part}: {replacement}"
+        );
+    }
+}
+
+#[test]
 fn table_child_sequences_and_filter_column_choice_are_enforced() {
     let invalid_tables = [
         TABLE_ONE.replace(
@@ -3346,6 +3749,71 @@ fn build_archive_with_sheets(sheet_one: &str, sheet_two: &str, shared_strings: &
                 .expect("start fixture part");
             writer
                 .write_all(contents.as_bytes())
+                .expect("write fixture part");
+        }
+        writer.finish().expect("finish fixture archive");
+    }
+    output.into_inner()
+}
+
+const ARCHIVE_PART_NAMES: [&str; 10] = [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "xl/workbook.xml",
+    "xl/_rels/workbook.xml.rels",
+    "xl/styles.xml",
+    "xl/sharedStrings.xml",
+    "xl/worksheets/sheet1.xml",
+    "xl/worksheets/sheet2.xml",
+    "xl/worksheets/_rels/sheet1.xml.rels",
+    "xl/tables/table1.xml",
+];
+
+/// Returns the bytes of one part of the table workbook that byte-level tests start from.
+fn archive_part_bytes(name: &str) -> Vec<u8> {
+    match name {
+        "[Content_Types].xml" => table_content_types().into_bytes(),
+        "_rels/.rels" => ROOT_RELATIONSHIPS.into(),
+        "xl/workbook.xml" => WORKBOOK.into(),
+        "xl/_rels/workbook.xml.rels" => WORKBOOK_RELATIONSHIPS.into(),
+        "xl/styles.xml" => STYLES.into(),
+        "xl/sharedStrings.xml" => SHARED_STRINGS.into(),
+        "xl/worksheets/sheet1.xml" => SHEET_WITH_TABLE.into(),
+        "xl/worksheets/sheet2.xml" => SHEET_TWO.into(),
+        "xl/worksheets/_rels/sheet1.xml.rels" => SHEET_ONE_TABLE_RELS.into(),
+        "xl/tables/table1.xml" => TABLE_ONE.into(),
+        _ => panic!("unknown fixture part {name}"),
+    }
+}
+
+fn replace_first(contents: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) {
+    let start = contents
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .expect("fixture needle");
+    contents.splice(start..start + needle.len(), replacement.iter().copied());
+}
+
+/// Builds the table workbook with the first `needle` of one part replaced by raw bytes.
+fn archive_with_replaced_part_bytes(part: &str, needle: &str, replacement: &[u8]) -> Vec<u8> {
+    let mut contents = archive_part_bytes(part);
+    replace_first(&mut contents, needle.as_bytes(), replacement);
+    archive_with_part_bytes(part, &contents)
+}
+
+/// Builds the table workbook with one part's bytes replaced.
+fn archive_with_part_bytes(part: &str, contents: &[u8]) -> Vec<u8> {
+    let mut output = Cursor::new(Vec::new());
+    {
+        let mut writer = ZipWriter::new(&mut output);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for name in ARCHIVE_PART_NAMES {
+            let fixture = archive_part_bytes(name);
+            writer
+                .start_file(name, options)
+                .expect("start fixture part");
+            writer
+                .write_all(if name == part { contents } else { &fixture })
                 .expect("write fixture part");
         }
         writer.finish().expect("finish fixture archive");
