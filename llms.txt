@@ -255,7 +255,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   the date system's first day (1900-01-01 or 1904-01-01) reads as `#VALUE!`;
   any other value fails with `InvalidCellValue`. A cached formula result of that
   type reads the same way. Once a draft changes the date system, saving it writes
-  each unedited `t="d"` literal as its serial number, which the draft keeps.
+  each `t="d"` literal as the serial number the draft keeps, also when an edit
+  such as a number format change left its value.
 - A limit failure's `XlsxReadError::observed() -> Option<u64>` is the value
   that exceeded the limit named by its code, in that limit's unit: bytes, a
   count, a nesting depth, or the uncompressed-to-compressed ratio rounded up.

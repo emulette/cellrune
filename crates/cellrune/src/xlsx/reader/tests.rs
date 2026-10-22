@@ -5,12 +5,13 @@ use zip::{CompressionMethod, ZipArchive};
 
 use super::{read_xlsx, read_xlsx_bytes};
 use crate::{
-    CalculationMode, CellAddress, CellContent, CellValue, DateSystem, EditBatch, NumberFormatKind,
-    OpenOptions, PhoneticAlignment, PhoneticRun, PhoneticRunLimitKind, PhoneticTextRange,
-    PhoneticType, PhoneticWriteOptions, ReadLimits, ReadOptions, RecalculationWriteOptions,
-    SavedResult, SheetId, SheetVisibility, TableColumnId, TableColumnName, TableId, TableName,
-    WorkbookChange, WorkbookDraft, WorkbookSourceKind, XlsxErrorCode, XlsxWriteErrorCode,
-    calculate_workbook, open_xlsx_document_bytes, write_xlsx_draft_bytes,
+    CalculationMode, CellAddress, CellContent, CellValue, DateSystem, EditBatch, NumberFormat,
+    NumberFormatKind, OpenOptions, PhoneticAlignment, PhoneticRun, PhoneticRunLimitKind,
+    PhoneticTextRange, PhoneticType, PhoneticWriteOptions, ReadLimits, ReadOptions,
+    RecalculationWriteOptions, SavedResult, SheetId, SheetVisibility, TableColumnId,
+    TableColumnName, TableId, TableName, WorkbookChange, WorkbookDraft, WorkbookSourceKind,
+    XlsxErrorCode, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
+    write_xlsx_draft_bytes,
 };
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -275,6 +276,107 @@ fn iso_date_cells_keep_their_serials_when_the_date_system_changes() {
             cell(sheet, "C1").number_format().kind(),
             NumberFormatKind::Date
         );
+    }
+}
+
+#[test]
+fn iso_date_cells_keep_their_serials_when_the_date_system_changes_and_they_are_edited() {
+    // A `t="d"` literal is saved as its number in the new date system also when an edit left its
+    // value: a number format change, a value changed back, or a cleared cell entered again, which
+    // takes a new cell's style. Entering the same value and formatting another cell leave it
+    // unedited.
+    let excel_1900 = WORKBOOK.replace(r#"<workbookPr date1904="1"/>"#, "");
+    let format = NumberFormat::custom(165, "d/m/yyyy", NumberFormatKind::Date).expect("format");
+    for (workbook, date_system, serial) in [
+        (excel_1900.as_str(), DateSystem::Excel1904, 45_366.0),
+        (WORKBOOK, DateSystem::Excel1900, 43_904.0),
+    ] {
+        let source = build_table_archive_with_workbook(workbook, ISO_DATE_SHEET, &[]);
+        let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("document");
+        let first = document
+            .workbook()
+            .sheet_by_name("First")
+            .expect("first sheet")
+            .id();
+        let value = CellValue::number(serial).expect("serial");
+        for (scenario, changes) in [
+            (
+                "number format",
+                vec![WorkbookChange::set_cell_number_format(
+                    first,
+                    address("C1"),
+                    format.clone(),
+                )],
+            ),
+            (
+                "value changed back",
+                vec![
+                    WorkbookChange::set_cell_value(
+                        first,
+                        address("C1"),
+                        CellValue::number(1.0).expect("number"),
+                    ),
+                    WorkbookChange::set_cell_value(first, address("C1"), value.clone()),
+                ],
+            ),
+            (
+                "cleared and entered again",
+                vec![
+                    WorkbookChange::clear_cell(first, address("C1")),
+                    WorkbookChange::set_cell_value(first, address("C1"), value.clone()),
+                ],
+            ),
+            (
+                "same value",
+                vec![WorkbookChange::set_cell_value(
+                    first,
+                    address("C1"),
+                    value.clone(),
+                )],
+            ),
+            (
+                "another cell's number format",
+                vec![WorkbookChange::set_cell_number_format(
+                    first,
+                    address("E1"),
+                    format.clone(),
+                )],
+            ),
+        ] {
+            let mut draft = WorkbookDraft::from_document(&document);
+            draft.set_date_system(date_system).expect("date system");
+            draft
+                .apply_changes(EditBatch::new(changes))
+                .expect(scenario);
+            let edits = crate::write_xlsx_draft_edits_bytes(&draft, crate::WriteOptions::default())
+                .expect(scenario);
+            let calculation =
+                calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+            let full =
+                write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                    .expect(scenario);
+            let edited = draft.workbook().sheet_by_id(first).expect("first sheet");
+            for output in [edits.bytes(), full.bytes()] {
+                let reopened = read_xlsx_bytes(output, ReadOptions::default()).expect(scenario);
+                assert_eq!(reopened.date_system(), date_system, "{scenario}");
+                let sheet = reopened.sheet_by_name("First").expect("first sheet");
+                assert_eq!(number(literal(sheet, "C1")), serial, "{scenario}");
+                assert_eq!(
+                    number(literal(sheet, "A1")),
+                    serial + 8.0 / 24.0,
+                    "{scenario}"
+                );
+                let (format, edited_format) = (
+                    cell(sheet, "C1").number_format(),
+                    cell(edited, "C1").number_format(),
+                );
+                assert_eq!(
+                    (format.id(), format.kind()),
+                    (edited_format.id(), edited_format.kind()),
+                    "{scenario}"
+                );
+            }
+        }
     }
 }
 

@@ -26,6 +26,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Renaming a sheet fails with `xlsx.write.invalid_generated_xml` when a chart or pivot cache part is
   UTF-16 or contains invalid UTF-8, instead of writing that part unchanged with its reference to the
   old sheet name or its invalid bytes.
+- A save after a draft changes the date system no longer fails with
+  `xlsx.write.output_verification_failed` when the draft also changed the number format of a `t="d"`
+  date cell, changed its value and back, or cleared and re-entered it: such cells are written as
+  their serial numbers too.
 
 ## [0.1.25] - 2026-10-18
 

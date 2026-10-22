@@ -270,6 +270,14 @@ pub(super) fn write_document_package(
                     .presentation_cell_mutations()
                     .range(sheet_cell_bounds(sheet_id)),
             )
+            .copied()
+            .chain(
+                date_typed_literals
+                    .get(&sheet_id)
+                    .into_iter()
+                    .flatten()
+                    .map(|address| CalculationCellId::new(sheet_id, *address)),
+            )
             .filter(|id| {
                 !matches!(
                     draft.cell_mutations().get(id),
@@ -280,13 +288,6 @@ pub(super) fn write_document_package(
                 )
             })
             .map(|id| id.address())
-            .chain(
-                date_typed_literals
-                    .get(&sheet_id)
-                    .into_iter()
-                    .flatten()
-                    .copied(),
-            )
             .filter(|address| source_sheet.is_some_and(|sheet| sheet.cell(*address).is_some()))
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
@@ -618,10 +619,11 @@ pub(super) fn write_document_package(
     })
 }
 
-/// Existing sheets whose sheet-level autoFilter the draft changed.
-/// Returns the unedited literal cells stored as ISO 8601 dates (`t="d"`) once the draft changed the
-/// date system. The draft keeps each cell's serial, which the stored calendar date would read as a
-/// different serial in the new system, so these cells are rewritten as their numbers.
+/// Returns the cells stored as ISO 8601 dates (`t="d"`) that the draft still holds as literals once
+/// it changed the date system, edited or not. The draft keeps each cell's serial, which the stored
+/// calendar date would read as a different serial in the new system, so these cells are rewritten
+/// from the draft: as their numbers also when an edit, such as a number format change, left their
+/// value.
 fn date_typed_literals_to_rewrite(
     draft: &WorkbookDraft,
     document: &XlsxDocument,
@@ -642,10 +644,7 @@ fn date_typed_literals_to_rewrite(
                 matches!(
                     sheet.cell(*address).map(crate::Cell::content),
                     Some(crate::CellContent::Literal(_))
-                ) && draft
-                    .cell_mutations()
-                    .get(&CalculationCellId::new(sheet.id(), *address))
-                    .is_none()
+                )
             })
             .collect::<BTreeSet<_>>();
         if !cells.is_empty() {
@@ -655,6 +654,7 @@ fn date_typed_literals_to_rewrite(
     Ok(literals)
 }
 
+/// Existing sheets whose sheet-level autoFilter the draft changed.
 fn changed_auto_filter_sheets(draft: &WorkbookDraft, document: &XlsxDocument) -> BTreeSet<SheetId> {
     draft
         .workbook()
