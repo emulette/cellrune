@@ -7,7 +7,7 @@ them.
 ## Runtime dependency graph
 
 The following table records the normal dependency graph selected by
-`cargo tree --locked -p cellrune --edges normal` for CellRune 0.1.25.
+`cargo tree --locked -p cellrune --edges normal` for CellRune 0.1.26.
 Transitive dependencies are included so the release boundary can be audited
 without confusing development-only tools with shipped library requirements.
 
@@ -36,14 +36,15 @@ without confusing development-only tools with shipped library requirements.
 | `stacker` | 0.1.25 | `MIT OR Apache-2.0` |
 | `typenum` | 1.20.1 | `MIT OR Apache-2.0` |
 | `typed-path` | 0.12.3 | `MIT OR Apache-2.0` |
-| `zip` | 8.6.0 | `MIT` |
+| `zip` | 9.0.4 | `MIT` |
 | `zlib-rs` | 0.6.6 | `Zlib` |
 
 `libm`, `pcre2`, `pcre2-sys`, `quick-xml`, `sha2`, `stacker`, and `zip` are CellRune's direct
 runtime dependencies. The remaining crates are selected transitively by those dependencies.
-On Windows targets, `stacker` also selects `windows-sys` 0.60.2, `windows-targets` 0.53.5,
-`windows-link` 0.2.1, and the target's `windows_x86_64_msvc` or `windows_aarch64_msvc` 0.53.1,
-all `MIT OR Apache-2.0`.
+On Windows targets, `stacker` also selects `windows-sys` 0.60.2, `windows-targets` 0.53.5, and
+the target's `windows_x86_64_msvc` or `windows_aarch64_msvc` 0.53.1, all `MIT OR Apache-2.0`.
+On macOS targets, `zip` also selects `nix` 0.31.3 (`MIT`) and `bitflags` 2.13.1
+(`MIT OR Apache-2.0`).
 
 The table covers the default feature set. The optional `capability-fs` feature adds
 `cap-std` and its transitive graph, which this table does not enumerate. Those crates
