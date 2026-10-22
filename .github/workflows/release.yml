@@ -113,7 +113,7 @@ jobs:
       # accepts the upload, and `deny.toml` is what enforces `wildcards = "deny"` on the
       # requirement ranges we publish.
       - name: Install pinned cargo-deny
-        uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
         with:
           tool: cargo-deny@0.20.2
           fallback: none
@@ -231,7 +231,7 @@ jobs:
 
       - name: Download every verified MCP archive
         if: steps.github-release-state.outputs.state != 'complete'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: mcp-*
           path: mcp-bundles
@@ -340,14 +340,14 @@ jobs:
       id-token: write
     steps:
       - name: Download every verified wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: python-wheel-*
           path: dist
           merge-multiple: true
 
       - name: Download the verified source archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: python-source-publication-archive
           path: dist
@@ -370,7 +370,7 @@ jobs:
       id-token: write
     steps:
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22.23.1
           registry-url: https://registry.npmjs.org
@@ -384,7 +384,7 @@ jobs:
         run: npm install -g npm@11.18.0
 
       - name: Download verified npm archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: npm-publication-archives
           path: release

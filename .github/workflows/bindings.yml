@@ -196,7 +196,7 @@ jobs:
           startsWith(github.ref, 'refs/tags/v') ||
           github.event_name == 'workflow_dispatch' ||
           inputs.scope != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-wheel-${{ matrix.os }}-${{ matrix.python }}
           path: bindings/python/dist/*.whl
@@ -264,7 +264,7 @@ jobs:
           consumer/bin/python tests/introspection.py
 
       - name: Upload verified Python archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-source-publication-archive
           path: bindings/python/dist/*.tar.gz
@@ -351,7 +351,7 @@ jobs:
           dist
 
       - name: Upload wheels for installation
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-linux-build-${{ matrix.target }}
           path: bindings/python/dist/*.whl
@@ -403,7 +403,7 @@ jobs:
           persist-credentials: false
 
       - name: Download wheels
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: python-linux-build-${{ matrix.target }}
           path: bindings/python/dist
@@ -433,7 +433,7 @@ jobs:
           done
 
       - name: Upload verified wheels
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-wheel-${{ matrix.target }}
           path: bindings/python/dist/*.whl
@@ -465,7 +465,7 @@ jobs:
           version: 10.22.0
 
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: pnpm
@@ -584,7 +584,7 @@ jobs:
           version: 10.22.0
 
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.23.1
           cache: pnpm
@@ -598,7 +598,7 @@ jobs:
 
       - name: Install cross-compilation cargo tools
         if: matrix.cargo_tool != ''
-        uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
         with:
           tool: ${{ matrix.cargo_tool }}
           fallback: none
@@ -628,7 +628,7 @@ jobs:
         run: python ../scripts/verify_release_artifacts.py ./*.node
 
       - name: Upload native addon
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: node-${{ matrix.target }}
           path: bindings/node/*.node
@@ -667,12 +667,12 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.23.1
 
       - name: Download native addon
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: node-${{ matrix.target }}
           path: bindings/node
@@ -713,7 +713,7 @@ jobs:
           persist-credentials: false
 
       - name: Download native addon
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: node-${{ matrix.target }}
           path: bindings/node
@@ -758,7 +758,7 @@ jobs:
           version: 10.22.0
 
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.23.1
           cache: pnpm
@@ -771,7 +771,7 @@ jobs:
         run: cargo fetch --locked
 
       - name: Download every native addon
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: node-*
           path: bindings/node/artifacts
@@ -807,7 +807,7 @@ jobs:
           python ../scripts/verify_release_artifacts.py release
 
       - name: Upload verified npm archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-publication-archives
           path: bindings/node/release/*.tgz
@@ -872,7 +872,7 @@ jobs:
         run: python bindings/scripts/exercise_mcp_bundle.py release
 
       - name: Upload verified MCP archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mcp-${{ matrix.target }}
           path: release/*
@@ -893,7 +893,7 @@ jobs:
       attestations: write
     steps:
       - name: Download verified MCP archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: mcp-*
           path: release-mcp
