@@ -32,6 +32,8 @@ pub struct CalculationOptionsDto {
     pub today_serial: Option<f64>,
     /// Excel serial returned by `NOW()`.
     pub now_serial: Option<f64>,
+    /// Seed that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` draw from; not cryptographic.
+    pub random_seed: Option<u32>,
     /// Policy for cancelling addition and subtraction.
     #[serde(default)]
     pub arithmetic_semantics: ArithmeticSemanticsDto,
@@ -594,6 +596,8 @@ pub struct CalculationOptionsReportDto {
     pub today_serial: Option<f64>,
     /// Excel serial date-time returned by `NOW()`, when supplied.
     pub now_serial: Option<f64>,
+    /// Seed for `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`, when supplied.
+    pub random_seed: Option<u32>,
     /// Policy for cancelling addition and subtraction.
     pub arithmetic_semantics: ArithmeticSemanticsDto,
     /// Policy for iterative financial-solver convergence.

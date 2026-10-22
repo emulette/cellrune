@@ -38,6 +38,15 @@ function requireOptionalFinite(value, name) {
   }
 }
 
+function requireOptionalU32(value, name) {
+  if (
+    value !== undefined &&
+    (!Number.isInteger(value) || value < 0 || value > 4294967295)
+  ) {
+    throw inputError(`${name} must be an unsigned 32-bit integer`);
+  }
+}
+
 function requireOptionalString(value, name) {
   if (value !== undefined) {
     requireString(value, name);
@@ -131,6 +140,7 @@ module.exports = {
   requireOptionalBoolean,
   requireOptionalFinite,
   requireOptionalString,
+  requireOptionalU32,
   requireOptionKeys,
   requireOptions,
   requireProtocolFinite,

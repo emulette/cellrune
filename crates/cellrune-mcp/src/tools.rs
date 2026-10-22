@@ -49,6 +49,7 @@ impl CellruneMcpServer {
             options: calculation_options(
                 args.options.today_serial,
                 args.options.now_serial,
+                args.options.random_seed,
                 args.options.arithmetic_semantics,
                 args.options.financial_solver_semantics,
             ),
@@ -328,6 +329,7 @@ can be calculated with the supplied deterministic TODAY/NOW serial values.",
         let options = calculation_options(
             args.today_serial,
             args.now_serial,
+            None,
             args.arithmetic_semantics,
             args.financial_solver_semantics,
         );
@@ -459,6 +461,7 @@ delta_cursor, and range reads and Save As use the installed results.",
                 calculation_options(
                     args.today_serial,
                     args.now_serial,
+                    args.random_seed,
                     args.arithmetic_semantics,
                     args.financial_solver_semantics,
                 ),
@@ -570,6 +573,7 @@ Use next_cursor to continue until it is absent.",
                     calculation_options(
                         args.today_serial,
                         args.now_serial,
+                        args.random_seed,
                         args.arithmetic_semantics,
                         args.financial_solver_semantics,
                     ),
@@ -897,6 +901,7 @@ fn install_recalculation(
 fn calculation_options(
     today_serial: Option<f64>,
     now_serial: Option<f64>,
+    random_seed: Option<u32>,
     arithmetic_semantics: ArithmeticSemanticsDto,
     financial_solver_semantics: FinancialSolverSemanticsDto,
 ) -> CalculationOptionsDto {
@@ -904,6 +909,7 @@ fn calculation_options(
     CalculationOptionsDto {
         today_serial,
         now_serial,
+        random_seed,
         arithmetic_semantics,
         financial_solver_semantics,
         calculation_limits: CalculationLimitOptionsDto::default(),

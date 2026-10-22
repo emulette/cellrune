@@ -41,6 +41,7 @@ const {
   requireOptionalBoolean,
   requireOptionalFinite,
   requireOptionalString,
+  requireOptionalU32,
   requireOptionKeys,
   requireOptions,
   requireString,
@@ -158,6 +159,7 @@ class Workbook {
     requireOptions(options);
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
+    requireOptionalU32(options.randomSeed, "randomSeed");
     requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
     requireOptionalString(
       options.financialSolverSemantics,
@@ -165,10 +167,7 @@ class Workbook {
     );
     const task = withSyncErrors(() =>
       this.#session().calculate(
-        options.todaySerial ?? null,
-        options.nowSerial ?? null,
-        options.arithmeticSemantics ?? null,
-        options.financialSolverSemantics ?? null,
+        calculationOptions(options),
         limitsJson(options.calculationLimits, "calculationLimits"),
       ),
     );
@@ -189,6 +188,7 @@ class Workbook {
     }
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
+    requireOptionalU32(options.randomSeed, "randomSeed");
     requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
     requireOptionalString(
       options.financialSolverSemantics,
@@ -197,10 +197,7 @@ class Workbook {
     const task = withSyncErrors(() =>
       this.#session().recalculate(
         mode,
-        options.todaySerial ?? null,
-        options.nowSerial ?? null,
-        options.arithmeticSemantics ?? null,
-        options.financialSolverSemantics ?? null,
+        calculationOptions(options),
         limitsJson(options.calculationLimits, "calculationLimits"),
       ),
     );
@@ -217,6 +214,7 @@ class Workbook {
       "mode",
       "todaySerial",
       "nowSerial",
+      "randomSeed",
       "arithmeticSemantics",
       "financialSolverSemantics",
       "calculationLimits",
@@ -227,6 +225,7 @@ class Workbook {
     }
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
+    requireOptionalU32(options.randomSeed, "randomSeed");
     requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
     requireOptionalString(
       options.financialSolverSemantics,
@@ -245,6 +244,7 @@ class Workbook {
           mode,
           today_serial: options.todaySerial ?? null,
           now_serial: options.nowSerial ?? null,
+          random_seed: options.randomSeed ?? null,
           arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
           financial_solver_semantics:
             options.financialSolverSemantics ?? "excel_iteration_budget",
@@ -487,6 +487,20 @@ class Workbook {
     requireString(address, "address");
     withSyncErrors(operation);
   }
+}
+
+/**
+ * Picks the validated calculation options native code reads for calculate and recalculate. They
+ * pass as JavaScript values rather than JSON so date-time serials keep every bit.
+ */
+function calculationOptions(options) {
+  return {
+    todaySerial: options.todaySerial,
+    nowSerial: options.nowSerial,
+    randomSeed: options.randomSeed,
+    arithmeticSemantics: options.arithmeticSemantics,
+    financialSolverSemantics: options.financialSolverSemantics,
+  };
 }
 
 function previewCursorWire(cursor) {

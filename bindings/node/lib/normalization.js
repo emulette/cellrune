@@ -603,6 +603,7 @@ function normalizeTransactionOptions(options) {
   return {
     todaySerial: options.today_serial ?? null,
     nowSerial: options.now_serial ?? null,
+    randomSeed: options.random_seed ?? null,
     arithmeticSemantics: options.arithmetic_semantics,
     financialSolverSemantics: options.financial_solver_semantics,
     limits: {

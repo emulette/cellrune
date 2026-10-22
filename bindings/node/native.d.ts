@@ -18,8 +18,8 @@ export declare class NativeWorkbook {
   scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
   functionUsage(): NativeFunctionUsageReport
-  calculate(todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationReport>
-  recalculate(mode: string, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null, arithmeticSemantics?: string | undefined | null, financialSolverSemantics?: string | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationDelta>
+  calculate(options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationReport>
+  recalculate(mode: string, options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationDelta>
   previewChanges(expectedRevision: string, batchJson: string, optionsJson: string, limitsJson?: string | undefined | null): Promise<string>
   previewChangesPage(previewId: string, section: string, cursorJson: string | undefined | null, limit: number): string
   commitPreview(previewId: string): string
@@ -75,6 +75,20 @@ export interface NativeCalculationDeltaPage {
   requestedCursor: string
   nextCursor?: string
   deltas: Array<NativeCalculationDelta>
+}
+
+/**
+ * Deterministic inputs and compatibility policies for `calculate` and `recalculate`, passed as
+ * JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
+ * own object so their errors keep the limit codes, and the policies stay strings so an unknown
+ * one keeps its own code.
+ */
+export interface NativeCalculationOptions {
+  todaySerial?: number
+  nowSerial?: number
+  randomSeed?: number
+  arithmeticSemantics?: string
+  financialSolverSemantics?: string
 }
 
 export interface NativeCalculationReport {

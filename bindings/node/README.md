@@ -114,7 +114,8 @@ Use declared spill ranges or full calculation if independent undeclared spills m
 anchors outside the dependency scope are not discovered by a partial request.
 
 `Workbook` supports typed errors, revision-checked edit batches, incremental
-calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, and explicit
+calculation deltas, deterministic `todaySerial` and `nowSerial` inputs, a `randomSeed` for
+`RAND`, `RANDBETWEEN`, and `RANDARRAY`, and explicit
 `arithmeticSemantics` / `financialSolverSemantics` compatibility policies. The latter accept
 `"ieee_754"` and `"extended_search"` when a caller needs the calculation behavior shipped through
 0.1.2; omitted fields select the Excel-compatible defaults.

@@ -181,15 +181,19 @@ impl Workbook {
         *,
         today_serial=None,
         now_serial=None,
+        random_seed=None,
         arithmetic_semantics="excel_near_zero",
         financial_solver_semantics="excel_iteration_budget",
         calculation_limits=None
     ))]
+    // One parameter per Python keyword argument.
+    #[allow(clippy::too_many_arguments)]
     pub fn calculate<'py>(
         &self,
         py: Python<'py>,
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
+        random_seed: Option<&Bound<'_, PyAny>>,
         arithmetic_semantics: &str,
         financial_solver_semantics: &str,
         calculation_limits: Option<&Bound<'_, PyAny>>,
@@ -200,6 +204,8 @@ impl Workbook {
             optional_number_from_python(today_serial).map_err(|error| into_py_error(py, error))?;
         let now_serial =
             optional_number_from_python(now_serial).map_err(|error| into_py_error(py, error))?;
+        let random_seed =
+            optional_seed_from_python(random_seed).map_err(|error| into_py_error(py, error))?;
         let arithmetic_semantics = parse_arithmetic_semantics(arithmetic_semantics)
             .map_err(|error| into_py_error(py, error))?;
         let financial_solver_semantics =
@@ -212,6 +218,7 @@ impl Workbook {
                     CalculationOptionsDto {
                         today_serial,
                         now_serial,
+                        random_seed,
                         arithmetic_semantics,
                         financial_solver_semantics,
                         calculation_limits,
@@ -246,15 +253,19 @@ impl Workbook {
         mode="auto",
         today_serial=None,
         now_serial=None,
+        random_seed=None,
         arithmetic_semantics="excel_near_zero",
         financial_solver_semantics="excel_iteration_budget",
         calculation_limits=None
     ))]
+    // One parameter per Python keyword argument.
+    #[allow(clippy::too_many_arguments)]
     pub fn recalculate<'py>(
         slf: PyRef<'py, Self>,
         mode: &str,
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
+        random_seed: Option<&Bound<'_, PyAny>>,
         arithmetic_semantics: &str,
         financial_solver_semantics: &str,
         calculation_limits: Option<&Bound<'_, PyAny>>,
@@ -268,6 +279,8 @@ impl Workbook {
             optional_number_from_python(today_serial).map_err(|error| into_py_error(py, error))?;
         let now_serial =
             optional_number_from_python(now_serial).map_err(|error| into_py_error(py, error))?;
+        let random_seed =
+            optional_seed_from_python(random_seed).map_err(|error| into_py_error(py, error))?;
         let arithmetic_semantics = parse_arithmetic_semantics(arithmetic_semantics)
             .map_err(|error| into_py_error(py, error))?;
         let financial_solver_semantics =
@@ -280,6 +293,7 @@ impl Workbook {
                     CalculationOptionsDto {
                         today_serial,
                         now_serial,
+                        random_seed,
                         arithmetic_semantics,
                         financial_solver_semantics,
                         calculation_limits,
@@ -682,6 +696,22 @@ fn optional_number_from_python(
     value.map(number_from_python).transpose()
 }
 
+/// Reads a random seed: an `int` from 0 through 2^32 - 1, never a `bool` or `float`.
+fn optional_seed_from_python(
+    value: Option<&Bound<'_, PyAny>>,
+) -> Result<Option<u32>, InteropError> {
+    value
+        .map(|value| {
+            if !value.is_instance_of::<PyInt>() || value.is_instance_of::<PyBool>() {
+                return Err(InteropError::invalid_number());
+            }
+            value
+                .extract::<u32>()
+                .map_err(|_| InteropError::invalid_number())
+        })
+        .transpose()
+}
+
 fn number_from_python(value: &Bound<'_, PyAny>) -> Result<f64, InteropError> {
     if value.is_instance_of::<PyBool>() {
         return Err(InteropError::invalid_number());
@@ -736,6 +766,7 @@ fn preview_options_from_python(
         "mode",
         "today_serial",
         "now_serial",
+        "random_seed",
         "arithmetic_semantics",
         "financial_solver_semantics",
         "calculation_limits",
@@ -771,6 +802,7 @@ fn preview_options_from_python(
     )?;
     let today_serial = options.get_item("today_serial")?;
     let now_serial = options.get_item("now_serial")?;
+    let random_seed = options.get_item("random_seed")?;
     let calculation_limits = options.get_item("calculation_limits")?;
     let calculation_limits = limits_from_python::<CalculationLimitOptionsDto>(
         py,
@@ -785,6 +817,10 @@ fn preview_options_from_python(
             .map_err(|error| into_py_error(py, error))?,
             now_serial: optional_number_from_python(
                 now_serial.as_ref().filter(|value| !value.is_none()),
+            )
+            .map_err(|error| into_py_error(py, error))?,
+            random_seed: optional_seed_from_python(
+                random_seed.as_ref().filter(|value| !value.is_none()),
             )
             .map_err(|error| into_py_error(py, error))?,
             arithmetic_semantics: parse_arithmetic_semantics(&arithmetic_semantics)

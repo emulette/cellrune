@@ -267,6 +267,11 @@ export interface OpenOptions {
 export interface CalculationOptions {
   readonly todaySerial?: number;
   readonly nowSerial?: number;
+  /**
+   * Seed for `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`: an integer from 0 through 2^32 - 1.
+   * The generator is deterministic and not cryptographically secure.
+   */
+  readonly randomSeed?: number;
   readonly arithmeticSemantics?: "excel_near_zero" | "ieee_754";
   readonly financialSolverSemantics?:
     | "excel_iteration_budget"
@@ -559,6 +564,7 @@ export interface CalculationLimits {
 export interface TransactionCalculationOptions {
   readonly todaySerial: number | null;
   readonly nowSerial: number | null;
+  readonly randomSeed: number | null;
   readonly arithmeticSemantics: "excel_near_zero" | "ieee_754";
   readonly financialSolverSemantics:
     | "excel_iteration_budget"

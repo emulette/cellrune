@@ -199,6 +199,76 @@ async function assertLimits() {
   });
 }
 
+async function assertExactSerials() {
+  const serial = 45158.311281307004;
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "A1", "=NOW()");
+  workbook.setFormula("Sheet1", "A2", "=TODAY()");
+  const read = () =>
+    workbook.readRange("Sheet1", "A1", "A2").cells.map((cell) => cell.calculated.value.value);
+  await workbook.calculate({ nowSerial: serial, todaySerial: serial });
+  assert.deepEqual(read(), [serial, serial]);
+  await workbook.recalculate({ mode: "full", nowSerial: serial, todaySerial: serial });
+  assert.deepEqual(read(), [serial, serial]);
+}
+
+async function assertRandomSeed() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "A1", "=RAND()");
+  workbook.setFormula("Sheet1", "A2", "=RANDBETWEEN(1,1000000)");
+  const results = () =>
+    workbook.readRange("Sheet1", "A1", "A2").cells.map((cell) => cell.calculated);
+  const numbers = () => results().map((result) => result.value.value);
+
+  assert.equal((await workbook.calculate()).unavailableCount, 2);
+  assert.deepEqual(
+    results().map((result) => result.code),
+    ["calculation.volatile_input_missing", "calculation.volatile_input_missing"],
+  );
+  assert.equal((await workbook.calculate({ randomSeed: 7 })).unavailableCount, 0);
+  const first = numbers();
+  assert.ok(first[0] >= 0 && first[0] < 1 && first[1] >= 1 && first[1] <= 1_000_000);
+  await workbook.recalculate({ mode: "full", randomSeed: 7 });
+  assert.deepEqual(numbers(), first);
+  const targeted = await workbook.calculateTargets(
+    [{ sheet: "Sheet1", start: "A1", end: "A2" }],
+    { randomSeed: 7 },
+  );
+  assert.deepEqual(
+    targeted.cells.map((cell) => cell.result.value.value),
+    first,
+  );
+  await workbook.calculate({ randomSeed: 8 });
+  assert.notDeepEqual(numbers(), first);
+
+  const preview = await workbook.previewChanges(
+    workbook.summary().semanticRevision,
+    [{ kind: "setValue", sheet: "Sheet1", address: "B1", value: { kind: "number", value: 1 } }],
+    { randomSeed: 7 },
+  );
+  assert.equal(preview.report.calculationOptions.randomSeed, 7);
+  workbook.discardPreview(preview.previewId);
+  for (const invalid of [-1, 1.5, 2 ** 32, Number.NaN, 7n, "7", true]) {
+    for (const operation of [
+      () => workbook.calculate({ randomSeed: invalid }),
+      () => workbook.recalculate({ randomSeed: invalid }),
+      () => workbook.calculateTargets([{ sheet: "Sheet1", start: "A1" }], { randomSeed: invalid }),
+      () => workbook.previewChanges(
+        0n,
+        [{ kind: "setValue", sheet: "Sheet1", address: "B1", value: { kind: "number", value: 1 } }],
+        { randomSeed: invalid },
+      ),
+    ]) {
+      await assert.rejects(operation(), (error) => {
+        assert.ok(error instanceof CellRuneError);
+        assert.equal(error.code, "interop.input.invalid");
+        assert.equal(error.kind, "input");
+        return true;
+      });
+    }
+  }
+}
+
 async function assertCapabilityScan() {
   const workbook = Workbook.create();
   workbook.setFormula("Sheet1", "A1", "=SUM(1,2)");
@@ -229,6 +299,8 @@ async function main() {
   await require("./compatibility.cjs")();
   assertCatalogContract();
   await assertPreviewContract();
+  await assertExactSerials();
+  await assertRandomSeed();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(

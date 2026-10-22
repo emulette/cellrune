@@ -26,6 +26,7 @@ struct TargetRequestInput {
 struct TargetOptionsInput {
     today_serial: Option<f64>,
     now_serial: Option<f64>,
+    random_seed: Option<u32>,
     #[serde(default)]
     arithmetic_semantics: ArithmeticSemanticsDto,
     #[serde(default)]
@@ -67,6 +68,7 @@ pub(crate) fn request_from_python(
         options: CalculationOptionsDto {
             today_serial: request.options.today_serial,
             now_serial: request.options.now_serial,
+            random_seed: request.options.random_seed,
             arithmetic_semantics: request.options.arithmetic_semantics,
             financial_solver_semantics: request.options.financial_solver_semantics,
             calculation_limits: CalculationLimitOptionsDto::default(),

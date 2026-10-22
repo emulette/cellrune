@@ -51,6 +51,9 @@ pub(crate) fn calculation_options(
     if let Some(value) = options.now_serial {
         converted = converted.with_now_serial(FiniteNumber::new(value)?);
     }
+    if let Some(seed) = options.random_seed {
+        converted = converted.with_random_seed(seed);
+    }
     Ok(converted.with_limits(calculation_limits(options.calculation_limits)?))
 }
 
@@ -772,6 +775,7 @@ pub(crate) fn calculation_options_report(
     CalculationOptionsReportDto {
         today_serial: options.today_serial().map(FiniteNumber::get),
         now_serial: options.now_serial().map(FiniteNumber::get),
+        random_seed: options.random_seed(),
         arithmetic_semantics: match options.arithmetic_semantics() {
             ArithmeticSemantics::ExcelNearZero => ArithmeticSemanticsDto::ExcelNearZero,
             ArithmeticSemantics::Ieee754 => ArithmeticSemanticsDto::Ieee754,

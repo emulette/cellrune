@@ -603,6 +603,7 @@ class CalculationLimits(TypedDict):
 class TransactionCalculationOptions(TypedDict):
     today_serial: float | None
     now_serial: float | None
+    random_seed: int | None
     arithmetic_semantics: Literal["excel_near_zero", "ieee_754"]
     financial_solver_semantics: Literal[
         "excel_iteration_budget", "extended_search"

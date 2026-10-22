@@ -182,3 +182,94 @@ fn calculation_and_read_limits_cross_the_transport_boundary() {
     .expect_err("a zero read limit is rejected");
     assert_eq!(error.code(), "interop.limit.invalid");
 }
+
+#[test]
+fn random_seed_crosses_the_transport_boundary() {
+    let seeded: CalculationOptionsDto =
+        serde_json::from_str(r#"{"random_seed":4294967295}"#).expect("largest u32 seed");
+    assert_eq!(seeded.random_seed, Some(u32::MAX));
+    assert_eq!(
+        serde_json::from_str::<CalculationOptionsDto>("{}")
+            .expect("omitted seed")
+            .random_seed,
+        None
+    );
+    for invalid in ["-1", "1.5", "4294967296", "true", "\"7\""] {
+        assert!(
+            serde_json::from_str::<CalculationOptionsDto>(&format!(
+                r#"{{"random_seed":{invalid}}}"#
+            ))
+            .is_err(),
+            "{invalid}"
+        );
+    }
+
+    let mut session = WorkbookSession::create();
+    session
+        .set_formula("Sheet1", "A1", "=RAND()", None)
+        .expect("RAND formula");
+    session
+        .set_formula("Sheet1", "A2", "=RANDBETWEEN(1,1000000)", None)
+        .expect("RANDBETWEEN formula");
+    let report = session
+        .calculate(CalculationOptionsDto::default())
+        .expect("calculation without a seed");
+    assert_eq!(report.unavailable_count, 2);
+    assert!(calculated_results(&session).iter().all(|result| matches!(
+        result,
+        CalculationResultDto::Unavailable { code, .. }
+            if code == "calculation.volatile_input_missing"
+    )));
+
+    let seed = |random_seed| CalculationOptionsDto {
+        random_seed: Some(random_seed),
+        ..CalculationOptionsDto::default()
+    };
+    session.calculate(seed(7)).expect("seeded calculation");
+    let first = calculated_results(&session);
+    assert!(
+        first
+            .iter()
+            .all(|result| matches!(result, CalculationResultDto::Value { .. }))
+    );
+    session.calculate(seed(7)).expect("repeated seed");
+    assert_eq!(calculated_results(&session), first);
+    session.calculate(seed(8)).expect("new seed");
+    assert_ne!(calculated_results(&session), first);
+
+    let targeted = session
+        .calculate_targets(
+            &serde_json::from_value(serde_json::json!({
+                "targets": [{"sheet": "Sheet1", "start": "A1", "end": "A2"}],
+                "options": {"random_seed": 7},
+            }))
+            .expect("targeted request"),
+        )
+        .expect("targeted calculation");
+    assert_eq!(
+        targeted
+            .cells
+            .into_iter()
+            .map(|cell| cell.result)
+            .collect::<Vec<_>>(),
+        first
+    );
+
+    let preview = session
+        .preview_changes(
+            session.summary().semantic_revision,
+            cellrune_interop::EditBatchV2Dto {
+                changes: vec![cellrune_interop::WorkbookChangeV2Dto::V1(
+                    cellrune_interop::WorkbookChangeDto::SetValue {
+                        sheet: "Sheet1".to_owned(),
+                        address: "B1".to_owned(),
+                        value: cellrune_interop::WritableCellValueDto::Number { value: 1.0 },
+                    },
+                )],
+            },
+            cellrune_interop::RecalculationModeDto::Auto,
+            seed(7),
+        )
+        .expect("seeded preview");
+    assert_eq!(preview.report.calculation_options.random_seed, Some(7));
+}

@@ -118,6 +118,60 @@ def calculate_with_invalid_today(workbook: Workbook, value: object) -> object:
 def recalculate_with_invalid_now(workbook: Workbook, value: object) -> object:
     return workbook.recalculate(now_serial=cast(float, value))
 
+def calculate_with_invalid_seed(workbook: Workbook, value: object) -> object:
+    return workbook.calculate(random_seed=cast(int, value))
+
+
+def assert_random_seed() -> None:
+    workbook = Workbook.create()
+    workbook.set_formula("Sheet1", "A1", "=RAND()")
+    workbook.set_formula("Sheet1", "A2", "=RANDBETWEEN(1,1000000)")
+
+    def numbers() -> list[float]:
+        return [
+            cell["calculated"]["value"]["value"]
+            for cell in workbook.read_range("Sheet1", "A1", "A2")["cells"]
+        ]
+
+    assert workbook.calculate()["unavailable_count"] == 2
+    assert [
+        cell["calculated"]["code"]
+        for cell in workbook.read_range("Sheet1", "A1", "A2")["cells"]
+    ] == ["calculation.volatile_input_missing"] * 2
+
+    assert workbook.calculate(random_seed=7)["unavailable_count"] == 0
+    first = numbers()
+    assert 0 <= first[0] < 1 and 1 <= first[1] <= 1_000_000
+    workbook.recalculate(mode="full", random_seed=7)
+    assert numbers() == first
+    targeted = workbook.calculate_targets(
+        [{"sheet": "Sheet1", "start": "A1", "end": "A2"}], random_seed=7
+    )
+    assert [cell["result"]["value"]["value"] for cell in targeted["cells"]] == first
+    workbook.calculate(random_seed=8)
+    assert numbers() != first
+
+    preview = workbook.preview_changes(
+        workbook.summary()["semantic_revision"],
+        [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "B1",
+                "value": {"kind": "number", "value": 1.0},
+            }
+        ],
+        random_seed=7,
+    )
+    assert preview["report"]["calculation_options"]["random_seed"] == 7
+    workbook.discard_preview(preview["preview_id"])
+    for invalid in (-1, 1.5, 2**32, True, "7"):
+        assert_error(
+            "interop.value.number_invalid",
+            lambda invalid=invalid: calculate_with_invalid_seed(workbook, invalid),
+        )
+
+
 def calculate_with_invalid_arithmetic_semantics(
     workbook: Workbook, value: str
 ) -> object:
@@ -258,6 +312,7 @@ def main() -> None:
     assert_compatibility()
     assert_catalog_contract()
     assert_preview_contract()
+    assert_random_seed()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")

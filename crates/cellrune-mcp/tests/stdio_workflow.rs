@@ -918,6 +918,116 @@ fn calculation_compatibility_modes_are_stdio_visible() {
 }
 
 #[test]
+fn random_seed_is_a_stdio_calculation_argument() {
+    let root = TestDirectory::new("random-seed");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A1",
+                    "formula": "=RAND()",
+                    "dynamic_range": null
+                },
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A2",
+                    "formula": "=RANDBETWEEN(1,1000000)",
+                    "dynamic_range": null
+                }
+            ]
+        }),
+    ));
+    let read = |mcp: &mut McpProcess| {
+        successful_tool(mcp.call_tool(
+            "workbook_read_range",
+            json!({"session_id": session_id, "sheet": "Sheet1", "start": "A1", "end": "A2"}),
+        ))["cells"]
+            .as_array()
+            .expect("range cells")
+            .iter()
+            .map(|cell| cell["calculated"].clone())
+            .collect::<Vec<_>>()
+    };
+
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full"}),
+    ));
+    assert!(
+        read(&mut mcp)
+            .iter()
+            .all(|result| result["code"] == "calculation.volatile_input_missing")
+    );
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full", "random_seed": 7}),
+    ));
+    let first = read(&mut mcp);
+    assert!(first.iter().all(|result| result["kind"] == "value"));
+    let targeted = successful_tool(mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id": session_id,
+            "targets": [{"sheet": "Sheet1", "start": "A1", "end": "A2"}],
+            "options": {"random_seed": 7}
+        }),
+    ));
+    assert_eq!(
+        targeted["cells"]
+            .as_array()
+            .expect("targeted cells")
+            .iter()
+            .map(|cell| cell["result"].clone())
+            .collect::<Vec<_>>(),
+        first
+    );
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full", "random_seed": 8}),
+    ));
+    assert_ne!(read(&mut mcp), first);
+
+    let preview = successful_tool(mcp.call_tool(
+        "workbook_preview_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "B1",
+                "value": {"kind": "number", "value": 1.0}
+            }],
+            "random_seed": 7
+        }),
+    ));
+    assert_eq!(preview["report"]["calculation_options"]["random_seed"], 7);
+    let invalid = mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "random_seed": -1}),
+    );
+    assert_eq!(
+        invalid["isError"], true,
+        "a negative seed must be rejected: {invalid}"
+    );
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
 fn response_limit_failures_do_not_commit_session_edit_or_file_state() {
     let root = TestDirectory::new("response-limit");
     let mut mcp = McpProcess::start(&root.path, &["--max-response-bytes", "1024"]);

@@ -112,6 +112,9 @@ pub(crate) struct RecalculateArgs {
     pub(crate) today_serial: Option<f64>,
     /// Optional finite Excel serial returned by `NOW()`.
     pub(crate) now_serial: Option<f64>,
+    /// Optional seed, 0 through 4294967295, that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`
+    /// draw from; the same seed repeats every draw.
+    pub(crate) random_seed: Option<u32>,
     /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
@@ -146,6 +149,8 @@ pub(crate) struct TargetCalculationOptionsArgs {
     pub(crate) today_serial: Option<f64>,
     /// Excel serial returned by `NOW()`.
     pub(crate) now_serial: Option<f64>,
+    /// Seed that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` draw from.
+    pub(crate) random_seed: Option<u32>,
     /// Policy for cancelling addition and subtraction.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
@@ -187,6 +192,9 @@ pub(crate) struct PreviewChangesArgs {
     pub(crate) today_serial: Option<f64>,
     /// Optional finite Excel serial returned by `NOW()`.
     pub(crate) now_serial: Option<f64>,
+    /// Optional seed, 0 through 4294967295, that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`
+    /// draw from; the same seed repeats every draw.
+    pub(crate) random_seed: Option<u32>,
     /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,

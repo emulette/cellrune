@@ -129,21 +129,12 @@ impl NativeWorkbook {
     #[napi(ts_return_type = "Promise<NativeCalculationReport>", catch_unwind)]
     pub fn calculate(
         &self,
-        today_serial: Option<f64>,
-        now_serial: Option<f64>,
-        arithmetic_semantics: Option<String>,
-        financial_solver_semantics: Option<String>,
+        options: Option<NativeCalculationOptions>,
         limits_json: Option<String>,
     ) -> napi::Result<AsyncTask<CalculateTask>> {
         Ok(AsyncTask::new(CalculateTask {
             session: Arc::clone(&self.session),
-            options: calculation_options(
-                today_serial,
-                now_serial,
-                arithmetic_semantics.as_deref(),
-                financial_solver_semantics.as_deref(),
-                limits_json.as_deref(),
-            )?,
+            options: calculation_options(options, limits_json.as_deref())?,
         }))
     }
 
@@ -151,22 +142,13 @@ impl NativeWorkbook {
     pub fn recalculate(
         &self,
         mode: String,
-        today_serial: Option<f64>,
-        now_serial: Option<f64>,
-        arithmetic_semantics: Option<String>,
-        financial_solver_semantics: Option<String>,
+        options: Option<NativeCalculationOptions>,
         limits_json: Option<String>,
     ) -> napi::Result<AsyncTask<RecalculateTask>> {
         Ok(AsyncTask::new(RecalculateTask {
             session: Arc::clone(&self.session),
             mode: recalculation_mode(&mode)?,
-            options: calculation_options(
-                today_serial,
-                now_serial,
-                arithmetic_semantics.as_deref(),
-                financial_solver_semantics.as_deref(),
-                limits_json.as_deref(),
-            )?,
+            options: calculation_options(options, limits_json.as_deref())?,
         }))
     }
 
@@ -405,6 +387,7 @@ struct PreviewOptionsInput {
     mode: RecalculationModeDto,
     today_serial: Option<f64>,
     now_serial: Option<f64>,
+    random_seed: Option<u32>,
     #[serde(default)]
     arithmetic_semantics: ArithmeticSemanticsDto,
     #[serde(default)]
@@ -419,6 +402,7 @@ impl PreviewOptionsInput {
         CalculationOptionsDto {
             today_serial: self.today_serial,
             now_serial: self.now_serial,
+            random_seed: self.random_seed,
             arithmetic_semantics: self.arithmetic_semantics,
             financial_solver_semantics: self.financial_solver_semantics,
             calculation_limits,
@@ -493,32 +477,53 @@ fn preview_section(value: &str) -> napi::Result<TransactionDetailSectionDto> {
     }
 }
 
+/// Deterministic inputs and compatibility policies for `calculate` and `recalculate`, passed as
+/// JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
+/// own object so their errors keep the limit codes, and the policies stay strings so an unknown
+/// one keeps its own code.
+#[napi(object)]
+#[derive(Default)]
+pub struct NativeCalculationOptions {
+    pub today_serial: Option<f64>,
+    pub now_serial: Option<f64>,
+    pub random_seed: Option<u32>,
+    pub arithmetic_semantics: Option<String>,
+    pub financial_solver_semantics: Option<String>,
+}
+
 fn calculation_options(
-    today_serial: Option<f64>,
-    now_serial: Option<f64>,
-    arithmetic_semantics: Option<&str>,
-    financial_solver_semantics: Option<&str>,
+    options: Option<NativeCalculationOptions>,
     limits_json: Option<&str>,
 ) -> napi::Result<CalculationOptionsDto> {
     let calculation_limits = limit_options::<CalculationLimitOptionsDto>(limits_json)?;
-    let arithmetic_semantics = match arithmetic_semantics.unwrap_or("excel_near_zero") {
+    let NativeCalculationOptions {
+        today_serial,
+        now_serial,
+        random_seed,
+        arithmetic_semantics,
+        financial_solver_semantics,
+    } = options.unwrap_or_default();
+    let arithmetic_semantics = match arithmetic_semantics.as_deref().unwrap_or("excel_near_zero") {
         "excel_near_zero" => ArithmeticSemanticsDto::ExcelNearZero,
         "ieee_754" => ArithmeticSemanticsDto::Ieee754,
         _ => return Err(napi_error(InteropError::invalid_arithmetic_semantics())),
     };
-    let financial_solver_semantics =
-        match financial_solver_semantics.unwrap_or("excel_iteration_budget") {
-            "excel_iteration_budget" => FinancialSolverSemanticsDto::ExcelIterationBudget,
-            "extended_search" => FinancialSolverSemanticsDto::ExtendedSearch,
-            _ => {
-                return Err(napi_error(
-                    InteropError::invalid_financial_solver_semantics(),
-                ));
-            }
-        };
+    let financial_solver_semantics = match financial_solver_semantics
+        .as_deref()
+        .unwrap_or("excel_iteration_budget")
+    {
+        "excel_iteration_budget" => FinancialSolverSemanticsDto::ExcelIterationBudget,
+        "extended_search" => FinancialSolverSemanticsDto::ExtendedSearch,
+        _ => {
+            return Err(napi_error(
+                InteropError::invalid_financial_solver_semantics(),
+            ));
+        }
+    };
     Ok(CalculationOptionsDto {
         today_serial,
         now_serial,
+        random_seed,
         arithmetic_semantics,
         financial_solver_semantics,
         calculation_limits,

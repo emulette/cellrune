@@ -25,6 +25,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   above the maximum, or a fractional bound with `whole_number`, and `#CALC!` for a zero dimension;
   both return `#NUM!` for a span too wide for a double. Authored `RANDARRAY` formulas are stored as
   `_xlfn.RANDARRAY`, and the catalog grows to 457 official names and 458 accepted entries.
+- The random seed is `CalculationOptionsDto::random_seed` and the transaction report's
+  `calculation_options.random_seed` in interop, Python `random_seed` and Node.js `randomSeed` on
+  calculate, recalculate, targeted calculation, and previews, and MCP `random_seed` on
+  `workbook_recalculate`, `workbook_calculate_targets` options, and `workbook_preview_changes`. It
+  must be an integer from 0 through 4294967295.
 
 ### Changed
 

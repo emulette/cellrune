@@ -825,7 +825,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   Undeclared spills outside the dependency scope are not discovered; use declared spill ranges
   or full calculation when independently anchored spills may overlap.
 - Python: `workbook.calculate_targets([{"sheet": "Sheet1", "start": "B1", "end": "B10"}],
-  today_serial=..., now_serial=..., arithmetic_semantics=..., financial_solver_semantics=...,
+  today_serial=..., now_serial=..., random_seed=..., arithmetic_semantics=...,
+  financial_solver_semantics=...,
   limits={"max_result_cells": 100}) -> TargetCalculationResult`; omit `end` for one cell.
   Node: `await workbook.calculateTargets([{sheet: "Sheet1", start: "B1", end: "B10"}],
   {limits: {maxResultCells: 100}}) -> TargetCalculationResult`. Node uses camel case and a bigint
@@ -889,6 +890,16 @@ than guessing a name from a different XLSX crate (`calamine`,
   changes calculated numbers unless you select `ArithmeticSemantics::Ieee754`
   and `FinancialSolverSemantics::ExtendedSearch`.** Both axes are also carried
   by the interop DTO and the Python, Node.js, and MCP boundaries.
+  The random seed is carried the same way: `CalculationOptionsDto.random_seed`
+  and the transaction report's `calculation_options.random_seed`, Python
+  `random_seed=` on `calculate`, `recalculate`, `calculate_targets`, and
+  `preview_changes`, Node.js `randomSeed` on `calculate`, `recalculate`,
+  `calculateTargets`, and `previewChanges`, and MCP `random_seed` on
+  `workbook_recalculate`, `workbook_calculate_targets` `options`, and
+  `workbook_preview_changes`. A seed must be an integer from 0 through
+  4294967295: Python rejects other values with `interop.value.number_invalid`,
+  Node.js with `interop.input.invalid`, and the JSON targeted and MCP payloads
+  as invalid payloads.
   `docs/NUMERICS.md` records the policies and their oracles.
 - `CalculationLimits::default()` + 12 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
   budgets: formula tokens, source bytes, AST nodes, AST nesting depth,
