@@ -164,9 +164,15 @@ pub(super) fn read_event<'b>(
     Ok(event)
 }
 
-/// Tags without `xmlns` text are not scanned, so ordinary elements are not parsed twice.
+/// Tags without `xmlns` text are not scanned, so ordinary elements are not parsed twice. The text
+/// is found by comparing windows, since attribute lists are short and a substring searcher costs
+/// more to set up for each tag than the comparison saves.
 fn declares_too_many_namespaces(element: &BytesStart<'_>) -> bool {
-    element.attributes_raw().contains("xmlns")
+    element
+        .attributes_raw()
+        .as_bytes()
+        .windows(5)
+        .any(|window| window == b"xmlns")
         && element
             .attributes()
             .with_checks(false)
