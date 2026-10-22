@@ -123,6 +123,7 @@ pub(crate) fn write_canonical_draft(
     verify_draft_output(
         &ExpectedDraftOutput {
             workbook: draft.workbook(),
+            source: None,
             presentation: draft.presentation(),
             materialization: &materialization,
             kind: crate::XlsxDocumentKind::Xlsx,
@@ -620,6 +621,9 @@ fn write_archive(
 /// What a verified draft output must reopen as.
 pub(super) struct ExpectedDraftOutput<'a> {
     pub(super) workbook: &'a WorkbookSnapshot,
+    /// The workbook a document draft was opened from, whose saved array and spill followers the
+    /// materialization replaces; `None` for a canonical draft.
+    pub(super) source: Option<&'a WorkbookSnapshot>,
     pub(super) presentation: &'a crate::DocumentPresentation,
     pub(super) materialization: &'a MaterializationPlan,
     pub(super) kind: crate::XlsxDocumentKind,
@@ -634,6 +638,7 @@ pub(super) fn verify_draft_output(
 ) -> Result<(), XlsxWriteError> {
     let ExpectedDraftOutput {
         workbook: expected_workbook,
+        source,
         presentation: expected_presentation,
         materialization,
         kind: expected_kind,
@@ -660,6 +665,7 @@ pub(super) fn verify_draft_output(
         || !draft_semantics_match(
             expected_workbook,
             reopened.workbook(),
+            source,
             materialization,
             host_recalculation,
         )
@@ -723,6 +729,7 @@ pub(super) fn verify_draft_output(
 fn draft_semantics_match(
     expected: &WorkbookSnapshot,
     actual: &WorkbookSnapshot,
+    source: Option<&WorkbookSnapshot>,
     materialization: &MaterializationPlan,
     host_recalculation: HostRecalculation,
 ) -> bool {
@@ -748,12 +755,28 @@ fn draft_semantics_match(
         {
             return false;
         }
+        let source_sheet = source.and_then(|source| source.sheet_by_id(expected_sheet.id()));
         for expected_cell in expected_sheet.cells() {
+            // A follower the source saved and the draft kept still holds the source's result,
+            // which the materialization overwrites or removes; the materialization check in
+            // `verify_draft_output` verifies that cell instead.
+            let saved_follower = || {
+                let id =
+                    crate::CalculationCellId::new(expected_sheet.id(), expected_cell.address());
+                planned_follower(materialization, id).is_some()
+                    && source_sheet
+                        .and_then(|sheet| sheet.cell(expected_cell.address()))
+                        .is_some_and(|saved| saved.content() == expected_cell.content())
+            };
             let Some(actual_cell) = actual_sheet.cell(expected_cell.address()) else {
+                if saved_follower() {
+                    continue;
+                }
                 return false;
             };
             if !number_formats_match(expected_cell.number_format(), actual_cell.number_format())
-                || !cell_content_matches(expected_cell.content(), actual_cell.content())
+                || (!cell_content_matches(expected_cell.content(), actual_cell.content())
+                    && !saved_follower())
             {
                 return false;
             }
@@ -761,21 +784,35 @@ fn draft_semantics_match(
         for actual_cell in actual_sheet.cells() {
             if expected_sheet.cell(actual_cell.address()).is_none() {
                 let id = crate::CalculationCellId::new(expected_sheet.id(), actual_cell.address());
-                let allowed_follower = materialization.cells().get(&id).is_some_and(|planned| {
-                    matches!(
-                        planned.origin,
-                        MaterializedResultOrigin::LegacyArray { anchor, .. }
-                            | MaterializedResultOrigin::DynamicSpill { anchor, .. }
-                            if anchor != id
-                    ) && matches!(planned.action, MaterializationAction::Set(_))
-                });
-                if !allowed_follower {
+                if !matches!(
+                    planned_follower(materialization, id),
+                    Some(MaterializationAction::Set(_))
+                ) {
                     return false;
                 }
             }
         }
     }
     true
+}
+
+/// Returns the planned result of a legacy-array or dynamic-spill cell other than its anchor.
+fn planned_follower(
+    materialization: &MaterializationPlan,
+    id: crate::CalculationCellId,
+) -> Option<&MaterializationAction> {
+    materialization
+        .cells()
+        .get(&id)
+        .filter(|planned| {
+            matches!(
+                planned.origin,
+                MaterializedResultOrigin::LegacyArray { anchor, .. }
+                    | MaterializedResultOrigin::DynamicSpill { anchor, .. }
+                    if anchor != id
+            )
+        })
+        .map(|planned| &planned.action)
 }
 
 fn tables_semantically_match(expected: &[crate::Table], actual: &[crate::Table]) -> bool {

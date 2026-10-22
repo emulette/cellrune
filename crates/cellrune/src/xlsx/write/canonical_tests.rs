@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    calculation_hints_match, draft_semantics_match, generated_worksheet_xml,
-    optional_false_matches, workbook_xml,
+    ExpectedDraftOutput, calculation_hints_match, draft_semantics_match, generated_worksheet_xml,
+    optional_false_matches, verify_draft_output, workbook_xml, write_archive,
 };
 use crate::calculation::{MaterializedCalculationCell, MaterializedResultOrigin};
 use crate::{
@@ -16,8 +16,8 @@ use crate::{
     TableColumn, TableFilterColumn, TableFilterCriteria, TableFilterItem, TableFormula, TableId,
     TableName, TableSortCondition, TableSortState, TableStyleInfo, TableType, TableValueFilters,
     TotalsRowFunction, ValidationError, WorkbookDraft, WorkbookSnapshot, WorkbookSource,
-    WriteOptions, XlsxWriteErrorCode, calculate_workbook, open_xlsx_document_bytes,
-    write_recalculated_xlsx_bytes, write_xlsx_draft_bytes,
+    WriteOptions, XlsxDocumentKind, XlsxWriteErrorCode, calculate_workbook,
+    open_xlsx_document_bytes, write_recalculated_xlsx_bytes, write_xlsx_draft_bytes,
 };
 
 use super::super::materialization::MaterializationPlan;
@@ -910,6 +910,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(draft_semantics_match(
         &expected,
         &expected,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -923,6 +924,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_date,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -936,6 +938,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_hints,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -957,6 +960,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_names,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -973,6 +977,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_count,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -995,6 +1000,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_id,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1017,6 +1023,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_name,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1039,6 +1046,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_visibility,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1052,6 +1060,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &missing_cell,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1074,6 +1083,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_format,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1096,6 +1106,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &changed_content,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1129,6 +1140,7 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
     assert!(!draft_semantics_match(
         &expected,
         &extra_cell,
+        None,
         &plan,
         HostRecalculation::Clear
     ));
@@ -1193,6 +1205,7 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
     assert!(draft_semantics_match(
         &expected,
         &actual,
+        None,
         &legacy_plan,
         HostRecalculation::Clear
     ));
@@ -1228,9 +1241,101 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
     assert!(!draft_semantics_match(
         &expected,
         &actual,
+        None,
         &direct_plan,
         HostRecalculation::Clear
     ));
+}
+
+/// A package whose only sheet holds A1 = 1, the given A2, and `{=A1:A2*2}` over B1:B2 with B1
+/// saved as 2 and the given B2 cell.
+fn doubled_inputs_package(a2: &str, b2: &str) -> Vec<u8> {
+    let parts = [
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.to_owned(),
+        ),
+        (
+            "_rels/.rels",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_owned(),
+        ),
+        (
+            "xl/workbook.xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#.to_owned(),
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.to_owned(),
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f t="array" ref="B1:B2">A1:A2*2</f><v>2</v></c></row><row r="2"><c r="A2"><v>{a2}</v></c>{b2}</row></sheetData></worksheet>"#
+            ),
+        ),
+    ];
+    write_archive(
+        &parts
+            .into_iter()
+            .map(|(name, xml)| (name.to_owned(), xml.into_bytes()))
+            .collect(),
+        WriteLimits::default(),
+    )
+    .expect("test package")
+}
+
+#[test]
+fn follower_verification_rejects_a_stale_wrong_or_missing_result_after_an_edit() {
+    let document = open_xlsx_document_bytes(
+        &doubled_inputs_package("3", r#"<c r="B2"><v>6</v></c>"#),
+        crate::OpenOptions::default(),
+    )
+    .expect("open source package");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            document.workbook().sheets()[0].id(),
+            address("A2"),
+            CellValue::Number(FiniteNumber::new(5.0).expect("finite")),
+        )
+        .expect("edit array input");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let plan = MaterializationPlan::new(
+        &calculation,
+        RecalculationWritePolicy::RequireComplete,
+        WriteLimits::default(),
+    )
+    .expect("array plan");
+    let verify = |b2: &str| {
+        verify_draft_output(
+            &ExpectedDraftOutput {
+                workbook: draft.workbook(),
+                source: Some(document.workbook()),
+                presentation: draft.presentation(),
+                materialization: &plan,
+                kind: XlsxDocumentKind::Xlsx,
+                host_recalculation: HostRecalculation::Clear,
+            },
+            &doubled_inputs_package("5", b2),
+            crate::ReadLimits::default(),
+            WriteLimits::default(),
+        )
+        .map_err(|error| error.code())
+    };
+
+    // The draft still holds the source's saved 6 at B2; only the planned 10 verifies.
+    assert_eq!(verify(r#"<c r="B2"><v>10</v></c>"#), Ok(()));
+    for b2 in [
+        r#"<c r="B2"><v>6</v></c>"#,
+        r#"<c r="B2"><v>11</v></c>"#,
+        "",
+    ] {
+        assert_eq!(
+            verify(b2),
+            Err(XlsxWriteErrorCode::OutputVerificationFailed),
+            "B2 cell {b2:?}"
+        );
+    }
 }
 
 #[test]
@@ -1271,6 +1376,7 @@ fn incomplete_materialization_alone_requires_host_recalculation_flags() {
     assert!(draft_semantics_match(
         &expected,
         &actual,
+        None,
         &plan,
         HostRecalculation::Full
     ));

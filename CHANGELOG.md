@@ -83,6 +83,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   system, as in Excel, instead of 2958466 (1900) or 2957004 (1904). A `t="d"` value wrapped in a
   non-ASCII space such as U+00A0 or U+3000, which Excel offers to repair and 0.1.25 accepted, fails
   the read with `xlsx.invalid_cell_value`; surrounding ASCII spaces are still ignored.
+- Saving an edited and calculated document draft no longer fails with
+  `xlsx.write.output_verification_failed` when the result of a legacy (CSE) array or dynamic-array
+  formula changed or was invalidated: output verification checks the array and spill follower cells
+  against their calculated results instead of the results the source saved.
 
 ## [0.1.25] - 2026-10-18
 

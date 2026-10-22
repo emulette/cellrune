@@ -603,6 +603,7 @@ pub(super) fn write_document_package(
     verify_draft_output(
         &ExpectedDraftOutput {
             workbook: draft.workbook(),
+            source: Some(document.workbook()),
             presentation: draft.presentation(),
             materialization,
             kind: document.kind(),

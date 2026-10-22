@@ -1,4 +1,5 @@
 mod generated_workbook {
+    mod array_follower_write;
     mod column_widening_write;
     mod contract;
     mod defined_name_write;
