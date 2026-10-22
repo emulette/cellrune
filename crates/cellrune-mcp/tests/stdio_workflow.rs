@@ -489,6 +489,26 @@ fn stdio_workflow_matches_the_rust_interop_session() {
             .is_some_and(|text| text.contains("unknown field `calculation_limits`")),
         "{raised_limits}"
     );
+    for limits in [json!([1]), json!([]), json!("1"), json!(1)] {
+        let rejected = mcp.call_tool(
+            "workbook_calculate_targets",
+            json!({
+                "session_id": session_id,
+                "targets": [{"sheet":"Sheet1", "start":"A2"}],
+                "limits": limits
+            }),
+        );
+        assert_eq!(
+            rejected["isError"], true,
+            "limits must be an object: {rejected}"
+        );
+        assert!(
+            rejected["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("invalid type")),
+            "{rejected}"
+        );
+    }
     let empty_history =
         successful_tool(mcp.call_tool("workbook_changes_since", json!({"session_id": session_id})));
     assert_eq!(

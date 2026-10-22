@@ -4,7 +4,7 @@ use cellrune_interop::{
     WriteReportDto,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Empty input for creating a canonical workbook session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -136,8 +136,21 @@ pub(crate) struct CalculateTargetsArgs {
     #[serde(default)]
     pub(crate) options: TargetCalculationOptionsArgs,
     /// Request limits, capped by the server at 1024 targets, 10000 results, and 100000 evaluator invocations.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "target_limits_object")]
     pub(crate) limits: cellrune_interop::TargetCalculationLimitsDto,
+}
+
+/// Reads target limits only from a JSON object; serde's derived struct deserializer would also
+/// fill them from an array by field position.
+fn target_limits_object<'de, D>(
+    deserializer: D,
+) -> Result<cellrune_interop::TargetCalculationLimitsDto, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let limits = serde_json::Map::deserialize(deserializer)?;
+    cellrune_interop::TargetCalculationLimitsDto::deserialize(serde_json::Value::Object(limits))
+        .map_err(serde::de::Error::custom)
 }
 
 /// Deterministic inputs for a target calculation. Calculation limits are absent because raising

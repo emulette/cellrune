@@ -45,7 +45,11 @@ pub(crate) fn request_from_python(
         for (key, value) in options.iter() {
             if key.extract::<String>()? == "limits" {
                 if !value.is_none() {
-                    payload.set_item("limits", value)?;
+                    // JSON would carry a sequence into the limits by position.
+                    let limits = value.cast::<PyDict>().map_err(|error| {
+                        into_py_error(py, InteropError::invalid_target_payload(error.to_string()))
+                    })?;
+                    payload.set_item("limits", limits)?;
                 }
             } else {
                 calculation_options.set_item(key, value)?;
