@@ -5,7 +5,7 @@ use quick_xml::events::Event;
 use super::super::package::PartPath;
 use super::super::xml::{
     XmlBudget, decode_cdata, decode_reference, decode_text, is_spreadsheet_element,
-    read_attributes, reader, require_spreadsheet_element,
+    read_attributes, read_event, reader, require_spreadsheet_element,
 };
 use super::super::xstring::XstringDecoder;
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
@@ -50,7 +50,7 @@ pub(super) fn parse(
     font_count: u32,
     phonetic_budget: &mut PhoneticReadBudget,
 ) -> Result<SharedStrings, XlsxReadError> {
-    let mut xml = reader(bytes);
+    let mut xml = reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut budget = XmlBudget::new(
         limits,
@@ -68,7 +68,7 @@ pub(super) fn parse(
     let mut total_bytes = 0_u64;
 
     loop {
-        let event = xml.read_event_into(&mut buffer).map_err(|error| {
+        let event = read_event(&mut xml, &mut buffer).map_err(|error| {
             budget
                 .error(XlsxErrorCode::InvalidSharedStrings)
                 .with_cause(error)
@@ -76,7 +76,7 @@ pub(super) fn parse(
         match event {
             Event::Start(element) => {
                 let depth = budget.start()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 if depth == 1 {
@@ -144,7 +144,7 @@ pub(super) fn parse(
             }
             Event::Empty(element) => {
                 let depth = budget.empty()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 if depth == 1 {
@@ -192,7 +192,7 @@ pub(super) fn parse(
                     &mut current,
                     &mut current_phonetics,
                     phonetic_depth.is_some(),
-                    text_decoder.push(&decode_text(&text, &budget)?),
+                    text_decoder.push(&decode_text(&text)),
                     capture,
                     limits,
                     &budget,
@@ -203,7 +203,7 @@ pub(super) fn parse(
                     &mut current,
                     &mut current_phonetics,
                     phonetic_depth.is_some(),
-                    text_decoder.push(&decode_cdata(&text, &budget)?),
+                    text_decoder.push(&decode_cdata(&text)),
                     capture,
                     limits,
                     &budget,
@@ -222,7 +222,7 @@ pub(super) fn parse(
             }
             Event::End(element) => {
                 let depth = budget.end()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 if text_depth == Some(depth) && local_name == TEXT {
                     text_depth = None;
                     append_text(

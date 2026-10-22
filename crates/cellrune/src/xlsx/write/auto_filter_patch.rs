@@ -10,6 +10,7 @@ use super::table_patch::{
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::SheetAutoFilter;
 use crate::xlsx::package::PartPath;
+use crate::xlsx::xml::{namespace_reader, read_event};
 
 const DETAIL_AUTO_FILTER_STRUCTURE: &str =
     "source worksheet auto-filter XML does not match the sheet auto-filter model";
@@ -37,7 +38,7 @@ impl FilterPatch<'_> {
     ) -> Result<BytesStart<'static>, XlsxWriteError> {
         let local = element.local_name();
         if depth == 2
-            && local.as_ref() == b"autoFilter"
+            && local.as_ref() == "autoFilter"
             && is_spreadsheet_element(xml, element.name())
         {
             if std::mem::replace(&mut self.saw_filter, true) {
@@ -53,7 +54,7 @@ impl FilterPatch<'_> {
             );
         }
         if self.open_depth.is_some_and(|parent| depth == parent + 1)
-            && local.as_ref() == b"filterColumn"
+            && local.as_ref() == "filterColumn"
             && is_spreadsheet_element(xml, element.name())
         {
             let column_id = self
@@ -78,7 +79,7 @@ pub(crate) fn patch_sheet_auto_filter(
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     enforce_bytes(source_bytes.len(), limits, source)?;
-    let mut xml = NsReader::from_reader(source_bytes);
+    let mut xml = namespace_reader(source_bytes, limits.max_xml_depth());
     xml.config_mut().check_end_names = true;
     xml.config_mut().allow_unmatched_ends = false;
     xml.config_mut().expand_empty_elements = false;
@@ -94,9 +95,8 @@ pub(crate) fn patch_sheet_auto_filter(
     };
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);

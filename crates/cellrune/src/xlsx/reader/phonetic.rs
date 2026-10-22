@@ -266,7 +266,7 @@ mod tests {
     }
 
     fn attributes(xml: &[u8], budget: &XmlBudget) -> XmlAttributes {
-        let mut xml_reader = reader(xml);
+        let mut xml_reader = reader(xml, ReadLimits::default());
         let mut buffer = Vec::new();
         match xml_reader
             .read_event_into(&mut buffer)

@@ -7,6 +7,7 @@ use quick_xml::reader::NsReader;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::CellAddress;
 use crate::xlsx::package::PartPath;
+use crate::xlsx::xml::{namespace_reader, read_event};
 
 const DETAIL_RICH_TEXT_PHONETIC_EDIT: &str =
     "phonetic edits on source rich text require a rich-text authoring model";
@@ -44,20 +45,19 @@ pub(super) fn ensure_phonetic_edit_preservation(
         return Ok(());
     }
     enforce_bytes(worksheet_bytes.len(), worksheet_part, limits)?;
-    let mut xml = configured_reader(worksheet_bytes);
+    let mut xml = configured_reader(worksheet_bytes, limits);
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut current = None::<TargetCell>;
     let mut found = BTreeMap::<CellAddress, TextStorage>::new();
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
+        let event = read_event(&mut xml, &mut buffer)
             .map_err(|error| invalid_source(worksheet_part, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, worksheet_part, limits)?;
-                if current.is_none() && element.local_name().as_ref() == b"c" {
+                if current.is_none() && element.local_name().as_ref() == "c" {
                     let address = required_address(&element, worksheet_part)?;
                     if targets.contains(&address) {
                         current = Some(TargetCell {
@@ -72,10 +72,10 @@ pub(super) fn ensure_phonetic_edit_preservation(
                     }
                 } else if let Some(cell) = &mut current {
                     match element.local_name().as_ref() {
-                        b"v" if depth == cell.depth + 1 => cell.value_depth = Some(depth),
-                        b"is" if depth == cell.depth + 1 => cell.inline_depth = Some(depth),
-                        b"rPh" if cell.inline_depth.is_some() => cell.phonetic_depth = Some(depth),
-                        b"r" if cell.inline_depth.is_some() && cell.phonetic_depth.is_none() => {
+                        "v" if depth == cell.depth + 1 => cell.value_depth = Some(depth),
+                        "is" if depth == cell.depth + 1 => cell.inline_depth = Some(depth),
+                        "rPh" if cell.inline_depth.is_some() => cell.phonetic_depth = Some(depth),
+                        "r" if cell.inline_depth.is_some() && cell.phonetic_depth.is_none() => {
                             cell.storage = TextStorage::Inline { rich: true };
                         }
                         _ => {}
@@ -84,13 +84,13 @@ pub(super) fn ensure_phonetic_edit_preservation(
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), worksheet_part, limits)?;
-                if current.is_none() && element.local_name().as_ref() == b"c" {
+                if current.is_none() && element.local_name().as_ref() == "c" {
                     let address = required_address(&element, worksheet_part)?;
                     if targets.contains(&address) {
                         found.insert(address, TextStorage::Other);
                     }
                 } else if let Some(cell) = &mut current
-                    && element.local_name().as_ref() == b"r"
+                    && element.local_name().as_ref() == "r"
                     && cell.inline_depth.is_some()
                     && cell.phonetic_depth.is_none()
                 {
@@ -103,28 +103,26 @@ pub(super) fn ensure_phonetic_edit_preservation(
                     .is_some_and(|cell| cell.value_depth.is_some()) =>
             {
                 let cell = current.as_mut().expect("guarded current cell");
-                cell.shared_index.push_str(
-                    &text
-                        .xml_content(XmlVersion::Implicit1_0)
-                        .map_err(|error| invalid_source(worksheet_part, error))?,
-                );
+                cell.shared_index
+                    .push_str(&text.xml_content(XmlVersion::Implicit1_0));
             }
             Event::End(element) => {
                 if let Some(cell) = &mut current {
-                    if cell.value_depth == Some(depth) && element.local_name().as_ref() == b"v" {
+                    if cell.value_depth == Some(depth) && element.local_name().as_ref() == "v" {
                         cell.value_depth = None;
                     }
-                    if cell.phonetic_depth == Some(depth) && element.local_name().as_ref() == b"rPh"
+                    if cell.phonetic_depth == Some(depth) && element.local_name().as_ref() == "rPh"
                     {
                         cell.phonetic_depth = None;
                     }
-                    if cell.inline_depth == Some(depth) && element.local_name().as_ref() == b"is" {
+                    if cell.inline_depth == Some(depth) && element.local_name().as_ref() == "is" {
                         cell.inline_depth = None;
                     }
                 }
-                if current.as_ref().is_some_and(|cell| {
-                    cell.depth == depth && element.local_name().as_ref() == b"c"
-                }) {
+                if current
+                    .as_ref()
+                    .is_some_and(|cell| cell.depth == depth && element.local_name().as_ref() == "c")
+                {
                     let cell = current.take().expect("guarded current cell");
                     let address = cell.address;
                     let storage = match cell.storage {
@@ -181,29 +179,28 @@ fn shared_items_are_rich(
     limits: WriteLimits,
 ) -> Result<bool, XlsxWriteError> {
     enforce_bytes(bytes.len(), source, limits)?;
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut item_index = 0_usize;
     let mut selected_depth = None::<u64>;
     let mut phonetic_depth = None::<u64>;
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_source(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_source(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, source, limits)?;
-                if element.local_name().as_ref() == b"si" {
+                if element.local_name().as_ref() == "si" {
                     if targets.contains(&item_index) {
                         selected_depth = Some(depth);
                     }
-                } else if selected_depth.is_some() && element.local_name().as_ref() == b"rPh" {
+                } else if selected_depth.is_some() && element.local_name().as_ref() == "rPh" {
                     phonetic_depth = Some(depth);
                 } else if selected_depth.is_some()
                     && phonetic_depth.is_none()
-                    && element.local_name().as_ref() == b"r"
+                    && element.local_name().as_ref() == "r"
                 {
                     return Ok(true);
                 }
@@ -212,22 +209,22 @@ fn shared_items_are_rich(
                 enforce_depth(depth.saturating_add(1), source, limits)?;
                 if selected_depth.is_some()
                     && phonetic_depth.is_none()
-                    && element.local_name().as_ref() == b"r"
+                    && element.local_name().as_ref() == "r"
                 {
                     return Ok(true);
                 }
-                if element.local_name().as_ref() == b"si" {
+                if element.local_name().as_ref() == "si" {
                     item_index = item_index.saturating_add(1);
                 }
             }
             Event::End(element) => {
-                if phonetic_depth == Some(depth) && element.local_name().as_ref() == b"rPh" {
+                if phonetic_depth == Some(depth) && element.local_name().as_ref() == "rPh" {
                     phonetic_depth = None;
                 }
-                if selected_depth == Some(depth) && element.local_name().as_ref() == b"si" {
+                if selected_depth == Some(depth) && element.local_name().as_ref() == "si" {
                     selected_depth = None;
                     item_index = item_index.saturating_add(1);
-                } else if element.local_name().as_ref() == b"si" {
+                } else if element.local_name().as_ref() == "si" {
                     item_index = item_index.saturating_add(1);
                 }
                 depth = depth.saturating_sub(1);
@@ -247,12 +244,8 @@ fn storage_from_cell(
     let mut cell_type = None::<String>;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_source(source, error))?;
-        if attribute.key.local_name().as_ref() == b"t" {
-            cell_type = Some(
-                std::str::from_utf8(attribute.value.as_ref())
-                    .map_err(|error| invalid_source(source, error))?
-                    .to_owned(),
-            );
+        if attribute.key.local_name().as_ref() == "t" {
+            cell_type = Some(attribute.value.into_owned());
         }
     }
     Ok(match cell_type.as_deref() {
@@ -268,17 +261,16 @@ fn required_address(
 ) -> Result<CellAddress, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_source(source, error))?;
-        if attribute.key.local_name().as_ref() == b"r" {
-            let value = std::str::from_utf8(attribute.value.as_ref())
-                .map_err(|error| invalid_source(source, error))?;
-            return CellAddress::from_a1(value).map_err(|error| invalid_source(source, error));
+        if attribute.key.local_name().as_ref() == "r" {
+            return CellAddress::from_a1(&attribute.value)
+                .map_err(|error| invalid_source(source, error));
         }
     }
     Err(invalid_generated(source))
 }
 
-fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
-    let mut reader = NsReader::from_reader(bytes);
+fn configured_reader(bytes: &[u8], limits: WriteLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     let config = reader.config_mut();
     config.check_end_names = true;
     config.allow_unmatched_ends = false;

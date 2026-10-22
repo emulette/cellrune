@@ -42,7 +42,7 @@ are not part of this binary notice.
 | `psm` | `0.1.32` | `MIT OR Apache-2.0` |
 | `pyo3` | `0.29.3` | `MIT OR Apache-2.0` |
 | `pyo3-ffi` | `0.29.3` | `MIT OR Apache-2.0` |
-| `quick-xml` | `0.41.0` | `MIT` |
+| `quick-xml` | `0.42.0` | `MIT` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
 | `schemars` | `1.2.1` | `MIT` |
 | `serde` | `1.0.229` | `MIT OR Apache-2.0` |
@@ -2770,7 +2770,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### License text 36
 
-Components: `quick-xml 0.41.0`
+Components: `quick-xml 0.42.0`
 
 Source filenames: `LICENSE-MIT.md`
 

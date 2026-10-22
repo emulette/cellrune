@@ -10,6 +10,23 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Changed
+
+- CellRune requires `quick-xml` 0.42. For valid UTF-8 input, read errors, written bytes, and
+  calculation results are unchanged, and each element may still declare up to 256 namespaces however
+  deeply nested. With invalid UTF-8, an element past the XML depth limit whose start tag holds
+  invalid UTF-8 reports the part's error code instead of `xlsx.xml_depth_exceeded`, and an unknown
+  namespace prefix spelled with invalid UTF-8 is no longer reported as the error detail.
+
+### Fixed
+
+- Invalid UTF-8 anywhere in a parsed XML part, including a comment, a processing instruction, an
+  unread element or attribute, or bytes before the XML declaration, fails the read with the part's
+  error code, such as `xlsx.invalid_worksheet`, instead of opening.
+- Renaming a sheet fails with `xlsx.write.invalid_generated_xml` when a chart or pivot cache part is
+  UTF-16 or contains invalid UTF-8, instead of writing that part unchanged with its reference to the
+  old sheet name or its invalid bytes.
+
 ## [0.1.25] - 2026-10-18
 
 ### Added

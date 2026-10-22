@@ -52,7 +52,7 @@ are not part of this binary notice.
 | `pcre2-sys` | `0.2.10` | `Unlicense OR MIT` |
 | `pin-project-lite` | `0.2.17` | `Apache-2.0 OR MIT` |
 | `psm` | `0.1.32` | `MIT OR Apache-2.0` |
-| `quick-xml` | `0.41.0` | `MIT` |
+| `quick-xml` | `0.42.0` | `MIT` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
 | `rustc-hash` | `2.1.3` | `Apache-2.0 OR MIT` |
 | `schemars` | `1.2.1` | `MIT` |
@@ -3133,7 +3133,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 ### License text 41
 
-Components: `quick-xml 0.41.0`
+Components: `quick-xml 0.42.0`
 
 Source filenames: `LICENSE-MIT.md`
 

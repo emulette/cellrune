@@ -80,7 +80,7 @@ are not part of this binary notice.
 | `pcre2-sys` | `0.2.10` | `Unlicense OR MIT` |
 | `pin-project-lite` | `0.2.17` | `Apache-2.0 OR MIT` |
 | `psm` | `0.1.32` | `MIT OR Apache-2.0` |
-| `quick-xml` | `0.41.0` | `MIT` |
+| `quick-xml` | `0.42.0` | `MIT` |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
 | `rmcp` | `3.5.1` | `Apache-2.0` |
@@ -5009,7 +5009,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 ### License text 61
 
-Components: `quick-xml 0.41.0`
+Components: `quick-xml 0.42.0`
 
 Source filenames: `LICENSE-MIT.md`
 

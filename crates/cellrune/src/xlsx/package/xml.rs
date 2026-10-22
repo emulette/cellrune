@@ -7,11 +7,11 @@ use super::super::error::detail;
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::path::PartPath;
 
-const ELEMENT_TYPES: &[u8] = b"Types";
-const ELEMENT_DEFAULT: &[u8] = b"Default";
-const ELEMENT_OVERRIDE: &[u8] = b"Override";
-const ELEMENT_RELATIONSHIPS: &[u8] = b"Relationships";
-const ELEMENT_RELATIONSHIP: &[u8] = b"Relationship";
+const ELEMENT_TYPES: &str = "Types";
+const ELEMENT_DEFAULT: &str = "Default";
+const ELEMENT_OVERRIDE: &str = "Override";
+const ELEMENT_RELATIONSHIPS: &str = "Relationships";
+const ELEMENT_RELATIONSHIP: &str = "Relationship";
 const CONTENT_TYPES_NAMESPACE: &str =
     "http://schemas.openxmlformats.org/package/2006/content-types";
 const RELATIONSHIPS_NAMESPACE: &str =
@@ -71,7 +71,7 @@ pub(super) fn parse_content_types(
         match event {
             Event::Start(element) => {
                 depth = checked_depth(depth, limits, source)?;
-                let attributes = read_attributes(&element, &reader, limits, source)?;
+                let attributes = read_attributes(&element, limits, source)?;
                 if depth == 1 {
                     require_root(
                         &element,
@@ -93,7 +93,7 @@ pub(super) fn parse_content_types(
             }
             Event::Empty(element) => {
                 let element_depth = checked_depth(depth, limits, source)?;
-                let attributes = read_attributes(&element, &reader, limits, source)?;
+                let attributes = read_attributes(&element, limits, source)?;
                 if element_depth == 1 {
                     require_root(
                         &element,
@@ -157,7 +157,7 @@ pub(super) fn parse_relationships(
         match event {
             Event::Start(element) => {
                 depth = checked_depth(depth, limits, relationship_part)?;
-                let attributes = read_attributes(&element, &reader, limits, relationship_part)?;
+                let attributes = read_attributes(&element, limits, relationship_part)?;
                 if depth == 1 {
                     require_root(
                         &element,
@@ -178,7 +178,7 @@ pub(super) fn parse_relationships(
             }
             Event::Empty(element) => {
                 let element_depth = checked_depth(depth, limits, relationship_part)?;
-                let attributes = read_attributes(&element, &reader, limits, relationship_part)?;
+                let attributes = read_attributes(&element, limits, relationship_part)?;
                 if element_depth == 1 {
                     require_root(
                         &element,
@@ -248,7 +248,7 @@ fn checked_depth(
 
 fn require_root(
     element: &BytesStart<'_>,
-    expected: &[u8],
+    expected: &str,
     expected_namespace: &str,
     attributes: &BTreeMap<Box<str>, Box<str>>,
     source: &PartPath,
@@ -264,7 +264,6 @@ fn require_root(
 
 fn read_attributes(
     element: &BytesStart<'_>,
-    reader: &Reader<&[u8]>,
     limits: ReadLimits,
     source: &PartPath,
 ) -> Result<BTreeMap<Box<str>, Box<str>>, XlsxReadError> {
@@ -278,12 +277,13 @@ fn read_attributes(
         }
         let attribute = attribute
             .map_err(|error| xml_error(source, XlsxErrorCode::InvalidXml).with_cause(error))?;
-        let name = std::str::from_utf8(attribute.key.as_ref())
-            .map_err(|error| xml_error(source, XlsxErrorCode::InvalidXml).with_cause(error))?;
         let value = attribute
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|error| xml_error(source, XlsxErrorCode::InvalidXml).with_cause(error))?;
-        values.insert(Box::<str>::from(name), value.into_owned().into_boxed_str());
+        values.insert(
+            Box::<str>::from(attribute.key.as_ref()),
+            value.into_owned().into_boxed_str(),
+        );
     }
     Ok(values)
 }

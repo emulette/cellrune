@@ -2306,6 +2306,63 @@ fn invalid_utf8_in_a_required_part_reports_the_part_code_without_detail() {
 }
 
 #[test]
+fn invalid_utf8_in_markup_the_reader_skips_fails_the_read() {
+    let cases: [(&str, &str, &[u8], XlsxErrorCode); 6] = [
+        (
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            b"<!--\xFF--><sheetData>",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            b"<?probe \xFF?><sheetData>",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            b"<extra\xFF/><sheetData>",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            "<?xml",
+            b"\xFF\xFE<?xml",
+            XlsxErrorCode::InvalidWorksheet,
+        ),
+        (
+            "[Content_Types].xml",
+            "</Types>",
+            b"<!--\xFF--></Types>",
+            XlsxErrorCode::InvalidXml,
+        ),
+        (
+            "xl/styles.xml",
+            "<cellXfs ",
+            b"\xE9<cellXfs ",
+            XlsxErrorCode::InvalidStyles,
+        ),
+    ];
+    for (part, needle, replacement, code) in cases {
+        let archive = archive_with_replaced_part_bytes(part, needle, replacement);
+        let error = read_xlsx(Cursor::new(archive), ReadOptions::default())
+            .expect_err("invalid UTF-8 anywhere in a part must fail the read");
+        assert_eq!(
+            (
+                error.code(),
+                error.detail(),
+                error.source_id().map(|source| source.as_str())
+            ),
+            (code, None, Some(part)),
+            "{part}: {}",
+            String::from_utf8_lossy(replacement)
+        );
+    }
+}
+
+#[test]
 fn each_element_may_declare_up_to_256_namespaces_however_deeply_nested() {
     // The worksheet root already declares the default and `r` namespaces; `xmlns:xml` counts.
     let worksheet = |root: usize, sheet_data: &str| {

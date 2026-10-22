@@ -8,6 +8,7 @@ use quick_xml::reader::NsReader;
 
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
+use crate::xlsx::xml::{namespace_reader, read_event};
 
 const DETAIL_DUPLICATE_RELATIONSHIP: &str = "generated relationship ID already exists";
 const DETAIL_DUPLICATE_CONTENT_TYPE: &str = "generated content type override already exists";
@@ -35,26 +36,25 @@ impl RelationshipIdAllocator {
         limits: WriteLimits,
     ) -> Result<Self, XlsxWriteError> {
         enforce_bytes(bytes.len(), limits, source)?;
-        let mut xml = configured_reader(bytes);
+        let mut xml = configured_reader(bytes, limits);
         let mut buffer = Vec::new();
         let mut depth = 0_u64;
         let mut root_depth = None;
         let mut used = BTreeSet::new();
         let mut count = 0_u64;
         loop {
-            let event = xml
-                .read_event_into(&mut buffer)
-                .map_err(|error| invalid_xml(source, error))?;
+            let event =
+                read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
             match event {
                 Event::Start(element) => {
                     depth = depth.saturating_add(1);
                     enforce_depth(depth, limits, source)?;
-                    if depth == 1 && element.local_name().as_ref() == b"Relationships" {
+                    if depth == 1 && element.local_name().as_ref() == "Relationships" {
                         root_depth = Some(depth);
                     } else if root_depth.is_some_and(|root| depth == root + 1)
-                        && element.local_name().as_ref() == b"Relationship"
+                        && element.local_name().as_ref() == "Relationship"
                     {
-                        used.insert(required_attribute(&element, b"Id", source)?);
+                        used.insert(required_attribute(&element, "Id", source)?);
                         count = count.saturating_add(1);
                         enforce_count(
                             DETAIL_RELATIONSHIP_COUNT,
@@ -67,9 +67,9 @@ impl RelationshipIdAllocator {
                 Event::Empty(element) => {
                     enforce_depth(depth.saturating_add(1), limits, source)?;
                     if root_depth.is_some_and(|root| depth + 1 == root + 1)
-                        && element.local_name().as_ref() == b"Relationship"
+                        && element.local_name().as_ref() == "Relationship"
                     {
-                        used.insert(required_attribute(&element, b"Id", source)?);
+                        used.insert(required_attribute(&element, "Id", source)?);
                         count = count.saturating_add(1);
                         enforce_count(
                             DETAIL_RELATIONSHIP_COUNT,
@@ -124,29 +124,28 @@ pub(crate) fn append_relationships(
         return Ok(bytes.to_vec());
     }
     enforce_bytes(bytes.len(), limits, source)?;
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut root_depth = None;
-    let mut root_name = None::<Vec<u8>>;
+    let mut root_name = None::<String>;
     let mut ids = BTreeSet::new();
     let mut count = 0_u64;
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
-                if depth == 1 && element.local_name().as_ref() == b"Relationships" {
+                if depth == 1 && element.local_name().as_ref() == "Relationships" {
                     root_depth = Some(depth);
-                    root_name = Some(element.name().as_ref().to_vec());
+                    root_name = Some(element.name().as_ref().to_owned());
                 } else if root_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"Relationship"
+                    && element.local_name().as_ref() == "Relationship"
                 {
-                    ids.insert(required_attribute(&element, b"Id", source)?);
+                    ids.insert(required_attribute(&element, "Id", source)?);
                     count = count.saturating_add(1);
                 }
                 write_event(&mut writer, Event::Start(element.into_owned()), source)?;
@@ -154,15 +153,15 @@ pub(crate) fn append_relationships(
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
                 if root_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"Relationship"
+                    && element.local_name().as_ref() == "Relationship"
                 {
-                    ids.insert(required_attribute(&element, b"Id", source)?);
+                    ids.insert(required_attribute(&element, "Id", source)?);
                     count = count.saturating_add(1);
                 }
                 write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
             }
             Event::End(element) => {
-                if root_depth == Some(depth) && element.local_name().as_ref() == b"Relationships" {
+                if root_depth == Some(depth) && element.local_name().as_ref() == "Relationships" {
                     for relationship in additions {
                         if !ids.insert(relationship.id.clone()) {
                             return Err(invalid_generated(source, DETAIL_DUPLICATE_RELATIONSHIP));
@@ -175,10 +174,10 @@ pub(crate) fn append_relationships(
                             source,
                         )?;
                         let name = qualified_sibling_name(
-                            root_name.as_deref().unwrap_or(b"Relationships"),
-                            b"Relationship",
+                            root_name.as_deref().unwrap_or("Relationships"),
+                            "Relationship",
                         );
-                        let mut generated = BytesStart::new(decode_name(&name, source)?);
+                        let mut generated = BytesStart::new(name);
                         generated.push_attribute(("Id", relationship.id.as_str()));
                         generated.push_attribute(("Type", relationship.kind));
                         generated.push_attribute(("Target", relationship.target.as_str()));
@@ -211,29 +210,28 @@ pub(crate) fn append_content_type_overrides(
         return Ok(bytes.to_vec());
     }
     enforce_bytes(bytes.len(), limits, source)?;
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut root_depth = None;
-    let mut root_name = None::<Vec<u8>>;
+    let mut root_name = None::<String>;
     let mut parts = BTreeSet::new();
     let mut count = 0_u64;
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
-                if depth == 1 && element.local_name().as_ref() == b"Types" {
+                if depth == 1 && element.local_name().as_ref() == "Types" {
                     root_depth = Some(depth);
-                    root_name = Some(element.name().as_ref().to_vec());
+                    root_name = Some(element.name().as_ref().to_owned());
                 } else if root_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"Override"
+                    && element.local_name().as_ref() == "Override"
                 {
-                    parts.insert(required_attribute(&element, b"PartName", source)?);
+                    parts.insert(required_attribute(&element, "PartName", source)?);
                     count = count.saturating_add(1);
                 }
                 write_event(&mut writer, Event::Start(element.into_owned()), source)?;
@@ -241,15 +239,15 @@ pub(crate) fn append_content_type_overrides(
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
                 if root_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"Override"
+                    && element.local_name().as_ref() == "Override"
                 {
-                    parts.insert(required_attribute(&element, b"PartName", source)?);
+                    parts.insert(required_attribute(&element, "PartName", source)?);
                     count = count.saturating_add(1);
                 }
                 write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
             }
             Event::End(element) => {
-                if root_depth == Some(depth) && element.local_name().as_ref() == b"Types" {
+                if root_depth == Some(depth) && element.local_name().as_ref() == "Types" {
                     for (part, content_type) in additions {
                         let part_name = format!("/{}", part.as_str());
                         if !parts.insert(part_name.clone()) {
@@ -263,10 +261,10 @@ pub(crate) fn append_content_type_overrides(
                             source,
                         )?;
                         let name = qualified_sibling_name(
-                            root_name.as_deref().unwrap_or(b"Types"),
-                            b"Override",
+                            root_name.as_deref().unwrap_or("Types"),
+                            "Override",
                         );
-                        let mut generated = BytesStart::new(decode_name(&name, source)?);
+                        let mut generated = BytesStart::new(name);
                         generated.push_attribute(("PartName", part_name.as_str()));
                         generated.push_attribute(("ContentType", *content_type));
                         write_event(&mut writer, Event::Empty(generated), source)?;
@@ -290,7 +288,7 @@ pub(crate) fn append_content_type_overrides(
 
 fn required_attribute(
     element: &BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<String, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {
@@ -305,8 +303,8 @@ fn required_attribute(
     Err(invalid_generated(source, DETAIL_RELATIONSHIP_ROOT))
 }
 
-fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
-    let mut reader = NsReader::from_reader(bytes);
+fn configured_reader(bytes: &[u8], limits: WriteLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     reader.config_mut().check_end_names = true;
     reader.config_mut().allow_unmatched_ends = false;
     reader.config_mut().expand_empty_elements = false;
@@ -314,13 +312,9 @@ fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
     reader
 }
 
-fn qualified_sibling_name(template: &[u8], local_name: &[u8]) -> Vec<u8> {
-    let mut output = template
-        .iter()
-        .rposition(|byte| *byte == b':')
-        .map_or_else(Vec::new, |index| template[..=index].to_vec());
-    output.extend_from_slice(local_name);
-    output
+fn qualified_sibling_name(template: &str, local_name: &str) -> String {
+    let prefix = template.rfind(':').map_or("", |index| &template[..=index]);
+    format!("{prefix}{local_name}")
 }
 
 fn enforce_count(
@@ -372,10 +366,6 @@ fn write_event<'a>(
     writer
         .write_event(event)
         .map_err(|error| invalid_xml(source, error))
-}
-
-fn decode_name<'a>(name: &'a [u8], source: &PartPath) -> Result<&'a str, XlsxWriteError> {
-    std::str::from_utf8(name).map_err(|error| invalid_xml(source, error))
 }
 
 fn invalid_xml(

@@ -7,7 +7,7 @@ use super::super::error::compatibility;
 use super::super::package::PartPath;
 use super::super::xml::{
     SPREADSHEETML_STRICT, XmlAttributes, XmlBudget, decode_cdata, decode_reference, decode_text,
-    is_element_in_namespace, is_spreadsheet_element, read_attributes, reader,
+    is_element_in_namespace, is_spreadsheet_element, read_attributes, read_event, reader,
     validate_processing_instruction, validate_xml_declaration,
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
@@ -266,15 +266,14 @@ pub(super) fn parse(
     total_formula_bytes: &mut u64,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Option<Table>, XlsxReadError> {
-    let mut xml = reader(bytes);
+    let mut xml = reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut budget = XmlBudget::new(limits, source.source_id(), XlsxErrorCode::InvalidXml);
     let mut state = TableParseState::default();
     let mut declaration_allowed = true;
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
+        let event = read_event(&mut xml, &mut buffer)
             .map_err(|error| budget.error(XlsxErrorCode::InvalidXml).with_cause(error))?;
         if !matches!(&event, Event::Decl(_) | Event::Eof) {
             declaration_allowed = false;
@@ -282,7 +281,7 @@ pub(super) fn parse(
         match event {
             Event::Start(element) => {
                 let depth = budget.start()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 let is_strict_spreadsheet =
@@ -308,7 +307,7 @@ pub(super) fn parse(
             }
             Event::Empty(element) => {
                 let depth = budget.empty()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 let is_strict_spreadsheet =
@@ -334,7 +333,7 @@ pub(super) fn parse(
             }
             Event::End(element) => {
                 let depth = budget.end()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 if state
                     .fragment_capture
                     .as_ref()
@@ -362,7 +361,7 @@ pub(super) fn parse(
             }
             Event::Text(text) => {
                 process_character_data(
-                    decode_text(&text, &budget)?,
+                    decode_text(&text),
                     CharacterDataKind::Text,
                     &mut state,
                     &budget,
@@ -370,7 +369,7 @@ pub(super) fn parse(
             }
             Event::CData(text) => {
                 process_character_data(
-                    decode_cdata(&text, &budget)?,
+                    decode_cdata(&text),
                     CharacterDataKind::CData,
                     &mut state,
                     &budget,

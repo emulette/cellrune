@@ -7,7 +7,9 @@ use quick_xml::reader::NsReader;
 
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
-use crate::xlsx::xml::{SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL};
+use crate::xlsx::xml::{
+    SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL, namespace_reader, read_event,
+};
 use crate::{CalculationHints, CalculationMode};
 
 const DETAIL_DUPLICATE_CALCULATION_PROPERTIES: &str =
@@ -50,7 +52,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, source)?;
-    let mut xml = NsReader::from_reader(bytes);
+    let mut xml = namespace_reader(bytes, limits.max_xml_depth());
     xml.config_mut().check_end_names = true;
     xml.config_mut().allow_unmatched_ends = false;
     xml.config_mut().expand_empty_elements = false;
@@ -63,18 +65,17 @@ pub(crate) fn patch_calculation_properties_with_hints(
     let mut saw_calc_properties = false;
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
                 let local = element.local_name();
-                if depth == 1 && spreadsheet && local.as_ref() == b"workbook" {
+                if depth == 1 && spreadsheet && local.as_ref() == "workbook" {
                     workbook_depth = Some(depth);
-                    workbook_name = Some(element.name().as_ref().to_vec());
+                    workbook_name = Some(element.name().as_ref().to_owned());
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && spreadsheet
@@ -83,7 +84,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                 {
                     write_generated_calc_properties(
                         &mut writer,
-                        workbook_name.as_deref().unwrap_or(b"workbook"),
+                        workbook_name.as_deref().unwrap_or("workbook"),
                         host_recalculation,
                         hints,
                         source,
@@ -92,7 +93,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && spreadsheet
-                    && local.as_ref() == b"calcPr"
+                    && local.as_ref() == "calcPr"
                 {
                     if saw_calc_properties {
                         return Err(invalid_generated(
@@ -118,7 +119,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                 {
                     write_generated_calc_properties(
                         &mut writer,
-                        workbook_name.as_deref().unwrap_or(b"workbook"),
+                        workbook_name.as_deref().unwrap_or("workbook"),
                         host_recalculation,
                         hints,
                         source,
@@ -127,7 +128,7 @@ pub(crate) fn patch_calculation_properties_with_hints(
                     write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
                     && spreadsheet
-                    && element.local_name().as_ref() == b"calcPr"
+                    && element.local_name().as_ref() == "calcPr"
                 {
                     if saw_calc_properties {
                         return Err(invalid_generated(
@@ -145,12 +146,12 @@ pub(crate) fn patch_calculation_properties_with_hints(
             }
             Event::End(element) => {
                 if workbook_depth == Some(depth)
-                    && element.local_name().as_ref() == b"workbook"
+                    && element.local_name().as_ref() == "workbook"
                     && !saw_calc_properties
                 {
                     write_generated_calc_properties(
                         &mut writer,
-                        workbook_name.as_deref().unwrap_or(b"workbook"),
+                        workbook_name.as_deref().unwrap_or("workbook"),
                         host_recalculation,
                         hints,
                         source,
@@ -174,30 +175,29 @@ pub(crate) fn patch_calculation_properties_with_hints(
 }
 
 /// Reports whether the workbook schema orders this child element after `<calcPr>`.
-pub(super) fn follows_calculation_properties(local_name: &[u8]) -> bool {
+pub(super) fn follows_calculation_properties(local_name: &str) -> bool {
     matches!(
         local_name,
-        b"oleSize"
-            | b"customWorkbookViews"
-            | b"pivotCaches"
-            | b"smartTagPr"
-            | b"smartTagTypes"
-            | b"webPublishing"
-            | b"fileRecoveryPr"
-            | b"webPublishObjects"
-            | b"extLst"
+        "oleSize"
+            | "customWorkbookViews"
+            | "pivotCaches"
+            | "smartTagPr"
+            | "smartTagTypes"
+            | "webPublishing"
+            | "fileRecoveryPr"
+            | "webPublishObjects"
+            | "extLst"
     )
 }
 
 fn write_generated_calc_properties(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    workbook_name: &[u8],
+    workbook_name: &str,
     host_recalculation: HostRecalculation,
     hints: Option<CalculationHints>,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let qualified = qualified_sibling_name(workbook_name, b"calcPr");
-    let mut calc = BytesStart::new(decode_name(&qualified, source)?.to_owned());
+    let mut calc = BytesStart::new(qualified_sibling_name(workbook_name, "calcPr"));
     push_calculation_attributes(&mut calc, host_recalculation, hints);
     write_event(writer, Event::Empty(calc), source)
 }
@@ -208,15 +208,14 @@ fn patch_calc_properties_start(
     hints: Option<CalculationHints>,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     let keeps_force = keeps_force_full_calculation(host_recalculation, hints);
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        let replace = attribute.key.as_ref() == b"fullCalcOnLoad"
-            || (attribute.key.as_ref() == b"forceFullCalc" && !keeps_force)
+        let replace = attribute.key.as_ref() == "fullCalcOnLoad"
+            || (attribute.key.as_ref() == "forceFullCalc" && !keeps_force)
             || (hints.is_some()
-                && matches!(attribute.key.as_ref(), b"calcMode" | b"calcId" | b"iterate"));
+                && matches!(attribute.key.as_ref(), "calcMode" | "calcId" | "iterate"));
         if !replace {
             patched.push_attribute(attribute);
         }
@@ -271,17 +270,9 @@ fn push_calculation_attributes(
     }
 }
 
-fn qualified_sibling_name(template: &[u8], local_name: &[u8]) -> Vec<u8> {
-    let mut output = template
-        .iter()
-        .rposition(|byte| *byte == b':')
-        .map_or_else(Vec::new, |index| template[..=index].to_vec());
-    output.extend_from_slice(local_name);
-    output
-}
-
-fn decode_name<'a>(name: &'a [u8], source: &PartPath) -> Result<&'a str, XlsxWriteError> {
-    std::str::from_utf8(name).map_err(|error| invalid_xml(source, error))
+fn qualified_sibling_name(template: &str, local_name: &str) -> String {
+    let prefix = template.rfind(':').map_or("", |index| &template[..=index]);
+    format!("{prefix}{local_name}")
 }
 
 fn is_spreadsheet_element(xml: &NsReader<&[u8]>, name: QName<'_>) -> bool {

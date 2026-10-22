@@ -6,8 +6,8 @@ use super::super::error::detail;
 use super::super::package::PartPath;
 use super::super::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, XmlAttributes, XmlBudget,
-    decode_cdata, decode_reference, decode_text, is_spreadsheet_element, read_attributes, reader,
-    require_spreadsheet_element,
+    decode_cdata, decode_reference, decode_text, is_spreadsheet_element, read_attributes,
+    read_event, reader, require_spreadsheet_element,
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::defined_name::DefinedNamesState;
@@ -75,13 +75,13 @@ pub(super) fn parse(
     source: &PartPath,
     limits: ReadLimits,
 ) -> Result<WorkbookMetadata, XlsxReadError> {
-    let mut xml = reader(bytes);
+    let mut xml = reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut budget = XmlBudget::new(limits, source.source_id(), XlsxErrorCode::InvalidWorkbook);
     let mut state = WorkbookParseState::default();
 
     loop {
-        let event = xml.read_event_into(&mut buffer).map_err(|error| {
+        let event = read_event(&mut xml, &mut buffer).map_err(|error| {
             budget
                 .error(XlsxErrorCode::InvalidWorkbook)
                 .with_cause(error)
@@ -89,7 +89,7 @@ pub(super) fn parse(
         match event {
             Event::Start(element) => {
                 let depth = budget.start()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 process_element(
@@ -105,7 +105,7 @@ pub(super) fn parse(
             }
             Event::Empty(element) => {
                 let depth = budget.empty()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 process_element(
@@ -120,14 +120,10 @@ pub(super) fn parse(
                 state.defined_names.finish(&local_name, depth, &budget)?;
             }
             Event::Text(text) => {
-                state
-                    .defined_names
-                    .append(decode_text(&text, &budget)?, &budget)?;
+                state.defined_names.append(decode_text(&text), &budget)?;
             }
             Event::CData(text) => {
-                state
-                    .defined_names
-                    .append(decode_cdata(&text, &budget)?, &budget)?;
+                state.defined_names.append(decode_cdata(&text), &budget)?;
             }
             Event::GeneralRef(reference) => {
                 state
@@ -136,7 +132,7 @@ pub(super) fn parse(
             }
             Event::End(element) => {
                 let depth = budget.end()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 state.defined_names.finish(&local_name, depth, &budget)?;
                 state
                     .stack

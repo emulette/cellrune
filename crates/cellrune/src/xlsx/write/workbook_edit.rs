@@ -12,7 +12,10 @@ use super::workbook_patch::{
 };
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
-use crate::xlsx::xml::{DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL};
+use crate::xlsx::xml::{
+    DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, namespace_reader,
+    read_event,
+};
 use crate::{
     DateSystem, DefinedName, DefinedNameScope, Sheet, SheetId, SheetVisibility, WorkbookSnapshot,
 };
@@ -34,9 +37,9 @@ pub(crate) struct WorkbookPatchOptions {
 
 #[derive(Debug)]
 struct RelationshipAttribute {
-    qualified_name: Vec<u8>,
-    prefix: Vec<u8>,
-    namespace: Vec<u8>,
+    qualified_name: String,
+    prefix: String,
+    namespace: String,
 }
 
 /// The source `<definedNames>` container, captured so a changed name set is written in draft
@@ -75,7 +78,7 @@ impl SourceDefinedNames {
             } else {
                 Event::Start(element)
             });
-        } else if depth == self.depth + 1 && element.local_name().as_ref() == b"definedName" {
+        } else if depth == self.depth + 1 && element.local_name().as_ref() == "definedName" {
             let defined_name = SourceDefinedName {
                 start: element.into_owned(),
                 content: Vec::new(),
@@ -120,14 +123,14 @@ pub(crate) fn patch_workbook_semantics(
     enforce_bytes(bytes.len(), limits, source)?;
     validate_existing_sheet_order(original, draft, source)?;
     let names_changed = original.defined_names() != draft.defined_names();
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut workbook_depth = None;
-    let mut workbook_name = None::<Vec<u8>>;
+    let mut workbook_name = None::<String>;
     let mut sheets_depth = None;
-    let mut sheets_name = None::<Vec<u8>>;
+    let mut sheets_name = None::<String>;
     let mut relationship_attribute = None::<RelationshipAttribute>;
     let mut existing_sheet_index = 0_usize;
     let mut existing_tab_position = 0_usize;
@@ -136,9 +139,8 @@ pub(crate) fn patch_workbook_semantics(
     let mut inserted_defined_names = !names_changed;
     let mut source_defined_names = None::<SourceDefinedNames>;
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
@@ -148,28 +150,28 @@ pub(crate) fn patch_workbook_semantics(
                     buffer.clear();
                     continue;
                 }
-                if depth == 1 && element.local_name().as_ref() == b"workbook" {
+                if depth == 1 && element.local_name().as_ref() == "workbook" {
                     workbook_depth = Some(depth);
-                    workbook_name = Some(element.name().as_ref().to_vec());
+                    workbook_name = Some(element.name().as_ref().to_owned());
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"workbookPr"
+                    && element.local_name().as_ref() == "workbookPr"
                 {
                     saw_workbook_properties = true;
                     let patched = patch_date_system(&element, draft.date_system(), source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"bookViews"
+                    && element.local_name().as_ref() == "bookViews"
                 {
                     saw_book_views = true;
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"sheets"
+                    && element.local_name().as_ref() == "sheets"
                 {
                     if !saw_workbook_properties && draft.date_system() == DateSystem::Excel1904 {
                         write_workbook_properties(
                             &mut writer,
-                            workbook_name.as_deref().unwrap_or(b"workbook"),
+                            workbook_name.as_deref().unwrap_or("workbook"),
                             draft.date_system(),
                             source,
                         )?;
@@ -178,21 +180,21 @@ pub(crate) fn patch_workbook_semantics(
                     if ensure_book_view && !saw_book_views {
                         write_book_views(
                             &mut writer,
-                            workbook_name.as_deref().unwrap_or(b"workbook"),
+                            workbook_name.as_deref().unwrap_or("workbook"),
                             source,
                         )?;
                         saw_book_views = true;
                     }
                     sheets_depth = Some(depth);
-                    sheets_name = Some(element.name().as_ref().to_vec());
+                    sheets_name = Some(element.name().as_ref().to_owned());
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"sheet"
+                    && element.local_name().as_ref() == "sheet"
                     && is_non_worksheet_tab(original, &mut existing_tab_position)
                 {
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"sheet"
+                    && element.local_name().as_ref() == "sheet"
                 {
                     let sheet = original
                         .sheets()
@@ -204,7 +206,7 @@ pub(crate) fn patch_workbook_semantics(
                     existing_sheet_index = existing_sheet_index.saturating_add(1);
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"definedNames"
+                    && element.local_name().as_ref() == "definedNames"
                     && names_changed
                 {
                     source_defined_names =
@@ -233,43 +235,39 @@ pub(crate) fn patch_workbook_semantics(
                     continue;
                 }
                 if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"workbookPr"
+                    && element.local_name().as_ref() == "workbookPr"
                 {
                     saw_workbook_properties = true;
                     let patched = patch_date_system(&element, draft.date_system(), source)?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"bookViews"
+                    && element.local_name().as_ref() == "bookViews"
                 {
                     saw_book_views = true;
                     if ensure_book_view {
-                        let name = element.name().as_ref().to_vec();
+                        let name = element.name().as_ref().to_owned();
                         write_event(&mut writer, Event::Start(element.into_owned()), source)?;
-                        let view_name = qualified_sibling_name(&name, b"workbookView");
+                        let view_name = qualified_sibling_name(&name, "workbookView");
                         write_event(
                             &mut writer,
-                            Event::Empty(BytesStart::new(decode_name(&view_name, source)?)),
+                            Event::Empty(BytesStart::new(view_name)),
                             source,
                         )?;
-                        write_event(
-                            &mut writer,
-                            Event::End(BytesEnd::new(decode_name(&name, source)?)),
-                            source,
-                        )?;
+                        write_event(&mut writer, Event::End(BytesEnd::new(name)), source)?;
                     } else {
                         write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                     }
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"sheets"
+                    && element.local_name().as_ref() == "sheets"
                 {
                     return Err(invalid_generated(source, DETAIL_MISSING_SHEETS));
                 } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == b"sheet"
+                    && element.local_name().as_ref() == "sheet"
                     && is_non_worksheet_tab(original, &mut existing_tab_position)
                 {
                     write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                 } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == b"sheet"
+                    && element.local_name().as_ref() == "sheet"
                 {
                     let sheet = original
                         .sheets()
@@ -281,7 +279,7 @@ pub(crate) fn patch_workbook_semantics(
                     existing_sheet_index = existing_sheet_index.saturating_add(1);
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"definedNames"
+                    && element.local_name().as_ref() == "definedNames"
                     && names_changed
                 {
                     write_defined_names(&mut writer, element.name().as_ref(), draft, source)?;
@@ -320,7 +318,7 @@ pub(crate) fn patch_workbook_semantics(
                     buffer.clear();
                     continue;
                 }
-                if sheets_depth == Some(depth) && element.local_name().as_ref() == b"sheets" {
+                if sheets_depth == Some(depth) && element.local_name().as_ref() == "sheets" {
                     if existing_sheet_index != original.sheets().len() {
                         return Err(invalid_generated(source, DETAIL_SHEET_COUNT));
                     }
@@ -338,7 +336,7 @@ pub(crate) fn patch_workbook_semantics(
                             })?;
                         write_added_sheet(
                             &mut writer,
-                            sheets_name.as_deref().unwrap_or(b"sheets"),
+                            sheets_name.as_deref().unwrap_or("sheets"),
                             relationship,
                             sheet,
                             relationship_id,
@@ -347,15 +345,15 @@ pub(crate) fn patch_workbook_semantics(
                     }
                 }
                 if workbook_depth == Some(depth)
-                    && element.local_name().as_ref() == b"workbook"
+                    && element.local_name().as_ref() == "workbook"
                     && names_changed
                     && !inserted_defined_names
                 {
                     write_defined_names(
                         &mut writer,
                         &qualified_sibling_name(
-                            workbook_name.as_deref().unwrap_or(b"workbook"),
-                            b"definedNames",
+                            workbook_name.as_deref().unwrap_or("workbook"),
+                            "definedNames",
                         ),
                         draft,
                         source,
@@ -395,26 +393,18 @@ pub(crate) fn patch_workbook_semantics(
 
 fn write_book_views(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    workbook_name: &[u8],
+    workbook_name: &str,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let views_name = qualified_sibling_name(workbook_name, b"bookViews");
+    let views_name = qualified_sibling_name(workbook_name, "bookViews");
     write_event(
         writer,
-        Event::Start(BytesStart::new(decode_name(&views_name, source)?)),
+        Event::Start(BytesStart::new(views_name.as_str())),
         source,
     )?;
-    let view_name = qualified_sibling_name(&views_name, b"workbookView");
-    write_event(
-        writer,
-        Event::Empty(BytesStart::new(decode_name(&view_name, source)?)),
-        source,
-    )?;
-    write_event(
-        writer,
-        Event::End(BytesEnd::new(decode_name(&views_name, source)?)),
-        source,
-    )
+    let view_name = qualified_sibling_name(&views_name, "workbookView");
+    write_event(writer, Event::Empty(BytesStart::new(view_name)), source)?;
+    write_event(writer, Event::End(BytesEnd::new(views_name)), source)
 }
 
 /// Advances past one source `<sheet>` element and reports whether it is a chartsheet,
@@ -449,11 +439,10 @@ fn patch_date_system(
     date_system: DateSystem,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.as_ref() != b"date1904" {
+        if attribute.key.as_ref() != "date1904" {
             patched.push_attribute(attribute);
         }
     }
@@ -465,12 +454,12 @@ fn patch_date_system(
 
 fn write_workbook_properties(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    workbook_name: &[u8],
+    workbook_name: &str,
     date_system: DateSystem,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let name = qualified_sibling_name(workbook_name, b"workbookPr");
-    let mut properties = BytesStart::new(decode_name(&name, source)?);
+    let name = qualified_sibling_name(workbook_name, "workbookPr");
+    let mut properties = BytesStart::new(name);
     if date_system == DateSystem::Excel1904 {
         properties.push_attribute(("date1904", "1"));
     }
@@ -483,8 +472,7 @@ fn patch_sheet(
     sheet: &Sheet,
     source: &PartPath,
 ) -> Result<(BytesStart<'static>, RelationshipAttribute), XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     let mut relationship = None;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
@@ -496,27 +484,26 @@ fn patch_sheet(
                     DOCUMENT_RELATIONSHIPS_TRANSITIONAL | DOCUMENT_RELATIONSHIPS_STRICT
                 ) =>
             {
-                Some(namespace.as_ref().to_vec())
+                Some(namespace.as_ref().to_owned())
             }
             _ => None,
         };
-        if local_name.as_ref() == b"id"
+        if local_name.as_ref() == "id"
             && let Some(namespace) = namespace
         {
             if relationship.is_none() {
-                let qualified_name = attribute.key.as_ref().to_vec();
+                let qualified_name = attribute.key.as_ref().to_owned();
                 let prefix_end = qualified_name
-                    .iter()
-                    .position(|byte| *byte == b':')
+                    .find(':')
                     .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?;
                 relationship = Some(RelationshipAttribute {
-                    prefix: qualified_name[..prefix_end].to_vec(),
+                    prefix: qualified_name[..prefix_end].to_owned(),
                     qualified_name,
                     namespace,
                 });
             }
             patched.push_attribute(attribute);
-        } else if !matches!(attribute.key.as_ref(), b"name" | b"sheetId" | b"state") {
+        } else if !matches!(attribute.key.as_ref(), "name" | "sheetId" | "state") {
             patched.push_attribute(attribute);
         }
     }
@@ -536,14 +523,14 @@ fn patch_sheet(
 
 fn write_added_sheet(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    sheets_name: &[u8],
+    sheets_name: &str,
     relationship: &RelationshipAttribute,
     sheet: &Sheet,
     relationship_id: &str,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let name = qualified_sibling_name(sheets_name, b"sheet");
-    let mut element = BytesStart::new(decode_name(&name, source)?);
+    let name = qualified_sibling_name(sheets_name, "sheet");
+    let mut element = BytesStart::new(name);
     let sheet_id = sheet.id().get().to_string();
     element.push_attribute(("name", sheet.name().as_str()));
     element.push_attribute(("sheetId", sheet_id.as_str()));
@@ -552,15 +539,12 @@ fn write_added_sheet(
         SheetVisibility::Hidden => element.push_attribute(("state", "hidden")),
         SheetVisibility::VeryHidden => element.push_attribute(("state", "veryHidden")),
     }
-    let namespace_declaration = format!("xmlns:{}", decode_name(&relationship.prefix, source)?);
+    let namespace_declaration = format!("xmlns:{}", relationship.prefix);
     element.push_attribute((
         namespace_declaration.as_str(),
-        decode_name(&relationship.namespace, source)?,
+        relationship.namespace.as_str(),
     ));
-    element.push_attribute((
-        decode_name(&relationship.qualified_name, source)?,
-        relationship_id,
-    ));
+    element.push_attribute((relationship.qualified_name.as_str(), relationship_id));
     write_event(writer, Event::Empty(element), source)
 }
 
@@ -569,8 +553,8 @@ fn maybe_insert_defined_names(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     workbook_depth: Option<u64>,
     depth: u64,
-    local_name: &[u8],
-    workbook_name: Option<&[u8]>,
+    local_name: &str,
+    workbook_name: Option<&str>,
     draft: &WorkbookSnapshot,
     names_changed: bool,
     inserted: &mut bool,
@@ -579,9 +563,9 @@ fn maybe_insert_defined_names(
     if names_changed
         && !*inserted
         && workbook_depth.is_some_and(|root| depth == root + 1)
-        && (local_name == b"calcPr" || follows_calculation_properties(local_name))
+        && (local_name == "calcPr" || follows_calculation_properties(local_name))
     {
-        let name = qualified_sibling_name(workbook_name.unwrap_or(b"workbook"), b"definedNames");
+        let name = qualified_sibling_name(workbook_name.unwrap_or("workbook"), "definedNames");
         write_defined_names(writer, &name, draft, source)?;
         *inserted = true;
     }
@@ -590,7 +574,7 @@ fn maybe_insert_defined_names(
 
 fn write_defined_names(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    container_name: &[u8],
+    container_name: &str,
     workbook: &WorkbookSnapshot,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
@@ -599,19 +583,15 @@ fn write_defined_names(
     }
     write_event(
         writer,
-        Event::Start(BytesStart::new(decode_name(container_name, source)?)),
+        Event::Start(BytesStart::new(container_name)),
         source,
     )?;
-    let name = qualified_sibling_name(container_name, b"definedName");
+    let name = qualified_sibling_name(container_name, "definedName");
     for defined_name in workbook.defined_names() {
         let element = new_defined_name(&name, workbook, defined_name, source)?;
         write_defined_name(writer, element, defined_name, source)?;
     }
-    write_event(
-        writer,
-        Event::End(BytesEnd::new(decode_name(container_name, source)?)),
-        source,
-    )
+    write_event(writer, Event::End(BytesEnd::new(container_name)), source)
 }
 
 /// Writes the draft names into the source container in draft order. A name whose identity
@@ -628,7 +608,7 @@ fn write_source_defined_names(
     if draft.defined_names().is_empty() {
         return Ok(());
     }
-    let name = qualified_sibling_name(names.container.name().as_ref(), b"definedName");
+    let name = qualified_sibling_name(names.container.name().as_ref(), "definedName");
     write_event(writer, Event::Start(names.container), source)?;
     for defined_name in draft.defined_names() {
         let retained = original
@@ -660,12 +640,12 @@ fn write_source_defined_names(
 }
 
 fn new_defined_name<'a>(
-    element_name: &'a [u8],
+    element_name: &'a str,
     workbook: &WorkbookSnapshot,
     defined_name: &DefinedName,
     source: &PartPath,
 ) -> Result<BytesStart<'a>, XlsxWriteError> {
-    let mut element = BytesStart::new(decode_name(element_name, source)?);
+    let mut element = BytesStart::new(element_name);
     element.push_attribute(("name", defined_name.name()));
     if let DefinedNameScope::Sheet(sheet_id) = defined_name.scope() {
         let index = workbook
@@ -686,15 +666,14 @@ fn patch_defined_name(
     defined_name: &DefinedName,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
         match attribute.key.as_ref() {
-            b"name" if source_name.name() != defined_name.name() => {
+            "name" if source_name.name() != defined_name.name() => {
                 patched.push_attribute(("name", defined_name.name()));
             }
-            b"hidden" if source_name.hidden() != defined_name.hidden() => {}
+            "hidden" if source_name.hidden() != defined_name.hidden() => {}
             _ => patched.push_attribute(attribute),
         }
     }
@@ -722,8 +701,8 @@ fn write_defined_name(
     write_event(writer, Event::End(end), source)
 }
 
-fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
-    let mut reader = NsReader::from_reader(bytes);
+fn configured_reader(bytes: &[u8], limits: WriteLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     reader.config_mut().check_end_names = true;
     reader.config_mut().allow_unmatched_ends = false;
     reader.config_mut().expand_empty_elements = false;
@@ -731,13 +710,9 @@ fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
     reader
 }
 
-fn qualified_sibling_name(template: &[u8], local_name: &[u8]) -> Vec<u8> {
-    let mut output = template
-        .iter()
-        .rposition(|byte| *byte == b':')
-        .map_or_else(Vec::new, |index| template[..=index].to_vec());
-    output.extend_from_slice(local_name);
-    output
+fn qualified_sibling_name(template: &str, local_name: &str) -> String {
+    let prefix = template.rfind(':').map_or("", |index| &template[..=index]);
+    format!("{prefix}{local_name}")
 }
 
 fn enforce_depth(depth: u64, limits: WriteLimits, source: &PartPath) -> Result<(), XlsxWriteError> {
@@ -776,10 +751,6 @@ fn write_event<'a>(
     writer
         .write_event(event)
         .map_err(|error| invalid_xml(source, error))
-}
-
-fn decode_name<'a>(name: &'a [u8], source: &PartPath) -> Result<&'a str, XlsxWriteError> {
-    std::str::from_utf8(name).map_err(|error| invalid_xml(source, error))
 }
 
 fn invalid_xml(

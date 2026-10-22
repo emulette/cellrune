@@ -53,7 +53,7 @@ pub(crate) fn remove_calculation_chain_relationship(
                     buffer.clear();
                     continue;
                 }
-                if depth == 1 && element.local_name().as_ref() == b"Relationships" {
+                if depth == 1 && element.local_name().as_ref() == "Relationships" {
                     root_depth = Some(depth);
                     write_event(
                         &mut writer,
@@ -61,7 +61,7 @@ pub(crate) fn remove_calculation_chain_relationship(
                         relationship_part,
                     )?;
                 } else if root_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"Relationship"
+                    && element.local_name().as_ref() == "Relationship"
                 {
                     relationship_count = relationship_count.saturating_add(1);
                     enforce_relationship_count(relationship_count, limits, relationship_part)?;
@@ -97,7 +97,7 @@ pub(crate) fn remove_calculation_chain_relationship(
                     continue;
                 }
                 if root_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"Relationship"
+                    && element.local_name().as_ref() == "Relationship"
                 {
                     relationship_count = relationship_count.saturating_add(1);
                     enforce_relationship_count(relationship_count, limits, relationship_part)?;
@@ -194,7 +194,7 @@ pub(crate) fn remove_content_type_overrides(
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, content_types_part)?;
-                if matches!(element.local_name().as_ref(), b"Default" | b"Override") {
+                if matches!(element.local_name().as_ref(), "Default" | "Override") {
                     declaration_count = declaration_count.saturating_add(1);
                     if declaration_count > limits.max_content_types() {
                         return Err(resource_error(
@@ -205,8 +205,8 @@ pub(crate) fn remove_content_type_overrides(
                         ));
                     }
                 }
-                let removed = if element.local_name().as_ref() == b"Override" {
-                    let part_name = required_attribute(&element, b"PartName", content_types_part)?;
+                let removed = if element.local_name().as_ref() == "Override" {
+                    let part_name = required_attribute(&element, "PartName", content_types_part)?;
                     let part = PartPath::from_content_type_override(&part_name)
                         .map_err(|error| invalid_xml(content_types_part, error))?;
                     if removals.contains(&part) {
@@ -254,18 +254,18 @@ fn calc_chain_target(
     element: &quick_xml::events::BytesStart<'_>,
     source: &PartPath,
 ) -> Result<Option<String>, XlsxWriteError> {
-    let relationship_type = required_attribute(element, b"Type", source)?;
+    let relationship_type = required_attribute(element, "Type", source)?;
     if !crate::xlsx::package::relationship_type::is_calc_chain(&relationship_type)
-        || optional_attribute(element, b"TargetMode", source)?.as_deref() == Some("External")
+        || optional_attribute(element, "TargetMode", source)?.as_deref() == Some("External")
     {
         return Ok(None);
     }
-    Ok(Some(required_attribute(element, b"Target", source)?))
+    Ok(Some(required_attribute(element, "Target", source)?))
 }
 
 fn optional_attribute(
     element: &quick_xml::events::BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<Option<String>, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {
@@ -282,7 +282,7 @@ fn optional_attribute(
 
 fn required_attribute(
     element: &quick_xml::events::BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<String, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {

@@ -5,6 +5,7 @@ use std::io::Cursor;
 use quick_xml::Writer;
 use quick_xml::XmlVersion;
 use quick_xml::escape::unescape;
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesRef, BytesStart, BytesText, Event};
 use quick_xml::name::{QName, ResolveResult};
 use quick_xml::reader::NsReader;
@@ -19,23 +20,23 @@ use crate::calculation::formula_rewrite::{
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, SPREADSHEETML_STRICT,
-    SPREADSHEETML_TRANSITIONAL,
+    SPREADSHEETML_TRANSITIONAL, namespace_reader, read_event,
 };
 use crate::{WorkbookSnapshot, XlsxDocument, case_insensitive_eq};
 
-const SPREADSHEETML: &[&[u8]] = &[SPREADSHEETML_TRANSITIONAL, SPREADSHEETML_STRICT];
-const RELATIONSHIPS: &[&[u8]] = &[
+const SPREADSHEETML: &[&str] = &[SPREADSHEETML_TRANSITIONAL, SPREADSHEETML_STRICT];
+const RELATIONSHIPS: &[&str] = &[
     DOCUMENT_RELATIONSHIPS_TRANSITIONAL,
     DOCUMENT_RELATIONSHIPS_STRICT,
 ];
 /// Holds the `xm:f` formulas of x14 conditional formats, data validations, and sparklines.
-const EXCEL_MAIN: &[&[u8]] = &[b"http://schemas.microsoft.com/office/excel/2006/main"];
-const CHART: &[&[u8]] = &[
-    b"http://schemas.openxmlformats.org/drawingml/2006/chart",
-    b"http://purl.oclc.org/ooxml/drawingml/chart",
+const EXCEL_MAIN: &[&str] = &["http://schemas.microsoft.com/office/excel/2006/main"];
+const CHART: &[&str] = &[
+    "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "http://purl.oclc.org/ooxml/drawingml/chart",
 ];
-const CHART_2012: &[&[u8]] = &[b"http://schemas.microsoft.com/office/drawing/2012/chart"];
-const CHART_EX: &[&[u8]] = &[b"http://schemas.microsoft.com/office/drawing/2014/chartex"];
+const CHART_2012: &[&str] = &["http://schemas.microsoft.com/office/drawing/2012/chart"];
+const CHART_EX: &[&str] = &["http://schemas.microsoft.com/office/drawing/2014/chartex"];
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_UNREWRITABLE_REFERENCE: &str =
     "a preserved reference to a renamed sheet cannot be rewritten";
@@ -135,7 +136,7 @@ fn patch_sheet_references(
     let never_cancelled = || false;
     let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
     let request = FormulaRewriteRequest::Sheets(renames);
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
@@ -143,25 +144,20 @@ fn patch_sheet_references(
     let mut held = None::<HeldText>;
     let mut changed = false;
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         if let Some(text) = held.as_mut()
             && !matches!(event, Event::Eof)
         {
             match event {
                 Event::Text(content) => {
-                    let decoded = content
-                        .xml_content(XmlVersion::Implicit1_0)
-                        .map_err(|error| invalid_xml(source, error))?;
-                    text.text.push_str(&decoded);
+                    text.text
+                        .push_str(&content.xml_content(XmlVersion::Implicit1_0));
                     text.events.push(Event::Text(content.into_owned()));
                 }
                 Event::CData(content) => {
-                    let decoded = content
-                        .xml_content(XmlVersion::Implicit1_0)
-                        .map_err(|error| invalid_xml(source, error))?;
-                    text.text.push_str(&decoded);
+                    text.text
+                        .push_str(&content.xml_content(XmlVersion::Implicit1_0));
                     text.events.push(Event::CData(content.into_owned()));
                 }
                 Event::GeneralRef(reference) => {
@@ -199,7 +195,7 @@ fn patch_sheet_references(
                 enforce_depth(depth, limits, source)?;
                 let kind = held_text_kind(&xml, &element, part, depth, pivot_source_depth);
                 if part == ReferencePart::Chart
-                    && element.local_name().as_ref() == b"pivotSource"
+                    && element.local_name().as_ref() == "pivotSource"
                     && in_namespace(&xml, element.name(), CHART)
                 {
                     pivot_source_depth = Some(depth);
@@ -272,20 +268,20 @@ fn held_text_kind(
     let name = element.name();
     let formula = match part {
         ReferencePart::Worksheet => {
-            (matches!(local_name, b"formula" | b"formula1" | b"formula2")
+            (matches!(local_name, "formula" | "formula1" | "formula2")
                 && in_namespace(xml, name, SPREADSHEETML))
-                || (local_name == b"f" && in_namespace(xml, name, EXCEL_MAIN))
+                || (local_name == "f" && in_namespace(xml, name, EXCEL_MAIN))
         }
         ReferencePart::Chart => {
-            if local_name == b"name"
+            if local_name == "name"
                 && pivot_source_depth.is_some_and(|parent| depth == parent + 1)
                 && in_namespace(xml, name, CHART)
             {
                 return Some(HeldTextKind::PivotSourceName);
             }
-            (local_name == b"f"
+            (local_name == "f"
                 && (in_namespace(xml, name, CHART) || in_namespace(xml, name, CHART_EX)))
-                || (matches!(local_name, b"f" | b"sqref") && in_namespace(xml, name, CHART_2012))
+                || (matches!(local_name, "f" | "sqref") && in_namespace(xml, name, CHART_2012))
         }
         ReferencePart::PivotCache => false,
     };
@@ -305,10 +301,10 @@ fn patch_attribute(
     source: &PartPath,
 ) -> Result<Option<BytesStart<'static>>, XlsxWriteError> {
     let local_name = element.local_name();
-    let target: &[u8] = match (part, local_name.as_ref()) {
-        (ReferencePart::Worksheet, b"hyperlink") => b"location",
-        (ReferencePart::Worksheet, b"cfvo") => b"val",
-        (ReferencePart::PivotCache, b"worksheetSource" | b"rangeSet") => b"sheet",
+    let target = match (part, local_name.as_ref()) {
+        (ReferencePart::Worksheet, "hyperlink") => "location",
+        (ReferencePart::Worksheet, "cfvo") => "val",
+        (ReferencePart::PivotCache, "worksheetSource" | "rangeSet") => "sheet",
         _ => return Ok(None),
     };
     if !in_namespace(xml, element.name(), SPREADSHEETML) {
@@ -320,7 +316,7 @@ fn patch_attribute(
         let (namespace, attribute_name) = xml.resolver().resolve_attribute(attribute.key);
         // A relationship ID points the reference into another package: an external hyperlink
         // target or an external workbook source, whose sheets this rename does not touch.
-        if attribute_name.as_ref() == b"id"
+        if attribute_name.as_ref() == "id"
             && matches!(
                 namespace,
                 ResolveResult::Bound(namespace) if RELATIONSHIPS.contains(&namespace.as_ref())
@@ -350,14 +346,14 @@ fn patch_attribute(
         return Ok(None);
     };
     let escaped = escape_attribute(&replacement)?;
-    let name = std::str::from_utf8(element.name().as_ref())
-        .map_err(|error| invalid_xml(source, error))?
-        .to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
         if attribute.key.as_ref() == target {
-            patched.push_attribute((target, escaped.as_bytes()));
+            patched.push_attribute(Attribute {
+                key: attribute.key,
+                value: Cow::Borrowed(&escaped),
+            });
         } else {
             patched.push_attribute(attribute);
         }
@@ -435,23 +431,20 @@ fn rewrite(
 }
 
 fn decode_reference(reference: &BytesRef<'_>, source: &PartPath) -> Result<String, XlsxWriteError> {
-    let name = reference
-        .decode()
-        .map_err(|error| invalid_xml(source, error))?;
-    unescape(&format!("&{name};"))
+    unescape(&format!("&{};", reference.as_ref()))
         .map(Cow::into_owned)
         .map_err(|error| invalid_xml(source, error))
 }
 
-fn in_namespace(xml: &NsReader<&[u8]>, name: QName<'_>, namespaces: &[&[u8]]) -> bool {
+fn in_namespace(xml: &NsReader<&[u8]>, name: QName<'_>, namespaces: &[&str]) -> bool {
     matches!(
         xml.resolver().resolve_element(name).0,
         ResolveResult::Bound(namespace) if namespaces.contains(&namespace.as_ref())
     )
 }
 
-fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
-    let mut reader = NsReader::from_reader(bytes);
+fn configured_reader(bytes: &[u8], limits: WriteLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     reader.config_mut().check_end_names = true;
     reader.config_mut().allow_unmatched_ends = false;
     reader.config_mut().expand_empty_elements = false;
@@ -571,6 +564,23 @@ mod tests {
             patch(ReferencePart::Chart, chartex),
             Some(chartex.replace("Data!$A$1", "'New Data'!$A$1"))
         );
+    }
+
+    #[test]
+    fn chart_part_that_is_not_utf8_fails_instead_of_keeping_a_stale_reference() {
+        let chart = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:f>Data!$A$1</c:f></c:chartSpace>"#;
+        let mut utf16 = vec![0xFF, 0xFE];
+        utf16.extend(chart.encode_utf16().flat_map(u16::to_le_bytes));
+        let source = PartPath::from_archive_name(b"xl/charts/chart1.xml").expect("part");
+        let error = patch_sheet_references(
+            &utf16,
+            &source,
+            ReferencePart::Chart,
+            RENAMES,
+            WriteLimits::default(),
+        )
+        .expect_err("a chart that cannot be read cannot be rewritten");
+        assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
     }
 
     #[test]

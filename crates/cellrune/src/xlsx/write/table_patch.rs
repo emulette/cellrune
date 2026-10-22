@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::io::Cursor;
 
 use quick_xml::Writer;
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::name::{QName, ResolveResult};
 use quick_xml::reader::NsReader;
@@ -9,7 +11,9 @@ use quick_xml::reader::NsReader;
 use super::serialization::escape_attribute;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
-use crate::xlsx::xml::{SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL};
+use crate::xlsx::xml::{
+    SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL, namespace_reader, read_event,
+};
 use crate::{CellRange, Table, TableColumn, TableSortState};
 
 const DETAIL_TABLE_PATCH_STRUCTURE: &str = "source table XML does not match the stable table model";
@@ -40,7 +44,7 @@ pub(crate) fn patch_table_xml(
             limits.max_rewritten_xml_bytes(),
         ));
     }
-    let mut xml = NsReader::from_reader(source_bytes);
+    let mut xml = namespace_reader(source_bytes, limits.max_xml_depth());
     xml.config_mut().check_end_names = true;
     xml.config_mut().allow_unmatched_ends = false;
     xml.config_mut().expand_empty_elements = false;
@@ -54,16 +58,15 @@ pub(crate) fn patch_table_xml(
     let mut auto_filter_depth = None;
     let mut next_filter_column = 0_usize;
     let mut table_columns_depth = None;
-    let mut table_columns_name = Vec::new();
+    let mut table_columns_name = String::new();
     let mut next_column = 0_usize;
     let mut current_column: Option<(u64, &TableColumn)> = None;
     let mut active_formula: Option<ActiveFormula> = None;
     let mut active_sort: Option<ActiveSort<'_>> = None;
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
@@ -71,7 +74,7 @@ pub(crate) fn patch_table_xml(
                 let local = element.local_name();
                 let local = local.as_ref();
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
-                if depth == 1 && spreadsheet && local == b"table" {
+                if depth == 1 && spreadsheet && local == "table" {
                     saw_root = true;
                     root_depth = Some(depth);
                     let patched = patch_attributes(
@@ -89,10 +92,10 @@ pub(crate) fn patch_table_xml(
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if root_depth.is_some_and(|root| depth == root + 1)
                     && spreadsheet
-                    && local == b"tableColumns"
+                    && local == "tableColumns"
                 {
                     table_columns_depth = Some(depth);
-                    table_columns_name = element.name().as_ref().to_vec();
+                    table_columns_name = element.name().as_ref().to_owned();
                     let patched = if element
                         .try_get_attribute("count")
                         .map_err(|error| invalid_xml(source, error))?
@@ -110,7 +113,7 @@ pub(crate) fn patch_table_xml(
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if root_depth.is_some_and(|root| depth == root + 1)
                     && spreadsheet
-                    && local == b"autoFilter"
+                    && local == "autoFilter"
                 {
                     let replacement = table
                         .auto_filter()
@@ -121,14 +124,14 @@ pub(crate) fn patch_table_xml(
                     next_filter_column = 0;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if spreadsheet
-                    && local == b"filterColumn"
+                    && local == "filterColumn"
                     && auto_filter_depth.is_some_and(|filter| depth == filter + 1)
                 {
                     let patched =
                         patch_filter_column(element, table, &mut next_filter_column, source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if spreadsheet
-                    && local == b"sortState"
+                    && local == "sortState"
                     && (root_depth.is_some_and(|root| depth == root + 1)
                         || auto_filter_depth.is_some_and(|filter| depth == filter + 1))
                 {
@@ -150,7 +153,7 @@ pub(crate) fn patch_table_xml(
                     });
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if spreadsheet
-                    && local == b"sortCondition"
+                    && local == "sortCondition"
                     && active_sort
                         .as_ref()
                         .is_some_and(|sort| depth == sort.depth + 1)
@@ -171,7 +174,7 @@ pub(crate) fn patch_table_xml(
                     )?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if spreadsheet
-                    && local == b"tableColumn"
+                    && local == "tableColumn"
                     && table_columns_depth.is_some_and(|columns| depth == columns + 1)
                 {
                     let (index, column) = column_for_element(&element, table, source)?;
@@ -192,13 +195,13 @@ pub(crate) fn patch_table_xml(
                     current_column = Some((depth, column));
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if spreadsheet
-                    && matches!(local, b"calculatedColumnFormula" | b"totalsRowFormula")
+                    && matches!(local, "calculatedColumnFormula" | "totalsRowFormula")
                     && current_column
                         .as_ref()
                         .is_some_and(|(column_depth, _)| depth == *column_depth + 1)
                 {
                     let (_, column) = current_column.ok_or_else(|| invalid_structure(source))?;
-                    let formula = if local == b"calculatedColumnFormula" {
+                    let formula = if local == "calculatedColumnFormula" {
                         column.calculated_column_formula()
                     } else {
                         column.totals_row_formula()
@@ -220,7 +223,7 @@ pub(crate) fn patch_table_xml(
                 let local = local.as_ref();
                 let element_depth = depth.saturating_add(1);
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
-                let output = if depth == 0 && spreadsheet && local == b"table" {
+                let output = if depth == 0 && spreadsheet && local == "table" {
                     saw_root = true;
                     patch_attributes(
                         &element,
@@ -236,7 +239,7 @@ pub(crate) fn patch_table_xml(
                     )?
                 } else if root_depth.is_some_and(|root| element_depth == root + 1)
                     && spreadsheet
-                    && local == b"autoFilter"
+                    && local == "autoFilter"
                 {
                     let replacement = table
                         .auto_filter()
@@ -244,12 +247,12 @@ pub(crate) fn patch_table_xml(
                         .map(range_text);
                     patch_attributes(&element, source, &[("ref", replacement)])?
                 } else if spreadsheet
-                    && local == b"filterColumn"
+                    && local == "filterColumn"
                     && auto_filter_depth.is_some_and(|filter| element_depth == filter + 1)
                 {
                     patch_filter_column(element, table, &mut next_filter_column, source)?
                 } else if spreadsheet
-                    && local == b"sortState"
+                    && local == "sortState"
                     && (root_depth.is_some_and(|root| element_depth == root + 1)
                         || auto_filter_depth.is_some_and(|filter| element_depth == filter + 1))
                 {
@@ -269,7 +272,7 @@ pub(crate) fn patch_table_xml(
                         &[("ref", Some(range_text(state.range())))],
                     )?
                 } else if spreadsheet
-                    && local == b"sortCondition"
+                    && local == "sortCondition"
                     && active_sort
                         .as_ref()
                         .is_some_and(|sort| element_depth == sort.depth + 1)
@@ -289,7 +292,7 @@ pub(crate) fn patch_table_xml(
                         &[("ref", Some(range_text(condition.range())))],
                     )?
                 } else if spreadsheet
-                    && local == b"tableColumn"
+                    && local == "tableColumn"
                     && table_columns_depth.is_some_and(|columns| element_depth == columns + 1)
                 {
                     let (index, column) = column_for_element(&element, table, source)?;
@@ -409,10 +412,8 @@ fn column_for_element<'a>(
     let mut id = None;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.as_ref() == b"id" {
-            id = std::str::from_utf8(attribute.value.as_ref())
-                .ok()
-                .and_then(|value| value.parse::<u32>().ok());
+        if attribute.key.as_ref() == "id" {
+            id = attribute.value.parse::<u32>().ok();
         }
     }
     let id = id.ok_or_else(|| invalid_structure(source))?;
@@ -429,25 +430,28 @@ fn column_for_element<'a>(
 /// column appeared out of the model's column order.
 fn insert_new_columns(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    table_columns_name: &[u8],
+    table_columns_name: &str,
     columns: Option<&[TableColumn]>,
     seen_columns: &mut BTreeSet<u32>,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
     let columns = columns.ok_or_else(|| invalid_structure(source))?;
     let prefix = table_columns_name
-        .iter()
-        .rposition(|byte| *byte == b':')
-        .map_or(&[][..], |index| &table_columns_name[..=index]);
-    let mut name = prefix.to_vec();
-    name.extend_from_slice(b"tableColumn");
-    let name = std::str::from_utf8(&name).map_err(|error| invalid_xml(source, error))?;
+        .rfind(':')
+        .map_or("", |index| &table_columns_name[..=index]);
+    let name = format!("{prefix}tableColumn");
     for column in columns {
         let id = column.id().to_string();
         let column_name = escape_attribute(column.name())?;
-        let mut element = BytesStart::new(name);
-        element.push_attribute((b"id".as_slice(), id.as_bytes()));
-        element.push_attribute((b"name".as_slice(), column_name.as_bytes()));
+        let mut element = BytesStart::new(name.as_str());
+        element.push_attribute(Attribute {
+            key: QName("id"),
+            value: Cow::Borrowed(&id),
+        });
+        element.push_attribute(Attribute {
+            key: QName("name"),
+            value: Cow::Borrowed(&column_name),
+        });
         write_event(writer, Event::Empty(element), source)?;
         seen_columns.insert(column.id());
     }
@@ -480,7 +484,7 @@ pub(super) fn replace_changed_attribute(
     let current = element
         .try_get_attribute(name)
         .map_err(|error| invalid_xml(source, error))?;
-    if current.is_some_and(|attribute| attribute.value.as_ref() == value.as_bytes()) {
+    if current.is_some_and(|attribute| attribute.value == value) {
         return Ok(element.into_owned());
     }
     patch_attributes(&element, source, &[(name, Some(value))])
@@ -491,15 +495,12 @@ pub(super) fn patch_attributes(
     source: &PartPath,
     replacements: &[(&str, Option<String>)],
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = std::str::from_utf8(element.name().as_ref())
-        .map_err(|error| invalid_xml(source, error))?
-        .to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
         if replacements
             .iter()
-            .any(|(name, _)| attribute.key.as_ref() == name.as_bytes())
+            .any(|(name, _)| attribute.key.as_ref() == *name)
         {
             continue;
         }
@@ -508,7 +509,10 @@ pub(super) fn patch_attributes(
     for (name, value) in replacements {
         if let Some(value) = value {
             let escaped = escape_attribute(value)?;
-            patched.push_attribute((name.as_bytes(), escaped.as_bytes()));
+            patched.push_attribute(Attribute {
+                key: QName(name),
+                value: Cow::Borrowed(&escaped),
+            });
         }
     }
     Ok(patched.into_owned())

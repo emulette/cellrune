@@ -6,7 +6,7 @@ use super::super::error::detail;
 use super::super::package::PartPath;
 use super::super::xml::{
     XmlAttributes, XmlBudget, is_element_in_namespace, is_spreadsheet_element, read_attributes,
-    reader, require_spreadsheet_element,
+    read_event, reader, require_spreadsheet_element,
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 
@@ -18,8 +18,8 @@ const CELL_METADATA: &[u8] = b"cellMetadata";
 const BLOCK: &[u8] = b"bk";
 const RECORD: &[u8] = b"rc";
 const DYNAMIC_ARRAY_PROPERTIES: &[u8] = b"dynamicArrayProperties";
-const DYNAMIC_ARRAY_NAMESPACE: &[u8] =
-    b"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray";
+const DYNAMIC_ARRAY_NAMESPACE: &str =
+    "http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray";
 const DYNAMIC_ARRAY_METADATA_TYPE: &str = "XLDAPR";
 
 #[derive(Debug, Default)]
@@ -76,7 +76,7 @@ pub(super) fn parse(
     source: &PartPath,
     limits: ReadLimits,
 ) -> Result<CellMetadata, XlsxReadError> {
-    let mut xml = reader(bytes);
+    let mut xml = reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut budget = XmlBudget::new(
         limits,
@@ -86,7 +86,7 @@ pub(super) fn parse(
     let mut state = MetadataParseState::default();
 
     loop {
-        let event = xml.read_event_into(&mut buffer).map_err(|error| {
+        let event = read_event(&mut xml, &mut buffer).map_err(|error| {
             budget
                 .error(XlsxErrorCode::InvalidCellMetadata)
                 .with_cause(error)
@@ -94,7 +94,7 @@ pub(super) fn parse(
         match event {
             Event::Start(element) => {
                 let depth = budget.start()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 let is_dynamic = is_element_in_namespace(
@@ -119,7 +119,7 @@ pub(super) fn parse(
             }
             Event::Empty(element) => {
                 let depth = budget.empty()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 let is_dynamic = is_element_in_namespace(
@@ -143,7 +143,7 @@ pub(super) fn parse(
             }
             Event::End(element) => {
                 let depth = budget.end()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 finish_element(&local_name, depth, &budget, &mut state)?;
                 state
                     .stack

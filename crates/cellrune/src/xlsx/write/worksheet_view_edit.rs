@@ -6,6 +6,7 @@ use quick_xml::reader::NsReader;
 
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
+use crate::xlsx::xml::{namespace_reader, read_event};
 use crate::{CellAddress, FrozenPane};
 
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
@@ -19,14 +20,14 @@ pub(crate) fn patch_frozen_pane(
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, source)?;
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut worksheet_depth = None;
-    let mut worksheet_name = None::<Vec<u8>>;
+    let mut worksheet_name = None::<String>;
     let mut sheet_views_depth = None;
-    let mut sheet_views_name = None::<Vec<u8>>;
+    let mut sheet_views_name = None::<String>;
     let mut default_view_depth = None;
     let mut saw_sheet_views = false;
     let mut saw_default_view = false;
@@ -34,9 +35,8 @@ pub(crate) fn patch_frozen_pane(
     let mut skip_pane_depth = None;
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
@@ -45,36 +45,36 @@ pub(crate) fn patch_frozen_pane(
                     buffer.clear();
                     continue;
                 }
-                if depth == 1 && element.local_name().as_ref() == b"worksheet" {
+                if depth == 1 && element.local_name().as_ref() == "worksheet" {
                     worksheet_depth = Some(depth);
-                    worksheet_name = Some(element.name().as_ref().to_vec());
+                    worksheet_name = Some(element.name().as_ref().to_owned());
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if worksheet_depth.is_some_and(|root| depth == root + 1)
-                    && element.local_name().as_ref() == b"sheetViews"
+                    && element.local_name().as_ref() == "sheetViews"
                 {
                     saw_sheet_views = true;
                     sheet_views_depth = Some(depth);
-                    sheet_views_name = Some(element.name().as_ref().to_vec());
+                    sheet_views_name = Some(element.name().as_ref().to_owned());
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheet_views_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"sheetView"
+                    && element.local_name().as_ref() == "sheetView"
                     && workbook_view_id(&element, source)? == 0
                 {
                     if std::mem::replace(&mut saw_default_view, true) {
                         return Err(invalid_generated(source, DETAIL_WORKSHEET_ROOT));
                     }
                     default_view_depth = Some(depth);
-                    let default_view_name = element.name().as_ref().to_vec();
+                    let default_view_name = element.name().as_ref().to_owned();
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                     if let Some(pane) = pane {
                         write_pane(&mut writer, &default_view_name, pane, source)?;
                     }
                 } else if default_view_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"pane"
+                    && element.local_name().as_ref() == "pane"
                 {
                     skip_pane_depth = Some(depth);
                 } else if default_view_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"selection"
+                    && element.local_name().as_ref() == "selection"
                     && pane.is_none()
                 {
                     let patched = without_pane_attribute(&element, source)?;
@@ -101,13 +101,13 @@ pub(crate) fn patch_frozen_pane(
                     continue;
                 }
                 if worksheet_depth.is_some_and(|root| depth + 1 == root + 1)
-                    && element.local_name().as_ref() == b"sheetViews"
+                    && element.local_name().as_ref() == "sheetViews"
                 {
                     saw_sheet_views = true;
                     if let Some(pane) = pane {
                         write_sheet_views(
                             &mut writer,
-                            worksheet_name.as_deref().unwrap_or(b"worksheet"),
+                            worksheet_name.as_deref().unwrap_or("worksheet"),
                             pane,
                             source,
                         )?;
@@ -115,30 +115,26 @@ pub(crate) fn patch_frozen_pane(
                         write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                     }
                 } else if sheet_views_depth == Some(depth)
-                    && element.local_name().as_ref() == b"sheetView"
+                    && element.local_name().as_ref() == "sheetView"
                     && workbook_view_id(&element, source)? == 0
                 {
                     if std::mem::replace(&mut saw_default_view, true) {
                         return Err(invalid_generated(source, DETAIL_WORKSHEET_ROOT));
                     }
                     if let Some(pane) = pane {
-                        let name = element.name().as_ref().to_vec();
+                        let name = element.name().as_ref().to_owned();
                         let start = element.into_owned();
                         write_event(&mut writer, Event::Start(start), source)?;
                         write_pane(&mut writer, &name, pane, source)?;
-                        write_event(
-                            &mut writer,
-                            Event::End(BytesEnd::new(decode_name(&name, source)?)),
-                            source,
-                        )?;
+                        write_event(&mut writer, Event::End(BytesEnd::new(name)), source)?;
                     } else {
                         write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                     }
                 } else if default_view_depth == Some(depth)
-                    && element.local_name().as_ref() == b"pane"
+                    && element.local_name().as_ref() == "pane"
                 {
                 } else if default_view_depth == Some(depth)
-                    && element.local_name().as_ref() == b"selection"
+                    && element.local_name().as_ref() == "selection"
                     && pane.is_none()
                 {
                     let patched = without_pane_attribute(&element, source)?;
@@ -167,18 +163,16 @@ pub(crate) fn patch_frozen_pane(
                     buffer.clear();
                     continue;
                 }
-                if default_view_depth == Some(depth)
-                    && element.local_name().as_ref() == b"sheetView"
+                if default_view_depth == Some(depth) && element.local_name().as_ref() == "sheetView"
                 {
                     default_view_depth = None;
                 }
-                if sheet_views_depth == Some(depth)
-                    && element.local_name().as_ref() == b"sheetViews"
+                if sheet_views_depth == Some(depth) && element.local_name().as_ref() == "sheetViews"
                 {
                     if !saw_default_view && let Some(pane) = pane {
                         write_sheet_view(
                             &mut writer,
-                            sheet_views_name.as_deref().unwrap_or(b"sheetViews"),
+                            sheet_views_name.as_deref().unwrap_or("sheetViews"),
                             pane,
                             source,
                         )?;
@@ -210,8 +204,8 @@ fn maybe_insert_sheet_views(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     worksheet_depth: Option<u64>,
     depth: u64,
-    local_name: &[u8],
-    worksheet_name: Option<&[u8]>,
+    local_name: &str,
+    worksheet_name: Option<&str>,
     pane: Option<FrozenPane>,
     saw_sheet_views: bool,
     inserted: &mut bool,
@@ -221,11 +215,11 @@ fn maybe_insert_sheet_views(
         return Ok(());
     }
     if worksheet_depth.is_some_and(|root| depth == root + 1)
-        && !matches!(local_name, b"sheetPr" | b"dimension" | b"sheetViews")
+        && !matches!(local_name, "sheetPr" | "dimension" | "sheetViews")
     {
         write_sheet_views(
             writer,
-            worksheet_name.unwrap_or(b"worksheet"),
+            worksheet_name.unwrap_or("worksheet"),
             pane.expect("pane checked"),
             source,
         )?;
@@ -236,50 +230,38 @@ fn maybe_insert_sheet_views(
 
 fn write_sheet_views(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    worksheet_name: &[u8],
+    worksheet_name: &str,
     pane: FrozenPane,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let name = qualified_sibling_name(worksheet_name, b"sheetViews");
-    write_event(
-        writer,
-        Event::Start(BytesStart::new(decode_name(&name, source)?)),
-        source,
-    )?;
+    let name = qualified_sibling_name(worksheet_name, "sheetViews");
+    write_event(writer, Event::Start(BytesStart::new(name.as_str())), source)?;
     write_sheet_view(writer, &name, pane, source)?;
-    write_event(
-        writer,
-        Event::End(BytesEnd::new(decode_name(&name, source)?)),
-        source,
-    )
+    write_event(writer, Event::End(BytesEnd::new(name)), source)
 }
 
 fn write_sheet_view(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    sheet_views_name: &[u8],
+    sheet_views_name: &str,
     pane: FrozenPane,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let name = qualified_sibling_name(sheet_views_name, b"sheetView");
-    let mut start = BytesStart::new(decode_name(&name, source)?);
+    let name = qualified_sibling_name(sheet_views_name, "sheetView");
+    let mut start = BytesStart::new(name.as_str());
     start.push_attribute(("workbookViewId", "0"));
     write_event(writer, Event::Start(start), source)?;
     write_pane(writer, &name, pane, source)?;
-    write_event(
-        writer,
-        Event::End(BytesEnd::new(decode_name(&name, source)?)),
-        source,
-    )
+    write_event(writer, Event::End(BytesEnd::new(name)), source)
 }
 
 fn write_pane(
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    sheet_view_name: &[u8],
+    sheet_view_name: &str,
     pane: FrozenPane,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let name = qualified_sibling_name(sheet_view_name, b"pane");
-    let mut element = BytesStart::new(decode_name(&name, source)?);
+    let name = qualified_sibling_name(sheet_view_name, "pane");
+    let mut element = BytesStart::new(name);
     let columns = pane.frozen_columns().to_string();
     let rows = pane.frozen_rows().to_string();
     if pane.frozen_columns() > 0 {
@@ -309,11 +291,10 @@ fn without_pane_attribute(
     element: &BytesStart<'_>,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut output = BytesStart::new(name);
+    let mut output = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.local_name().as_ref() != b"pane" {
+        if attribute.key.local_name().as_ref() != "pane" {
             output.push_attribute(attribute);
         }
     }
@@ -323,9 +304,9 @@ fn without_pane_attribute(
 fn workbook_view_id(element: &BytesStart<'_>, source: &PartPath) -> Result<u32, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.local_name().as_ref() == b"workbookViewId" {
-            return std::str::from_utf8(attribute.value.as_ref())
-                .map_err(|error| invalid_xml(source, error))?
+        if attribute.key.local_name().as_ref() == "workbookViewId" {
+            return attribute
+                .value
                 .parse::<u32>()
                 .map_err(|error| invalid_xml(source, error));
         }
@@ -333,8 +314,8 @@ fn workbook_view_id(element: &BytesStart<'_>, source: &PartPath) -> Result<u32, 
     Err(invalid_generated(source, DETAIL_WORKSHEET_ROOT))
 }
 
-fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
-    let mut reader = NsReader::from_reader(bytes);
+fn configured_reader(bytes: &[u8], limits: WriteLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     reader.config_mut().check_end_names = true;
     reader.config_mut().allow_unmatched_ends = false;
     reader.config_mut().expand_empty_elements = false;
@@ -342,18 +323,9 @@ fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
     reader
 }
 
-fn qualified_sibling_name(template: &[u8], local_name: &[u8]) -> Vec<u8> {
-    let mut output = qualified_prefix(template).as_bytes().to_vec();
-    output.extend_from_slice(local_name);
-    output
-}
-
-fn qualified_prefix(template: &[u8]) -> &str {
-    template
-        .iter()
-        .rposition(|byte| *byte == b':')
-        .and_then(|index| std::str::from_utf8(&template[..=index]).ok())
-        .unwrap_or("")
+fn qualified_sibling_name(template: &str, local_name: &str) -> String {
+    let prefix = template.rfind(':').map_or("", |index| &template[..=index]);
+    format!("{prefix}{local_name}")
 }
 
 fn write_event<'a>(
@@ -364,10 +336,6 @@ fn write_event<'a>(
     writer
         .write_event(event)
         .map_err(|error| invalid_xml(source, error))
-}
-
-fn decode_name<'a>(name: &'a [u8], source: &PartPath) -> Result<&'a str, XlsxWriteError> {
-    std::str::from_utf8(name).map_err(|error| invalid_xml(source, error))
 }
 
 fn enforce_depth(depth: u64, limits: WriteLimits, source: &PartPath) -> Result<(), XlsxWriteError> {

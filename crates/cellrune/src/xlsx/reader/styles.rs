@@ -5,7 +5,8 @@ use quick_xml::events::Event;
 use super::super::error::detail;
 use super::super::package::PartPath;
 use super::super::xml::{
-    XmlBudget, is_spreadsheet_element, read_attributes, reader, require_spreadsheet_element,
+    XmlBudget, is_spreadsheet_element, read_attributes, read_event, reader,
+    require_spreadsheet_element,
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use crate::{NumberFormat, NumberFormatKind};
@@ -60,19 +61,18 @@ pub(super) fn parse(
     source: &PartPath,
     limits: ReadLimits,
 ) -> Result<Styles, XlsxReadError> {
-    let mut xml = reader(bytes);
+    let mut xml = reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut budget = XmlBudget::new(limits, source.source_id(), XlsxErrorCode::InvalidStyles);
     let mut state = StyleParseState::default();
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
+        let event = read_event(&mut xml, &mut buffer)
             .map_err(|error| budget.error(XlsxErrorCode::InvalidStyles).with_cause(error))?;
         match event {
             Event::Start(element) => {
                 let depth = budget.start()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 process_element(
@@ -87,7 +87,7 @@ pub(super) fn parse(
             }
             Event::Empty(element) => {
                 let depth = budget.empty()?;
-                let local_name = element.local_name().as_ref().to_vec();
+                let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
                 process_element(

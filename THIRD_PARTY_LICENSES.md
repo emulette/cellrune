@@ -31,7 +31,7 @@ without confusing development-only tools with shipped library requirements.
 | `pcre2` | 0.2.11 | `Unlicense OR MIT` |
 | `pcre2-sys` | 0.2.10 | `Unlicense OR MIT` |
 | `psm` | 0.1.32 | `MIT OR Apache-2.0` |
-| `quick-xml` | 0.41.0 | `MIT` |
+| `quick-xml` | 0.42.0 | `MIT` |
 | `sha2` | 0.11.0 | `MIT OR Apache-2.0` |
 | `stacker` | 0.1.25 | `MIT OR Apache-2.0` |
 | `typenum` | 1.20.1 | `MIT OR Apache-2.0` |

@@ -1,15 +1,19 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
 use quick_xml::Writer;
 use quick_xml::XmlVersion;
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::name::QName;
 use quick_xml::reader::NsReader;
 
 use super::canonical::StyleRegistry;
 use super::serialization::escape_attribute;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
+use crate::xlsx::xml::{namespace_reader, read_event};
 use crate::{CalculationCellId, NumberFormat};
 
 const DETAIL_MISSING_CELL_XFS: &str = "styles part does not contain cellXfs";
@@ -143,7 +147,7 @@ fn analyze_styles(
     source: &PartPath,
     limits: WriteLimits,
 ) -> Result<StyleAnalysis, XlsxWriteError> {
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
     let mut num_formats_depth = None;
@@ -154,27 +158,26 @@ fn analyze_styles(
     let mut has_num_formats = false;
     let mut saw_cell_xfs = false;
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match &event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
                 if let Some((_, events)) = &mut capture {
                     events.push(event.clone().into_owned());
-                } else if element.local_name().as_ref() == b"numFmts" && depth == 2 {
+                } else if element.local_name().as_ref() == "numFmts" && depth == 2 {
                     has_num_formats = true;
                     num_formats_depth = Some(depth);
-                } else if element.local_name().as_ref() == b"cellXfs" && depth == 2 {
+                } else if element.local_name().as_ref() == "cellXfs" && depth == 2 {
                     saw_cell_xfs = true;
                     cell_xfs_depth = Some(depth);
                 } else if num_formats_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"numFmt"
+                    && element.local_name().as_ref() == "numFmt"
                 {
                     insert_custom_format(element, &mut custom_formats, source)?;
                 } else if cell_xfs_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == b"xf"
+                    && element.local_name().as_ref() == "xf"
                 {
                     capture = Some((depth, vec![event.clone().into_owned()]));
                 }
@@ -183,17 +186,17 @@ fn analyze_styles(
                 enforce_depth(depth.saturating_add(1), limits, source)?;
                 if let Some((_, events)) = &mut capture {
                     events.push(event.clone().into_owned());
-                } else if element.local_name().as_ref() == b"numFmts" && depth + 1 == 2 {
+                } else if element.local_name().as_ref() == "numFmts" && depth + 1 == 2 {
                     has_num_formats = true;
-                } else if element.local_name().as_ref() == b"cellXfs" && depth + 1 == 2 {
+                } else if element.local_name().as_ref() == "cellXfs" && depth + 1 == 2 {
                     saw_cell_xfs = true;
                     cell_xfs_depth = Some(depth + 1);
                 } else if num_formats_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == b"numFmt"
+                    && element.local_name().as_ref() == "numFmt"
                 {
                     insert_custom_format(element, &mut custom_formats, source)?;
                 } else if cell_xfs_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == b"xf"
+                    && element.local_name().as_ref() == "xf"
                 {
                     xfs.push(XfTemplate {
                         events: vec![event.clone().into_owned()],
@@ -245,7 +248,7 @@ fn rewrite_styles(
     xf_additions: &[XfTemplate],
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
-    let mut xml = configured_reader(bytes);
+    let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
@@ -253,9 +256,8 @@ fn rewrite_styles(
     let mut cell_xfs_depth = None;
     let mut inserted_num_formats = custom_additions.is_empty();
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
@@ -264,7 +266,7 @@ fn rewrite_styles(
                     write_num_formats(&mut writer, custom_additions, source)?;
                     inserted_num_formats = true;
                 }
-                if depth == 2 && element.local_name().as_ref() == b"numFmts" {
+                if depth == 2 && element.local_name().as_ref() == "numFmts" {
                     num_formats_depth = Some(depth);
                     let patched = patch_count(
                         &element,
@@ -275,7 +277,7 @@ fn rewrite_styles(
                         source,
                     )?;
                     write_event(&mut writer, Event::Start(patched), source)?;
-                } else if depth == 2 && element.local_name().as_ref() == b"cellXfs" {
+                } else if depth == 2 && element.local_name().as_ref() == "cellXfs" {
                     cell_xfs_depth = Some(depth);
                     let patched = patch_count(
                         &element,
@@ -293,7 +295,7 @@ fn rewrite_styles(
                     write_num_formats(&mut writer, custom_additions, source)?;
                     inserted_num_formats = true;
                 }
-                if depth + 1 == 2 && element.local_name().as_ref() == b"numFmts" {
+                if depth + 1 == 2 && element.local_name().as_ref() == "numFmts" {
                     let patched = patch_count(
                         &element,
                         analysis
@@ -306,7 +308,7 @@ fn rewrite_styles(
                     write_custom_formats(&mut writer, custom_additions, source)?;
                     write_event(&mut writer, Event::End(BytesEnd::new("numFmts")), source)?;
                     inserted_num_formats = true;
-                } else if depth + 1 == 2 && element.local_name().as_ref() == b"cellXfs" {
+                } else if depth + 1 == 2 && element.local_name().as_ref() == "cellXfs" {
                     let patched = patch_count(
                         &element,
                         analysis.xfs.len().saturating_add(xf_additions.len()),
@@ -369,11 +371,10 @@ fn patch_xf(
     number_format_id: u32,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if !matches!(attribute.key.as_ref(), b"numFmtId" | b"applyNumberFormat") {
+        if !matches!(attribute.key.as_ref(), "numFmtId" | "applyNumberFormat") {
             patched.push_attribute(attribute);
         }
     }
@@ -388,7 +389,7 @@ fn template_number_format(template: &XfTemplate, source: &PartPath) -> Result<u3
         Some(Event::Start(element) | Event::Empty(element)) => element,
         _ => return Err(invalid_generated(source, DETAIL_BASE_STYLE)),
     };
-    required_u32_attribute(element, b"numFmtId", source)
+    required_u32_attribute(element, "numFmtId", source)
 }
 
 fn insert_custom_format(
@@ -396,8 +397,8 @@ fn insert_custom_format(
     formats: &mut BTreeMap<u32, String>,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let id = required_u32_attribute(element, b"numFmtId", source)?;
-    let code = required_attribute(element, b"formatCode", source)?;
+    let id = required_u32_attribute(element, "numFmtId", source)?;
+    let code = required_attribute(element, "formatCode", source)?;
     if formats.insert(id, code).is_some() {
         return Err(invalid_generated(source, DETAIL_CUSTOM_CONFLICT));
     }
@@ -427,7 +428,10 @@ fn write_custom_formats(
         let id = id.to_string();
         format.push_attribute(("numFmtId", id.as_str()));
         let escaped_code = escape_attribute(code)?;
-        format.push_attribute((b"formatCode".as_slice(), escaped_code.as_bytes()));
+        format.push_attribute(Attribute {
+            key: QName("formatCode"),
+            value: Cow::Borrowed(&escaped_code),
+        });
         write_event(writer, Event::Empty(format), source)?;
     }
     Ok(())
@@ -451,11 +455,10 @@ fn patch_count(
     count: usize,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.as_ref() != b"count" {
+        if attribute.key.as_ref() != "count" {
             patched.push_attribute(attribute);
         }
     }
@@ -466,7 +469,7 @@ fn patch_count(
 
 fn required_u32_attribute(
     element: &BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<u32, XlsxWriteError> {
     required_attribute(element, name, source)?
@@ -476,7 +479,7 @@ fn required_u32_attribute(
 
 fn required_attribute(
     element: &BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<String, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {
@@ -491,8 +494,8 @@ fn required_attribute(
     Err(invalid_generated(source, DETAIL_BASE_STYLE))
 }
 
-fn configured_reader(bytes: &[u8]) -> NsReader<&[u8]> {
-    let mut reader = NsReader::from_reader(bytes);
+fn configured_reader(bytes: &[u8], limits: WriteLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     reader.config_mut().check_end_names = true;
     reader.config_mut().allow_unmatched_ends = false;
     reader.config_mut().expand_empty_elements = false;
@@ -536,10 +539,6 @@ fn write_event<'a>(
     writer
         .write_event(event)
         .map_err(|error| invalid_xml(source, error))
-}
-
-fn decode_name<'a>(name: &'a [u8], source: &PartPath) -> Result<&'a str, XlsxWriteError> {
-    std::str::from_utf8(name).map_err(|error| invalid_xml(source, error))
 }
 
 fn invalid_xml(

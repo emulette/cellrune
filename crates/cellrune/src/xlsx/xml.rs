@@ -1,24 +1,29 @@
 use quick_xml::XmlVersion;
-use quick_xml::events::{BytesCData, BytesDecl, BytesPI, BytesRef, BytesStart, BytesText};
-use quick_xml::name::{QName, ResolveResult};
+use quick_xml::events::{BytesCData, BytesDecl, BytesPI, BytesRef, BytesStart, BytesText, Event};
+use quick_xml::name::{NamespaceError, QName, ResolveResult};
 use quick_xml::reader::NsReader;
 
 use super::error::detail;
 use super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use crate::SourceId;
 
-pub(super) const SPREADSHEETML_TRANSITIONAL: &[u8] =
-    b"http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-pub(super) const SPREADSHEETML_STRICT: &[u8] = b"http://purl.oclc.org/ooxml/spreadsheetml/main";
-pub(super) const DOCUMENT_RELATIONSHIPS_TRANSITIONAL: &[u8] =
-    b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-pub(super) const DOCUMENT_RELATIONSHIPS_STRICT: &[u8] =
-    b"http://purl.oclc.org/ooxml/officeDocument/relationships";
+pub(super) const SPREADSHEETML_TRANSITIONAL: &str =
+    "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+pub(super) const SPREADSHEETML_STRICT: &str = "http://purl.oclc.org/ooxml/spreadsheetml/main";
+pub(super) const DOCUMENT_RELATIONSHIPS_TRANSITIONAL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+pub(super) const DOCUMENT_RELATIONSHIPS_STRICT: &str =
+    "http://purl.oclc.org/ooxml/officeDocument/relationships";
+
+/// Most namespace declarations one start tag may carry, counting every `xmlns` and `xmlns:*`
+/// attribute including `xmlns:xml`. The limit applies to each element on its own, so the
+/// declarations of its ancestors never count against it.
+const MAX_NAMESPACE_DECLARATIONS: usize = 256;
 
 #[derive(Debug)]
 pub(super) struct XmlAttribute {
     local_name: Box<str>,
-    namespace: Option<Box<[u8]>>,
+    namespace: Option<Box<str>>,
     value: Box<str>,
 }
 
@@ -35,7 +40,7 @@ impl XmlAttributes {
             .map(|attribute| attribute.value.as_ref())
     }
 
-    pub(super) fn namespaced(&self, namespace: &[u8], local_name: &str) -> Option<&str> {
+    pub(super) fn namespaced(&self, namespace: &str, local_name: &str) -> Option<&str> {
         self.0
             .iter()
             .find(|attribute| {
@@ -45,7 +50,7 @@ impl XmlAttributes {
             .map(|attribute| attribute.value.as_ref())
     }
 
-    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = (&str, Option<&[u8]>, &str)> {
+    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = (&str, Option<&str>, &str)> {
         self.0.iter().map(|attribute| {
             (
                 attribute.local_name.as_ref(),
@@ -128,8 +133,51 @@ impl XmlBudget {
     }
 }
 
-pub(super) fn reader(bytes: &[u8]) -> NsReader<&[u8]> {
+/// Creates a namespace-aware reader over one package part whose elements nest at most
+/// `max_xml_depth` deep. [`read_event`] limits each element to [`MAX_NAMESPACE_DECLARATIONS`]
+/// declarations, so the reader's cap on bindings in scope admits that many for every level
+/// through the first element past the depth limit: it never rejects a part before those checks
+/// do, and it still bounds the bindings one name lookup searches.
+pub(super) fn namespace_reader(bytes: &[u8], max_xml_depth: u64) -> NsReader<&[u8]> {
     let mut reader = NsReader::from_reader(bytes);
+    let max_bindings = max_xml_depth
+        .saturating_add(1)
+        .saturating_mul(MAX_NAMESPACE_DECLARATIONS as u64);
+    reader
+        .resolver_mut()
+        .set_max_namespace_bindings(usize::try_from(max_bindings).unwrap_or(usize::MAX));
+    reader
+}
+
+/// Reads the next event of a part from a [`namespace_reader`]. A start tag that declares more
+/// than [`MAX_NAMESPACE_DECLARATIONS`] namespaces fails as a namespace error of the reader.
+pub(super) fn read_event<'b>(
+    reader: &mut NsReader<&[u8]>,
+    buffer: &'b mut Vec<u8>,
+) -> quick_xml::Result<Event<'b>> {
+    let event = reader.read_event_into(buffer)?;
+    if let Event::Start(element) | Event::Empty(element) = &event
+        && declares_too_many_namespaces(element)
+    {
+        return Err(NamespaceError::TooManyBindings(MAX_NAMESPACE_DECLARATIONS).into());
+    }
+    Ok(event)
+}
+
+/// Tags without `xmlns` text are not scanned, so ordinary elements are not parsed twice.
+fn declares_too_many_namespaces(element: &BytesStart<'_>) -> bool {
+    element.attributes_raw().contains("xmlns")
+        && element
+            .attributes()
+            .with_checks(false)
+            .map_while(Result::ok)
+            .filter(|attribute| attribute.key.as_namespace_binding().is_some())
+            .nth(MAX_NAMESPACE_DECLARATIONS)
+            .is_some()
+}
+
+pub(super) fn reader(bytes: &[u8], limits: ReadLimits) -> NsReader<&[u8]> {
+    let mut reader = namespace_reader(bytes, limits.max_xml_depth());
     let config = reader.config_mut();
     config.check_end_names = true;
     config.allow_unmatched_ends = false;
@@ -150,9 +198,7 @@ pub(super) fn validate_xml_declaration(
         return Err(budget.error(budget.invalid_code));
     }
 
-    let declaration_text = std::str::from_utf8(&declaration[..])
-        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
-    let declaration_start = BytesStart::from_content(declaration_text, 3);
+    let declaration_start = BytesStart::from_content(&declaration[..], 3);
     let mut saw_encoding = false;
     let mut saw_standalone = false;
     for (index, attribute) in declaration_start.attributes().with_checks(true).enumerate() {
@@ -161,14 +207,14 @@ pub(super) fn validate_xml_declaration(
         let key = attribute.key.as_ref();
         let value = attribute.value.as_ref();
         let valid = match (index, key) {
-            (0, b"version") => value == b"1.0",
-            (_, b"encoding") if !saw_encoding && !saw_standalone => {
+            (0, "version") => value == "1.0",
+            (_, "encoding") if !saw_encoding && !saw_standalone => {
                 saw_encoding = true;
                 is_xml_encoding_name(value)
             }
-            (_, b"standalone") if !saw_standalone => {
+            (_, "standalone") if !saw_standalone => {
                 saw_standalone = true;
-                matches!(value, b"yes" | b"no")
+                matches!(value, "yes" | "no")
             }
             _ => false,
         };
@@ -183,8 +229,7 @@ pub(super) fn validate_processing_instruction(
     instruction: &BytesPI<'_>,
     budget: &XmlBudget,
 ) -> Result<(), XlsxReadError> {
-    let target = std::str::from_utf8(instruction.target())
-        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
+    let target = instruction.target();
     let mut characters = target.chars();
     let valid_name = characters.next().is_some_and(is_xml_name_start_character)
         && characters.all(is_xml_name_character);
@@ -224,7 +269,8 @@ fn is_xml_name_character(character: char) -> bool {
         )
 }
 
-fn is_xml_encoding_name(value: &[u8]) -> bool {
+fn is_xml_encoding_name(value: &str) -> bool {
+    let value = value.as_bytes();
     value.first().is_some_and(u8::is_ascii_alphabetic)
         && value[1..]
             .iter()
@@ -246,26 +292,22 @@ pub(super) fn read_attributes(
         }
         let attribute =
             attribute.map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
-        if attribute.key.as_ref() == b"xmlns" || attribute.key.as_ref().starts_with(b"xmlns:") {
+        if attribute.key.as_ref() == "xmlns" || attribute.key.as_ref().starts_with("xmlns:") {
             continue;
         }
         let (namespace, local_name) = reader.resolver().resolve_attribute(attribute.key);
         let namespace = match namespace {
             ResolveResult::Unbound => None,
-            ResolveResult::Bound(namespace) => Some(Box::<[u8]>::from(namespace.as_ref())),
+            ResolveResult::Bound(namespace) => Some(Box::<str>::from(namespace.as_ref())),
             ResolveResult::Unknown(prefix) => {
-                return Err(budget
-                    .error(budget.invalid_code)
-                    .with_detail(String::from_utf8_lossy(&prefix).into_owned()));
+                return Err(budget.error(budget.invalid_code).with_detail(prefix));
             }
         };
-        let local_name = std::str::from_utf8(local_name.as_ref())
-            .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
         let value = attribute
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
         values.push(XmlAttribute {
-            local_name: local_name.to_owned().into_boxed_str(),
+            local_name: local_name.as_ref().into(),
             namespace,
             value: value.into_owned().into_boxed_str(),
         });
@@ -296,7 +338,7 @@ pub(super) fn is_spreadsheet_element(
 pub(super) fn is_element_in_namespace(
     reader: &NsReader<&[u8]>,
     name: QName<'_>,
-    expected_namespace: &[u8],
+    expected_namespace: &str,
     budget: &XmlBudget,
 ) -> Result<bool, XlsxReadError> {
     match reader.resolver().resolve_element(name).0 {
@@ -307,28 +349,18 @@ pub(super) fn is_element_in_namespace(
                     && namespace == SPREADSHEETML_STRICT))
         }
         ResolveResult::Unbound => Ok(false),
-        ResolveResult::Unknown(prefix) => Err(budget
-            .error(budget.invalid_code)
-            .with_detail(String::from_utf8_lossy(&prefix).into_owned())),
+        ResolveResult::Unknown(prefix) => {
+            Err(budget.error(budget.invalid_code).with_detail(prefix))
+        }
     }
 }
 
-pub(super) fn decode_text(
-    text: &BytesText<'_>,
-    budget: &XmlBudget,
-) -> Result<String, XlsxReadError> {
-    text.xml_content(XmlVersion::Implicit1_0)
-        .map(|value| value.into_owned())
-        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))
+pub(super) fn decode_text(text: &BytesText<'_>) -> String {
+    text.xml_content(XmlVersion::Implicit1_0).into_owned()
 }
 
-pub(super) fn decode_cdata(
-    text: &BytesCData<'_>,
-    budget: &XmlBudget,
-) -> Result<String, XlsxReadError> {
-    text.xml_content(XmlVersion::Implicit1_0)
-        .map(|value| value.into_owned())
-        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))
+pub(super) fn decode_cdata(text: &BytesCData<'_>) -> String {
+    text.xml_content(XmlVersion::Implicit1_0).into_owned()
 }
 
 /// Returns whether `character` matches the XML 1.0 `Char` production.
@@ -355,17 +387,12 @@ pub(super) fn decode_reference(
         }
         return Ok(character.to_string());
     }
-    let name = reference
-        .decode()
-        .map_err(|error| budget.error(budget.invalid_code).with_cause(error))?;
-    match name.as_ref() {
+    match reference.as_ref() {
         "lt" => Ok("<".to_owned()),
         "gt" => Ok(">".to_owned()),
         "amp" => Ok("&".to_owned()),
         "apos" => Ok("'".to_owned()),
         "quot" => Ok("\"".to_owned()),
-        _ => Err(budget
-            .error(budget.invalid_code)
-            .with_detail(name.into_owned())),
+        name => Err(budget.error(budget.invalid_code).with_detail(name)),
     }
 }

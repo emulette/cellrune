@@ -11,7 +11,9 @@ use super::serialization::escape_text;
 use super::serialization::number_to_xlsx_text;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
-use crate::xlsx::xml::{SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL};
+use crate::xlsx::xml::{
+    SPREADSHEETML_STRICT, SPREADSHEETML_TRANSITIONAL, namespace_reader, read_event,
+};
 use crate::xlsx::xstring::encode_xstring;
 use crate::{CellAddress, CellValue, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
@@ -55,7 +57,7 @@ struct RowPatch {
     depth: u64,
     number: u32,
     last_column: u32,
-    qualified_name: Vec<u8>,
+    qualified_name: String,
 }
 
 pub(crate) fn patch_worksheet(
@@ -84,7 +86,7 @@ pub(crate) fn patch_worksheet(
             ))
         })
         .collect::<Result<BTreeMap<_, _>, XlsxWriteError>>()?;
-    let mut xml = NsReader::from_reader(bytes);
+    let mut xml = namespace_reader(bytes, limits.max_xml_depth());
     xml.config_mut().check_end_names = true;
     xml.config_mut().allow_unmatched_ends = false;
     xml.config_mut().expand_empty_elements = false;
@@ -100,9 +102,8 @@ pub(crate) fn patch_worksheet(
     let mut last_row = 0_u32;
 
     loop {
-        let event = xml
-            .read_event_into(&mut buffer)
-            .map_err(|error| invalid_xml(source, error))?;
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
@@ -118,24 +119,22 @@ pub(crate) fn patch_worksheet(
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
                 let local = element.local_name();
                 if let Some(state) = &mut cell {
-                    if depth == state.depth + 1 && spreadsheet && local.as_ref() == b"v" {
+                    if depth == state.depth + 1 && spreadsheet && local.as_ref() == "v" {
                         state.skipped_value_depth = Some(depth);
                     } else {
-                        if depth == state.depth + 1 && spreadsheet && local.as_ref() == b"f" {
+                        if depth == state.depth + 1 && spreadsheet && local.as_ref() == "f" {
                             state.saw_formula = true;
                         }
                         write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                     }
-                } else if spreadsheet
-                    && local.as_ref() == b"sheetData"
-                    && sheet_data_depth.is_none()
+                } else if spreadsheet && local.as_ref() == "sheetData" && sheet_data_depth.is_none()
                 {
                     sheet_data_depth = Some(depth);
-                    sheet_data_name = Some(element.name().as_ref().to_vec());
+                    sheet_data_name = Some(element.name().as_ref().to_owned());
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheet_data_depth.is_some_and(|value| depth == value + 1)
                     && spreadsheet
-                    && local.as_ref() == b"row"
+                    && local.as_ref() == "row"
                 {
                     let number = required_row_number(&element, source)?;
                     if number <= last_row {
@@ -147,7 +146,7 @@ pub(crate) fn patch_worksheet(
                         &mut seen,
                         last_row,
                         number,
-                        sheet_data_name.as_deref().unwrap_or(b"sheetData"),
+                        sheet_data_name.as_deref().unwrap_or("sheetData"),
                         source,
                     )?;
                     last_row = number;
@@ -155,12 +154,12 @@ pub(crate) fn patch_worksheet(
                         depth,
                         number,
                         last_column: 0,
-                        qualified_name: element.name().as_ref().to_vec(),
+                        qualified_name: element.name().as_ref().to_owned(),
                     });
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if row.as_ref().is_some_and(|value| depth == value.depth + 1)
                     && spreadsheet
-                    && local.as_ref() == b"c"
+                    && local.as_ref() == "c"
                 {
                     let address = required_cell_reference(&element, source)?;
                     let row_state = row
@@ -211,14 +210,14 @@ pub(crate) fn patch_worksheet(
                     continue;
                 }
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
-                let local = element.local_name().as_ref().to_vec();
-                let value_name = qualified_sibling_name(element.name().as_ref(), b"v");
+                let local = element.local_name().as_ref().to_owned();
+                let value_name = qualified_sibling_name(element.name().as_ref(), "v");
                 if let Some(state) = &mut cell {
-                    if depth + 1 == state.depth + 1 && spreadsheet && local == b"v" {
+                    if depth + 1 == state.depth + 1 && spreadsheet && local == "v" {
                         // The stale empty cache is removed.
                     } else {
                         write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
-                        if depth + 1 == state.depth + 1 && spreadsheet && local == b"f" {
+                        if depth + 1 == state.depth + 1 && spreadsheet && local == "f" {
                             state.saw_formula = true;
                             write_cache_if_set(
                                 &mut writer,
@@ -229,7 +228,7 @@ pub(crate) fn patch_worksheet(
                             state.wrote_value = true;
                         }
                     }
-                } else if sheet_data_depth == Some(depth) && spreadsheet && local == b"row" {
+                } else if sheet_data_depth == Some(depth) && spreadsheet && local == "row" {
                     let number = required_row_number(&element, source)?;
                     if number <= last_row {
                         return Err(invalid_generated(source, DETAIL_ROW_ORDER));
@@ -240,11 +239,11 @@ pub(crate) fn patch_worksheet(
                         &mut seen,
                         last_row,
                         number,
-                        sheet_data_name.as_deref().unwrap_or(b"sheetData"),
+                        sheet_data_name.as_deref().unwrap_or("sheetData"),
                         source,
                     )?;
                     last_row = number;
-                    let qualified_name = element.name().as_ref().to_vec();
+                    let qualified_name = element.name().as_ref().to_owned();
                     let (row_start, row_end) = row_address_bounds(number);
                     let has_updates = serialized
                         .range(row_start..=row_end)
@@ -267,7 +266,7 @@ pub(crate) fn patch_worksheet(
                         )?;
                         write_event(
                             &mut writer,
-                            Event::End(BytesEnd::new(decode_name(&qualified_name, source)?)),
+                            Event::End(BytesEnd::new(qualified_name)),
                             source,
                         )?;
                     } else {
@@ -275,7 +274,7 @@ pub(crate) fn patch_worksheet(
                     }
                 } else if row.as_ref().is_some_and(|value| depth == value.depth)
                     && spreadsheet
-                    && local == b"c"
+                    && local == "c"
                 {
                     let address = required_cell_reference(&element, source)?;
                     let row_state = row
@@ -302,13 +301,13 @@ pub(crate) fn patch_worksheet(
                         if update.requires_formula {
                             return Err(invalid_generated(source, DETAIL_MISSING_FORMULA_ELEMENT));
                         }
-                        let qualified_name = element.name().as_ref().to_vec();
+                        let qualified_name = element.name().as_ref().to_owned();
                         let patched = patch_cell_start(&element, cache.cell_type, source)?;
                         write_event(&mut writer, Event::Start(patched), source)?;
                         write_cache_if_set(&mut writer, cache.clone(), value_name, source)?;
                         write_event(
                             &mut writer,
-                            Event::End(BytesEnd::new(decode_name(&qualified_name, source)?)),
+                            Event::End(BytesEnd::new(qualified_name)),
                             source,
                         )?;
                     } else {
@@ -320,8 +319,8 @@ pub(crate) fn patch_worksheet(
             }
             Event::End(element) => {
                 let current_depth = depth;
-                let local = element.local_name().as_ref().to_vec();
-                let value_name = qualified_sibling_name(element.name().as_ref(), b"v");
+                let local = element.local_name().as_ref().to_owned();
+                let value_name = qualified_sibling_name(element.name().as_ref(), "v");
                 if let Some(state) = &mut cell {
                     if let Some(skipped) = state.skipped_value_depth {
                         if current_depth == skipped {
@@ -331,7 +330,7 @@ pub(crate) fn patch_worksheet(
                         buffer.clear();
                         continue;
                     }
-                    if current_depth == state.depth + 1 && local == b"f" {
+                    if current_depth == state.depth + 1 && local == "f" {
                         write_event(&mut writer, Event::End(element.into_owned()), source)?;
                         let cache = serialized_cache(&state.update, source)?;
                         write_cache_if_set(&mut writer, cache, value_name, source)?;
@@ -340,7 +339,7 @@ pub(crate) fn patch_worksheet(
                         buffer.clear();
                         continue;
                     }
-                    if current_depth == state.depth && local == b"c" {
+                    if current_depth == state.depth && local == "c" {
                         if state.update.requires_formula && !state.saw_formula {
                             return Err(invalid_generated(source, DETAIL_MISSING_FORMULA_ELEMENT));
                         }
@@ -357,7 +356,7 @@ pub(crate) fn patch_worksheet(
                 }
                 if let Some(row_state) = &mut row
                     && current_depth == row_state.depth
-                    && local == b"row"
+                    && local == "row"
                 {
                     insert_missing_cells_before(
                         &mut writer,
@@ -369,14 +368,14 @@ pub(crate) fn patch_worksheet(
                     )?;
                     write_event(&mut writer, Event::End(element.into_owned()), source)?;
                     row = None;
-                } else if sheet_data_depth == Some(current_depth) && local == b"sheetData" {
+                } else if sheet_data_depth == Some(current_depth) && local == "sheetData" {
                     insert_missing_rows_before(
                         &mut writer,
                         &serialized,
                         &mut seen,
                         last_row,
                         u32::MAX,
-                        sheet_data_name.as_deref().unwrap_or(b"sheetData"),
+                        sheet_data_name.as_deref().unwrap_or("sheetData"),
                         source,
                     )?;
                     write_event(&mut writer, Event::End(element.into_owned()), source)?;
@@ -478,7 +477,7 @@ fn insert_missing_rows_before(
     seen: &mut BTreeSet<CellAddress>,
     after_row: u32,
     before_row: u32,
-    sheet_data_name: &[u8],
+    sheet_data_name: &str,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
     let first_row = after_row.saturating_add(1).max(1);
@@ -493,9 +492,9 @@ fn insert_missing_rows_before(
         .filter(|(address, _)| !seen.contains(*address))
         .map(|(address, _)| address.row().get())
         .collect::<BTreeSet<_>>();
-    let row_name = qualified_sibling_name(sheet_data_name, b"row");
+    let row_name = qualified_sibling_name(sheet_data_name, "row");
     for row in rows {
-        let mut start = BytesStart::new(decode_name(&row_name, source)?);
+        let mut start = BytesStart::new(row_name.as_str());
         let row_text = row.to_string();
         start.push_attribute(("r", row_text.as_str()));
         write_event(writer, Event::Start(start), source)?;
@@ -516,11 +515,7 @@ fn insert_missing_rows_before(
             write_inserted_cell(writer, address, cache, &row_name, source)?;
             seen.insert(address);
         }
-        write_event(
-            writer,
-            Event::End(BytesEnd::new(decode_name(&row_name, source)?)),
-            source,
-        )?;
+        write_event(writer, Event::End(BytesEnd::new(row_name.as_str())), source)?;
     }
     Ok(())
 }
@@ -573,11 +568,11 @@ fn write_inserted_cell(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     address: CellAddress,
     cache: &SerializedCache,
-    row_name: &[u8],
+    row_name: &str,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let cell_name = qualified_sibling_name(row_name, b"c");
-    let mut start = BytesStart::new(decode_name(&cell_name, source)?);
+    let cell_name = qualified_sibling_name(row_name, "c");
+    let mut start = BytesStart::new(cell_name.as_str());
     let reference = address.to_string();
     start.push_attribute(("r", reference.as_str()));
     if let Some(cell_type) = cache.cell_type {
@@ -587,33 +582,32 @@ fn write_inserted_cell(
     write_cache_if_set(
         writer,
         cache.clone(),
-        qualified_sibling_name(row_name, b"v"),
+        qualified_sibling_name(row_name, "v"),
         source,
     )?;
-    write_event(
-        writer,
-        Event::End(BytesEnd::new(decode_name(&cell_name, source)?)),
-        source,
-    )
+    write_event(writer, Event::End(BytesEnd::new(cell_name)), source)
 }
 
 fn write_cache_if_set(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     cache: SerializedCache,
-    qualified_name: Vec<u8>,
+    qualified_name: String,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
     let Some(value) = cache.value else {
         return Ok(());
     };
-    let name = decode_name(&qualified_name, source)?;
-    write_event(writer, Event::Start(BytesStart::new(name)), source)?;
+    write_event(
+        writer,
+        Event::Start(BytesStart::new(qualified_name.as_str())),
+        source,
+    )?;
     write_event(
         writer,
         Event::Text(BytesText::from_escaped(escape_text(&value)?)),
         source,
     )?;
-    write_event(writer, Event::End(BytesEnd::new(name)), source)
+    write_event(writer, Event::End(BytesEnd::new(qualified_name)), source)
 }
 
 fn patch_cell_start(
@@ -621,11 +615,10 @@ fn patch_cell_start(
     cell_type: Option<&str>,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
-    let name = decode_name(element.name().as_ref(), source)?.to_owned();
-    let mut patched = BytesStart::new(name);
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.as_ref() != b"t" {
+        if attribute.key.as_ref() != "t" {
             patched.push_attribute(attribute);
         }
     }
@@ -639,7 +632,7 @@ fn required_cell_reference(
     element: &BytesStart<'_>,
     source: &PartPath,
 ) -> Result<CellAddress, XlsxWriteError> {
-    let value = required_attribute(element, b"r", source)?;
+    let value = required_attribute(element, "r", source)?;
     CellAddress::from_a1(&value).map_err(|error| {
         invalid_generated(source, DETAIL_CELL_ORDER)
             .with_detail(value)
@@ -649,7 +642,7 @@ fn required_cell_reference(
 
 fn required_u32_attribute(
     element: &BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<u32, XlsxWriteError> {
     let value = required_attribute(element, name, source)?;
@@ -659,7 +652,7 @@ fn required_u32_attribute(
 }
 
 fn required_row_number(element: &BytesStart<'_>, source: &PartPath) -> Result<u32, XlsxWriteError> {
-    let row = required_u32_attribute(element, b"r", source)?;
+    let row = required_u32_attribute(element, "r", source)?;
     if !(1..=EXCEL_MAX_ROWS).contains(&row) {
         return Err(invalid_generated_context(
             source,
@@ -672,7 +665,7 @@ fn required_row_number(element: &BytesStart<'_>, source: &PartPath) -> Result<u3
 
 fn required_attribute(
     element: &BytesStart<'_>,
-    name: &[u8],
+    name: &str,
     source: &PartPath,
 ) -> Result<String, XlsxWriteError> {
     for attribute in element.attributes().with_checks(true) {
@@ -687,25 +680,13 @@ fn required_attribute(
     Err(invalid_generated_context(
         source,
         DETAIL_MISSING_ATTRIBUTE,
-        &format!(
-            "{} on <{}>",
-            decode_name(name, source)?,
-            decode_name(element.name().as_ref(), source)?
-        ),
+        &format!("{name} on <{}>", element.name().as_ref()),
     ))
 }
 
-fn qualified_sibling_name(template: &[u8], local_name: &[u8]) -> Vec<u8> {
-    let mut output = template
-        .iter()
-        .rposition(|byte| *byte == b':')
-        .map_or_else(Vec::new, |index| template[..=index].to_vec());
-    output.extend_from_slice(local_name);
-    output
-}
-
-fn decode_name<'a>(name: &'a [u8], source: &PartPath) -> Result<&'a str, XlsxWriteError> {
-    std::str::from_utf8(name).map_err(|error| invalid_xml(source, error))
+fn qualified_sibling_name(template: &str, local_name: &str) -> String {
+    let prefix = template.rfind(':').map_or("", |index| &template[..=index]);
+    format!("{prefix}{local_name}")
 }
 
 fn is_spreadsheet_element(xml: &NsReader<&[u8]>, name: QName<'_>) -> bool {
