@@ -782,10 +782,20 @@ export class Workbook {
   clearCell(sheet: string, address: string): boolean;
   addSheet(name: string): number;
   renameSheet(currentName: string, newName: string): void;
+  /**
+   * Reads the workbook when the save runs on a worker, so do not edit it until the Promise
+   * settles: an edit made meanwhile may or may not be saved, or may fail with
+   * `interop.session.unavailable`.
+   */
   toBytes(options?: WriteOptions): Promise<Buffer>;
+  /** Do not edit the workbook until the Promise settles, as with {@link Workbook.toBytes}. */
   save(path: string, options?: SaveOptions): Promise<WriteReport>;
-  /** The source package with this session's edits written in, without calculating. */
+  /**
+   * The source package with this session's edits written in, without calculating. Do not edit
+   * the workbook until the Promise settles, as with {@link Workbook.toBytes}.
+   */
   editsToBytes(): Promise<Buffer>;
+  /** Do not edit the workbook until the Promise settles, as with {@link Workbook.toBytes}. */
   saveEdits(path: string, options?: EditSaveOptions): Promise<EditWriteReport>;
 }
 

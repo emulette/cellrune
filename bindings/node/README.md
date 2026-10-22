@@ -129,6 +129,8 @@ archive bytes. It is an output identity, not the input document hash.
 `saveEdits()` and `editsToBytes()` write only the edits of a workbook opened from a file, without
 calculating: formulas the edits can affect lose their saved results and the file asks the
 spreadsheet app to recalculate them, and formulas CellRune cannot calculate do not block the save.
+`save()`, `toBytes()`, `saveEdits()`, and `editsToBytes()` read the workbook when their worker
+runs, so do not edit it until the returned Promise settles.
 `openPath`/`fromBytes` accept `readLimits` and `calculate`/`recalculate`/`previewChanges` accept
 `calculationLimits` to change individual default limits, and `scanCapabilities()` pages through the
 static per-formula support report.

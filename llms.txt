@@ -134,8 +134,11 @@ policy. Python `save_edits`/`edits_to_bytes` and Node `saveEdits`/`editsToBytes`
 write only the edits of a workbook opened from a package, without calculating,
 and return an edit report (`affected_formulas`/`affectedFormulas`,
 `requests_host_recalculation`/`requestsHostRecalculation`, changed and removed
-parts, input and output SHA-256). Opening takes `read_limits`/`readLimits`, and
-`calculate`, `recalculate`, and previews take
+parts, input and output SHA-256). Node `save`, `toBytes`, `saveEdits`, and
+`editsToBytes` read the workbook when their worker runs, not when called, so do
+not edit it until the Promise settles: an edit made meanwhile may or may not be
+saved, or may fail with `interop.session.unavailable`. Opening takes
+`read_limits`/`readLimits`, and `calculate`, `recalculate`, and previews take
 `calculation_limits`/`calculationLimits`: objects keyed by the Rust limit names
 (snake case in Python, camel case in Node) whose omitted entries keep their
 defaults. A zero fails with `interop.limit.invalid`; limits that are not an

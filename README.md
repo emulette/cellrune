@@ -425,7 +425,10 @@ try {
 ```
 
 `edits_to_bytes`/`editsToBytes` return the same package in memory. A workbook created rather than
-opened has no package to edit and fails with `xlsx.write.invalid_package_plan`.
+opened has no package to edit and fails with `xlsx.write.invalid_package_plan`. Node.js `save`,
+`toBytes`, `saveEdits`, and `editsToBytes` read the workbook when their worker runs, not when they
+are called, so do not edit the workbook until the returned Promise settles: an edit made meanwhile
+may or may not be saved, or may fail with `interop.session.unavailable`.
 
 Opening takes `read_limits`/`readLimits` and calculating takes
 `calculation_limits`/`calculationLimits` to change individual default limits, for example
