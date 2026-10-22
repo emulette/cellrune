@@ -87,6 +87,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   `xlsx.write.output_verification_failed` when the result of a legacy (CSE) array or dynamic-array
   formula changed or was invalidated: output verification checks the array and spill follower cells
   against their calculated results instead of the results the source saved.
+- Renaming a column of a table or resizing it no longer fails to save with
+  `xlsx.write.output_verification_failed` when a calculated column or totals row formula contains an
+  entity or character reference, such as the `&amp;`, `&lt;`, and `&gt;` Excel stores for `&`, `<`,
+  and `>`.
 
 ## [0.1.25] - 2026-10-18
 

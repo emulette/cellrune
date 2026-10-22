@@ -315,7 +315,9 @@ pub(crate) fn patch_table_xml(
                 };
                 write_event(&mut writer, Event::Empty(output), source)?;
             }
-            Event::Text(_) | Event::CData(_) if active_formula.is_some() => {
+            // The model formula replaces all of the source formula: its text, CDATA, and entity
+            // and character references.
+            Event::Text(_) | Event::CData(_) | Event::GeneralRef(_) if active_formula.is_some() => {
                 let formula = active_formula.as_mut().expect("checked formula");
                 if !formula.wrote {
                     write_event(

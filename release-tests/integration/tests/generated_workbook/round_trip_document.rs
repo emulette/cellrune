@@ -1023,9 +1023,8 @@ fn number_at(workbook: &cellrune::WorkbookSnapshot, address: &str) -> f64 {
     }
 }
 
-/// The totals-table fixture as xlsxwriter writes its `[@hp]` calculated column: the column name
-/// follows `[#This Row]` without its own brackets.
-fn xlsxwriter_totals_table_fixture() -> Vec<u8> {
+/// The totals-table fixture with each `(from, to)` text replacement applied in order to every part.
+fn replaced_totals_table_fixture(replacements: &[(&str, &str)]) -> Vec<u8> {
     let source = generated_totals_table_fixture();
     let mut archive = ZipArchive::new(Cursor::new(&source)).expect("fixture archive");
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
@@ -1034,17 +1033,21 @@ fn xlsxwriter_totals_table_fixture() -> Vec<u8> {
         let name = file.name().expect("entry name").into_owned();
         let mut text = String::new();
         file.read_to_string(&mut text).expect("fixture entry text");
+        for (from, to) in replacements {
+            text = text.replace(from, to);
+        }
         writer
             .start_file(name, SimpleFileOptions::default())
             .expect("start entry");
-        writer
-            .write_all(
-                text.replace("tblChar[[#This Row],[hp]]", "[[#This Row],hp]")
-                    .as_bytes(),
-            )
-            .expect("write entry");
+        writer.write_all(text.as_bytes()).expect("write entry");
     }
     writer.finish().expect("finish archive").into_inner()
+}
+
+/// The totals-table fixture as xlsxwriter writes its `[@hp]` calculated column: the column name
+/// follows `[#This Row]` without its own brackets.
+fn xlsxwriter_totals_table_fixture() -> Vec<u8> {
+    replaced_totals_table_fixture(&[("tblChar[[#This Row],[hp]]", "[[#This Row],hp]")])
 }
 
 #[test]
@@ -1078,6 +1081,113 @@ fn xlsxwriter_calculated_columns_calculate_and_an_unrelated_edit_keeps_saved_res
         )]))
         .expect("rename the column");
     assert_totals_formula(draft.workbook(), "D2", "[[#This Row],[hit.points]]*2");
+}
+
+/// The totals-table fixture with a text calculated column and a custom totals row whose `&`, `<`,
+/// `>`, quotes, `≤`, and `=` are stored as XML references, as Excel stores the first three.
+fn entity_totals_table_fixture() -> Vec<u8> {
+    let calculated = "tblChar[[#This Row],[name]]&amp;IF(tblChar[[#This Row],[hp]]&gt;15,&quot;&gt;&quot;,&quot;&lt;&quot;)&amp;&quot;&apos;&#x2264;&quot;";
+    let totals = "&quot;n&#61;&quot;&amp;SUBTOTAL(103,tblChar[hp2])&amp;IF(SUBTOTAL(109,tblChar[hp])&gt;50,&quot;&gt;50&quot;,&quot;&lt;=50&quot;)";
+    let totals_element =
+        format!("</calculatedColumnFormula><totalsRowFormula>{totals}</totalsRowFormula>");
+    replaced_totals_table_fixture(&[
+        ("tblChar[[#This Row],[hp]]*2", calculated),
+        ("SUBTOTAL(109,tblChar[hp2])", totals),
+        (
+            r#"name="hp2" totalsRowFunction="sum""#,
+            r#"name="hp2" totalsRowFunction="custom""#,
+        ),
+        ("</calculatedColumnFormula>", &totals_element),
+    ])
+}
+
+#[test]
+fn table_formulas_with_xml_references_survive_a_column_rename_and_a_resize() {
+    let sheet = SheetId::new(1).expect("sheet");
+    let table = TableId::new(1).expect("table");
+    let address = |a1: &str| CellAddress::from_a1(a1).expect("valid address");
+    let rename = vec![WorkbookChange::rename_table_column(
+        table,
+        TableColumnId::new(3).expect("column ID"),
+        TableColumnName::new("health").expect("column name"),
+    )];
+    let resize = vec![
+        WorkbookChange::resize_table_rows(
+            table,
+            Row::new(2).expect("first data row"),
+            Row::new(5).expect("last data row"),
+        )
+        .expect("valid resize"),
+        WorkbookChange::set_cell_value(sheet, address("A5"), CellValue::number(4.0).unwrap()),
+        WorkbookChange::set_cell_value(sheet, address("B5"), CellValue::Text("d".into())),
+        WorkbookChange::set_cell_value(sheet, address("C5"), CellValue::number(40.0).unwrap()),
+    ];
+    let document = open_xlsx_document_bytes(&entity_totals_table_fixture(), OpenOptions::default())
+        .expect("entity table input");
+    for (changes, hp_name, values, (totals_cell, totals_value)) in [
+        (
+            rename,
+            "health",
+            &["a<'≤", "b>'≤", "c>'≤"][..],
+            ("D5", "n=3>50"),
+        ),
+        (
+            resize,
+            "hp",
+            &["a<'≤", "b>'≤", "c>'≤", "d>'≤"][..],
+            ("D6", "n=4>50"),
+        ),
+    ] {
+        let calculated = format!(
+            r#"tblChar[[#This Row],[name]]&IF(tblChar[[#This Row],[{hp_name}]]>15,">","<")&"'≤""#
+        );
+        let totals = format!(
+            r#""n="&SUBTOTAL(103,tblChar[hp2])&IF(SUBTOTAL(109,tblChar[{hp_name}])>50,">50","<=50")"#
+        );
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .apply_changes(EditBatch::new(changes))
+            .expect("table edit");
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let full =
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect("full write");
+        let edits = cellrune::write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+            .expect("edits-only write");
+        for output in [full.bytes(), edits.bytes()] {
+            let reopened =
+                open_xlsx_document_bytes(output, OpenOptions::default()).expect("reopen output");
+            let workbook = reopened.workbook();
+            let column = &workbook.sheets()[0].tables()[0].columns()[3];
+            assert_eq!(
+                column
+                    .calculated_column_formula()
+                    .map(|formula| formula.text().as_str()),
+                Some(calculated.as_str())
+            );
+            assert_eq!(
+                column
+                    .totals_row_formula()
+                    .map(|formula| formula.text().as_str()),
+                Some(totals.as_str())
+            );
+            let calculation = calculate_workbook(workbook, CalculationOptions::default());
+            let assert_text = |a1: &str, text: &str| {
+                assert_eq!(
+                    calculation.cell(CalculationCellId::new(sheet, address(a1))),
+                    Some(&CalculationCellResult::Value(CellValue::Text(text.into()))),
+                    "{a1}"
+                );
+            };
+            for (row, value) in (2..).zip(values) {
+                let cell = format!("D{row}");
+                assert_totals_formula(workbook, &cell, &calculated);
+                assert_text(&cell, value);
+            }
+            assert_totals_formula(workbook, totals_cell, &totals);
+            assert_text(totals_cell, totals_value);
+        }
+    }
 }
 
 /// Column names that Excel reads and saves in a single-bracket reference such as
