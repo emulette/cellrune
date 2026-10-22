@@ -7,7 +7,13 @@ import tempfile
 from collections.abc import Callable
 from typing import Literal, cast
 
-from cellrune import CellRuneError, Workbook, function_catalog
+from cellrune import (
+    CalculationLimitOptions,
+    CellRuneError,
+    ReadLimitOptions,
+    Workbook,
+    function_catalog,
+)
 from function_usage import assert_function_usage
 from compatibility import assert_compatibility
 
@@ -191,10 +197,14 @@ def assert_limits() -> None:
     for limits, code in [
         ({"max_aray_cells": 100}, "interop.limit.payload_invalid"),
         ({"max_array_cells": -1}, "interop.limit.payload_invalid"),
+        ({"max_array_cells": None}, "interop.limit.payload_invalid"),
+        ([100], "interop.limit.payload_invalid"),
+        ((100,), "interop.limit.payload_invalid"),
+        ([], "interop.limit.payload_invalid"),
         ({"max_array_cells": 0}, "interop.limit.invalid"),
     ]:
         try:
-            workbook.calculate(calculation_limits=limits)
+            workbook.calculate(calculation_limits=cast(CalculationLimitOptions, limits))
         except CellRuneError as error:
             assert error.code == code, (limits, error.code)
             assert error.kind == "input"
@@ -212,6 +222,13 @@ def assert_limits() -> None:
     else:
         raise AssertionError("a lowered read limit did not reject the package")
     Workbook.from_bytes(package, read_limits={"max_entry_uncompressed_bytes": 1 << 20})
+    for read_limits in ([1], [], {"max_entry_uncompressed_bytes": None}):
+        try:
+            Workbook.from_bytes(package, read_limits=cast(ReadLimitOptions, read_limits))
+        except CellRuneError as error:
+            assert error.code == "interop.limit.payload_invalid", (read_limits, error.code)
+        else:
+            raise AssertionError(f"{read_limits} was accepted")
 
 
 def assert_capability_scan() -> None:

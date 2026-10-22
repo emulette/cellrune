@@ -798,8 +798,9 @@ fn preview_options_from_python(
     })
 }
 
-/// Reads a limit mapping as the interop limit object, so unknown names, non-integers, and
-/// negative values fail as one stable input error. `None` keeps every default.
+/// Reads a limit mapping as the interop limit object, so another object, unknown names, and
+/// values that are not positive integers fail as one stable input error. `None` keeps every
+/// default.
 fn limits_from_python<T: serde::de::DeserializeOwned + Default>(
     py: Python<'_>,
     value: Option<&Bound<'_, PyAny>>,
@@ -807,9 +808,19 @@ fn limits_from_python<T: serde::de::DeserializeOwned + Default>(
     let Some(value) = value else {
         return Ok(T::default());
     };
+    // JSON would carry a sequence into the limits by position and a `None` limit as omitted.
+    let limits = value.cast::<PyDict>().map_err(|error| {
+        into_py_error(py, InteropError::invalid_limit_payload(error.to_string()))
+    })?;
+    if let Some((name, _)) = limits.iter().find(|(_, limit)| limit.is_none()) {
+        return Err(into_py_error(
+            py,
+            InteropError::invalid_limit_payload(name.to_string()),
+        ));
+    }
     let json = py
         .import("json")?
-        .call_method1("dumps", (value,))
+        .call_method1("dumps", (limits,))
         .and_then(|dumped| dumped.extract::<String>())
         .map_err(|error| {
             into_py_error(py, InteropError::invalid_limit_payload(error.to_string()))

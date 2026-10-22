@@ -430,8 +430,9 @@ opened has no package to edit and fails with `xlsx.write.invalid_package_plan`.
 Opening takes `read_limits`/`readLimits` and calculating takes
 `calculation_limits`/`calculationLimits` to change individual default limits, for example
 `Workbook.open_path(path, read_limits={"max_entry_uncompressed_bytes": 256 << 20})`. Omitted limits
-keep their defaults; a zero fails with `interop.limit.invalid` and an unknown name or a value that
-is not a positive integer with `interop.limit.payload_invalid`. `scan_capabilities`/
+keep their defaults; a zero fails with `interop.limit.invalid`, and limits that are not an object
+(a `dict` in Python), an unknown name, or a value that is not a positive integer with
+`interop.limit.payload_invalid`. `scan_capabilities`/
 `scanCapabilities` page through the static per-formula support report. Range cells carry a
 `number_format` with its ID, code, and kind, and the summary reports each sheet's `auto_filter`
 range and the package's `full_calculation_on_load` declaration: xlsxwriter and similar producers

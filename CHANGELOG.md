@@ -33,6 +33,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Python `calculate_targets` rejects `calculation_limits` with
   `interop.calculation.target.invalid_payload`, like any other unknown option, instead of applying
   it. Targeted calculation keeps the default calculation limits, as in Node.js and MCP.
+- Python `read_limits` and `calculation_limits` fail with `interop.limit.payload_invalid` when given
+  a list, tuple, or other object that is not a `dict`, which set limits by position, or a limit
+  whose value is `None`, which kept its default.
 
 ## [0.1.25] - 2026-10-18
 
