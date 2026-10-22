@@ -38,6 +38,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   deeply nested. With invalid UTF-8, an element past the XML depth limit whose start tag holds
   invalid UTF-8 reports the part's error code instead of `xlsx.xml_depth_exceeded`, and an unknown
   namespace prefix spelled with invalid UTF-8 is no longer reported as the error detail.
+- When only the `TODAY()` serial, the `NOW()` serial, or the random seed differs from the installed
+  calculation, `Auto` recalculation evaluates only the formulas that read the changed input and
+  their dependents, reporting `DirtySubset` or `NoDirtyFormulas`, and `Incremental` recalculation
+  proceeds instead of failing with `session.incremental_unsafe`. Workbooks with uncertain dynamic
+  references still recalculate in full when such a formula is dirty, and any other option change
+  still recalculates in full. Results are unchanged.
 
 ### Fixed
 

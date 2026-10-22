@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use super::eval::{CompiledWorkbook, clone_set_cancellable};
 use super::formula_rewrite::{FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits};
+use super::functions::descriptor::Volatility;
 use super::pipeline::{calculate_and_compile, calculate_from_compiled};
 use crate::draft::{
     BatchExecutionError, TableMaterializationBudget, TableMaterializationError,
@@ -25,7 +27,9 @@ pub use delta::{CalculationDelta, CalculationDeltaCell, CalculationDeltaPage};
 use delta::{DeltaMetadata, build_delta, build_empty_delta, build_incremental_delta};
 use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
-use impact::{affected_formulas, formula_cells, formula_cells_from_workbook};
+use impact::{
+    affected_formulas, formula_cells, formula_cells_from_workbook, volatile_input_formulas,
+};
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
     CompletedWorkbookTransaction, InstallDeltaBasisReason, PreparedWorkbookTransaction,
@@ -352,9 +356,11 @@ impl WorkbookCalculationSession {
             ));
         }
 
-        let options_changed = self
-            .calculation_options
-            .is_some_and(|previous| previous != options);
+        let changed_volatile_inputs = match self.calculation_options {
+            Some(previous) if previous != options => volatile_input_changes(previous, options),
+            _ => Some(Vec::new()),
+        };
+        let options_changed = changed_volatile_inputs.is_none();
         let no_state = self.calculation.is_none() || self.compiled.is_none();
         let compiled_limit_changed = self
             .compiled
@@ -366,16 +372,33 @@ impl WorkbookCalculationSession {
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
             None => false,
         };
+        let structural_rebuild = no_state
+            || self.requires_full_rebuild
+            || compiled_limit_changed
+            || table_topology_changed;
+        // A changed volatile input dirties the formulas that read it, as an edit dirties the
+        // formulas that read the edited cell.
+        let volatile_dirty = match (&self.compiled, changed_volatile_inputs) {
+            (Some(compiled), Some(changed)) if !structural_rebuild && !changed.is_empty() => {
+                volatile_input_formulas(self.workbook(), compiled, &changed, &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            }
+            _ => BTreeSet::new(),
+        };
         let unsafe_dynamic = self
             .compiled
             .as_ref()
             .is_some_and(|compiled| !compiled.incremental_safe())
-            && self.calculation_changes_pending;
-        let compile_required = no_state
-            || self.requires_full_rebuild
-            || compiled_limit_changed
-            || table_topology_changed
-            || unsafe_dynamic;
+            && (self.calculation_changes_pending || !volatile_dirty.is_empty());
+        let compile_required = structural_rebuild || unsafe_dynamic;
+        let pending_dirty = if volatile_dirty.is_empty() {
+            Cow::Borrowed(&self.dirty)
+        } else {
+            let mut dirty = clone_set_cancellable(&self.dirty, &cancelled)
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+            dirty.extend(volatile_dirty);
+            Cow::Owned(dirty)
+        };
 
         let (execution_mode, reason) = match mode {
             RecalculationMode::Full => (
@@ -402,7 +425,7 @@ impl WorkbookCalculationSession {
             }
             RecalculationMode::Incremental => (
                 CalculationExecutionMode::Incremental,
-                if self.dirty.is_empty() {
+                if pending_dirty.is_empty() {
                     CalculationDecisionReason::NoDirtyFormulas
                 } else {
                     CalculationDecisionReason::IncrementalRequested
@@ -426,7 +449,7 @@ impl WorkbookCalculationSession {
             ),
             RecalculationMode::Auto
                 if self.compiled.as_ref().is_some_and(|compiled| {
-                    !self.dirty.is_empty() && self.dirty.len() >= compiled.formula_count()
+                    !pending_dirty.is_empty() && pending_dirty.len() >= compiled.formula_count()
                 }) =>
             {
                 (
@@ -434,7 +457,7 @@ impl WorkbookCalculationSession {
                     CalculationDecisionReason::DirtySetCoversWorkbook,
                 )
             }
-            RecalculationMode::Auto if self.dirty.is_empty() => (
+            RecalculationMode::Auto if pending_dirty.is_empty() => (
                 CalculationExecutionMode::Incremental,
                 CalculationDecisionReason::NoDirtyFormulas,
             ),
@@ -452,7 +475,10 @@ impl WorkbookCalculationSession {
                 _ => formula_cells_from_workbook(self.workbook(), &cancelled),
             }
         } else {
-            clone_set_cancellable(&self.dirty, &cancelled)
+            match pending_dirty {
+                Cow::Borrowed(dirty) => clone_set_cancellable(dirty, &cancelled),
+                Cow::Owned(dirty) => Ok(dirty),
+            }
         }
         .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
         let workbook = self.draft.shared_workbook();
@@ -954,6 +980,36 @@ impl std::error::Error for ApplyChangesError {
             Self::Validation(error) => Some(error),
         }
     }
+}
+
+/// Lists the volatile inputs that differ between two option sets, or returns `None` when any
+/// other option differs as well.
+fn volatile_input_changes(
+    previous: CalculationOptions,
+    options: CalculationOptions,
+) -> Option<Vec<Volatility>> {
+    let only_volatile_inputs_differ = CalculationOptions {
+        today_serial: options.today_serial,
+        now_serial: options.now_serial,
+        random_seed: options.random_seed,
+        ..previous
+    } == options;
+    only_volatile_inputs_differ.then(|| {
+        [
+            (
+                previous.today_serial != options.today_serial,
+                Volatility::Today,
+            ),
+            (previous.now_serial != options.now_serial, Volatility::Now),
+            (
+                previous.random_seed != options.random_seed,
+                Volatility::Random,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(changed, volatility)| changed.then_some(volatility))
+        .collect()
+    })
 }
 
 fn incremental_unsafe_detail(

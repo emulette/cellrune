@@ -1,10 +1,11 @@
 use cellrune::{
-    CalculationOptions, CancellationToken, CellAddress, CellValue, EditBatch, FiniteNumber,
-    FormulaText, RecalculationMode, SheetId, WorkbookCalculationSession, WorkbookChange,
+    ArithmeticSemantics, CalculationOptions, CancellationToken, CellAddress, CellValue, EditBatch,
+    FiniteNumber, FormulaText, RecalculationMode, SheetId, WorkbookCalculationSession,
+    WorkbookChange,
 };
 use cellrune_interop::{
-    CalculationOptionsDto, EditBatchV2Dto, RecalculationModeDto, WorkbookChangeDto,
-    WorkbookChangeV2Dto, WorkbookSession, WritableCellValueDto,
+    ArithmeticSemanticsDto, CalculationOptionsDto, EditBatchV2Dto, RecalculationModeDto,
+    WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookSession, WritableCellValueDto,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,14 +170,14 @@ fn recalculate_core(session: &mut WorkbookCalculationSession, options: Calculati
         .expect("initial benchmark calculation");
 }
 
+// A volatile input alone recalculates incrementally, so the mismatch changes a semantic option.
 fn mismatched_core_options() -> CalculationOptions {
-    CalculationOptions::default()
-        .with_today_serial(FiniteNumber::new(45_000.0).expect("finite benchmark TODAY serial"))
+    CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754)
 }
 
 fn mismatched_interop_options() -> CalculationOptionsDto {
     CalculationOptionsDto {
-        today_serial: Some(45_000.0),
+        arithmetic_semantics: ArithmeticSemanticsDto::Ieee754,
         ..CalculationOptionsDto::default()
     }
 }

@@ -172,6 +172,32 @@ def assert_random_seed() -> None:
         )
 
 
+def assert_volatile_input_recalculation() -> None:
+    workbook = Workbook.create()
+    workbook.set_number("Sheet1", "A1", 1.0)
+    workbook.set_formula("Sheet1", "B1", "=TODAY()")
+    workbook.set_formula("Sheet1", "C1", "=RAND()+B1")
+    workbook.set_formula("Sheet1", "D1", "=A1+1")
+    initial = workbook.recalculate(today_serial=45_000.0, random_seed=1)
+    assert initial["mode"] == "full"
+
+    for seed, changed in ((1, ["B1", "C1"]), (2, ["C1"])):
+        delta = workbook.recalculate(today_serial=45_001.0, random_seed=seed)
+        assert delta["mode"] == "incremental"
+        assert delta["reason"] == "dirty_subset"
+        assert delta["evaluated_count"] == len(changed)
+        assert [cell["cell"]["address"] for cell in delta["changed_cells"]] == changed
+
+    forced = workbook.recalculate(mode="incremental", today_serial=45_001.0, random_seed=3)
+    assert forced["reason"] == "incremental_requested"
+    assert forced["evaluated_count"] == 1
+    full = workbook.recalculate(
+        today_serial=45_001.0, random_seed=3, arithmetic_semantics="ieee_754"
+    )
+    assert full["mode"] == "full"
+    assert full["reason"] == "options_changed"
+
+
 def calculate_with_invalid_arithmetic_semantics(
     workbook: Workbook, value: str
 ) -> object:
@@ -313,6 +339,7 @@ def main() -> None:
     assert_catalog_contract()
     assert_preview_contract()
     assert_random_seed()
+    assert_volatile_input_recalculation()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     defined_name_corpus = json.loads(
         DEFINED_NAME_CORPUS_PATH.read_text(encoding="utf-8")

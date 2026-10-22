@@ -945,6 +945,13 @@ fn random_seed_is_a_stdio_calculation_argument() {
                     "address": "A2",
                     "formula": "=RANDBETWEEN(1,1000000)",
                     "dynamic_range": null
+                },
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "B1",
+                    "formula": "=1+1",
+                    "dynamic_range": null
                 }
             ]
         }),
@@ -1007,13 +1014,24 @@ fn random_seed_is_a_stdio_calculation_argument() {
             "changes": [{
                 "kind": "set_value",
                 "sheet": "Sheet1",
-                "address": "B1",
+                "address": "C1",
                 "value": {"kind": "number", "value": 1.0}
             }],
             "random_seed": 7
         }),
     ));
     assert_eq!(preview["report"]["calculation_options"]["random_seed"], 7);
+    successful_tool(mcp.call_tool(
+        "workbook_discard_preview",
+        json!({"session_id": session_id, "preview_id": preview["preview_id"]}),
+    ));
+    let incremental = successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "random_seed": 9}),
+    ));
+    assert_eq!(incremental["mode"], "incremental");
+    assert_eq!(incremental["reason"], "dirty_subset");
+    assert_eq!(incremental["evaluated_count"], 2);
     let invalid = mcp.call_tool(
         "workbook_recalculate",
         json!({"session_id": session_id, "random_seed": -1}),

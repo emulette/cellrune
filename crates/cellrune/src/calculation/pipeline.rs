@@ -672,48 +672,107 @@ fn build_materialization_view_cancellable(
     Ok(materialized)
 }
 
+/// The volatile calculation inputs a formula reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct VolatileInputs {
+    today: bool,
+    now: bool,
+    random: bool,
+}
+
+impl VolatileInputs {
+    const fn of(volatility: Volatility) -> Self {
+        Self {
+            today: matches!(volatility, Volatility::Today),
+            now: matches!(volatility, Volatility::Now),
+            random: matches!(volatility, Volatility::Random),
+        }
+    }
+
+    pub(super) const fn contains(self, volatility: Volatility) -> bool {
+        match volatility {
+            Volatility::Today => self.today,
+            Volatility::Now => self.now,
+            Volatility::Random => self.random,
+            Volatility::None => false,
+        }
+    }
+}
+
+impl std::ops::BitOr for VolatileInputs {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self {
+            today: self.today || other.today,
+            now: self.now || other.now,
+            random: self.random || other.random,
+        }
+    }
+}
+
+impl std::ops::BitOrAssign for VolatileInputs {
+    fn bitor_assign(&mut self, other: Self) {
+        *self = *self | other;
+    }
+}
+
 /// Reports whether `expr` calls a volatile function whose deterministic input the options omit.
 fn misses_volatile_input(engine: &Engine<'_>, sheet: usize, expr: &Expr) -> bool {
     let options = engine.calculation_options();
-    [
+    let missing = [
         (options.today_serial().is_none(), Volatility::Today),
         (options.now_serial().is_none(), Volatility::Now),
         (options.random_seed().is_none(), Volatility::Random),
-    ]
-    .into_iter()
-    .any(|(missing, volatility)| missing && contains_volatility(engine, sheet, expr, volatility))
+    ];
+    if missing.iter().all(|(missing, _)| !missing) {
+        return false;
+    }
+    let read = formula_volatility(engine, sheet, expr);
+    missing
+        .into_iter()
+        .any(|(missing, volatility)| missing && read.contains(volatility))
 }
 
-fn contains_volatility(
-    engine: &Engine<'_>,
-    sheet: usize,
-    expr: &Expr,
-    expected: Volatility,
-) -> bool {
-    expr_contains_volatility(
+/// Returns the volatile inputs read by the functions `expr` calls, directly or through defined
+/// names and LAMBDA bodies.
+pub(super) fn formula_volatility(engine: &Engine<'_>, sheet: usize, expr: &Expr) -> VolatileInputs {
+    expr_volatility(
         engine,
         NameScanContext::root(sheet),
         expr,
-        expected,
         &mut BTreeSet::new(),
         &mut CapabilityScope::default(),
     )
 }
 
-fn expr_contains_volatility(
+fn exprs_volatility<'a>(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
+    exprs: impl IntoIterator<Item = &'a Expr>,
+    names: &mut BTreeSet<DefinedLambdaId>,
+    local_scope: &mut CapabilityScope,
+) -> VolatileInputs {
+    exprs
+        .into_iter()
+        .fold(VolatileInputs::default(), |read, expr| {
+            read | expr_volatility(engine, sheet, expr, names, local_scope)
+        })
+}
+
+fn expr_volatility(
     engine: &Engine<'_>,
     sheet: NameScanContext,
     expr: &Expr,
-    expected: Volatility,
     names: &mut BTreeSet<DefinedLambdaId>,
     local_scope: &mut CapabilityScope,
-) -> bool {
+) -> VolatileInputs {
     crate::calculation::stack::grow(|| match expr {
         Expr::Call { name, args } => {
             if let Some(arguments_are_reachable) =
                 call_shadow_arguments_are_reachable(engine, sheet, name, args, local_scope)
             {
-                let mut found = false;
+                let mut read = VolatileInputs::default();
                 let shadow = call_shadow(engine, sheet, name, local_scope)
                     .expect("shadow reachability implies a shadow state");
                 if shadow != CallableShadow::CyclicNonCallable
@@ -724,27 +783,18 @@ fn expr_contains_volatility(
                     )
                     && names.insert(id.clone())
                 {
-                    found |= expr_contains_volatility(
+                    read |= expr_volatility(
                         engine,
                         sheet.for_definition(id.scope()),
                         named,
-                        expected,
                         names,
                         &mut CapabilityScope::default(),
                     );
                 }
-                return found
-                    || (arguments_are_reachable
-                        && args.iter().any(|arg| {
-                            expr_contains_volatility(
-                                engine,
-                                sheet,
-                                arg,
-                                expected,
-                                names,
-                                local_scope,
-                            )
-                        }));
+                if arguments_are_reachable {
+                    read |= exprs_volatility(engine, sheet, args, names, local_scope);
+                }
+                return read;
             }
             if is_supported_function(name)
                 && !function_arguments_are_reachable(
@@ -753,166 +803,99 @@ fn expr_contains_volatility(
                     engine.calculation_limits().max_let_bindings(),
                 )
             {
-                return false;
+                return VolatileInputs::default();
             }
-            if function_volatility(name) == Some(expected) {
-                return true;
-            }
+            let called =
+                function_volatility(name).map_or_else(VolatileInputs::default, VolatileInputs::of);
             match dynamic_function(name) {
                 Some(DynamicFunction::Let) => {
                     let previous_len = local_scope.len();
-                    let mut found = false;
+                    let mut read = called;
                     if let Some((final_expr, pairs)) = args.split_last() {
                         for pair in pairs.chunks_exact(2) {
-                            found |= expr_contains_volatility(
-                                engine,
-                                sheet,
-                                &pair[1],
-                                expected,
-                                names,
-                                local_scope,
-                            );
+                            read |= expr_volatility(engine, sheet, &pair[1], names, local_scope);
                             if let Expr::Name(binding_name) = &pair[0] {
                                 local_scope.push_expression(engine, sheet, binding_name, &pair[1]);
                             }
                         }
-                        found |= expr_contains_volatility(
-                            engine,
-                            sheet,
-                            final_expr,
-                            expected,
-                            names,
-                            local_scope,
-                        );
+                        read |= expr_volatility(engine, sheet, final_expr, names, local_scope);
                     }
                     local_scope.truncate(previous_len);
-                    return found;
+                    read
                 }
                 Some(DynamicFunction::Lambda) => {
                     let Some(lambda) = definition(expr) else {
-                        return false;
+                        return called;
                     };
                     let previous_len = local_scope.len();
                     for parameter in lambda.parameters() {
                         local_scope.push_parameter(parameter.clone());
                     }
-                    let found = expr_contains_volatility(
-                        engine,
-                        sheet,
-                        lambda.body(),
-                        expected,
-                        names,
-                        local_scope,
-                    );
+                    let read =
+                        called | expr_volatility(engine, sheet, lambda.body(), names, local_scope);
                     local_scope.truncate(previous_len);
-                    return found;
+                    read
                 }
                 Some(DynamicFunction::Map) => {
                     let Some((lambda_expr, array_exprs)) = args.split_last() else {
-                        return false;
+                        return called;
                     };
                     let Some(lambda) = definition(lambda_expr) else {
-                        return false;
+                        return called;
                     };
-                    let mut found = array_exprs.iter().any(|arg| {
-                        expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
-                    });
+                    let mut read =
+                        called | exprs_volatility(engine, sheet, array_exprs, names, local_scope);
                     let previous_len = local_scope.len();
                     for parameter in lambda.parameters() {
                         local_scope.push_parameter(parameter.clone());
                     }
-                    found |= expr_contains_volatility(
-                        engine,
-                        sheet,
-                        lambda.body(),
-                        expected,
-                        names,
-                        local_scope,
-                    );
+                    read |= expr_volatility(engine, sheet, lambda.body(), names, local_scope);
                     local_scope.truncate(previous_len);
-                    return found;
+                    read
                 }
-                _ => {}
+                _ => called | exprs_volatility(engine, sheet, args, names, local_scope),
             }
-            args.iter().any(|arg| {
-                expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
-            })
         }
         Expr::Invoke { callee, args } => {
             let cyclic_callee = typed_invocation_shadow(engine, sheet, callee, local_scope)
                 .is_some_and(|(_, shadow)| shadow == CallableShadow::CyclicNonCallable);
-            let callee_is_volatile = !cyclic_callee
-                && expr_contains_volatility(engine, sheet, callee, expected, names, local_scope);
-            callee_is_volatile
-                || (typed_invocation_arguments_are_reachable(
-                    engine,
-                    sheet,
-                    callee,
-                    args,
-                    local_scope,
-                ) && args.iter().any(|arg| {
-                    expr_contains_volatility(engine, sheet, arg, expected, names, local_scope)
-                }))
+            let mut read = VolatileInputs::default();
+            if !cyclic_callee {
+                read |= expr_volatility(engine, sheet, callee, names, local_scope);
+            }
+            if typed_invocation_arguments_are_reachable(engine, sheet, callee, args, local_scope) {
+                read |= exprs_volatility(engine, sheet, args, names, local_scope);
+            }
+            read
         }
         Expr::ImplicitIntersection(inner)
         | Expr::SpillRef(inner)
         | Expr::Paren(inner)
         | Expr::Unary { operand: inner, .. } => {
-            expr_contains_volatility(engine, sheet, inner, expected, names, local_scope)
+            expr_volatility(engine, sheet, inner, names, local_scope)
         }
         Expr::Binary { left, right, .. }
         | Expr::ReferenceUnion { left, right }
-        | Expr::ReferenceIntersection { left, right } => {
-            expr_contains_volatility(engine, sheet, left, expected, names, local_scope)
-                || expr_contains_volatility(engine, sheet, right, expected, names, local_scope)
+        | Expr::ReferenceIntersection { left, right }
+        | Expr::Range {
+            start: left,
+            end: right,
+        } => exprs_volatility(engine, sheet, [&**left, &**right], names, local_scope),
+        Expr::Array(rows) => {
+            exprs_volatility(engine, sheet, rows.iter().flatten(), names, local_scope)
         }
-        Expr::Range { start, end } => {
-            expr_contains_volatility(engine, sheet, start, expected, names, local_scope)
-                || expr_contains_volatility(engine, sheet, end, expected, names, local_scope)
-        }
-        Expr::Array(rows) => rows.iter().flatten().any(|element| {
-            expr_contains_volatility(engine, sheet, element, expected, names, local_scope)
-        }),
         Expr::Name(name) => {
             if local_scope.lookup(name).is_some() {
-                return false;
+                return VolatileInputs::default();
             }
-            engine
-                .resolve_name_expr_with_id_for_scope(sheet.sheet, sheet.defined_name_scope, name)
-                .is_some_and(|(id, named)| {
-                    if !names.insert(id.clone()) {
-                        return false;
-                    }
-                    expr_contains_volatility(
-                        engine,
-                        sheet.for_definition(id.scope()),
-                        named,
-                        expected,
-                        names,
-                        &mut CapabilityScope::default(),
-                    )
-                })
+            name_volatility(engine, sheet, name, names)
         }
         Expr::BuiltinCallable(callable) => {
             let name = callable.canonical_name();
             if local_scope.lookup(name).is_some() {
-                return false;
+                return VolatileInputs::default();
             }
-            engine
-                .resolve_name_expr_with_id_for_scope(sheet.sheet, sheet.defined_name_scope, name)
-                .is_some_and(|(id, named)| {
-                    if !names.insert(id.clone()) {
-                        return false;
-                    }
-                    expr_contains_volatility(
-                        engine,
-                        sheet.for_definition(id.scope()),
-                        named,
-                        expected,
-                        names,
-                        &mut CapabilityScope::default(),
-                    )
-                })
+            name_volatility(engine, sheet, name, names)
         }
         Expr::Number(_)
         | Expr::Text(_)
@@ -922,8 +905,29 @@ fn expr_contains_volatility(
         | Expr::StructuredRef(_)
         | Expr::ExternalReference(_)
         | Expr::QualifiedName { .. }
-        | Expr::Missing => false,
+        | Expr::Missing => VolatileInputs::default(),
     })
+}
+
+/// Follows a defined name once per formula into its definition.
+fn name_volatility(
+    engine: &Engine<'_>,
+    sheet: NameScanContext,
+    name: &str,
+    names: &mut BTreeSet<DefinedLambdaId>,
+) -> VolatileInputs {
+    engine
+        .resolve_name_expr_with_id_for_scope(sheet.sheet, sheet.defined_name_scope, name)
+        .filter(|(id, _)| names.insert(id.clone()))
+        .map_or_else(VolatileInputs::default, |(id, named)| {
+            expr_volatility(
+                engine,
+                sheet.for_definition(id.scope()),
+                named,
+                names,
+                &mut CapabilityScope::default(),
+            )
+        })
 }
 
 #[derive(Clone)]

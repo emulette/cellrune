@@ -269,6 +269,37 @@ async function assertRandomSeed() {
   }
 }
 
+async function assertVolatileInputRecalculation() {
+  const workbook = Workbook.create();
+  workbook.setNumber("Sheet1", "A1", 1);
+  workbook.setFormula("Sheet1", "B1", "=TODAY()");
+  workbook.setFormula("Sheet1", "C1", "=RAND()+B1");
+  workbook.setFormula("Sheet1", "D1", "=A1+1");
+  const initial = await workbook.recalculate({ todaySerial: 45000, randomSeed: 1 });
+  assert.equal(initial.mode, "full");
+  for (const [randomSeed, changed] of [[1, ["B1", "C1"]], [2, ["C1"]]]) {
+    const delta = await workbook.recalculate({ todaySerial: 45001, randomSeed });
+    assert.equal(delta.mode, "incremental");
+    assert.equal(delta.reason, "dirty_subset");
+    assert.equal(delta.evaluatedCount, changed.length);
+    assert.deepEqual(delta.changedCells.map((cell) => cell.cell.address), changed);
+  }
+  const forced = await workbook.recalculate({
+    mode: "incremental",
+    todaySerial: 45001,
+    randomSeed: 3,
+  });
+  assert.equal(forced.reason, "incremental_requested");
+  assert.equal(forced.evaluatedCount, 1);
+  const full = await workbook.recalculate({
+    todaySerial: 45001,
+    randomSeed: 3,
+    arithmeticSemantics: "ieee_754",
+  });
+  assert.equal(full.mode, "full");
+  assert.equal(full.reason, "options_changed");
+}
+
 async function assertCapabilityScan() {
   const workbook = Workbook.create();
   workbook.setFormula("Sheet1", "A1", "=SUM(1,2)");
@@ -301,6 +332,7 @@ async function main() {
   await assertPreviewContract();
   await assertExactSerials();
   await assertRandomSeed();
+  await assertVolatileInputRecalculation();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
   const definedNameCorpusPath = path.join(

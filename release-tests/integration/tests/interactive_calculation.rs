@@ -3125,6 +3125,229 @@ fn random_draws_agree_across_full_targeted_incremental_and_preview_calculation()
     }
 }
 
+fn volatile_session() -> WorkbookCalculationSession {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut session = WorkbookCalculationSession::create();
+    let mut changes = vec![
+        WorkbookChange::set_defined_name(defined_name("stamp", "TODAY()+0")),
+        WorkbookChange::set_defined_name(defined_name("clock", "LAMBDA(NOW())")),
+        WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+    ];
+    for (cell, text) in [
+        ("B1", "TODAY()"),
+        ("C1", "NOW()"),
+        ("D1", "RAND()"),
+        ("E1", "B1+1"),
+        ("F1", "D1*2"),
+        ("G1", "A1+1"),
+        ("H1", "stamp"),
+        ("I1", "LET(f,LAMBDA(RAND()),f())"),
+        ("J1", "clock()"),
+        ("K1", "SUM(MAKEARRAY(2,2,LAMBDA(r,c,RAND())))"),
+    ] {
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            address(cell),
+            formula(text),
+        ));
+    }
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("volatile workbook");
+    session
+}
+
+fn volatile_options(today: f64, now: f64, seed: u32) -> CalculationOptions {
+    CalculationOptions::default()
+        .with_today_serial(FiniteNumber::new(today).expect("finite TODAY serial"))
+        .with_now_serial(FiniteNumber::new(now).expect("finite NOW serial"))
+        .with_random_seed(seed)
+}
+
+fn changed_addresses(delta: &cellrune::CalculationDelta) -> Vec<String> {
+    delta
+        .changed_cells()
+        .iter()
+        .map(|cell| cell.cell().address().to_string())
+        .collect()
+}
+
+#[test]
+fn a_volatile_input_change_recalculates_only_the_formulas_that_read_it() {
+    let mut session = volatile_session();
+    let initial = session
+        .recalculate(
+            RecalculationMode::Auto,
+            volatile_options(45_000.0, 45_000.5, 1),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    assert_eq!(initial.mode(), CalculationExecutionMode::Full);
+
+    for (options, expected) in [
+        (
+            volatile_options(45_001.0, 45_000.5, 1),
+            vec!["B1", "E1", "H1"],
+        ),
+        (volatile_options(45_001.0, 45_001.5, 1), vec!["C1", "J1"]),
+        (
+            volatile_options(45_001.0, 45_001.5, 2),
+            vec!["D1", "F1", "I1", "K1"],
+        ),
+    ] {
+        let delta = session
+            .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+            .expect("volatile input recalculation");
+        assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+        assert_eq!(delta.reason(), CalculationDecisionReason::DirtySubset);
+        assert_eq!(delta.dirty_count(), expected.len());
+        assert_eq!(delta.evaluated_count(), expected.len());
+        assert_eq!(delta.parsed_formula_count(), 0);
+        assert_eq!(changed_addresses(&delta), expected);
+        assert_calculations_equal(
+            session.calculation().expect("installed calculation"),
+            &calculate_workbook(session.workbook(), options),
+        );
+    }
+
+    let seed_three = volatile_options(45_001.0, 45_001.5, 3);
+    let forced = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            seed_three,
+            CancellationToken::new(),
+        )
+        .expect("a seed change is incrementally safe");
+    assert_eq!(forced.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(
+        forced.reason(),
+        CalculationDecisionReason::IncrementalRequested
+    );
+    assert_eq!(forced.evaluated_count(), 4);
+
+    let without_seed = CalculationOptions::default()
+        .with_today_serial(FiniteNumber::new(45_001.0).expect("finite TODAY serial"))
+        .with_now_serial(FiniteNumber::new(45_001.5).expect("finite NOW serial"));
+    let removed = session
+        .recalculate(
+            RecalculationMode::Auto,
+            without_seed,
+            CancellationToken::new(),
+        )
+        .expect("removing the seed");
+    assert_eq!(removed.reason(), CalculationDecisionReason::DirtySubset);
+    let installed = session.calculation().expect("installed calculation");
+    assert_calculations_equal(
+        installed,
+        &calculate_workbook(session.workbook(), without_seed),
+    );
+    for (cell, code) in [
+        ("D1", CalculationIssueCode::VolatileInputMissing),
+        ("F1", CalculationIssueCode::BlockedByUpstream),
+    ] {
+        let Some(CalculationCellResult::Unavailable(issue)) = installed.cell(
+            CalculationCellId::new(SheetId::new(1).expect("sheet"), address(cell)),
+        ) else {
+            panic!("{cell} must be unavailable without a seed");
+        };
+        assert_eq!(issue.code(), code, "{cell}");
+    }
+
+    let other_option = seed_three.with_arithmetic_semantics(ArithmeticSemantics::Ieee754);
+    let error = session
+        .prepare_recalculation(
+            RecalculationMode::Incremental,
+            other_option,
+            CancellationToken::new(),
+        )
+        .expect_err("another option change is not incrementally safe");
+    assert_eq!(error.code(), SessionErrorCode::IncrementalUnsafe);
+    let full = session
+        .recalculate(
+            RecalculationMode::Auto,
+            other_option,
+            CancellationToken::new(),
+        )
+        .expect("another option change recalculates in full");
+    assert_eq!(full.mode(), CalculationExecutionMode::Full);
+    assert_eq!(full.reason(), CalculationDecisionReason::OptionsChanged);
+}
+
+#[test]
+fn a_volatile_input_change_without_readers_needs_no_evaluation() {
+    let mut session = chain_session();
+    let today = |serial: f64| {
+        CalculationOptions::default()
+            .with_today_serial(FiniteNumber::new(serial).expect("finite TODAY serial"))
+    };
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            today(1.0),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    for options in [today(2.0), today(2.0).with_random_seed(9)] {
+        let delta = session
+            .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+            .expect("volatile input change");
+        assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+        assert_eq!(delta.reason(), CalculationDecisionReason::NoDirtyFormulas);
+        assert_eq!(delta.evaluated_count(), 0);
+        assert!(delta.changed_cells().is_empty());
+        assert_eq!(
+            session
+                .calculation()
+                .expect("installed calculation")
+                .options(),
+            options
+        );
+    }
+}
+
+#[test]
+fn a_volatile_input_change_under_dynamic_references_recalculates_in_full() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("A2"), number(2.0)),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("OFFSET(A1,RANDBETWEEN(0,1),0)"),
+                ),
+            ]),
+        )
+        .expect("dynamic random workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default().with_random_seed(1),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default().with_random_seed(2),
+            CancellationToken::new(),
+        )
+        .expect("seed change");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+    assert_calculations_equal(
+        session.calculation().expect("installed calculation"),
+        &calculate_workbook(
+            session.workbook(),
+            CalculationOptions::default().with_random_seed(2),
+        ),
+    );
+}
+
 fn chain_session() -> WorkbookCalculationSession {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");

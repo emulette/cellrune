@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::super::eval::CompiledWorkbook;
+use super::super::functions::descriptor::Volatility;
 use super::super::runtime::CellId;
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
@@ -129,6 +130,44 @@ pub(super) fn affected_formula_impact(
         direct: public_direct,
         transitive: public_transitive,
     })
+}
+
+/// Returns the formulas that read a changed volatile input and every formula depending on them.
+pub(super) fn volatile_input_formulas(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    changed: &[Volatility],
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<CalculationCellId>, ()> {
+    let mut charger = ImpactWorkCharger {
+        charged: 0,
+        cancelled,
+    };
+    let mut all = BTreeSet::new();
+    let mut pending = Vec::new();
+    for volatility in changed {
+        for cell in compiled.volatile_formulas(*volatility) {
+            charger.charge()?;
+            if all.insert(*cell) {
+                pending.push(*cell);
+            }
+        }
+    }
+    while let Some(cell) = pending.pop() {
+        for child in compiled.dependents(cell, &mut || charger.charge())? {
+            if all.insert(child) {
+                pending.push(child);
+            }
+        }
+    }
+    let mut public = BTreeSet::new();
+    for cell in all {
+        charger.charge()?;
+        if let Some(cell) = internal_to_public(workbook, cell) {
+            public.insert(cell);
+        }
+    }
+    Ok(public)
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {

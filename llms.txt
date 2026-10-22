@@ -593,7 +593,14 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `session.recalculate(RecalculationMode::Auto, options, token)` returns a
   `CalculationDelta`. `Auto` uses a proven dirty subset and falls back to
   full calculation for formula/name/sheet/options or uncertain dynamic/spill
-  topology. Forced `Incremental` fails closed when unsafe.
+  topology. Forced `Incremental` fails closed when unsafe. When the only
+  options that differ from the installed calculation are the `TODAY()` serial,
+  the `NOW()` serial, or the random seed, the dirty subset is the formulas
+  calling a function that reads a changed input, directly or through defined
+  names and `LAMBDA`, plus their dependents: `Auto` reports `DirtySubset`,
+  `NoDirtyFormulas` when no formula reads the input, or a full
+  `DynamicTopology` pass under uncertain dynamic topology, and forced
+  `Incremental` proceeds. Any other option or limit change stays full.
 - For work outside a session lock, call `prepare_recalculation`, run the
   returned `PreparedCalculation`, then call `install`. `CancellationToken`
   provides cooperative cancellation. Running a prepared calculation returns

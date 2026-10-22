@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::{
-    CompiledWorkbook, Engine, EvalContext, EvaluationBudget, collect_column_extents,
-    collect_workbook_layout, public_to_internal,
+    CompiledWorkbook, Engine, EvalContext, EvaluationBudget, VolatileFormulas,
+    collect_column_extents, collect_workbook_layout, public_to_internal,
 };
 use crate::calculation::graph::{DependencyGraph, schedule_cancellable};
 use crate::calculation::parser::parse_formula_with_limits;
+use crate::calculation::pipeline::formula_volatility;
 use crate::calculation::runtime::CellId;
 use crate::calculation::value::{ErrorKind, Value};
 use crate::calculation::{
@@ -123,6 +124,7 @@ impl<'workbook> Engine<'workbook> {
         let dependency_targets = self.dependency_targets_cancellable(cancelled)?;
         let table_topologies = super::dependency::table_topologies(&dependency_targets, cancelled)?;
         let incremental_safe = !self.has_unstable_incremental_dependencies(cancelled)?;
+        let volatile_formulas = self.volatile_formulas(cancelled)?;
         let schedule = schedule_cancellable(&self.dependencies, cancelled)?;
         let topological_rank = schedule
             .order
@@ -159,7 +161,20 @@ impl<'workbook> Engine<'workbook> {
             topological_rank,
             limits: self.options.limits(),
             incremental_safe,
+            volatile_formulas: Arc::new(volatile_formulas),
         })
+    }
+
+    /// Classifies every parsed formula by the volatile calculation inputs it reads.
+    fn volatile_formulas(&self, cancelled: &impl Fn() -> bool) -> Result<VolatileFormulas, ()> {
+        let mut formulas = VolatileFormulas::default();
+        for (cell, parsed) in self.asts.iter() {
+            if cancelled() {
+                return Err(());
+            }
+            formulas.record(*cell, formula_volatility(self, cell.0, parsed.root()));
+        }
+        Ok(formulas)
     }
 
     pub(in crate::calculation) fn evaluate_compiled(

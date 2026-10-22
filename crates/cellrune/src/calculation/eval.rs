@@ -6,9 +6,11 @@ use super::ast::Expr;
 use super::convert::value_from_cell;
 use super::decimal::DecimalTrace;
 use super::functions::LookupIndexCache;
+use super::functions::descriptor::Volatility;
 use super::graph::{DependencyGraph, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
+use super::pipeline::VolatileInputs;
 use super::random::{RandomDraws, RandomPath};
 use super::runtime::{CellId, Rect};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
@@ -117,6 +119,39 @@ pub(super) struct CompiledWorkbook {
     topological_rank: BTreeMap<CellId, usize>,
     limits: CalculationLimits,
     incremental_safe: bool,
+    volatile_formulas: Arc<VolatileFormulas>,
+}
+
+/// Formula cells that call a function reading each volatile calculation input, directly or
+/// through defined names and LAMBDA bodies.
+#[derive(Debug, Default)]
+pub(super) struct VolatileFormulas {
+    today: Vec<CellId>,
+    now: Vec<CellId>,
+    random: Vec<CellId>,
+}
+
+impl VolatileFormulas {
+    fn record(&mut self, cell: CellId, read: VolatileInputs) {
+        for (volatility, cells) in [
+            (Volatility::Today, &mut self.today),
+            (Volatility::Now, &mut self.now),
+            (Volatility::Random, &mut self.random),
+        ] {
+            if read.contains(volatility) {
+                cells.push(cell);
+            }
+        }
+    }
+
+    fn reading(&self, volatility: Volatility) -> &[CellId] {
+        match volatility {
+            Volatility::Today => &self.today,
+            Volatility::Now => &self.now,
+            Volatility::Random => &self.random,
+            Volatility::None => &[],
+        }
+    }
 }
 
 impl CompiledWorkbook {
@@ -180,6 +215,11 @@ impl CompiledWorkbook {
 
     pub(super) fn topological_rank(&self, cell: CellId) -> Option<usize> {
         self.topological_rank.get(&cell).copied()
+    }
+
+    /// Returns the formula cells whose own formula reads `volatility`.
+    pub(super) fn volatile_formulas(&self, volatility: Volatility) -> &[CellId] {
+        self.volatile_formulas.reading(volatility)
     }
 }
 
