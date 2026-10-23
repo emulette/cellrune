@@ -13,6 +13,7 @@ from cellrune import (
     LocaleProfile,
     ReadLimitOptions,
     Workbook,
+    format_display_text,
     function_catalog,
 )
 from function_usage import assert_function_usage
@@ -242,6 +243,30 @@ def assert_locale_profile() -> None:
             "interop.calculation.locale_profile_invalid",
             lambda invalid=invalid: calculate_with_invalid_locale(workbook, invalid),
         )
+
+
+def assert_display_format() -> None:
+    assert format_display_text({"kind": "number", "value": 1234.567}, "#,##0.00") == "1,234.57"
+    assert (
+        format_display_text({"kind": "number", "value": 0.0}, "yyyy-mm-dd", date_system="excel_1904")
+        == "1904-01-01"
+    )
+    assert format_display_text({"kind": "text", "value": "abc"}, '"name: "@') == "name: abc"
+    assert format_display_text({"kind": "logical", "value": True}, "0") == "TRUE"
+    assert_error(
+        "display_format.unsupported",
+        lambda: format_display_text(
+            {"kind": "number", "value": 46230.0}, "mmmm", locale_profile={"locale": "ko-KR"}
+        ),
+    )
+    assert_error(
+        "interop.display_format.request_invalid",
+        lambda: format_display_text(
+            {"kind": "number", "value": 1.0},
+            "0",
+            date_system=cast(Literal["excel_1900"], "excel_1901"),
+        ),
+    )
 
 
 def assert_exact_numbers() -> None:
@@ -494,6 +519,7 @@ def main() -> None:
     assert_object_payloads()
     assert_random_seed()
     assert_locale_profile()
+    assert_display_format()
     assert_exact_numbers()
     assert_volatile_input_recalculation()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))

@@ -22,6 +22,7 @@ import {
   type WorkbookChangeV2,
   type WriteReport,
   Workbook,
+  formatDisplayText,
   functionCatalog,
 } from "@cellrune/node";
 
@@ -69,6 +70,11 @@ async function check(): Promise<void> {
   });
   const korean: LocaleProfile = { locale: "ko-KR", displayLanguage: "en-US" };
   await workbook.calculate({ localeProfile: korean });
+  const shown: string = formatDisplayText({ kind: "number", value: 1 }, "0.00", {
+    dateSystem: "excel_1904",
+    localeProfile: korean,
+  });
+  shown.toUpperCase();
   // @ts-expect-error Only the built-in locales are accepted.
   await workbook.calculate({ localeProfile: { locale: "ja-JP" } });
   const changes: readonly WorkbookChange[] = [

@@ -62,6 +62,42 @@ pub struct LocaleProfileDto {
     pub display_language: Option<LocaleDto>,
 }
 
+/// A workbook date system, as `WorkbookSummaryDto::date_system` writes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub enum DateSystemDto {
+    /// The 1900 date system, with serial 60 as 1900-02-29.
+    #[default]
+    #[serde(rename = "excel_1900")]
+    Excel1900,
+    /// The 1904 date system.
+    #[serde(rename = "excel_1904")]
+    Excel1904,
+}
+
+/// A value and number-format code to render as the text a cell shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayFormatRequestDto {
+    /// The cell value.
+    pub value: WritableCellValueDto,
+    /// The number-format code, such as `#,##0.00` or `yyyy-mm-dd`.
+    pub format_code: String,
+    /// The workbook date system; omitted selects `excel_1900`.
+    #[serde(default)]
+    pub date_system: DateSystemDto,
+    /// Locale conventions for names; omitted selects en-US.
+    #[serde(default)]
+    pub locale_profile: Option<LocaleProfileDto>,
+}
+
+/// The text a cell shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayFormatResultDto {
+    /// Display text.
+    pub text: String,
+}
+
 /// Deterministic inputs supplied to one calculation.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

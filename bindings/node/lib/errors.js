@@ -23,6 +23,7 @@ const INPUT_DETAIL = Object.freeze({
   TARGETS_ARRAY: "targets must be an array of cell or range targets",
   PREVIEW_SECTION_INVALID: "section is not a transaction detail section",
   PREVIEW_CURSOR_INVALID: "cursor must be a preview cursor object",
+  DISPLAY_VALUE_INVALID: "value must be a cell value object",
 });
 
 class CellRuneError extends Error {

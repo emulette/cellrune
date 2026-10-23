@@ -203,6 +203,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "format_display_text",
                 "workbook_apply_changes",
                 "workbook_apply_changes_v2",
                 "workbook_calculate_targets",

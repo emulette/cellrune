@@ -21,6 +21,7 @@ from cellrune import (
     WorkbookChange,
     WorkbookChangeV2,
     WorkbookTransactionReceipt,
+    format_display_text,
     WriteReport,
     function_catalog,
 )
@@ -108,6 +109,10 @@ def check() -> None:
     workbook.calculate(calculation_limits=limits)
     korean: LocaleProfile = {"locale": "ko-KR", "display_language": "en-US"}
     workbook.calculate(locale_profile=korean)
+    shown: str = format_display_text(
+        {"kind": "number", "value": 1.5}, "0.00", date_system="excel_1904", locale_profile=korean
+    )
+    shown.upper()
     read_limits: ReadLimitOptions = {"max_entry_uncompressed_bytes": 1 << 27}
     reopened: Workbook = Workbook.from_bytes(output, read_limits=read_limits)
     edited: bytes = reopened.edits_to_bytes()

@@ -2,6 +2,7 @@ from ._native import (
     SCHEMA_VERSION as SCHEMA_VERSION,
     CellRuneError as CellRuneError,
     Workbook as Workbook,
+    format_display_text as format_display_text,
     function_catalog as function_catalog,
 )
 from ._types import (
@@ -146,6 +147,7 @@ __all__ = [
     "FunctionCatalogEntry",
     "FunctionCatalogReport",
     "function_catalog",
+    "format_display_text",
     "LogicalValue",
     "MaterializedResultOrigin",
     "NumberValue",

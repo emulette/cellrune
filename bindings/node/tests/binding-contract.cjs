@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { CellRuneError, Workbook, functionCatalog } = require("..");
+const { CellRuneError, Workbook, formatDisplayText, functionCatalog } = require("..");
 
 function assertCatalogContract() {
   const catalog = functionCatalog();
@@ -360,6 +360,37 @@ async function assertLocaleProfile() {
   }
 }
 
+function assertDisplayFormat() {
+  assert.equal(formatDisplayText({ kind: "number", value: 1234.567 }, "#,##0.00"), "1,234.57");
+  assert.equal(
+    formatDisplayText({ kind: "number", value: 0 }, "yyyy-mm-dd", { dateSystem: "excel_1904" }),
+    "1904-01-01",
+  );
+  assert.equal(formatDisplayText({ kind: "text", value: "abc" }, "\"name: \"@"), "name: abc");
+  assert.equal(formatDisplayText({ kind: "logical", value: true }, "0"), "TRUE");
+  for (const [operation, code] of [
+    [
+      () => formatDisplayText({ kind: "number", value: 46230 }, "mmmm", {
+        localeProfile: { locale: "ko-KR" },
+      }),
+      "display_format.unsupported",
+    ],
+    [
+      () => formatDisplayText({ kind: "number", value: 1 }, "0", { dateSystem: "excel_1901" }),
+      "interop.display_format.request_invalid",
+    ],
+    [() => formatDisplayText(1, "0"), "interop.input.invalid"],
+    [() => formatDisplayText({ kind: "number", value: 1 }, "0", { width: 9 }), "interop.input.invalid"],
+  ]) {
+    assert.throws(operation, (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, code);
+      assert.equal(error.kind, "input");
+      return true;
+    });
+  }
+}
+
 async function assertVolatileInputRecalculation() {
   const workbook = Workbook.create();
   workbook.setNumber("Sheet1", "A1", 1);
@@ -468,6 +499,7 @@ async function main() {
   await assertExactNumbers();
   await assertRandomSeed();
   await assertLocaleProfile();
+  assertDisplayFormat();
   await assertVolatileInputRecalculation();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));

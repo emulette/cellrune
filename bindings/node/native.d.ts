@@ -47,6 +47,9 @@ export declare class NativeWorkbook {
 
 export declare function createWorkbook(): NativeWorkbook
 
+/** Returns the text a cell shows for a display-format request serialized by the JavaScript wrapper. */
+export declare function formatDisplayText(requestJson: string): string
+
 export declare function functionCatalog(): NativeFunctionCatalogReport
 
 export interface NativeCalculationDelta {

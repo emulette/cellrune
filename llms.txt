@@ -95,13 +95,13 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 18 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 19 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
-`workbook_preview_changes_page`, `workbook_commit_preview`, and
-`workbook_discard_preview`. `workbook_save_edits_as` is the edits-only write of
+`workbook_preview_changes_page`, `workbook_commit_preview`,
+`workbook_discard_preview`, and the sessionless `format_display_text`. `workbook_save_edits_as` is the edits-only write of
 `write_xlsx_draft_edits_bytes` for a session opened from a file. MCP clients
 always use the default read and calculation limits.
 Read-only JSON resources expose the versioned function catalog at
@@ -1119,6 +1119,24 @@ than guessing a name from a different XLSX crate (`calamine`,
   `PIVOTBY` total label: `Total` or `합계`, and `Grand Total` over several
   levels in English, which is unsupported in Korean. Changing the profile is
   a calculation-options change, so a session recalculates fully.
+- `format_display_text(&CellValue, format_code: &str, DateSystem, LocaleProfile)
+  -> Result<String, DisplayFormatError>` returns the text a cell shows. Numbers
+  go through the `TEXT` engine with the profile's names; text goes through the
+  code's text section (the fourth section, or a lone section holding `@`) and
+  is otherwise unchanged; logical and error values show `TRUE`, `FALSE`, or the
+  error; a blank shows nothing. `General` is not shortened to a column width,
+  and a `*` fill is unsupported because the width is not an input.
+  `DisplayFormatError::Unsupported` (`.code()` `display_format.unsupported`)
+  covers every construct `TEXT` leaves unsupported and numbers past 2^53
+  rounded units. Interop `format_display_text(DisplayFormatRequestDto { value,
+  format_code, date_system, locale_profile }) -> DisplayFormatResultDto { text }`
+  takes a `WritableCellValueDto` and `DateSystemDto` (`"excel_1900"`, the
+  default, or `"excel_1904"`); Python `format_display_text(value, format_code,
+  *, date_system=..., locale_profile=...) -> str` and Node.js
+  `formatDisplayText(value, formatCode, { dateSystem, localeProfile }) -> string`
+  take the `{kind, value}` cell values `read_range` returns, and MCP has the
+  sessionless `format_display_text` tool. A request bindings cannot read is
+  `interop.display_format.request_invalid`.
 - **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
   than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
   applies Excel's narrow correction only when the exact decimal/rational trace

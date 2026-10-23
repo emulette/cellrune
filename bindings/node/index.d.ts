@@ -17,6 +17,23 @@ export interface FunctionCatalogReport {
 
 export function functionCatalog(): FunctionCatalogReport;
 
+export interface DisplayFormatOptions {
+  readonly dateSystem?: "excel_1900" | "excel_1904";
+  readonly localeProfile?: LocaleProfile;
+}
+
+/**
+ * Returns the text a cell holding `value` shows with the number-format code `formatCode`, using the
+ * engine behind `TEXT`. Text goes through the code's text section, logical and error values show
+ * as they are, and `General` is not shortened to a column width. Throws `display_format.unsupported`
+ * for a construct whose Excel display has not been established, such as a `*` fill.
+ */
+export function formatDisplayText(
+  value: Exclude<CellValue, { readonly kind: "unsupported" }>,
+  formatCode: string,
+  options?: DisplayFormatOptions,
+): string;
+
 export type CellRuneErrorKind =
   | "input"
   | "validation"
@@ -829,6 +846,7 @@ declare const packageExports: {
   readonly SCHEMA_VERSION: typeof SCHEMA_VERSION;
   readonly CellRuneError: typeof CellRuneError;
   readonly Workbook: typeof Workbook;
+  readonly formatDisplayText: typeof formatDisplayText;
   readonly functionCatalog: typeof functionCatalog;
 };
 

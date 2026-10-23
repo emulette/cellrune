@@ -2,10 +2,10 @@ use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationLimitOptionsDto, CalculationOptionsDto,
     CancellationToken as WorkbookCancellationToken, CapabilityPageDto, CompletedRecalculation,
-    EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto,
-    FunctionUsageReportDto, InteropError, LocaleProfileDto, PreviewChangesDto, RangePageDto,
-    RangeRequestDto, TransactionImpactPageDto, WorkbookSession, WorkbookTransactionReceiptDto,
-    WriteOptionsDto,
+    DisplayFormatRequestDto, DisplayFormatResultDto, EditReceiptDto, EditReceiptV2Dto,
+    EditWriteOptionsDto, FinancialSolverSemanticsDto, FunctionUsageReportDto, InteropError,
+    LocaleProfileDto, PreviewChangesDto, RangePageDto, RangeRequestDto, TransactionImpactPageDto,
+    WorkbookSession, WorkbookTransactionReceiptDto, WriteOptionsDto,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool, tool_router};
@@ -305,6 +305,33 @@ expose one tool per spreadsheet function.",
             .map_err(worker_error)?;
         self.sessions.touch(&args.session_id)?;
         self.bounded_json(report)
+    }
+
+    /// Render the text a cell shows for a value and a number-format code.
+    #[tool(
+        name = "format_display_text",
+        input_schema = crate::schema::mcp_schema::<DisplayFormatRequestDto>(),
+        output_schema = crate::schema::mcp_schema::<DisplayFormatResultDto>(),
+        description = "Return the text a cell holding value shows with the Excel number-format code \
+format_code, using the engine behind TEXT: sections, conditions, dates and times in the given \
+date_system (excel_1900 or excel_1904), elapsed time, scientific notation, and fractions. Text \
+goes through the code's text section, and General is not shortened to a column width. A \
+construct whose Excel display has not been established, such as a * fill, fails with \
+display_format.unsupported. No workbook session is needed.",
+        annotations(
+            title = "Render number-format display text",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn format_display_text(
+        &self,
+        Parameters(args): Parameters<DisplayFormatRequestDto>,
+    ) -> Result<Json<DisplayFormatResultDto>, McpError> {
+        let result = cellrune_interop::format_display_text(args)?;
+        self.bounded_json(result)
     }
 
     /// Scan formula support without executing formulas.

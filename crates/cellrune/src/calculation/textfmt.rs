@@ -36,6 +36,36 @@ pub(crate) fn format_number(
     render_number_section(&chosen.section.tokens, chosen, context)
 }
 
+/// Formats text with `format`: the fourth section, or a lone section holding `@`, places the text
+/// at each `@`; a code without a text section shows the text unchanged.
+pub(crate) fn format_text(text: &str, format: &str) -> Result<String, ErrorKind> {
+    let sections = lexer::lex(format)?;
+    let holds_text = |section: &RawSection| {
+        section
+            .tokens
+            .iter()
+            .any(|token| matches!(token, Token::TextValue))
+    };
+    // How a conditional code formats text has not been measured.
+    if sections.iter().any(|section| section.condition.is_some()) {
+        return Err(ErrorKind::Unsupported);
+    }
+    let section = match sections.as_slice() {
+        [.., text_section] if sections.len() == 4 => text_section,
+        [only] if holds_text(only) => only,
+        _ if sections.iter().any(holds_text) => return Err(ErrorKind::Unsupported),
+        _ => return Ok(text.to_owned()),
+    };
+    let mut output = String::new();
+    for token in &section.tokens {
+        match token {
+            Token::TextValue => output.push_str(text),
+            _ => output.push_str(&literal_text(token)?),
+        }
+    }
+    Ok(output)
+}
+
 /// The section a number selected and the value that section renders.
 #[derive(Debug, Clone, Copy)]
 struct ChosenSection<'a> {

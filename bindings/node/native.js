@@ -780,6 +780,7 @@ module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __n
 module.exports = nativeBinding
 module.exports.NativeWorkbook = nativeBinding.NativeWorkbook
 module.exports.createWorkbook = nativeBinding.createWorkbook
+module.exports.formatDisplayText = nativeBinding.formatDisplayText
 module.exports.functionCatalog = nativeBinding.functionCatalog
 module.exports.openWorkbookBytes = nativeBinding.openWorkbookBytes
 module.exports.openWorkbookPath = nativeBinding.openWorkbookPath

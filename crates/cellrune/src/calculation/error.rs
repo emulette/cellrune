@@ -30,6 +30,8 @@ pub(super) const MESSAGE_VOLATILE_INPUT_MISSING: &str =
 pub(super) const MESSAGE_CIRCULAR_REFERENCE: &str = "formula participates in a circular reference";
 pub(super) const MESSAGE_BLOCKED_BY_UPSTREAM: &str =
     "formula depends on a cell that could not be calculated";
+pub(super) const MESSAGE_DISPLAY_FORMAT_UNSUPPORTED: &str =
+    "number format code uses a construct whose Excel display is not established";
 
 pub(crate) const ERROR_PARSE_INVALID_STRUCTURED_REFERENCE: &str = "invalid structured reference";
 pub(crate) const ERROR_PARSE_INVALID_EXTERNAL_REFERENCE: &str =

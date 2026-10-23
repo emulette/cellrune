@@ -16,6 +16,7 @@ mod convert;
 mod criteria;
 mod decimal;
 mod defined_name_analysis;
+mod display_format;
 mod error;
 mod eval;
 mod formula_rebase;
@@ -66,6 +67,7 @@ pub use defined_name_analysis::{
     DefinedNameUnsupportedReason, analyze_defined_name, analyze_defined_name_cancellable,
     analyze_defined_name_with_options,
 };
+pub use display_format::{DisplayFormatError, format_display_text};
 pub use limits::{CalculationLimitKind, CalculationLimits, CalculationOptionsError};
 pub use locale::{Locale, LocaleProfile};
 pub use session::{

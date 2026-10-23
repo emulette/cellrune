@@ -7,6 +7,7 @@ from ._types import (
     CalculationLimitOptions,
     CalculationTarget,
     LocaleProfile,
+    CellValue,
     TargetCalculationLimitOptions,
     TargetCalculationResult,
     CalculationDelta,
@@ -35,6 +36,13 @@ from ._types import (
 SCHEMA_VERSION: int
 
 def function_catalog() -> FunctionCatalogReport: ...
+def format_display_text(
+    value: CellValue,
+    format_code: str,
+    *,
+    date_system: Literal["excel_1900", "excel_1904"] = "excel_1900",
+    locale_profile: LocaleProfile | None = None,
+) -> str: ...
 
 class CellRuneError(Exception):
     code: str

@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 18);
+    assert_eq!(tools.len(), 19);
     assert!(
         tools
             .iter()
@@ -1768,6 +1768,42 @@ fn input_paths_outside_every_root_are_rejected_regardless_of_existence() {
     let parent = root.path.join("..").join("missing.xlsx");
     let error = failed_tool(mcp.call_tool("workbook_open", json!({"path": parent})));
     assert_eq!(error["code"], "mcp.path.invalid");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn display_text_is_a_stateless_stdio_tool() {
+    let root = TestDirectory::new("display-text");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let shown = successful_tool(mcp.call_tool(
+        "format_display_text",
+        json!({
+            "value": {"kind": "number", "value": 46230.5},
+            "format_code": "dddd, mmmm d, yyyy h:mm AM/PM",
+        }),
+    ));
+    assert_eq!(shown["text"], "Monday, July 27, 2026 12:00 PM");
+    let epoch = successful_tool(mcp.call_tool(
+        "format_display_text",
+        json!({
+            "value": {"kind": "number", "value": 0.0},
+            "format_code": "yyyy-mm-dd",
+            "date_system": "excel_1904",
+        }),
+    ));
+    assert_eq!(epoch["text"], "1904-01-01");
+    let unsupported = failed_tool(mcp.call_tool(
+        "format_display_text",
+        json!({
+            "value": {"kind": "number", "value": 46230.0},
+            "format_code": "mmmm",
+            "locale_profile": {"locale": "ko-KR"},
+        }),
+    ));
+    assert_eq!(unsupported["code"], "display_format.unsupported");
 
     let (status, _, _) = mcp.finish();
     assert!(status.success());

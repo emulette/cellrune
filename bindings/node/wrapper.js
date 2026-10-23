@@ -529,9 +529,28 @@ function functionCatalog() {
   return normalizeFunctionCatalog(withSyncErrors(() => native.functionCatalog()));
 }
 
+function formatDisplayText(value, formatCode, options = {}) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw inputError(INPUT_DETAIL.DISPLAY_VALUE_INVALID);
+  }
+  requireString(formatCode, "formatCode");
+  requireOptions(options);
+  requireOptionKeys(options, ["dateSystem", "localeProfile"]);
+  requireOptionalString(options.dateSystem, "dateSystem");
+  requireOptionalLocaleProfile(options.localeProfile, "localeProfile");
+  const request = {
+    value,
+    format_code: formatCode,
+    date_system: options.dateSystem ?? "excel_1900",
+    locale_profile: localeProfileWire(options.localeProfile),
+  };
+  return withSyncErrors(() => native.formatDisplayText(JSON.stringify(request)));
+}
+
 module.exports = {
   SCHEMA_VERSION: native.schemaVersion(),
   CellRuneError,
   Workbook,
+  formatDisplayText,
   functionCatalog,
 };

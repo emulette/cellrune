@@ -1,6 +1,7 @@
 //! Stateful workbook facade and cohesive transport-service operations.
 
 mod calculation;
+mod display;
 mod edit;
 mod preview;
 mod query;
@@ -21,6 +22,7 @@ use crate::convert::{cell_reference, read_limits};
 use crate::{CellReferenceDto, InteropError, ReadLimitOptionsDto};
 
 pub use calculation::{CompletedRecalculation, PreparedRecalculation};
+pub use display::format_display_text;
 pub use edit::{PreparedChanges, PreparedChangesV2};
 pub use preview::{
     CompletedPreview, DEFAULT_PREVIEW_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedPreview,

@@ -38,6 +38,7 @@ const MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID: &str =
     "financial solver semantics must be excel_iteration_budget or extended_search";
 const MESSAGE_LOCALE_PROFILE_INVALID: &str =
     "locale profile must be an object whose locale and display_language are en-US or ko-KR";
+const MESSAGE_DISPLAY_FORMAT_REQUEST_INVALID: &str = "display format request is invalid";
 const MESSAGE_NUMBER_INVALID: &str =
     "number must be an integer or floating-point value; booleans are not accepted";
 const MESSAGE_ARCHIVE_LIMIT_INVALID: &str = "archive byte limit must be greater than zero";
@@ -281,6 +282,19 @@ impl InteropError {
         )
     }
 
+    /// Creates the stable error for a display-format request a binding could not read.
+    pub fn invalid_display_format_request(detail: String) -> Self {
+        Self::new(
+            InteropErrorKind::Input,
+            "interop.display_format.request_invalid",
+            MESSAGE_DISPLAY_FORMAT_REQUEST_INVALID,
+            ErrorDetails {
+                detail: Some(detail),
+                ..ErrorDetails::default()
+            },
+        )
+    }
+
     /// Creates the stable invalid locale-profile error used by typed bindings.
     pub fn invalid_locale_profile() -> Self {
         Self::input(
@@ -412,6 +426,21 @@ impl fmt::Display for InteropError {
 }
 
 impl Error for InteropError {}
+
+impl From<cellrune::DisplayFormatError> for InteropError {
+    fn from(error: cellrune::DisplayFormatError) -> Self {
+        let code = error.code();
+        Self::new(
+            InteropErrorKind::Input,
+            code,
+            error.to_string(),
+            ErrorDetails {
+                source_code: Some(code.to_owned()),
+                ..ErrorDetails::default()
+            },
+        )
+    }
+}
 
 impl From<ValidationError> for InteropError {
     fn from(error: ValidationError) -> Self {

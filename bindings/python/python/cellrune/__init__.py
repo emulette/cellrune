@@ -1,6 +1,12 @@
 """Typed Python bindings for CellRune's headless workbook engine."""
 
-from ._native import SCHEMA_VERSION, CellRuneError, Workbook, function_catalog
+from ._native import (
+    SCHEMA_VERSION,
+    CellRuneError,
+    Workbook,
+    format_display_text,
+    function_catalog,
+)
 from ._types import (
     CalculationLimitOptions,
     CalculationTarget,
@@ -148,6 +154,7 @@ __all__ = [
     "FunctionCatalogEntry",
     "FunctionCatalogReport",
     "function_catalog",
+    "format_display_text",
     "LogicalValue",
     "MaterializedResultOrigin",
     "NumberValue",

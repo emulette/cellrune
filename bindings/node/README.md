@@ -120,6 +120,8 @@ in won and counts Hangul as two bytes in `LENB`), and explicit
 `arithmeticSemantics` / `financialSolverSemantics` compatibility policies. The latter accept
 `"ieee_754"` and `"extended_search"` when a caller needs the calculation behavior shipped through
 0.1.2; omitted fields select the Excel-compatible defaults.
+`formatDisplayText(value, formatCode, { dateSystem, localeProfile })` returns the text a cell
+shows for a `{ kind, value }` cell value and an Excel number-format code.
 The 0.1.14 calculation surface adds `CONVERT`, the four `BESSEL*` functions, and fourteen
 `COMPLEX`/`IM*` functions. They return scalar numbers or Excel-compatible complex text and expose
 the same catalog and calculation contract as Rust and Python.

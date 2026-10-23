@@ -6,6 +6,7 @@ mod targeted;
 mod task;
 mod workbook;
 
+use cellrune_interop::InteropError;
 use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
 
@@ -20,6 +21,19 @@ pub fn schema_version() -> u32 {
 #[napi(catch_unwind)]
 pub fn function_catalog() -> conversion::NativeFunctionCatalogReport {
     conversion::function_catalog(cellrune_interop::function_catalog())
+}
+
+/// Returns the text a cell shows for a display-format request serialized by the JavaScript wrapper.
+#[napi(catch_unwind)]
+pub fn format_display_text(request_json: String) -> napi::Result<String> {
+    let request = serde_json::from_str(&request_json).map_err(|error| {
+        error::napi_error(InteropError::invalid_display_format_request(
+            error.to_string(),
+        ))
+    })?;
+    cellrune_interop::format_display_text(request)
+        .map(|result| result.text)
+        .map_err(error::napi_error)
 }
 
 #[napi(catch_unwind)]

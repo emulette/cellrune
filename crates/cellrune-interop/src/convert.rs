@@ -60,7 +60,7 @@ pub(crate) fn calculation_options(
     Ok(converted.with_limits(calculation_limits(options.calculation_limits)?))
 }
 
-fn locale_profile(profile: LocaleProfileDto) -> LocaleProfile {
+pub(crate) fn locale_profile(profile: LocaleProfileDto) -> LocaleProfile {
     let locale = locale(profile.locale);
     LocaleProfile::new(locale)
         .with_display_language(profile.display_language.map_or(locale, self::locale))

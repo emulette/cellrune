@@ -375,6 +375,7 @@ reaches every surface:
 | Save edits without calculating | yes | yes | yes | yes |
 | Cell number formats, sheet autoFilter ranges, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
+| Locale profile and number-format display text | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
 | Defined-name inspection | yes | yes | yes | no |
 | Sheet autoFilter and table column widening edits | yes | no | no | no |
@@ -390,6 +391,9 @@ Node.js `randomSeed` on calculate, recalculate, targeted calculation, and previe
 The locale profile travels the same way: Python `locale_profile={"locale": "ko-KR"}` and Node.js
 `localeProfile: { locale: "ko-KR" }`, each with an optional display language, and MCP
 `locale_profile` on the same tools; `en-US` and `ko-KR` are the built-in locales.
+`format_display_text` (Rust and Python), `formatDisplayText` (Node.js), and the MCP
+`format_display_text` tool return the text a cell shows for a value and a number-format code, so
+an application that draws its own grid does not rebuild Excel's format engine.
 Python `inspect_defined_name` and Node.js `inspectDefinedName` expose the typed defined-name query.
 The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separate
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
@@ -503,11 +507,12 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 18 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
+Its 19 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
 `workbook_read_range`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
-`workbook_preview_changes_page`, `workbook_commit_preview`, and `workbook_discard_preview`.
+`workbook_preview_changes_page`, `workbook_commit_preview`, `workbook_discard_preview`, and the
+sessionless `format_display_text`.
 The v2 edit tool adds stable-ID table rename, table-column rename, and table-row resize while
 retaining the v1 edit shapes. The four preview tools are the retained immutable transaction
 workflow: preview returns a summary and ID, page returns a byte-bounded core-cursor page, and
