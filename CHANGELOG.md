@@ -64,6 +64,20 @@ inventories, and measurements belong in the linked documentation rather than in 
   reach `max_dependency_edges` still compiles the workbook again and reports `TopologyChanged`.
   Forced `Incremental` and `Full` recalculation and transactions behave as before, and results are
   unchanged.
+- A full calculation with references known only from values, such as `OFFSET` or `INDIRECT` with
+  calculated arguments or a range ending in `INDEX`, evaluates the workbook once instead of twice
+  when that pass read every formula after calculating it and the resolved dependencies neither
+  limit nor cycle other formulas; workbooks with a dynamic array formula without a declared spill
+  range still take two passes. The function iterations and reference cells a calculation reports
+  are then those of one pass.
+
+### Fixed
+
+- A dynamic reference whose position comes from another dynamic reference, such as an `OFFSET`
+  row read through a second `OFFSET`, calculates instead of reporting
+  `UnsupportedExpression`: a full calculation repeats while a pass reads a formula before
+  calculating it, ordering each pass by the references the previous pass resolved, for at most
+  eight passes.
 
 ### Fixed
 

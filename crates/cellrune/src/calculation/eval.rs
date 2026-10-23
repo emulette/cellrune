@@ -1068,6 +1068,9 @@ pub struct Engine<'workbook> {
     target_pending: Option<std::cell::RefCell<BTreeSet<CellId>>>,
     lookup_indexes: RefCell<LookupIndexCache>,
     formula_columns: std::cell::OnceCell<Vec<FormulaColumns>>,
+    /// Whether a cell read during this pass found a formula that the pass calculates later, which
+    /// means the dependency graph missed an edge the values now resolve.
+    read_formula_before_calculation: Cell<bool>,
     function_iterations: u64,
     reference_cells: u64,
 }
@@ -1108,6 +1111,7 @@ impl<'workbook> Engine<'workbook> {
                 && !self.parse_failures.contains_key(&owner)
             {
                 self.record_target_dependency(owner);
+                self.record_formula_read_before_calculation(owner);
             }
             if let Some(value) = self.results.get(&owner) {
                 return ValueSource::Calculated(value);
@@ -1131,8 +1135,15 @@ impl<'workbook> Engine<'workbook> {
             CellContent::Literal(value) => ValueSource::Literal(value),
             CellContent::Formula(_) => {
                 self.record_target_dependency(cell);
+                self.record_formula_read_before_calculation(cell);
                 ValueSource::Error(ErrorKind::Unsupported)
             }
+        }
+    }
+
+    fn record_formula_read_before_calculation(&self, cell: CellId) {
+        if self.asts.contains_key(&cell) {
+            self.read_formula_before_calculation.set(true);
         }
     }
 

@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::dependency_areas::AreaNodes;
+
+/// Passes a full calculation makes at most when references known only from values form chains.
+const MAX_DYNAMIC_REFERENCE_PASSES: u32 = 8;
 use super::{
     CompiledWorkbook, Engine, EvalContext, EvaluationBudget, VolatileFormulas,
     collect_column_extents, collect_workbook_layout, public_to_internal,
@@ -69,6 +72,7 @@ impl<'workbook> Engine<'workbook> {
             target_pending: None,
             lookup_indexes: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
+            read_formula_before_calculation: std::cell::Cell::new(false),
         };
         if cancelled() {
             return Err(());
@@ -102,13 +106,42 @@ impl<'workbook> Engine<'workbook> {
         let mut collected = engine.dependencies_cancellable(cancelled)?;
         engine.dependency_limit_cells = Arc::new(collected.limited);
         if engine.has_unresolved_dynamic_dependencies(cancelled)? {
-            if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
-                return Err(());
+            // References known only from values: each pass orders formulas by the graph the
+            // previous pass's values resolve, until a pass reads every formula after calculating
+            // it.
+            let undeclared_dynamic_arrays = engine.has_undeclared_dynamic_arrays(cancelled)?;
+            let mut passes = 0;
+            loop {
+                engine.read_formula_before_calculation.set(false);
+                if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
+                    return Err(());
+                }
+                passes += 1;
+                let ordered = !engine.read_formula_before_calculation.get();
+                if passes > 1 && (ordered || passes == MAX_DYNAMIC_REFERENCE_PASSES) {
+                    break;
+                }
+                let next = engine.dependencies_cancellable(cancelled)?;
+                // A first pass that read every formula in order already holds the results the
+                // resolved graph gives, unless that graph limits or cycles other formulas, or an
+                // undeclared spill, which each pass discovers again, could collide differently.
+                let settled = passes == 1
+                    && ordered
+                    && !undeclared_dynamic_arrays
+                    && next.limited == *engine.dependency_limit_cells
+                    && {
+                        let schedule = schedule_cancellable(&next.graph, cancelled)?;
+                        schedule.cycle_cells == *engine.cycle_cells
+                            && schedule.blocked_cells == *engine.blocked_cells
+                    };
+                engine.dependency_limit_cells = Arc::new(next.limited);
+                collected.graph = next.graph;
+                collected.areas = next.areas;
+                if settled {
+                    break;
+                }
             }
-            collected = engine.dependencies_cancellable(cancelled)?;
-            engine.dependency_limit_cells = Arc::new(collected.limited);
-        }
-        if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
+        } else if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
             return Err(());
         }
         engine.dependencies = Arc::new(collected.graph);
@@ -243,6 +276,7 @@ impl<'workbook> Engine<'workbook> {
             target_pending: None,
             lookup_indexes: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
+            read_formula_before_calculation: std::cell::Cell::new(false),
         };
         let internal_dirty = match dirty {
             Some(cells) => {

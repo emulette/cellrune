@@ -4193,6 +4193,24 @@ fn running_totals_over_formulas_share_their_dependency_edges() {
 }
 
 #[test]
+fn chained_dynamic_references_settle_on_the_cells_they_select() {
+    // K1's OFFSET row comes from L1 and lands on K6, and J1's OFFSET row is K1's value, so J1
+    // reads J7 only once K1 is right. Static references alone order K1 before K6 and J1 before
+    // J7; each pass resolves one more link, so J1 settles on J7 on the third pass.
+    let workbook = workbook_with_formulas(&[
+        (1, 10, "OFFSET(J5,K1,0)"),
+        (1, 11, "OFFSET(K5,L1,0)"),
+        (1, 12, "1"),
+        (6, 11, "2+0"),
+        (7, 10, "9+0"),
+    ]);
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+
+    assert_number_at(&calculation, 1, 11, 2.0, 0.0);
+    assert_number_at(&calculation, 1, 10, 9.0, 0.0);
+}
+
+#[test]
 fn array_budget_cannot_be_hidden_by_iferror() {
     let workbook = workbook_with_formulas(&[(1, 1, "IFERROR(SUM({1,2,3}),42)")]);
     let limits = CalculationLimits::default()
