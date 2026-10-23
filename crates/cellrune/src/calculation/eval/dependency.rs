@@ -1787,6 +1787,23 @@ impl Engine<'_> {
         })
     }
 
+    /// Reports whether a dynamic reference resolves from `args` without reading a formula.
+    ///
+    /// Draft impact analysis does not calculate, so a formula read there gives an engine issue
+    /// that functions such as `COUNTIF` skip, and a position read through one may not be the
+    /// position the calculated workbook gives.
+    fn dynamic_rect_resolves_without_formulas(
+        &self,
+        context: EvalContext<'_>,
+        kind: DynamicReferenceKind,
+        args: &[Expr],
+    ) -> bool {
+        let earlier = self.read_formula_before_calculation.replace(false);
+        let resolved = self.resolve_dynamic_rect(context, kind, args).is_ok();
+        let read_formula = self.read_formula_before_calculation.replace(earlier);
+        resolved && !read_formula
+    }
+
     /// Reports whether `expr` holds a reference whose cells depend on values in a way `usage`
     /// cannot follow.
     ///
@@ -1855,7 +1872,7 @@ impl Engine<'_> {
                         function_dependency_kind(name)
                         && (usage == DynamicReferenceUse::Incremental
                             || kind == DynamicReferenceKind::Indirect
-                            || self.resolve_dynamic_rect(context, kind, args).is_err())
+                            || !self.dynamic_rect_resolves_without_formulas(context, kind, args))
                     {
                         return true;
                     }

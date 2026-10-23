@@ -340,7 +340,8 @@ the edits can affect, listed by `EditWriteReport::affected_formulas()`, and only
 `fullCalcOnLoad` so the host recalculates on open. Every other saved result, `calcChain.xml` while
 the formula layout is unchanged, `calcPr`, and untouched parts keep their source bytes, and an
 uncalculable formula elsewhere does not block the write. Formulas whose references are known only
-after evaluation, such as `INDIRECT` or `OFFSET`, always count as affected when anything changed.
+after evaluation, such as `INDIRECT` or an `OFFSET` whose position reads another formula, always
+count as affected when anything changed.
 Cells the draft creates take the style of their row or column, as in Excel.
 
 Package-backed documents expose phonetic annotations and frozen panes through

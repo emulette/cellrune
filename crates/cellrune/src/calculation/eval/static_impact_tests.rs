@@ -163,6 +163,46 @@ fn resolvable_offsets_are_affected_only_by_the_cells_they_read() {
     assert_eq!(affected_by("C1"), addresses(&["B2", "B3", "B4"]));
 }
 
+/// The uncalculated draft reads a formula as an engine issue, which `COUNTIF` skips, so an
+/// `OFFSET` whose position reads a formula through it resolves to the wrong cell there and is
+/// affected by any edit.
+#[test]
+fn offsets_positioned_through_a_formula_are_affected_by_any_edit() {
+    let mut draft = WorkbookDraft::new();
+    let sheet = draft.workbook().sheets()[0].id();
+    for (cell, value) in [("A1", 1.0), ("A2", 2.0), ("A3", 3.0)] {
+        draft
+            .set_cell_value(sheet, address(cell), number(value))
+            .expect("value");
+    }
+    for (cell, text) in [
+        ("C1", "2+3"),
+        ("B1", "OFFSET($A$1,COUNTIF(C1:C3,\">0\"),0)"),
+    ] {
+        draft
+            .set_cell_formula(sheet, address(cell), formula(text))
+            .expect("formula");
+    }
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("fixture output");
+    let document =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("fixture");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(sheet, address("A2"), number(100.0))
+        .expect("edit");
+    let affected = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+        .expect("edited output")
+        .report()
+        .affected_formulas()
+        .iter()
+        .map(|formula| formula.address())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(affected, BTreeSet::from([address("B1")]));
+}
+
 /// A workbook whose formulas reach their inputs in every way the analysis traces: plain, whole
 /// column, `INDEX`-ended, and 3-D ranges, workbook and sheet-scoped names, a sheet-qualified
 /// name, nested names, a name holding a rejected call, a sheet that does not exist yet, LET and

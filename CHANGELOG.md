@@ -239,7 +239,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Minimal-write impact analysis treats an `OFFSET` whose position the edited workbook gives
   without calculating anything, such as `OFFSET(A1,1,0)` or `OFFSET(A1,C1,0)` with a value in
   `C1`, as reading the cells it resolves to, so an unrelated edit keeps its saved result.
-  `INDIRECT` and an `OFFSET` positioned by a formula are still affected by any edit.
+  `INDIRECT` and an `OFFSET` whose position reads a formula, directly or through a function such
+  as `COUNTIF`, are still affected by any edit.
 - A sheet rename fails with `validation.formula_rewrite_parse_failed`, as it does for a cell
   formula, when a data validation formula that names the sheet does not parse. Such a rename was
   accepted before but could not be saved.
