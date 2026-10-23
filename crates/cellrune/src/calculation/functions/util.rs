@@ -332,6 +332,7 @@ fn collect_rect_values(
         .checked_add(cells)
         .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
     engine.ensure_array_cells(*visited_cells)?;
+    let populated_row_end = engine.populated_row_end(&rect);
     for row_offset in 0..rows as u32 {
         let row = rect.row_start + row_offset;
         for column in rect.col_start..=rect.col_end {
@@ -339,7 +340,9 @@ fn collect_rect_values(
             if !(selection.include)(cell) {
                 continue;
             }
-            let (value, decimal_trace) = if selection.decimal_traces == DecimalTraces::Collect {
+            let (value, decimal_trace) = if row > populated_row_end {
+                (engine.read_blank_reference_cell(context)?, None)
+            } else if selection.decimal_traces == DecimalTraces::Collect {
                 let (value, trace) = engine.read_reference_cell_with_trace(context, cell)?;
                 let trace = trace.filter(|_| matches!(value, Value::Number(_)));
                 (value, trace)

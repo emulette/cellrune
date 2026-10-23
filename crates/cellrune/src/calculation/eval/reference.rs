@@ -523,6 +523,14 @@ impl Engine<'_> {
         if !rect.whole_rows {
             return rect.row_end;
         }
+        self.populated_row_end(rect)
+    }
+
+    /// Returns the last row of `rect` that holds a stored cell or an array result in its columns.
+    ///
+    /// Every cell below it reads as blank: no formula, array result, or result kept from a
+    /// previous calculation lies there.
+    pub(in crate::calculation) fn populated_row_end(&self, rect: &Rect) -> u32 {
         let stored = self.column_extents.get(rect.sheet).map_or(0, |extents| {
             extents.row_end_within(rect.col_start, rect.col_end)
         });

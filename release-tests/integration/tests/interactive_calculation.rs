@@ -312,6 +312,81 @@ fn whole_column_references_include_array_result_areas() {
 }
 
 #[test]
+fn explicit_ranges_read_array_results_below_the_last_stored_cell() {
+    // J1 and L1 are the only stored cells in their columns; their spills fill the rows below, and
+    // explicit ranges far past them read those results and blanks, in full and incrementally.
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("C1"), number(4.0)),
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("J1"),
+                    formula("SEQUENCE(C1)"),
+                    None,
+                )
+                .expect("undeclared spill"),
+                WorkbookChange::set_cell_dynamic_formula(
+                    sheet_id,
+                    address("L1"),
+                    formula("SEQUENCE(3)*C1"),
+                    Some(CellRange::new(address("L1"), address("L3")).expect("declared range")),
+                )
+                .expect("declared spill"),
+                WorkbookChange::set_cell_formula(sheet_id, address("A1"), formula("SUM(J1:J5000)")),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("A2"),
+                    formula("SUMPRODUCT(L1:L5000*2)"),
+                ),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("A3"),
+                    formula("COUNTA(L1:L5000)"),
+                ),
+            ]),
+        )
+        .expect("spill workbook");
+    for (step, value) in [(0, 4.0), (1, 5.0)] {
+        if step > 0 {
+            session
+                .apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([WorkbookChange::set_cell_value(
+                        sheet_id,
+                        address("C1"),
+                        number(value),
+                    )]),
+                )
+                .expect("input edit");
+        }
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("spill calculation");
+        let calculation = session.calculation().expect("installed calculation");
+        let triangle = value * (value + 1.0) / 2.0;
+        for (cell, expected) in [("A1", triangle), ("A2", 12.0 * value), ("A3", 3.0)] {
+            assert_eq!(
+                calculation.cell(CalculationCellId::new(sheet_id, address(cell))),
+                Some(&CalculationCellResult::Value(number(expected))),
+                "{cell} at step {step}",
+            );
+        }
+        assert_calculations_equal(
+            calculation,
+            &calculate_workbook(session.workbook(), CalculationOptions::default()),
+        );
+    }
+}
+
+#[test]
 fn declared_spill_followers_read_a_failed_anchor_the_same_way_incrementally() {
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
     let mut session = WorkbookCalculationSession::create();

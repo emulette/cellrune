@@ -1429,6 +1429,20 @@ impl<'workbook> Engine<'workbook> {
         Ok(self.cell_value(cell))
     }
 
+    /// Reads a referenced cell known to be blank, charged as [`Self::read_reference_cell`] is.
+    pub(super) fn read_blank_reference_cell(
+        &self,
+        context: EvalContext<'_>,
+    ) -> Result<Value, ErrorKind> {
+        if context.is_cancelled() {
+            return Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations,
+            ));
+        }
+        self.charge_reference_cells(context, 1)?;
+        Ok(Value::Blank)
+    }
+
     /// Reads a referenced cell with [`Self::numeric_decimal_trace`], finding its source once.
     pub(super) fn read_reference_cell_with_trace(
         &self,

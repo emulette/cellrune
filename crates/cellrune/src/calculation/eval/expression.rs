@@ -895,10 +895,14 @@ impl Engine<'_> {
         let mut data = Vec::with_capacity(cells as usize);
         let mut decimal_traces = Vec::with_capacity(cells as usize);
         if row_end >= rect.row_start {
+            let populated_row_end = self.populated_row_end(&rect);
             for row in rect.row_start..=row_end {
                 for column in rect.col_start..=rect.col_end {
-                    let (value, decimal_trace) =
-                        self.read_reference_cell_with_trace(context, (rect.sheet, row, column))?;
+                    let (value, decimal_trace) = if row > populated_row_end {
+                        (self.read_blank_reference_cell(context)?, None)
+                    } else {
+                        self.read_reference_cell_with_trace(context, (rect.sheet, row, column))?
+                    };
                     data.push(value);
                     decimal_traces.push(decimal_trace);
                 }
