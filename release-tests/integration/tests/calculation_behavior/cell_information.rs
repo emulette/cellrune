@@ -53,6 +53,13 @@ fn cell_reports_address_position_contents_and_type_from_the_workbook() {
         ("D9", "=CELL(\"type\",B4)"),
         ("D10", "=CELL(\"type\",B20)"),
         ("D11", "=CELL(\"type\",B5)"),
+        // Excel 16.114 for Mac: the upper-left row of a range, 0 for an empty cell's contents,
+        // "l" for a formula's text result, and the info type in any case.
+        ("D12", "=CELL(\"row\",B3:C9)"),
+        ("D13", "=CELL(\"contents\",B20)"),
+        ("D14", "=CELL(\"type\",B6)"),
+        ("D15", "=CELL(\"ADDRESS\",B3)"),
+        ("D16", "=CELL(\"Row\",B3)"),
     ]);
     for (address, expected) in [
         ("D1", CellValue::Text("$B$3".to_owned())),
@@ -66,6 +73,11 @@ fn cell_reports_address_position_contents_and_type_from_the_workbook() {
         ("D9", CellValue::Text("v".to_owned())),
         ("D10", CellValue::Text("b".to_owned())),
         ("D11", CellValue::Text("v".to_owned())),
+        ("D12", CellValue::number(3.0).expect("finite")),
+        ("D13", CellValue::number(0.0).expect("finite")),
+        ("D14", CellValue::Text("l".to_owned())),
+        ("D15", CellValue::Text("$B$3".to_owned())),
+        ("D16", CellValue::number(3.0).expect("finite")),
     ] {
         assert_eq!(
             materialized_result(&calculation, sheet_id, address),
@@ -82,11 +94,13 @@ fn cell_leaves_host_and_format_dependent_information_unsupported() {
         ("D2", "=CELL(\"format\",B3)"),
         ("D3", "=CELL(\"width\",B3)"),
         ("D4", "=CELL(\"protect\",B3)"),
+        // An omitted or empty reference reads the selection at calculation time.
         ("D5", "=CELL(\"row\")"),
-        ("D6", "=CELL(\"row\",B3:C9)"),
-        ("D7", "=CELL(\"contents\",B20)"),
-        ("D8", "=CELL(\"type\",B6)"),
-        ("D9", "=CELL(\"ADDRESS\",B3)"),
+        ("D6", "=CELL(\"row\",)"),
+        // Excel was not measured on a multi-cell "col" or "type".
+        ("D7", "=CELL(\"col\",B3:C9)"),
+        ("D8", "=CELL(\"type\",B3:C9)"),
+        ("D9", "=CELL(\"color\",B3)"),
         ("D10", "=CELL(\"no such type\",B3)"),
     ];
     let (calculation, sheet_id) = calculate(&formulas);

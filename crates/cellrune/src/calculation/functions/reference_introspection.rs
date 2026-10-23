@@ -86,19 +86,27 @@ pub(super) fn sheets(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
     }
 }
 
-/// CELL(info_type, reference) for the info types Microsoft defines by the workbook alone:
-/// `"address"` and `"contents"` of the upper-left cell, and `"col"`, `"row"`, and `"type"` of a
-/// single cell. The other info types read formatting, column widths, or the file path, an omitted
-/// reference reads the selection, and the address of another sheet names the file, so those are
-/// unsupported, as are a multi-cell `"col"`, `"row"`, or `"type"` (Microsoft documents the active
-/// cell), a blank `"contents"`, a formula with a text result for `"type"`, and info_type spellings
-/// other than these lowercase ones.
+/// CELL(info_type, reference) for the info types defined by the workbook alone, as Microsoft
+/// documents them and Excel 16.114 for Mac returns them: `"address"` of the upper-left cell as
+/// `$A$1` text when the reference is on the formula's sheet, `"contents"` (the upper-left cell's
+/// value, 0 for an empty cell), `"row"` of the upper-left cell, and for a single cell `"col"` and
+/// `"type"` (`"b"` for an empty cell, `"l"` for text, including a formula's text result, and `"v"`
+/// otherwise). The info type is matched without regard to ASCII case.
+///
+/// The other info types read the number format, column width, protection, or file path, which are
+/// not calculation inputs, an omitted or empty reference reads the selection at calculation time,
+/// and Excel prefixes the address of another sheet with the file name, so those are unsupported.
+/// So are a multi-cell `"col"` or `"type"`, which Excel was not measured on, and the `"type"` of a
+/// formula with a blank result.
 pub(super) fn cell(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let [info_type, reference] = args else {
         return Value::Error(ErrorKind::Unsupported);
     };
+    if matches!(reference, Expr::Missing) {
+        return Value::Error(ErrorKind::Unsupported);
+    }
     let info_type = match required_text(engine, context, info_type) {
-        Ok(info_type) => info_type,
+        Ok(info_type) => info_type.to_ascii_lowercase(),
         Err(kind) => return Value::Error(kind),
     };
     let rect = match engine
@@ -117,17 +125,16 @@ pub(super) fn cell(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr])
             rect.row_start
         )),
         "col" if single => Value::Number(f64::from(rect.col_start)),
-        "row" if single => Value::Number(f64::from(rect.row_start)),
+        "row" => Value::Number(f64::from(rect.row_start)),
         "contents" => match engine.read_reference_cell(context, first) {
-            Ok(Value::Blank) => Value::Error(ErrorKind::Unsupported),
+            Ok(Value::Blank) => Value::Number(0.0),
             Ok(value) => value,
             Err(kind) => Value::Error(kind),
         },
         "type" if single => match engine.read_reference_cell(context, first) {
-            Ok(value) if engine.cell_has_formula(first) => match value {
-                Value::Blank | Value::Text(_) => Value::Error(ErrorKind::Unsupported),
-                _ => Value::Text("v".to_owned()),
-            },
+            Ok(Value::Blank) if engine.cell_has_formula(first) => {
+                Value::Error(ErrorKind::Unsupported)
+            }
             Ok(Value::Blank) => Value::Text("b".to_owned()),
             Ok(Value::Text(_)) => Value::Text("l".to_owned()),
             Ok(_) => Value::Text("v".to_owned()),

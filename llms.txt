@@ -986,16 +986,19 @@ than guessing a name from a different XLSX crate (`calamine`,
   final one after a zero tens digit (101, 1000001) report
   `calculation.unsupported_expression`.
 - `CELL(info_type, reference)` calculates the info types defined by the
-  workbook alone: `"address"` of the upper-left cell as `$A$1` text when the
-  reference is on the formula's sheet, `"contents"` (the upper-left cell's
-  value), and for a single cell `"row"`, `"col"`, and `"type"` (`"b"` for an
-  empty cell, `"l"` for a text constant, and `"v"` otherwise). The other info
-  types (formatting, width, protection, file name), an omitted reference,
-  another sheet's address, a multi-cell `"row"`, `"col"`, or `"type"`, an empty
-  cell's `"contents"`, a formula with a text result for `"type"`, and other
-  info_type spellings report `calculation.unsupported_expression`. Because
-  `CELL` depends on the referenced cells, a `CELL` formula that refers to its
-  own cell is a circular reference.
+  workbook alone, matching the info type in any ASCII case: `"address"` of the
+  upper-left cell as `$A$1` text when the reference is on the formula's sheet,
+  `"contents"` (the upper-left cell's value, 0 for an empty cell), `"row"` of
+  the upper-left cell, and for a single cell `"col"` and `"type"` (`"b"` for an
+  empty cell, `"l"` for text, including a formula's text result, and `"v"`
+  otherwise), as Excel returns them. The info types that read the number
+  format, column width, protection, or file name, which are not calculation
+  inputs, an omitted or empty reference (the selection), another sheet's
+  address (which names the file), a multi-cell `"col"` or `"type"`, and a
+  formula with a blank result for `"type"` report
+  `calculation.unsupported_expression`. Because `CELL` depends on the
+  referenced cells, a `CELL` formula that refers to its own cell is a circular
+  reference.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
   `[0, 1)`. `RANDBETWEEN(bottom, top)` returns `#NUM!` when `bottom` exceeds

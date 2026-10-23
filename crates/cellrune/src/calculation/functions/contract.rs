@@ -1304,7 +1304,7 @@ impl LookupFunction {
 
 const CELL_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     1,
-    DefaultTrigger::Absent,
+    DefaultTrigger::AbsentOrMissing,
     ArgumentDefaultValue::Omitted,
 )];
 
