@@ -148,8 +148,8 @@ fn compound_excess(rate: f64, count: f64, growth: f64) -> f64 {
 /// `no_switch` is TRUE the remaining depreciable amount is spread evenly over the remaining life
 /// from the first period in which that straight line exceeds the declining balance.
 ///
-/// Microsoft documents positive arguments and whole-period examples; fractional periods and an
-/// end period beyond the life are unsupported rather than guessed.
+/// An end period beyond the life returns `#NUM!`, as Excel does. Fractional periods follow
+/// [`partial_vdb`].
 fn vdb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let [numbers @ .., no_switch] = args else {
         return Value::Error(ErrorKind::Value);
@@ -165,11 +165,21 @@ fn vdb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Ok(value) => value,
         Err(kind) => return Value::Error(kind),
     };
-    if cost < 0.0 || salvage < 0.0 || life <= 0.0 || start < 0.0 || end < start || factor <= 0.0 {
+    if cost < 0.0
+        || salvage < 0.0
+        || life <= 0.0
+        || start < 0.0
+        || end < start
+        || end > life
+        || factor <= 0.0
+    {
         return Value::Error(ErrorKind::Num);
     }
-    if start.fract() != 0.0 || end.fract() != 0.0 || end > life {
-        return Value::Error(ErrorKind::Unsupported);
+    if start.fract() != 0.0 || end.fract() != 0.0 {
+        if no_switch {
+            return Value::Error(ErrorKind::Unsupported);
+        }
+        return partial_vdb(engine, context, [cost, salvage, life, start, end], factor / life);
     }
     if let Err(kind) = engine.charge_function_iterations(context, end as u64) {
         return Value::Error(kind);
@@ -194,6 +204,57 @@ fn vdb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
             total += depreciation;
         }
         book -= depreciation;
+    }
+    financial_value(total)
+}
+
+/// VDB with a fractional `start_period` or `end_period`, as Excel 16.114 for Mac computes it: the
+/// book value at the start is the cost less the whole periods before it and the started share of
+/// the next one, and the depreciation is then taken over periods of one year counted from the
+/// start, the last one prorated. Excel returns 432 for `VDB(2400,300,10,0.5,1.5)`, 315 for
+/// Microsoft's `VDB(2400,300,10,0,0.875,1.5)`, and 247.5 for `VDB(2400,300,10,0.875,1.5)`, where
+/// prorating calendar periods would give 252.
+///
+/// Those results never stop at salvage or switch to the straight line, so a period that would, or
+/// `no_switch` TRUE, is unsupported rather than guessed.
+fn partial_vdb(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    [cost, salvage, life, start, end]: [f64; 5],
+    rate: f64,
+) -> Value {
+    let span = end - start;
+    let (before, after) = (start.ceil(), span.ceil());
+    if let Err(kind) = engine.charge_function_iterations(context, (before + after) as u64) {
+        return Value::Error(kind);
+    }
+    // The declining-balance depreciation of a whole period from `book` with `remaining` years of
+    // life, or `None` where it would stop at salvage or the straight line would exceed it.
+    let declining = |book: f64, remaining: f64| {
+        let amount = book * rate;
+        let stops = amount > book - salvage || (book - salvage) / remaining > amount;
+        (!stops).then_some(amount)
+    };
+    let mut book = cost;
+    for period in 0..before as u64 {
+        if let Err(kind) = poll_cancellation(context) {
+            return Value::Error(kind);
+        }
+        let Some(amount) = declining(book, life - period as f64) else {
+            return Value::Error(ErrorKind::Unsupported);
+        };
+        book -= (start - period as f64).min(1.0) * amount;
+    }
+    let mut total = 0.0;
+    for period in 0..after as u64 {
+        if let Err(kind) = poll_cancellation(context) {
+            return Value::Error(kind);
+        }
+        let Some(amount) = declining(book, life - start - period as f64) else {
+            return Value::Error(ErrorKind::Unsupported);
+        };
+        total += (span - period as f64).min(1.0) * amount;
+        book -= amount;
     }
     financial_value(total)
 }

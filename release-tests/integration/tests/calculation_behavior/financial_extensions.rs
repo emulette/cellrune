@@ -219,6 +219,12 @@ fn vdb_switches_to_straight_line_when_it_exceeds_the_declining_balance() {
         ("VDB(10000,1000,5,3,5)", 1_160.0),
         ("VDB(2400,300,10,0,10)", 2_100.0),
         ("VDB(2400,300,10,4,4)", 0.0),
+        // Microsoft's example for a first year of 0.875 at 150%, and Excel 16.114 for Mac: the
+        // depreciation runs in whole years from a fractional start, so 0.875 through 1.5 is
+        // 0.625 × 0.2 × 1980 rather than the 252 of prorating periods 1 and 2.
+        ("VDB(2400,300,10,0,0.875,1.5)", 315.0),
+        ("VDB(2400,300,10,0.5,1.5)", 432.0),
+        ("VDB(2400,300,10,0.875,1.5)", 247.5),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula)]);
         assert!(scan_formula_capabilities(&workbook).is_supported());
@@ -236,11 +242,19 @@ fn vdb_switches_to_straight_line_when_it_exceeds_the_declining_balance() {
         "VDB(100,0,5,-1,1)",
         "VDB(100,0,5,2,1)",
         "VDB(100,0,5,0,1,0)",
+        // Excel 16.114 for Mac rejects an end after the life.
+        "VDB(100,0,5,0,6)",
     ] {
         assert_error(formula, ExcelError::Number);
     }
     assert_error("VDB(100,0,5,0,1,2,\"maybe\")", ExcelError::Value);
-    for formula in ["VDB(2400,300,10,0,0.875,1.5)", "VDB(100,0,5,0,6)"] {
+    // Excel was not measured where a fractional period stops at salvage, switches to the straight
+    // line, or has no_switch TRUE.
+    for formula in [
+        "VDB(2400,300,10,9.5,10)",
+        "VDB(10000,0,5,3.5,4)",
+        "VDB(2400,300,10,0.5,1.5,2,TRUE)",
+    ] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),
             CalculationOptions::default(),
