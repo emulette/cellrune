@@ -252,6 +252,7 @@ pub(super) fn parse(
                             &budget,
                         )?;
                         process_column_style(&attributes, capture, resources.styles, sheet);
+                        process_column_width(&attributes, capture, sheet_id, presentation);
                     } else if depth == 2 && local_name == SHEET_DATA {
                         // An empty sheet is serialized by Excel and every mainstream producer
                         // as a self-closing <sheetData/>, which arrives as an Empty event, not
@@ -320,6 +321,7 @@ pub(super) fn parse(
                         )?;
                         process_row_style(&attributes, capture, resources.styles, sheet);
                         process_row_hidden(&attributes, sheet);
+                        process_row_height(&attributes, capture, sheet_id, presentation);
                     } else if local_name == CELL
                         && state.row_depth.is_some_and(|row| depth == row + 1)
                     {
@@ -494,6 +496,7 @@ fn process_start(
     {
         process_column_visibility(&attributes, capture, sheet_id, presentation, budget)?;
         process_column_style(&attributes, capture, styles, sheet);
+        process_column_width(&attributes, capture, sheet_id, presentation);
     } else if depth == 2 && local_name == PHONETIC_PROPERTIES {
         process_worksheet_phonetic_properties(
             &attributes,
@@ -617,6 +620,7 @@ fn process_start(
         }
         process_row_style(&attributes, capture, styles, sheet);
         process_row_hidden(&attributes, sheet);
+        process_row_height(&attributes, capture, sheet_id, presentation);
     } else if state.row_depth.is_some_and(|row| depth == row + 1) && local_name == CELL {
         increment_cell_counts(&mut state.sheet_cells, total_cells, budget.limits(), budget)?;
         if state.current_cell.is_some() {
@@ -825,6 +829,62 @@ fn process_column_style(
         sheet
             .new_cell_styles_mut()
             .push_columns(first, last, index, number_format);
+    }
+}
+
+/// Records the `width` of a column span for the format read model.
+///
+/// Column widths were not read before they were modeled, so a span whose `min`, `max`, or `width`
+/// does not resolve records nothing instead of failing the read.
+fn process_column_width(
+    attributes: &XmlAttributes,
+    capture: PresentationCapture,
+    sheet_id: SheetId,
+    presentation: &mut DocumentPresentation,
+) {
+    if capture == PresentationCapture::None {
+        return;
+    }
+    let column = |name| {
+        attributes
+            .unqualified(name)
+            .and_then(|value| value.parse::<u32>().ok())
+            .and_then(|column| Column::new(column).ok())
+    };
+    let width = attributes
+        .unqualified("width")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|width| (0.0..=255.0).contains(width));
+    if let (Some(first), Some(last), Some(width)) = (column("min"), column("max"), width)
+        && first <= last
+    {
+        presentation.source_column_width(sheet_id, first, last, width);
+    }
+}
+
+/// Records the `ht` of a row for the format read model.
+///
+/// Row heights were not read before they were modeled, so a row whose `r` or `ht` does not resolve
+/// records nothing instead of failing the read.
+fn process_row_height(
+    attributes: &XmlAttributes,
+    capture: PresentationCapture,
+    sheet_id: SheetId,
+    presentation: &mut DocumentPresentation,
+) {
+    if capture == PresentationCapture::None {
+        return;
+    }
+    let row = attributes
+        .unqualified("r")
+        .and_then(|value| value.parse::<u32>().ok())
+        .and_then(|row| Row::new(row).ok());
+    let height = attributes
+        .unqualified("ht")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|height| (0.0..=409.0).contains(height));
+    if let (Some(row), Some(height)) = (row, height) {
+        presentation.source_row_height(sheet_id, row, height);
     }
 }
 

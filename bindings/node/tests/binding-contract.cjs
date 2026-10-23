@@ -539,8 +539,74 @@ async function assertDataValidations() {
   workbook.close();
 }
 
+async function assertFormats() {
+  const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
+  const page = workbook.readFormats("Data", "A1", "B1");
+  const styled = page.cells[0].format;
+  assert.equal(styled.font.name, "Arial");
+  assert.deepEqual(styled.font.color, { kind: "argb", argb: "FFFF0000", tint: 0 });
+  assert.deepEqual(styled.fill, {
+    kind: "pattern",
+    pattern: "solid",
+    foreground: { kind: "argb", argb: "FFFFFF00", tint: 0 },
+    background: null,
+  });
+  assert.equal(styled.alignment.horizontal, "center");
+  assert.equal(styled.alignment.wrapText, true);
+  assert.deepEqual(styled.border.bottom, {
+    style: "thin",
+    color: { kind: "indexed", index: 64, tint: 0 },
+  });
+  assert.equal(page.cells[1].format.font.name, "Calibri");
+  assert.deepEqual(page.columnWidths, [{ first: 1, last: 2, width: 18.5 }]);
+  assert.deepEqual(page.rowHeights, [{ row: 1, height: 24 }]);
+  workbook.close();
+
+  const created = Workbook.create();
+  const revision = created.summary().semanticRevision;
+  const receipt = created.applyChangesV2(revision, [
+    {
+      kind: "setCellFormat",
+      sheet: "Sheet1",
+      address: "B2",
+      font: { bold: true, size: 14 },
+      border: { diagonal: { style: "hair" }, diagonalUp: true },
+      alignment: { wrapText: true, textRotation: 90 },
+    },
+    { kind: "setColumnWidth", sheet: "Sheet1", first: 2, last: 2, width: 25 },
+    { kind: "setRowHeight", sheet: "Sheet1", row: 2, height: 30 },
+  ]);
+  assert.equal(receipt.resultRevision, revision);
+  await created.calculate();
+  const reopened = await Workbook.fromBytes(await created.toBytes());
+  const edited = reopened.readFormats("Sheet1", "B2", "B2");
+  const format = edited.cells[0].format;
+  assert.equal(format.font.bold, true);
+  assert.equal(format.font.size, 14);
+  assert.deepEqual(format.border.diagonal, { style: "hair", color: null });
+  assert.equal(format.border.diagonalUp, true);
+  assert.equal(format.alignment.wrapText, true);
+  assert.equal(format.alignment.textRotation, 90);
+  assert.deepEqual(edited.columnWidths, [{ first: 2, last: 2, width: 25 }]);
+  assert.deepEqual(edited.rowHeights, [{ row: 2, height: 30 }]);
+  assert.throws(
+    () =>
+      reopened.applyChangesV2(reopened.summary().semanticRevision, [
+        { kind: "setCellFormat", sheet: "Sheet1", address: "A1", font: { weight: 700 } },
+      ]),
+    (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, "interop.input.invalid");
+      return true;
+    },
+  );
+  created.close();
+  reopened.close();
+}
+
 async function main() {
   await assertDeleteSheet();
+  await assertFormats();
   await assertDataValidations();
   await assertIncompleteSaveNamesCells();
   await assertCapabilityScan();

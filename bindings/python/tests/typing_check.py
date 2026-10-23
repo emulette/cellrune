@@ -1,5 +1,7 @@
 from cellrune import (
     CapabilityPage,
+    CellFormatPage,
+    SetCellFormatChange,
     DataValidationPage,
     CalculationLimitOptions,
     LocaleProfile,
@@ -120,6 +122,18 @@ def check() -> None:
     capabilities: CapabilityPage = reopened.scan_capabilities(limit=10)
     for entry in capabilities["entries"]:
         entry["cell"]["address"].upper()
+    formats: CellFormatPage = reopened.read_formats("Sheet1", "A1", "B2", limit=4)
+    for formatted in formats["cells"]:
+        fill = formatted["format"]["fill"]
+        if fill["kind"] == "pattern" and fill["foreground"] is not None:
+            fill["foreground"]["kind"].upper()
+    bold: SetCellFormatChange = {
+        "kind": "set_cell_format",
+        "sheet": "Sheet1",
+        "address": "A1",
+        "font": {"bold": True},
+    }
+    reopened.apply_changes_v2(reopened.summary()["semantic_revision"], [bold])
     validations: DataValidationPage = reopened.data_validations("Sheet1", limit=10)
     for rule in validations["entries"]:
         rule["ranges"][0].upper()

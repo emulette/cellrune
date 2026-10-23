@@ -217,6 +217,7 @@ mod tests {
                 "workbook_open",
                 "workbook_preview_changes",
                 "workbook_preview_changes_page",
+                "workbook_read_formats",
                 "workbook_read_range",
                 "workbook_recalculate",
                 "workbook_save_as",
@@ -238,6 +239,7 @@ mod tests {
         }
         for (tool_name, expected_maximum) in [
             ("workbook_read_range", 10_000_u64),
+            ("workbook_read_formats", 10_000),
             ("workbook_data_validations", 10_000),
             ("workbook_scan_capabilities", 10_000),
             ("workbook_changes_since", 100),
@@ -311,6 +313,7 @@ mod tests {
             ("workbook_open", false, true, false, false),
             ("workbook_preview_changes", false, false, false, false),
             ("workbook_preview_changes_page", true, false, true, false),
+            ("workbook_read_formats", true, false, true, false),
             ("workbook_read_range", true, false, true, false),
             ("workbook_recalculate", false, true, false, false),
             ("workbook_save_as", false, true, false, false),

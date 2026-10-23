@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use super::super::format::effective_cell_format;
 use super::super::{
     WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
@@ -608,6 +609,41 @@ impl WorkbookDraft {
                             topology_changed = true;
                         }
                     }
+                }
+                WorkbookChange::SetCellFormat {
+                    sheet_id,
+                    address,
+                    edit,
+                } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let current = effective_cell_format(
+                        &presentation,
+                        sheet,
+                        source,
+                        &cell_mutations,
+                        *address,
+                    );
+                    let edited = current.edited(edit);
+                    if edited != current {
+                        presentation.set_cell_format(*sheet_id, *address, edited)?;
+                    }
+                }
+                WorkbookChange::SetColumnWidth {
+                    sheet_id,
+                    first,
+                    last,
+                    width,
+                } => {
+                    sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    presentation.set_column_width(*sheet_id, *first, *last, *width)?;
+                }
+                WorkbookChange::SetRowHeight {
+                    sheet_id,
+                    row,
+                    height,
+                } => {
+                    sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    presentation.set_row_height(*sheet_id, *row, *height)?;
                 }
             }
         }

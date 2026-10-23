@@ -9,6 +9,8 @@
 mod convert;
 mod dto;
 mod error;
+mod format_convert;
+mod format_dto;
 mod json_object;
 mod service;
 mod sheet_metadata;
@@ -42,6 +44,10 @@ pub use dto::{
     WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
+pub use format_dto::{
+    AlignmentDto, BorderDto, BorderEdgeDto, CellFormatDto, CellFormatEntryDto, CellFormatPageDto,
+    ColorDto, ColumnWidthDto, FillDto, FontDto, FormatChangeV2Dto, PatternFillDto, RowHeightDto,
+};
 pub use json_object::{deserialize_object, deserialize_objects, deserialize_optional_object};
 pub use service::{
     CompletedPreview, CompletedRecalculation, DEFAULT_PAGE_SIZE, DEFAULT_PREVIEW_PAGE_SIZE,

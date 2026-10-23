@@ -105,6 +105,181 @@ export interface RangePage {
   readonly cells: readonly Cell[];
 }
 
+export type Color =
+  | { readonly kind: "argb"; readonly argb: string; readonly tint: number }
+  | { readonly kind: "theme" | "indexed"; readonly index: number; readonly tint: number }
+  | { readonly kind: "automatic"; readonly tint: number };
+
+export type ColorInput =
+  | { readonly kind: "argb"; readonly argb: string; readonly tint?: number }
+  | { readonly kind: "theme" | "indexed"; readonly index: number; readonly tint?: number }
+  | { readonly kind: "automatic"; readonly tint?: number };
+
+export type FontUnderline =
+  | "none"
+  | "single"
+  | "double"
+  | "singleAccounting"
+  | "doubleAccounting";
+
+export type FillPattern =
+  | "none"
+  | "solid"
+  | "mediumGray"
+  | "darkGray"
+  | "lightGray"
+  | "darkHorizontal"
+  | "darkVertical"
+  | "darkDown"
+  | "darkUp"
+  | "darkGrid"
+  | "darkTrellis"
+  | "lightHorizontal"
+  | "lightVertical"
+  | "lightDown"
+  | "lightUp"
+  | "lightGrid"
+  | "lightTrellis"
+  | "gray125"
+  | "gray0625";
+
+export type BorderStyle =
+  | "none"
+  | "thin"
+  | "medium"
+  | "dashed"
+  | "dotted"
+  | "thick"
+  | "double"
+  | "hair"
+  | "mediumDashed"
+  | "dashDot"
+  | "mediumDashDot"
+  | "dashDotDot"
+  | "mediumDashDotDot"
+  | "slantDashDot";
+
+export type HorizontalAlignment =
+  | "general"
+  | "left"
+  | "center"
+  | "right"
+  | "fill"
+  | "justify"
+  | "centerContinuous"
+  | "distributed";
+
+export type VerticalAlignment = "top" | "center" | "bottom" | "justify" | "distributed";
+
+export interface Font {
+  readonly name: string | null;
+  readonly size: number | null;
+  readonly bold: boolean;
+  readonly italic: boolean;
+  readonly underline: FontUnderline;
+  readonly strike: boolean;
+  readonly color: Color | null;
+}
+
+export type Fill =
+  | {
+      readonly kind: "pattern";
+      readonly pattern: FillPattern;
+      readonly foreground: Color | null;
+      readonly background: Color | null;
+    }
+  | { readonly kind: "gradient" };
+
+export interface BorderEdge {
+  readonly style: BorderStyle;
+  readonly color: Color | null;
+}
+
+export interface Border {
+  readonly left: BorderEdge;
+  readonly right: BorderEdge;
+  readonly top: BorderEdge;
+  readonly bottom: BorderEdge;
+  readonly diagonal: BorderEdge;
+  readonly diagonalUp: boolean;
+  readonly diagonalDown: boolean;
+}
+
+export interface Alignment {
+  readonly horizontal: HorizontalAlignment;
+  readonly vertical: VerticalAlignment;
+  readonly wrapText: boolean;
+  readonly shrinkToFit: boolean;
+  readonly indent: number;
+  readonly textRotation: number;
+}
+
+export interface CellFormat {
+  readonly font: Font;
+  readonly fill: Fill;
+  readonly border: Border;
+  readonly alignment: Alignment;
+}
+
+export interface CellFormatPage {
+  readonly schemaVersion: number;
+  readonly sheet: string;
+  readonly start: string;
+  readonly end: string;
+  readonly totalCells: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly cells: readonly { readonly address: string; readonly format: CellFormat }[];
+  readonly columnWidths: readonly {
+    readonly first: number;
+    readonly last: number;
+    readonly width: number;
+  }[];
+  readonly rowHeights: readonly { readonly row: number; readonly height: number }[];
+}
+
+export interface BorderEdgeInput {
+  readonly style: BorderStyle;
+  readonly color?: ColorInput;
+}
+
+export interface CellFormatChange {
+  readonly kind: "setCellFormat";
+  readonly sheet: string;
+  readonly address: string;
+  readonly font?: {
+    readonly name?: string;
+    readonly size?: number;
+    readonly bold?: boolean;
+    readonly italic?: boolean;
+    readonly underline?: FontUnderline;
+    readonly strike?: boolean;
+    readonly color?: ColorInput;
+  };
+  readonly fill?: {
+    readonly pattern: FillPattern;
+    readonly foreground?: ColorInput;
+    readonly background?: ColorInput;
+  };
+  readonly border?: {
+    readonly left?: BorderEdgeInput;
+    readonly right?: BorderEdgeInput;
+    readonly top?: BorderEdgeInput;
+    readonly bottom?: BorderEdgeInput;
+    readonly diagonal?: BorderEdgeInput;
+    readonly diagonalUp?: boolean;
+    readonly diagonalDown?: boolean;
+  };
+  readonly alignment?: {
+    readonly horizontal?: HorizontalAlignment;
+    readonly vertical?: VerticalAlignment;
+    readonly wrapText?: boolean;
+    readonly shrinkToFit?: boolean;
+    readonly indent?: number;
+    readonly textRotation?: number;
+  };
+}
+
 export interface SheetPageOptions {
   readonly offset?: number;
   readonly limit?: number;
@@ -494,6 +669,20 @@ export type WorkbookChangeV2 =
       readonly tableId: number;
       readonly firstDataRow: number;
       readonly lastDataRow: number;
+    }
+  | CellFormatChange
+  | {
+      readonly kind: "setColumnWidth";
+      readonly sheet: string;
+      readonly first: number;
+      readonly last: number;
+      readonly width: number | null;
+    }
+  | {
+      readonly kind: "setRowHeight";
+      readonly sheet: string;
+      readonly row: number;
+      readonly height: number | null;
     };
 
 export interface EditReceipt {
@@ -826,6 +1015,13 @@ export class Workbook {
     options?: { readonly currentSheet?: string },
   ): DefinedNameInspection;
   functionUsage(): FunctionUsageReport;
+  /** Reads one bounded page of cell formats with column widths and row heights. */
+  readFormats(
+    sheet: string,
+    start: string,
+    end: string,
+    options?: SheetPageOptions,
+  ): CellFormatPage;
   /** Reads one bounded page of a sheet's read-only data validation rules. */
   dataValidations(sheet: string, options?: SheetPageOptions): DataValidationPage;
   /** Statically reports whether each formula can be calculated, one bounded page at a time. */

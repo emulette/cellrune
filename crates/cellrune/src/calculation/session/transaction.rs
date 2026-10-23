@@ -35,6 +35,7 @@ pub struct PreparedWorkbookTransaction {
     candidate_draft: WorkbookDraft,
     edit_receipt: EditReceipt,
     base_revision: u64,
+    base_presentation_revision: u64,
     base_cursor: u64,
     base_fingerprint: WorkbookFingerprint,
     requested_mode: RecalculationMode,
@@ -69,6 +70,7 @@ struct CompletedTransactionPayload {
     captured_compiled: Option<Arc<CompiledWorkbook>>,
     captured_options: Option<CalculationOptions>,
     base_revision: u64,
+    base_presentation_revision: u64,
     base_cursor: u64,
     base_fingerprint: WorkbookFingerprint,
     result_fingerprint: WorkbookFingerprint,
@@ -234,6 +236,7 @@ impl WorkbookCalculationSession {
             candidate_draft,
             edit_receipt,
             base_revision: expected_revision,
+            base_presentation_revision: self.draft.presentation_revision(),
             base_cursor: self.next_cursor,
             requested_mode: mode,
             options,
@@ -311,6 +314,7 @@ impl WorkbookCalculationSession {
             option_arc_ptr_eq(self.compiled.as_ref(), payload.captured_compiled.as_ref());
         let live_fingerprint = fingerprint_cancellable(self.workbook(), cancellation)?;
         let stale = self.workbook().semantic_revision() != payload.base_revision
+            || self.draft.presentation_revision() != payload.base_presentation_revision
             || self.next_cursor != payload.base_cursor
             || live_fingerprint != payload.base_fingerprint
             || !calculation_identity_matches

@@ -95,9 +95,9 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 20 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 21 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
-`workbook_data_validations`, `workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_read_formats`, `workbook_data_validations`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
@@ -160,7 +160,17 @@ xlsxwriter set while storing placeholder results. Python
 `workbook_data_validations` in MCP); each entry carries `ranges`,
 `validation_type`, `operator`, and `error_style` OOXML tokens, `formula1`,
 `formula2`, `allow_blank`, `in_cell_dropdown`, the two message flags, and the
-error and prompt titles and messages. An
+error and prompt titles and messages. Python `read_formats(sheet, start, end,
+offset=, limit=)` and Node.js `readFormats(sheet, start, end, { offset, limit
+})` (`WorkbookSession::read_formats(&RangeRequestDto) -> CellFormatPageDto`,
+MCP `workbook_read_formats`) return each cell's `font`, `fill` (tagged
+`pattern` or `gradient`), `border`, and `alignment`, with colors tagged
+`argb`/`theme`/`indexed`/`automatic` plus `tint`, the range's
+`column_widths`, and the page's `row_heights`. Edit schema v2 adds
+`set_cell_format` (`sheet`, `address`, optional `font`, `fill` pattern,
+`border`, `alignment`), `set_column_width` (`first`, `last`, `width` or
+null), and `set_row_height` (`row`, `height` or null); Node uses the
+camel-case kinds and fields. An
 `xlsx.write.incomplete_calculation` error names the first 64 unavailable
 formulas in `details.cells`. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
@@ -613,6 +623,31 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.with_properties(...)`.
 - `FrozenPane::new(frozen_rows, frozen_columns)`, `.frozen_rows()`,
   `.frozen_columns()`, `.is_clear()`.
+- Cell formats: `WorkbookDraft::cell_format(SheetId, CellAddress) ->
+  Result<CellFormat, ValidationError>` resolves the edited format, else a
+  kept valued source cell's own style, else the style a new cell takes there
+  (blank cell, `customFormat` row, then column), else the default style;
+  `WorkbookDraft::new()` defaults to Calibri 11. `CellFormat`: `.font() ->
+  &Font` (`.name()`, `.size()`, `.bold()`, `.italic()`, `.underline() ->
+  FontUnderline`, `.strike()`, `.color()`), `.fill() -> Fill`
+  (`Pattern(PatternFill)` with `.pattern() -> FillPattern`,
+  `.foreground()`, `.background()`, or `Gradient`, whose stops are not
+  modeled), `.border() -> Border` (`.left()`, `.right()`, `.top()`,
+  `.bottom()`, `.diagonal()` as `BorderEdge { .style() -> BorderStyle,
+  .color() }`, `.diagonal_up()`, `.diagonal_down()`), and `.alignment() ->
+  Alignment` (`HorizontalAlignment`, `VerticalAlignment`, `.wrap_text()`,
+  `.shrink_to_fit()`, `.indent()` 0-250, `.text_rotation()` 0-180 or 255).
+  `Color::argb(0xAARRGGBB)`, `::theme(i)`, `::indexed(i)`, `::automatic()`,
+  `.with_tint(-1.0..=1.0)`, `.kind() -> ColorKind`, `.tint()`. Builders
+  validate: `Font::with_name` (1-31 UTF-16 units, no control characters,
+  else `FontNameInvalid`), `Font::with_size` (1-409 points), tints, indents,
+  and rotations fail with `FormatValueOutOfRange { property, value }`. Token
+  enums are `#[non_exhaustive]` with OOXML `.as_str()`/`::from_token`.
+- Layout: `DocumentPresentation::column_widths(SheetId) -> &[ColumnWidth]`
+  (`.first()`, `.last()`, `.width()` in characters; sorted,
+  non-overlapping), `.column_width(SheetId, Column)`, `.row_heights(SheetId)`
+  iterating `(Row, f64)` points, and `.row_height(SheetId, Row)`. Document
+  opens capture source formats and layout; `read_xlsx_*` snapshots do not.
 - Canonical authoring supports default font record `0`; source rich-text
   phonetic edits and right-to-left frozen-pane edits fail closed with
   `UnsupportedPreservation`.
@@ -633,6 +668,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   span, contains the old range, keeps filter and sort state, shifts filter
   column IDs when it grows leftward, names new table columns from their text
   header cells, and moves `_xlnm._FilterDatabase` with a sheet filter.
+  `set_cell_format(SheetId, CellAddress, CellFormatEdit)` (`.with_font`,
+  `.with_fill(PatternFill)`, `.with_border`, `.with_alignment`; unset
+  components keep their value), `set_column_width(SheetId, first: Column,
+  last: Column, Option<f64>)` (0-255 characters), and
+  `set_row_height(SheetId, Row, Option<f64>)` (0-409 points; `None`
+  restores the default) are presentation changes: they advance only the
+  presentation revision. A session install of a batch prepared before
+  another presentation-only install fails with `RevisionMismatch`.
 - `EditBatch::new(changes)` preserves operation order.
   `WorkbookDraft::apply_changes(batch)` stages once and commits one semantic
   revision or rolls the complete batch back. If every accepted operation is

@@ -11,6 +11,7 @@ use cellrune::{
 
 use super::WorkbookSession;
 use crate::convert::{edit_receipt, edit_receipt_v2, value_from_dto};
+use crate::format_convert::format_change;
 use crate::{
     EditBatchDto, EditBatchV2Dto, EditReceiptDto, EditReceiptV2Dto, InteropError, TableChangeV2Dto,
     WorkbookChangeDto, WorkbookChangeV2Dto, WritableCellValueDto,
@@ -331,26 +332,52 @@ fn convert_edit_batch(
     batch: EditBatchDto,
     cancelled: &impl Fn() -> bool,
 ) -> Result<EditBatch, InteropError> {
-    let mut sheets = workbook
-        .sheets()
-        .iter()
-        .map(|sheet| (case_insensitive_key(sheet.name().as_str()), sheet.id()))
-        .collect::<BTreeMap<_, _>>();
-    // The core never reuses a deleted sheet's ID, so an added sheet's ID follows the highest one
-    // the workbook has used.
-    let mut maximum_sheet_id = workbook.highest_sheet_id().map_or(0, SheetId::get);
+    let mut converter = ChangeConverter::new(workbook);
     let mut changes = Vec::with_capacity(batch.changes.len());
     for change in batch.changes {
         if cancelled() {
             return Err(InteropError::edit_cancelled());
         }
-        let converted = match change {
+        changes.push(converter.convert(change)?);
+    }
+    Ok(EditBatch::new(changes))
+}
+
+/// Converts operations in batch order, resolving each sheet name against the sheets earlier
+/// operations added or renamed.
+struct ChangeConverter {
+    sheets: BTreeMap<String, SheetId>,
+    maximum_sheet_id: u32,
+}
+
+impl ChangeConverter {
+    fn new(workbook: &WorkbookSnapshot) -> Self {
+        Self {
+            sheets: workbook
+                .sheets()
+                .iter()
+                .map(|sheet| (case_insensitive_key(sheet.name().as_str()), sheet.id()))
+                .collect(),
+            // The core never reuses a deleted sheet's ID, so an added sheet's ID follows the
+            // highest one the workbook has used.
+            maximum_sheet_id: workbook.highest_sheet_id().map_or(0, SheetId::get),
+        }
+    }
+
+    fn resolve(&self, name: &str) -> Result<SheetId, InteropError> {
+        resolve_sheet_map(&self.sheets, name)
+    }
+
+    fn convert(&mut self, change: WorkbookChangeDto) -> Result<WorkbookChange, InteropError> {
+        let sheets = &mut self.sheets;
+        let maximum_sheet_id = &mut self.maximum_sheet_id;
+        Ok(match change {
             WorkbookChangeDto::SetValue {
                 sheet,
                 address,
                 value,
             } => WorkbookChange::set_cell_value(
-                resolve_sheet_map(&sheets, &sheet)?,
+                resolve_sheet_map(sheets, &sheet)?,
                 CellAddress::from_a1(&address)?,
                 value_from_dto(value)?,
             ),
@@ -360,7 +387,7 @@ fn convert_edit_batch(
                 formula,
                 dynamic_range,
             } => {
-                let sheet_id = resolve_sheet_map(&sheets, &sheet)?;
+                let sheet_id = resolve_sheet_map(sheets, &sheet)?;
                 let address = CellAddress::from_a1(&address)?;
                 let formula = FormulaText::from_user_input(&formula)?;
                 match dynamic_range {
@@ -374,7 +401,7 @@ fn convert_edit_batch(
                 }
             }
             WorkbookChangeDto::ClearCell { sheet, address } => WorkbookChange::clear_cell(
-                resolve_sheet_map(&sheets, &sheet)?,
+                resolve_sheet_map(sheets, &sheet)?,
                 CellAddress::from_a1(&address)?,
             ),
             WorkbookChangeDto::SetNumberFormat {
@@ -390,7 +417,7 @@ fn convert_edit_batch(
                     None => NumberFormat::built_in(id, kind)?,
                 };
                 WorkbookChange::set_cell_number_format(
-                    resolve_sheet_map(&sheets, &sheet)?,
+                    resolve_sheet_map(sheets, &sheet)?,
                     CellAddress::from_a1(&address)?,
                     number_format,
                 )
@@ -403,15 +430,15 @@ fn convert_edit_batch(
                         "added sheet name is already present".to_owned(),
                     ));
                 }
-                maximum_sheet_id = maximum_sheet_id
+                *maximum_sheet_id = maximum_sheet_id
                     .checked_add(1)
                     .ok_or_else(InteropError::sheet_creation_failed)?;
-                let sheet_id = SheetId::new(maximum_sheet_id)?;
+                let sheet_id = SheetId::new(*maximum_sheet_id)?;
                 sheets.insert(key, sheet_id);
                 WorkbookChange::add_sheet(name)
             }
             WorkbookChangeDto::RenameSheet { sheet, new_name } => {
-                let sheet_id = resolve_sheet_map(&sheets, &sheet)?;
+                let sheet_id = resolve_sheet_map(sheets, &sheet)?;
                 let new_name = SheetName::new(new_name)?;
                 let old_key = case_insensitive_key(&sheet);
                 let new_key = case_insensitive_key(new_name.as_str());
@@ -428,13 +455,13 @@ fn convert_edit_batch(
                 WorkbookChange::rename_sheet(sheet_id, new_name)
             }
             WorkbookChangeDto::DeleteSheet { sheet } => {
-                let sheet_id = resolve_sheet_map(&sheets, &sheet)?;
+                let sheet_id = resolve_sheet_map(sheets, &sheet)?;
                 sheets.remove(&case_insensitive_key(&sheet));
                 WorkbookChange::delete_sheet(sheet_id)
             }
             WorkbookChangeDto::SetSheetVisibility { sheet, visibility } => {
                 WorkbookChange::set_sheet_visibility(
-                    resolve_sheet_map(&sheets, &sheet)?,
+                    resolve_sheet_map(sheets, &sheet)?,
                     parse_visibility(&visibility)?,
                 )
             }
@@ -444,7 +471,7 @@ fn convert_edit_batch(
                 formula,
                 hidden,
             } => {
-                let scope = parse_defined_name_scope(&sheets, scope_sheet.as_deref())?;
+                let scope = parse_defined_name_scope(sheets, scope_sheet.as_deref())?;
                 WorkbookChange::set_defined_name(DefinedName::new(
                     name,
                     scope,
@@ -454,7 +481,7 @@ fn convert_edit_batch(
             }
             WorkbookChangeDto::RemoveDefinedName { name, scope_sheet } => {
                 WorkbookChange::remove_defined_name(
-                    parse_defined_name_scope(&sheets, scope_sheet.as_deref())?,
+                    parse_defined_name_scope(sheets, scope_sheet.as_deref())?,
                     name,
                 )
             }
@@ -484,10 +511,8 @@ fn convert_edit_batch(
                 )
                 .with_iterative_calculation(iterative_calculation),
             ),
-        };
-        changes.push(converted);
+        })
     }
-    Ok(EditBatch::new(changes))
 }
 
 pub(super) fn convert_edit_batch_v2(
@@ -495,72 +520,50 @@ pub(super) fn convert_edit_batch_v2(
     batch: EditBatchV2Dto,
     cancelled: &impl Fn() -> bool,
 ) -> Result<EditBatch, InteropError> {
-    enum Marker {
-        V1,
-        Table(TableChangeV2Dto),
-    }
-
-    let mut markers = Vec::with_capacity(batch.changes.len());
-    let mut v1_changes = Vec::new();
+    let mut converter = ChangeConverter::new(workbook);
+    let mut changes = Vec::with_capacity(batch.changes.len());
     for change in batch.changes {
         if cancelled() {
             return Err(InteropError::edit_cancelled());
         }
-        match change {
-            WorkbookChangeV2Dto::V1(change) => {
-                markers.push(Marker::V1);
-                v1_changes.push(change);
+        changes.push(match change {
+            WorkbookChangeV2Dto::V1(change) => converter.convert(change)?,
+            WorkbookChangeV2Dto::Table(change) => table_change(change)?,
+            WorkbookChangeV2Dto::Format(change) => {
+                format_change(converter.resolve(change.sheet())?, change)?
             }
-            WorkbookChangeV2Dto::Table(change) => markers.push(Marker::Table(change)),
-        }
+        });
     }
-    let converted_v1 = convert_edit_batch(
-        workbook,
-        EditBatchDto {
-            changes: v1_changes,
-        },
-        cancelled,
-    )?;
-    let mut converted_v1 = converted_v1.changes().iter().cloned();
-    let mut changes = Vec::with_capacity(markers.len());
-    for marker in markers {
-        if cancelled() {
-            return Err(InteropError::edit_cancelled());
-        }
-        let change = match marker {
-            Marker::V1 => converted_v1
-                .next()
-                .expect("one converted v1 operation for each marker"),
-            Marker::Table(TableChangeV2Dto::RenameTable {
-                table_id,
-                new_display_name,
-            }) => WorkbookChange::rename_table(
-                TableId::new(table_id)?,
-                TableName::new(new_display_name)?,
-            ),
-            Marker::Table(TableChangeV2Dto::RenameTableColumn {
-                table_id,
-                column_id,
-                new_name,
-            }) => WorkbookChange::rename_table_column(
-                TableId::new(table_id)?,
-                TableColumnId::new(column_id)?,
-                TableColumnName::new(new_name)?,
-            ),
-            Marker::Table(TableChangeV2Dto::ResizeTableRows {
-                table_id,
-                first_data_row,
-                last_data_row,
-            }) => WorkbookChange::resize_table_rows(
-                TableId::new(table_id)?,
-                Row::new(first_data_row)?,
-                Row::new(last_data_row)?,
-            )?,
-        };
-        changes.push(change);
-    }
-    debug_assert!(converted_v1.next().is_none());
     Ok(EditBatch::new(changes))
+}
+
+fn table_change(change: TableChangeV2Dto) -> Result<WorkbookChange, InteropError> {
+    Ok(match change {
+        TableChangeV2Dto::RenameTable {
+            table_id,
+            new_display_name,
+        } => {
+            WorkbookChange::rename_table(TableId::new(table_id)?, TableName::new(new_display_name)?)
+        }
+        TableChangeV2Dto::RenameTableColumn {
+            table_id,
+            column_id,
+            new_name,
+        } => WorkbookChange::rename_table_column(
+            TableId::new(table_id)?,
+            TableColumnId::new(column_id)?,
+            TableColumnName::new(new_name)?,
+        ),
+        TableChangeV2Dto::ResizeTableRows {
+            table_id,
+            first_data_row,
+            last_data_row,
+        } => WorkbookChange::resize_table_rows(
+            TableId::new(table_id)?,
+            Row::new(first_data_row)?,
+            Row::new(last_data_row)?,
+        )?,
+    })
 }
 
 fn resolve_sheet_map(

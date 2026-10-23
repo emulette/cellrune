@@ -123,6 +123,31 @@ impl Workbook {
         conversion::range_page(py, &page)
     }
 
+    #[pyo3(signature = (sheet, start, end, *, offset=None, limit=None))]
+    pub fn read_formats<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        start: String,
+        end: String,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let offset = page_offset_from_python(offset).map_err(|error| into_py_error(py, error))?;
+        let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
+        let result = py.detach(move || {
+            self.lock_interop_wait()?.read_formats(&RangeRequestDto {
+                sheet,
+                start,
+                end,
+                offset,
+                limit,
+            })
+        });
+        let page = result.map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &page)
+    }
+
     #[pyo3(signature = (sheet, *, offset=None, limit=None))]
     pub fn data_validations<'py>(
         &self,

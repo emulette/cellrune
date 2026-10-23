@@ -85,6 +85,26 @@ impl NativeWorkbook {
     }
 
     #[napi(catch_unwind)]
+    pub fn read_formats(
+        &self,
+        sheet: String,
+        start: String,
+        end: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<String> {
+        let request = RangeRequestDto {
+            sheet,
+            start,
+            end,
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        };
+        let page = self.lock()?.read_formats(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
     pub fn data_validations(
         &self,
         sheet: String,

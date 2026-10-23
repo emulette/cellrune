@@ -57,6 +57,9 @@ const MESSAGE_ARRAY_FORMULA_PART_EDIT: &str =
     "a cell inside a legacy array formula cannot be edited apart from its anchor";
 const MESSAGE_FROZEN_ROWS_OUT_OF_RANGE: &str =
     "frozen row count cannot produce a valid top-left cell";
+const MESSAGE_FONT_NAME_INVALID: &str =
+    "font name must be 1 through 31 UTF-16 code units without control characters";
+const MESSAGE_FORMAT_VALUE_OUT_OF_RANGE: &str = "cell format value is outside its allowed range";
 const MESSAGE_FROZEN_COLUMNS_OUT_OF_RANGE: &str =
     "frozen column count cannot produce a valid top-left cell";
 const MESSAGE_TABLE_ID_ZERO: &str = "table ID must be greater than zero";
@@ -208,6 +211,10 @@ pub enum ValidationErrorCode {
     FrozenRowsOutOfRange,
     /// A frozen column count cannot be represented within worksheet bounds.
     FrozenColumnsOutOfRange,
+    /// A font name is empty, too long, or contains a control character.
+    FontNameInvalid,
+    /// A font size, color tint, column width, row height, indent, or text rotation is out of range.
+    FormatValueOutOfRange,
     /// A built-in number format uses a custom-format identifier.
     BuiltInNumberFormatId,
     /// A custom number format uses a reserved built-in identifier.
@@ -336,6 +343,8 @@ impl ValidationErrorCode {
             Self::ArrayFormulaPartEdit => "validation.array_formula_part_edit",
             Self::FrozenRowsOutOfRange => "validation.frozen_rows_out_of_range",
             Self::FrozenColumnsOutOfRange => "validation.frozen_columns_out_of_range",
+            Self::FontNameInvalid => "validation.font_name_invalid",
+            Self::FormatValueOutOfRange => "validation.format_value_out_of_range",
             Self::BuiltInNumberFormatId => "validation.built_in_number_format_id",
             Self::CustomNumberFormatId => "validation.custom_number_format_id",
             Self::NumberFormatCodeEmpty => "validation.number_format_code_empty",
@@ -565,6 +574,15 @@ pub enum ValidationError {
     FrozenColumnsOutOfRange {
         /// Rejected frozen column count.
         value: u32,
+    },
+    /// A font name was empty, longer than 31 UTF-16 code units, or held a control character.
+    FontNameInvalid,
+    /// A cell format, column width, or row height value was outside its allowed range.
+    FormatValueOutOfRange {
+        /// Property that rejected the value, such as `font_size` or `column_width`.
+        property: &'static str,
+        /// Rejected value as text.
+        value: String,
     },
     /// A built-in number format used a custom-format identifier.
     BuiltInNumberFormatId {
@@ -831,6 +849,8 @@ impl ValidationError {
             Self::ArrayFormulaPartEdit { .. } => ValidationErrorCode::ArrayFormulaPartEdit,
             Self::FrozenRowsOutOfRange { .. } => ValidationErrorCode::FrozenRowsOutOfRange,
             Self::FrozenColumnsOutOfRange { .. } => ValidationErrorCode::FrozenColumnsOutOfRange,
+            Self::FontNameInvalid => ValidationErrorCode::FontNameInvalid,
+            Self::FormatValueOutOfRange { .. } => ValidationErrorCode::FormatValueOutOfRange,
             Self::BuiltInNumberFormatId { .. } => ValidationErrorCode::BuiltInNumberFormatId,
             Self::CustomNumberFormatId { .. } => ValidationErrorCode::CustomNumberFormatId,
             Self::NumberFormatCodeEmpty => ValidationErrorCode::NumberFormatCodeEmpty,
@@ -1030,6 +1050,11 @@ impl fmt::Display for ValidationError {
             Self::FrozenColumnsOutOfRange { value } => {
                 write!(formatter, "{MESSAGE_FROZEN_COLUMNS_OUT_OF_RANGE}: {value}")
             }
+            Self::FontNameInvalid => formatter.write_str(MESSAGE_FONT_NAME_INVALID),
+            Self::FormatValueOutOfRange { property, value } => write!(
+                formatter,
+                "{MESSAGE_FORMAT_VALUE_OUT_OF_RANGE}: {property} {value}"
+            ),
             Self::BuiltInNumberFormatId { value } => {
                 write!(formatter, "{MESSAGE_NUMBER_FORMAT_BUILTIN_ID}: {value}")
             }
@@ -1389,6 +1414,14 @@ mod tests {
             (
                 ValidationErrorCode::FrozenColumnsOutOfRange,
                 "validation.frozen_columns_out_of_range",
+            ),
+            (
+                ValidationErrorCode::FontNameInvalid,
+                "validation.font_name_invalid",
+            ),
+            (
+                ValidationErrorCode::FormatValueOutOfRange,
+                "validation.format_value_out_of_range",
             ),
             (
                 ValidationErrorCode::BuiltInNumberFormatId,

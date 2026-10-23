@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod batch;
+mod format;
 mod metadata;
 mod presentation;
 mod single_edit;
@@ -15,6 +16,7 @@ pub(crate) use batch::{
     rewrite_limit_detail,
 };
 pub use batch::{EditBatch, EditReceipt, WorkbookChange};
+pub(crate) use format::effective_cell_format;
 
 /// One explicit cell mutation retained for document-backed package patching.
 ///

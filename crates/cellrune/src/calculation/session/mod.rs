@@ -304,6 +304,7 @@ impl WorkbookCalculationSession {
             self.calculation_changes_pending || !receipt.calculation_changed_cells().is_empty();
         Ok(PreparedEditBatch {
             base_revision: current_revision,
+            base_presentation_revision: self.draft.presentation_revision(),
             base_cursor: self.next_cursor,
             draft,
             receipt,
@@ -343,6 +344,19 @@ impl WorkbookCalculationSession {
                 Some(stale_calculation_cursor_detail(
                     prepared.base_cursor,
                     self.next_cursor,
+                )),
+            )
+            .into());
+        }
+        // A presentation-only batch keeps the semantic revision, so a batch prepared before one
+        // was installed must not replace the draft that holds its edits.
+        let current_presentation = self.draft.presentation_revision();
+        if current_presentation != prepared.base_presentation_revision {
+            return Err(SessionError::new(
+                SessionErrorCode::RevisionMismatch,
+                Some(format!(
+                    "expected presentation={}, current presentation={current_presentation}",
+                    prepared.base_presentation_revision
                 )),
             )
             .into());
@@ -721,6 +735,7 @@ impl Default for WorkbookCalculationSession {
 #[derive(Debug)]
 pub struct PreparedEditBatch {
     base_revision: u64,
+    base_presentation_revision: u64,
     base_cursor: u64,
     draft: WorkbookDraft,
     receipt: EditReceipt,

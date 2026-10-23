@@ -8,6 +8,7 @@ mod merge;
 mod metadata;
 mod phonetic;
 mod shared_strings;
+mod style_formats;
 mod styles;
 mod table;
 mod workbook_xml;
@@ -236,6 +237,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         })?;
         sheets.push(sheet);
     }
+    presentation.set_style_formats(styles.into_cell_formats());
     if used_relationships.len() != package.worksheet_count() {
         return Err(
             XlsxReadError::new(XlsxErrorCode::InvalidWorkbook).at_source(workbook_part.source_id())

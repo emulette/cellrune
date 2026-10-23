@@ -4,6 +4,7 @@ use std::io::{Cursor, Write};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
+use super::format_xml;
 use super::materialization::{MaterializationAction, MaterializationPlan};
 use super::serialization::{
     escape_attribute, escape_text, serialize_cell, serialize_materialized_follower,
@@ -14,10 +15,11 @@ use super::{
     RecalculatedWorkbook, RecalculationWriteOptions, WriteLimits, WriteProvenance, WriteReport,
     XlsxWriteError, XlsxWriteErrorCode,
 };
+use crate::presentation::canonical_default_format;
 use crate::{
-    CalculationSnapshot, CellAddress, CellContent, DateSystem, DefinedNameScope,
-    MaterializedResultOrigin, NumberFormat, Sheet, SheetVisibility, WorkbookDraft,
-    WorkbookSnapshot, XlsxDocumentKind,
+    Border, CalculationSnapshot, CellAddress, CellContent, CellFormat, DateSystem,
+    DefinedNameScope, Fill, Font, MaterializedResultOrigin, NumberFormat, PatternFill, Sheet,
+    SheetVisibility, WorkbookDraft, WorkbookSnapshot, XlsxDocumentKind,
 };
 
 const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -51,7 +53,7 @@ pub(crate) fn write_canonical_draft(
     let limits = options.write_options().limits();
     validate_phonetic_limits(draft.presentation(), limits)?;
     let materialization = MaterializationPlan::new(calculation, options.policy(), limits)?;
-    let styles = StyleRegistry::for_workbook(draft.workbook())?;
+    let styles = StyleRegistry::for_draft(draft)?;
     let request_host_recalculation =
         !materialization.is_complete() || !draft.workbook().diagnostics().is_empty();
 
@@ -91,10 +93,19 @@ pub(crate) fn write_canonical_draft(
             .filter(|(id, _)| id.sheet_id() == sheet.id())
             .map(|(id, planned)| (id.address(), planned))
             .collect::<BTreeMap<_, _>>();
-        let style_indexes = sheet
+        let presentation = draft.presentation();
+        let mut style_indexes = sheet
             .cells()
-            .map(|cell| (cell.address(), styles.index(cell.number_format())))
+            .map(|cell| {
+                let format = presentation.edited_cell_format(sheet.id(), cell.address());
+                (cell.address(), styles.index(cell.number_format(), format))
+            })
             .collect::<BTreeMap<_, _>>();
+        for (address, format) in presentation.edited_cell_formats(sheet.id()) {
+            style_indexes
+                .entry(address)
+                .or_insert_with(|| styles.index(&NumberFormat::default(), Some(format)));
+        }
         parts.insert(
             worksheet_part_name(index),
             generated_worksheet_xml(
@@ -161,33 +172,73 @@ pub(crate) fn write_canonical_draft(
     ))
 }
 
+/// One generated `cellXfs` entry: a number format and the format the cell displays with.
+#[derive(Debug, Clone, PartialEq)]
+struct StyleKey {
+    number_format: NumberFormat,
+    format: CellFormat,
+}
+
 pub(super) struct StyleRegistry {
-    formats: Vec<NumberFormat>,
+    xfs: Vec<StyleKey>,
     custom_formats: BTreeMap<u32, Box<str>>,
+    fonts: Vec<Font>,
+    fills: Vec<PatternFill>,
+    borders: Vec<Border>,
 }
 
 impl StyleRegistry {
-    fn for_workbook(workbook: &WorkbookSnapshot) -> Result<Self, XlsxWriteError> {
+    /// Registers every cell's number format with the format the draft displays it with, and the
+    /// formats of edited cells that hold no value.
+    fn for_draft(draft: &WorkbookDraft) -> Result<Self, XlsxWriteError> {
+        let mut keys = Vec::new();
+        for sheet in draft.workbook().sheets() {
+            for cell in sheet.cells() {
+                keys.push((
+                    cell.number_format().clone(),
+                    draft
+                        .presentation()
+                        .edited_cell_format(sheet.id(), cell.address())
+                        .cloned(),
+                ));
+            }
+            for (address, format) in draft.presentation().edited_cell_formats(sheet.id()) {
+                if sheet.cell(address).is_none() {
+                    keys.push((NumberFormat::default(), Some(format.clone())));
+                }
+            }
+        }
         Self::for_formats(
-            workbook
-                .sheets()
-                .iter()
-                .flat_map(|sheet| sheet.cells())
-                .map(|cell| cell.number_format()),
+            keys.iter()
+                .map(|(number_format, format)| (number_format, format.as_ref())),
         )
     }
 
+    /// Registers number formats, each with the format it displays with or the default format.
     pub(super) fn for_formats<'a>(
-        formats_to_register: impl IntoIterator<Item = &'a NumberFormat>,
+        formats_to_register: impl IntoIterator<Item = (&'a NumberFormat, Option<&'a CellFormat>)>,
     ) -> Result<Self, XlsxWriteError> {
-        let mut formats = vec![NumberFormat::default()];
-        let mut custom_formats = BTreeMap::<u32, Box<str>>::new();
-        for format in formats_to_register {
-            if let Some(code) = format.code()
-                && format.id() >= 164
+        let default_format = canonical_default_format();
+        let mut registry = Self {
+            xfs: vec![StyleKey {
+                number_format: NumberFormat::default(),
+                format: default_format.clone(),
+            }],
+            custom_formats: BTreeMap::new(),
+            fonts: vec![default_format.font().clone()],
+            fills: vec![
+                PatternFill::default(),
+                PatternFill::new(crate::FillPattern::Gray125),
+            ],
+            borders: vec![Border::default()],
+        };
+        for (number_format, format) in formats_to_register {
+            if let Some(code) = number_format.code()
+                && number_format.id() >= 164
             {
-                if custom_formats
-                    .get(&format.id())
+                if registry
+                    .custom_formats
+                    .get(&number_format.id())
                     .is_some_and(|existing| existing.as_ref() != code)
                 {
                     return Err(
@@ -195,22 +246,42 @@ impl StyleRegistry {
                             .with_detail(DETAIL_STYLE_CONFLICT),
                     );
                 }
-                custom_formats.insert(format.id(), Box::from(code));
+                registry
+                    .custom_formats
+                    .insert(number_format.id(), Box::from(code));
             }
-            if !formats.iter().any(|existing| existing == format) {
-                formats.push(format.clone());
+            let key = StyleKey {
+                number_format: number_format.clone(),
+                format: format.cloned().unwrap_or_else(|| default_format.clone()),
+            };
+            if !registry.xfs.contains(&key) {
+                registry.register_records(&key.format);
+                registry.xfs.push(key);
             }
         }
-        Ok(Self {
-            formats,
-            custom_formats,
-        })
+        Ok(registry)
     }
 
-    pub(super) fn index(&self, format: &NumberFormat) -> usize {
-        self.formats
+    fn register_records(&mut self, format: &CellFormat) {
+        if !self.fonts.contains(format.font()) {
+            self.fonts.push(format.font().clone());
+        }
+        if let Fill::Pattern(fill) = format.fill()
+            && !self.fills.contains(&fill)
+        {
+            self.fills.push(fill);
+        }
+        if !self.borders.contains(&format.border()) {
+            self.borders.push(format.border());
+        }
+    }
+
+    pub(super) fn index(&self, number_format: &NumberFormat, format: Option<&CellFormat>) -> usize {
+        let default_format = canonical_default_format();
+        let format = format.unwrap_or(&default_format);
+        self.xfs
             .iter()
-            .position(|candidate| candidate == format)
+            .position(|key| key.number_format == *number_format && key.format == *format)
             .unwrap_or(0)
     }
 
@@ -231,27 +302,86 @@ impl StyleRegistry {
             }
             xml.push_str("</numFmts>");
         }
+        xml.push_str(&format!("<fonts count=\"{}\">", self.fonts.len()));
+        xml.push_str(DEFAULT_FONT_XML);
+        for font in &self.fonts[1..] {
+            xml.push_str(&format_xml::font_xml(font, "")?);
+        }
+        xml.push_str(&format!("</fonts><fills count=\"{}\">", self.fills.len()));
+        for fill in &self.fills {
+            xml.push_str(&format_xml::fill_xml(fill, ""));
+        }
+        xml.push_str(&format!(
+            "</fills><borders count=\"{}\">",
+            self.borders.len()
+        ));
+        xml.push_str(DEFAULT_BORDER_XML);
+        for border in &self.borders[1..] {
+            xml.push_str(&format_xml::border_xml(border, ""));
+        }
         xml.push_str(
-            r#"<fonts count="1"><font><sz val="11"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>"#,
+            r#"</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>"#,
         );
         xml.push_str("<cellXfs count=\"");
-        xml.push_str(&self.formats.len().to_string());
+        xml.push_str(&self.xfs.len().to_string());
         xml.push_str("\">");
-        for format in &self.formats {
-            xml.push_str("<xf numFmtId=\"");
-            xml.push_str(&format.id().to_string());
-            xml.push_str("\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"");
-            if format.id() != 0 {
-                xml.push_str(" applyNumberFormat=\"1\"");
-            }
-            xml.push_str("/>");
+        for key in &self.xfs {
+            self.push_xf(&mut xml, key);
         }
         xml.push_str(
             r#"</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>"#,
         );
         Ok(xml)
     }
+
+    fn push_xf(&self, xml: &mut String, key: &StyleKey) {
+        let font_id = self
+            .fonts
+            .iter()
+            .position(|font| font == key.format.font())
+            .unwrap_or(0);
+        let fill_id = match key.format.fill() {
+            Fill::Pattern(fill) => self
+                .fills
+                .iter()
+                .position(|candidate| *candidate == fill)
+                .unwrap_or(0),
+            _ => 0,
+        };
+        let border_id = self
+            .borders
+            .iter()
+            .position(|border| *border == key.format.border())
+            .unwrap_or(0);
+        xml.push_str(&format!(
+            "<xf numFmtId=\"{}\" fontId=\"{font_id}\" fillId=\"{fill_id}\" borderId=\"{border_id}\" xfId=\"0\"",
+            key.number_format.id()
+        ));
+        for (applies, attribute) in [
+            (key.number_format.id() != 0, " applyNumberFormat=\"1\""),
+            (font_id != 0, " applyFont=\"1\""),
+            (fill_id != 0, " applyFill=\"1\""),
+            (border_id != 0, " applyBorder=\"1\""),
+        ] {
+            if applies {
+                xml.push_str(attribute);
+            }
+        }
+        match format_xml::alignment_xml(&key.format.alignment(), "") {
+            Some(alignment) => {
+                xml.push_str(" applyAlignment=\"1\">");
+                xml.push_str(&alignment);
+                xml.push_str("</xf>");
+            }
+            None => xml.push_str("/>"),
+        }
+    }
 }
+
+/// The default font record of a generated workbook, with the family and scheme Excel writes.
+const DEFAULT_FONT_XML: &str =
+    r#"<font><sz val="11"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>"#;
+const DEFAULT_BORDER_XML: &str = "<border><left/><right/><top/><bottom/><diagonal/></border>";
 
 pub(super) fn generated_worksheet_xml(
     sheet: &Sheet,
@@ -286,6 +416,15 @@ pub(super) fn generated_worksheet_xml(
         ) && let Some(cell) = serialize_materialized_follower(*address, &planned.action)?
         {
             cells.insert(*address, cell);
+        }
+    }
+    // A formatted position that holds no value is written as an empty styled cell.
+    for (address, style_index) in style_indexes {
+        if *style_index != 0 && !cells.contains_key(address) {
+            cells.insert(
+                *address,
+                format!("<c r=\"{address}\" s=\"{style_index}\"/>"),
+            );
         }
     }
     let mut xml = String::from(
@@ -333,28 +472,53 @@ pub(super) fn generated_worksheet_xml(
         xml.push_str("\"/>");
     }
     push_sheet_views(&mut xml, presentation.frozen_pane(sheet.id()));
+    push_columns(&mut xml, presentation.column_widths(sheet.id()));
     xml.push_str("<sheetData>");
-    let mut current_row = None;
+    let mut rows = BTreeMap::<u32, (Option<f64>, Vec<&String>)>::new();
     for (address, cell) in &cells {
-        let row = address.row().get();
-        if current_row != Some(row) {
-            if current_row.is_some() {
-                xml.push_str("</row>");
-            }
-            xml.push_str("<row r=\"");
-            xml.push_str(&row.to_string());
-            xml.push_str("\">");
-            current_row = Some(row);
-        }
-        xml.push_str(cell);
+        rows.entry(address.row().get()).or_default().1.push(cell);
     }
-    if current_row.is_some() {
+    for (row, height) in presentation.row_heights(sheet.id()) {
+        rows.entry(row.get()).or_default().0 = Some(height);
+    }
+    for (row, (height, row_cells)) in rows {
+        xml.push_str("<row r=\"");
+        xml.push_str(&row.to_string());
+        xml.push('"');
+        if let Some(height) = height {
+            xml.push_str(&format!(" ht=\"{height}\" customHeight=\"1\""));
+        }
+        if row_cells.is_empty() {
+            xml.push_str("/>");
+            continue;
+        }
+        xml.push('>');
+        for cell in row_cells {
+            xml.push_str(cell);
+        }
         xml.push_str("</row>");
     }
     xml.push_str("</sheetData>");
     super::table::push_table_parts(&mut xml, sheet);
     xml.push_str("</worksheet>");
     Ok(xml)
+}
+
+/// Writes `<cols>` for the sheet's explicit column widths.
+fn push_columns(output: &mut String, widths: &[crate::ColumnWidth]) {
+    if widths.is_empty() {
+        return;
+    }
+    output.push_str("<cols>");
+    for span in widths {
+        output.push_str(&format!(
+            "<col min=\"{}\" max=\"{}\" width=\"{}\" customWidth=\"1\"/>",
+            span.first().get(),
+            span.last().get(),
+            span.width()
+        ));
+    }
+    output.push_str("</cols>");
 }
 
 fn workbook_xml(
@@ -670,6 +834,7 @@ pub(super) fn verify_draft_output(
             host_recalculation,
         )
         || !expected_presentation.semantics_match(reopened.presentation())
+        || !edited_formats_match(expected_workbook, expected_presentation, &reopened)
     {
         return Err(
             XlsxWriteError::new(XlsxWriteErrorCode::OutputVerificationFailed)
@@ -724,6 +889,31 @@ pub(super) fn verify_draft_output(
         }
     }
     Ok(())
+}
+
+/// Returns whether every edited cell displays its edited format in the reopened output.
+fn edited_formats_match(
+    expected: &WorkbookSnapshot,
+    presentation: &crate::DocumentPresentation,
+    reopened: &crate::XlsxDocument,
+) -> bool {
+    let unchanged = crate::draft::DraftCellMutationStore::default();
+    expected.sheets().iter().all(|sheet| {
+        let Some(actual_sheet) = reopened.workbook().sheet_by_id(sheet.id()) else {
+            return false;
+        };
+        presentation
+            .edited_cell_formats(sheet.id())
+            .all(|(address, format)| {
+                crate::draft::effective_cell_format(
+                    reopened.presentation(),
+                    actual_sheet,
+                    Some(reopened.workbook()),
+                    &unchanged,
+                    address,
+                ) == *format
+            })
+    })
 }
 
 fn draft_semantics_match(

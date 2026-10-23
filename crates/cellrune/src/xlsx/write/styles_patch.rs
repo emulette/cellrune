@@ -1,6 +1,6 @@
 use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::io::Cursor;
+use std::collections::{BTreeMap, HashMap};
+use std::io::{Cursor, Write as _};
 
 use quick_xml::Writer;
 use quick_xml::XmlVersion;
@@ -10,11 +10,15 @@ use quick_xml::name::QName;
 use quick_xml::reader::NsReader;
 
 use super::canonical::StyleRegistry;
+use super::format_xml;
 use super::serialization::escape_attribute;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{namespace_reader, read_event};
-use crate::{CalculationCellId, NumberFormat};
+use crate::{
+    Alignment, Border, CalculationCellId, CellFormat, DocumentPresentation, Fill, Font,
+    NumberFormat, PatternFill,
+};
 
 const DETAIL_MISSING_CELL_XFS: &str = "styles part does not contain cellXfs";
 const DETAIL_BASE_STYLE: &str = "cell references an unavailable base style";
@@ -23,9 +27,21 @@ const DETAIL_CUSTOM_CONFLICT: &str =
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
+/// Stylesheet children in schema order, up to `cellXfs`, which every styles part holds.
+const SECTION_ORDER: [&str; 6] = [
+    "numFmts",
+    "fonts",
+    "fills",
+    "borders",
+    "cellStyleXfs",
+    "cellXfs",
+];
+
 pub(crate) struct StyleRequest {
     pub(crate) base_index: usize,
     pub(crate) format: NumberFormat,
+    /// The font, fill, border, and alignment to display, or `None` to keep the base style's.
+    pub(crate) presentation: Option<CellFormat>,
 }
 
 pub(crate) struct DocumentStylePlan {
@@ -38,23 +54,103 @@ struct XfTemplate {
     events: Vec<Event<'static>>,
 }
 
+/// The records of one `cellXfs` entry a request replaces; `None` keeps the base style's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct XfReplacement {
+    font: Option<usize>,
+    fill: Option<usize>,
+    border: Option<usize>,
+    alignment: Option<Alignment>,
+}
+
+impl XfReplacement {
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Default)]
 struct StyleAnalysis {
     custom_formats: BTreeMap<u32, String>,
     xfs: Vec<XfTemplate>,
-    has_num_formats: bool,
+    /// Record counts of the sections the styles part holds, by section name.
+    sections: BTreeMap<&'static str, usize>,
+}
+
+/// Font, fill, and border records appended to the styles part.
+#[derive(Default)]
+struct RecordAdditions {
+    fonts: Vec<Font>,
+    fills: Vec<PatternFill>,
+    borders: Vec<Border>,
+}
+
+impl RecordAdditions {
+    fn font(&mut self, font: &Font, existing: usize) -> usize {
+        existing + position_or_push(&mut self.fonts, font)
+    }
+
+    fn fill(&mut self, fill: &PatternFill, existing: usize) -> usize {
+        existing + position_or_push(&mut self.fills, fill)
+    }
+
+    fn border(&mut self, border: &Border, existing: usize) -> usize {
+        existing + position_or_push(&mut self.borders, border)
+    }
+
+    fn section_xml(&self, section: &str, prefix: &str) -> Result<Vec<String>, XlsxWriteError> {
+        match section {
+            "fonts" => self
+                .fonts
+                .iter()
+                .map(|font| format_xml::font_xml(font, prefix))
+                .collect(),
+            "fills" => Ok(self
+                .fills
+                .iter()
+                .map(|fill| format_xml::fill_xml(fill, prefix))
+                .collect()),
+            "borders" => Ok(self
+                .borders
+                .iter()
+                .map(|border| format_xml::border_xml(border, prefix))
+                .collect()),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn count(&self, section: &str) -> usize {
+        match section {
+            "fonts" => self.fonts.len(),
+            "fills" => self.fills.len(),
+            "borders" => self.borders.len(),
+            _ => 0,
+        }
+    }
+}
+
+fn position_or_push<T: Clone + PartialEq>(values: &mut Vec<T>, value: &T) -> usize {
+    if let Some(index) = values.iter().position(|candidate| candidate == value) {
+        return index;
+    }
+    values.push(value.clone());
+    values.len() - 1
 }
 
 pub(crate) fn plan_document_styles(
     bytes: Option<&[u8]>,
     source: &PartPath,
     requests: &BTreeMap<CalculationCellId, StyleRequest>,
+    base_formats: &DocumentPresentation,
     limits: WriteLimits,
 ) -> Result<Option<DocumentStylePlan>, XlsxWriteError> {
     if requests.is_empty() {
         return Ok(None);
     }
     match bytes {
-        Some(bytes) => patch_existing_styles(bytes, source, requests, limits).map(Some),
+        Some(bytes) => {
+            patch_existing_styles(bytes, source, requests, base_formats, limits).map(Some)
+        }
         None => generate_styles(source, requests, limits).map(Some),
     }
 }
@@ -67,10 +163,19 @@ fn generate_styles(
     if requests.values().any(|request| request.base_index != 0) {
         return Err(invalid_generated(source, DETAIL_BASE_STYLE));
     }
-    let registry = StyleRegistry::for_formats(requests.values().map(|request| &request.format))?;
+    let registry = StyleRegistry::for_formats(
+        requests
+            .values()
+            .map(|request| (&request.format, request.presentation.as_ref())),
+    )?;
     let indexes = requests
         .iter()
-        .map(|(id, request)| (*id, registry.index(&request.format)))
+        .map(|(id, request)| {
+            (
+                *id,
+                registry.index(&request.format, request.presentation.as_ref()),
+            )
+        })
         .collect();
     let bytes = registry.to_xml()?.into_bytes();
     enforce_bytes(bytes.len(), limits, source)?;
@@ -81,14 +186,17 @@ fn patch_existing_styles(
     bytes: &[u8],
     source: &PartPath,
     requests: &BTreeMap<CalculationCellId, StyleRequest>,
+    base_formats: &DocumentPresentation,
     limits: WriteLimits,
 ) -> Result<DocumentStylePlan, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, source)?;
     let analysis = analyze_styles(bytes, source, limits)?;
+    let existing = |section| analysis.sections.get(section).copied().unwrap_or(0);
+    let mut records = RecordAdditions::default();
     let mut additions = Vec::<XfTemplate>::new();
     let mut indexes = BTreeMap::new();
     let mut requested_custom = BTreeMap::<u32, String>::new();
-    let mut pair_indexes = BTreeMap::<(usize, u32), usize>::new();
+    let mut added_indexes = HashMap::<(usize, u32, XfReplacement), usize>::new();
     for (id, request) in requests {
         let base = analysis
             .xfs
@@ -113,17 +221,45 @@ fn patch_existing_styles(
                 requested_custom.insert(request.format.id(), code.to_owned());
             }
         }
-        if template_number_format(base, source)? == request.format.id() {
+        // Only the components that differ from the base style get new records, so a record's
+        // attributes the model does not carry stay on every component the edit left alone.
+        let replacement = request
+            .presentation
+            .as_ref()
+            .map(|format| {
+                let base_format = base_formats.style_format(request.base_index);
+                XfReplacement {
+                    font: (format.font() != base_format.font())
+                        .then(|| records.font(format.font(), existing("fonts"))),
+                    fill: match format.fill() {
+                        Fill::Pattern(fill) if format.fill() != base_format.fill() => {
+                            Some(records.fill(&fill, existing("fills")))
+                        }
+                        _ => None,
+                    },
+                    border: (format.border() != base_format.border())
+                        .then(|| records.border(&format.border(), existing("borders"))),
+                    alignment: (format.alignment() != base_format.alignment())
+                        .then_some(format.alignment()),
+                }
+            })
+            .unwrap_or_default();
+        if replacement.is_empty() && template_number_format(base, source)? == request.format.id() {
             indexes.insert(*id, request.base_index);
             continue;
         }
-        let key = (request.base_index, request.format.id());
-        let style_index = if let Some(index) = pair_indexes.get(&key) {
+        let key = (request.base_index, request.format.id(), replacement);
+        let style_index = if let Some(index) = added_indexes.get(&key) {
             *index
         } else {
             let index = analysis.xfs.len().saturating_add(additions.len());
-            additions.push(patch_template(base, request.format.id(), source)?);
-            pair_indexes.insert(key, index);
+            additions.push(patch_template(
+                base,
+                request.format.id(),
+                &replacement,
+                source,
+            )?);
+            added_indexes.insert(key, index);
             index
         };
         indexes.insert(*id, style_index);
@@ -132,8 +268,11 @@ fn patch_existing_styles(
         bytes,
         source,
         &analysis,
-        &requested_custom,
-        &additions,
+        &StyleAdditions {
+            custom_formats: &requested_custom,
+            records: &records,
+            xfs: &additions,
+        },
         limits,
     )?;
     Ok(DocumentStylePlan {
@@ -150,57 +289,48 @@ fn analyze_styles(
     let mut xml = configured_reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
-    let mut num_formats_depth = None;
-    let mut cell_xfs_depth = None;
-    let mut custom_formats = BTreeMap::new();
-    let mut xfs = Vec::new();
+    let mut section = None::<&'static str>;
+    let mut analysis = StyleAnalysis::default();
     let mut capture = None::<(u64, Vec<Event<'static>>)>;
-    let mut has_num_formats = false;
-    let mut saw_cell_xfs = false;
     loop {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         match &event {
-            Event::Start(element) => {
-                depth = depth.saturating_add(1);
-                enforce_depth(depth, limits, source)?;
+            Event::Start(element) | Event::Empty(element) => {
+                let empty = matches!(event, Event::Empty(_));
+                let element_depth = depth.saturating_add(1);
+                enforce_depth(element_depth, limits, source)?;
                 if let Some((_, events)) = &mut capture {
                     events.push(event.clone().into_owned());
-                } else if element.local_name().as_ref() == "numFmts" && depth == 2 {
-                    has_num_formats = true;
-                    num_formats_depth = Some(depth);
-                } else if element.local_name().as_ref() == "cellXfs" && depth == 2 {
-                    saw_cell_xfs = true;
-                    cell_xfs_depth = Some(depth);
-                } else if num_formats_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == "numFmt"
+                } else if element_depth == 2 {
+                    section = SECTION_ORDER
+                        .iter()
+                        .find(|name| element.local_name().as_ref() == **name)
+                        .copied();
+                    if let Some(name) = section {
+                        analysis.sections.insert(name, 0);
+                    }
+                    if empty {
+                        section = None;
+                    }
+                } else if element_depth == 3
+                    && let Some(name) = section
                 {
-                    insert_custom_format(element, &mut custom_formats, source)?;
-                } else if cell_xfs_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == "xf"
-                {
-                    capture = Some((depth, vec![event.clone().into_owned()]));
+                    *analysis.sections.entry(name).or_default() += 1;
+                    if name == "numFmts" && element.local_name().as_ref() == "numFmt" {
+                        insert_custom_format(element, &mut analysis.custom_formats, source)?;
+                    } else if name == "cellXfs" && element.local_name().as_ref() == "xf" {
+                        if empty {
+                            analysis.xfs.push(XfTemplate {
+                                events: vec![event.clone().into_owned()],
+                            });
+                        } else {
+                            capture = Some((element_depth, vec![event.clone().into_owned()]));
+                        }
+                    }
                 }
-            }
-            Event::Empty(element) => {
-                enforce_depth(depth.saturating_add(1), limits, source)?;
-                if let Some((_, events)) = &mut capture {
-                    events.push(event.clone().into_owned());
-                } else if element.local_name().as_ref() == "numFmts" && depth + 1 == 2 {
-                    has_num_formats = true;
-                } else if element.local_name().as_ref() == "cellXfs" && depth + 1 == 2 {
-                    saw_cell_xfs = true;
-                    cell_xfs_depth = Some(depth + 1);
-                } else if num_formats_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == "numFmt"
-                {
-                    insert_custom_format(element, &mut custom_formats, source)?;
-                } else if cell_xfs_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == "xf"
-                {
-                    xfs.push(XfTemplate {
-                        events: vec![event.clone().into_owned()],
-                    });
+                if !empty {
+                    depth = element_depth;
                 }
             }
             Event::End(_) => {
@@ -210,14 +340,10 @@ fn analyze_styles(
                         let (_, events) = capture
                             .take()
                             .ok_or_else(|| invalid_generated(source, DETAIL_MISSING_CELL_XFS))?;
-                        xfs.push(XfTemplate { events });
+                        analysis.xfs.push(XfTemplate { events });
                     }
-                }
-                if num_formats_depth == Some(depth) {
-                    num_formats_depth = None;
-                }
-                if cell_xfs_depth == Some(depth) {
-                    cell_xfs_depth = None;
+                } else if depth == 2 {
+                    section = None;
                 }
                 depth = depth.saturating_sub(1);
             }
@@ -230,31 +356,48 @@ fn analyze_styles(
         }
         buffer.clear();
     }
-    if xfs.is_empty() || !saw_cell_xfs {
+    if analysis.xfs.is_empty() || !analysis.sections.contains_key("cellXfs") {
         return Err(invalid_generated(source, DETAIL_MISSING_CELL_XFS));
     }
-    Ok(StyleAnalysis {
-        custom_formats,
-        xfs,
-        has_num_formats,
-    })
+    Ok(analysis)
+}
+
+struct StyleAdditions<'a> {
+    custom_formats: &'a BTreeMap<u32, String>,
+    records: &'a RecordAdditions,
+    xfs: &'a [XfTemplate],
+}
+
+impl StyleAdditions<'_> {
+    fn count(&self, section: &str) -> usize {
+        match section {
+            "numFmts" => self.custom_formats.len(),
+            "cellXfs" => self.xfs.len(),
+            other => self.records.count(other),
+        }
+    }
 }
 
 fn rewrite_styles(
     bytes: &[u8],
     source: &PartPath,
     analysis: &StyleAnalysis,
-    custom_additions: &BTreeMap<u32, String>,
-    xf_additions: &[XfTemplate],
+    additions: &StyleAdditions<'_>,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
-    let mut num_formats_depth = None;
-    let mut cell_xfs_depth = None;
-    let mut inserted_num_formats = custom_additions.is_empty();
+    let mut open_section = None::<(&'static str, String)>;
+    let mut root_prefix = String::new();
+    // Sections absent from the source that additions need are inserted before the first later
+    // stylesheet child, in schema order.
+    let mut missing = SECTION_ORDER
+        .iter()
+        .copied()
+        .filter(|name| !analysis.sections.contains_key(name) && additions.count(name) > 0)
+        .collect::<Vec<_>>();
     loop {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
@@ -262,75 +405,64 @@ fn rewrite_styles(
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
-                if depth == 2 && !analysis.has_num_formats && !inserted_num_formats {
-                    write_num_formats(&mut writer, custom_additions, source)?;
-                    inserted_num_formats = true;
+                if depth == 1 {
+                    root_prefix = qualified_prefix(element.name().as_ref());
                 }
-                if depth == 2 && element.local_name().as_ref() == "numFmts" {
-                    num_formats_depth = Some(depth);
-                    let patched = patch_count(
-                        &element,
-                        analysis
-                            .custom_formats
-                            .len()
-                            .saturating_add(custom_additions.len()),
+                if depth == 2 {
+                    insert_missing_sections(
+                        &mut writer,
+                        &mut missing,
+                        element.local_name().as_ref(),
+                        &root_prefix,
+                        additions,
                         source,
                     )?;
-                    write_event(&mut writer, Event::Start(patched), source)?;
-                } else if depth == 2 && element.local_name().as_ref() == "cellXfs" {
-                    cell_xfs_depth = Some(depth);
-                    let patched = patch_count(
-                        &element,
-                        analysis.xfs.len().saturating_add(xf_additions.len()),
-                        source,
-                    )?;
-                    write_event(&mut writer, Event::Start(patched), source)?;
-                } else {
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                }
+                match section_of(depth, &element) {
+                    Some(name) => {
+                        let total = analysis.sections[name] + additions.count(name);
+                        let patched = patch_count(&element, total, source)?;
+                        open_section = Some((name, qualified_prefix(element.name().as_ref())));
+                        write_event(&mut writer, Event::Start(patched), source)?;
+                    }
+                    None => {
+                        write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                    }
                 }
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
-                if depth + 1 == 2 && !analysis.has_num_formats && !inserted_num_formats {
-                    write_num_formats(&mut writer, custom_additions, source)?;
-                    inserted_num_formats = true;
+                if depth + 1 == 2 {
+                    insert_missing_sections(
+                        &mut writer,
+                        &mut missing,
+                        element.local_name().as_ref(),
+                        &root_prefix,
+                        additions,
+                        source,
+                    )?;
                 }
-                if depth + 1 == 2 && element.local_name().as_ref() == "numFmts" {
-                    let patched = patch_count(
-                        &element,
-                        analysis
-                            .custom_formats
-                            .len()
-                            .saturating_add(custom_additions.len()),
-                        source,
-                    )?;
-                    write_event(&mut writer, Event::Start(patched), source)?;
-                    write_custom_formats(&mut writer, custom_additions, source)?;
-                    write_event(&mut writer, Event::End(BytesEnd::new("numFmts")), source)?;
-                    inserted_num_formats = true;
-                } else if depth + 1 == 2 && element.local_name().as_ref() == "cellXfs" {
-                    let patched = patch_count(
-                        &element,
-                        analysis.xfs.len().saturating_add(xf_additions.len()),
-                        source,
-                    )?;
-                    write_event(&mut writer, Event::Start(patched), source)?;
-                    write_templates(&mut writer, xf_additions, source)?;
-                    write_event(&mut writer, Event::End(BytesEnd::new("cellXfs")), source)?;
-                    cell_xfs_depth = Some(depth + 1);
-                } else {
-                    write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
+                match section_of(depth + 1, &element) {
+                    Some(name) if additions.count(name) > 0 => {
+                        let total = analysis.sections[name] + additions.count(name);
+                        let patched = patch_count(&element, total, source)?;
+                        let prefix = qualified_prefix(element.name().as_ref());
+                        write_event(&mut writer, Event::Start(patched), source)?;
+                        write_section_additions(&mut writer, name, &prefix, additions, source)?;
+                        write_event(
+                            &mut writer,
+                            Event::End(BytesEnd::new(element.name().as_ref().to_owned())),
+                            source,
+                        )?;
+                    }
+                    _ => write_event(&mut writer, Event::Empty(element.into_owned()), source)?,
                 }
             }
             Event::End(element) => {
-                if num_formats_depth == Some(depth) {
-                    write_custom_formats(&mut writer, custom_additions, source)?;
-                    inserted_num_formats = true;
-                    num_formats_depth = None;
-                }
-                if cell_xfs_depth == Some(depth) {
-                    write_templates(&mut writer, xf_additions, source)?;
-                    cell_xfs_depth = None;
+                if depth == 2
+                    && let Some((name, prefix)) = open_section.take()
+                {
+                    write_section_additions(&mut writer, name, &prefix, additions, source)?;
                 }
                 write_event(&mut writer, Event::End(element.into_owned()), source)?;
                 depth = depth.saturating_sub(1);
@@ -340,7 +472,7 @@ fn rewrite_styles(
         }
         buffer.clear();
     }
-    if !inserted_num_formats || cell_xfs_depth.is_some() {
+    if !missing.is_empty() {
         return Err(invalid_generated(source, DETAIL_MISSING_CELL_XFS));
     }
     let output = writer.into_inner().into_inner();
@@ -348,39 +480,196 @@ fn rewrite_styles(
     Ok(output)
 }
 
+/// Returns the stylesheet section a depth-2 element is.
+fn section_of(depth: u64, element: &BytesStart<'_>) -> Option<&'static str> {
+    if depth != 2 {
+        return None;
+    }
+    SECTION_ORDER
+        .iter()
+        .find(|name| element.local_name().as_ref() == **name)
+        .copied()
+}
+
+fn insert_missing_sections(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    missing: &mut Vec<&'static str>,
+    next_local_name: &str,
+    prefix: &str,
+    additions: &StyleAdditions<'_>,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    let next_position = SECTION_ORDER
+        .iter()
+        .position(|name| *name == next_local_name)
+        .unwrap_or(SECTION_ORDER.len());
+    while let Some(name) = missing.first().copied() {
+        let position = SECTION_ORDER
+            .iter()
+            .position(|candidate| *candidate == name)
+            .unwrap_or(0);
+        if position >= next_position {
+            break;
+        }
+        missing.remove(0);
+        let qualified = format!("{prefix}{name}");
+        let mut start = BytesStart::new(qualified.as_str());
+        let count = additions.count(name).to_string();
+        start.push_attribute(("count", count.as_str()));
+        write_event(writer, Event::Start(start), source)?;
+        write_section_additions(writer, name, prefix, additions, source)?;
+        write_event(
+            writer,
+            Event::End(BytesEnd::new(qualified.as_str())),
+            source,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_section_additions(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    section: &str,
+    prefix: &str,
+    additions: &StyleAdditions<'_>,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    match section {
+        "numFmts" => write_custom_formats(writer, additions.custom_formats, prefix, source),
+        "cellXfs" => write_templates(writer, additions.xfs, source),
+        other => {
+            for record in additions.records.section_xml(other, prefix)? {
+                writer
+                    .get_mut()
+                    .write_all(record.as_bytes())
+                    .map_err(|error| invalid_xml(source, error))?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn patch_template(
     template: &XfTemplate,
     number_format_id: u32,
+    replacement: &XfReplacement,
     source: &PartPath,
 ) -> Result<XfTemplate, XlsxWriteError> {
-    let mut events = template.events.clone();
-    let first = events
-        .first_mut()
+    let (first, children) = template
+        .events
+        .split_first()
         .ok_or_else(|| invalid_generated(source, DETAIL_BASE_STYLE))?;
-    match first {
-        Event::Start(element) | Event::Empty(element) => {
-            *element = patch_xf(element, number_format_id, source)?;
-        }
+    let (element, empty) = match first {
+        Event::Start(element) => (element, false),
+        Event::Empty(element) => (element, true),
         _ => return Err(invalid_generated(source, DETAIL_BASE_STYLE)),
+    };
+    let patched = patch_xf(element, number_format_id, replacement, source)?;
+    let Some(alignment) = replacement.alignment else {
+        let first = if empty {
+            Event::Empty(patched)
+        } else {
+            Event::Start(patched)
+        };
+        let mut events = vec![first];
+        events.extend(children.iter().cloned());
+        return Ok(XfTemplate { events });
+    };
+    let name = element.name().as_ref().to_owned();
+    let prefix = qualified_prefix(&name);
+    let mut events = vec![Event::Start(patched)];
+    if let Some(xml) = format_xml::alignment_xml(&alignment, &prefix) {
+        events.push(single_element_event(&xml, source)?);
     }
+    // The base alignment is replaced; every other child keeps its source events.
+    let body = if empty {
+        &[][..]
+    } else {
+        &children[..children.len().saturating_sub(1)]
+    };
+    let mut skip_depth = None::<usize>;
+    let mut nested = 0_usize;
+    for event in body {
+        match event {
+            Event::Start(child) => {
+                nested += 1;
+                if skip_depth.is_none() && nested == 1 && child.local_name().as_ref() == "alignment"
+                {
+                    skip_depth = Some(nested);
+                }
+                if skip_depth.is_none() {
+                    events.push(event.clone());
+                }
+            }
+            Event::End(_) => {
+                if skip_depth.is_none() {
+                    events.push(event.clone());
+                }
+                if skip_depth == Some(nested) {
+                    skip_depth = None;
+                }
+                nested = nested.saturating_sub(1);
+            }
+            Event::Empty(child) if nested == 0 && child.local_name().as_ref() == "alignment" => {}
+            other => {
+                if skip_depth.is_none() {
+                    events.push(other.clone());
+                }
+            }
+        }
+    }
+    events.push(Event::End(BytesEnd::new(name)));
     Ok(XfTemplate { events })
+}
+
+/// Parses one generated self-closing element into an owned event.
+fn single_element_event(xml: &str, source: &PartPath) -> Result<Event<'static>, XlsxWriteError> {
+    let mut reader = quick_xml::Reader::from_str(xml);
+    match reader
+        .read_event()
+        .map_err(|error| invalid_xml(source, error))?
+    {
+        Event::Empty(element) => Ok(Event::Empty(element.into_owned())),
+        _ => Err(invalid_generated(source, DETAIL_BASE_STYLE)),
+    }
 }
 
 fn patch_xf(
     element: &BytesStart<'_>,
     number_format_id: u32,
+    replacement: &XfReplacement,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
+    let mut replaced = vec!["numFmtId", "applyNumberFormat"];
+    let mut added = vec![
+        ("numFmtId", number_format_id.to_string()),
+        ("applyNumberFormat", "1".to_owned()),
+    ];
+    for (record, id_name, apply_name) in [
+        (replacement.font, "fontId", "applyFont"),
+        (replacement.fill, "fillId", "applyFill"),
+        (replacement.border, "borderId", "applyBorder"),
+    ] {
+        if let Some(index) = record {
+            replaced.extend([id_name, apply_name]);
+            added.extend([(id_name, index.to_string()), (apply_name, "1".to_owned())]);
+        }
+    }
+    if replacement.alignment.is_some() {
+        replaced.push("applyAlignment");
+        added.push(("applyAlignment", "1".to_owned()));
+    }
     let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if !matches!(attribute.key.as_ref(), "numFmtId" | "applyNumberFormat") {
+        let key = attribute.key.as_ref();
+        if !replaced.contains(&key) {
             patched.push_attribute(attribute);
         }
     }
-    let id = number_format_id.to_string();
-    patched.push_attribute(("numFmtId", id.as_str()));
-    patched.push_attribute(("applyNumberFormat", "1"));
+    for (name, value) in &added {
+        patched.push_attribute((*name, value.as_str()));
+    }
     Ok(patched.into_owned())
 }
 
@@ -405,26 +694,15 @@ fn insert_custom_format(
     Ok(())
 }
 
-fn write_num_formats(
-    writer: &mut Writer<Cursor<Vec<u8>>>,
-    formats: &BTreeMap<u32, String>,
-    source: &PartPath,
-) -> Result<(), XlsxWriteError> {
-    let mut start = BytesStart::new("numFmts");
-    let count = formats.len().to_string();
-    start.push_attribute(("count", count.as_str()));
-    write_event(writer, Event::Start(start), source)?;
-    write_custom_formats(writer, formats, source)?;
-    write_event(writer, Event::End(BytesEnd::new("numFmts")), source)
-}
-
 fn write_custom_formats(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     formats: &BTreeMap<u32, String>,
+    prefix: &str,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
+    let name = format!("{prefix}numFmt");
     for (id, code) in formats {
-        let mut format = BytesStart::new("numFmt");
+        let mut format = BytesStart::new(name.as_str());
         let id = id.to_string();
         format.push_attribute(("numFmtId", id.as_str()));
         let escaped_code = escape_attribute(code)?;
@@ -448,6 +726,13 @@ fn write_templates(
         }
     }
     Ok(())
+}
+
+/// Returns the `prefix:` of a qualified element name, or `""` for an unprefixed one.
+fn qualified_prefix(name: &str) -> String {
+    name.rsplit_once(':')
+        .map(|(prefix, _)| format!("{prefix}:"))
+        .unwrap_or_default()
 }
 
 fn patch_count(

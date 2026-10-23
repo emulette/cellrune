@@ -9,7 +9,8 @@ use super::super::xml::{
     require_spreadsheet_element,
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
-use crate::{NumberFormat, NumberFormatKind};
+use super::style_formats::StyleFormatCollector;
+use crate::{CellFormat, NumberFormat, NumberFormatKind};
 
 const STYLE_SHEET: &[u8] = b"styleSheet";
 const NUMBER_FORMATS: &[u8] = b"numFmts";
@@ -22,6 +23,7 @@ const FORMAT_RECORD: &[u8] = b"xf";
 #[derive(Debug)]
 pub(super) struct Styles {
     formats: Vec<NumberFormat>,
+    cell_formats: Vec<CellFormat>,
     font_count: u32,
 }
 
@@ -35,6 +37,7 @@ struct StyleParseState {
     custom_formats: BTreeMap<u32, Box<str>>,
     cell_format_ids: Vec<u32>,
     font_count: u32,
+    cell_formats: StyleFormatCollector,
 }
 
 impl Styles {
@@ -45,12 +48,18 @@ impl Styles {
     pub(super) const fn font_count(&self) -> u32 {
         self.font_count
     }
+
+    /// Returns the font, fill, border, and alignment of every `cellXfs` entry.
+    pub(super) fn into_cell_formats(self) -> Vec<CellFormat> {
+        self.cell_formats
+    }
 }
 
 impl Default for Styles {
     fn default() -> Self {
         Self {
             formats: vec![NumberFormat::default()],
+            cell_formats: vec![CellFormat::default()],
             font_count: 1,
         }
     }
@@ -83,6 +92,11 @@ pub(super) fn parse(
                     &budget,
                     &mut state,
                 )?;
+                if is_spreadsheet {
+                    state
+                        .cell_formats
+                        .element(&local_name, depth, &attributes, false);
+                }
                 state.stack.push(local_name.into_boxed_slice());
             }
             Event::Empty(element) => {
@@ -98,9 +112,15 @@ pub(super) fn parse(
                     &budget,
                     &mut state,
                 )?;
+                if is_spreadsheet {
+                    state
+                        .cell_formats
+                        .element(&local_name, depth, &attributes, true);
+                }
             }
             Event::End(_) => {
-                budget.end()?;
+                let depth = budget.end()?;
+                state.cell_formats.end(depth);
                 state
                     .stack
                     .pop()
@@ -126,6 +146,7 @@ pub(super) fn parse(
         .collect();
     Ok(Styles {
         formats,
+        cell_formats: state.cell_formats.finish(),
         font_count: state.font_count.max(1),
     })
 }

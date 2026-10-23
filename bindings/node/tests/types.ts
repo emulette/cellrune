@@ -1,5 +1,6 @@
 import {
   type CapabilityPage,
+  type CellFormatPage,
   type DataValidationPage,
   type CalculationLimitOptions,
   type ReadLimitOptions,
@@ -152,6 +153,15 @@ async function check(): Promise<void> {
   const edited: Buffer = await reopened.editsToBytes();
   const capabilities: CapabilityPage = await reopened.scanCapabilities({ limit: 10 });
   capabilities.entries[0]?.cell.address.toUpperCase();
+  const formats: CellFormatPage = reopened.readFormats("Sheet1", "A1", "B2", { limit: 4 });
+  const fill = formats.cells[0]?.format.fill;
+  if (fill?.kind === "pattern") {
+    fill.pattern.toUpperCase();
+  }
+  reopened.applyChangesV2(reopened.summary().semanticRevision, [
+    { kind: "setCellFormat", sheet: "Sheet1", address: "A1", font: { bold: true } },
+    { kind: "setRowHeight", sheet: "Sheet1", row: 1, height: null },
+  ]);
   const validations: DataValidationPage = reopened.dataValidations("Sheet1", { limit: 10 });
   for (const rule of validations.entries) {
     rule.ranges[0]?.toUpperCase();

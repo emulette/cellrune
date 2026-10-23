@@ -10,6 +10,8 @@ use crate::{CellAddress, Column, NumberFormat, Row};
 /// the number format that index resolves to.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NewCellStyles {
+    /// The nonzero style of each valued source cell, which the format read model resolves.
+    valued_cells: BTreeMap<CellAddress, usize>,
     blank_cells: BTreeMap<CellAddress, usize>,
     rows: BTreeMap<Row, usize>,
     columns: Vec<(Column, Column, usize)>,
@@ -26,6 +28,16 @@ impl NewCellStyles {
     ) {
         self.blank_cells.insert(address, index);
         self.insert_number_format(index, number_format);
+    }
+
+    /// Records the nonzero style of a source cell that holds a value.
+    pub(crate) fn insert_valued_cell(&mut self, address: CellAddress, index: usize) {
+        self.valued_cells.insert(address, index);
+    }
+
+    /// Returns the style index of a valued source cell: its recorded style, else the default.
+    pub(crate) fn valued_cell_style(&self, address: CellAddress) -> usize {
+        self.valued_cells.get(&address).copied().unwrap_or(0)
     }
 
     /// Records the style of a row that declares `customFormat`.

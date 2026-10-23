@@ -3,6 +3,7 @@
 mod calculation;
 mod display;
 mod edit;
+mod format;
 mod preview;
 mod query;
 mod save;

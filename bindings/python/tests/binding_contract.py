@@ -551,8 +551,66 @@ def assert_data_validations() -> None:
     )
 
 
+def assert_formats() -> None:
+    workbook = Workbook.from_bytes(SHEET_METADATA_FIXTURE_PATH.read_bytes())
+    page = workbook.read_formats("Data", "A1", "B1")
+    styled = page["cells"][0]["format"]
+    assert styled["font"]["name"] == "Arial"
+    assert styled["font"]["color"] == {"kind": "argb", "argb": "FFFF0000", "tint": 0.0}
+    assert styled["fill"] == {
+        "kind": "pattern",
+        "pattern": "solid",
+        "foreground": {"kind": "argb", "argb": "FFFFFF00", "tint": 0.0},
+        "background": None,
+    }
+    assert styled["alignment"]["horizontal"] == "center"
+    assert page["cells"][1]["format"]["font"]["name"] == "Calibri"
+    assert page["column_widths"] == [{"first": 1, "last": 2, "width": 18.5}]
+    assert page["row_heights"] == [{"row": 1, "height": 24.0}]
+
+    created = Workbook.create()
+    revision = created.summary()["semantic_revision"]
+    receipt = created.apply_changes_v2(
+        revision,
+        [
+            {
+                "kind": "set_cell_format",
+                "sheet": "Sheet1",
+                "address": "B2",
+                "font": {"bold": True, "size": 14.0},
+                "border": {"bottom": {"style": "double", "color": {"kind": "indexed", "index": 8}}},
+            },
+            {"kind": "set_column_width", "sheet": "Sheet1", "first": 2, "last": 2, "width": 25.0},
+            {"kind": "set_row_height", "sheet": "Sheet1", "row": 2, "height": 30.0},
+        ],
+    )
+    assert receipt["result_revision"] == revision
+    created.calculate()
+    reopened = Workbook.from_bytes(created.to_bytes())
+    edited = reopened.read_formats("Sheet1", "B2", "B2")
+    assert edited["cells"][0]["format"]["font"]["bold"] is True
+    assert edited["cells"][0]["format"]["font"]["size"] == 14.0
+    assert edited["cells"][0]["format"]["border"]["bottom"] == {
+        "style": "double",
+        "color": {"kind": "indexed", "index": 8, "tint": 0.0},
+    }
+    assert edited["column_widths"] == [{"first": 2, "last": 2, "width": 25.0}]
+    assert edited["row_heights"] == [{"row": 2, "height": 30.0}]
+    revision = reopened.summary()["semantic_revision"]
+    try:
+        reopened.apply_changes_v2(
+            revision,
+            [{"kind": "set_cell_format", "sheet": "Sheet1", "address": "A1", "fill": {"pattern": "plaid"}}],  # type: ignore[list-item]
+        )
+    except CellRuneError as error:
+        assert error.code == "interop.change.invalid", error.code
+    else:
+        raise AssertionError("an unknown fill pattern was accepted")
+
+
 def main() -> None:
     assert_delete_sheet()
+    assert_formats()
     assert_data_validations()
     assert_incomplete_save_names_cells()
     assert_capability_scan()

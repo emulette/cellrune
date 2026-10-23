@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::auto_filter_patch::patch_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
+use super::layout_patch::{LayoutChanges, patch_sheet_layout};
 use super::materialization::{MaterializationAction, MaterializationPlan};
 use super::package::{PackageReader, PackageWritePlan};
 use super::package_additions::{
@@ -31,8 +32,8 @@ use super::{
 use crate::draft::DraftCellMutation;
 use crate::xlsx::package::PartPath;
 use crate::{
-    CalculationCellId, CalculationSnapshot, MaterializedResultOrigin, Sheet, SheetId, SourceId,
-    WorkbookDraft, XlsxDocument,
+    CalculationCellId, CalculationSnapshot, CellAddress, CellFormat, MaterializedResultOrigin,
+    Sheet, SheetId, SourceId, WorkbookDraft, XlsxDocument,
 };
 
 const CONTENT_TYPES_PART: &[u8] = b"[Content_Types].xml";
@@ -83,6 +84,8 @@ pub(crate) fn write_document_draft(
         && draft.presentation_sheet_mutations().is_empty()
         && draft.changed_table_ids().is_empty()
         && auto_filter_sheets.is_empty()
+        && format_edits(draft).is_empty()
+        && layout_sheets(draft, document).is_empty()
     {
         return super::recalculation::write_recalculated_xlsx_bytes(document, calculation, options);
     }
@@ -149,17 +152,62 @@ pub(super) fn validate_draft_edits(
     limits: WriteLimits,
 ) -> Result<(), XlsxWriteError> {
     validate_phonetic_limits(draft.presentation(), limits)?;
+    let formatted = format_edits(draft)
+        .into_iter()
+        .flat_map(|(sheet_id, edits)| {
+            edits
+                .into_keys()
+                .map(move |address| CalculationCellId::new(sheet_id, address))
+        })
+        .collect::<BTreeSet<_>>();
     enforce_count(
         DETAIL_EDITED_CELL_COUNT,
         draft
             .cell_mutations()
             .keys()
             .chain(draft.presentation_cell_mutations().iter())
+            .chain(formatted.iter())
             .copied()
             .collect::<BTreeSet<_>>()
             .len(),
         limits.max_edited_cells(),
     )
+}
+
+/// Returns the edited cell formats of every sheet the draft holds, by sheet.
+fn format_edits(draft: &WorkbookDraft) -> BTreeMap<SheetId, BTreeMap<CellAddress, CellFormat>> {
+    draft
+        .workbook()
+        .sheets()
+        .iter()
+        .filter_map(|sheet| {
+            let edits = draft
+                .presentation()
+                .edited_cell_formats(sheet.id())
+                .map(|(address, format)| (address, format.clone()))
+                .collect::<BTreeMap<_, _>>();
+            (!edits.is_empty()).then_some((sheet.id(), edits))
+        })
+        .collect()
+}
+
+/// Returns the column width and row height changes of each source sheet whose layout the draft
+/// changed.
+fn layout_sheets(
+    draft: &WorkbookDraft,
+    document: &XlsxDocument,
+) -> BTreeMap<SheetId, LayoutChanges> {
+    draft
+        .workbook()
+        .sheets()
+        .iter()
+        .filter(|sheet| !draft.added_sheets().contains(&sheet.id()))
+        .filter_map(|sheet| {
+            let changes =
+                LayoutChanges::between(document.presentation(), draft.presentation(), sheet.id());
+            (!changes.is_empty()).then_some((sheet.id(), changes))
+        })
+        .collect()
 }
 
 /// Patches the edited semantics, the planned formula caches, and the package metadata of a
@@ -172,6 +220,8 @@ pub(super) fn write_document_package(
 ) -> Result<DocumentPackageOutput, XlsxWriteError> {
     let materialization = plan.materialization;
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
+    let format_edits = format_edits(draft);
+    let layout_changes = layout_sheets(draft, document);
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
     let deletion = plan_sheet_deletion(document, draft.workbook(), &mut source_reader)?;
@@ -244,6 +294,8 @@ pub(super) fn write_document_package(
         .chain(draft.presentation_sheet_mutations().iter().copied())
         .chain(auto_filter_sheets.iter().copied())
         .chain(date_typed_literals.keys().copied())
+        .chain(format_edits.keys().copied())
+        .chain(layout_changes.keys().copied())
         .filter(|sheet_id| !draft.added_sheets().contains(sheet_id))
         .collect::<BTreeSet<_>>();
     enforce_count(
@@ -278,6 +330,13 @@ pub(super) fn write_document_package(
                     .get(&sheet_id)
                     .into_iter()
                     .flatten()
+                    .map(|address| CalculationCellId::new(sheet_id, *address)),
+            )
+            .chain(
+                format_edits
+                    .get(&sheet_id)
+                    .into_iter()
+                    .flat_map(BTreeMap::keys)
                     .map(|address| CalculationCellId::new(sheet_id, *address)),
             )
             .filter(|id| {
@@ -343,8 +402,49 @@ pub(super) fn write_document_package(
             StyleRequest {
                 base_index,
                 format: cell.number_format().clone(),
+                presentation: None,
             },
         );
+    }
+    for (sheet_id, edits) in &format_edits {
+        let sheet = draft
+            .workbook()
+            .sheet_by_id(*sheet_id)
+            .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+        let added = draft.added_sheets().contains(sheet_id);
+        for (address, format) in edits {
+            let id = CalculationCellId::new(*sheet_id, *address);
+            if let Some(request) = style_requests.get_mut(&id) {
+                request.presentation = Some(format.clone());
+                continue;
+            }
+            let (base_index, number_format) = if added {
+                (
+                    0,
+                    sheet
+                        .cell(*address)
+                        .map(|cell| cell.number_format().clone())
+                        .unwrap_or_default(),
+                )
+            } else {
+                let base_index = sheet_sources.get(sheet_id).map_or(0, |source| {
+                    source_style_index(&source.styles, sheet, *address)
+                });
+                let number_format = sheet.cell(*address).map_or_else(
+                    || sheet.new_cell_number_format(*address),
+                    |cell| cell.number_format().clone(),
+                );
+                (base_index, number_format)
+            };
+            style_requests.insert(
+                id,
+                StyleRequest {
+                    base_index,
+                    format: number_format,
+                    presentation: Some(format.clone()),
+                },
+            );
+        }
     }
     let existing_style_bytes = styles_part
         .as_ref()
@@ -354,6 +454,7 @@ pub(super) fn write_document_package(
         existing_style_bytes.as_deref(),
         &target_styles_part,
         &style_requests,
+        draft.presentation(),
         limits,
     )?;
     let style_indexes = style_plan
@@ -407,10 +508,30 @@ pub(super) fn write_document_package(
             )
             .map(|id| id.address())
             .chain(date_typed.iter().copied())
+            .chain(
+                format_edits
+                    .get(&sheet_id)
+                    .into_iter()
+                    .flat_map(BTreeMap::keys)
+                    .copied(),
+            )
             .collect::<BTreeSet<_>>();
+        let sheet_format_edits = format_edits.get(&sheet_id);
         for address in edit_addresses {
             let id = CalculationCellId::new(sheet_id, address);
             let mutation = draft.cell_mutations().get(&id);
+            let formatted = sheet_format_edits.is_some_and(|edits| edits.contains_key(&address));
+            // A formatted position that holds no value keeps its format as an empty styled cell,
+            // as Excel keeps the format of a cell whose content is cleared.
+            if formatted && draft_sheet.cell(address).is_none() {
+                semantic_edits.insert(
+                    address,
+                    WorksheetSemanticEdit::Blank {
+                        style_index: style_indexes.get(&id).copied().unwrap_or(0),
+                    },
+                );
+                continue;
+            }
             let edit = match mutation {
                 Some(DraftCellMutation::Remove) => WorksheetSemanticEdit::Remove,
                 Some(DraftCellMutation::Upsert { .. }) | None => {
@@ -477,6 +598,9 @@ pub(super) fn write_document_package(
                 .ok_or_else(|| invalid_plan(DETAIL_MISSING_AUTO_FILTER))?;
             bytes = patch_sheet_auto_filter(&bytes, &sheet_source.part, filter, limits)?;
         }
+        if let Some(changes) = layout_changes.get(&sheet_id) {
+            bytes = patch_sheet_layout(&bytes, &sheet_source.part, changes, limits)?;
+        }
         replacements.insert(sheet_source.part, bytes);
     }
     rewrite_sheet_references(
@@ -500,9 +624,17 @@ pub(super) fn write_document_package(
             .collect::<BTreeMap<_, _>>();
         let sheet_styles = sheet
             .cells()
-            .map(|cell| {
-                let id = CalculationCellId::new(*sheet_id, cell.address());
-                (cell.address(), style_indexes.get(&id).copied().unwrap_or(0))
+            .map(|cell| cell.address())
+            .chain(
+                format_edits
+                    .get(sheet_id)
+                    .into_iter()
+                    .flat_map(BTreeMap::keys)
+                    .copied(),
+            )
+            .map(|address| {
+                let id = CalculationCellId::new(*sheet_id, address);
+                (address, style_indexes.get(&id).copied().unwrap_or(0))
             })
             .collect::<BTreeMap<_, _>>();
         additions.insert(

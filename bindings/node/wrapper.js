@@ -1,6 +1,7 @@
 "use strict";
 
 const native = require("./native.js");
+const { normalizeCellFormatPage } = require("./lib/formats.js");
 const { normalizeDataValidationPage } = require("./lib/sheet_metadata.js");
 const { targetRequest } = require("./lib/targeted.js");
 const {
@@ -113,6 +114,17 @@ class Workbook {
     return normalizeRangePage(
       withSyncErrors(() =>
         this.#session().readRange(sheet, start, end, offset, limit),
+      ),
+    );
+  }
+
+  readFormats(sheet, start, end, options = {}) {
+    requireString(start, "start");
+    requireString(end, "end");
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizeCellFormatPage(
+      withSyncErrors(() =>
+        this.#session().readFormats(sheet, start, end, offset, limit),
       ),
     );
   }

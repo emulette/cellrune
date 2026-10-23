@@ -7,7 +7,8 @@ use crate::{
 };
 
 use super::phonetic::{ResolvedPhoneticRun, resolve_runs};
-use super::{PhoneticAnnotation, PhoneticProperties, PhoneticRun};
+use super::sheet_format::SheetFormats;
+use super::{CellFormat, PhoneticAnnotation, PhoneticProperties, PhoneticRun};
 
 /// A validated frozen-pane position expressed as fixed row and column counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -183,6 +184,10 @@ impl<'a> CellPhonetics<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DocumentPresentation {
     pub(crate) sheets: BTreeMap<SheetId, SheetPresentation>,
+    /// Column widths, row heights, and edited cell formats per sheet.
+    pub(crate) formats: BTreeMap<SheetId, Arc<SheetFormats>>,
+    /// The font, fill, border, and alignment of each source `cellXfs` entry.
+    pub(crate) style_formats: Arc<Vec<CellFormat>>,
     diagnostics: Vec<Diagnostic>,
     revision: u64,
 }
@@ -237,9 +242,20 @@ impl DocumentPresentation {
         }
         Ok(Self {
             sheets,
+            formats: self.formats.clone(),
+            style_formats: Arc::clone(&self.style_formats),
             diagnostics,
             revision: self.revision,
         })
+    }
+
+    /// Advances the presentation revision for one effective edit.
+    pub(crate) fn advance_revision(&mut self) -> Result<(), ValidationError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(ValidationError::PresentationRevisionExhausted)?;
+        Ok(())
     }
 
     /// Returns the monotonic presentation revision.
@@ -551,7 +567,7 @@ impl DocumentPresentation {
     }
 
     pub(crate) fn semantics_match(&self, other: &Self) -> bool {
-        self.sheets == other.sheets
+        self.sheets == other.sheets && self.layout_matches(other)
     }
 
     pub(crate) fn retain_nonempty_sheets(&mut self) {

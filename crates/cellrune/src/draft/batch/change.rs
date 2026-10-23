@@ -1,7 +1,7 @@
 use crate::{
-    CalculationHints, CellAddress, CellRange, CellValue, DateSystem, DefinedName, DefinedNameScope,
-    FormulaText, NumberFormat, Row, SheetId, SheetName, SheetVisibility, TableColumnId,
-    TableColumnName, TableId, TableName, ValidationError,
+    CalculationHints, CellAddress, CellFormatEdit, CellRange, CellValue, Column, DateSystem,
+    DefinedName, DefinedNameScope, FormulaText, NumberFormat, Row, SheetId, SheetName,
+    SheetVisibility, TableColumnId, TableColumnName, TableId, TableName, ValidationError,
 };
 
 /// One validated workbook mutation in an atomic [`EditBatch`].
@@ -139,6 +139,38 @@ pub enum WorkbookChange {
         sheet_id: SheetId,
         /// New filter range, which keeps the current rows and contains the current range.
         range: CellRange,
+    },
+    /// Replaces the font, fill, border, or alignment one cell displays with.
+    ///
+    /// This is a presentation change: it advances the presentation revision, not the semantic
+    /// one, and never invalidates calculation. The cell need not hold a value.
+    SetCellFormat {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Target address.
+        address: CellAddress,
+        /// Components to replace; the others keep their current value.
+        edit: CellFormatEdit,
+    },
+    /// Sets or clears the width of an inclusive column span, a presentation change.
+    SetColumnWidth {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First column.
+        first: Column,
+        /// Last column.
+        last: Column,
+        /// Width in characters from 0 through 255, or `None` for the sheet's default width.
+        width: Option<f64>,
+    },
+    /// Sets or clears the height of one row, a presentation change.
+    SetRowHeight {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Target row.
+        row: Row,
+        /// Height in points from 0 through 409, or `None` for the sheet's default height.
+        height: Option<f64>,
     },
 }
 
@@ -305,6 +337,43 @@ impl WorkbookChange {
     /// Constructs a sheet-level auto-filter column widening.
     pub const fn widen_sheet_auto_filter(sheet_id: SheetId, range: CellRange) -> Self {
         Self::WidenSheetAutoFilter { sheet_id, range }
+    }
+
+    /// Constructs a cell format change.
+    pub const fn set_cell_format(
+        sheet_id: SheetId,
+        address: CellAddress,
+        edit: CellFormatEdit,
+    ) -> Self {
+        Self::SetCellFormat {
+            sheet_id,
+            address,
+            edit,
+        }
+    }
+
+    /// Constructs a column width change; `None` restores the default width.
+    pub const fn set_column_width(
+        sheet_id: SheetId,
+        first: Column,
+        last: Column,
+        width: Option<f64>,
+    ) -> Self {
+        Self::SetColumnWidth {
+            sheet_id,
+            first,
+            last,
+            width,
+        }
+    }
+
+    /// Constructs a row height change; `None` restores the default height.
+    pub const fn set_row_height(sheet_id: SheetId, row: Row, height: Option<f64>) -> Self {
+        Self::SetRowHeight {
+            sheet_id,
+            row,
+            height,
+        }
     }
 }
 

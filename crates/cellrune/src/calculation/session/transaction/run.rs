@@ -506,6 +506,7 @@ impl PreparedWorkbookTransaction {
             captured_compiled: self.captured_compiled,
             captured_options: self.captured_options,
             base_revision: self.base_revision,
+            base_presentation_revision: self.base_presentation_revision,
             base_cursor: self.base_cursor,
             base_fingerprint: self.base_fingerprint,
             result_fingerprint,

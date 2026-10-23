@@ -28,6 +28,10 @@ pub(crate) enum WorksheetSemanticEdit {
         content_changed: bool,
         presentation: Option<CellPresentation>,
     },
+    /// An empty cell that keeps a format: it replaces any source cell at its address.
+    Blank {
+        style_index: usize,
+    },
 }
 
 struct RowState {
@@ -422,7 +426,29 @@ fn write_existing_edit(
             row_name,
             source,
         ),
+        WorksheetSemanticEdit::Blank { style_index } => {
+            let address = required_cell_reference(original, source)?;
+            write_blank_cell(writer, address, *style_index, row_name, source)
+        }
     }
+}
+
+fn write_blank_cell(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    address: CellAddress,
+    style_index: usize,
+    row_name: &str,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    let name = qualified_sibling_name(row_name, "c");
+    let mut cell = BytesStart::new(name.as_str());
+    let reference = address.to_string();
+    cell.push_attribute(("r", reference.as_str()));
+    if style_index != 0 {
+        let index = style_index.to_string();
+        cell.push_attribute(("s", index.as_str()));
+    }
+    write_event(writer, Event::Empty(cell), source)
 }
 
 fn insert_missing_rows(
@@ -451,7 +477,7 @@ fn insert_missing_rows(
                     WorksheetSemanticEdit::Upsert {
                         content_changed: true,
                         ..
-                    }
+                    } | WorksheetSemanticEdit::Blank { .. }
                 )
         })
         .map(|(address, _)| address.row().get())
@@ -514,6 +540,11 @@ fn insert_missing_cells(
                     &row.qualified_name,
                     source,
                 )?;
+                seen.insert(address);
+                row.last_column = address.column().get();
+            }
+            WorksheetSemanticEdit::Blank { style_index } => {
+                write_blank_cell(writer, address, *style_index, &row.qualified_name, source)?;
                 seen.insert(address);
                 row.last_column = address.column().get();
             }

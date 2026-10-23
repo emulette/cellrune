@@ -390,6 +390,11 @@ impl CellBuilder {
                     .error(XlsxErrorCode::InvalidStyleIndex)
                     .with_detail(self.style_index.to_string())
             })?;
+        if self.capture == PresentationCapture::Document && self.style_index != 0 {
+            sheet
+                .new_cell_styles_mut()
+                .insert_valued_cell(self.address, self.style_index);
+        }
         sheet
             .insert_cell_with_number_format(self.address, content, number_format)
             .map_err(|error| {

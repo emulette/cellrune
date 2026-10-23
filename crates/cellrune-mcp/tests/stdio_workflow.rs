@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 19);
+    assert_eq!(tools.len(), 20);
     assert!(
         tools
             .iter()
@@ -1823,6 +1823,52 @@ fn open_sheet_metadata_fixture(mcp: &mut McpProcess, root: &Path) -> String {
         .as_str()
         .expect("open must return a session ID")
         .to_owned()
+}
+
+#[test]
+fn cell_formats_are_read_and_edited_over_stdio() {
+    let root = TestDirectory::new("cell-formats");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = open_sheet_metadata_fixture(&mut mcp, &root.path);
+    let read = |mcp: &mut McpProcess| {
+        successful_tool(mcp.call_tool(
+            "workbook_read_formats",
+            json!({"session_id": session_id, "sheet": "Data", "start": "A1", "end": "B1"}),
+        ))
+    };
+    let page = read(&mut mcp);
+    assert_eq!(page["cells"][0]["format"]["font"]["name"], "Arial");
+    assert_eq!(page["cells"][0]["format"]["fill"]["pattern"], "solid");
+    assert_eq!(
+        page["column_widths"],
+        json!([{"first": 1, "last": 2, "width": 18.5}])
+    );
+    assert_eq!(page["row_heights"], json!([{"row": 1, "height": 24.0}]));
+
+    let summary =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    let revision = summary["summary"]["semantic_revision"].clone();
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": revision,
+            "changes": [
+                {"kind": "set_cell_format", "sheet": "Data", "address": "B1",
+                 "font": {"name": "Georgia", "bold": true}},
+                {"kind": "set_row_height", "sheet": "Data", "row": 1, "height": 40.0}
+            ]
+        }),
+    ));
+    assert_eq!(receipt["result_revision"], revision);
+    let edited = read(&mut mcp);
+    assert_eq!(edited["cells"][1]["format"]["font"]["name"], "Georgia");
+    assert_eq!(edited["cells"][1]["format"]["font"]["bold"], true);
+    assert_eq!(edited["row_heights"], json!([{"row": 1, "height": 40.0}]));
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
 }
 
 #[test]

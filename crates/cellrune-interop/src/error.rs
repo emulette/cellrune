@@ -54,6 +54,12 @@ const MESSAGE_PREVIEW_RESPONSE_LIMIT: &str =
 const MESSAGE_PREVIEW_ID_EXHAUSTED: &str = "workbook preview identifier is exhausted";
 const MESSAGE_PREVIEW_SECTION_INVALID: &str = "preview detail section is not recognized";
 const MESSAGE_SERIALIZATION: &str = "interop DTO serialization failed";
+pub(crate) const DETAIL_FONT_UNDERLINE: &str = "font underline is not recognized";
+pub(crate) const DETAIL_FILL_PATTERN: &str = "fill pattern is not recognized";
+pub(crate) const DETAIL_BORDER_STYLE: &str = "border style is not recognized";
+pub(crate) const DETAIL_HORIZONTAL_ALIGNMENT: &str = "horizontal alignment is not recognized";
+pub(crate) const DETAIL_VERTICAL_ALIGNMENT: &str = "vertical alignment is not recognized";
+pub(crate) const DETAIL_COLOR_ARGB: &str = "argb color must be eight hexadecimal digits";
 
 /// Broad error boundary used by all language bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

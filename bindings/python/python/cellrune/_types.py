@@ -512,11 +512,277 @@ class ResizeTableRowsChange(TypedDict):
     last_data_row: int
 
 
+FontUnderlineName = Literal[
+    "none", "single", "double", "singleAccounting", "doubleAccounting"
+]
+FillPatternName = Literal[
+    "none",
+    "solid",
+    "mediumGray",
+    "darkGray",
+    "lightGray",
+    "darkHorizontal",
+    "darkVertical",
+    "darkDown",
+    "darkUp",
+    "darkGrid",
+    "darkTrellis",
+    "lightHorizontal",
+    "lightVertical",
+    "lightDown",
+    "lightUp",
+    "lightGrid",
+    "lightTrellis",
+    "gray125",
+    "gray0625",
+]
+BorderStyleName = Literal[
+    "none",
+    "thin",
+    "medium",
+    "dashed",
+    "dotted",
+    "thick",
+    "double",
+    "hair",
+    "mediumDashed",
+    "dashDot",
+    "mediumDashDot",
+    "dashDotDot",
+    "mediumDashDotDot",
+    "slantDashDot",
+]
+HorizontalAlignmentName = Literal[
+    "general",
+    "left",
+    "center",
+    "right",
+    "fill",
+    "justify",
+    "centerContinuous",
+    "distributed",
+]
+VerticalAlignmentName = Literal["top", "center", "bottom", "justify", "distributed"]
+
+
+class ArgbColor(TypedDict):
+    kind: Literal["argb"]
+    argb: str
+    tint: float
+
+
+class ThemeColor(TypedDict):
+    kind: Literal["theme"]
+    index: int
+    tint: float
+
+
+class IndexedColor(TypedDict):
+    kind: Literal["indexed"]
+    index: int
+    tint: float
+
+
+class AutomaticColor(TypedDict):
+    kind: Literal["automatic"]
+    tint: float
+
+
+Color = ArgbColor | ThemeColor | IndexedColor | AutomaticColor
+
+
+class Font(TypedDict):
+    name: str | None
+    size: float | None
+    bold: bool
+    italic: bool
+    underline: FontUnderlineName
+    strike: bool
+    color: Color | None
+
+
+class PatternFill(TypedDict):
+    kind: Literal["pattern"]
+    pattern: FillPatternName
+    foreground: Color | None
+    background: Color | None
+
+
+class GradientFill(TypedDict):
+    kind: Literal["gradient"]
+
+
+Fill = PatternFill | GradientFill
+
+
+class BorderEdge(TypedDict):
+    style: BorderStyleName
+    color: Color | None
+
+
+class Border(TypedDict):
+    left: BorderEdge
+    right: BorderEdge
+    top: BorderEdge
+    bottom: BorderEdge
+    diagonal: BorderEdge
+    diagonal_up: bool
+    diagonal_down: bool
+
+
+class Alignment(TypedDict):
+    horizontal: HorizontalAlignmentName
+    vertical: VerticalAlignmentName
+    wrap_text: bool
+    shrink_to_fit: bool
+    indent: int
+    text_rotation: int
+
+
+class CellFormat(TypedDict):
+    font: Font
+    fill: Fill
+    border: Border
+    alignment: Alignment
+
+
+class CellFormatEntry(TypedDict):
+    address: str
+    format: CellFormat
+
+
+class ColumnWidth(TypedDict):
+    first: int
+    last: int
+    width: float
+
+
+class RowHeight(TypedDict):
+    row: int
+    height: float
+
+
+class CellFormatPage(TypedDict):
+    schema_version: int
+    sheet: str
+    start: str
+    end: str
+    total_cells: int
+    offset: int
+    next_offset: int | None
+    cells: list[CellFormatEntry]
+    column_widths: list[ColumnWidth]
+    row_heights: list[RowHeight]
+
+
+class ColorTintOption(TypedDict, total=False):
+    tint: float
+
+
+class ArgbColorInput(ColorTintOption):
+    kind: Literal["argb"]
+    argb: str
+
+
+class ThemeColorInput(ColorTintOption):
+    kind: Literal["theme"]
+    index: int
+
+
+class IndexedColorInput(ColorTintOption):
+    kind: Literal["indexed"]
+    index: int
+
+
+class AutomaticColorInput(ColorTintOption):
+    kind: Literal["automatic"]
+
+
+ColorInput = ArgbColorInput | ThemeColorInput | IndexedColorInput | AutomaticColorInput
+
+
+class FontInput(TypedDict, total=False):
+    name: str
+    size: float
+    bold: bool
+    italic: bool
+    underline: FontUnderlineName
+    strike: bool
+    color: ColorInput
+
+
+class PatternFillInputOptions(TypedDict, total=False):
+    foreground: ColorInput
+    background: ColorInput
+
+
+class PatternFillInput(PatternFillInputOptions):
+    pattern: FillPatternName
+
+
+class BorderEdgeInputOptions(TypedDict, total=False):
+    color: ColorInput
+
+
+class BorderEdgeInput(BorderEdgeInputOptions):
+    style: BorderStyleName
+
+
+class BorderInput(TypedDict, total=False):
+    left: BorderEdgeInput
+    right: BorderEdgeInput
+    top: BorderEdgeInput
+    bottom: BorderEdgeInput
+    diagonal: BorderEdgeInput
+    diagonal_up: bool
+    diagonal_down: bool
+
+
+class AlignmentInput(TypedDict, total=False):
+    horizontal: HorizontalAlignmentName
+    vertical: VerticalAlignmentName
+    wrap_text: bool
+    shrink_to_fit: bool
+    indent: int
+    text_rotation: int
+
+
+class SetCellFormatChangeOptions(TypedDict, total=False):
+    font: FontInput
+    fill: PatternFillInput
+    border: BorderInput
+    alignment: AlignmentInput
+
+
+class SetCellFormatChange(SetCellFormatChangeOptions):
+    kind: Literal["set_cell_format"]
+    sheet: str
+    address: str
+
+
+class SetColumnWidthChange(TypedDict):
+    kind: Literal["set_column_width"]
+    sheet: str
+    first: int
+    last: int
+    width: float | None
+
+
+class SetRowHeightChange(TypedDict):
+    kind: Literal["set_row_height"]
+    sheet: str
+    row: int
+    height: float | None
+
+
 WorkbookChangeV2 = (
     WorkbookChange
     | RenameTableChange
     | RenameTableColumnChange
     | ResizeTableRowsChange
+    | SetCellFormatChange
+    | SetColumnWidthChange
+    | SetRowHeightChange
 )
 
 

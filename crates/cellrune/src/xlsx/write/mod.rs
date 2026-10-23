@@ -5,6 +5,8 @@ mod document_authoring;
 mod document_edits;
 mod edit_report;
 mod error;
+mod format_xml;
+mod layout_patch;
 mod materialization;
 mod options;
 mod package;

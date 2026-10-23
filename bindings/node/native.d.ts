@@ -15,6 +15,7 @@ export declare class NativeWorkbook {
   close(): void
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
   dataValidations(sheet: string, offset: number, limit: number): NativeDataValidationPage
   scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection

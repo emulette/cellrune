@@ -14,6 +14,7 @@ from ._types import (
     CalculationDeltaPage,
     CalculationReport,
     CapabilityPage,
+    CellFormatPage,
     DataValidationPage,
     DefinedNameInspection,
     EditReceipt,
@@ -93,6 +94,15 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> RangePage: ...
+    def read_formats(
+        self,
+        sheet: str,
+        start: str,
+        end: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> CellFormatPage: ...
     def inspect_defined_name(
         self,
         name: str,

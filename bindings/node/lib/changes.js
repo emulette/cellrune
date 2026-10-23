@@ -1,6 +1,7 @@
 "use strict";
 
 const { inputError } = require("./errors.js");
+const { serializeFormatChange } = require("./formats.js");
 const {
   requireFinite,
   requireNonNegativeInteger,
@@ -156,6 +157,10 @@ function serializeWorkbookChange(change, index) {
 function serializeWorkbookChangeV2(change, index) {
   requireOptions(change);
   requireString(change.kind, `changes[${index}].kind`);
+  const format = serializeFormatChange(change, index);
+  if (format !== undefined) {
+    return format;
+  }
   validateV2ChangeKeys(change, index);
   switch (change.kind) {
     case "renameTable":

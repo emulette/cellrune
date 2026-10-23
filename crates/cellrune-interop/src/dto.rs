@@ -442,8 +442,9 @@ pub enum TableChangeV2Dto {
 
 /// One v2 workbook mutation.
 ///
-/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds only the
-/// three table-authoring operations.
+/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the three
+/// table-authoring operations and the third the cell format, column width, and row height
+/// operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WorkbookChangeV2Dto {
@@ -453,6 +454,9 @@ pub enum WorkbookChangeV2Dto {
     /// A table-authoring operation introduced by edit schema v2.
     #[serde(deserialize_with = "crate::deserialize_object")]
     Table(TableChangeV2Dto),
+    /// A presentation-only format or layout operation.
+    #[serde(deserialize_with = "crate::deserialize_object")]
+    Format(crate::FormatChangeV2Dto),
 }
 
 /// Ordered, atomic edit-schema-v2 change set.
