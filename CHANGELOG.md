@@ -436,6 +436,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- Saving a document draft's cell edits into a source worksheet copies the XML the edits leave
+  alone straight from the source part instead of rebuilding it event by event, and reads the
+  source styles of edited cells only until it has found them all, with the same output.
 - Saving a document draft verifies the sheets it rewrote by reopening them in full, and the
   sheets the draft left alone and the save copied unchanged, while the shared strings, styles, and
   cell metadata stay as they were, by their names and visibility only, so a save of one edited

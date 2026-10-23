@@ -51,7 +51,8 @@ pub(crate) fn read_cell_style_indices(
     let mut xml = configured_reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut output = BTreeMap::new();
-    loop {
+    // The patch reads the whole part again and refuses what this scan stops before.
+    while output.len() < targets.len() {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
         if let Event::Start(element) | Event::Empty(element) = &event
@@ -112,6 +113,9 @@ pub(crate) fn patch_worksheet_semantics(
 ) -> Result<Vec<u8>, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, source)?;
     let mut xml = configured_reader(bytes, limits);
+    // Events the patch leaves alone are copied from `bytes` as they are; `writer` only produces
+    // the XML that replaces an event or goes in before one.
+    let mut output = RawPatch::new(bytes);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
@@ -123,30 +127,32 @@ pub(crate) fn patch_worksheet_semantics(
     let mut seen = BTreeSet::new();
     let mut last_row = 0_u32;
     loop {
+        let start = position(&xml);
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        let end = position(&xml);
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
                 if skip_cell_depth.is_some() {
+                    output.replace(start, end, &[]);
                     buffer.clear();
                     continue;
                 }
                 if depth == 1 && element.local_name().as_ref() == "worksheet" {
                     worksheet_depth = Some(depth);
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if worksheet_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "dimension"
                 {
                     let patched = patch_dimension(&element, used_range, source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
+                    output.replace(start, end, &take(&mut writer));
                 } else if worksheet_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "sheetData"
                 {
                     sheet_data_depth = Some(depth);
                     sheet_data_name = Some(element.name().as_ref().to_owned());
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheet_data_depth.is_some_and(|parent| depth == parent + 1)
                     && element.local_name().as_ref() == "row"
                 {
@@ -163,6 +169,7 @@ pub(crate) fn patch_worksheet_semantics(
                         sheet_data_name.as_deref().unwrap_or("sheetData"),
                         source,
                     )?;
+                    output.insert(start, &take(&mut writer));
                     last_row = number;
                     row = Some(RowState {
                         depth,
@@ -170,7 +177,6 @@ pub(crate) fn patch_worksheet_semantics(
                         last_column: 0,
                         qualified_name: element.name().as_ref().to_owned(),
                     });
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if row.as_ref().is_some_and(|state| depth == state.depth + 1)
                     && element.local_name().as_ref() == "c"
                 {
@@ -187,6 +193,7 @@ pub(crate) fn patch_worksheet_semantics(
                         address.column().get(),
                         source,
                     )?;
+                    output.insert(start, &take(&mut writer));
                     row_state.last_column = address.column().get();
                     if let Some(edit) = edits.get(&address) {
                         if !seen.insert(address) {
@@ -199,6 +206,7 @@ pub(crate) fn patch_worksheet_semantics(
                             &row_state.qualified_name,
                             source,
                         )?;
+                        output.replace(start, end, &take(&mut writer));
                         if !matches!(
                             edit,
                             WorksheetSemanticEdit::Upsert {
@@ -208,16 +216,13 @@ pub(crate) fn patch_worksheet_semantics(
                         ) {
                             skip_cell_depth = Some(depth);
                         }
-                    } else {
-                        write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                     }
-                } else {
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 }
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
                 if skip_cell_depth.is_some() {
+                    output.replace(start, end, &[]);
                     buffer.clear();
                     continue;
                 }
@@ -226,6 +231,7 @@ pub(crate) fn patch_worksheet_semantics(
                 {
                     let patched = patch_dimension(&element, used_range, source)?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
+                    output.replace(start, end, &take(&mut writer));
                 } else if worksheet_depth.is_some_and(|root| depth + 1 == root + 1)
                     && element.local_name().as_ref() == "sheetData"
                 {
@@ -248,6 +254,7 @@ pub(crate) fn patch_worksheet_semantics(
                         Event::End(BytesEnd::new(qualified.as_str())),
                         source,
                     )?;
+                    output.replace(start, end, &take(&mut writer));
                     sheet_data_name = Some(qualified);
                 } else if sheet_data_depth == Some(depth) && element.local_name().as_ref() == "row"
                 {
@@ -264,6 +271,7 @@ pub(crate) fn patch_worksheet_semantics(
                         sheet_data_name.as_deref().unwrap_or("sheetData"),
                         source,
                     )?;
+                    output.insert(start, &take(&mut writer));
                     last_row = number;
                     let qualified = element.name().as_ref().to_owned();
                     if number <= EXCEL_MAX_ROWS
@@ -290,8 +298,7 @@ pub(crate) fn patch_worksheet_semantics(
                             source,
                         )?;
                         write_event(&mut writer, Event::End(BytesEnd::new(qualified)), source)?;
-                    } else {
-                        write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
+                        output.replace(start, end, &take(&mut writer));
                     }
                 } else if row.as_ref().is_some_and(|state| depth == state.depth)
                     && element.local_name().as_ref() == "c"
@@ -309,6 +316,7 @@ pub(crate) fn patch_worksheet_semantics(
                         address.column().get(),
                         source,
                     )?;
+                    output.insert(start, &take(&mut writer));
                     row_state.last_column = address.column().get();
                     if let Some(edit) = edits.get(&address) {
                         if !seen.insert(address) {
@@ -321,11 +329,8 @@ pub(crate) fn patch_worksheet_semantics(
                             &row_state.qualified_name,
                             source,
                         )?;
-                    } else {
-                        write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
+                        output.replace(start, end, &take(&mut writer));
                     }
-                } else {
-                    write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
                 }
             }
             Event::End(element) => {
@@ -334,6 +339,7 @@ pub(crate) fn patch_worksheet_semantics(
                         skip_cell_depth = None;
                     }
                     depth = depth.saturating_sub(1);
+                    output.replace(start, end, &[]);
                     buffer.clear();
                     continue;
                 }
@@ -351,7 +357,7 @@ pub(crate) fn patch_worksheet_semantics(
                         u32::MAX,
                         source,
                     )?;
-                    write_event(&mut writer, Event::End(element.into_owned()), source)?;
+                    output.insert(start, &take(&mut writer));
                     row = None;
                 } else if sheet_data_depth == Some(depth)
                     && element.local_name().as_ref() == "sheetData"
@@ -365,16 +371,14 @@ pub(crate) fn patch_worksheet_semantics(
                         sheet_data_name.as_deref().unwrap_or("sheetData"),
                         source,
                     )?;
-                    write_event(&mut writer, Event::End(element.into_owned()), source)?;
-                } else {
-                    write_event(&mut writer, Event::End(element.into_owned()), source)?;
+                    output.insert(start, &take(&mut writer));
                 }
                 depth = depth.saturating_sub(1);
             }
             Event::Eof => break,
-            other => {
-                if skip_cell_depth.is_none() {
-                    write_event(&mut writer, other.into_owned(), source)?;
+            _ => {
+                if skip_cell_depth.is_some() {
+                    output.replace(start, end, &[]);
                 }
             }
         }
@@ -386,9 +390,65 @@ pub(crate) fn patch_worksheet_semantics(
     if edits.keys().any(|address| !seen.contains(address)) {
         return Err(invalid_generated(source, DETAIL_MISSING_EDIT_TARGET));
     }
-    let output = writer.into_inner().into_inner();
+    let output = output.finish();
     enforce_bytes(output.len(), limits, source)?;
     Ok(output)
+}
+
+/// Output that copies the source bytes between the spans a patch replaces or inserts before.
+struct RawPatch<'source> {
+    source: &'source [u8],
+    copied_to: usize,
+    output: Vec<u8>,
+}
+
+impl<'source> RawPatch<'source> {
+    fn new(source: &'source [u8]) -> Self {
+        Self {
+            source,
+            copied_to: 0,
+            output: Vec::with_capacity(source.len()),
+        }
+    }
+
+    fn copy_to(&mut self, offset: usize) {
+        self.output
+            .extend_from_slice(&self.source[self.copied_to..offset]);
+        self.copied_to = offset;
+    }
+
+    /// Writes `bytes` before the source span starting at `offset`.
+    fn insert(&mut self, offset: usize, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        self.copy_to(offset);
+        self.output.extend_from_slice(bytes);
+    }
+
+    /// Writes `bytes` in place of the source span `start..end`.
+    fn replace(&mut self, start: usize, end: usize, bytes: &[u8]) {
+        self.copy_to(start);
+        self.output.extend_from_slice(bytes);
+        self.copied_to = end;
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        self.copy_to(self.source.len());
+        self.output
+    }
+}
+
+/// The source offset the reader has consumed.
+fn position(xml: &NsReader<&[u8]>) -> usize {
+    usize::try_from(xml.buffer_position()).unwrap_or(usize::MAX)
+}
+
+/// Takes the XML `writer` produced so far, leaving it empty.
+fn take(writer: &mut Writer<Cursor<Vec<u8>>>) -> Vec<u8> {
+    let cursor = writer.get_mut();
+    cursor.set_position(0);
+    std::mem::take(cursor.get_mut())
 }
 
 fn write_existing_edit(
