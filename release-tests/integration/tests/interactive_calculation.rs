@@ -2693,6 +2693,124 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 }
 
 #[test]
+fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
+    // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
+    // totals, conditional aggregates, lookups, and cycles, in batches of one to three changes.
+    // After every batch the session's automatic recalculation must equal a fresh full one.
+    for seed in 1..=6_u64 {
+        let mut random = Lcg(seed);
+        let mut session = WorkbookCalculationSession::create();
+        let first = SheetId::new(1).expect("constant sheet ID");
+        let second = session
+            .apply_changes(
+                0,
+                EditBatch::new([WorkbookChange::add_sheet(
+                    SheetName::new("Data").expect("valid sheet name"),
+                )]),
+            )
+            .expect("second sheet")
+            .created_sheet_ids()[0];
+        let sheets = [first, second];
+        let mut initial = Vec::new();
+        for _ in 0..120 {
+            initial.push(random_change(&mut random, sheets));
+        }
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new(initial),
+            )
+            .expect("generated workbook");
+        for step in 0..60 {
+            let changes = (0..=random.below(3))
+                .map(|_| random_change(&mut random, sheets))
+                .collect::<Vec<_>>();
+            session
+                .apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new(changes),
+                )
+                .expect("generated edit");
+            session
+                .recalculate(
+                    RecalculationMode::Auto,
+                    CalculationOptions::default(),
+                    CancellationToken::new(),
+                )
+                .unwrap_or_else(|error| panic!("seed {seed}, step {step}: {error}"));
+            let full = calculate_workbook(session.workbook(), CalculationOptions::default());
+            let calculation = session.calculation().expect("installed calculation");
+            assert_eq!(
+                calculation.cells().collect::<Vec<_>>(),
+                full.cells().collect::<Vec<_>>(),
+                "seed {seed}, step {step}",
+            );
+            assert_eq!(
+                calculation.materialized_cells().collect::<Vec<_>>(),
+                full.materialized_cells().collect::<Vec<_>>(),
+                "seed {seed}, step {step}",
+            );
+        }
+    }
+}
+
+/// A linear congruential generator, so every run edits the same cells.
+struct Lcg(u64);
+
+impl Lcg {
+    fn below(&mut self, bound: u32) -> u32 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((self.0 >> 33) % u64::from(bound)) as u32
+    }
+
+    fn cell(&mut self) -> String {
+        let column = char::from(b'A' + self.below(12) as u8);
+        format!("{column}{}", self.below(24) + 1)
+    }
+
+    fn column(&mut self) -> char {
+        char::from(b'A' + self.below(12) as u8)
+    }
+}
+
+fn random_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let sheet = sheets[random.below(2) as usize];
+    let target = CellAddress::from_a1(&random.cell()).expect("valid generated address");
+    let value = match random.below(10) {
+        0 => return WorkbookChange::clear_cell(sheet, target),
+        1 => CellValue::Text(["k1", "k2", "K1", " 3 "][random.below(4) as usize].to_owned()),
+        2 => CellValue::Logical(random.below(2) == 0),
+        3 | 4 => number(f64::from(random.below(10))),
+        _ => {
+            let (a, b, column) = (random.cell(), random.cell(), random.column());
+            let (top, bottom) = (random.below(12) + 1, random.below(12) + 13);
+            let text = match random.below(12) {
+                0 => format!("{a}+{b}"),
+                1 => format!("{a}*2-{b}"),
+                2 => format!("SUM({column}{top}:{column}{bottom})"),
+                3 => format!("SUM(${column}$1:{column}{bottom})"),
+                4 => format!(
+                    "SUMIFS({column}1:{column}24,A1:A24,\"k1\",B1:B24,{})",
+                    random.below(5)
+                ),
+                5 => format!("COUNTIFS(A1:A24,\"K1\",C1:C24,{})", random.below(5)),
+                6 => format!("IF({a}>4,{b},{a})"),
+                7 => format!("AVERAGE({column}{top}:{column}{bottom})"),
+                8 => format!("IFERROR(VLOOKUP({a},A1:D24,2,FALSE),-1)"),
+                9 => format!("Data!{a}+{b}"),
+                10 => format!("MAX(A{top}:H{bottom})"),
+                _ => format!("COUNTIF(B1:B24,{a})"),
+            };
+            return WorkbookChange::set_cell_formula(sheet, target, formula(&text));
+        }
+    };
+    WorkbookChange::set_cell_value(sheet, target, value)
+}
+
+#[test]
 fn evaluated_and_changed_result_sets_are_reported_independently() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
