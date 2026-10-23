@@ -5,6 +5,7 @@ use super::dependency_areas::AreaNodes;
 
 /// Passes a full calculation makes at most when references known only from values form chains.
 const MAX_DYNAMIC_REFERENCE_PASSES: u32 = 8;
+use super::materialization::ArrayOwners;
 use super::{
     CompiledWorkbook, Engine, EvalContext, EvaluationBudget, VolatileFormulas,
     collect_column_extents, collect_workbook_layout, public_to_internal,
@@ -57,6 +58,7 @@ impl<'workbook> Engine<'workbook> {
             results: std::collections::HashMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
+            static_array_owners: Arc::new(ArrayOwners::new(&array_regions)),
             array_regions,
             column_extents,
             dynamic_spills: BTreeMap::new(),
@@ -261,6 +263,7 @@ impl<'workbook> Engine<'workbook> {
             results: std::collections::HashMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
+            static_array_owners: Arc::new(ArrayOwners::new(&array_regions)),
             array_regions,
             column_extents,
             dynamic_spills: BTreeMap::new(),

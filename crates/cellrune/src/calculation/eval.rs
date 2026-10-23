@@ -38,7 +38,7 @@ pub(super) use dependency::DependencyTarget;
 use dependency::{TableTopologyRevision, table_dependency_by_id_cancellable};
 use dependency_areas::AreaNodes;
 use formula_columns::FormulaColumns;
-use materialization::ArrayRegion;
+use materialization::{ArrayOwners, ArrayRegion};
 pub(super) use recompile::RecompiledWorkbook;
 use reference::{ColumnExtents, cell_at};
 
@@ -1056,6 +1056,8 @@ pub struct Engine<'workbook> {
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
+    /// An index of the regions `array_regions` starts with.
+    static_array_owners: Arc<ArrayOwners>,
     column_extents: Vec<ColumnExtents<'workbook>>,
     dynamic_spills: BTreeMap<CellId, Rect>,
     parse_failures: Arc<BTreeMap<CellId, ParseError>>,

@@ -267,15 +267,92 @@ impl Engine<'_> {
         })
     }
 
+    /// Returns the anchor of the first array region, in region order, whose area holds `cell`.
     pub(super) fn array_owner(&self, cell: CellId) -> Option<CellId> {
-        self.array_regions
-            .iter()
-            .find(|region| {
-                region.rect.sheet == cell.0
-                    && (region.rect.row_start..=region.rect.row_end).contains(&cell.1)
-                    && (region.rect.col_start..=region.rect.col_end).contains(&cell.2)
-            })
-            .map(|region| region.anchor)
+        self.static_array_owners.owner(cell).or_else(|| {
+            self.array_regions[self.static_array_owners.len()..]
+                .iter()
+                .find(|region| region_holds(&region.rect, cell))
+                .map(|region| region.anchor)
+        })
+    }
+}
+
+fn region_holds(rect: &Rect, cell: CellId) -> bool {
+    rect.sheet == cell.0
+        && (rect.row_start..=rect.row_end).contains(&cell.1)
+        && (rect.col_start..=rect.col_end).contains(&cell.2)
+}
+
+/// The regions a calculation starts with, which come first among its array regions and never
+/// change while it runs, sorted by first row on each sheet so finding the one over a cell does
+/// not scan them all.
+#[derive(Debug, Default)]
+pub(super) struct ArrayOwners {
+    count: usize,
+    sheets: std::collections::BTreeMap<usize, SheetArrayOwners>,
+}
+
+#[derive(Debug, Default)]
+struct SheetArrayOwners {
+    /// Regions with their position among all regions, by first row.
+    regions: Vec<(usize, ArrayRegion)>,
+    /// The greatest last row among `regions[..=index]`.
+    last_rows: Vec<u32>,
+}
+
+impl ArrayOwners {
+    pub(super) fn new(regions: &[ArrayRegion]) -> Self {
+        let mut sheets = std::collections::BTreeMap::<usize, SheetArrayOwners>::new();
+        for (position, region) in regions.iter().enumerate() {
+            sheets
+                .entry(region.rect.sheet)
+                .or_default()
+                .regions
+                .push((position, *region));
+        }
+        for owners in sheets.values_mut() {
+            owners
+                .regions
+                .sort_by_key(|(position, region)| (region.rect.row_start, *position));
+            let mut last_row = 0;
+            owners.last_rows = owners
+                .regions
+                .iter()
+                .map(|(_, region)| {
+                    last_row = last_row.max(region.rect.row_end);
+                    last_row
+                })
+                .collect();
+        }
+        Self {
+            count: regions.len(),
+            sheets,
+        }
+    }
+
+    /// The number of regions indexed, which lead the calculation's region list.
+    pub(super) const fn len(&self) -> usize {
+        self.count
+    }
+
+    /// Returns the anchor of the first indexed region, in region order, over `cell`.
+    fn owner(&self, cell: CellId) -> Option<CellId> {
+        let owners = self.sheets.get(&cell.0)?;
+        let starting = owners
+            .regions
+            .partition_point(|(_, region)| region.rect.row_start <= cell.1);
+        let mut found = None::<(usize, CellId)>;
+        for index in (0..starting).rev() {
+            if owners.last_rows[index] < cell.1 {
+                break;
+            }
+            let (position, region) = owners.regions[index];
+            if region_holds(&region.rect, cell) && found.is_none_or(|(first, _)| position < first) {
+                found = Some((position, region.anchor));
+            }
+        }
+        found.map(|(_, anchor)| anchor)
     }
 }
 
@@ -285,4 +362,55 @@ fn rects_intersect(left: &Rect, right: &Rect) -> bool {
         && right.row_start <= left.row_end
         && left.col_start <= right.col_end
         && right.col_start <= left.col_end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ArrayOwners, ArrayRegion, region_holds};
+    use crate::calculation::runtime::Rect;
+
+    #[test]
+    fn owners_match_the_first_region_over_each_cell() {
+        // Overlapping regions too: the first in region order owns a cell, as a scan finds it.
+        let mut state = 0x9e37_79b9_u32;
+        let mut next = |bound: u32| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state % bound
+        };
+        let regions = (0..60)
+            .map(|_| {
+                let (row, column) = (next(40) + 1, next(12) + 1);
+                ArrayRegion {
+                    anchor: (next(2) as usize, row, column),
+                    rect: Rect {
+                        sheet: next(2) as usize,
+                        row_start: row,
+                        col_start: column,
+                        row_end: row + next(8),
+                        col_end: column + next(3),
+                        whole_rows: false,
+                    },
+                    provisional: false,
+                }
+            })
+            .collect::<Vec<_>>();
+        let owners = ArrayOwners::new(&regions);
+        for sheet in 0..2 {
+            for row in 1..=50 {
+                for column in 1..=16 {
+                    let cell = (sheet, row, column);
+                    assert_eq!(
+                        owners.owner(cell),
+                        regions
+                            .iter()
+                            .find(|region| region_holds(&region.rect, cell))
+                            .map(|region| region.anchor),
+                        "{cell:?}",
+                    );
+                }
+            }
+        }
+    }
 }

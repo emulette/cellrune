@@ -1149,18 +1149,10 @@ impl Engine<'_> {
         cell: super::CellId,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Option<super::CellId>, ()> {
-        for region in &self.array_regions {
-            if cancelled() {
-                return Err(());
-            }
-            if region.rect.sheet == cell.0
-                && (region.rect.row_start..=region.rect.row_end).contains(&cell.1)
-                && (region.rect.col_start..=region.rect.col_end).contains(&cell.2)
-            {
-                return Ok(Some(region.anchor));
-            }
+        if cancelled() {
+            return Err(());
         }
-        Ok(None)
+        Ok(self.array_owner(cell))
     }
 
     fn structured_table_dependency(
