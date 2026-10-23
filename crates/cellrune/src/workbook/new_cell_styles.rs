@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::{CellAddress, Column, NumberFormat, Row};
+use crate::grid::{GridAxis, GridEdit};
+use crate::{CellAddress, Column, EXCEL_MAX_COLUMNS, NumberFormat, Row};
 
 /// The source styles that a cell written at an empty position receives.
 ///
@@ -78,9 +79,123 @@ impl NewCellStyles {
             .map(|number_format| (index, number_format))
     }
 
+    /// Returns the style index and number format of every styled position on line `line` of
+    /// `axis`, which lines inserted after it inherit. `valued` gives the number format of a
+    /// valued cell, whose style alone is recorded here.
+    pub(crate) fn line_styles(
+        &self,
+        axis: GridAxis,
+        line: u32,
+        valued: impl Fn(CellAddress) -> Option<NumberFormat>,
+    ) -> Vec<(CellAddress, usize, NumberFormat)> {
+        let on_line = |address: &&CellAddress| axis.of(**address) == line;
+        let mut styles = self
+            .valued_cells
+            .iter()
+            .filter(|(address, _)| on_line(address))
+            .filter_map(|(address, index)| Some((*address, *index, valued(*address)?)))
+            .collect::<Vec<_>>();
+        styles.extend(
+            self.blank_cells
+                .iter()
+                .filter(|(address, _)| on_line(address))
+                .filter_map(|(address, index)| {
+                    Some((*address, *index, self.number_formats.get(index)?.clone()))
+                }),
+        );
+        styles
+    }
+
+    /// Moves every recorded style through a structural edit. Lines an insertion adds take the
+    /// row or column style of the line before them, and `inherited` gives the cell styles they
+    /// take, at their new positions.
+    pub(crate) fn apply_grid_edit(
+        &mut self,
+        edit: GridEdit,
+        inherited: Vec<(CellAddress, usize, NumberFormat)>,
+    ) {
+        let move_cells = |cells: &BTreeMap<CellAddress, usize>| {
+            cells
+                .iter()
+                .filter_map(|(address, index)| Some((edit.map_address(*address)?, *index)))
+                .collect::<BTreeMap<_, _>>()
+        };
+        self.valued_cells = move_cells(&self.valued_cells);
+        self.blank_cells = move_cells(&self.blank_cells);
+        let inherited_line = match edit {
+            GridEdit::Insert { at, count, .. } if at > 1 => Some((at - 1, at..at + count)),
+            _ => None,
+        };
+        match edit.line_axis() {
+            Some(GridAxis::Rows) => {
+                let mut rows = self
+                    .rows
+                    .iter()
+                    .filter_map(|(row, index)| {
+                        Some((Row::new(edit.map_line(row.get())?).ok()?, *index))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                if let Some((before, lines)) = inherited_line.clone()
+                    && let Some(index) = Row::new(before).ok().and_then(|row| self.rows.get(&row))
+                {
+                    for line in lines {
+                        if let Ok(row) = Row::new(line) {
+                            rows.insert(row, *index);
+                        }
+                    }
+                }
+                self.rows = rows;
+            }
+            Some(GridAxis::Columns) => {
+                let mut columns = vec![None; EXCEL_MAX_COLUMNS as usize + 1];
+                for (first, last, index) in &self.columns {
+                    for column in first.get()..=last.get() {
+                        columns[column as usize] = Some(*index);
+                    }
+                }
+                let mut moved = vec![None; EXCEL_MAX_COLUMNS as usize + 1];
+                for (column, index) in columns.iter().enumerate().skip(1) {
+                    if let Some(index) = index
+                        && let Some(target) = edit.map_line(column as u32)
+                    {
+                        moved[target as usize] = Some(*index);
+                    }
+                }
+                if let Some((before, lines)) = inherited_line.clone() {
+                    for line in lines {
+                        moved[line as usize] = columns[before as usize];
+                    }
+                }
+                self.columns = spans(&moved);
+            }
+            None => {}
+        }
+        for (address, index, number_format) in inherited {
+            self.blank_cells.insert(address, index);
+            self.insert_number_format(index, &number_format);
+        }
+    }
+
     fn insert_number_format(&mut self, index: usize, number_format: &NumberFormat) {
         self.number_formats
             .entry(index)
             .or_insert_with(|| number_format.clone());
     }
+}
+
+/// Collapses per-column styles, indexed from column 1, into inclusive spans.
+fn spans(columns: &[Option<usize>]) -> Vec<(Column, Column, usize)> {
+    let mut spans = Vec::<(Column, Column, usize)>::new();
+    for (column, index) in columns.iter().enumerate().skip(1) {
+        let (Some(index), Ok(column)) = (index, Column::new(column as u32)) else {
+            continue;
+        };
+        match spans.last_mut() {
+            Some((_, last, previous)) if *previous == *index && last.get() + 1 == column.get() => {
+                *last = column;
+            }
+            _ => spans.push((column, column, *index)),
+        }
+    }
+    spans
 }

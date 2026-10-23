@@ -1,4 +1,5 @@
 use crate::CellRange;
+use crate::grid::{GridAxis, GridEdit, RangeRule};
 
 /// A worksheet-level auto-filter that belongs to no Excel table.
 ///
@@ -46,6 +47,36 @@ impl SheetAutoFilter {
     /// empty.
     pub fn filtered_column_ids(&self) -> &[u32] {
         &self.filtered_column_ids
+    }
+
+    /// Returns this filter after a structural edit, or `None` when the edit deletes its range.
+    /// Each filter column follows its column, and a deleted column's filter goes with it.
+    pub(crate) fn grid_mapped(&self, edit: GridEdit) -> Option<Self> {
+        let range = edit.map_range(self.range, RangeRule::Reference)?;
+        if edit.line_axis() != Some(GridAxis::Columns) {
+            return Some(Self {
+                range,
+                ..self.clone()
+            });
+        }
+        let first = self.range.start().column().get();
+        let new_first = range.start().column().get();
+        let remapped = |column_ids: &[u32]| {
+            column_ids
+                .iter()
+                .filter_map(|column_id| {
+                    let column = edit.map_line(first + column_id)?;
+                    column
+                        .checked_sub(new_first)
+                        .filter(|offset| *offset < range.width())
+                })
+                .collect()
+        };
+        Some(Self {
+            range,
+            filter_column_ids: remapped(&self.filter_column_ids),
+            filtered_column_ids: remapped(&self.filtered_column_ids),
+        })
     }
 
     /// Returns this filter over `range`, which keeps its rows and contains its columns, with each

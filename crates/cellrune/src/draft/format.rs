@@ -1,9 +1,9 @@
 //! The format each cell of a draft displays with.
 
-use super::{DraftCellMutation, DraftCellMutationStore, WorkbookDraft};
+use super::{DraftCellMutation, DraftCellMutationStore, SourceCells, WorkbookDraft};
 use crate::{
     CalculationCellId, CellAddress, CellFormat, DocumentPresentation, Sheet, SheetId,
-    ValidationError, WorkbookSnapshot,
+    ValidationError,
 };
 
 impl WorkbookDraft {
@@ -31,9 +31,7 @@ impl WorkbookDraft {
         Ok(effective_cell_format(
             &self.presentation,
             sheet,
-            self.source_document
-                .as_deref()
-                .map(crate::XlsxDocument::workbook),
+            self.source_cells(),
             &self.cell_mutations,
             address,
         ))
@@ -44,7 +42,7 @@ impl WorkbookDraft {
 pub(crate) fn effective_cell_format(
     presentation: &DocumentPresentation,
     sheet: &Sheet,
-    source: Option<&WorkbookSnapshot>,
+    source: SourceCells<'_>,
     mutations: &DraftCellMutationStore,
     address: CellAddress,
 ) -> CellFormat {
@@ -59,7 +57,7 @@ pub(crate) fn effective_cell_format(
 /// writer styles written cells the same way.
 pub(crate) fn source_style_index(
     sheet: &Sheet,
-    source: Option<&WorkbookSnapshot>,
+    source: SourceCells<'_>,
     mutations: &DraftCellMutationStore,
     address: CellAddress,
 ) -> usize {
@@ -71,9 +69,7 @@ pub(crate) fn source_style_index(
         }) => !replaces_source_cell,
         Some(DraftCellMutation::Remove) => false,
     };
-    let source_cell = source
-        .and_then(|source| source.sheet_by_id(sheet.id()))
-        .and_then(|source_sheet| source_sheet.cell(address));
+    let source_cell = source.cell(sheet.id(), address);
     if keeps_source_cell && source_cell.is_some() && sheet.cell(address).is_some() {
         return sheet.new_cell_styles().valued_cell_style(address);
     }

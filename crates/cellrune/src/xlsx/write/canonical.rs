@@ -898,6 +898,7 @@ fn edited_formats_match(
     reopened: &crate::XlsxDocument,
 ) -> bool {
     let unchanged = crate::draft::DraftCellMutationStore::default();
+    let unmoved = std::collections::BTreeMap::new();
     expected.sheets().iter().all(|sheet| {
         let Some(actual_sheet) = reopened.workbook().sheet_by_id(sheet.id()) else {
             return false;
@@ -908,7 +909,7 @@ fn edited_formats_match(
                 crate::draft::effective_cell_format(
                     reopened.presentation(),
                     actual_sheet,
-                    Some(reopened.workbook()),
+                    crate::draft::SourceCells::new(Some(reopened.workbook()), &unmoved),
                     &unchanged,
                     address,
                 ) == *format

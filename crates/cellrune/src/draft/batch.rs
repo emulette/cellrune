@@ -1,6 +1,7 @@
 mod change;
 mod executor;
 mod formula_edit;
+mod grid_edit;
 mod receipt;
 mod sheet_delete;
 mod staged;
@@ -92,6 +93,9 @@ impl BatchExecutionError {
                     end: span.end,
                     owner,
                 }
+            }
+            Self::Rewrite(FormulaRewriteError::OverwrittenReference { owner }) => {
+                ValidationError::MovedRangeOverwritesReferences { owner }
             }
             Self::Rewrite(FormulaRewriteError::SourceEdit(_)) => {
                 ValidationError::FormulaRewriteParseFailed {

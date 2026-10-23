@@ -2,6 +2,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::{fmt, result};
 
+use crate::grid::{GridAxis, GridEdit, RangeRule};
 use crate::{CellRange, FormulaText, ValidationError};
 
 mod filter;
@@ -894,6 +895,69 @@ impl Table {
             .map(|filter| filter.widened(range.start().column(), range.end().column()));
         self.range = range;
         self.columns = columns;
+    }
+
+    /// Returns this table after a structural edit of its sheet, or `None` when the edit deletes
+    /// it. Lines inserted strictly inside the table widen it; `inserted` holds the columns an
+    /// insertion inside the table adds, in order. The filter and sort ranges follow the table:
+    /// one spanning the header and data rows, or the data rows, keeps spanning them.
+    pub(crate) fn grid_mapped(&self, edit: GridEdit, inserted: Vec<TableColumn>) -> Option<Self> {
+        let range = edit.map_range(self.range, RangeRule::Reference)?;
+        let spans = |table: CellRange| {
+            let top = table.start().row().get();
+            let bottom = table
+                .end()
+                .row()
+                .get()
+                .saturating_sub(self.totals_row_count);
+            [
+                (top, bottom),
+                (top.saturating_add(self.header_row_count), bottom),
+            ]
+        };
+        let (old_spans, new_spans) = (spans(self.range), spans(range));
+        let rows_edit = edit.line_axis() == Some(GridAxis::Rows);
+        let map = move |filter: CellRange| -> Option<CellRange> {
+            let rows = (filter.start().row().get(), filter.end().row().get());
+            if rows_edit && let Some(index) = old_spans.iter().position(|span| *span == rows) {
+                let (top, bottom) = new_spans[index];
+                return Some(CellRange::from_ordered(
+                    crate::CellAddress::new(crate::Row::new(top).ok()?, filter.start().column()),
+                    crate::CellAddress::new(crate::Row::new(bottom).ok()?, filter.end().column()),
+                ));
+            }
+            edit.map_range(filter, RangeRule::Reference)
+        };
+        let column_shift =
+            i64::from(range.start().column().get()) - i64::from(self.range.start().column().get());
+        let column = move |column: u32| -> Option<u32> {
+            if edit.line_axis() == Some(GridAxis::Columns) {
+                edit.map_line(column)
+            } else {
+                u32::try_from(i64::from(column) + column_shift).ok()
+            }
+        };
+        let mut columns = self.columns.clone();
+        if let GridEdit::Insert {
+            axis: GridAxis::Columns,
+            at,
+            ..
+        } = edit
+            && !inserted.is_empty()
+        {
+            let position = (at - self.range.start().column().get()) as usize;
+            columns.splice(position..position, inserted);
+        }
+        Some(Self {
+            range,
+            columns,
+            auto_filter: self
+                .auto_filter
+                .as_ref()
+                .and_then(|filter| filter.mapped(&map, &column)),
+            sort_state: self.sort_state.as_ref().and_then(|sort| sort.mapped(&map)),
+            ..self.clone()
+        })
     }
 
     pub(crate) fn data_range(&self) -> Option<CellRange> {

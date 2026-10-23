@@ -580,9 +580,9 @@ fn rewrite(
     source: &PartPath,
 ) -> Result<Option<String>, XlsxWriteError> {
     rewrite_formula(formula, request, budget).map_err(|error| match error {
-        FormulaRewriteError::Parse { .. } | FormulaRewriteError::SourceEdit(_) => {
-            unrewritable(source)
-        }
+        FormulaRewriteError::Parse { .. }
+        | FormulaRewriteError::SourceEdit(_)
+        | FormulaRewriteError::OverwrittenReference { .. } => unrewritable(source),
         FormulaRewriteError::Cancelled | FormulaRewriteError::LimitExceeded { .. } => {
             unreachable!("an unbounded non-cancellable rewrite cannot exhaust rewrite control")
         }

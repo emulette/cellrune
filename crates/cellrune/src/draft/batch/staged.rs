@@ -1,5 +1,5 @@
-use super::super::{DraftCellMutation, DraftCellMutationStore};
-use crate::{CalculationCellId, CellAddress, Sheet, SheetId, ValidationError, WorkbookSnapshot};
+use super::super::{DraftCellMutation, DraftCellMutationStore, SourceCells};
+use crate::{CalculationCellId, CellAddress, Sheet, SheetId, ValidationError};
 
 pub(super) fn sheet_by_id_mut(
     sheets: &mut [Sheet],
@@ -20,14 +20,12 @@ pub(super) fn sheet_by_id_mut(
 /// such cell for the writer to remove.
 pub(super) fn mark_removed(
     mutations: &mut DraftCellMutationStore,
-    source: Option<&WorkbookSnapshot>,
+    source: SourceCells<'_>,
     sheet_id: SheetId,
     address: CellAddress,
 ) -> bool {
     let id = CalculationCellId::new(sheet_id, address);
-    let in_source = source
-        .and_then(|workbook| workbook.sheet_by_id(sheet_id))
-        .is_some_and(|sheet| sheet.cell(address).is_some());
+    let in_source = source.cell(sheet_id, address).is_some();
     if in_source {
         mutations.insert(id, DraftCellMutation::Remove);
     } else {

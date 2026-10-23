@@ -1,5 +1,6 @@
+use crate::grid::GridHistory;
 use crate::{
-    CalculationCellId, CellAddress, DocumentPresentation, SheetId, TableId, ValidationError,
+    CalculationCellId, Cell, CellAddress, DocumentPresentation, SheetId, TableId, ValidationError,
     WorkbookSnapshot, XlsxDocument,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -101,6 +102,26 @@ impl DraftCellMutationStore {
         }
     }
 
+    /// Moves every mutation recorded for one sheet to the address `map` gives it, dropping the
+    /// ones whose cell `map` removes.
+    pub(crate) fn remap_sheet(
+        &mut self,
+        sheet_id: SheetId,
+        map: impl Fn(CellAddress) -> Option<CellAddress>,
+    ) {
+        let entries = self
+            .chunks
+            .range((sheet_id, 0)..=(sheet_id, u32::MAX))
+            .flat_map(|(_, chunk)| chunk.iter().map(|(id, mutation)| (*id, *mutation)))
+            .collect::<Vec<_>>();
+        self.remove_sheet(sheet_id);
+        for (id, mutation) in entries {
+            if let Some(address) = map(id.address()) {
+                self.insert(CalculationCellId::new(sheet_id, address), mutation);
+            }
+        }
+    }
+
     pub(crate) fn sheet_keys(&self, sheet_id: SheetId) -> impl Iterator<Item = &CalculationCellId> {
         self.chunks
             .range((sheet_id, 0)..=(sheet_id, u32::MAX))
@@ -109,6 +130,34 @@ impl DraftCellMutationStore {
 
     pub(crate) const fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+/// The source document's cells where the draft's structural edits moved them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SourceCells<'a> {
+    workbook: Option<&'a WorkbookSnapshot>,
+    histories: &'a BTreeMap<SheetId, GridHistory>,
+}
+
+impl<'a> SourceCells<'a> {
+    pub(crate) const fn new(
+        workbook: Option<&'a WorkbookSnapshot>,
+        histories: &'a BTreeMap<SheetId, GridHistory>,
+    ) -> Self {
+        Self {
+            workbook,
+            histories,
+        }
+    }
+
+    /// Returns the source cell that now sits at `address`.
+    pub(crate) fn cell(&self, sheet_id: SheetId, address: CellAddress) -> Option<&'a Cell> {
+        let sheet = self.workbook?.sheet_by_id(sheet_id)?;
+        match self.histories.get(&sheet_id) {
+            Some(history) => sheet.cell(history.to_source(address)?),
+            None => sheet.cell(address),
+        }
     }
 }
 
@@ -124,6 +173,9 @@ pub struct WorkbookDraft {
     added_sheets: BTreeSet<SheetId>,
     changed_table_ids: BTreeSet<TableId>,
     workbook_changed: bool,
+    /// The structural edits applied to each source worksheet, which the writer replays on the
+    /// preserved part.
+    grid_histories: BTreeMap<SheetId, GridHistory>,
 }
 
 impl WorkbookDraft {
@@ -139,6 +191,7 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
+            grid_histories: BTreeMap::new(),
         }
     }
 
@@ -154,6 +207,7 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: false,
+            grid_histories: BTreeMap::new(),
         }
     }
 
@@ -214,6 +268,7 @@ impl WorkbookDraft {
             added_sheets: clone_set_cancellable(&self.added_sheets, cancelled)?,
             changed_table_ids: clone_set_cancellable(&self.changed_table_ids, cancelled)?,
             workbook_changed: self.workbook_changed,
+            grid_histories: self.grid_histories.clone(),
         })
     }
 
@@ -229,6 +284,7 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
+            grid_histories: BTreeMap::new(),
         }
     }
 }

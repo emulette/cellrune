@@ -2,12 +2,13 @@ use std::collections::BTreeSet;
 
 use super::super::format::effective_cell_format;
 use super::super::{
-    WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
+    SourceCells, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
 };
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
+use super::grid_edit::{GridEditState, apply_grid_edit, grid_change};
 use super::sheet_delete::delete_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
 use super::table_edit::{
@@ -78,10 +79,11 @@ impl WorkbookDraft {
         let mut defined_names = clone_slice(self.workbook.defined_names(), rewrite_budget)?;
         let mut date_system = self.workbook.date_system();
         let mut calculation_hints = self.workbook.calculation_hints();
-        let source = self
+        let source_workbook = self
             .source_document
             .as_deref()
             .map(crate::XlsxDocument::workbook);
+        let mut grid_histories = self.grid_histories.clone();
         let mut cell_mutations = self.cell_mutations.clone();
         let mut presentation = self
             .presentation
@@ -137,7 +139,7 @@ impl WorkbookDraft {
                                     touched_sheets: &mut touched_sheets,
                                     changed_table_ids: &mut changed_table_ids,
                                     presentation: &presentation,
-                                    source,
+                                    source: SourceCells::new(source_workbook, &grid_histories),
                                 },
                                 locations: &table_locations,
                                 formula_locations: &table_formula_locations,
@@ -178,7 +180,12 @@ impl WorkbookDraft {
                     }
                     if *value == CellValue::Blank {
                         if sheet.remove_cell_deferred(*address) {
-                            if !mark_removed(&mut cell_mutations, source, *sheet_id, *address) {
+                            if !mark_removed(
+                                &mut cell_mutations,
+                                SourceCells::new(source_workbook, &grid_histories),
+                                *sheet_id,
+                                *address,
+                            ) {
                                 presentation_cell_mutations
                                     .remove(&CalculationCellId::new(*sheet_id, *address));
                             }
@@ -305,7 +312,12 @@ impl WorkbookDraft {
                         .cell(*address)
                         .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)));
                     if sheet.remove_cell_deferred(*address) {
-                        if !mark_removed(&mut cell_mutations, source, *sheet_id, *address) {
+                        if !mark_removed(
+                            &mut cell_mutations,
+                            SourceCells::new(source_workbook, &grid_histories),
+                            *sheet_id,
+                            *address,
+                        ) {
                             presentation_cell_mutations
                                 .remove(&CalculationCellId::new(*sheet_id, *address));
                         }
@@ -423,6 +435,7 @@ impl WorkbookDraft {
                     presentation_sheet_mutations.remove(sheet_id);
                     touched_sheets.remove(sheet_id);
                     added_sheets.remove(sheet_id);
+                    grid_histories.remove(sheet_id);
                     for table in removed.tables() {
                         changed_table_ids.remove(&table.id());
                         previous_changed_table_ids.remove(&table.id());
@@ -518,7 +531,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -548,7 +561,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -578,7 +591,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             rewrite_budget,
@@ -610,6 +623,41 @@ impl WorkbookDraft {
                         }
                     }
                 }
+                WorkbookChange::InsertRows { .. }
+                | WorkbookChange::DeleteRows { .. }
+                | WorkbookChange::InsertColumns { .. }
+                | WorkbookChange::DeleteColumns { .. } => {
+                    let (sheet_id, edit) =
+                        grid_change(change)?.expect("a structural change has a grid edit");
+                    let records_history = source_workbook
+                        .is_some_and(|workbook| workbook.sheet_by_id(sheet_id).is_some())
+                        && !added_sheets.contains(&sheet_id);
+                    let outcome = apply_grid_edit(
+                        GridEditState {
+                            sheets: &mut sheets,
+                            defined_names: &mut defined_names,
+                            presentation: &mut presentation,
+                            mutations: &mut cell_mutations,
+                            presentation_cell_mutations: &mut presentation_cell_mutations,
+                            presentation_sheet_mutations: &mut presentation_sheet_mutations,
+                            changed_cells: &mut changed_cells,
+                            calculation_changed_cells: &mut calculation_changed_cells,
+                            touched_sheets: &mut touched_sheets,
+                            changed_table_ids: &mut changed_table_ids,
+                            history: records_history
+                                .then(|| grid_histories.entry(sheet_id).or_default()),
+                            budget: rewrite_budget,
+                        },
+                        sheet_id,
+                        edit,
+                    )?;
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed |= outcome.names_changed;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
                 WorkbookChange::SetCellFormat {
                     sheet_id,
                     address,
@@ -619,7 +667,7 @@ impl WorkbookDraft {
                     let current = effective_cell_format(
                         &presentation,
                         sheet,
-                        source,
+                        SourceCells::new(source_workbook, &grid_histories),
                         &cell_mutations,
                         *address,
                     );
@@ -695,6 +743,7 @@ impl WorkbookDraft {
         self.presentation_cell_mutations = presentation_cell_mutations;
         self.presentation_sheet_mutations = presentation_sheet_mutations;
         self.added_sheets = added_sheets;
+        self.grid_histories = grid_histories;
         self.changed_table_ids = previous_changed_table_ids
             .union(&changed_table_ids)
             .copied()

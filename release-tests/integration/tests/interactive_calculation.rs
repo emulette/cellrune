@@ -2771,8 +2771,8 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
     // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
     // totals, conditional aggregates, lookups, dynamic references, spills, and cycles, in batches
-    // of one to three changes. After every batch the session's automatic recalculation must
-    // equal a fresh full one.
+    // of one to three changes, some of which also insert or delete rows or columns. After every
+    // batch the session's automatic recalculation must equal a fresh full one.
     for seed in 1..=8_u64 {
         let mut random = Lcg(seed);
         let mut session = WorkbookCalculationSession::create();
@@ -2798,9 +2798,13 @@ fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
             )
             .expect("generated workbook");
         for step in 0..60 {
-            let changes = (0..=random.below(3))
+            let mut changes = (0..=random.below(3))
                 .map(|_| random_change(&mut random, sheets))
                 .collect::<Vec<_>>();
+            if random.below(4) == 0 {
+                let position = random.below(changes.len() as u32 + 1) as usize;
+                changes.insert(position, random_structural_change(&mut random, sheets));
+            }
             session
                 .apply_changes(
                     session.workbook().semantic_revision(),
@@ -2850,6 +2854,33 @@ impl Lcg {
     fn column(&mut self) -> char {
         char::from(b'A' + self.below(12) as u8)
     }
+}
+
+/// Inserts or deletes one to three rows or columns of the generated grid.
+fn random_structural_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let sheet = sheets[random.below(2) as usize];
+    let count = random.below(3) + 1;
+    match random.below(4) {
+        0 => WorkbookChange::insert_rows(sheet, row(random.below(24) + 1), count),
+        1 => {
+            let first = random.below(24) + 1;
+            WorkbookChange::delete_rows(sheet, row(first), row(first + count - 1))
+        }
+        2 => WorkbookChange::insert_columns(sheet, column(random.below(12) + 1), count),
+        _ => {
+            let first = random.below(12) + 1;
+            WorkbookChange::delete_columns(sheet, column(first), column(first + count - 1))
+        }
+    }
+    .expect("generated structural edit")
+}
+
+fn row(value: u32) -> cellrune::Row {
+    cellrune::Row::new(value).expect("generated row")
+}
+
+fn column(value: u32) -> cellrune::Column {
+    cellrune::Column::new(value).expect("generated column")
 }
 
 fn random_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {

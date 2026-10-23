@@ -844,6 +844,19 @@ impl Parser<'_> {
             );
         }
         self.cursor = snapshot;
+        // Excel saves a reference whose cells were deleted as `Sheet1!#REF!`; it reads `#REF!`.
+        if let Some(SpannedToken {
+            token: Token::ErrorLit(ErrorKind::Ref),
+            span,
+        }) = self.tokens.get(self.cursor).cloned()
+        {
+            self.cursor += 1;
+            return self.track_with_components(
+                Expr::ErrorLit(ErrorKind::Ref),
+                start.merge(span),
+                components,
+            );
+        }
         let invalid_span = self.span(0);
         let Some(SpannedToken {
             token: Token::Ident(name),
@@ -1315,6 +1328,7 @@ mod tests {
     };
     use crate::calculation::error::ParseErrorCode;
     use crate::calculation::syntax::{SourceComponentKind, SourceSpan};
+    use crate::calculation::value::ErrorKind;
 
     fn parse(input: &str) -> crate::calculation::syntax::ParsedFormula {
         parse_formula_with_limits(input, CalculationLimits::default()).expect(input)
@@ -1720,6 +1734,22 @@ mod tests {
         for formula in ["A1:#REF!", "#REF!:B2", "#REF!,A1"] {
             parse(formula);
         }
+        // Excel keeps the sheet of a reference whose cells another sheet deleted.
+        for formula in ["Sheet1!#REF!", "'S1'!#REF!+1", "SUM('My Sheet'!#REF!)"] {
+            let parsed = parse(formula);
+            let mut pending = vec![parsed.root()];
+            let mut found = false;
+            while let Some(expr) = pending.pop() {
+                match expr {
+                    Expr::ErrorLit(ErrorKind::Ref) => found = true,
+                    Expr::Call { args, .. } => pending.extend(args),
+                    Expr::Binary { left, right, .. } => pending.extend([&**left, &**right]),
+                    _ => {}
+                }
+            }
+            assert!(found, "{formula}");
+        }
+        assert!(parse_formula_with_limits("Sheet1!#VALUE!", CalculationLimits::default()).is_err());
         let error = parse_formula_with_limits("A1:#VALUE!", CalculationLimits::default())
             .expect_err("non-reference errors are not range endpoints");
         assert_eq!(error.span, SourceSpan::new(2, 3));

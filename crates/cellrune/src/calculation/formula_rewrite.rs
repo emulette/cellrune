@@ -3,6 +3,9 @@ use super::ast::{
     structured_column_needs_grouping, structured_simple_column_needs_grouping,
 };
 use super::error::ParseErrorCode;
+use super::grid_rewrite::{
+    CopyOffset, DELETED_REFERENCE, GridChange, NodePlan, plan_copy_node, plan_grid_node,
+};
 use super::lexer::{Token, lex_spanned};
 use super::parser::parse_formula_with_limits;
 use super::structured_reference::parse_structured_reference;
@@ -31,6 +34,10 @@ pub(crate) enum FormulaRewriteRequest<'a> {
         new_name: &'a str,
         owner_is_target_table: bool,
     },
+    /// Moves references through a structural edit of one sheet's grid.
+    Grid(GridChange<'a>),
+    /// Shifts the relative parts of every reference, as copying a formula does.
+    Copy(CopyOffset),
 }
 
 /// Sheets renamed and deleted together, every name as the formulas spell it before the change.
@@ -116,14 +123,18 @@ impl FormulaRewriteRequest<'_> {
                 case_insensitive_eq(name, old_name).then_some(*new_name)
             }
             Self::Sheets(changes) => changes.renamed(name),
-            Self::Table { .. } | Self::TableColumn { .. } => None,
+            Self::Table { .. } | Self::TableColumn { .. } | Self::Grid(_) | Self::Copy(_) => None,
         }
     }
 
     const fn sheet_changes(&self) -> Option<&SheetChanges<'_>> {
         match self {
             Self::Sheets(changes) => Some(changes),
-            Self::Sheet { .. } | Self::Table { .. } | Self::TableColumn { .. } => None,
+            Self::Sheet { .. }
+            | Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::Grid(_)
+            | Self::Copy(_) => None,
         }
     }
 
@@ -207,6 +218,10 @@ pub(crate) enum FormulaRewriteError {
         owner: Option<String>,
     },
     SourceEdit(SourceEditError),
+    /// A range move would paste over cells this formula reads.
+    OverwrittenReference {
+        owner: Option<String>,
+    },
 }
 
 impl FormulaRewriteError {
@@ -221,6 +236,9 @@ impl FormulaRewriteError {
                 span,
                 owner: Some(owner),
             },
+            Self::OverwrittenReference { owner: None } => {
+                Self::OverwrittenReference { owner: Some(owner) }
+            }
             other => other,
         }
     }
@@ -370,6 +388,64 @@ pub(crate) fn rewrite_formula(
     let mut stack = vec![(parsed.root(), parsed.source_map().node_tree())];
     while let Some((expr, source_node)) = stack.pop() {
         budget.charge_node()?;
+        let plan = match request {
+            FormulaRewriteRequest::Grid(change) => {
+                let before = edits.len();
+                let plan = plan_grid_node(source, expr, source_node, change, &mut edits)
+                    .map_err(|_| FormulaRewriteError::OverwrittenReference { owner: None })?;
+                for _ in before..edits.len() {
+                    budget.charge_edit()?;
+                }
+                Some(plan)
+            }
+            FormulaRewriteRequest::Copy(offset) => {
+                let before = edits.len();
+                let Ok(plan) = plan_copy_node(expr, source_node, *offset, &mut edits) else {
+                    // A copied reference that leaves the grid turns the whole formula into
+                    // `#REF!`, as Excel pastes it.
+                    budget.charge_edit()?;
+                    return Ok(Some(DELETED_REFERENCE.to_owned()));
+                };
+                for _ in before..edits.len() {
+                    budget.charge_edit()?;
+                }
+                Some(plan)
+            }
+            _ => None,
+        };
+        if let Some(plan) = plan {
+            if plan == NodePlan::Descend {
+                push_children(expr, source_node, &mut stack);
+            }
+            continue;
+        }
+        if let Expr::ErrorLit(_) = expr
+            && let Some(prefix) = qualified_error_prefix(source, source_node.components())
+        {
+            // `Sheet1!#REF!` keeps naming its sheet, so a rename or deletion changes it too.
+            let deleted = request.sheet_changes().is_some_and(|changes| {
+                changes
+                    .remaining_span(
+                        &prefix.name,
+                        prefix.end_name.as_deref().unwrap_or(&prefix.name),
+                    )
+                    .is_none()
+            });
+            if deleted {
+                budget.charge_edit()?;
+                edits.push(SourceEdit::new(source_node.span(), DELETED_REFERENCE));
+            } else {
+                plan_sheet_prefix_edits(
+                    source,
+                    &prefix,
+                    source_node.components(),
+                    request,
+                    &mut edits,
+                    budget,
+                )?;
+            }
+            continue;
+        }
         if replaced_by_deletion(expr, request) {
             budget.charge_edit()?;
             edits.push(SourceEdit::new(source_node.span(), DELETED_REFERENCE));
@@ -436,7 +512,10 @@ pub(crate) fn rewrite_formula(
                         )?;
                     }
                 }
-                FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {}
+                FormulaRewriteRequest::Sheet { .. }
+                | FormulaRewriteRequest::Sheets(_)
+                | FormulaRewriteRequest::Grid(_)
+                | FormulaRewriteRequest::Copy(_) => {}
             },
             Expr::ExternalReference(_) => continue,
             _ => {}
@@ -521,9 +600,6 @@ pub(super) fn push_children<'a>(
         .rev()
         .for_each(|pair| stack.push(pair));
 }
-
-/// The text a reference to a deleted sheet or table becomes, as Excel saves it.
-const DELETED_REFERENCE: &str = "#REF!";
 
 /// Reports whether a sheet deletion replaces `expr` as a whole with `#REF!`: a reference to a
 /// deleted sheet or table, or a range, spill reference, or invocation whose reference operand is
@@ -623,6 +699,27 @@ fn plan_sheet_prefix_edits(
         },
     ));
     Ok(())
+}
+
+/// Returns the sheet a `Sheet1!#REF!` names, read from its qualifier components.
+fn qualified_error_prefix(source: &str, components: &[SourceComponent]) -> Option<SheetPrefix> {
+    let qualifier = component(components, SourceComponentKind::SheetQualifier)?;
+    let text = |span: SourceSpan| {
+        source
+            .get(span.start..span.end)
+            .map(|name| name.replace("''", "'"))
+    };
+    let quoted = qualifier
+        .span()
+        .start
+        .checked_sub(1)
+        .is_some_and(|offset| source.as_bytes().get(offset) == Some(&b'\''));
+    Some(SheetPrefix {
+        name: text(qualifier.span())?,
+        end_name: component(components, SourceComponentKind::SheetRangeEnd)
+            .and_then(|end| text(end.span())),
+        quoted,
+    })
 }
 
 fn replacement_sheet_name(source: &str, span: SourceSpan, new_name: &str) -> String {
@@ -825,6 +922,29 @@ fn formula_may_reference_target(
                 },
                 _ => false,
             }),
+        FormulaRewriteRequest::Grid(change) => {
+            // An unqualified reference names the edited sheet in its own formulas, and anything
+            // shaped like a cell, column, or row may be one.
+            let unqualified = change.host_is_sheet
+                && lexed.tokens.iter().any(|token| {
+                    matches!(
+                        &token.token,
+                        Token::Dollar | Token::Number(_) | Token::Colon
+                    ) || matches!(&token.token, Token::Ident(name) if name_may_be_reference(name))
+                });
+            unqualified
+                || lexed.tokens.windows(2).enumerate().any(|(index, tokens)| {
+                    let (Token::Ident(name) | Token::QuotedSheet(name), Token::Bang) =
+                        (&tokens[0].token, &tokens[1].token)
+                    else {
+                        return false;
+                    };
+                    !sheet_token_is_external(&lexed.tokens, index)
+                        && case_insensitive_eq(name, change.sheet)
+                })
+        }
+        // A copy shifts every reference, so a formula that cannot be read cannot be copied.
+        FormulaRewriteRequest::Copy(_) => true,
         FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {
             let targeted = |name: &str| {
                 request.renamed_sheet(name).is_some()
@@ -886,6 +1006,13 @@ fn formula_may_reference_target(
     };
     budget.check_cancelled()?;
     Ok(result)
+}
+
+/// Reports whether a name token could be a cell reference such as `A1`.
+fn name_may_be_reference(name: &str) -> bool {
+    let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
+    let digits = &name.as_bytes()[letters..];
+    (1..=3).contains(&letters) && !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
 }
 
 fn quoted_or_single_sheet_targets(name: &str, renamed: impl Fn(&str) -> bool) -> bool {

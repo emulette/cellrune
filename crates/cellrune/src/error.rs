@@ -115,6 +115,23 @@ const MESSAGE_COLUMN_WIDENING_RANGE_INVALID: &str =
 const MESSAGE_COLUMN_WIDENING_OVERLAP: &str = "widened columns must not overlap a merged range, legacy array formula, or declared spill range";
 const MESSAGE_FORMULA_REWRITE_PARSE_FAILED: &str =
     "a formula related to the rename could not be parsed for typed rewriting";
+const MESSAGE_STRUCTURAL_EDIT_EMPTY: &str = "a row or column insertion must insert at least one";
+const MESSAGE_CONTENT_SHIFTED_OFF_SHEET: &str =
+    "an insertion cannot shift nonblank cells off the sheet";
+const MESSAGE_MERGED_RANGE_SPLIT: &str =
+    "a structural edit cannot move or overwrite part of a merged range";
+const MESSAGE_TABLE_HEADER_SHIFT: &str =
+    "a structural edit cannot delete, move, or overwrite a table's header row";
+const MESSAGE_TABLE_DATA_ROWS_DELETED: &str =
+    "deleting every data row of a table is refused because Excel keeps one";
+const MESSAGE_TABLE_SPLIT: &str =
+    "a structural edit cannot delete, move, or overwrite part of a table or its totals row";
+const MESSAGE_MOVED_RANGE_OVERWRITES_REFERENCES: &str =
+    "a range move cannot paste over cells that a formula outside the moved cells reads";
+const MESSAGE_COPY_DESTINATION_SHAPE: &str =
+    "a copy destination must repeat the source range a whole number of times";
+const MESSAGE_COPY_UNSUPPORTED_FORMULA: &str =
+    "a formula with a spill reference or a data-table formula cannot be copied";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
@@ -289,6 +306,24 @@ pub enum ValidationErrorCode {
     ColumnWideningOverlap,
     /// A target-related formula could not be parsed for typed rewriting.
     FormulaRewriteParseFailed,
+    /// A row or column insertion inserts nothing.
+    StructuralEditEmpty,
+    /// An insertion would shift nonblank cells off the sheet.
+    ContentShiftedOffSheet,
+    /// A structural edit would move or overwrite part of a merged range.
+    MergedRangeSplit,
+    /// A structural edit would delete, move, or overwrite a table's header row.
+    TableHeaderShift,
+    /// A deletion would remove every data row of a table.
+    TableDataRowsDeleted,
+    /// A structural edit would delete, move, or overwrite part of a table or its totals row.
+    TableSplit,
+    /// A range move would paste over cells that a formula outside the moved cells reads.
+    MovedRangeOverwritesReferences,
+    /// A copy destination does not repeat the source range a whole number of times.
+    CopyDestinationShape,
+    /// A copy would copy a formula with a spill reference or a data-table formula.
+    CopyUnsupportedFormula,
 }
 
 impl ValidationErrorCode {
@@ -388,6 +423,15 @@ impl ValidationErrorCode {
             Self::ColumnWideningRangeInvalid => "validation.column_widening_range_invalid",
             Self::ColumnWideningOverlap => "validation.column_widening_overlap",
             Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
+            Self::StructuralEditEmpty => "validation.structural_edit_empty",
+            Self::ContentShiftedOffSheet => "validation.content_shifted_off_sheet",
+            Self::MergedRangeSplit => "validation.merged_range_split",
+            Self::TableHeaderShift => "validation.table_header_shift",
+            Self::TableDataRowsDeleted => "validation.table_data_rows_deleted",
+            Self::TableSplit => "validation.table_split",
+            Self::MovedRangeOverwritesReferences => "validation.moved_range_overwrites_references",
+            Self::CopyDestinationShape => "validation.copy_destination_shape",
+            Self::CopyUnsupportedFormula => "validation.copy_unsupported_formula",
         }
     }
 }
@@ -783,6 +827,53 @@ pub enum ValidationError {
         /// Stable workbook owner context for the rejected formula, when available.
         owner: Option<String>,
     },
+    /// A row or column insertion inserts nothing.
+    StructuralEditEmpty,
+    /// An insertion would shift nonblank cells off the sheet.
+    ContentShiftedOffSheet {
+        /// Edited sheet.
+        sheet_id: u32,
+    },
+    /// A structural edit would move or overwrite part of a merged range.
+    MergedRangeSplit {
+        /// Sheet containing the merged range.
+        sheet_id: u32,
+        /// One-based top row of the merged range.
+        row: u32,
+        /// One-based left column of the merged range.
+        column: u32,
+    },
+    /// A structural edit would delete, move, or overwrite a table's header row.
+    TableHeaderShift {
+        /// Affected table.
+        table_id: u32,
+    },
+    /// A deletion would remove every data row of a table, of which Excel keeps one.
+    TableDataRowsDeleted {
+        /// Affected table.
+        table_id: u32,
+    },
+    /// A structural edit would delete, move, or overwrite part of a table or its totals row.
+    TableSplit {
+        /// Affected table.
+        table_id: u32,
+    },
+    /// A range move would paste over cells that a formula outside the moved cells reads.
+    MovedRangeOverwritesReferences {
+        /// Stable workbook owner context for the formula, when available.
+        owner: Option<String>,
+    },
+    /// A copy destination does not repeat the source range a whole number of times.
+    CopyDestinationShape,
+    /// A copy would copy a formula with a spill reference or a data-table formula.
+    CopyUnsupportedFormula {
+        /// Source sheet.
+        sheet_id: u32,
+        /// One-based row of the source cell.
+        row: u32,
+        /// One-based column of the source cell.
+        column: u32,
+    },
 }
 
 impl ValidationError {
@@ -910,6 +1001,17 @@ impl ValidationError {
             Self::FormulaRewriteParseFailed { .. } => {
                 ValidationErrorCode::FormulaRewriteParseFailed
             }
+            Self::StructuralEditEmpty => ValidationErrorCode::StructuralEditEmpty,
+            Self::ContentShiftedOffSheet { .. } => ValidationErrorCode::ContentShiftedOffSheet,
+            Self::MergedRangeSplit { .. } => ValidationErrorCode::MergedRangeSplit,
+            Self::TableHeaderShift { .. } => ValidationErrorCode::TableHeaderShift,
+            Self::TableDataRowsDeleted { .. } => ValidationErrorCode::TableDataRowsDeleted,
+            Self::TableSplit { .. } => ValidationErrorCode::TableSplit,
+            Self::MovedRangeOverwritesReferences { .. } => {
+                ValidationErrorCode::MovedRangeOverwritesReferences
+            }
+            Self::CopyDestinationShape => ValidationErrorCode::CopyDestinationShape,
+            Self::CopyUnsupportedFormula { .. } => ValidationErrorCode::CopyUnsupportedFormula,
         }
     }
 }
@@ -1227,6 +1329,49 @@ impl fmt::Display for ValidationError {
                 }
                 Ok(())
             }
+            Self::StructuralEditEmpty => formatter.write_str(MESSAGE_STRUCTURAL_EDIT_EMPTY),
+            Self::ContentShiftedOffSheet { sheet_id } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_CONTENT_SHIFTED_OFF_SHEET}: sheet {sheet_id}"
+                )
+            }
+            Self::MergedRangeSplit {
+                sheet_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_MERGED_RANGE_SPLIT}: sheet {sheet_id}, row {row}, column {column}"
+            ),
+            Self::TableHeaderShift { table_id } => {
+                write!(formatter, "{MESSAGE_TABLE_HEADER_SHIFT}: table {table_id}")
+            }
+            Self::TableDataRowsDeleted { table_id } => {
+                write!(
+                    formatter,
+                    "{MESSAGE_TABLE_DATA_ROWS_DELETED}: table {table_id}"
+                )
+            }
+            Self::TableSplit { table_id } => {
+                write!(formatter, "{MESSAGE_TABLE_SPLIT}: table {table_id}")
+            }
+            Self::MovedRangeOverwritesReferences { owner } => {
+                formatter.write_str(MESSAGE_MOVED_RANGE_OVERWRITES_REFERENCES)?;
+                if let Some(owner) = owner {
+                    write!(formatter, ": owner {owner}")?;
+                }
+                Ok(())
+            }
+            Self::CopyDestinationShape => formatter.write_str(MESSAGE_COPY_DESTINATION_SHAPE),
+            Self::CopyUnsupportedFormula {
+                sheet_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_COPY_UNSUPPORTED_FORMULA}: sheet {sheet_id}, row {row}, column {column}"
+            ),
         }
     }
 }
@@ -1567,6 +1712,39 @@ mod tests {
             (
                 ValidationErrorCode::FormulaRewriteParseFailed,
                 "validation.formula_rewrite_parse_failed",
+            ),
+            (
+                ValidationErrorCode::StructuralEditEmpty,
+                "validation.structural_edit_empty",
+            ),
+            (
+                ValidationErrorCode::ContentShiftedOffSheet,
+                "validation.content_shifted_off_sheet",
+            ),
+            (
+                ValidationErrorCode::MergedRangeSplit,
+                "validation.merged_range_split",
+            ),
+            (
+                ValidationErrorCode::TableHeaderShift,
+                "validation.table_header_shift",
+            ),
+            (
+                ValidationErrorCode::TableDataRowsDeleted,
+                "validation.table_data_rows_deleted",
+            ),
+            (ValidationErrorCode::TableSplit, "validation.table_split"),
+            (
+                ValidationErrorCode::MovedRangeOverwritesReferences,
+                "validation.moved_range_overwrites_references",
+            ),
+            (
+                ValidationErrorCode::CopyDestinationShape,
+                "validation.copy_destination_shape",
+            ),
+            (
+                ValidationErrorCode::CopyUnsupportedFormula,
+                "validation.copy_unsupported_formula",
             ),
         ];
         let mut seen_codes = BTreeSet::new();

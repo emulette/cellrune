@@ -55,6 +55,8 @@ const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
     "document-backed dynamic formula edits require source metadata index merging";
 const DETAIL_RTL_FROZEN_PANE: &str =
     "right-to-left frozen-pane authoring requires a verified native contract";
+const DETAIL_GRID_EDITS: &str =
+    "a preserved worksheet whose rows or columns were inserted or deleted cannot be saved yet";
 
 struct ExistingSheetSource {
     part: PartPath,
@@ -79,6 +81,7 @@ pub(crate) fn write_document_draft(
     validate_dynamic_formula_edits(draft, document)?;
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     if !draft.workbook_changed()
+        && draft.grid_histories().is_empty()
         && draft.cell_mutations().is_empty()
         && draft.presentation_cell_mutations().is_empty()
         && draft.presentation_sheet_mutations().is_empty()
@@ -218,6 +221,12 @@ pub(super) fn write_document_package(
     plan: &DocumentResultPlan<'_>,
     limits: WriteLimits,
 ) -> Result<DocumentPackageOutput, XlsxWriteError> {
+    if !draft.grid_histories().is_empty() {
+        return Err(
+            XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
+                .with_detail(DETAIL_GRID_EDITS),
+        );
+    }
     let materialization = plan.materialization;
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     let format_edits = format_edits(draft);

@@ -140,6 +140,50 @@ pub enum WorkbookChange {
         /// New filter range, which keeps the current rows and contains the current range.
         range: CellRange,
     },
+    /// Inserts `count` empty rows before `row`, moving that row and every later one down.
+    ///
+    /// References to the moved cells follow them, and a range the rows are inserted strictly
+    /// inside grows. The inserted rows take the height and formats of the row above them.
+    InsertRows {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First inserted row.
+        row: Row,
+        /// Number of inserted rows, at least one.
+        count: u32,
+    },
+    /// Deletes rows `first..=last`, moving every later row up.
+    ///
+    /// A reference to deleted cells becomes `#REF!`, and a range that loses only some of its
+    /// rows shrinks.
+    DeleteRows {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First deleted row.
+        first: Row,
+        /// Last deleted row.
+        last: Row,
+    },
+    /// Inserts `count` empty columns before `column`, moving that column and every later one
+    /// right, as [`Self::InsertRows`] moves rows.
+    InsertColumns {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First inserted column.
+        column: Column,
+        /// Number of inserted columns, at least one.
+        count: u32,
+    },
+    /// Deletes columns `first..=last`, moving every later column left, as [`Self::DeleteRows`]
+    /// deletes rows.
+    DeleteColumns {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First deleted column.
+        first: Column,
+        /// Last deleted column.
+        last: Column,
+    },
     /// Replaces the font, fill, border, or alignment one cell displays with.
     ///
     /// This is a presentation change: it advances the presentation revision, not the semantic
@@ -339,6 +383,81 @@ impl WorkbookChange {
         Self::WidenSheetAutoFilter { sheet_id, range }
     }
 
+    /// Constructs a row insertion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::StructuralEditEmpty`] when `count` is zero and
+    /// [`ValidationError::RowOutOfRange`] when the inserted rows would end past the last row.
+    pub fn insert_rows(sheet_id: SheetId, row: Row, count: u32) -> Result<Self, ValidationError> {
+        validate_insertion(row.get(), count, crate::EXCEL_MAX_ROWS, |value| {
+            ValidationError::RowOutOfRange { value }
+        })?;
+        Ok(Self::InsertRows {
+            sheet_id,
+            row,
+            count,
+        })
+    }
+
+    /// Constructs a row deletion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last`.
+    pub fn delete_rows(sheet_id: SheetId, first: Row, last: Row) -> Result<Self, ValidationError> {
+        if first > last {
+            return Err(ValidationError::RangeStartAfterEnd);
+        }
+        Ok(Self::DeleteRows {
+            sheet_id,
+            first,
+            last,
+        })
+    }
+
+    /// Constructs a column insertion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::StructuralEditEmpty`] when `count` is zero and
+    /// [`ValidationError::ColumnOutOfRange`] when the inserted columns would end past the last
+    /// column.
+    pub fn insert_columns(
+        sheet_id: SheetId,
+        column: Column,
+        count: u32,
+    ) -> Result<Self, ValidationError> {
+        validate_insertion(column.get(), count, crate::EXCEL_MAX_COLUMNS, |value| {
+            ValidationError::ColumnOutOfRange { value }
+        })?;
+        Ok(Self::InsertColumns {
+            sheet_id,
+            column,
+            count,
+        })
+    }
+
+    /// Constructs a column deletion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last`.
+    pub fn delete_columns(
+        sheet_id: SheetId,
+        first: Column,
+        last: Column,
+    ) -> Result<Self, ValidationError> {
+        if first > last {
+            return Err(ValidationError::RangeStartAfterEnd);
+        }
+        Ok(Self::DeleteColumns {
+            sheet_id,
+            first,
+            last,
+        })
+    }
+
     /// Constructs a cell format change.
     pub const fn set_cell_format(
         sheet_id: SheetId,
@@ -375,6 +494,25 @@ impl WorkbookChange {
             height,
         }
     }
+}
+
+/// Rejects an insertion of no lines or of lines that would end past the last one.
+pub(super) fn validate_insertion(
+    at: u32,
+    count: u32,
+    maximum: u32,
+    out_of_range: impl Fn(u32) -> ValidationError,
+) -> Result<(), ValidationError> {
+    if count == 0 {
+        return Err(ValidationError::StructuralEditEmpty);
+    }
+    let end = at
+        .checked_add(count - 1)
+        .ok_or_else(|| out_of_range(u32::MAX))?;
+    if end > maximum {
+        return Err(out_of_range(end));
+    }
+    Ok(())
 }
 
 /// An ordered collection of workbook changes committed atomically.

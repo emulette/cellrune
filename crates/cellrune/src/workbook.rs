@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock};
 mod annotations;
 mod auto_filter;
 mod data_validation;
+mod grid_transform;
 mod new_cell_styles;
 mod sheet_tabs;
 mod table_index;
@@ -601,6 +602,10 @@ impl Sheet {
 
     pub(crate) fn data_validations_mut(&mut self) -> &mut [DataValidation] {
         Arc::make_mut(&mut self.data_validations).as_mut_slice()
+    }
+
+    pub(crate) fn set_data_validations(&mut self, data_validations: Vec<DataValidation>) {
+        self.data_validations = Arc::new(data_validations);
     }
 
     /// Returns the sheet's hyperlinks in worksheet order.

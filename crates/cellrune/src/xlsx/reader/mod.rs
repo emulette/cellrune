@@ -17,6 +17,8 @@ mod workbook_xml;
 mod worksheet;
 mod worksheet_cell;
 
+pub(crate) use formula_reference::shift_formula as shift_shared_formula;
+
 #[cfg(test)]
 mod formula_tests;
 #[cfg(test)]
