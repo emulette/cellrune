@@ -878,3 +878,133 @@ fn a_range_move_carries_references_wholly_inside_it_and_keeps_moved_formulas() {
     assert_eq!(sheet.tables()[0].range(), range("F11:G13"));
     assert_eq!(sheet.merged_ranges(), &[range("D11:D12")]);
 }
+
+fn copy(source: &str, destination_sheet: u32, destination: &str) -> WorkbookChange {
+    WorkbookChange::copy_range(
+        id(1),
+        range(source),
+        id(destination_sheet),
+        range(destination),
+    )
+    .expect("copy")
+}
+
+#[test]
+fn copies_move_relative_references_by_the_copy_distance() {
+    let build = || {
+        draft(
+            vec![
+                sheet(
+                    1,
+                    "S1",
+                    &[
+                        ("A1", "1"),
+                        ("A2", "2"),
+                        ("B1", "=A1*2"),
+                        ("B2", "=SUM(A2:A5)"),
+                        ("C1", "=$A$1+A$1+$A1"),
+                        ("D1", "=SUM(T[c])+Rate"),
+                        ("E1", "=A1+'S2'!A1"),
+                        ("F2", "=A1"),
+                        ("G1", "7"),
+                        ("G2", "8"),
+                        ("H1", "=G1"),
+                    ],
+                ),
+                sheet(2, "S2", &[("A1", "5"), ("B2", "9")]),
+            ],
+            Vec::new(),
+        )
+    };
+    let mut draft = build();
+    draft
+        .apply_changes(EditBatch::new([
+            copy("B2", 1, "C6"),
+            copy("B1", 1, "B3:B5"),
+            copy("C1", 1, "D4"),
+            copy("D1", 1, "D9"),
+            copy("F2", 1, "F1"),
+            copy("G1:H1", 1, "J1:M2"),
+            copy("E1", 2, "E1"),
+            copy("Z1", 1, "A2"),
+        ]))
+        .expect("copies");
+    let workbook = draft.workbook();
+    for (cell, expected) in [
+        ("C6", "=SUM(B6:B9)"),
+        ("B3", "=A3*2"),
+        ("B5", "=A5*2"),
+        ("D4", "=$A$1+B$1+$A4"),
+        ("D9", "=SUM(T[c])+Rate"),
+        ("F1", "=#REF!"),
+        ("J1", "7"),
+        ("K1", "=J1"),
+        ("L2", "7"),
+        ("M2", "=L2"),
+        ("A2", ""),
+    ] {
+        assert_eq!(text(workbook, "S1", cell), expected, "{cell}");
+    }
+    // Unqualified references of a formula copied to another sheet read that sheet.
+    assert_eq!(text(workbook, "S2", "E1"), "=A1+'S2'!A1");
+    assert_eq!(value(&draft, 2, "E1"), CellValue::number(10.0).expect("10"));
+
+    let mut refused_draft = build();
+    refused_draft
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_formula(
+            id(1),
+            address("P1"),
+            FormulaText::from_xlsx("A1#").expect("spill reference"),
+        )]))
+        .expect("spill reference");
+    assert_eq!(
+        refused(&mut refused_draft, copy("P1", 1, "P2")),
+        ValidationError::CopyUnsupportedFormula {
+            sheet_id: 1,
+            row: 1,
+            column: 16,
+        }
+    );
+    assert_eq!(
+        WorkbookChange::copy_range(id(1), range("A1:A2"), id(1), range("B1:B3")),
+        Err(ValidationError::CopyDestinationShape)
+    );
+}
+
+#[test]
+fn copies_carry_number_formats_and_cell_formats() {
+    let mut draft = WorkbookDraft::new();
+    let sheet = draft.workbook().sheets()[0].id();
+    let bold = crate::CellFormatEdit::new().with_font(
+        crate::Font::new()
+            .with_name("Calibri")
+            .and_then(|font| font.with_size(11.0))
+            .expect("font")
+            .with_bold(true),
+    );
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_value(
+                sheet,
+                address("A1"),
+                CellValue::number(1.5).expect("1.5"),
+            ),
+            WorkbookChange::set_cell_number_format(
+                sheet,
+                address("A1"),
+                NumberFormat::custom(164, "0.000", crate::NumberFormatKind::Number)
+                    .expect("format"),
+            ),
+            WorkbookChange::set_cell_format(sheet, address("A1"), bold),
+            WorkbookChange::copy_range(sheet, range("A1"), sheet, range("C3")).expect("copy"),
+        ]))
+        .expect("copy formats");
+    let copied = draft.workbook().sheets()[0]
+        .cell(address("C3"))
+        .expect("copied cell");
+    assert_eq!(copied.number_format().code(), Some("0.000"));
+    assert_eq!(
+        draft.cell_format(sheet, address("C3")).expect("format"),
+        draft.cell_format(sheet, address("A1")).expect("format")
+    );
+}

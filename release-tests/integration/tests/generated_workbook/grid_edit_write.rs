@@ -516,3 +516,43 @@ fn a_range_move_carries_its_cells_filter_and_links_in_the_saved_package() {
     );
     assert!(!parts[DATA].contains(r#"<c r="L1""#), "{}", parts[DATA]);
 }
+
+#[test]
+fn copies_save_shifted_formulas_with_their_values_and_formats() {
+    let range = |text: &str| {
+        let (start, end) = text.split_once(':').unwrap_or((text, text));
+        cellrune::CellRange::new(
+            CellAddress::from_a1(start).expect("start"),
+            CellAddress::from_a1(end).expect("end"),
+        )
+        .expect("range")
+    };
+    let source = generated_grid_edit_fixture();
+    let draft = edited(
+        &source,
+        vec![
+            WorkbookChange::copy_range(sheet(1), range("B2"), sheet(1), range("F10"))
+                .expect("copy"),
+            WorkbookChange::copy_range(sheet(1), range("D2"), sheet(1), range("D10:D11"))
+                .expect("fill"),
+            WorkbookChange::copy_range(sheet(1), range("A7"), sheet(2), range("A7")).expect("copy"),
+        ],
+    );
+    let (_, reopened) = write_and_reopen(&draft);
+    assert_eq!(formula(&reopened, "Data", "D10"), "B11*2");
+    assert_eq!(formula(&reopened, "Data", "D11"), "B12*2");
+    assert_eq!(formula(&reopened, "Report", "A7"), "SUM(Things[val])");
+    assert_eq!(
+        literal(&reopened, "Data", "F10"),
+        Some(CellValue::number(1.0).expect("number"))
+    );
+    let saved = WorkbookDraft::from_document(&reopened);
+    assert_eq!(
+        saved
+            .cell_format(sheet(1), CellAddress::from_a1("F10").expect("F10"))
+            .expect("format"),
+        saved
+            .cell_format(sheet(1), CellAddress::from_a1("B2").expect("B2"))
+            .expect("format")
+    );
+}

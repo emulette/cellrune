@@ -226,6 +226,24 @@ pub enum WorkbookChange {
         /// Cell the top-left cut cell lands on.
         destination: CellAddress,
     },
+    /// Copies the cells of `source` on `sheet_id` into `destination` on `destination_sheet_id`,
+    /// repeating them over a destination that is a whole multiple of their size, as pasting and
+    /// filling do.
+    ///
+    /// Each copied formula's relative references move by the distance it is copied; absolute
+    /// parts, structured references, and names stay as written, and a formula whose reference
+    /// would leave the sheet becomes `#REF!`. Values, number formats, and cell formats are
+    /// copied, and an empty source cell clears its destination.
+    CopyRange {
+        /// Source sheet.
+        sheet_id: SheetId,
+        /// Copied cells.
+        source: CellRange,
+        /// Destination sheet, which may be the source sheet.
+        destination_sheet_id: SheetId,
+        /// Cells the copy fills, a whole multiple of the source's size.
+        destination: CellRange,
+    },
     /// Replaces the font, fill, border, or alignment one cell displays with.
     ///
     /// This is a presentation change: it advances the presentation revision, not the semantic
@@ -574,6 +592,27 @@ impl WorkbookChange {
         })
     }
 
+    /// Constructs a copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::CopyDestinationShape`] when `destination` does not repeat
+    /// `source` a whole number of times.
+    pub fn copy_range(
+        sheet_id: SheetId,
+        source: CellRange,
+        destination_sheet_id: SheetId,
+        destination: CellRange,
+    ) -> Result<Self, ValidationError> {
+        validate_copy_shape(source, destination)?;
+        Ok(Self::CopyRange {
+            sheet_id,
+            source,
+            destination_sheet_id,
+            destination,
+        })
+    }
+
     /// Constructs a cell format change.
     pub const fn set_cell_format(
         sheet_id: SheetId,
@@ -649,6 +688,20 @@ pub(super) fn validate_move(
         return Err(out_of_range(end));
     }
     Ok(())
+}
+
+/// Rejects a copy destination that does not repeat the source a whole number of times.
+pub(super) fn validate_copy_shape(
+    source: CellRange,
+    destination: CellRange,
+) -> Result<(), ValidationError> {
+    if destination.height().is_multiple_of(source.height())
+        && destination.width().is_multiple_of(source.width())
+    {
+        Ok(())
+    } else {
+        Err(ValidationError::CopyDestinationShape)
+    }
 }
 
 /// Rejects a range move whose cells would land past the last row or column.

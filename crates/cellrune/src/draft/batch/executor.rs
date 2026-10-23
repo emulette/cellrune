@@ -5,6 +5,7 @@ use super::super::{
     SourceCells, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
 };
+use super::copy_edit::{CopyEditState, copy_range};
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
@@ -659,6 +660,31 @@ impl WorkbookDraft {
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed |= outcome.names_changed;
                     topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::CopyRange {
+                    sheet_id,
+                    source,
+                    destination_sheet_id,
+                    destination,
+                } => {
+                    cell_formulas_changed |= copy_range(
+                        CopyEditState {
+                            sheets: &mut sheets,
+                            presentation: &mut presentation,
+                            mutations: &mut cell_mutations,
+                            presentation_cell_mutations: &mut presentation_cell_mutations,
+                            changed_cells: &mut changed_cells,
+                            calculation_changed_cells: &mut calculation_changed_cells,
+                            touched_sheets: &mut touched_sheets,
+                            source: SourceCells::new(source_workbook, &grid_histories),
+                            budget: rewrite_budget,
+                        },
+                        *sheet_id,
+                        *source,
+                        *destination_sheet_id,
+                        *destination,
+                    )?;
                     semantic_changed = true;
                 }
                 WorkbookChange::SetCellFormat {

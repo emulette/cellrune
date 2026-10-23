@@ -114,6 +114,24 @@ pub(crate) struct AnchoredFormulas {
     pub(crate) formulas: Vec<Option<String>>,
 }
 
+/// Reports whether a formula holds a spill reference (`A1#` or `ANCHORARRAY`), whose copying
+/// Excel was not measured for. A formula that does not parse holds none.
+pub(crate) fn contains_spill_reference(source: &str) -> bool {
+    let Ok(parsed) =
+        super::parser::parse_formula_with_limits(source, super::CalculationLimits::default())
+    else {
+        return false;
+    };
+    let mut stack = vec![(parsed.root(), parsed.source_map().node_tree())];
+    while let Some((expr, node)) = stack.pop() {
+        if matches!(expr, Expr::SpillRef(_)) {
+            return true;
+        }
+        super::formula_rewrite::push_children(expr, node, &mut stack);
+    }
+    false
+}
+
 /// Plans the edits a grid change makes to one syntax node.
 pub(super) fn plan_grid_node(
     source: &str,

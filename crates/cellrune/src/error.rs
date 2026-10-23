@@ -130,8 +130,7 @@ const MESSAGE_MOVED_RANGE_OVERWRITES_REFERENCES: &str =
     "a range move cannot paste over cells that a formula outside the moved cells reads";
 const MESSAGE_COPY_DESTINATION_SHAPE: &str =
     "a copy destination must repeat the source range a whole number of times";
-const MESSAGE_COPY_UNSUPPORTED_FORMULA: &str =
-    "a formula with a spill reference or a data-table formula cannot be copied";
+const MESSAGE_COPY_UNSUPPORTED_FORMULA: &str = "a formula with a spill reference, a legacy array formula, or a data-table formula cannot be copied";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
@@ -322,7 +321,8 @@ pub enum ValidationErrorCode {
     MovedRangeOverwritesReferences,
     /// A copy destination does not repeat the source range a whole number of times.
     CopyDestinationShape,
-    /// A copy would copy a formula with a spill reference or a data-table formula.
+    /// A copy would copy a formula with a spill reference, a legacy array formula, or a data-table
+    /// formula.
     CopyUnsupportedFormula,
 }
 
@@ -865,7 +865,8 @@ pub enum ValidationError {
     },
     /// A copy destination does not repeat the source range a whole number of times.
     CopyDestinationShape,
-    /// A copy would copy a formula with a spill reference or a data-table formula.
+    /// A copy would copy a formula with a spill reference, a legacy array formula, or a data-table
+    /// formula.
     CopyUnsupportedFormula {
         /// Source sheet.
         sheet_id: u32,

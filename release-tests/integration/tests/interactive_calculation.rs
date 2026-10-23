@@ -2771,8 +2771,9 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
     // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
     // totals, conditional aggregates, lookups, dynamic references, spills, and cycles, in batches
-    // of one to three changes, some of which also insert, delete, or move rows, columns, or ranges.
-    // After every batch the session's automatic recalculation must equal a fresh full one.
+    // of one to three changes, some of which also insert, delete, or move rows, columns, or ranges,
+    // or copy ranges. After every batch the session's automatic recalculation must equal a fresh
+    // full one.
     for seed in 1..=8_u64 {
         let mut random = Lcg(seed);
         let mut session = WorkbookCalculationSession::create();
@@ -2821,6 +2822,19 @@ fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
                     Ok(_)
                     | Err(ApplyChangesError::Validation(
                         cellrune::ValidationError::MovedRangeOverwritesReferences { .. },
+                    )) => {}
+                    Err(error) => panic!("seed {seed}, step {step}: {error}"),
+                }
+            }
+            if random.below(4) == 0 {
+                // Copying a spill reference is refused, so a copy may not apply.
+                match session.apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([random_copy(&mut random, sheets)]),
+                ) {
+                    Ok(_)
+                    | Err(ApplyChangesError::Validation(
+                        cellrune::ValidationError::CopyUnsupportedFormula { .. },
                     )) => {}
                     Err(error) => panic!("seed {seed}, step {step}: {error}"),
                 }
@@ -2925,6 +2939,37 @@ fn random_range_move(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
         destination,
     )
     .expect("generated range move")
+}
+
+/// Copies a block of up to two by two cells of the generated grid over one to two times its
+/// size elsewhere, on either sheet.
+fn random_copy(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let (height, width) = (random.below(2) + 1, random.below(2) + 1);
+    let corner = |random: &mut Lcg| {
+        CellAddress::from_indices(random.below(20) + 1, random.below(9) + 1)
+            .expect("generated corner")
+    };
+    let block = |start: CellAddress, rows: u32, columns: u32| {
+        CellRange::new(
+            start,
+            CellAddress::from_indices(
+                start.row().get() + rows - 1,
+                start.column().get() + columns - 1,
+            )
+            .expect("generated end"),
+        )
+        .expect("generated block")
+    };
+    let source = block(corner(random), height, width);
+    let repeat = random.below(2) + 1;
+    let destination = block(corner(random), height * repeat, width);
+    WorkbookChange::copy_range(
+        sheets[random.below(2) as usize],
+        source,
+        sheets[random.below(2) as usize],
+        destination,
+    )
+    .expect("generated copy")
 }
 
 fn row(value: u32) -> cellrune::Row {
