@@ -10,8 +10,12 @@ use crate::{CellAddress, Column, NumberFormat, Row};
 /// the number format that index resolves to.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NewCellStyles {
-    /// The nonzero style of each valued source cell, which the format read model resolves.
-    valued_cells: BTreeMap<CellAddress, usize>,
+    /// The nonzero style of each valued source cell in row-major order, which the format read
+    /// model resolves. A sorted vector keeps each in 12 bytes; a map took several times that for
+    /// every styled cell of a document.
+    valued_cells: Vec<(CellAddress, u32)>,
+    /// Whether a valued cell arrived out of row-major order, so `valued_cells` needs sorting.
+    valued_cells_unsorted: bool,
     blank_cells: BTreeMap<CellAddress, usize>,
     rows: BTreeMap<Row, usize>,
     columns: Vec<(Column, Column, usize)>,
@@ -30,14 +34,36 @@ impl NewCellStyles {
         self.insert_number_format(index, number_format);
     }
 
-    /// Records the nonzero style of a source cell that holds a value.
+    /// Records the nonzero style of a source cell that holds a value. Cells usually arrive in
+    /// row-major order; [`Self::finish_reading`] sorts any that do not.
     pub(crate) fn insert_valued_cell(&mut self, address: CellAddress, index: usize) {
-        self.valued_cells.insert(address, index);
+        let index = u32::try_from(index)
+            .expect("a styles part within the read limits holds fewer than 2^32 cell formats");
+        if self
+            .valued_cells
+            .last()
+            .is_some_and(|(last, _)| *last >= address)
+        {
+            self.valued_cells_unsorted = true;
+        }
+        self.valued_cells.push((address, index));
+    }
+
+    /// Sorts the valued cell styles a read recorded out of order and releases spare capacity.
+    pub(crate) fn finish_reading(&mut self) {
+        if std::mem::take(&mut self.valued_cells_unsorted) {
+            self.valued_cells
+                .sort_unstable_by_key(|(address, _)| *address);
+        }
+        self.valued_cells.shrink_to_fit();
     }
 
     /// Returns the style index of a valued source cell: its recorded style, else the default.
     pub(crate) fn valued_cell_style(&self, address: CellAddress) -> usize {
-        self.valued_cells.get(&address).copied().unwrap_or(0)
+        debug_assert!(!self.valued_cells_unsorted);
+        self.valued_cells
+            .binary_search_by_key(&address, |(cell, _)| *cell)
+            .map_or(0, |position| self.valued_cells[position].1 as usize)
     }
 
     /// Records the style of a row that declares `customFormat`.

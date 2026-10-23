@@ -384,3 +384,33 @@ fn a_bold_edit_without_styles_keeps_the_default_font() {
         (Some("Calibri"), Some(11.0), true)
     );
 }
+
+#[test]
+fn styles_of_cells_out_of_row_major_order_resolve_to_their_own_record() {
+    const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/></cellXfs></styleSheet>"#;
+    const SHEET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="3"><c r="B3" s="2"><v>1</v></c></row><row r="1"><c r="C1" s="1"><v>2</v></c><c r="A1" s="2"><v>3</v></c><c r="B1"><v>4</v></c></row></sheetData></worksheet>"#;
+    let document = open_xlsx_document_bytes(
+        &one_sheet_package(SHEET, Some(STYLES)),
+        OpenOptions::default(),
+    )
+    .expect("open");
+    let draft = WorkbookDraft::from_document(&document);
+    let red = Fill::Pattern(PatternFill::solid(Color::argb(0xFFFF_0000)));
+    let green = Fill::Pattern(PatternFill::solid(Color::argb(0xFF00_FF00)));
+    for (cell, fill) in [
+        ("A1", green),
+        ("B1", Fill::Pattern(PatternFill::new(FillPattern::None))),
+        ("C1", red),
+        ("B3", green),
+    ] {
+        assert_eq!(
+            draft
+                .cell_format(sheet1(), address(cell))
+                .expect("format")
+                .fill(),
+            fill,
+            "{cell}"
+        );
+    }
+}

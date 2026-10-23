@@ -868,6 +868,7 @@ impl SheetBuilder {
     pub(crate) fn finish(self) -> Sheet {
         let Self { mut sheet, cells } = self;
         sheet.cells = CellStore::from_sorted(cells);
+        Arc::make_mut(&mut sheet.new_cell_styles).finish_reading();
         sheet
     }
 }
