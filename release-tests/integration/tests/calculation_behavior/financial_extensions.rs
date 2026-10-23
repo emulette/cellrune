@@ -223,6 +223,77 @@ fn vdb_switches_to_straight_line_when_it_exceeds_the_declining_balance() {
     assert_issue(&result, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
 
+#[test]
+fn french_depreciation_prorates_the_first_period_and_depreciates_whole_periods() {
+    for (formula, expected) in [
+        // Microsoft's examples publish 776 and 360; the Oracle records 2344 and 1500.
+        ("AMORDEGRC(2400,39679,39813,300,1,0.15,1)", 776.0),
+        ("AMORLINC(2400,39679,39813,300,1,0.15,1)", 360.0),
+        (
+            "AMORDEGRC(10000,DATE(2023,1,1),DATE(2023,12,31),1000,1,0.15,0)",
+            2_344.0,
+        ),
+        (
+            "AMORLINC(10000,DATE(2023,1,1),DATE(2023,12,31),1000,1,0.15)",
+            1_500.0,
+        ),
+        // Period 0 is the first period prorated over 134 of 366 days, rounded for AMORDEGRC.
+        ("AMORDEGRC(2400,39679,39813,300,0,0.15,1)", 330.0),
+        (
+            "AMORLINC(2400,39679,39813,300,0,0.15,1)",
+            2_400.0 * 0.15 * 134.0 / 366.0,
+        ),
+        // AMORLINC takes the remainder after five whole periods, then nothing.
+        (
+            "AMORLINC(2400,39679,39813,300,6,0.15,1)",
+            2_100.0 - 5.0 * 360.0 - 2_400.0 * 0.15 * 134.0 / 366.0,
+        ),
+        ("AMORLINC(2400,39679,39813,300,7,0.15,1)", 0.0),
+        // A four-year life uses the 1.5 coefficient: 1000 × 0.375 = 375, then 625 × 0.375.
+        (
+            "AMORDEGRC(1000,DATE(2023,1,1),DATE(2023,12,31),0,1,0.25,0)",
+            234.0,
+        ),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula)]);
+        assert!(scan_formula_capabilities(&workbook).is_supported());
+        assert_number(
+            &calculate_workbook(&workbook, CalculationOptions::default()),
+            1,
+            expected,
+            1e-9,
+        );
+    }
+    for formula in [
+        "AMORDEGRC(\"2\",DATE(2023,1,1),DATE(2023,12,31),1000,1,0.15,0)",
+        "AMORLINC(\"2\",DATE(2023,1,1),DATE(2023,12,31),1000,1,0.15,0)",
+        "AMORDEGRC(2400,39679,39813,300,1,0.22,1)",
+        "AMORDEGRC(2400,39679,39813,300,1,0.4,1)",
+    ] {
+        assert_error(formula, ExcelError::Number);
+    }
+    assert_error(
+        "AMORLINC(\"x\",DATE(2023,1,1),DATE(2023,12,31),1000,1,0.15,0)",
+        ExcelError::Value,
+    );
+    for formula in [
+        "AMORLINC(2400,39679,39813,300,1,0.15,2)",
+        "AMORLINC(2400,39679,39813,300,1.5,0.15,1)",
+        "AMORLINC(2400,39813,39679,300,1,0.15,1)",
+        "AMORLINC(2400,39679,39813,300,1,0,1)",
+        "AMORDEGRC(2400,39679,39813,300,1,1,1)",
+        // The last two periods of the life and a stop at salvage are not documented exactly.
+        "AMORDEGRC(2400,39679,39813,300,5,0.15,1)",
+        "AMORDEGRC(2400,39679,39813,2000,1,0.15,1)",
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+}
+
 fn assert_error(formula: &str, expected: ExcelError) {
     let result = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, formula)]),

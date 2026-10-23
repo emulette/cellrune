@@ -1880,6 +1880,11 @@ const FIXED_INCOME_ACCRINTM_DEFAULTS: &[ArgumentDefault] = &[
     ),
 ];
 
+const AMORTIZATION_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    6,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Number(0.0),
+)];
 const VDB_DEFAULTS: &[ArgumentDefault] = &[
     ArgumentDefault::new(5, DefaultTrigger::Absent, ArgumentDefaultValue::Number(2.0)),
     ArgumentDefault::new(
@@ -1900,6 +1905,11 @@ impl FinancialAdditionalFunction {
             Self::Mirr => CallContract::positional(Arity::exact(3), &[ARRAY, SCALAR, SCALAR]),
             Self::IsPmt => CallContract::uniform(Arity::exact(4), SCALAR),
             Self::CumIpmt | Self::CumPrinc => CallContract::uniform(Arity::exact(6), SCALAR),
+            Self::AmorDegrc | Self::AmorLinc => CallContract::positional(
+                Arity::range(6, 7),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(AMORTIZATION_DEFAULTS),
             Self::Vdb => CallContract::positional(
                 Arity::range(5, 7),
                 &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],

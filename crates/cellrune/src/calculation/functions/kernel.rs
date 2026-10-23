@@ -501,6 +501,8 @@ function_enum!(FinancialFunction {
 });
 
 function_enum!(FinancialAdditionalFunction {
+    AmorDegrc,
+    AmorLinc,
     CumIpmt,
     CumPrinc,
     DollarDe,

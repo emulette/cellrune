@@ -69,8 +69,21 @@ fn yearfrac(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         },
         None => 0,
     };
+    match year_fraction(start_serial, end_serial, basis, engine.date_system()) {
+        Ok(fraction) => Value::Number(fraction),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// The YEARFRAC fraction of a year between two whole date serials in day-count basis 0 through 4.
+pub(super) fn year_fraction(
+    start_serial: f64,
+    end_serial: f64,
+    basis: i32,
+    date_system: crate::DateSystem,
+) -> Result<f64, ErrorKind> {
     if !(0..=4).contains(&basis) {
-        return Value::Error(ErrorKind::Num);
+        return Err(ErrorKind::Num);
     }
 
     let (low_serial, high_serial, sign) = if start_serial <= end_serial {
@@ -78,12 +91,8 @@ fn yearfrac(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
     } else {
         (end_serial, start_serial, -1.0)
     };
-    let Some(start) = date_from_serial(low_serial, engine.date_system()) else {
-        return Value::Error(ErrorKind::Num);
-    };
-    let Some(end) = date_from_serial(high_serial, engine.date_system()) else {
-        return Value::Error(ErrorKind::Num);
-    };
+    let start = date_from_serial(low_serial, date_system).ok_or(ErrorKind::Num)?;
+    let end = date_from_serial(high_serial, date_system).ok_or(ErrorKind::Num)?;
     let actual_days = high_serial - low_serial;
     let fraction = match basis {
         0 => days_360_us(start, end) / 360.0,
@@ -93,7 +102,7 @@ fn yearfrac(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         4 => days_360_european(start, end) / 360.0,
         _ => unreachable!("basis was validated"),
     };
-    Value::Number(fraction * sign)
+    Ok(fraction * sign)
 }
 
 fn actual_actual_year_length(start: Date, end: Date) -> f64 {

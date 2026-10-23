@@ -1382,46 +1382,40 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
   },
   "function:amordegrc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2344",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (AMORDEGRC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:amordegrc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (AMORDEGRC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:amordegrc:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (AMORDEGRC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:amorlinc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1500",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (AMORLINC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:amorlinc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (AMORLINC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:amorlinc:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (AMORLINC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:and": {
     "classification": "match",

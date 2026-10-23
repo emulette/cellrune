@@ -30,6 +30,12 @@ pub(super) fn call(
             cumulative_payment(engine, context, args, PaymentPart::Principal)
         }
         FinancialAdditionalFunction::Vdb => vdb(engine, context, args),
+        FinancialAdditionalFunction::AmorDegrc => {
+            super::amortization::amordegrc(engine, context, args)
+        }
+        FinancialAdditionalFunction::AmorLinc => {
+            super::amortization::amorlinc(engine, context, args)
+        }
     }
 }
 

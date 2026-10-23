@@ -1175,6 +1175,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Nominal, "NOMINAL", FinancialAdditional),
     function!(PDuration, "PDURATION", FinancialAdditional),
     function!(Rri, "RRI", FinancialAdditional),
+    function!(AmorDegrc, "AMORDEGRC", FinancialAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(AmorLinc, "AMORLINC", FinancialAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(CumIpmt, "CUMIPMT", FinancialAdditional)
         .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(CumPrinc, "CUMPRINC", FinancialAdditional)
@@ -1780,7 +1784,14 @@ mod tests {
             assert!(!descriptor.catalog_returns_array(), "{name}");
         }
 
-        for name in ["CUMIPMT", "CUMPRINC", "VDB"] {
+        for name in ["AMORDEGRC", "AMORLINC"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(6), "{name}");
+            assert!(descriptor.call_contract().arity().accepts(7), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(5), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(8), "{name}");
+        }
+        for name in ["AMORDEGRC", "AMORLINC", "CUMIPMT", "CUMPRINC", "VDB"] {
             let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
             assert_eq!(
                 descriptor.minimum_version(),

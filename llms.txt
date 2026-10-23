@@ -734,15 +734,16 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 481 official
+  `.is_official()`. The 0.1.27 catalog contains 483 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 482 accepted entries. The descriptor registry
+  dummy-function marker, for 484 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
 - The official names added in 0.1.27 are `SKEW`, `SKEW.P`, `KURT`,
   `FREQUENCY`, `MODE.MULT`, `CHISQ.TEST`, `CHITEST`, `CHISQ.INV`,
-  `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `IMSIN`, `IMCOS`,
+  `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `AMORLINC`,
+  `AMORDEGRC`, `IMSIN`, `IMCOS`,
   `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, `IMCSCH`,
   `ENCODEURL`, and `CELL`. `CHITEST` and `CHIINV` are legacy aliases of
   `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
@@ -793,6 +794,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   declining balance. Salvage above cost depreciates nothing. A negative cost,
   salvage, or start, a life or factor that is not positive, or an end before the
   start returns `#NUM!`; fractional periods and an end after the life report
+  `calculation.unsupported_expression`.
+- `AMORLINC` and `AMORDEGRC(cost, date_purchased, first_period, salvage,
+  period, rate, [basis])` prorate period 0 by the `YEARFRAC` fraction from the
+  purchase date to the end of the first period in basis 0 (absent), 1, 3, or 4.
+  `AMORLINC` then depreciates cost × rate per period and the remainder down to
+  salvage in the following period, then 0. `AMORDEGRC` multiplies the rate by
+  1.5 for a life (1/rate) from 3 through 4 years, 2 from 5 through 6, and 2.5
+  above 6, depreciates the book value at that rate each period, and rounds
+  each amount to a whole number; a life strictly between 0 and 3 other than 1
+  and 2, or strictly between 4 and 5, returns `#NUM!`. A salvage above the cost
+  returns `#NUM!`. Other invalid arguments, another basis, a fractional period,
+  a purchase after the first period, `AMORDEGRC` periods within two of the end
+  of the life or past salvage, a life of exactly 1 or 2, a rounding tie, and an
+  `AMORLINC` first period above the depreciable amount report
   `calculation.unsupported_expression`.
 - The complex trigonometric functions take one inumber and return complex text
   with the same 15-significant-digit formatting and `i`/`j` suffix as the other

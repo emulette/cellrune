@@ -16,6 +16,7 @@ use kernel::ArrayEvaluator;
 pub(in crate::calculation) use kernel::{DynamicFunction, Evaluator};
 
 mod aggregate;
+mod amortization;
 mod array;
 mod array_common;
 mod array_reshape;
@@ -996,10 +997,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 482);
+        assert_eq!(catalog.len(), 484);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            481
+            483
         );
         assert!(
             catalog
