@@ -3,6 +3,7 @@ mod copy_edit;
 mod executor;
 mod formula_edit;
 mod grid_edit;
+mod inverse;
 mod receipt;
 mod sheet_delete;
 mod staged;
@@ -10,6 +11,7 @@ mod table_edit;
 mod widen_edit;
 
 pub use change::{EditBatch, WorkbookChange};
+pub use inverse::{EditInverse, UnrestoredContent, UnrestoredContentKind};
 pub use receipt::EditReceipt;
 
 use crate::ValidationError;

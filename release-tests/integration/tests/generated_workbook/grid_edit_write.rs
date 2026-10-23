@@ -556,3 +556,52 @@ fn copies_save_shifted_formulas_with_their_values_and_formats() {
             .expect("format")
     );
 }
+
+#[test]
+fn the_inverse_of_a_deletion_saves_the_source_cells_again() {
+    let source = generated_grid_edit_fixture();
+    let document = open(&source);
+    let mut draft = WorkbookDraft::from_document(&document);
+    let receipt = draft
+        .apply_changes(EditBatch::new([WorkbookChange::delete_rows(
+            sheet(1),
+            row(3),
+            row(3),
+        )
+        .expect("deletion")]))
+        .expect("deletion");
+    let inverse = receipt.inverse().expect("inverse").clone();
+    assert!(matches!(
+        inverse.changes().first(),
+        Some(WorkbookChange::InsertRows { count: 1, .. })
+    ));
+    assert!(inverse.unrestored().iter().any(|content| {
+        content.kind() == cellrune::UnrestoredContentKind::PreservedContent
+            && content.sheet_id() == Some(sheet(1))
+    }));
+    draft
+        .apply_changes(EditBatch::new(inverse.changes().to_vec()))
+        .expect("undo");
+    let (_, reopened) = write_and_reopen(&draft);
+    let texts = |document: &XlsxDocument, name: &str| {
+        document
+            .workbook()
+            .sheet_by_name(name)
+            .expect("sheet")
+            .cells()
+            .map(|cell| {
+                let text = match cell.content() {
+                    CellContent::Formula(formula) => {
+                        formula.text().map(|text| text.as_str().to_owned())
+                    }
+                    CellContent::Literal(value) => Some(format!("{value:?}")),
+                };
+                (cell.address().to_string(), text)
+            })
+            .collect::<Vec<_>>()
+    };
+    for name in ["Data", "Report"] {
+        assert_eq!(texts(&reopened, name), texts(&document, name), "{name}");
+    }
+    assert_eq!(names(&reopened), names(&document));
+}

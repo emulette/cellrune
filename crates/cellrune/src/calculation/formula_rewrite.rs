@@ -265,6 +265,11 @@ impl<'a> FormulaRewriteBudget<'a> {
         }
     }
 
+    /// Returns the cancellation check this budget polls.
+    pub(crate) fn cancellation(&self) -> &'a dyn Fn() -> bool {
+        self.cancelled
+    }
+
     pub(crate) fn check_cancelled(&self) -> Result<(), FormulaRewriteError> {
         if (self.cancelled)() {
             Err(FormulaRewriteError::Cancelled)

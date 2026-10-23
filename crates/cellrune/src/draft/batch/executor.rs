@@ -10,6 +10,7 @@ use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
 use super::grid_edit::{GridEditState, apply_grid_edit, grid_change};
+use super::inverse::{InverseSeed, edit_inverse, has_inverse, moves_preserved_content};
 use super::sheet_delete::delete_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
 use super::table_edit::{
@@ -56,6 +57,17 @@ impl WorkbookDraft {
         rewrite_budget: &mut FormulaRewriteBudget<'_>,
         materialization_budget: &mut TableMaterializationBudget<'_>,
     ) -> Result<EditReceipt, BatchExecutionError> {
+        self.apply_batch(batch, rewrite_budget, materialization_budget, true)
+    }
+
+    /// Applies a batch; `with_inverse` builds the inverse a structural batch's receipt carries.
+    pub(super) fn apply_batch(
+        &mut self,
+        batch: EditBatch,
+        rewrite_budget: &mut FormulaRewriteBudget<'_>,
+        materialization_budget: &mut TableMaterializationBudget<'_>,
+        with_inverse: bool,
+    ) -> Result<EditReceipt, BatchExecutionError> {
         let base_revision = self.semantic_revision();
         if batch.is_empty() {
             return Ok(EditReceipt {
@@ -69,8 +81,11 @@ impl WorkbookDraft {
                 topology_changed: false,
                 cell_formulas_changed_topology_only: false,
                 calculation_metadata_changed: false,
+                inverse: None,
             });
         }
+        let with_inverse = with_inverse && batch.changes().iter().any(has_inverse);
+        let mut inverse_seed = InverseSeed::default();
 
         rewrite_budget.check_cancelled()?;
         let mut sheets = clone_sheets(self.workbook.sheets(), rewrite_budget)?;
@@ -636,6 +651,10 @@ impl WorkbookDraft {
                     let records_history = source_workbook
                         .is_some_and(|workbook| workbook.sheet_by_id(sheet_id).is_some())
                         && !added_sheets.contains(&sheet_id);
+                    inverse_seed.edits.push((sheet_id, edit));
+                    if records_history && moves_preserved_content(edit) {
+                        inverse_seed.preserved_sheets.insert(sheet_id);
+                    }
                     let outcome = apply_grid_edit(
                         GridEditState {
                             sheets: &mut sheets,
@@ -766,18 +785,29 @@ impl WorkbookDraft {
         })?
         .with_semantic_revision(result_revision);
 
-        self.workbook = std::sync::Arc::new(workbook);
-        self.cell_mutations = cell_mutations;
-        self.presentation = presentation;
-        self.presentation_cell_mutations = presentation_cell_mutations;
-        self.presentation_sheet_mutations = presentation_sheet_mutations;
-        self.added_sheets = added_sheets;
-        self.grid_histories = grid_histories;
-        self.changed_table_ids = previous_changed_table_ids
-            .union(&changed_table_ids)
-            .copied()
-            .collect();
-        self.workbook_changed = workbook_changed;
+        let next = Self {
+            workbook: std::sync::Arc::new(workbook),
+            presentation,
+            source_document: self.source_document.clone(),
+            cell_mutations,
+            presentation_cell_mutations,
+            presentation_sheet_mutations,
+            added_sheets,
+            changed_table_ids: previous_changed_table_ids
+                .union(&changed_table_ids)
+                .copied()
+                .collect(),
+            workbook_changed,
+            grid_histories,
+        };
+        // The inverse is built before the batch is installed, so a cancelled build leaves the
+        // draft unchanged.
+        let inverse = if with_inverse {
+            edit_inverse(self, &next, inverse_seed, rewrite_budget.cancellation())?.map(Box::new)
+        } else {
+            None
+        };
+        *self = next;
 
         Ok(EditReceipt {
             base_revision,
@@ -790,6 +820,7 @@ impl WorkbookDraft {
             topology_changed: topology_changed || cell_formulas_changed,
             cell_formulas_changed_topology_only: !topology_changed,
             calculation_metadata_changed,
+            inverse,
         })
     }
 }

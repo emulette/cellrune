@@ -79,6 +79,28 @@ impl NewCellStyles {
             .map(|number_format| (index, number_format))
     }
 
+    /// Returns every position that carries a cell style of its own.
+    pub(crate) fn styled_positions(&self) -> impl Iterator<Item = CellAddress> + '_ {
+        self.valued_cells
+            .keys()
+            .chain(self.blank_cells.keys())
+            .copied()
+    }
+
+    /// Reports whether every row and column has the same style in both.
+    pub(crate) fn same_line_styles(&self, other: &Self) -> bool {
+        let columns = |styles: &Self| {
+            let mut columns = vec![None; EXCEL_MAX_COLUMNS as usize + 1];
+            for (first, last, index) in &styles.columns {
+                for column in first.get()..=last.get() {
+                    columns[column as usize] = Some(*index);
+                }
+            }
+            columns
+        };
+        self.rows == other.rows && columns(self) == columns(other)
+    }
+
     /// Returns the style index and number format of every styled position on line `line` of
     /// `axis`, which lines inserted after it inherit. `valued` gives the number format of a
     /// valued cell, whose style alone is recorded here.

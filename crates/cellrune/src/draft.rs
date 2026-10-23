@@ -16,7 +16,9 @@ pub(crate) use batch::{
     BatchExecutionError, TableMaterializationBudget, TableMaterializationError,
     rewrite_limit_detail,
 };
-pub use batch::{EditBatch, EditReceipt, WorkbookChange};
+pub use batch::{
+    EditBatch, EditInverse, EditReceipt, UnrestoredContent, UnrestoredContentKind, WorkbookChange,
+};
 pub(crate) use format::effective_cell_format;
 
 /// One explicit cell mutation retained for document-backed package patching.
