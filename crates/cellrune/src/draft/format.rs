@@ -12,7 +12,8 @@ impl WorkbookDraft {
     /// An edited cell keeps its edited format. Otherwise a source cell that holds a value keeps its
     /// own style, and an empty position or a cell the draft added takes the style a new cell
     /// receives there: the blank source cell's, else its row's, else its column's. A workbook
-    /// created by [`WorkbookDraft::new`] displays Calibri 11 by default.
+    /// created by [`WorkbookDraft::new`], or opened from a package without a styles part, displays
+    /// Calibri 11 by default, the default style the writers generate for it.
     ///
     /// # Errors
     ///

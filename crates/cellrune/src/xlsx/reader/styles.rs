@@ -10,6 +10,7 @@ use super::super::xml::{
 };
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::style_formats::StyleFormatCollector;
+use crate::presentation::canonical_default_format;
 use crate::{CellFormat, NumberFormat, NumberFormatKind};
 
 const STYLE_SHEET: &[u8] = b"styleSheet";
@@ -55,11 +56,12 @@ impl Styles {
     }
 }
 
+/// A package without a styles part displays the default style a writer generates for it.
 impl Default for Styles {
     fn default() -> Self {
         Self {
             formats: vec![NumberFormat::default()],
-            cell_formats: vec![CellFormat::default()],
+            cell_formats: vec![canonical_default_format()],
             font_count: 1,
         }
     }

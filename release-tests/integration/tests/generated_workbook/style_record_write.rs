@@ -214,3 +214,38 @@ fn edit_sessions_reuse_records_equal_to_the_ones_they_need() {
     assert_eq!(a1.fill(), Fill::Pattern(green));
     assert_eq!((b1.fill(), b1.font()), (Fill::Pattern(blue), &bold));
 }
+
+#[test]
+fn a_package_without_styles_displays_the_default_style_it_is_saved_with() {
+    let source = one_sheet_package(ONE_VALUE_SHEET, None);
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let draft = WorkbookDraft::from_document(&document);
+    let unedited = draft.cell_format(sheet1(), address("B1")).expect("B1");
+    assert_eq!(
+        (unedited.font().name(), unedited.font().size()),
+        (Some("Calibri"), Some(11.0))
+    );
+    let green = PatternFill::solid(Color::argb(0xFF00_FF00));
+    let output = edit_and_save(
+        &source,
+        vec![WorkbookChange::set_cell_format(
+            sheet1(),
+            address("A1"),
+            CellFormatEdit::new().with_fill(green),
+        )],
+    );
+    let styles = support::part_text(&output, STYLES_PART);
+    assert_eq!(section_count(&styles, "fonts"), 1, "{styles}");
+    let reopened = WorkbookDraft::from_document(
+        &open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen"),
+    );
+    assert_eq!(
+        reopened.cell_format(sheet1(), address("B1")).expect("B1"),
+        unedited
+    );
+    let edited = reopened.cell_format(sheet1(), address("A1")).expect("A1");
+    assert_eq!(
+        (edited.font(), edited.fill()),
+        (unedited.font(), Fill::Pattern(green))
+    );
+}
