@@ -950,17 +950,25 @@ than guessing a name from a different XLSX crate (`calamine`,
   TRUE, reports `calculation.unsupported_expression`.
 - `AMORLINC` and `AMORDEGRC(cost, date_purchased, first_period, salvage,
   period, rate, [basis])` prorate period 0 by the `YEARFRAC` fraction from the
-  purchase date to the end of the first period in basis 0 (absent), 1, 3, or 4.
-  `AMORLINC` then depreciates cost × rate per period and the remainder down to
-  salvage in the following period, then 0. `AMORDEGRC` multiplies the rate by
-  1.5 for a life (1/rate) from 3 through 4 years, 2 from 5 through 6, and 2.5
-  above 6, depreciates the book value at that rate each period, and rounds
-  each amount to a whole number; a life strictly between 0 and 3 other than 1
-  and 2, or strictly between 4 and 5, returns `#NUM!`. A salvage above the cost
-  returns `#NUM!`. Other invalid arguments, another basis, a fractional period,
-  a purchase after the first period, `AMORDEGRC` periods within two of the end
-  of the life or past salvage, a life of exactly 1 or 2, a rounding tie, and an
-  `AMORLINC` first period above the depreciable amount report
+  purchase date to the end of the first period in basis 0 (absent), 1, 3, or 4,
+  truncating the basis and a period from 1 on. `AMORLINC` then depreciates
+  cost × rate per period and the remainder down to salvage in the following
+  period, then 0, and counts a period between 0 and 1 as period 1. `AMORDEGRC`
+  multiplies the rate by 1.5 for a life (1/rate) from 3 through 4 years, 2 from
+  5 through 6, and 2.5 above 6, depreciates the book value at that rate each
+  period, and rounds each amount to a whole number; the period whose
+  depreciation would pass salvage, when it is the one before the last of the
+  life, depreciates half the book value and later periods nothing, as Excel
+  returns 158, 0, and 0 for periods 5 through 7 of Microsoft's example. A
+  salvage above the cost, a rate of 0, a negative period, basis 2 or a basis of
+  5 or more, a purchase after the end of the first period, and an `AMORDEGRC`
+  life below 3 or strictly between 4 and 5 return `#NUM!`; a salvage equal to
+  the cost depreciates 0 from period 1 on. Other invalid arguments, period 0
+  of a salvage equal to the cost, an `AMORDEGRC` period between 0 and 1 (where
+  Excel's result is not a defined number), other end periods, a purchase on the
+  end of the first period (except `AMORLINC` periods that are the same for a
+  first share of 0 or 1), a rounding tie whose direction changes the result,
+  and an `AMORLINC` first period above the depreciable amount report
   `calculation.unsupported_expression`.
 - The complex trigonometric functions take one inumber and return complex text
   with the same 15-significant-digit formatting and `i`/`j` suffix as the other

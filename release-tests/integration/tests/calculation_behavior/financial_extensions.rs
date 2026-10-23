@@ -326,17 +326,113 @@ fn french_depreciation_prorates_the_first_period_and_depreciates_whole_periods()
         ExcelError::Value,
     );
     for formula in [
-        "AMORLINC(2400,39679,39813,300,1,0.15,2)",
-        "AMORLINC(2400,39679,39813,300,1.5,0.15,1)",
-        "AMORLINC(2400,39813,39679,300,1,0.15,1)",
-        "AMORLINC(2400,39679,39813,300,1,0,1)",
-        "AMORDEGRC(2400,39679,39813,300,1,1,1)",
-        // The last two periods of the life and a stop at salvage are not documented exactly.
-        "AMORDEGRC(2400,39679,39813,300,5,0.15,1)",
+        // A stop at salvage away from the end of the life is not established.
         "AMORDEGRC(2400,39679,39813,2000,1,0.15,1)",
+        // A first period above the depreciable amount.
+        "AMORLINC(2400,39679,39813,2000,1,0.5,1)",
     ] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+}
+
+#[test]
+fn french_depreciation_follows_excel_through_the_life_and_at_invalid_arguments() {
+    // Excel 16.114 for Mac for Microsoft's asset: cost 2400 bought 2008-08-19 (39679), first
+    // period ending 2008-12-31 (39813), salvage 300, rate 0.15, basis 1.
+    let asset = |function: &str, salvage: &str, period: &str, rate: &str, basis: &str| {
+        format!("{function}(2400,39679,39813,{salvage},{period},{rate},{basis})")
+    };
+    for (period, degressive, linear) in [
+        ("0", 330.0, 131.803_278_688_524_6),
+        ("1", 776.0, 360.0),
+        ("2", 485.0, 360.0),
+        ("3", 303.0, 360.0),
+        ("4", 190.0, 360.0),
+        // AMORDEGRC takes half the book value in the period before the last of the life, then
+        // nothing.
+        ("5", 158.0, 360.0),
+        ("6", 0.0, 168.196_721_311_475_36),
+        ("7", 0.0, 0.0),
+        // Both truncate a period from 1 on.
+        ("1.9", 776.0, 360.0),
+        ("5.5", 158.0, 360.0),
+        ("6.5", 0.0, 168.196_721_311_475_36),
+    ] {
+        for (function, expected) in [("AMORDEGRC", degressive), ("AMORLINC", linear)] {
+            let formula = asset(function, "300", period, "0.15", "1");
+            let workbook = workbook_with_formulas(&[(1, 1, formula.as_str())]);
+            assert_number(
+                &calculate_workbook(&workbook, CalculationOptions::default()),
+                1,
+                expected,
+                1e-12,
+            );
+        }
+    }
+    for (formula, expected) in [
+        // The basis is truncated, and basis 4 moves period 0 from 330 to 327.
+        (asset("AMORDEGRC", "300", "1", "0.15", "0"), 776.0),
+        (asset("AMORDEGRC", "300", "1", "0.15", "3"), 776.0),
+        (asset("AMORDEGRC", "300", "1", "0.15", "4"), 777.0),
+        (asset("AMORDEGRC", "300", "1", "0.15", "1.9"), 776.0),
+        (asset("AMORLINC", "300", "1", "0.15", "4"), 360.0),
+        (asset("AMORLINC", "300", "1", "0.15", "1.9"), 360.0),
+        // AMORLINC counts a period between 0 and 1 as period 1.
+        (asset("AMORLINC", "300", "0.5", "0.15", "1"), 360.0),
+        (asset("AMORLINC", "300", "0.9", "0.15", "1"), 360.0),
+        // A salvage equal to the cost depreciates nothing.
+        (asset("AMORDEGRC", "2400", "1", "0.15", "1"), 0.0),
+        (asset("AMORLINC", "2400", "1", "0.15", "1"), 0.0),
+        // AMORLINC at rates whose first period leaves less than one whole period.
+        (asset("AMORLINC", "300", "1", "1", "1"), 1_221.311_475_409_836),
+        (asset("AMORLINC", "300", "1", "0.5", "1"), 1_200.0),
+        // Bought on the first period's end, AMORLINC period 1 is 360 whether the first share is
+        // 0 or a whole year.
+        (
+            "AMORLINC(2400,39813,39813,300,1,0.15,1)".to_owned(),
+            360.0,
+        ),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula.as_str())]);
+        assert_number(
+            &calculate_workbook(&workbook, CalculationOptions::default()),
+            1,
+            expected,
+            1e-12,
+        );
+    }
+    for function in ["AMORDEGRC", "AMORLINC"] {
+        for formula in [
+            asset(function, "300", "1", "0.15", "2"),
+            asset(function, "300", "1", "0.15", "5"),
+            asset(function, "300", "1", "0", "1"),
+            asset(function, "300", "-1", "0.15", "1"),
+            asset(function, "300", "-0.5", "0.15", "1"),
+            format!("{function}(2400,DATE(2009,2,1),39813,300,1,0.15,1)"),
+        ] {
+            assert_error(&formula, ExcelError::Number);
+        }
+    }
+    // A life of 1 or 2 years has no AMORDEGRC coefficient.
+    assert_error(&asset("AMORDEGRC", "300", "1", "1", "1"), ExcelError::Number);
+    assert_error(&asset("AMORDEGRC", "300", "1", "0.5", "1"), ExcelError::Number);
+    for formula in [
+        // Excel's AMORDEGRC for a period between 0 and 1 is not a defined number.
+        asset("AMORDEGRC", "300", "0.5", "0.15", "1"),
+        // Excel returns 563 for this period 1, but the first share it takes is unknown.
+        "AMORDEGRC(2400,39813,39813,300,1,0.15,1)".to_owned(),
+        // Only AMORLINC's whole periods agree for either first share.
+        "AMORLINC(2400,39813,39813,300,0,0.15,1)".to_owned(),
+        // Period 0 of a salvage equal to the cost was not measured.
+        asset("AMORDEGRC", "2400", "0", "0.15", "1"),
+        asset("AMORLINC", "2400", "0", "0.15", "1"),
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula.as_str())]),
             CalculationOptions::default(),
         );
         assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
