@@ -3,13 +3,13 @@
 //! Excel saves functions introduced after the Excel 2007 file format as `_xlfn.NAME`, and FILTER
 //! and SORT as `_xlfn._xlws.NAME`. A bare spelling loads as an unknown user-defined function and
 //! becomes `#NAME?` once Excel recalculates. Every name below was saved with its prefix by Excel
-//! 2021, Excel for the web, or Excel for Mac, except ENCODEURL: Excel 2013 added it with Windows
-//! as its only host, the Oracle case manifest stores it as `_xlfn.ENCODEURL`, and LibreOffice's
-//! OOXML filter writes it with the prefix. ISO.CEILING, NETWORKDAYS.INTL, and WORKDAY.INTL are
+//! 2021, Excel for the web, or Excel for Mac, except ENCODEURL and FILTERXML: Excel 2013 added
+//! them with Windows as their only host, the Oracle case manifest stores them as `_xlfn.NAME`,
+//! and LibreOffice's OOXML filter writes them with the prefix. ISO.CEILING, NETWORKDAYS.INTL, and WORKDAY.INTL are
 //! absent because Excel saves them bare. The list includes functions the catalog cannot calculate,
 //! since formulas that use them are still written.
 
-const FUTURE_FUNCTIONS: [&str; 160] = [
+const FUTURE_FUNCTIONS: [&str; 161] = [
     "ACOT",
     "ACOTH",
     "AGGREGATE",
@@ -62,6 +62,7 @@ const FUTURE_FUNCTIONS: [&str; 160] = [
     "F.INV.RT",
     "F.TEST",
     "FIELDVALUE",
+    "FILTERXML",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
     "FORECAST.ETS",

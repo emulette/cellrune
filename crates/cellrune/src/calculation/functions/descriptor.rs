@@ -851,6 +851,11 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
             ModernTextArrayFunction::RegexExtract,
         ))
         .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(FilterXml, "FILTERXML", ModernText)
+        .with_array_evaluator(ArrayEvaluator::ModernText(
+            ModernTextArrayFunction::FilterXml,
+        ))
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(RegexReplace, "REGEXREPLACE", ModernText)
         .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(RegexTest, "REGEXTEST", ModernText)
@@ -1845,6 +1850,14 @@ mod tests {
             assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
             assert!(!descriptor.catalog_returns_array(), "{name}");
         }
+
+        let filter_xml = descriptor("FILTERXML").expect("FILTERXML descriptor");
+        assert_eq!(filter_xml.minimum_version(), CompatibilityVersion::V0_1_27);
+        assert!(matches!(filter_xml.evaluator(), Evaluator::ModernText(_)));
+        assert!(filter_xml.call_contract().arity().accepts(2));
+        assert!(!filter_xml.call_contract().arity().accepts(1));
+        assert!(!filter_xml.call_contract().arity().accepts(3));
+        assert!(filter_xml.catalog_returns_array());
 
         let cell = descriptor("CELL").expect("CELL descriptor");
         assert_eq!(cell.minimum_version(), CompatibilityVersion::V0_1_27);

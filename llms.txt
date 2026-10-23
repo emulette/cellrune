@@ -1164,10 +1164,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `AMORLINC`,
   `AMORDEGRC`, `IMSIN`, `IMCOS`,
   `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMCOSH`, `IMSECH`, `IMCSCH`,
-  `ENCODEURL`, `BAHTTEXT`, `CELL`, `AGGREGATE`, `FIXED`, `LENB`, `LEFTB`,
-  `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`, `REPLACEB`, `ASC`, and `DBCS`. `CHITEST` and `CHIINV` are legacy
-  aliases of
-  `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
+  `ENCODEURL`, `FILTERXML`, `BAHTTEXT`, `CELL`, `AGGREGATE`, `FIXED`, `LENB`,
+  `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`, `REPLACEB`, `ASC`, and `DBCS`.
+  `CHITEST` and `CHIINV` are legacy aliases of `CHISQ.TEST` and
+  `CHISQ.INV.RT`. `FREQUENCY`, `MODE.MULT`, and `FILTERXML` are marked
   `.returns_array()`; the others return scalars.
 - `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
   numbers and logical values
@@ -1276,6 +1276,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   disagree and Excel for Windows was not measured, reports
   `calculation.unsupported_expression`. Authored `ENCODEURL` formulas are
   stored as `_xlfn.ENCODEURL`.
+- `FILTERXML(xml, xpath)` reads `xml` as XML 1.0 with namespaces and returns
+  the string values of the nodes the XPath 1.0 expression `xpath` selects, in
+  document order, down one column. Text that is not well-formed XML or that
+  uses an undeclared namespace prefix gives `#VALUE!`, as Microsoft documents.
+  FILTERXML runs only on Excel for Windows, so what Microsoft does not document
+  reports `calculation.unsupported_expression`: a value that reads as a number
+  or is empty, an empty selection, an expression whose value is not a node set
+  or that is not XPath 1.0, a DTD, variables, namespace prefixes in the
+  expression, the `namespace` axis, `id()` and `lang()`, and any result,
+  position, count, or string value a white-space-only text node would change.
+  Authored `FILTERXML` formulas are stored as `_xlfn.FILTERXML`.
 - `BAHTTEXT(number)` reads the baht as Thai numerals (สิบ for ten, ยี่สิบ for
   twenty, เอ็ด for a final one after any higher digit as in 101 and 1000001,
   หนึ่ง before the other place words, and ล้าน for each million), then บาท,

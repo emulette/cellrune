@@ -15,6 +15,7 @@ pub(super) fn call_scalar(
 ) -> Value {
     match function {
         ModernTextFunction::ArrayToText => array_to_text(engine, context, args),
+        ModernTextFunction::FilterXml => super::filter_xml::call_scalar(engine, context, args),
         ModernTextFunction::RegexExtract => {
             super::regex_text::extract_scalar(engine, context, args)
         }
@@ -31,6 +32,7 @@ pub(super) fn call_array(
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
     match function {
+        ModernTextArrayFunction::FilterXml => super::filter_xml::call_array(engine, context, args),
         ModernTextArrayFunction::RegexExtract => {
             super::regex_text::extract_array(engine, context, args)
         }

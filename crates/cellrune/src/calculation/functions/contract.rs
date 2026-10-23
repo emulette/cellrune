@@ -1432,6 +1432,7 @@ impl ModernTextFunction {
                 CallContract::positional(Arity::range(2, 3), &[SCALAR, SCALAR, SCALAR])
                     .with_defaults(REGEX_TEST_DEFAULTS)
             }
+            Self::FilterXml => CallContract::uniform(Arity::exact(2), SCALAR),
             Self::TextSplit => CallContract::positional(
                 Arity::range(2, 6),
                 &[SCALAR, ARRAY, ARRAY, SCALAR, SCALAR, SCALAR],

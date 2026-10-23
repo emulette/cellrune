@@ -1,7 +1,8 @@
 use super::support::{assert_issue, assert_number, cell_id, workbook_with_formulas};
 use cellrune::{
-    CalculationCellResult, CalculationIssueCode, CalculationLimits, CalculationOptions, CellValue,
-    ExcelError, FormulaText, calculate_workbook, scan_formula_capabilities,
+    CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
+    CalculationOptions, CellAddress, CellValue, ExcelError, FormulaText, WorkbookDraft,
+    calculate_workbook, scan_formula_capabilities,
 };
 
 #[test]
@@ -178,6 +179,80 @@ fn encodeurl_percent_encodes_the_documented_characters() {
 fn authored_encodeurl_is_stored_with_its_future_prefix() {
     let text = FormulaText::from_user_input("=ENCODEURL(\"a b\")").expect("user formula");
     assert_eq!(text.as_str(), "_xlfn.ENCODEURL(\"a b\")");
+}
+
+#[test]
+fn filterxml_spills_the_string_values_of_the_selected_nodes_down_a_column() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    let text = FormulaText::from_user_input(
+        "=FILTERXML(\"<r><x k='1'>a</x><y><x>b &amp; c</x></y><x>d</x></r>\",\"//x[not(@k)]\")",
+    )
+    .expect("user formula");
+    assert!(text.as_str().starts_with("_xlfn.FILTERXML("));
+    draft
+        .set_cell_dynamic_formula(
+            sheet_id,
+            CellAddress::from_a1("A1").expect("valid anchor"),
+            text,
+            None,
+        )
+        .expect("dynamic formula");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let cell = |address: &str| {
+        calculation
+            .materialized_cell(CalculationCellId::new(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid address"),
+            ))
+            .map(|cell| cell.result().clone())
+    };
+    assert_eq!(
+        cell("A1"),
+        Some(CalculationCellResult::Value(CellValue::Text(
+            "b & c".to_owned()
+        )))
+    );
+    assert_eq!(
+        cell("A2"),
+        Some(CalculationCellResult::Value(CellValue::Text(
+            "d".to_owned()
+        )))
+    );
+    assert_eq!(cell("A3"), None);
+    assert_eq!(cell("B1"), None);
+}
+
+#[test]
+fn filterxml_rejects_invalid_xml_and_leaves_undocumented_results_unsupported() {
+    let workbook =
+        workbook_with_formulas(&[(1, 1, "FILTERXML(\"<r><x>a</x><x>b</x></r>\",\"/r/x\")")]);
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    assert_eq!(
+        calculate_workbook(&workbook, CalculationOptions::default()).cell(cell_id(1)),
+        Some(&CalculationCellResult::Value(CellValue::Text(
+            "a".to_owned()
+        )))
+    );
+    // Microsoft documents #VALUE! for invalid XML and for an undeclared namespace prefix.
+    assert_error("FILTERXML(\"<r><x>a</r>\",\"//x\")", ExcelError::Value);
+    assert_error("FILTERXML(\"<p:r/>\",\"/*\")", ExcelError::Value);
+    assert_error("FILTERXML(#N/A,\"//x\")", ExcelError::NotAvailable);
+    for formula in [
+        // Whether a value that reads as a number becomes one, and what an empty selection or a
+        // non-node result returns, is not documented.
+        "FILTERXML(\"<r><x>7</x></r>\",\"//x\")",
+        "FILTERXML(\"<r><x/></r>\",\"//x\")",
+        "FILTERXML(\"<r><x>a</x></r>\",\"//y\")",
+        "FILTERXML(\"<r><x>a</x></r>\",\"count(//x)\")",
+        "FILTERXML(\"<r><x>a</x></r>\",\"//x[\")",
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
 }
 
 #[test]

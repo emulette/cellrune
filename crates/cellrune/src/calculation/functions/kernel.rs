@@ -310,6 +310,7 @@ function_enum!(TextAdditionalFunction {
 
 function_enum!(ModernTextFunction {
     ArrayToText,
+    FilterXml,
     RegexExtract,
     RegexReplace,
     RegexTest,
@@ -791,6 +792,7 @@ function_enum!(DynamicArrayFunction {
 function_enum!(ElementwiseArrayFunction { Abs });
 
 function_enum!(ModernTextArrayFunction {
+    FilterXml,
     RegexExtract,
     TextSplit,
 });

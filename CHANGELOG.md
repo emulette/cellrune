@@ -390,6 +390,12 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `ENCODEURL` keeps ASCII letters, digits, and `.` and encodes `:`, `/`, and the space, as
   Microsoft documents; text with other characters reports `calculation.unsupported_expression`.
   Authored `ENCODEURL` formulas are stored as `_xlfn.ENCODEURL`.
+- `FILTERXML` returns the string values of the nodes an XPath 1.0 expression selects from
+  well-formed XML, down one column, and `#VALUE!` for invalid XML or an undeclared namespace prefix,
+  as Microsoft documents. A value that reads as a number or is empty, an empty selection, a result
+  that is not a node set, a DTD, and white-space-only text that would change the result report
+  `calculation.unsupported_expression`, since Excel for Windows cannot be measured. Authored
+  `FILTERXML` formulas are stored as `_xlfn.FILTERXML`.
 - `CELL` returns the `"address"`, `"contents"`, `"row"`, `"col"`, and `"type"` information defined
   by the workbook alone, as Excel does for a range's row, an empty cell's contents (0), a formula's
   text result (`"l"`), and an info type in any case. `"format"`, `"color"`, and `"parentheses"`

@@ -40,6 +40,7 @@ mod distribution;
 mod dynamic;
 mod engineering;
 mod engineering_complex;
+mod filter_xml;
 mod financial;
 mod financial_additional;
 mod fixed_income;
@@ -1012,10 +1013,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 497);
+        assert_eq!(catalog.len(), 498);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            496
+            497
         );
         assert!(
             catalog

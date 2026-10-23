@@ -10,7 +10,7 @@ const { CellRuneError, Workbook, formatDisplayText, functionCatalog } = require(
 function assertCatalogContract() {
   const catalog = functionCatalog();
   assert.equal(catalog.schemaVersion, 1);
-  assert.equal(catalog.entries.length, 497);
+  assert.equal(catalog.entries.length, 498);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [
     "CODE", "NUMBERVALUE", "DDB", "XNPV",
@@ -45,7 +45,7 @@ function assertCatalogContract() {
     "CHISQ.TEST", "CHITEST", "CHISQ.INV", "CHISQ.INV.RT", "CHIINV",
     "CUMIPMT", "CUMPRINC", "VDB",
     "IMCOS", "IMCOSH", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSIN", "IMSINH", "IMTAN",
-    "ENCODEURL",
+    "ENCODEURL", "FILTERXML",
     "CELL",
     "AMORDEGRC", "AMORLINC",
     "BAHTTEXT",
