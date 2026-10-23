@@ -1611,6 +1611,80 @@ fn clean_runtime_issues_survive_incremental_reuse_and_match_full() {
 }
 
 #[test]
+fn incremental_results_report_capability_issues_as_a_full_calculation_does() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut initial = vec![
+        WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+        WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("A1+NB")),
+    ];
+    for row in 1..=4 {
+        initial.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 26).expect("valid filler address"),
+            formula(&format!("{row}*2")),
+        ));
+    }
+    session
+        .apply_changes(0, EditBatch::new(initial))
+        .expect("workbook with an undefined name");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    // A value edit dirties the formula with the undefined name; formula edits add an unknown
+    // function, a parse failure, and a cycle through an undefined name.
+    let edits = [
+        vec![WorkbookChange::set_cell_value(
+            sheet_id,
+            address("A1"),
+            number(2.0),
+        )],
+        vec![
+            WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("FOOBAR(A1)")),
+            WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("SUM((")),
+            WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("SUM(E1:E3)+NB")),
+        ],
+    ];
+    for changes in edits {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new(changes),
+            )
+            .expect("edit");
+        let delta = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("automatic recalculation");
+        assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+        assert_calculations_equal(
+            session.calculation().expect("installed calculation"),
+            &calculate_workbook(session.workbook(), CalculationOptions::default()),
+        );
+    }
+    let issue = |a1: &str| match session
+        .calculation()
+        .expect("installed calculation")
+        .cell(CalculationCellId::new(sheet_id, address(a1)))
+    {
+        Some(CalculationCellResult::Unavailable(issue)) => issue.code(),
+        other => panic!("{a1} must be unavailable, found {other:?}"),
+    };
+    assert_eq!(issue("B1"), CalculationIssueCode::UnsupportedName);
+    assert_eq!(issue("C1"), CalculationIssueCode::UnsupportedFunction);
+    assert_eq!(issue("D1"), CalculationIssueCode::ParseError);
+    assert_eq!(issue("E1"), CalculationIssueCode::UnsupportedName);
+}
+
+#[test]
 fn formula_metadata_dependencies_dirty_without_scheduling_source_values() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");

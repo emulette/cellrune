@@ -302,6 +302,27 @@ fn snapshot_from_incremental_engine_cancellable(
     dirty: &BTreeSet<CalculationCellId>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<CalculationSnapshot, ()> {
+    // A dirty formula reports its capability issue, and a formula reading one is blocked, exactly
+    // as the full snapshot classifies them.
+    let mut unsupported = BTreeMap::new();
+    for public_id in dirty {
+        if cancelled() {
+            return Err(());
+        }
+        let Some(internal_id) = public_to_internal(workbook, *public_id) else {
+            continue;
+        };
+        let Some(cell) = workbook.sheets()[internal_id.0].cell(public_id.address()) else {
+            continue;
+        };
+        if let Some(issue) = formula_issues(engine, internal_id.0, cell)
+            .into_iter()
+            .next()
+        {
+            unsupported.insert(internal_id, issue);
+        }
+    }
+    let direct_unavailable = unsupported.keys().copied().collect::<BTreeSet<_>>();
     let mut cells = BTreeMap::new();
     let mut removed_formulas = BTreeSet::new();
     for public_id in dirty {
@@ -315,7 +336,9 @@ fn snapshot_from_incremental_engine_cancellable(
             removed_formulas.insert(*public_id);
             continue;
         }
-        let result = if engine.cycle_cells.contains(&internal_id) {
+        let result = if let Some(issue) = unsupported.get(&internal_id) {
+            CalculationCellResult::Unavailable(issue.clone())
+        } else if engine.cycle_cells.contains(&internal_id) {
             CalculationCellResult::Unavailable(CalculationIssue::new(
                 CalculationIssueCode::CircularReference,
                 None,
@@ -336,7 +359,7 @@ fn snapshot_from_incremental_engine_cancellable(
                         .is_some_and(|expr| misses_volatile_input(engine, internal_id.0, expr));
                     let code = if missing_volatile_input {
                         CalculationIssueCode::VolatileInputMissing
-                    } else if engine.has_unavailable_dependency(internal_id, &BTreeSet::new()) {
+                    } else if engine.has_unavailable_dependency(internal_id, &direct_unavailable) {
                         CalculationIssueCode::BlockedByUpstream
                     } else {
                         CalculationIssueCode::UnsupportedExpression

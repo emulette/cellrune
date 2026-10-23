@@ -268,6 +268,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   `workbookViewId`, with a fractional or negative split, or whose `activePane` or `topLeftCell`
   disagrees with its split; the pane stays preserved but unmodeled with an `xlsx.pane.invalid`
   presentation diagnostic, as a snapshot read already ignored it.
+- Incremental recalculation reports a recalculated formula's capability issue as a full
+  calculation does: `UnsupportedName` for an undefined name, `UnsupportedFunction`, `ParseError`,
+  or `UnsupportedExpression` with its detail, ahead of `CircularReference`, instead of the value
+  or `UnsupportedExpression` the formula evaluated to. A recalculated formula that a calculation
+  engine issue stops while it reads such a formula reports `BlockedByUpstream`, as in a full
+  calculation.
 
 ## [0.1.26] - 2026-10-23
 
