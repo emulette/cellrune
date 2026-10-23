@@ -22,7 +22,8 @@ const MESSAGE_PAGE_LIMIT_INVALID: &str =
     "page limit must be a non-negative integer within the unsigned 32-bit range";
 const MESSAGE_PAGE_BYTE_LIMIT_INVALID: &str =
     "page byte limit must be a non-negative integer within the unsigned 64-bit range";
-const MESSAGE_CALCULATION_REQUIRED: &str = "calculate the current workbook revision before saving";
+const MESSAGE_CALCULATION_REQUIRED: &str =
+    "calculate the current workbook revision before saving, exporting, or reading its dependencies";
 const MESSAGE_SESSION_CLOSED: &str = "workbook session is closed";
 const MESSAGE_SESSION_BUSY: &str = "workbook session state is unavailable";
 const MESSAGE_SESSION_POISONED: &str = "workbook session state is unusable after a native panic";

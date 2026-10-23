@@ -25,7 +25,8 @@ pub(crate) enum InteropCode {
     PageLimitInvalid,
     /// Page byte limit must be a non-negative integer within the unsigned 64-bit range.
     PageByteLimitInvalid,
-    /// Calculate the current workbook revision before saving.
+    /// Calculate the current workbook revision before saving, exporting, or reading its
+    /// dependencies.
     CalculationRequired,
     /// Excel error value is not recognized.
     ValueExcelErrorInvalid,
