@@ -912,10 +912,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   is `#N/A`. The right tail is solved directly, so tiny tails keep their
   relative precision.
 - `CHISQ.TEST(actual_range, expected_range)` returns the right-tail probability
-  of Σ (A − E)² / E with (r − 1)(c − 1) degrees of freedom, or one less than
-  the length of a single row or column. Ranges with different numbers of values
-  or a single value return `#N/A`. Equal counts in different shapes, values
-  that are not numbers, and expected values that are not positive report
+  of Σ (A − E)² / E. As in Excel, the ranges need the same number of values but
+  not the same shape, and the degrees of freedom come from the shape of
+  `actual_range`, text cells included: (r − 1)(c − 1), or one less than the
+  count for a single row or column. Different counts or a single value return
+  `#N/A`, a pair with text drops out of the sum, an expected 0 returns
+  `#DIV/0!`, and a negative expected value `#NUM!`. Blanks, logical values, and
+  errors in the ranges, text beside an expected value that is not positive, and
+  expected values that would give both errors report
   `calculation.unsupported_expression`.
 - `CUMIPMT` and `CUMPRINC(rate, nper, pv, start_period, end_period, type)`
   total the interest or principal of the level payments from `start_period`

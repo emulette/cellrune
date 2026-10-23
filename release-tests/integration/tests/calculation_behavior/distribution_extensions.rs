@@ -74,11 +74,65 @@ fn chi_square_test_sums_the_statistic_over_the_contingency_table() {
 }
 
 #[test]
-fn chi_square_test_rejects_mismatched_and_undocumented_tables() {
+fn chi_square_test_follows_excel_for_shapes_text_and_expected_values() {
+    // Excel 16.114 for Mac: the counts must match but not the shapes, the degrees of freedom come
+    // from the first argument's shape, and a pair with text drops out of the sum.
+    for (formula, expected) in [
+        ("CHISQ.TEST({1,2;3,4},{1,2,3,4})", 1.0),
+        ("CHISQ.TEST({1,\"a\"},{1,2})", 1.0),
+        ("CHISQ.TEST({1,2;3,4},{2,1;4,3})", 0.148_914_673_178_765_7),
+        ("CHISQ.TEST({1,2,3,4},{2,1,4,3})", 0.555_291_895_481_792_4),
+        ("CHISQ.TEST({1;2;3;4},{2;1;4;3})", 0.555_291_895_481_792_4),
+        ("CHISQ.TEST({1,2;3,4},{2,1,4,3})", 0.148_914_673_178_765_7),
+        ("CHISQ.TEST({1,2,3,4},{2,1;4,3})", 0.555_291_895_481_792_4),
+        // The text cell still counts toward the 3 − 1 degrees of freedom.
+        ("CHISQ.TEST({1,\"a\",3},{2,2,2})", 0.606_530_659_712_633_4),
+    ] {
+        assert_formula_number(formula, expected, 1e-14);
+    }
+    // The same rules for ranges, with text in either argument.
+    for (formula, expected) in [
+        ("CHISQ.TEST(A10:C10,A11:C11)", 0.606_530_659_712_633_4),
+        ("CHISQ.TEST(A12:B13,A14:B15)", 0.083_264_516_663_550_45),
+        ("CHISQ.TEST(A11:C11,A16:C16)", 1.0),
+        ("CHISQ.TEST(A10:B10,A11:B11)", 0.479_500_122_186_953_5),
+    ] {
+        let workbook = workbook_with_formulas(&[
+            (1, 1, formula),
+            (10, 1, "1"),
+            (10, 2, "\"a\""),
+            (10, 3, "3"),
+            (11, 1, "2"),
+            (11, 2, "2"),
+            (11, 3, "2"),
+            (12, 1, "1"),
+            (12, 2, "\"a\""),
+            (13, 1, "3"),
+            (13, 2, "4"),
+            (14, 1, "2"),
+            (14, 2, "2"),
+            (15, 1, "2"),
+            (15, 2, "2"),
+            (16, 1, "2"),
+            (16, 2, "\"b\""),
+            (16, 3, "2"),
+        ]);
+        let result = calculate_workbook(&workbook, CalculationOptions::default());
+        assert_number(&result, 1, expected, expected * 1e-14);
+    }
+}
+
+#[test]
+fn chi_square_test_rejects_mismatched_tables_and_non_positive_expectations() {
     for (formula, expected) in [
         ("CHISQ.TEST({1,2},{1,2,3})", ExcelError::NotAvailable),
+        ("CHISQ.TEST({1,2,3},{2,1})", ExcelError::NotAvailable),
+        ("CHISQ.TEST({1},{2})", ExcelError::NotAvailable),
         ("CHITEST(4,5)", ExcelError::NotAvailable),
         ("CHISQ.TEST({1,2},{#DIV/0!,2,3})", ExcelError::NotAvailable),
+        // Excel 16.114 for Mac for an expected 0 and a negative expected value.
+        ("CHISQ.TEST({1,2},{0,2})", ExcelError::DivisionByZero),
+        ("CHISQ.TEST({1,2},{-1,2})", ExcelError::Number),
     ] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),
@@ -90,16 +144,16 @@ fn chi_square_test_rejects_mismatched_and_undocumented_tables() {
             "{formula}"
         );
     }
+    // Excel was not measured on these.
     for formula in [
-        "CHISQ.TEST({1,2;3,4},{1,2,3,4})",
-        "CHISQ.TEST({1,\"a\"},{1,2})",
         "CHISQ.TEST({1,2},{1,TRUE})",
         "CHISQ.TEST({1,#N/A},{1,2})",
-        "CHISQ.TEST({1,2},{0,2})",
-        "CHISQ.TEST({1,2},{-1,2})",
+        "CHISQ.TEST({\"a\",2},{0,2})",
+        "CHISQ.TEST({1,2},{0,-1})",
+        "CHISQ.TEST(A10:B10,A11:B11)",
     ] {
         let result = calculate_workbook(
-            &workbook_with_formulas(&[(1, 1, formula)]),
+            &workbook_with_formulas(&[(1, 1, formula), (10, 1, "1"), (11, 1, "2"), (11, 2, "2")]),
             CalculationOptions::default(),
         );
         assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);

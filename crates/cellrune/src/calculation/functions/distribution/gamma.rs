@@ -232,12 +232,14 @@ pub(super) fn chi_square_inverse_rt(
 }
 
 /// CHISQ.TEST(actual_range, expected_range), also spelled CHITEST: the right-tail probability of
-/// χ² = Σ (A − E)² / E with (r − 1)(c − 1) degrees of freedom, or r − 1 or c − 1 for a single row
-/// or column. Ranges with different numbers of values, or a single value, return `#N/A`.
+/// χ² = Σ (A − E)² / E. Ranges with different numbers of values, or a single value, return `#N/A`.
 ///
-/// Microsoft documents neither text, logical values, blanks, or errors in the ranges, nor equal
-/// counts in different shapes, nor expected values that are not positive, so those inputs are
-/// unsupported rather than guessed.
+/// As Excel 16.114 for Mac returns it, the ranges only need the same number of values, and the
+/// degrees of freedom come from the shape of `actual_range`, text cells included: (r − 1)(c − 1),
+/// or one less than the count for a single row or column. A pair with text drops out of the sum,
+/// an expected 0 returns `#DIV/0!`, and a negative expected value `#NUM!`. Blanks, logical values,
+/// and errors in the ranges, text beside an expected value that is not positive, and expected
+/// values that would give both errors were not measured, so they are unsupported.
 pub(in crate::calculation::functions) fn chi_square_test(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -251,25 +253,41 @@ pub(in crate::calculation::functions) fn chi_square_test(
         if actual.data.len() != expected.data.len() || actual.data.len() == 1 {
             return Err(ErrorKind::NA);
         }
-        if actual.rows != expected.rows || actual.cols != expected.cols {
-            return Err(ErrorKind::Unsupported);
-        }
         engine.charge_function_iterations(
             context,
             u64::try_from(actual.data.len()).map_err(|_| ErrorKind::Num)?,
         )?;
         let mut statistic = 0.0;
-        for (actual, expected) in actual.data.iter().zip(&expected.data) {
+        let mut error = None;
+        let mut unsupported = false;
+        for pair in actual.data.iter().zip(&expected.data) {
             poll_cancellation(context)?;
-            match (actual, expected) {
-                (Value::Number(actual), Value::Number(expected)) if *expected > 0.0 => {
-                    statistic += (actual - expected) * (actual - expected) / expected;
-                }
+            match pair {
                 (Value::Error(kind), _) | (_, Value::Error(kind)) if kind.is_engine_issue() => {
                     return Err(*kind);
                 }
-                _ => return Err(ErrorKind::Unsupported),
+                (Value::Number(actual), Value::Number(expected)) if *expected > 0.0 => {
+                    statistic += (actual - expected) * (actual - expected) / expected;
+                }
+                (Value::Number(_), Value::Number(expected)) => {
+                    let kind = if *expected == 0.0 {
+                        ErrorKind::Div0
+                    } else {
+                        ErrorKind::Num
+                    };
+                    unsupported |= error.is_some_and(|first| first != kind);
+                    error = Some(kind);
+                }
+                (Value::Text(_), Value::Number(expected)) if *expected > 0.0 => {}
+                (Value::Text(_) | Value::Number(_), Value::Text(_)) => {}
+                _ => unsupported = true,
             }
+        }
+        if unsupported {
+            return Err(ErrorKind::Unsupported);
+        }
+        if let Some(kind) = error {
+            return Err(kind);
         }
         let rows = f64::from(actual.rows);
         let cols = f64::from(actual.cols);
