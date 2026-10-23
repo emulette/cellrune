@@ -21,5 +21,5 @@ pub use state::{CellPhonetics, ColumnPhoneticVisibility, DocumentPresentation, F
 
 pub(crate) use format::VERTICAL_TEXT_ROTATION;
 pub(crate) use phonetic::{PhoneticAnnotation, validate_authoring_runs, validate_source_runs};
-pub(crate) use sheet_format::canonical_default_format;
+pub(crate) use sheet_format::{canonical_default_format, standard_column_width};
 pub(crate) use state::CellPresentation;

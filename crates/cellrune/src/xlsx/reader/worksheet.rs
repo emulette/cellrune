@@ -19,6 +19,7 @@ use super::phonetic::{PhoneticReadBudget, parse_bool, parse_properties};
 use super::shared_strings::SharedStrings;
 use super::styles::Styles;
 use super::worksheet_cell::{CellBuilder, CellFinishContext};
+use crate::presentation::standard_column_width;
 use crate::workbook::SheetBuilder;
 use crate::{
     CellAddress, Column, ColumnPhoneticVisibility, DateSystem, Diagnostic, DiagnosticCode,
@@ -36,6 +37,7 @@ const SHEET_DATA: &[u8] = b"sheetData";
 const ROW: &[u8] = b"row";
 const CELL: &[u8] = b"c";
 const PHONETIC_PROPERTIES: &[u8] = b"phoneticPr";
+const SHEET_FORMAT_PROPERTIES: &[u8] = b"sheetFormatPr";
 const MERGE_CELLS: &[u8] = b"mergeCells";
 const MERGE_CELL: &[u8] = b"mergeCell";
 const TABLE_PARTS: &[u8] = b"tableParts";
@@ -82,6 +84,8 @@ struct WorksheetParseState {
     implied_row: u32,
     /// The column of the open row's previous cell, from which a cell without `r` follows.
     last_column: u32,
+    /// The width of a column without its own, from `sheetFormatPr`.
+    standard_column_width: Option<f64>,
 }
 
 impl WorksheetParseState {
@@ -281,6 +285,8 @@ pub(super) fn parse(
                             &budget,
                             &mut state,
                         )?;
+                    } else if depth == 2 && local_name == SHEET_FORMAT_PROPERTIES {
+                        state.standard_column_width = Some(sheet_standard_width(&attributes));
                     } else if state
                         .columns_depth
                         .is_some_and(|parent| depth == parent + 1)
@@ -294,7 +300,13 @@ pub(super) fn parse(
                             &budget,
                         )?;
                         process_column_style(&attributes, capture, resources.styles, sheet);
-                        process_column_width(&attributes, capture, sheet_id, presentation);
+                        process_column_width(
+                            &attributes,
+                            state.standard_column_width,
+                            capture,
+                            sheet_id,
+                            presentation,
+                        );
                     } else if depth == 2 && local_name == SHEET_DATA {
                         // An empty sheet is serialized by Excel and every mainstream producer
                         // as a self-closing <sheetData/>, which arrives as an Empty event, not
@@ -559,7 +571,15 @@ fn process_start(
     {
         process_column_visibility(&attributes, capture, sheet_id, presentation, budget)?;
         process_column_style(&attributes, capture, styles, sheet);
-        process_column_width(&attributes, capture, sheet_id, presentation);
+        process_column_width(
+            &attributes,
+            state.standard_column_width,
+            capture,
+            sheet_id,
+            presentation,
+        );
+    } else if depth == 2 && local_name == SHEET_FORMAT_PROPERTIES {
+        state.standard_column_width = Some(sheet_standard_width(&attributes));
     } else if depth == 2 && local_name == PHONETIC_PROPERTIES {
         process_worksheet_phonetic_properties(
             &attributes,
@@ -959,12 +979,15 @@ fn process_column_style(
     }
 }
 
-/// Records the `width` of a column span for the format read model.
+/// Records the `width` of a column span for the format read model. A span without
+/// `customWidth` at the standard width, as Excel writes a column kept only for its style, has no
+/// width of its own.
 ///
 /// Column widths were not read before they were modeled, so a span whose `min`, `max`, or `width`
 /// does not resolve records nothing instead of failing the read.
 fn process_column_width(
     attributes: &XmlAttributes,
+    sheet_standard: Option<f64>,
     capture: PresentationCapture,
     sheet_id: SheetId,
     presentation: &mut DocumentPresentation,
@@ -982,11 +1005,28 @@ fn process_column_width(
         .unqualified("width")
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|width| (0.0..=255.0).contains(width));
+    let custom = matches!(attributes.unqualified("customWidth"), Some("1" | "true"));
+    let standard = sheet_standard.unwrap_or_else(|| standard_column_width(None, None));
+    if !custom && width == Some(standard) {
+        return;
+    }
     if let (Some(first), Some(last), Some(width)) = (column("min"), column("max"), width)
         && first <= last
     {
         presentation.source_column_width(sheet_id, first, last, width);
     }
+}
+
+/// Returns the standard column width a `sheetFormatPr` declares.
+fn sheet_standard_width(attributes: &XmlAttributes) -> f64 {
+    standard_column_width(
+        attributes
+            .unqualified("defaultColWidth")
+            .and_then(|value| value.parse().ok()),
+        attributes
+            .unqualified("baseColWidth")
+            .and_then(|value| value.parse().ok()),
+    )
 }
 
 /// Records the `ht` of a row for the format read model; a row without the optional `r` is

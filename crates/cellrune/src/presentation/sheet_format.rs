@@ -49,6 +49,17 @@ pub(crate) struct SheetFormats {
 // Widths and heights are validated finite, so equality is reflexive.
 impl Eq for SheetFormats {}
 
+/// The width, in characters, of a column without its own from a worksheet's `sheetFormatPr`:
+/// `defaultColWidth`, or else, by ECMA-376 §18.3.1.81, `baseColWidth` (8 when absent) plus 5 pixels
+/// of padding and gridline in characters of the maximum digit width, 7 pixels for the default
+/// Calibri 11, truncated to 1/256 of a character.
+pub(crate) fn standard_column_width(default_width: Option<f64>, base_width: Option<u32>) -> f64 {
+    default_width.unwrap_or_else(|| {
+        let characters = f64::from(base_width.unwrap_or(8)) + 5.0 / 7.0;
+        (characters * 256.0).trunc() / 256.0
+    })
+}
+
 impl SheetFormats {
     fn is_empty(&self) -> bool {
         self.column_widths.is_empty() && self.row_heights.is_empty() && self.cell_formats.is_empty()

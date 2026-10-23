@@ -213,7 +213,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `CellFormat` (`Font`, `Fill`, `Border`, `Alignment`, with `Color` as an ARGB, theme, indexed, or
   automatic color and a tint) a cell displays with, resolved as Excel does from the cell's own
   style, else a blank cell's, its row's, or its column's. `DocumentPresentation::column_widths`,
-  `column_width`, `row_heights`, and `row_height` read explicit widths and heights. Package-backed
+  `column_width`, `row_heights`, and `row_height` read explicit widths and heights; a `<col>`
+  without `customWidth` at its sheet's standard width, as Excel writes a column kept only for its
+  style, has no width of its own. Package-backed
   documents capture them on open; a gradient fill reads as `Fill::Gradient` and its stops stay in
   the source record.
 - `WorkbookChange::set_cell_format` (a `CellFormatEdit` whose font, border, and alignment parts
@@ -224,7 +226,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   The document writer adds only the font, fill, border, and `cellXfs` records an edit needs,
   reusing an identical existing record and placing new fills after the two reserved ones, keeping
   every unedited record, attribute, and component of the source style; it splits `<col>`
-  spans, writes rows that gain a height, and keeps an edited cell's format when its content is
+  spans, gives a column whose width is cleared but that keeps a style the standard width, since
+  Excel reads a `<col>` without `width` as a hidden column, writes rows that gain a height, and keeps an edited cell's format when its content is
   cleared. The canonical writer writes the same model, and both verify the reopened output. A
   session rejects a batch prepared before another presentation-only batch was installed with
   `session.revision_mismatch`, so neither batch's edits are lost.

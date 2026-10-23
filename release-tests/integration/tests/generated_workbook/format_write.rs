@@ -405,3 +405,61 @@ fn a_session_rejects_a_batch_prepared_before_a_presentation_only_install() {
         Some(20.0)
     );
 }
+
+#[test]
+fn clearing_the_width_of_a_styled_column_keeps_a_standard_width() {
+    use super::style_record_write::{one_sheet_package, sheet1};
+
+    for (format_pr, standard) in [
+        ("", "8.7109375"),
+        (
+            r#"<sheetFormatPr baseColWidth="10" defaultRowHeight="15"/>"#,
+            "10.7109375",
+        ),
+        (
+            r#"<sheetFormatPr defaultColWidth="12.5" defaultRowHeight="15"/>"#,
+            "12.5",
+        ),
+    ] {
+        let worksheet = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{format_pr}<cols><col min="1" max="5" width="20" customWidth="1" style="1"/></cols><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#
+        );
+        const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/></cellXfs></styleSheet>"#;
+        let source = one_sheet_package(&worksheet, Some(STYLES));
+        let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::set_column_width(
+                sheet1(),
+                column(3),
+                column(3),
+                None,
+            )]))
+            .expect("clear");
+        let saved = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+            .expect("edits write")
+            .into_bytes();
+        let written = support::part_text(&saved, "xl/worksheets/sheet1.xml");
+        // Excel reads a <col> without `width` as zero wide, hiding the column.
+        assert!(
+            written.contains(&format!(
+                r#"<col min="3" max="3" style="1" width="{standard}"/>"#
+            )),
+            "{written}"
+        );
+        let reopened = WorkbookDraft::from_document(
+            &open_xlsx_document_bytes(&saved, OpenOptions::default()).expect("reopen"),
+        );
+        assert_eq!(
+            reopened.presentation().column_width(sheet1(), column(3)),
+            None
+        );
+        assert!(
+            reopened
+                .presentation()
+                .column_width(sheet1(), column(2))
+                .is_some()
+        );
+    }
+}

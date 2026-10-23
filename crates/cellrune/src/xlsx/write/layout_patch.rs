@@ -8,6 +8,7 @@ use quick_xml::reader::NsReader;
 use quick_xml::{Writer, XmlVersion};
 
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
+use crate::presentation::standard_column_width;
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{namespace_reader, read_event};
 use crate::{DocumentPresentation, SheetId};
@@ -120,6 +121,7 @@ pub(super) fn patch_sheet_layout(
     let mut in_cols = false;
     let mut wrote_cols = changes.columns.is_empty();
     let mut sheet_data = None::<String>;
+    let mut standard_width = StandardWidth::default();
     let mut pending_rows = changes
         .rows
         .iter()
@@ -133,6 +135,9 @@ pub(super) fn patch_sheet_layout(
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
                 let name = element.local_name().as_ref().to_owned();
+                if depth == 2 && name == "sheetFormatPr" {
+                    standard_width = StandardWidth::of(&element);
+                }
                 if depth == 2 && name == "cols" && !changes.columns.is_empty() {
                     in_cols = true;
                     cols_name = Some(element.name().as_ref().to_owned());
@@ -148,6 +153,7 @@ pub(super) fn patch_sheet_layout(
                             cols_name.as_deref(),
                             &source_columns,
                             changes,
+                            &standard_width,
                             source,
                         )?;
                         wrote_cols = true;
@@ -169,6 +175,9 @@ pub(super) fn patch_sheet_layout(
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
                 let name = element.local_name().as_ref().to_owned();
+                if depth + 1 == 2 && name == "sheetFormatPr" {
+                    standard_width = StandardWidth::of(&element);
+                }
                 if depth + 1 == 2 && name == "cols" && !changes.columns.is_empty() {
                     cols_name = Some(element.name().as_ref().to_owned());
                 } else if in_cols {
@@ -183,6 +192,7 @@ pub(super) fn patch_sheet_layout(
                             cols_name.as_deref(),
                             &source_columns,
                             changes,
+                            &standard_width,
                             source,
                         )?;
                         wrote_cols = true;
@@ -271,9 +281,10 @@ fn write_columns(
     cols_name: Option<&str>,
     source_columns: &[ColumnSpan],
     changes: &LayoutChanges,
+    standard_width: &StandardWidth,
     source: &PartPath,
 ) -> Result<(), XlsxWriteError> {
-    let columns = patched_columns(source_columns, changes);
+    let columns = patched_columns(source_columns, changes, standard_width);
     if columns.is_empty() {
         return Ok(());
     }
@@ -296,9 +307,44 @@ fn write_columns(
     write_event(writer, Event::End(BytesEnd::new(cols.as_str())), source)
 }
 
+/// The width a column without its own shows, from the worksheet's `sheetFormatPr`.
+#[derive(Debug, Default)]
+struct StandardWidth {
+    declared: Option<f64>,
+    base: Option<u32>,
+}
+
+impl StandardWidth {
+    fn of(element: &BytesStart<'_>) -> Self {
+        let attribute = |name: &str| {
+            element
+                .try_get_attribute(name)
+                .ok()
+                .flatten()
+                .map(|value| value.value.into_owned())
+        };
+        Self {
+            declared: attribute("defaultColWidth").and_then(|value| value.parse().ok()),
+            base: attribute("baseColWidth").and_then(|value| value.parse().ok()),
+        }
+    }
+
+    /// Returns the `width` of a `<col>` that keeps the standard width. Excel reads a `<col>`
+    /// without `width` as zero wide, hiding the column (Excel 16.114, excel-measure I), so a span
+    /// kept for its style or other attributes needs one; the reader reads it back as no width.
+    fn text(&self) -> String {
+        standard_column_width(self.declared, self.base).to_string()
+    }
+}
+
 /// Splits the source spans at the changed columns, sets or clears their width, and adds spans for
-/// changed columns no source span covers.
-fn patched_columns(source_columns: &[ColumnSpan], changes: &LayoutChanges) -> Vec<ColumnSpan> {
+/// changed columns no source span covers. A span whose width is cleared but that keeps other
+/// attributes, such as a style, takes the standard width.
+fn patched_columns(
+    source_columns: &[ColumnSpan],
+    changes: &LayoutChanges,
+    standard_width: &StandardWidth,
+) -> Vec<ColumnSpan> {
     let mut boundaries = source_columns
         .iter()
         .flat_map(|span| [span.min, span.max.saturating_add(1)])
@@ -327,6 +373,9 @@ fn patched_columns(source_columns: &[ColumnSpan], changes: &LayoutChanges) -> Ve
             }
             Some(None) => {
                 attributes.retain(|(key, _)| key != "width" && key != "customWidth");
+                if !attributes.is_empty() {
+                    attributes.push(("width".to_owned(), standard_width.text()));
+                }
             }
             None if source_span.is_none() => continue,
             None => {}
