@@ -730,8 +730,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
   `resize_table_rows(TableId, first_data_row, last_data_row)`,
   `convert_table_to_range(TableId)`,
-  `widen_table_columns(TableId, CellRange)`, and
-  `widen_sheet_auto_filter(SheetId, CellRange)`. A widening keeps the row
+  `widen_table_columns(TableId, CellRange)`,
+  `widen_sheet_auto_filter(SheetId, CellRange)`, and
+  `set_sheet_auto_filter(SheetId, Option<CellRange>)`. A widening keeps the row
   span, contains the old range, keeps filter and sort state, shifts filter
   column IDs when it grows leftward, names new table columns from their text
   header cells, and moves `_xlnm._FilterDatabase` with a sheet filter.
@@ -810,6 +811,16 @@ than guessing a name from a different XLSX crate (`calamine`,
   `DuplicateDefinedName`, and a new name the other scope already uses,
   which would take over uses, with `validation.defined_name_rename_shadowed`.
   The receipt reports a topology change.
+- `set_sheet_auto_filter(SheetId, Option<CellRange>)` creates, changes, or,
+  with `None`, removes a sheet-level autoFilter with the hidden sheet-scoped
+  `_xlnm._FilterDatabase` name Excel keeps equal to its range: a new filter
+  gains the name (`Sheet1!$A$1:$C$9`), a changed one moves it, and a removed
+  one takes it away. A changed filter keeps the criteria of the filter
+  columns whose worksheet columns it still covers, renumbered from its first
+  column; rows a filter hid stay hidden. A filter over a table fails with
+  `validation.sheet_auto_filter_overlaps_table`. Saving writes the
+  worksheet `<autoFilter>` where CT_Worksheet places it, a canonical
+  workbook included.
 - `convert_table_to_range(TableId)` converts a table to a plain range, as
   Excel's Convert to Range does: the table and its filter leave the sheet,
   its cells keep their values and formulas, and every structured reference

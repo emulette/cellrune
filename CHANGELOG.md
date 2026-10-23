@@ -59,6 +59,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   keep their values and formulas, and every structured reference to it becomes a sheet-qualified
   absolute reference, as Excel 16.114 saves it (`Things[val]` becomes `'S2'!$D$2:$D$4`, `[@val]`
   becomes `'S2'!$D2`). Saving into the source package removes the table part and its entries.
+- `WorkbookChange::set_sheet_auto_filter(SheetId, Option<CellRange>)` creates, changes, or removes a
+  sheet-level autoFilter together with its hidden `_xlnm._FilterDatabase` name, keeping the
+  criteria of the columns a changed filter still covers. The canonical writer now writes a sheet's
+  `<autoFilter>`.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and

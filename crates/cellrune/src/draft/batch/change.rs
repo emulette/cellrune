@@ -177,6 +177,17 @@ pub enum WorkbookChange {
         /// New filter range, which keeps the current rows and contains the current range.
         range: CellRange,
     },
+    /// Creates, changes, or, with `None`, removes the sheet-level auto-filter, keeping the hidden
+    /// `_xlnm._FilterDatabase` name Excel keeps equal to its range.
+    ///
+    /// A changed filter keeps the settings of the filter columns whose worksheet columns it still
+    /// covers; rows a filter hid stay hidden.
+    SetSheetAutoFilter {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Filtered range, including its header row, or `None` to remove the filter.
+        range: Option<CellRange>,
+    },
     /// Replaces the font, fill, border, or alignment one cell displays with.
     ///
     /// This is a presentation change: it advances the presentation revision, not the semantic
@@ -397,6 +408,11 @@ impl WorkbookChange {
     /// Constructs a sheet-level auto-filter column widening.
     pub const fn widen_sheet_auto_filter(sheet_id: SheetId, range: CellRange) -> Self {
         Self::WidenSheetAutoFilter { sheet_id, range }
+    }
+
+    /// Constructs a sheet-level auto-filter creation, change, or, with `None`, removal.
+    pub const fn set_sheet_auto_filter(sheet_id: SheetId, range: Option<CellRange>) -> Self {
+        Self::SetSheetAutoFilter { sheet_id, range }
     }
 
     /// Constructs a cell format change.

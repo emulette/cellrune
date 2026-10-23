@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::auto_filter_patch::patch_sheet_auto_filter;
+use super::auto_filter_patch::rewrite_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
 use super::layout_patch::{LayoutChanges, patch_sheet_layout};
 use super::materialization::{MaterializationAction, MaterializationPlan};
@@ -49,7 +49,6 @@ const REL_STYLES: &str =
 const DETAIL_CALCULATION_IDENTITY: &str = "calculation does not belong to the current draft";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_MISSING_TABLE_PART: &str = "source table part mapping was not found";
-const DETAIL_MISSING_AUTO_FILTER: &str = "draft sheet auto-filter was not found";
 const DETAIL_EDITED_CELL_COUNT: &str = "max_edited_cells";
 const DETAIL_EDITED_SHEET_COUNT: &str = "max_edited_sheets";
 const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
@@ -595,10 +594,17 @@ pub(super) fn write_document_package(
             )?;
         }
         if auto_filter_sheets.contains(&sheet_id) {
-            let filter = draft_sheet
-                .auto_filter()
-                .ok_or_else(|| invalid_plan(DETAIL_MISSING_AUTO_FILTER))?;
-            bytes = patch_sheet_auto_filter(&bytes, &sheet_source.part, filter, limits)?;
+            let original = document
+                .workbook()
+                .sheet_by_id(sheet_id)
+                .and_then(Sheet::auto_filter);
+            bytes = rewrite_sheet_auto_filter(
+                &bytes,
+                &sheet_source.part,
+                original,
+                draft_sheet.auto_filter(),
+                limits,
+            )?;
         }
         if let Some(changes) = layout_changes.get(&sheet_id) {
             bytes = patch_sheet_layout(&bytes, &sheet_source.part, changes, limits)?;

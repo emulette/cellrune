@@ -5,6 +5,7 @@ use super::super::{
     WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
 };
+use super::auto_filter_edit::set_sheet_auto_filter;
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
@@ -706,6 +707,18 @@ impl WorkbookDraft {
                             workbook_changed = true;
                             topology_changed = true;
                         }
+                    }
+                }
+                WorkbookChange::SetSheetAutoFilter { sheet_id, range } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let edit = set_sheet_auto_filter(sheet, &mut defined_names, *range)?;
+                    if edit.filter_changed {
+                        touched_sheets.insert(*sheet_id);
+                        semantic_changed = true;
+                    }
+                    if edit.names_changed {
+                        workbook_changed = true;
+                        topology_changed = true;
                     }
                 }
                 WorkbookChange::SetCellFormat {
