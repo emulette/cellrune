@@ -603,7 +603,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   CsvWriteOptions) -> Result<Vec<u8>, CsvError>` writes A1 through the last
   used cell, CRLF after every record, numbers as their shortest round-trip
   decimal, formulas and spilled cells as their calculated values, and quotes
-  text that would read back as anything else. A sheet without formulas needs
+  text that would read back as anything else. Text is written unchanged, so
+  text starting with `=`, `+`, `-`, or `@` opens as a formula in Excel and
+  other spreadsheets; neutralize untrusted text first. A sheet without formulas needs
   no calculation (`None`); with `None`, a formula fails with
   `csv.write.unavailable_result` naming it.
 - `CsvError::code() -> CsvErrorCode`: `csv.invalid_delimiter`,

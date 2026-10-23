@@ -527,7 +527,9 @@ revision; a sheet without formulas needs no calculation. Reading never
 creates a formula: unquoted decimal numbers, `TRUE`/`FALSE` in any case, and Excel error spellings
 become numbers, logicals, and errors, quoted fields and everything else become text, and dates are
 not parsed. Writing quotes text that would read back as anything else, so a write and a read keep
-every value at its address. `read_formats`/`readFormats` page through the font, fill,
+every value at its address. Text is written as it is: text starting with `=`, `+`, `-`, or `@`
+opens as a formula in Excel and other spreadsheets, so neutralize untrusted text before exporting
+a CSV that a spreadsheet will open. `read_formats`/`readFormats` page through the font, fill,
 border, and alignment of a range's cells with its column widths and the page's row heights, and
 `apply_changes_v2`/`applyChangesV2` take `set_cell_format`/`setCellFormat`,
 `set_column_width`/`setColumnWidth`, and `set_row_height`/`setRowHeight` changes, which keep the

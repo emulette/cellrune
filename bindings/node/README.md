@@ -159,7 +159,9 @@ limit. `readValues(sheet, start, end)` reads a rectangle as rows of typed values
 receipt's `inverse` holds the `applyChangesV2` changes that undo the batch and the `unrestored`
 content they cannot bring back.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
-`toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
+`toCsv(sheet, { delimiter })` exports one sheet, formulas as their calculated values (a sheet
+without formulas needs no calculation); the value rule, and why untrusted text starting with `=`,
+`+`, `-`, or `@` needs neutralizing before a spreadsheet opens the file, are in the repository
 README.
 `precedents(sheet, address, { offset, limit })` and `dependents(...)` page through what a cell's
 formula reads and the formulas that read the cell, from the current calculation's graph.

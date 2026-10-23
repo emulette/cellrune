@@ -346,7 +346,8 @@ are never evicted.",
         output_schema = crate::schema::mcp_schema::<CsvExported>(),
         description = "Return one sheet as RFC 4180 CSV text, written from A1 through the last used \
 cell with formulas as their values in the session's current calculated revision. Recalculate \
-first when the sheet holds a formula; the whole text must fit the server response limit.",
+first when the sheet holds a formula; the whole text must fit the server response limit. Text is \
+written unchanged, so text starting with =, +, -, or @ opens as a formula in a spreadsheet.",
         annotations(
             title = "Export sheet as CSV",
             read_only_hint = true,
