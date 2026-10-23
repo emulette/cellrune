@@ -387,6 +387,9 @@ The random-function seed is a calculation option on every surface: Python `rando
 Node.js `randomSeed` on calculate, recalculate, targeted calculation, and previews, and MCP
 `random_seed` on `workbook_recalculate`, `workbook_calculate_targets` options, and
 `workbook_preview_changes`. It accepts an integer from 0 through 4294967295.
+The locale profile travels the same way: Python `locale_profile={"locale": "ko-KR"}` and Node.js
+`localeProfile: { locale: "ko-KR" }`, each with an optional display language, and MCP
+`locale_profile` on the same tools; `en-US` and `ko-KR` are the built-in locales.
 Python `inspect_defined_name` and Node.js `inspectDefinedName` expose the typed defined-name query.
 The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separate
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and

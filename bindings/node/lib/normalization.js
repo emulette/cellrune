@@ -604,6 +604,10 @@ function normalizeTransactionOptions(options) {
     todaySerial: options.today_serial ?? null,
     nowSerial: options.now_serial ?? null,
     randomSeed: options.random_seed ?? null,
+    localeProfile: {
+      locale: options.locale_profile.locale,
+      displayLanguage: options.locale_profile.display_language,
+    },
     arithmeticSemantics: options.arithmetic_semantics,
     financialSolverSemantics: options.financial_solver_semantics,
     limits: {

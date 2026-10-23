@@ -1,6 +1,7 @@
 from cellrune import (
     CapabilityPage,
     CalculationLimitOptions,
+    LocaleProfile,
     ReadLimitOptions,
     TargetCalculationResult,
     CalculationDelta,
@@ -105,6 +106,8 @@ def check() -> None:
     output: bytes = workbook.to_bytes()
     limits: CalculationLimitOptions = {"max_array_cells": 2_000_000}
     workbook.calculate(calculation_limits=limits)
+    korean: LocaleProfile = {"locale": "ko-KR", "display_language": "en-US"}
+    workbook.calculate(locale_profile=korean)
     read_limits: ReadLimitOptions = {"max_entry_uncompressed_bytes": 1 << 27}
     reopened: Workbook = Workbook.from_bytes(output, read_limits=read_limits)
     edited: bytes = reopened.edits_to_bytes()

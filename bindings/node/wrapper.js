@@ -36,10 +36,12 @@ const {
 } = require("./lib/normalization.js");
 const {
   limitsJson,
+  localeProfileWire,
   requireFinite,
   requireNonNegativeInteger,
   requireOptionalBoolean,
   requireOptionalFinite,
+  requireOptionalLocaleProfile,
   requireOptionalString,
   requireOptionalU32,
   requireOptionKeys,
@@ -160,6 +162,7 @@ class Workbook {
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
     requireOptionalU32(options.randomSeed, "randomSeed");
+    requireOptionalLocaleProfile(options.localeProfile, "localeProfile");
     requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
     requireOptionalString(
       options.financialSolverSemantics,
@@ -189,6 +192,7 @@ class Workbook {
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
     requireOptionalU32(options.randomSeed, "randomSeed");
+    requireOptionalLocaleProfile(options.localeProfile, "localeProfile");
     requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
     requireOptionalString(
       options.financialSolverSemantics,
@@ -215,6 +219,7 @@ class Workbook {
       "todaySerial",
       "nowSerial",
       "randomSeed",
+      "localeProfile",
       "arithmeticSemantics",
       "financialSolverSemantics",
       "calculationLimits",
@@ -226,6 +231,7 @@ class Workbook {
     requireOptionalFinite(options.todaySerial, "todaySerial");
     requireOptionalFinite(options.nowSerial, "nowSerial");
     requireOptionalU32(options.randomSeed, "randomSeed");
+    requireOptionalLocaleProfile(options.localeProfile, "localeProfile");
     requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
     requireOptionalString(
       options.financialSolverSemantics,
@@ -245,6 +251,7 @@ class Workbook {
           today_serial: options.todaySerial ?? null,
           now_serial: options.nowSerial ?? null,
           random_seed: options.randomSeed ?? null,
+          locale_profile: localeProfileWire(options.localeProfile),
           arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
           financial_solver_semantics:
             options.financialSolverSemantics ?? "excel_iteration_budget",
@@ -503,6 +510,7 @@ function calculationOptions(options) {
     todaySerial: options.todaySerial,
     nowSerial: options.nowSerial,
     randomSeed: options.randomSeed,
+    localeProfile: options.localeProfile,
     arithmeticSemantics: options.arithmeticSemantics,
     financialSolverSemantics: options.financialSolverSemantics,
   };

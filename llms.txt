@@ -1052,7 +1052,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   Undeclared spills outside the dependency scope are not discovered; use declared spill ranges
   or full calculation when independently anchored spills may overlap.
 - Python: `workbook.calculate_targets([{"sheet": "Sheet1", "start": "B1", "end": "B10"}],
-  today_serial=..., now_serial=..., random_seed=..., arithmetic_semantics=...,
+  today_serial=..., now_serial=..., random_seed=..., locale_profile=...,
+  arithmetic_semantics=...,
   financial_solver_semantics=...,
   limits={"max_result_cells": 100}) -> TargetCalculationResult`; omit `end` for one cell.
   Node: `await workbook.calculateTargets([{sheet: "Sheet1", start: "B1", end: "B10"}],
@@ -1145,6 +1146,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   4294967295: Python rejects other values with `interop.value.number_invalid`,
   Node.js with `interop.input.invalid`, and the JSON targeted and MCP payloads
   as invalid payloads.
+  The locale profile is carried the same way: `CalculationOptionsDto.locale_profile`
+  is an optional `LocaleProfileDto { locale, display_language }` of `LocaleDto`
+  tags `"en-US"` or `"ko-KR"` (an omitted display language follows `locale`),
+  and the transaction report's `calculation_options.locale_profile` records
+  the profile in effect with the display language resolved. Python
+  `locale_profile={"locale": "ko-KR", "display_language": "en-US"}` and
+  Node.js `localeProfile: { locale: "ko-KR", displayLanguage: "en-US" }` work
+  on `calculate`, `recalculate`, targeted calculation, and previews, and MCP
+  `locale_profile` on `workbook_recalculate`, `workbook_calculate_targets`
+  `options`, and `workbook_preview_changes`. An unknown tag or key is
+  `interop.calculation.locale_profile_invalid` from Python and from Node.js
+  `calculate` and `recalculate`, Node.js rejects a value that is not an object
+  of strings with `interop.input.invalid`, and JSON targeted, Node.js preview,
+  and MCP payloads fail as invalid payloads.
   `docs/NUMERICS.md` records the policies and their oracles.
 - `CalculationLimits::default()` + 12 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
   budgets: formula tokens, source bytes, AST nodes, AST nesting depth,

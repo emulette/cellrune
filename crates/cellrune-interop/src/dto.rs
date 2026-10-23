@@ -24,6 +24,44 @@ pub enum FinancialSolverSemanticsDto {
     ExtendedSearch,
 }
 
+/// A built-in locale, written as its BCP 47 tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub enum LocaleDto {
+    /// English (United States).
+    #[default]
+    #[serde(rename = "en-US")]
+    EnUs,
+    /// Korean (Korea).
+    #[serde(rename = "ko-KR")]
+    KoKr,
+}
+
+impl LocaleDto {
+    /// Reads a BCP 47 tag, `en-US` or `ko-KR`, as bindings receive it.
+    ///
+    /// # Errors
+    /// Returns `interop.calculation.locale_profile_invalid` for any other text.
+    pub fn from_tag(tag: &str) -> Result<Self, crate::InteropError> {
+        match tag {
+            "en-US" => Ok(Self::EnUs),
+            "ko-KR" => Ok(Self::KoKr),
+            _ => Err(crate::InteropError::invalid_locale_profile()),
+        }
+    }
+}
+
+/// Locale conventions: the regional format of `DOLLAR`, `TEXT` names, and the double-byte text
+/// functions, and the language of the `GROUPBY` and `PIVOTBY` total labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LocaleProfileDto {
+    /// Regional-format locale.
+    pub locale: LocaleDto,
+    /// Language of generated labels; omitted follows `locale`.
+    #[serde(default)]
+    pub display_language: Option<LocaleDto>,
+}
+
 /// Deterministic inputs supplied to one calculation.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +72,9 @@ pub struct CalculationOptionsDto {
     pub now_serial: Option<f64>,
     /// Seed that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` draw from; not cryptographic.
     pub random_seed: Option<u32>,
+    /// Locale conventions; omitted selects English (United States).
+    #[serde(default)]
+    pub locale_profile: Option<LocaleProfileDto>,
     /// Policy for cancelling addition and subtraction.
     #[serde(default)]
     pub arithmetic_semantics: ArithmeticSemanticsDto,
@@ -607,6 +648,9 @@ pub struct CalculationOptionsReportDto {
     pub now_serial: Option<f64>,
     /// Seed for `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`, when supplied.
     pub random_seed: Option<u32>,
+    /// Locale conventions in effect, with the display language resolved.
+    #[serde(default)]
+    pub locale_profile: LocaleProfileDto,
     /// Policy for cancelling addition and subtraction.
     pub arithmetic_semantics: ArithmeticSemanticsDto,
     /// Policy for iterative financial-solver convergence.

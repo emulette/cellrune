@@ -3,12 +3,12 @@ use cellrune::{
     CalculationDelta, CalculationDeltaPage, CalculationExecutionMode, CalculationIssue,
     CalculationLimits, CalculationOptions, CalculationSnapshot, CellAddress, CellContent,
     CellValue, EditReceipt, ExcelError, FinancialSolverSemantics, FiniteNumber,
-    InstallDeltaBasisReason, MaterializedResultOrigin, NumberFormat, NumberFormatKind, ReadLimits,
-    RecalculationMode, RecalculationWriteOptions, RecalculationWritePolicy, SavedResult, SheetId,
-    SheetVisibility, TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
-    TransactionImpactCoverage, TransactionIssueChangeKind, WorkbookDraft, WorkbookFingerprint,
-    WorkbookSnapshot, WorkbookTransactionReceipt, WorkbookTransactionReport, WriteOptions,
-    XlsxDocumentKind,
+    InstallDeltaBasisReason, Locale, LocaleProfile, MaterializedResultOrigin, NumberFormat,
+    NumberFormatKind, ReadLimits, RecalculationMode, RecalculationWriteOptions,
+    RecalculationWritePolicy, SavedResult, SheetId, SheetVisibility, TransactionDetailItem,
+    TransactionDetailSection, TransactionImpactCause, TransactionImpactCoverage,
+    TransactionIssueChangeKind, WorkbookDraft, WorkbookFingerprint, WorkbookSnapshot,
+    WorkbookTransactionReceipt, WorkbookTransactionReport, WriteOptions, XlsxDocumentKind,
 };
 
 use crate::{
@@ -16,9 +16,9 @@ use crate::{
     CalculationIssueDto, CalculationLimitOptionsDto, CalculationLimitsDto, CalculationOptionsDto,
     CalculationOptionsReportDto, CalculationReportDto, CalculationResultDto, CellDto,
     CellReferenceDto, CellValueDto, EditReceiptDto, EditWriteReportDto,
-    FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION, InteropError, MaterializedResultOriginDto,
-    NumberFormatDto, ProviderIdentityDto, ReadLimitOptionsDto, RecalculationModeDto,
-    SavedValueStateDto, TransactionDetailCountsDto, TransactionDetailItemDto,
+    FinancialSolverSemanticsDto, INTEROP_SCHEMA_VERSION, InteropError, LocaleDto, LocaleProfileDto,
+    MaterializedResultOriginDto, NumberFormatDto, ProviderIdentityDto, ReadLimitOptionsDto,
+    RecalculationModeDto, SavedValueStateDto, TransactionDetailCountsDto, TransactionDetailItemDto,
     TransactionDetailSectionDto, TransactionImpactCoverageDto, TransactionImpactPageDto,
     WorkbookFingerprintDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
     WritableCellValueDto, WriteOptionsDto, WriteReportDto,
@@ -54,7 +54,30 @@ pub(crate) fn calculation_options(
     if let Some(seed) = options.random_seed {
         converted = converted.with_random_seed(seed);
     }
+    if let Some(profile) = options.locale_profile {
+        converted = converted.with_locale_profile(locale_profile(profile));
+    }
     Ok(converted.with_limits(calculation_limits(options.calculation_limits)?))
+}
+
+fn locale_profile(profile: LocaleProfileDto) -> LocaleProfile {
+    let locale = locale(profile.locale);
+    LocaleProfile::new(locale)
+        .with_display_language(profile.display_language.map_or(locale, self::locale))
+}
+
+const fn locale(locale: LocaleDto) -> Locale {
+    match locale {
+        LocaleDto::EnUs => Locale::EnUs,
+        LocaleDto::KoKr => Locale::KoKr,
+    }
+}
+
+fn locale_dto(locale: Locale) -> LocaleDto {
+    match locale {
+        Locale::KoKr => LocaleDto::KoKr,
+        _ => LocaleDto::EnUs,
+    }
 }
 
 /// Applies the supplied limits over the core defaults.
@@ -781,6 +804,10 @@ pub(crate) fn calculation_options_report(
         today_serial: options.today_serial().map(FiniteNumber::get),
         now_serial: options.now_serial().map(FiniteNumber::get),
         random_seed: options.random_seed(),
+        locale_profile: LocaleProfileDto {
+            locale: locale_dto(options.locale_profile().locale()),
+            display_language: Some(locale_dto(options.locale_profile().display_language())),
+        },
         arithmetic_semantics: match options.arithmetic_semantics() {
             ArithmeticSemantics::ExcelNearZero => ArithmeticSemanticsDto::ExcelNearZero,
             ArithmeticSemantics::Ieee754 => ArithmeticSemanticsDto::Ieee754,

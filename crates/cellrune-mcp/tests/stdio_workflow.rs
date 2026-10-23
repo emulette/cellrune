@@ -1801,3 +1801,105 @@ fn failed_tool(result: Value) -> Value {
     );
     result["structuredContent"].clone()
 }
+
+#[test]
+fn locale_profile_is_a_stdio_calculation_argument() {
+    let root = TestDirectory::new("locale-profile");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A1",
+                    "formula": "=DOLLAR(1234.567,2)",
+                    "dynamic_range": null
+                },
+                {
+                    "kind": "set_formula",
+                    "sheet": "Sheet1",
+                    "address": "A2",
+                    "formula": "=LENB(\"가나\")",
+                    "dynamic_range": null
+                }
+            ]
+        }),
+    ));
+    let read = |mcp: &mut McpProcess| {
+        successful_tool(mcp.call_tool(
+            "workbook_read_range",
+            json!({"session_id": session_id, "sheet": "Sheet1", "start": "A1", "end": "A2"}),
+        ))["cells"]
+            .as_array()
+            .expect("range cells")
+            .iter()
+            .map(|cell| cell["calculated"]["value"]["value"].clone())
+            .collect::<Vec<_>>()
+    };
+
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full"}),
+    ));
+    assert_eq!(read(&mut mcp), [json!("$1,234.57"), json!(2.0)]);
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({
+            "session_id": session_id,
+            "mode": "full",
+            "locale_profile": {"locale": "ko-KR"}
+        }),
+    ));
+    assert_eq!(read(&mut mcp), [json!("₩1,234.57"), json!(4.0)]);
+    let targeted = successful_tool(mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id": session_id,
+            "targets": [{"sheet": "Sheet1", "start": "A1", "end": "A1"}],
+            "options": {"locale_profile": {"locale": "ko-KR"}}
+        }),
+    ));
+    assert_eq!(
+        targeted["cells"][0]["result"]["value"]["value"],
+        "₩1,234.57"
+    );
+
+    let preview = successful_tool(mcp.call_tool(
+        "workbook_preview_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "B1",
+                "value": {"kind": "number", "value": 1.0}
+            }],
+            "locale_profile": {"locale": "ko-KR", "display_language": "en-US"}
+        }),
+    ));
+    assert_eq!(
+        preview["report"]["calculation_options"]["locale_profile"],
+        json!({"locale": "ko-KR", "display_language": "en-US"})
+    );
+    let invalid = mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "locale_profile": {"locale": "ja-JP"}}),
+    );
+    assert_eq!(
+        invalid["isError"], true,
+        "an unknown locale must be rejected: {invalid}"
+    );
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}

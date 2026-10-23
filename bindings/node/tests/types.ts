@@ -11,6 +11,7 @@ import {
   type EditReceipt,
   type EditReceiptV2,
   type FunctionCatalogReport,
+  type LocaleProfile,
   type PreviewChanges,
   type PreviewCursor,
   type RangePage,
@@ -66,6 +67,10 @@ async function check(): Promise<void> {
     arithmeticSemantics: "ieee_754",
     financialSolverSemantics: "extended_search",
   });
+  const korean: LocaleProfile = { locale: "ko-KR", displayLanguage: "en-US" };
+  await workbook.calculate({ localeProfile: korean });
+  // @ts-expect-error Only the built-in locales are accepted.
+  await workbook.calculate({ localeProfile: { locale: "ja-JP" } });
   const changes: readonly WorkbookChange[] = [
     {
       kind: "setValue",

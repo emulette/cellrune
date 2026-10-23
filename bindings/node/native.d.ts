@@ -88,6 +88,7 @@ export interface NativeCalculationOptions {
   todaySerial?: number
   nowSerial?: number
   randomSeed?: number
+  localeProfile?: NativeLocaleProfile
   arithmeticSemantics?: string
   financialSolverSemantics?: string
 }
@@ -248,6 +249,12 @@ export interface NativeFunctionUsageReport {
   parsedFormulaCount: number
   unparsedFormulaCount: number
   entries: Array<NativeFunctionUsageEntry>
+}
+
+/** A locale profile as JavaScript passes it: BCP 47 tags that native code validates. */
+export interface NativeLocaleProfile {
+  locale: string
+  displayLanguage?: string
 }
 
 export interface NativeNumberFormat {

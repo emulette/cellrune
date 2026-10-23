@@ -4,9 +4,9 @@ use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
-    ReadLimitOptionsDto, RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession,
-    WritableCellValueDto, WriteOptionsDto,
+    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
+    RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, TransactionDetailSectionDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -182,6 +182,7 @@ impl Workbook {
         today_serial=None,
         now_serial=None,
         random_seed=None,
+        locale_profile=None,
         arithmetic_semantics="excel_near_zero",
         financial_solver_semantics="excel_iteration_budget",
         calculation_limits=None
@@ -194,6 +195,7 @@ impl Workbook {
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
         random_seed: Option<&Bound<'_, PyAny>>,
+        locale_profile: Option<&Bound<'_, PyAny>>,
         arithmetic_semantics: &str,
         financial_solver_semantics: &str,
         calculation_limits: Option<&Bound<'_, PyAny>>,
@@ -206,6 +208,8 @@ impl Workbook {
             optional_number_from_python(now_serial).map_err(|error| into_py_error(py, error))?;
         let random_seed =
             optional_seed_from_python(random_seed).map_err(|error| into_py_error(py, error))?;
+        let locale_profile = optional_locale_profile_from_python(locale_profile)
+            .map_err(|error| into_py_error(py, error))?;
         let arithmetic_semantics = parse_arithmetic_semantics(arithmetic_semantics)
             .map_err(|error| into_py_error(py, error))?;
         let financial_solver_semantics =
@@ -219,6 +223,7 @@ impl Workbook {
                         today_serial,
                         now_serial,
                         random_seed,
+                        locale_profile,
                         arithmetic_semantics,
                         financial_solver_semantics,
                         calculation_limits,
@@ -254,6 +259,7 @@ impl Workbook {
         today_serial=None,
         now_serial=None,
         random_seed=None,
+        locale_profile=None,
         arithmetic_semantics="excel_near_zero",
         financial_solver_semantics="excel_iteration_budget",
         calculation_limits=None
@@ -266,6 +272,7 @@ impl Workbook {
         today_serial: Option<&Bound<'_, PyAny>>,
         now_serial: Option<&Bound<'_, PyAny>>,
         random_seed: Option<&Bound<'_, PyAny>>,
+        locale_profile: Option<&Bound<'_, PyAny>>,
         arithmetic_semantics: &str,
         financial_solver_semantics: &str,
         calculation_limits: Option<&Bound<'_, PyAny>>,
@@ -281,6 +288,8 @@ impl Workbook {
             optional_number_from_python(now_serial).map_err(|error| into_py_error(py, error))?;
         let random_seed =
             optional_seed_from_python(random_seed).map_err(|error| into_py_error(py, error))?;
+        let locale_profile = optional_locale_profile_from_python(locale_profile)
+            .map_err(|error| into_py_error(py, error))?;
         let arithmetic_semantics = parse_arithmetic_semantics(arithmetic_semantics)
             .map_err(|error| into_py_error(py, error))?;
         let financial_solver_semantics =
@@ -294,6 +303,7 @@ impl Workbook {
                         today_serial,
                         now_serial,
                         random_seed,
+                        locale_profile,
                         arithmetic_semantics,
                         financial_solver_semantics,
                         calculation_limits,
@@ -701,6 +711,36 @@ fn optional_number_from_python(
     value.map(number_from_python).transpose()
 }
 
+/// Reads a locale profile: a `dict` with a `locale` tag and an optional `display_language` tag,
+/// each `"en-US"` or `"ko-KR"`.
+fn optional_locale_profile_from_python(
+    value: Option<&Bound<'_, PyAny>>,
+) -> Result<Option<LocaleProfileDto>, InteropError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let profile = value
+        .cast::<PyDict>()
+        .map_err(|_| InteropError::invalid_locale_profile())?;
+    let mut locale = None;
+    let mut display_language = None;
+    for (key, tag) in profile.iter() {
+        let tag = tag
+            .extract::<String>()
+            .map_err(|_| InteropError::invalid_locale_profile())?;
+        let tag = LocaleDto::from_tag(&tag)?;
+        match key.extract::<String>().as_deref() {
+            Ok("locale") => locale = Some(tag),
+            Ok("display_language") => display_language = Some(tag),
+            _ => return Err(InteropError::invalid_locale_profile()),
+        }
+    }
+    Ok(Some(LocaleProfileDto {
+        locale: locale.ok_or_else(InteropError::invalid_locale_profile)?,
+        display_language,
+    }))
+}
+
 /// Reads a random seed: an `int` from 0 through 2^32 - 1, never a `bool` or `float`.
 fn optional_seed_from_python(
     value: Option<&Bound<'_, PyAny>>,
@@ -776,6 +816,7 @@ fn preview_options_from_python(
         "today_serial",
         "now_serial",
         "random_seed",
+        "locale_profile",
         "arithmetic_semantics",
         "financial_solver_semantics",
         "calculation_limits",
@@ -812,6 +853,7 @@ fn preview_options_from_python(
     let today_serial = options.get_item("today_serial")?;
     let now_serial = options.get_item("now_serial")?;
     let random_seed = options.get_item("random_seed")?;
+    let locale_profile = options.get_item("locale_profile")?;
     let calculation_limits = options.get_item("calculation_limits")?;
     let calculation_limits = limits_from_python::<CalculationLimitOptionsDto>(
         py,
@@ -830,6 +872,10 @@ fn preview_options_from_python(
             .map_err(|error| into_py_error(py, error))?,
             random_seed: optional_seed_from_python(
                 random_seed.as_ref().filter(|value| !value.is_none()),
+            )
+            .map_err(|error| into_py_error(py, error))?,
+            locale_profile: optional_locale_profile_from_python(
+                locale_profile.as_ref().filter(|value| !value.is_none()),
             )
             .map_err(|error| into_py_error(py, error))?,
             arithmetic_semantics: parse_arithmetic_semantics(&arithmetic_semantics)

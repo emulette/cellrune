@@ -47,6 +47,29 @@ function requireOptionalU32(value, name) {
   }
 }
 
+function requireOptionalLocaleProfile(value, name) {
+  if (value === undefined) {
+    return;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw inputError(`${name} must be an object`);
+  }
+  for (const key of Object.keys(value)) {
+    if (key !== "locale" && key !== "displayLanguage") {
+      throw inputError(`${name} has an unknown key ${key}`);
+    }
+  }
+  requireString(value.locale, `${name}.locale`);
+  requireOptionalString(value.displayLanguage, `${name}.displayLanguage`);
+}
+
+/** The snake_case form a JSON payload carries; native code validates the tags. */
+function localeProfileWire(value) {
+  return value === undefined
+    ? null
+    : { locale: value.locale, display_language: value.displayLanguage ?? null };
+}
+
 function requireOptionalString(value, name) {
   if (value !== undefined) {
     requireString(value, name);
@@ -134,11 +157,13 @@ function limitsJson(value, name) {
 
 module.exports = {
   limitsJson,
+  localeProfileWire,
   requireFinite,
   requireNonNegativeInteger,
   requireObject,
   requireOptionalBoolean,
   requireOptionalFinite,
+  requireOptionalLocaleProfile,
   requireOptionalString,
   requireOptionalU32,
   requireOptionKeys,

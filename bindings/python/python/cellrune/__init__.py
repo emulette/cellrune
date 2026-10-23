@@ -4,6 +4,8 @@ from ._native import SCHEMA_VERSION, CellRuneError, Workbook, function_catalog
 from ._types import (
     CalculationLimitOptions,
     CalculationTarget,
+    LocaleProfile,
+    LocaleTag,
     TargetCalculationCell,
     TargetCalculationLimitOptions,
     TargetCalculationLimits,
@@ -76,6 +78,7 @@ from ._types import (
     PreviewCursor,
     ProviderIdentity,
     TransactionCalculationOptions,
+    TransactionLocaleProfile,
     TransactionDetailCounts,
     TransactionDetailItem,
     TransactionImpactPage,
@@ -94,6 +97,8 @@ from ._types import (
 __all__ = [
     "CalculationLimitOptions",
     "CalculationTarget",
+    "LocaleProfile",
+    "LocaleTag",
     "TargetCalculationCell",
     "TargetCalculationLimitOptions",
     "TargetCalculationLimits",
@@ -169,6 +174,7 @@ __all__ = [
     "TableSummary",
     "TextValue",
     "TransactionCalculationOptions",
+    "TransactionLocaleProfile",
     "TransactionDetailCounts",
     "TransactionDetailItem",
     "TransactionImpactPage",

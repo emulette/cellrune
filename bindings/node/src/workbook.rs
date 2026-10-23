@@ -4,9 +4,9 @@ use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, PreviewCursorDto, RangeRequestDto,
-    RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
+    RangeRequestDto, RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession,
+    WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
@@ -409,6 +409,7 @@ struct PreviewOptionsInput {
     today_serial: Option<f64>,
     now_serial: Option<f64>,
     random_seed: Option<u32>,
+    locale_profile: Option<LocaleProfileDto>,
     #[serde(default)]
     arithmetic_semantics: ArithmeticSemanticsDto,
     #[serde(default)]
@@ -424,6 +425,7 @@ impl PreviewOptionsInput {
             today_serial: self.today_serial,
             now_serial: self.now_serial,
             random_seed: self.random_seed,
+            locale_profile: self.locale_profile,
             arithmetic_semantics: self.arithmetic_semantics,
             financial_solver_semantics: self.financial_solver_semantics,
             calculation_limits,
@@ -508,8 +510,28 @@ pub struct NativeCalculationOptions {
     pub today_serial: Option<f64>,
     pub now_serial: Option<f64>,
     pub random_seed: Option<u32>,
+    pub locale_profile: Option<NativeLocaleProfile>,
     pub arithmetic_semantics: Option<String>,
     pub financial_solver_semantics: Option<String>,
+}
+
+/// A locale profile as JavaScript passes it: BCP 47 tags that native code validates.
+#[napi(object)]
+pub struct NativeLocaleProfile {
+    pub locale: String,
+    pub display_language: Option<String>,
+}
+
+fn locale_profile(profile: NativeLocaleProfile) -> napi::Result<LocaleProfileDto> {
+    Ok(LocaleProfileDto {
+        locale: LocaleDto::from_tag(&profile.locale).map_err(napi_error)?,
+        display_language: profile
+            .display_language
+            .as_deref()
+            .map(LocaleDto::from_tag)
+            .transpose()
+            .map_err(napi_error)?,
+    })
 }
 
 fn calculation_options(
@@ -521,9 +543,11 @@ fn calculation_options(
         today_serial,
         now_serial,
         random_seed,
+        locale_profile,
         arithmetic_semantics,
         financial_solver_semantics,
     } = options.unwrap_or_default();
+    let locale_profile = locale_profile.map(self::locale_profile).transpose()?;
     let arithmetic_semantics = match arithmetic_semantics.as_deref().unwrap_or("excel_near_zero") {
         "excel_near_zero" => ArithmeticSemanticsDto::ExcelNearZero,
         "ieee_754" => ArithmeticSemanticsDto::Ieee754,
@@ -545,6 +569,7 @@ fn calculation_options(
         today_serial,
         now_serial,
         random_seed,
+        locale_profile,
         arithmetic_semantics,
         financial_solver_semantics,
         calculation_limits,

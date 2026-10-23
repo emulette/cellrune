@@ -264,6 +264,13 @@ export interface OpenOptions {
   readonly readLimits?: ReadLimitOptions;
 }
 
+export type LocaleTag = "en-US" | "ko-KR";
+
+export interface LocaleProfile {
+  readonly locale: LocaleTag;
+  readonly displayLanguage?: LocaleTag;
+}
+
 export interface CalculationOptions {
   readonly todaySerial?: number;
   readonly nowSerial?: number;
@@ -272,6 +279,12 @@ export interface CalculationOptions {
    * The generator is deterministic and not cryptographically secure.
    */
   readonly randomSeed?: number;
+  /**
+   * Locale conventions: `{ locale: "ko-KR" }` writes `DOLLAR` in won, counts Hangul as two bytes in
+   * `LENB` and the other byte functions, and labels `GROUPBY` and `PIVOTBY` totals `합계`;
+   * `displayLanguage` sets the labels apart. Omitted selects en-US.
+   */
+  readonly localeProfile?: LocaleProfile;
   readonly arithmeticSemantics?: "excel_near_zero" | "ieee_754";
   readonly financialSolverSemantics?:
     | "excel_iteration_budget"
@@ -566,6 +579,7 @@ export interface TransactionCalculationOptions {
   readonly todaySerial: number | null;
   readonly nowSerial: number | null;
   readonly randomSeed: number | null;
+  readonly localeProfile: { readonly locale: LocaleTag; readonly displayLanguage: LocaleTag };
   readonly arithmeticSemantics: "excel_near_zero" | "ieee_754";
   readonly financialSolverSemantics:
     | "excel_iteration_budget"

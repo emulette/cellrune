@@ -10,6 +10,7 @@ from typing import Literal, cast
 from cellrune import (
     CalculationLimitOptions,
     CellRuneError,
+    LocaleProfile,
     ReadLimitOptions,
     Workbook,
     function_catalog,
@@ -181,6 +182,65 @@ def assert_random_seed() -> None:
         assert_error(
             "interop.value.number_invalid",
             lambda invalid=invalid: calculate_with_invalid_seed(workbook, invalid),
+        )
+
+
+def calculate_with_invalid_locale(workbook: Workbook, value: object) -> object:
+    return workbook.calculate(locale_profile=cast(LocaleProfile, value))
+
+
+def assert_locale_profile() -> None:
+    workbook = Workbook.create()
+    workbook.set_formula("Sheet1", "A1", "=DOLLAR(1234.567,2)")
+    workbook.set_formula("Sheet1", "A2", '=LENB("가나")')
+    korean: LocaleProfile = {"locale": "ko-KR"}
+
+    def values() -> list[object]:
+        return [
+            cell["calculated"]["value"]["value"]
+            for cell in workbook.read_range("Sheet1", "A1", "A2")["cells"]
+        ]
+
+    workbook.calculate()
+    assert values() == ["$1,234.57", 2]
+    workbook.calculate(locale_profile=korean)
+    assert values() == ["₩1,234.57", 4]
+    workbook.recalculate(mode="full")
+    assert values() == ["$1,234.57", 2]
+    workbook.recalculate(mode="full", locale_profile=korean)
+    assert values() == ["₩1,234.57", 4]
+    targeted = workbook.calculate_targets(
+        [{"sheet": "Sheet1", "start": "A1"}], locale_profile=korean
+    )
+    assert targeted["cells"][0]["result"]["value"]["value"] == "₩1,234.57"
+
+    preview = workbook.preview_changes(
+        workbook.summary()["semantic_revision"],
+        [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "B1",
+                "value": {"kind": "number", "value": 1.0},
+            }
+        ],
+        locale_profile={"locale": "ko-KR", "display_language": "en-US"},
+    )
+    assert preview["report"]["calculation_options"]["locale_profile"] == {
+        "locale": "ko-KR",
+        "display_language": "en-US",
+    }
+    workbook.discard_preview(preview["preview_id"])
+    for invalid in (
+        "ko-KR",
+        {"locale": "ja-JP"},
+        {"display_language": "ko-KR"},
+        {"locale": "ko-KR", "region": "KR"},
+        {"locale": 1},
+    ):
+        assert_error(
+            "interop.calculation.locale_profile_invalid",
+            lambda invalid=invalid: calculate_with_invalid_locale(workbook, invalid),
         )
 
 
@@ -433,6 +493,7 @@ def main() -> None:
     assert_preview_contract()
     assert_object_payloads()
     assert_random_seed()
+    assert_locale_profile()
     assert_exact_numbers()
     assert_volatile_input_recalculation()
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))

@@ -24,6 +24,22 @@ class TargetCalculationLimits(TypedDict):
     max_evaluated_cells: int
 
 
+LocaleTag = Literal["en-US", "ko-KR"]
+
+
+class LocaleProfileOptions(TypedDict, total=False):
+    display_language: LocaleTag
+
+
+class LocaleProfile(LocaleProfileOptions):
+    locale: LocaleTag
+
+
+class TransactionLocaleProfile(TypedDict):
+    locale: LocaleTag
+    display_language: LocaleTag
+
+
 class CalculationLimitOptions(TypedDict, total=False):
     max_formula_tokens: int
     max_formula_source_bytes: int
@@ -610,6 +626,7 @@ class TransactionCalculationOptions(TypedDict):
     today_serial: float | None
     now_serial: float | None
     random_seed: int | None
+    locale_profile: TransactionLocaleProfile
     arithmetic_semantics: Literal["excel_near_zero", "ieee_754"]
     financial_solver_semantics: Literal[
         "excel_iteration_budget", "extended_search"

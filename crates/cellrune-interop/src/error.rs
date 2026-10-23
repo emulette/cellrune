@@ -36,6 +36,8 @@ const MESSAGE_ARITHMETIC_SEMANTICS_INVALID: &str =
     "arithmetic semantics must be excel_near_zero or ieee_754";
 const MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID: &str =
     "financial solver semantics must be excel_iteration_budget or extended_search";
+const MESSAGE_LOCALE_PROFILE_INVALID: &str =
+    "locale profile must be an object whose locale and display_language are en-US or ko-KR";
 const MESSAGE_NUMBER_INVALID: &str =
     "number must be an integer or floating-point value; booleans are not accepted";
 const MESSAGE_ARCHIVE_LIMIT_INVALID: &str = "archive byte limit must be greater than zero";
@@ -276,6 +278,14 @@ impl InteropError {
         Self::input(
             "interop.calculation.financial_solver_semantics_invalid",
             MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID,
+        )
+    }
+
+    /// Creates the stable invalid locale-profile error used by typed bindings.
+    pub fn invalid_locale_profile() -> Self {
+        Self::input(
+            "interop.calculation.locale_profile_invalid",
+            MESSAGE_LOCALE_PROFILE_INVALID,
         )
     }
 

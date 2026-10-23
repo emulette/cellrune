@@ -6,6 +6,8 @@ from ._native import (
 )
 from ._types import (
     CalculationLimitOptions as CalculationLimitOptions,
+    LocaleProfile as LocaleProfile,
+    LocaleTag as LocaleTag,
     CalculationTarget as CalculationTarget,
     TargetCalculationCell as TargetCalculationCell,
     TargetCalculationLimitOptions as TargetCalculationLimitOptions,
@@ -79,6 +81,7 @@ from ._types import (
     TableSummary as TableSummary,
     TextValue as TextValue,
     TransactionCalculationOptions as TransactionCalculationOptions,
+    TransactionLocaleProfile as TransactionLocaleProfile,
     TransactionDetailCounts as TransactionDetailCounts,
     TransactionDetailItem as TransactionDetailItem,
     TransactionImpactPage as TransactionImpactPage,
@@ -104,6 +107,8 @@ __all__ = [
     "CalculationDeltaPage",
     "CalculationIssue",
     "CalculationLimitOptions",
+    "LocaleProfile",
+    "LocaleTag",
     "CalculationLimits",
     "CalculationReport",
     "CalculationResult",
@@ -167,6 +172,7 @@ __all__ = [
     "TableSummary",
     "TextValue",
     "TransactionCalculationOptions",
+    "TransactionLocaleProfile",
     "TransactionDetailCounts",
     "TransactionDetailItem",
     "TransactionImpactPage",

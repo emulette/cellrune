@@ -306,6 +306,60 @@ async function assertRandomSeed() {
   }
 }
 
+async function assertLocaleProfile() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "A1", "=DOLLAR(1234.567,2)");
+  workbook.setFormula("Sheet1", "A2", "=LENB(\"가나\")");
+  const values = () =>
+    workbook.readRange("Sheet1", "A1", "A2").cells.map((cell) => cell.calculated.value.value);
+  const korean = { locale: "ko-KR" };
+
+  await workbook.calculate();
+  assert.deepEqual(values(), ["$1,234.57", 2]);
+  await workbook.calculate({ localeProfile: korean });
+  assert.deepEqual(values(), ["₩1,234.57", 4]);
+  await workbook.recalculate({ mode: "full" });
+  assert.deepEqual(values(), ["$1,234.57", 2]);
+  await workbook.recalculate({ mode: "full", localeProfile: korean });
+  assert.deepEqual(values(), ["₩1,234.57", 4]);
+  const targeted = await workbook.calculateTargets(
+    [{ sheet: "Sheet1", start: "A1" }],
+    { localeProfile: korean },
+  );
+  assert.equal(targeted.cells[0].result.value.value, "₩1,234.57");
+  const preview = await workbook.previewChanges(
+    workbook.summary().semanticRevision,
+    [{ kind: "setValue", sheet: "Sheet1", address: "B1", value: { kind: "number", value: 1 } }],
+    { localeProfile: { locale: "ko-KR", displayLanguage: "en-US" } },
+  );
+  assert.deepEqual(preview.report.calculationOptions.localeProfile, {
+    locale: "ko-KR",
+    displayLanguage: "en-US",
+  });
+  workbook.discardPreview(preview.previewId);
+
+  for (const invalid of ["ko-KR", null, [], { locale: 1 }, { locale: "ko-KR", region: "KR" }, {}]) {
+    await assert.rejects(workbook.calculate({ localeProfile: invalid }), (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, "interop.input.invalid");
+      return true;
+    });
+  }
+  for (const invalid of [{ locale: "ja-JP" }, { locale: "ko-KR", displayLanguage: "ko" }]) {
+    for (const operation of [
+      () => workbook.calculate({ localeProfile: invalid }),
+      () => workbook.recalculate({ localeProfile: invalid }),
+    ]) {
+      await assert.rejects(operation(), (error) => {
+        assert.ok(error instanceof CellRuneError);
+        assert.equal(error.code, "interop.calculation.locale_profile_invalid");
+        assert.equal(error.kind, "input");
+        return true;
+      });
+    }
+  }
+}
+
 async function assertVolatileInputRecalculation() {
   const workbook = Workbook.create();
   workbook.setNumber("Sheet1", "A1", 1);
@@ -413,6 +467,7 @@ async function main() {
   await assertPreviewContract();
   await assertExactNumbers();
   await assertRandomSeed();
+  await assertLocaleProfile();
   await assertVolatileInputRecalculation();
   const corpusPath = path.join(__dirname, "..", "..", "..", "binding-contract", "v1.json");
   const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));

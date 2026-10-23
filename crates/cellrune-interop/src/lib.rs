@@ -30,14 +30,14 @@ pub use dto::{
     DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, EditBatchDto, EditBatchV2Dto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto,
     FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
-    FunctionUsageEntryDto, FunctionUsageReportDto, MaterializedResultOriginDto, NumberFormatDto,
-    PreviewChangesDto, PreviewCursorDto, ProviderIdentityDto, RangePageDto, RangeRequestDto,
-    ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto, SheetSummaryDto,
-    TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
-    TransactionDetailItemDto, TransactionDetailSectionDto, TransactionImpactCoverageDto,
-    TransactionImpactPageDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto,
-    WorkbookSummaryDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    FunctionUsageEntryDto, FunctionUsageReportDto, LocaleDto, LocaleProfileDto,
+    MaterializedResultOriginDto, NumberFormatDto, PreviewChangesDto, PreviewCursorDto,
+    ProviderIdentityDto, RangePageDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto,
+    SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto,
+    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
+    TransactionImpactCoverageDto, TransactionImpactPageDto, WorkbookChangeDto, WorkbookChangeV2Dto,
+    WorkbookFingerprintDto, WorkbookSummaryDto, WorkbookTransactionReceiptDto,
+    WorkbookTransactionReportDto, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use json_object::{deserialize_object, deserialize_objects, deserialize_optional_object};

@@ -1,7 +1,7 @@
 use cellrune_interop::{
     ArithmeticSemanticsDto, EditBatchDto, EditBatchV2Dto, EditWriteReportDto,
-    FinancialSolverSemanticsDto, PreviewCursorDto, TransactionDetailSectionDto, WorkbookSummaryDto,
-    WriteReportDto,
+    FinancialSolverSemanticsDto, LocaleProfileDto, PreviewCursorDto, TransactionDetailSectionDto,
+    WorkbookSummaryDto, WriteReportDto,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -115,6 +115,10 @@ pub(crate) struct RecalculateArgs {
     /// Optional seed, 0 through 4294967295, that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`
     /// draw from; the same seed repeats every draw.
     pub(crate) random_seed: Option<u32>,
+    /// Optional locale conventions: `{"locale": "ko-KR"}` writes `DOLLAR` in won, counts Hangul as two
+    /// bytes, and labels `GROUPBY` totals `합계`; `display_language` sets the labels apart. Omitted
+    /// selects en-US.
+    pub(crate) locale_profile: Option<LocaleProfileDto>,
     /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
@@ -152,6 +156,8 @@ pub(crate) struct TargetCalculationOptionsArgs {
     pub(crate) now_serial: Option<f64>,
     /// Seed that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` draw from.
     pub(crate) random_seed: Option<u32>,
+    /// Locale conventions; omitted selects en-US.
+    pub(crate) locale_profile: Option<LocaleProfileDto>,
     /// Policy for cancelling addition and subtraction.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
@@ -196,6 +202,10 @@ pub(crate) struct PreviewChangesArgs {
     /// Optional seed, 0 through 4294967295, that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`
     /// draw from; the same seed repeats every draw.
     pub(crate) random_seed: Option<u32>,
+    /// Optional locale conventions: `{"locale": "ko-KR"}` writes `DOLLAR` in won, counts Hangul as two
+    /// bytes, and labels `GROUPBY` totals `합계`; `display_language` sets the labels apart. Omitted
+    /// selects en-US.
+    pub(crate) locale_profile: Option<LocaleProfileDto>,
     /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,

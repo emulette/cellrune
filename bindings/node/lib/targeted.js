@@ -1,16 +1,19 @@
 "use strict";
 
 const { inputError, INPUT_DETAIL } = require("./errors.js");
-const { requireOptions, requireOptionKeys, requireString, requireOptionalString,
-  requireOptionalFinite, requireOptionalU32, requireNonNegativeInteger } = require("./validation.js");
+const { localeProfileWire, requireOptions, requireOptionKeys, requireString, requireOptionalString,
+  requireOptionalFinite, requireOptionalLocaleProfile, requireOptionalU32, requireNonNegativeInteger } =
+  require("./validation.js");
 
 function targetRequest(targets, options) {
   if (!Array.isArray(targets)) throw inputError(INPUT_DETAIL.TARGETS_ARRAY);
   requireOptions(options);
-  requireOptionKeys(options, ["todaySerial", "nowSerial", "randomSeed", "arithmeticSemantics", "financialSolverSemantics", "limits"]);
+  requireOptionKeys(options, ["todaySerial", "nowSerial", "randomSeed", "localeProfile", "arithmeticSemantics",
+    "financialSolverSemantics", "limits"]);
   requireOptionalFinite(options.todaySerial, "todaySerial");
   requireOptionalFinite(options.nowSerial, "nowSerial");
   requireOptionalU32(options.randomSeed, "randomSeed");
+  requireOptionalLocaleProfile(options.localeProfile, "localeProfile");
   requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
   requireOptionalString(options.financialSolverSemantics, "financialSolverSemantics");
   const limits = {};
@@ -34,6 +37,7 @@ function targetRequest(targets, options) {
       return { sheet: target.sheet, start: target.start, end: target.end };
     }),
     options: { today_serial: options.todaySerial, now_serial: options.nowSerial, random_seed: options.randomSeed,
+      locale_profile: localeProfileWire(options.localeProfile),
       arithmetic_semantics: options.arithmeticSemantics, financial_solver_semantics: options.financialSolverSemantics },
     limits,
   });

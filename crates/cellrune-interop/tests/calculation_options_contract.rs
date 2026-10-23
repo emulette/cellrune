@@ -1,7 +1,7 @@
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
-    CalculationResultDto, CellValueDto, FinancialSolverSemanticsDto, RangeRequestDto,
-    ReadLimitOptionsDto, WorkbookSession,
+    CalculationResultDto, CellValueDto, FinancialSolverSemanticsDto, LocaleDto, LocaleProfileDto,
+    RangeRequestDto, ReadLimitOptionsDto, WorkbookSession,
 };
 
 #[test]
@@ -272,4 +272,125 @@ fn random_seed_crosses_the_transport_boundary() {
         )
         .expect("seeded preview");
     assert_eq!(preview.report.calculation_options.random_seed, Some(7));
+}
+
+#[test]
+fn locale_profile_crosses_the_transport_boundary() {
+    let korean: CalculationOptionsDto =
+        serde_json::from_str(r#"{"locale_profile":{"locale":"ko-KR"}}"#).expect("Korean locale");
+    assert_eq!(
+        korean.locale_profile,
+        Some(LocaleProfileDto {
+            locale: LocaleDto::KoKr,
+            display_language: None,
+        })
+    );
+    assert_eq!(
+        serde_json::from_str::<CalculationOptionsDto>("{}")
+            .expect("omitted profile")
+            .locale_profile,
+        None
+    );
+    for invalid in [
+        r#"{"locale":"ja-JP"}"#,
+        r#"{"locale":"ko-kr"}"#,
+        r#"{"display_language":"ko-KR"}"#,
+        r#"{"locale":"ko-KR","region":"KR"}"#,
+        r#""ko-KR""#,
+    ] {
+        assert!(
+            serde_json::from_str::<CalculationOptionsDto>(&format!(
+                r#"{{"locale_profile":{invalid}}}"#
+            ))
+            .is_err(),
+            "{invalid}"
+        );
+    }
+    assert_eq!(
+        LocaleDto::from_tag("ko-KR").expect("Korean tag"),
+        LocaleDto::KoKr
+    );
+    assert_eq!(
+        LocaleDto::from_tag("ko").expect_err("partial tag").code(),
+        "interop.calculation.locale_profile_invalid"
+    );
+
+    let mut session = WorkbookSession::create();
+    session
+        .set_formula("Sheet1", "A1", "=DOLLAR(1234.567,2)", None)
+        .expect("DOLLAR formula");
+    session
+        .set_formula("Sheet1", "A2", "=LENB(\"가나\")", None)
+        .expect("LENB formula");
+    let results = |session: &WorkbookSession| {
+        calculated_results(session)
+            .into_iter()
+            .map(|result| match result {
+                CalculationResultDto::Value {
+                    value: CellValueDto::Text { value },
+                } => value,
+                CalculationResultDto::Value {
+                    value: CellValueDto::Number { value },
+                } => value.to_string(),
+                other => panic!("unexpected result {other:?}"),
+            })
+            .collect::<Vec<_>>()
+    };
+    session
+        .calculate(CalculationOptionsDto::default())
+        .expect("default calculation");
+    assert_eq!(results(&session), ["$1,234.57", "2"]);
+    let profile = |display_language| CalculationOptionsDto {
+        locale_profile: Some(LocaleProfileDto {
+            locale: LocaleDto::KoKr,
+            display_language,
+        }),
+        ..CalculationOptionsDto::default()
+    };
+    session
+        .calculate(profile(None))
+        .expect("Korean calculation");
+    assert_eq!(results(&session), ["₩1,234.57", "4"]);
+
+    let targeted = session
+        .calculate_targets(
+            &serde_json::from_value(serde_json::json!({
+                "targets": [{"sheet": "Sheet1", "start": "A1", "end": "A1"}],
+                "options": {"locale_profile": {"locale": "ko-KR"}},
+            }))
+            .expect("targeted request"),
+        )
+        .expect("targeted calculation");
+    assert_eq!(
+        targeted.cells[0].result,
+        CalculationResultDto::Value {
+            value: CellValueDto::Text {
+                value: "₩1,234.57".to_owned()
+            }
+        }
+    );
+
+    let preview = session
+        .preview_changes(
+            session.summary().semantic_revision,
+            cellrune_interop::EditBatchV2Dto {
+                changes: vec![cellrune_interop::WorkbookChangeV2Dto::V1(
+                    cellrune_interop::WorkbookChangeDto::SetValue {
+                        sheet: "Sheet1".to_owned(),
+                        address: "B1".to_owned(),
+                        value: cellrune_interop::WritableCellValueDto::Number { value: 1.0 },
+                    },
+                )],
+            },
+            cellrune_interop::RecalculationModeDto::Auto,
+            profile(Some(LocaleDto::EnUs)),
+        )
+        .expect("Korean preview with English labels");
+    assert_eq!(
+        preview.report.calculation_options.locale_profile,
+        LocaleProfileDto {
+            locale: LocaleDto::KoKr,
+            display_language: Some(LocaleDto::EnUs),
+        }
+    );
 }
