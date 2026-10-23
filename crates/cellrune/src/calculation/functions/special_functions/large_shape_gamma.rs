@@ -177,10 +177,7 @@ mod tests {
     fn tails_match_high_precision_quadrature() {
         // mpmath at 50 digits puts the medians here. Rounding x to f64 moves P by up to the
         // density times half an ULP of x over √a, about 4e-13 at a = 5e8.
-        for (a, x) in [
-            (5e8, 499_999_999.666_666_7),
-            (5e5, 499_999.666_666_706_2),
-        ] {
+        for (a, x) in [(5e8, 499_999_999.666_666_7), (5e5, 499_999.666_666_706_2)] {
             let (p, q) = regularized_gamma_large_shape(a, x, free).expect("tails");
             assert!((p - 0.5).abs() < 5e-13, "{a} {p}");
             assert!((p + q - 1.0).abs() < 1e-15);
