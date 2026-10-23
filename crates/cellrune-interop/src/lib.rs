@@ -8,6 +8,7 @@
 
 mod convert;
 mod csv;
+mod dependencies;
 mod dto;
 mod error;
 mod format_convert;
@@ -27,6 +28,9 @@ pub use targeted::{
 
 pub use cellrune::CancellationToken;
 pub use csv::{CsvReadOptionsDto, CsvWriteRequestDto};
+pub use dependencies::{
+    CellDependencyRequestDto, DependentDto, DependentPageDto, PrecedentDto, PrecedentPageDto,
+};
 pub use dto::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationIssueDto, CalculationLimitOptionsDto, CalculationLimitsDto, CalculationOptionsDto,

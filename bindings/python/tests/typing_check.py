@@ -1,4 +1,6 @@
 from cellrune import (
+    DependentPage,
+    PrecedentPage,
     RangeValue,
     PhoneticPage,
     CapabilityPage,
@@ -156,6 +158,13 @@ def check() -> None:
     compact_page = reopened.read_range("Sheet1", "A1", "B2", compact=True, max_bytes=4096)
     for compact_row in compact_page.get("rows", []):
         len(compact_row)
+    reopened.calculate()
+    precedent_page: PrecedentPage = reopened.precedents("Sheet1", "A1")
+    for precedent in precedent_page["entries"]:
+        precedent["range"].upper()
+    dependent_page: DependentPage = reopened.dependents("Sheet1", "A1", limit=5)
+    for dependent in dependent_page["entries"]:
+        dependent["cell"]["address"].upper()
     grid: list[list[RangeValue]] = reopened.read_values("Sheet1", "A1", "B2")
     for grid_row in grid:
         for grid_value in grid_row:

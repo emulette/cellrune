@@ -72,6 +72,8 @@ cellrune = "0.1.26"
   Node.js/TypeScript native packages, including saves of edits without calculating, adjustable
   read and calculation limits, and capability scans; the table under
   [Language bindings](#language-bindings) lists what each surface offers;
+- reports the cells and ranges a formula reads and the formulas that read a cell, from the
+  dependency graph of the installed calculation, marking references that depend on values;
 - supports atomic typed edit batches, persistent parsed/dependency state, safe incremental
   recalculation, bounded result deltas, cooperative cancellation, stale-result rejection, and
   retained immutable change previews;
@@ -391,6 +393,7 @@ reaches every surface:
 | Phonetic annotations and frozen panes (read and edit) | yes | yes | yes | yes |
 | Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | yes | yes | yes |
 | Rectangle value read and write as rows (interop `read_values`/`write_values`) | yes | yes | yes | no |
+| Precedent and dependent queries | yes | yes | yes | yes |
 
 Native package availability remains platform-specific; package managers must select a wheel or
 exact-version npm platform package compatible with the current runtime.
@@ -538,6 +541,15 @@ current revision, and otherwise its literal or saved value. `write_values(sheet,
 `writeValues(sheet, start, rows)` write equal-length rows of values from `start` as one atomic
 edit batch, where a blank value clears its cell, and return the edit receipt.
 
+Python `precedents(sheet, address)` and `dependents(sheet, address)` and the Node.js methods of
+the same names, with `offset` and `limit`, page through the cells and ranges a cell's formula
+reads and the formulas that read the cell directly. They use the dependency graph of the
+calculation installed for the current revision, so they fail with `interop.calculation.required`
+until the workbook is calculated after an edit. A formula whose references depend on values, such
+as `INDIRECT` or `OFFSET`, is marked `dynamic`: its precedents are those the installed values
+resolved, and a dependents page counts the `unlisted_dynamic_formulas` that could read the cell
+after a value changes.
+
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview
 is discarded; subsequent operations fail with the stable `interop.session.closed` code.
@@ -554,10 +566,10 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 26 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
+Its 28 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
 `workbook_summary`, `workbook_export_csv`, `workbook_read_range`, `workbook_read_formats`,
 `workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_phonetics`,
-`workbook_function_usage`,
+`workbook_precedents`, `workbook_dependents`, `workbook_function_usage`,
 `workbook_scan_capabilities`, `workbook_apply_changes`, `workbook_apply_changes_v2`,
 `workbook_recalculate`, `workbook_calculate_targets`, `workbook_changes_since`, `workbook_save_as`,
 `workbook_save_edits_as`, `workbook_preview_changes`, `workbook_preview_changes_page`,

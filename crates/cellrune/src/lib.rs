@@ -125,9 +125,10 @@ pub use calculation::{
     scan_function_usage, scan_function_usage_with_options, supported_function_catalog,
 };
 pub use calculation::{
-    CalculationTarget, CompletedTargetCalculation, PreparedTargetCalculation,
-    TargetCalculationError, TargetCalculationErrorCode, TargetCalculationLimits,
-    TargetCalculationResult, calculate_targets,
+    CalculationTarget, CellDependents, CellPrecedents, CompletedTargetCalculation, Dependent,
+    Precedent, PrecedentKind, PreparedTargetCalculation, TargetCalculationError,
+    TargetCalculationErrorCode, TargetCalculationLimits, TargetCalculationResult,
+    calculate_targets,
 };
 pub use cell::{
     Cell, CellContent, CellValue, ExcelError, FiniteNumber, NumberFormat, NumberFormatKind,

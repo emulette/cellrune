@@ -242,6 +242,18 @@ impl CompiledWorkbook {
     pub(super) fn volatile_formulas(&self, volatility: Volatility) -> &[CellId] {
         self.volatile_formulas.reading(volatility)
     }
+
+    /// Returns what the formula at `cell` reads, with the values of the calculation that compiled
+    /// it, or `None` when `cell` holds no parsed formula.
+    pub(super) fn dependency_targets(&self, cell: CellId) -> Option<&[DependencyTarget]> {
+        self.dependency_targets.get(&cell).map(Vec::as_slice)
+    }
+
+    /// Returns the formulas whose references depend on values, so their targets hold for the
+    /// values of the calculation that compiled them.
+    pub(super) fn value_dependent_formulas(&self) -> &BTreeSet<CellId> {
+        &self.unstable_formulas
+    }
 }
 
 #[derive(Debug, Clone)]

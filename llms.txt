@@ -95,11 +95,12 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 26 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 28 tools are `workbook_create`,
 `workbook_open`, `workbook_open_csv`, `workbook_close`, `workbook_summary`,
 `workbook_export_csv`, `workbook_read_range`,
 `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
-`workbook_comments`, `workbook_phonetics`, `workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_comments`, `workbook_phonetics`, `workbook_precedents`, `workbook_dependents`,
+`workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
@@ -868,6 +869,28 @@ than guessing a name from a different XLSX crate (`calamine`,
   `NoDirtyFormulas` when no formula reads the input, or a full
   `DynamicTopology` pass under uncertain dynamic topology, and forced
   `Incremental` proceeds. Any other option or limit change stays full.
+- `session.precedents(CalculationCellId) -> Option<CellPrecedents>` and
+  `session.dependents(CalculationCellId) -> Option<CellDependents>` read the
+  dependency graph of the calculation installed for the current revision and
+  return `None` before one. `CellPrecedents::precedents()` lists `Precedent`s
+  (`.sheet_id()`, `.range()`, `.kind()`: `PrecedentKind::Value`, `Spill` for
+  `A1#`, `FormulaText` for `FORMULATEXT`/`ISFORMULA`, or `ValueDependent` for
+  the cells a reference end that moves with values can reach) in sheet, row,
+  column, and kind order; `.is_dynamic()` marks a formula whose references
+  depend on values, whose precedents are those the installed values resolved.
+  `CellDependents::dependents()` lists the formulas that read the cell
+  directly (`Dependent::cell()`, `.is_dynamic()`), including a dynamic-array
+  formula whose spill range covers it, and `.unlisted_dynamic_formulas()`
+  counts the value-dependent formulas that do not read it under the current
+  values but could after a change. Interop
+  `WorkbookSession::precedents`/`dependents(&CellDependencyRequestDto { sheet,
+  address, offset, limit })` page them as `PrecedentPageDto` (`dynamic`,
+  entries of `sheet_id`, `sheet_name`, `range`, `kind`) and
+  `DependentPageDto` (`unlisted_dynamic_formulas`, entries of `cell` and
+  `dynamic`), failing with `interop.calculation.required` before a current
+  calculation; Python `precedents`/`dependents(sheet, address, offset=,
+  limit=)`, Node.js `precedents`/`dependents(sheet, address, { offset, limit
+  })`, and MCP `workbook_precedents`/`workbook_dependents` expose them.
 - For work outside a session lock, call `prepare_recalculation`, run the
   returned `PreparedCalculation`, then call `install`. `CancellationToken`
   provides cooperative cancellation. Running a prepared calculation returns

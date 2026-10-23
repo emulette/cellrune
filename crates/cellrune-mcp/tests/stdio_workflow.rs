@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 26);
+    assert_eq!(tools.len(), 28);
     assert!(
         tools
             .iter()
@@ -2091,6 +2091,48 @@ fn range_reads_take_compact_and_byte_limited_forms_over_stdio() {
     let error = failed_tool(read(&mut mcp, json!({"max_bytes": 50})));
     assert_eq!(error["code"], "interop.page.byte_limit_exceeded");
 
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn precedents_and_dependents_are_bounded_stdio_pages() {
+    let root = TestDirectory::new("dependencies");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("session")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "B1", "formula": "=SUM(A1:A3)"},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "C1", "formula": "=B1+A2"}
+            ]
+        }),
+    ));
+    let arguments =
+        |address: &str| json!({"session_id": session_id, "sheet": "Sheet1", "address": address});
+    let error = failed_tool(mcp.call_tool("workbook_precedents", arguments("C1")));
+    assert_eq!(error["code"], "interop.calculation.required");
+    successful_tool(mcp.call_tool("workbook_recalculate", json!({"session_id": session_id})));
+    let precedents = successful_tool(mcp.call_tool("workbook_precedents", arguments("C1")));
+    assert_eq!(
+        precedents["entries"],
+        json!([
+            {"sheet_id": 1, "sheet_name": "Sheet1", "range": "B1", "kind": "value"},
+            {"sheet_id": 1, "sheet_name": "Sheet1", "range": "A2", "kind": "value"}
+        ])
+    );
+    let dependents = successful_tool(mcp.call_tool("workbook_dependents", arguments("A2")));
+    assert_eq!(dependents["total"], 2);
+    assert_eq!(dependents["entries"][0]["cell"]["address"], "B1");
+    assert_eq!(dependents["entries"][1]["cell"]["address"], "C1");
+    assert_eq!(dependents["unlisted_dynamic_formulas"], 0);
     let (status, _, _) = mcp.finish();
     assert!(status.success());
 }

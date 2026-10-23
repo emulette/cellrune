@@ -1,4 +1,6 @@
 import {
+  type DependentPage,
+  type PrecedentPage,
   type RangeValue,
   type PhoneticPage,
   type LimitDiagnostics,
@@ -191,6 +193,10 @@ async function check(): Promise<void> {
   void reopened.calculateTargets([{ sheet: "Sheet1", start: "A1" }], { signal: abort.signal });
   // @ts-expect-error A signal is an AbortSignal.
   void reopened.recalculate({ signal: true });
+  const precedentPage: PrecedentPage = reopened.precedents("Sheet1", "A1", { limit: 10 });
+  precedentPage.entries[0]?.range.toUpperCase();
+  const dependentPage: DependentPage = reopened.dependents("Sheet1", "A1");
+  dependentPage.entries[0]?.cell.address.toUpperCase();
   const grid: RangeValue[][] = reopened.readValues("Sheet1", "A1", "B2");
   for (const value of grid.flat()) {
     if (value.kind === "unavailable") {

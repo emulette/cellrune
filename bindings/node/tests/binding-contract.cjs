@@ -729,6 +729,37 @@ async function assertAbortSignal() {
   workbook.close();
 }
 
+async function assertDependencies() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "B1", "=SUM(A1:A3)");
+  workbook.setFormula("Sheet1", "C1", '=B1+INDIRECT("A2")');
+  assert.throws(
+    () => workbook.precedents("Sheet1", "C1"),
+    (error) => error.code === "interop.calculation.required",
+  );
+  await workbook.calculate();
+  const precedents = workbook.precedents("sheet1", "C1");
+  assert.equal(precedents.dynamic, true);
+  assert.ok(
+    precedents.entries.some(
+      (entry) => entry.range === "B1" && entry.kind === "value" && entry.sheetName === "Sheet1",
+    ),
+  );
+  assert.deepEqual(workbook.precedents("Sheet1", "B1").entries, [
+    { sheetId: 1, sheetName: "Sheet1", range: "A1:A3", kind: "value" },
+  ]);
+  const dependents = workbook.dependents("Sheet1", "A1", { limit: 1 });
+  assert.deepEqual(dependents.entries, [
+    { cell: { sheetId: 1, sheetName: "Sheet1", address: "B1" }, dynamic: false },
+  ]);
+  assert.equal(dependents.unlistedDynamicFormulas, 1);
+  assert.throws(
+    () => workbook.dependents("Sheet1", "A1", { offset: 2 }),
+    (error) => error.code === "interop.page.offset_out_of_range",
+  );
+  workbook.close();
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -896,6 +927,7 @@ async function main() {
   await assertRangeValues();
   await assertRangeReadForms();
   await assertAbortSignal();
+  await assertDependencies();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

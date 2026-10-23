@@ -83,6 +83,36 @@ pub(crate) struct SheetPageArgs {
     pub(crate) limit: u32,
 }
 
+/// Input for one bounded page of a cell's precedents or dependents.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CellDependencyArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Case-insensitive sheet name.
+    pub(crate) sheet: String,
+    /// Unqualified A1 address of the cell.
+    pub(crate) address: String,
+    /// Zero-based entry offset; omitted or zero starts at the first entry.
+    #[serde(default)]
+    pub(crate) offset: u64,
+    /// Page size; omitted or zero selects the server default, with a hard maximum of 10,000.
+    #[serde(default)]
+    #[schemars(range(max = 10_000))]
+    pub(crate) limit: u32,
+}
+
+impl CellDependencyArgs {
+    pub(crate) fn request(self) -> cellrune_interop::CellDependencyRequestDto {
+        cellrune_interop::CellDependencyRequestDto {
+            sheet: self.sheet,
+            address: self.address,
+            offset: self.offset,
+            limit: self.limit,
+        }
+    }
+}
+
 /// Input for one bounded row-major range page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

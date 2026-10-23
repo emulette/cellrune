@@ -43,6 +43,14 @@ inventories, and measurements belong in the linked documentation rather than in 
   existing `session.cancelled`, or `calculation.target.cancelled` for targeted calculation, and an
   already aborted signal cancels before calculating. Interop
   `WorkbookSession::prepare_recalculation_cancellable` takes the caller's token.
+- `WorkbookCalculationSession::precedents` and `dependents` report the rectangles a cell's formula
+  reads and the formulas that read a cell directly, from the dependency graph of the calculation
+  installed for the current revision, as `CellPrecedents` (`Precedent` with a `PrecedentKind`) and
+  `CellDependents`. Formulas whose references depend on values, such as `INDIRECT` and `OFFSET`,
+  are marked dynamic, and a dependents result counts the dynamic formulas it cannot list. Interop
+  `WorkbookSession::precedents` and `dependents`, Python and Node.js `precedents` and
+  `dependents`, and the new `workbook_precedents` and `workbook_dependents` MCP tools page through
+  them and fail with `interop.calculation.required` before the current revision is calculated.
 
 ### Changed
 

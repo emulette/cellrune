@@ -809,6 +809,40 @@ def assert_range_read_forms() -> None:
             raise AssertionError("a page with no room for a cell was returned")
 
 
+def assert_dependencies() -> None:
+    with Workbook.create() as workbook:
+        workbook.set_formula("Sheet1", "B1", "=SUM(A1:A3)")
+        workbook.set_formula("Sheet1", "C1", "=B1+INDIRECT(\"A2\")")
+        try:
+            workbook.precedents("Sheet1", "C1")
+        except CellRuneError as error:
+            assert error.code == "interop.calculation.required"
+        else:
+            raise AssertionError("precedents were read without a calculation")
+        workbook.calculate()
+        precedents = workbook.precedents("sheet1", "C1")
+        assert precedents["dynamic"] is True
+        assert {"sheet_id": 1, "sheet_name": "Sheet1", "range": "B1", "kind": "value"} in precedents[
+            "entries"
+        ]
+        assert workbook.precedents("Sheet1", "B1")["entries"] == [
+            {"sheet_id": 1, "sheet_name": "Sheet1", "range": "A1:A3", "kind": "value"}
+        ]
+        dependents = workbook.dependents("Sheet1", "A1", limit=1)
+        assert dependents["total"] == 1
+        assert dependents["entries"] == [
+            {
+                "cell": {"sheet_id": 1, "sheet_name": "Sheet1", "address": "B1"},
+                "dynamic": False,
+            }
+        ]
+        assert dependents["unlisted_dynamic_formulas"] == 1
+        assert_error(
+            "interop.page.offset_out_of_range",
+            lambda: workbook.dependents("Sheet1", "A1", offset=2),
+        )
+
+
 def assert_csv() -> None:
     workbook = Workbook.from_csv(
         b'item;amount\r\n"Widget; large";2.5\r\n', sheet_name="Import", delimiter=";"
@@ -838,6 +872,7 @@ def main() -> None:
     assert_surface_authoring()
     assert_range_values()
     assert_range_read_forms()
+    assert_dependencies()
     assert_csv()
     assert_annotations()
     assert_formats()

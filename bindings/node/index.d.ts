@@ -514,6 +514,47 @@ export interface SheetSummary {
   readonly frozenPane?: FrozenPane;
 }
 
+export interface Precedent {
+  readonly sheetId: number;
+  readonly sheetName: string;
+  /** The rectangle in A1 notation; one cell is a single address. */
+  readonly range: string;
+  /**
+   * `value` for the cells' values, `spill` for the spill range anchored at the cell (`A1#`),
+   * `formula_text` for its formula, or `value_dependent` for the cells a reference end that moves
+   * with values can reach.
+   */
+  readonly kind: "value" | "spill" | "formula_text" | "value_dependent";
+}
+
+export interface PrecedentPage {
+  readonly schemaVersion: number;
+  readonly cell: CellReference;
+  /** Whether the formula's references depend on values, as `INDIRECT` and `OFFSET` do. */
+  readonly dynamic: boolean;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly Precedent[];
+}
+
+export interface Dependent {
+  readonly cell: CellReference;
+  /** Whether the formula's references depend on values, so it may stop reading the cell. */
+  readonly dynamic: boolean;
+}
+
+export interface DependentPage {
+  readonly schemaVersion: number;
+  readonly cell: CellReference;
+  /** Formulas with value-dependent references that could read the cell after a value changes. */
+  readonly unlistedDynamicFormulas: number;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly Dependent[];
+}
+
 export interface FrozenPane {
   readonly rows: number;
   readonly columns: number;
@@ -1192,6 +1233,13 @@ export class Workbook {
   dataValidations(sheet: string, options?: SheetPageOptions): DataValidationPage;
   /** Reads one bounded page of a sheet's phonetic annotations in row-major address order. */
   phonetics(sheet: string, options?: SheetPageOptions): PhoneticPage;
+  /**
+   * Reads one page of the rectangles a cell's formula reads, from the graph of the calculation
+   * installed for the current revision; fails with `interop.calculation.required` before it.
+   */
+  precedents(sheet: string, address: string, options?: SheetPageOptions): PrecedentPage;
+  /** Reads one page of the formulas that read a cell directly, from the same graph. */
+  dependents(sheet: string, address: string, options?: SheetPageOptions): DependentPage;
   /** Reads every value of an inclusive rectangle, at most 1,048,576 cells, as rows. */
   readValues(sheet: string, start: string, end: string): RangeValue[][];
   /** Writes equal-length rows of values from `start` as one atomic edit; blank clears a cell. */

@@ -6,6 +6,10 @@ from ._native import (
     function_catalog as function_catalog,
 )
 from ._types import (
+    Dependent as Dependent,
+    DependentPage as DependentPage,
+    Precedent as Precedent,
+    PrecedentPage as PrecedentPage,
     RangeCellValue as RangeCellValue,
     RangeValue as RangeValue,
     ClearPhoneticsChange as ClearPhoneticsChange,
@@ -149,6 +153,10 @@ from ._types import (
 )
 
 __all__ = [
+    "Dependent",
+    "DependentPage",
+    "Precedent",
+    "PrecedentPage",
     "RangeCellValue",
     "RangeValue",
     "ClearPhoneticsChange",

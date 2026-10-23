@@ -2,12 +2,13 @@ use std::path::PathBuf;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto, CsvReadOptionsDto,
-    CsvWriteRequestDto, DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto,
-    EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto,
-    PreviewCursorDto, RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto,
-    RangeWriteRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto,
-    TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
+    CellDependencyRequestDto, CsvReadOptionsDto, CsvWriteRequestDto,
+    DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
+    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
+    RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto,
+    ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt, PyList};
@@ -288,6 +289,40 @@ impl Workbook {
             .detach(move || self.lock_interop_wait()?.write_values(request))
             .map_err(|error| into_py_error(py, error))?;
         conversion::edit_receipt(py, &receipt)
+    }
+
+    #[pyo3(signature = (sheet, address, *, offset=None, limit=None))]
+    pub fn precedents<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        address: String,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let request = dependency_request(sheet, address, offset, limit)
+            .map_err(|error| into_py_error(py, error))?;
+        let page = py
+            .detach(move || self.lock_interop_wait()?.precedents(&request))
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &page)
+    }
+
+    #[pyo3(signature = (sheet, address, *, offset=None, limit=None))]
+    pub fn dependents<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        address: String,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let request = dependency_request(sheet, address, offset, limit)
+            .map_err(|error| into_py_error(py, error))?;
+        let page = py
+            .detach(move || self.lock_interop_wait()?.dependents(&request))
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &page)
     }
 
     #[pyo3(signature = (sheet, *, offset=None, limit=None))]
@@ -851,6 +886,20 @@ impl Workbook {
 struct PreviewOptionsInput {
     mode: RecalculationModeDto,
     calculation_options: CalculationOptionsDto,
+}
+
+fn dependency_request(
+    sheet: String,
+    address: String,
+    offset: Option<&Bound<'_, PyAny>>,
+    limit: Option<&Bound<'_, PyAny>>,
+) -> Result<CellDependencyRequestDto, InteropError> {
+    Ok(CellDependencyRequestDto {
+        sheet,
+        address,
+        offset: page_offset_from_python(offset)?,
+        limit: page_limit_from_python(limit)?,
+    })
 }
 
 fn sheet_page_request(

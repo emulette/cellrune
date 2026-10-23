@@ -154,6 +154,8 @@ limit. `readValues(sheet, start, end)` reads a rectangle as rows of typed values
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
 README.
+`precedents(sheet, address, { offset, limit })` and `dependents(...)` page through what a cell's
+formula reads and the formulas that read the cell, from the current calculation's graph.
 `calculate`, `recalculate`, `calculateTargets`, and `previewChanges` accept an `AbortSignal` as
 `signal`; aborting it cancels the calculation cooperatively and rejects with `session.cancelled`
 (`calculation.target.cancelled` for `calculateTargets`).

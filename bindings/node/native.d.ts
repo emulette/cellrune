@@ -26,6 +26,8 @@ export declare class NativeWorkbook {
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
   readValues(sheet: string, start: string, end: string): string
   writeValues(requestJson: string): NativeEditReceipt
+  precedents(sheet: string, address: string, offset: number, limit: number): string
+  dependents(sheet: string, address: string, offset: number, limit: number): string
   phonetics(sheet: string, offset: number, limit: number): string
   hyperlinks(sheet: string, offset: number, limit: number): NativeHyperlinkPage
   comments(sheet: string, offset: number, limit: number): NativeCommentPage

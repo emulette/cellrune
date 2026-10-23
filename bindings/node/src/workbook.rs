@@ -3,11 +3,11 @@ use std::sync::Arc;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
-    DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
-    RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto,
-    RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession,
-    WritableCellValueDto, WriteOptionsDto,
+    CellDependencyRequestDto, DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto,
+    EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto,
+    PreviewCursorDto, RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto,
+    RangeWriteRequestDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
@@ -148,6 +148,32 @@ impl NativeWorkbook {
             .write_values(request)
             .map(crate::conversion::edit_receipt)
             .map_err(napi_error)
+    }
+
+    #[napi(catch_unwind)]
+    pub fn precedents(
+        &self,
+        sheet: String,
+        address: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<String> {
+        let request = dependency_request(sheet, address, offset, limit)?;
+        let page = self.lock()?.precedents(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn dependents(
+        &self,
+        sheet: String,
+        address: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<String> {
+        let request = dependency_request(sheet, address, offset, limit)?;
+        let page = self.lock()?.dependents(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
     }
 
     #[napi(catch_unwind)]
@@ -595,6 +621,20 @@ impl NativeWorkbook {
     fn lock(&self) -> napi::Result<WorkbookSessionGuard<'_>> {
         self.session.try_lock().map_err(napi_error)
     }
+}
+
+fn dependency_request(
+    sheet: String,
+    address: String,
+    offset: f64,
+    limit: f64,
+) -> napi::Result<CellDependencyRequestDto> {
+    Ok(CellDependencyRequestDto {
+        sheet,
+        address,
+        offset: offset_from_number(offset)?,
+        limit: limit_from_number(limit)?,
+    })
 }
 
 fn offset_from_number(value: f64) -> napi::Result<u64> {

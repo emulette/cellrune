@@ -18,6 +18,8 @@ from ._types import (
     CommentPage,
     DataValidationPage,
     PhoneticPage,
+    PrecedentPage,
+    DependentPage,
     RangeValue,
     WritableCellValue,
     HyperlinkPage,
@@ -131,6 +133,22 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> DataValidationPage: ...
+    def precedents(
+        self,
+        sheet: str,
+        address: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> PrecedentPage: ...
+    def dependents(
+        self,
+        sheet: str,
+        address: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> DependentPage: ...
     def read_values(self, sheet: str, start: str, end: str) -> list[list[RangeValue]]: ...
     def write_values(
         self,

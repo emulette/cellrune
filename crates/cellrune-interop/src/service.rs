@@ -2,6 +2,7 @@
 
 mod calculation;
 mod csv;
+mod dependencies;
 mod display;
 mod edit;
 mod format;

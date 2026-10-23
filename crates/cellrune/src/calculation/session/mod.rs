@@ -16,6 +16,7 @@ use crate::{
 };
 
 mod delta;
+mod dependencies;
 mod error;
 mod impact;
 mod limits;
@@ -25,6 +26,7 @@ pub use targeted::{CompletedTargetCalculation, PreparedTargetCalculation};
 
 pub use delta::{CalculationDelta, CalculationDeltaCell, CalculationDeltaPage};
 use delta::{DeltaMetadata, build_delta, build_empty_delta, build_incremental_delta};
+pub use dependencies::{CellDependents, CellPrecedents, Dependent, Precedent, PrecedentKind};
 use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{

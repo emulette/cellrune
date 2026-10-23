@@ -446,6 +446,38 @@ class PhoneticPage(TypedDict):
     entries: list[PhoneticCell]
 
 
+class Precedent(TypedDict):
+    sheet_id: int
+    sheet_name: str
+    range: str
+    kind: Literal["value", "spill", "formula_text", "value_dependent"]
+
+
+class PrecedentPage(TypedDict):
+    schema_version: int
+    cell: "CellReference"
+    dynamic: bool
+    total: int
+    offset: int
+    next_offset: int | None
+    entries: list[Precedent]
+
+
+class Dependent(TypedDict):
+    cell: "CellReference"
+    dynamic: bool
+
+
+class DependentPage(TypedDict):
+    schema_version: int
+    cell: "CellReference"
+    unlisted_dynamic_formulas: int
+    total: int
+    offset: int
+    next_offset: int | None
+    entries: list[Dependent]
+
+
 class WorkbookFingerprint(TypedDict):
     schema_version: int
     digest_hex: str

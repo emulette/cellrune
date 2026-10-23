@@ -8,6 +8,10 @@ const {
   normalizeHyperlinkPage,
 } = require("./lib/sheet_metadata.js");
 const { requireOptionalAbortSignal, runAbortable } = require("./lib/abort.js");
+const {
+  normalizeDependentPage,
+  normalizePrecedentPage,
+} = require("./lib/dependencies.js");
 const { normalizePhoneticPage } = require("./lib/presentation.js");
 const { parseRangeValues, serializeRangeRows } = require("./lib/values.js");
 const { targetRequest } = require("./lib/targeted.js");
@@ -192,6 +196,22 @@ class Workbook {
     const request = { sheet, start, rows: serializeRangeRows(rows) };
     return normalizeEditReceipt(
       withSyncErrors(() => this.#session().writeValues(JSON.stringify(request))),
+    );
+  }
+
+  precedents(sheet, address, options = {}) {
+    requireString(address, "address");
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizePrecedentPage(
+      withSyncErrors(() => this.#session().precedents(sheet, address, offset, limit)),
+    );
+  }
+
+  dependents(sheet, address, options = {}) {
+    requireString(address, "address");
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizeDependentPage(
+      withSyncErrors(() => this.#session().dependents(sheet, address, offset, limit)),
     );
   }
 
