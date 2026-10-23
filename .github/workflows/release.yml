@@ -191,10 +191,11 @@ jobs:
   # crates.io and npm cannot mint their first release over OIDC, so 0.1.0 uses
   # tokens for those two. Once the crate and the nine npm packages exist, attach
   # their trusted publishers, delete both secrets, and drop the token lines here.
-  # cellrune-mcp is not published to any registry, so this release is the only
-  # way to obtain the binary the README tells MCP clients to launch. Without it
-  # the verified bundles expire with the workflow artifacts. A GitHub release can
-  # be edited or deleted, unlike a registry upload, so it needs no reviewer gate.
+  # The GitHub release holds the three verified cellrune-mcp archives and the MCP
+  # Bundle (.mcpb) assembled from them, which the MCP registry entry names by its
+  # download URL and digest. Without it the verified archives expire with the
+  # workflow artifacts. A GitHub release can be edited or deleted, unlike a
+  # registry upload, so it needs no reviewer gate.
   github-release:
     name: Publish the GitHub release with MCP bundles
     needs: mcp-artifacts
@@ -208,9 +209,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # The release is complete only when its three MCP bundles are attached. A
-      # create that failed mid-upload leaves the release existing but partial,
-      # so existence alone must not short-circuit a rerun.
+      # The release is complete only when its three MCP archives and the MCP
+      # Bundle are attached. A create that failed mid-upload leaves the release
+      # existing but partial, so existence alone must not short-circuit a rerun.
       - name: Skip when the GitHub release is already complete
         id: github-release-state
         env:
@@ -220,7 +221,7 @@ jobs:
           state=absent
           if assets="$(gh release view "$RELEASE_TAG" --json assets \
             --jq '.assets | length' 2>/dev/null)"; then
-            if [ "$assets" -eq 3 ]; then
+            if [ "$assets" -eq 4 ]; then
               state=complete
             else
               state=partial
@@ -237,6 +238,16 @@ jobs:
           path: mcp-bundles
           merge-multiple: true
 
+      # The bundle is rebuilt from the verified archives on every run; its bytes
+      # depend only on them and SOURCE_DATE_EPOCH, so a rerun attaches the same file.
+      - name: Assemble the MCP Bundle from the verified archives
+        if: steps.github-release-state.outputs.state != 'complete'
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          python3 bindings/scripts/mcp_registry.py bundle \
+            --archives mcp-bundles --output mcp-registry
+
       - name: Publish the release from the changelog entry
         if: steps.github-release-state.outputs.state != 'complete'
         env:
@@ -249,6 +260,7 @@ jobs:
             printf '::error::expected 3 MCP bundles, found:\n%s\n' "$bundles"
             exit 1
           fi
+          bundles="$bundles $(find mcp-registry -type f -name '*.mcpb')"
           printf '%s\n' "$bundles"
           if [ "$RELEASE_STATE" = "partial" ]; then
             # Finish the interrupted create: attach the verified bundles to the
@@ -273,6 +285,80 @@ jobs:
             --notes-file release-notes.md \
             --verify-tag \
             $bundles
+
+  # The MCP registry lists the .mcpb the GitHub release holds, by its download URL
+  # and SHA-256, so it publishes once that release is complete. A published registry
+  # version cannot be replaced, so the job names an environment for a reviewer and,
+  # like the package registries, skips a version the registry already lists.
+  publish-mcp-registry:
+    name: Publish cellrune-mcp to the MCP registry
+    needs: github-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: mcp-registry
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out exact release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Skip when the MCP registry already lists this version
+        id: mcp-registry-state
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          curl -fsS --retry 3 \
+            "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.emulette/cellrune&version=${version}" \
+            -o registry-listing.json
+          state="$(python3 - "$version" <<'PY'
+          import json, sys
+          version = sys.argv[1]
+          servers = json.load(open("registry-listing.json")).get("servers", [])
+          listed = any(
+              entry.get("server", entry).get("name") == "io.github.emulette/cellrune"
+              and entry.get("server", entry).get("version") == version
+              for entry in servers
+          )
+          print("published" if listed else "absent")
+          PY
+          )"
+          printf 'MCP registry %s: %s\n' "$version" "$state"
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+
+      # The entry describes the bundle the release holds, so its digest is that of the
+      # downloaded file rather than one rebuilt here.
+      - name: Write the registry entry for the released MCP Bundle
+        if: steps.mcp-registry-state.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern '*.mcpb' --dir mcp-registry
+          python3 bindings/scripts/mcp_registry.py server-json \
+            --bundle "$(find mcp-registry -type f -name '*.mcpb')" --output server.json
+
+      # mcp-publisher 1.8.1, checked against the SHA-256 its release publishes in
+      # registry_1.8.1_checksums.txt.
+      - name: Install mcp-publisher
+        if: steps.mcp-registry-state.outputs.state != 'published'
+        run: |
+          curl -fsSL --retry 3 -o mcp-publisher.tar.gz \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+          printf '%s  %s\n' \
+            a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc \
+            mcp-publisher.tar.gz | sha256sum --check --strict
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+
+      # The io.github.emulette namespace is proven by this workflow's GitHub OIDC token.
+      - name: Publish the registry entry
+        if: steps.mcp-registry-state.outputs.state != 'published'
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
 
   publish-crates-io:
     name: Publish cellrune to crates.io

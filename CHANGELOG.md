@@ -208,7 +208,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `bindings/scripts/mcp_registry.py` assembles one MCP Bundle, `cellrune-mcp-<version>.mcpb`, from
   a release's three verified `cellrune-mcp` archives, running the platform's executable on one
   approved directory, and writes the official MCP registry `server.json` that names that bundle's
-  release download URL and SHA-256.
+  release download URL and SHA-256. The release workflow attaches the bundle to the GitHub release
+  beside the three archives and, behind the `mcp-registry` environment, publishes that entry with
+  `mcp-publisher` over GitHub OIDC, skipping a version the registry already lists; CI runs the
+  bundle and entry tests.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and

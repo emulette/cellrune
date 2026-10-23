@@ -58,6 +58,9 @@ jobs:
       - name: Verify published version and README link contracts
         run: python3 bindings/scripts/check_version_consistency.py
 
+      - name: Test the MCP Bundle and registry entry assembly
+        run: python3 bindings/scripts/test_mcp_registry.py
+
       - name: Check formatting
         run: cargo fmt --all --check
 
