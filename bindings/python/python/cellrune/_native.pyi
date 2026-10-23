@@ -244,6 +244,13 @@ class Workbook:
         expected_revision: int,
         changes: Sequence[WorkbookChange],
     ) -> EditReceipt: ...
+    def import_sheet(
+        self,
+        expected_revision: int,
+        source: Workbook,
+        sheet: str,
+        position: int,
+    ) -> EditReceipt: ...
     def apply_changes_v2(
         self,
         expected_revision: int,

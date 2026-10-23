@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use cellrune::{
     CalculationHints, CalculationMode, CancellationToken, CellAddress, CellRange, Column,
-    DateSystem, DefinedName, DefinedNameScope, EditBatch, FormulaText, NumberFormat,
+    DateSystem, DefinedName, DefinedNameScope, EditBatch, FormulaText, ImportedSheet, NumberFormat,
     NumberFormatKind, PreparedEditBatch, Row, SheetId, SheetName, SheetVisibility, TableColumnId,
     TableColumnName, TableId, TableName, WorkbookChange, WorkbookSnapshot,
 };
@@ -89,6 +89,44 @@ impl WorkbookSession {
             self.invalidate_preview_for_mutation();
         }
         Ok(receipt)
+    }
+
+    /// Reads the worksheet `sheet` of this session for [`Self::import_sheet`] into another, as
+    /// Excel copies a sheet into another workbook. The read sheet owns its content, so it can be
+    /// imported after this session is released, into any session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `interop.sheet.not_found` for a missing sheet and
+    /// `validation.sheet_import_unsupported` naming content the import cannot carry.
+    pub fn read_sheet_for_import(&self, sheet: &str) -> Result<ImportedSheet, InteropError> {
+        let sheet_id = self
+            .engine
+            .workbook()
+            .sheet_by_name(sheet)
+            .ok_or_else(InteropError::sheet_not_found)?
+            .id();
+        Ok(ImportedSheet::from_draft(self.engine.draft(), sheet_id)?)
+    }
+
+    /// Imports a sheet read with [`Self::read_sheet_for_import`] at zero-based tab `position`
+    /// after checking the expected revision. The receipt's `created_sheet_ids` holds the new
+    /// sheet, and its inverse removes it again.
+    ///
+    /// # Errors
+    ///
+    /// Returns `validation.sheet_import_unsupported` for a different date system and the same
+    /// revision and validation errors as [`Self::apply_changes`].
+    pub fn import_sheet(
+        &mut self,
+        expected_revision: u64,
+        imported: ImportedSheet,
+        position: usize,
+    ) -> Result<EditReceiptDto, InteropError> {
+        let batch = EditBatch::new([WorkbookChange::import_sheet(imported, position)]);
+        let prepared = self.engine.prepare_changes(expected_revision, batch)?;
+        let receipt = edit_receipt(prepared.workbook(), prepared.receipt());
+        self.install_changes(PreparedChanges { prepared, receipt })
     }
 
     /// Applies an edit-schema-v2 batch, including stable-ID table authoring.

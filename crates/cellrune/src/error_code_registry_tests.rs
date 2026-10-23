@@ -200,6 +200,7 @@ fn registry() -> Vec<Vec<&'static str>> {
             TableSplit,
             CopyDestinationShape,
             CopyUnsupportedFormula,
+            SheetImportUnsupported,
         ),
         codes!(SessionErrorCode::as_str;
             RevisionMismatch,

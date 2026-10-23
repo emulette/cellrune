@@ -208,6 +208,22 @@ pub(crate) struct ApplyChangesArgs {
     pub(crate) batch: EditBatchDto,
 }
 
+/// Input for copying a worksheet from one resident workbook into another.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ImportSheetArgs {
+    /// Opaque resident workbook session identifier of the workbook that receives the sheet.
+    pub(crate) session_id: String,
+    /// Current semantic revision of the receiving workbook that must still match.
+    pub(crate) expected_revision: u64,
+    /// Session identifier of the workbook the sheet is copied from; it may equal `session_id`.
+    pub(crate) source_session_id: String,
+    /// Case-insensitive name of the worksheet to copy.
+    pub(crate) sheet: String,
+    /// Zero-based tab position the sheet takes in the receiving workbook.
+    pub(crate) position: u32,
+}
+
 /// Input for one optimistic, atomic edit-schema-v2 batch.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

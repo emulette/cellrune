@@ -161,6 +161,11 @@ sheet edits `deleteSheet`, `moveSheet`, `copySheet`, and `setSheetAutoFilter`,
 `convertTableToRange`.
 A receipt of a batch with any of them carries `inverse`: the `applyChangesV2` changes that undo
 the batch and the `unrestored` content they cannot bring back.
+`importSheet(expectedRevision, source, sheet, position)` copies a worksheet of another open
+`Workbook`, or of this one, to a tab position as Excel copies a sheet into another workbook, with
+its tables and the names that read it; content it cannot carry, such as a reference to another
+sheet, data validations, comments, or conditional formats, fails with
+`validation.sheet_import_unsupported`.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one sheet, formulas as their calculated values (a sheet
 without formulas needs no calculation); the value rule, and why untrusted text starting with `=`,

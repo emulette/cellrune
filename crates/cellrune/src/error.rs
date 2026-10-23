@@ -129,6 +129,8 @@ const MESSAGE_TABLE_SPLIT: &str =
 const MESSAGE_COPY_DESTINATION_SHAPE: &str =
     "a copy destination must repeat the source range a whole number of times";
 const MESSAGE_COPY_UNSUPPORTED_FORMULA: &str = "a formula with a spill reference, a legacy array formula, or a data-table formula cannot be copied";
+const MESSAGE_SHEET_IMPORT_UNSUPPORTED: &str =
+    "a sheet cannot be imported with content the target workbook cannot hold";
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
@@ -338,6 +340,8 @@ pub enum ValidationErrorCode {
     /// A copy would copy a formula with a spill reference, a legacy array formula, or a data-table
     /// formula.
     CopyUnsupportedFormula,
+    /// An imported sheet holds content the target workbook cannot hold as Excel would.
+    SheetImportUnsupported,
 }
 
 impl ValidationErrorCode {
@@ -450,6 +454,7 @@ impl ValidationErrorCode {
             Self::TableSplit => "validation.table_split",
             Self::CopyDestinationShape => "validation.copy_destination_shape",
             Self::CopyUnsupportedFormula => "validation.copy_unsupported_formula",
+            Self::SheetImportUnsupported => "validation.sheet_import_unsupported",
         }
     }
 }
@@ -916,6 +921,14 @@ pub enum ValidationError {
         /// One-based column of the source cell.
         column: u32,
     },
+    /// An imported sheet holds content the target workbook cannot hold as Excel would: a
+    /// reference to another sheet or workbook, a name that conflicts or reads another sheet, a
+    /// different date system, or content the model does not write, such as data validations,
+    /// comments, conditional formats, or drawings.
+    SheetImportUnsupported {
+        /// The content, as `comments` or `a reference to sheet 'Other'`.
+        content: String,
+    },
 }
 
 impl ValidationError {
@@ -1058,6 +1071,7 @@ impl ValidationError {
             Self::TableSplit { .. } => ValidationErrorCode::TableSplit,
             Self::CopyDestinationShape => ValidationErrorCode::CopyDestinationShape,
             Self::CopyUnsupportedFormula { .. } => ValidationErrorCode::CopyUnsupportedFormula,
+            Self::SheetImportUnsupported { .. } => ValidationErrorCode::SheetImportUnsupported,
         }
     }
 }
@@ -1433,6 +1447,9 @@ impl fmt::Display for ValidationError {
                 formatter,
                 "{MESSAGE_COPY_UNSUPPORTED_FORMULA}: sheet {sheet_id}, row {row}, column {column}"
             ),
+            Self::SheetImportUnsupported { content } => {
+                write!(formatter, "{MESSAGE_SHEET_IMPORT_UNSUPPORTED}: {content}")
+            }
         }
     }
 }
@@ -1822,6 +1839,10 @@ mod tests {
             (
                 ValidationErrorCode::CopyUnsupportedFormula,
                 "validation.copy_unsupported_formula",
+            ),
+            (
+                ValidationErrorCode::SheetImportUnsupported,
+                "validation.sheet_import_unsupported",
             ),
         ];
         let mut seen_codes = BTreeSet::new();

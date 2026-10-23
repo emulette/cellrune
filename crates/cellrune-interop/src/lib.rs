@@ -28,7 +28,7 @@ pub use targeted::{
     TargetCalculationRequestDto, TargetCalculationResultDto, TargetCalculationScopeDto,
 };
 
-pub use cellrune::CancellationToken;
+pub use cellrune::{CancellationToken, ImportedSheet};
 pub use csv::{CsvReadOptionsDto, CsvWriteRequestDto};
 pub use dependencies::{
     CellDependencyRequestDto, DependentDto, DependentPageDto, PrecedentDto, PrecedentPageDto,

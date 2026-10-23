@@ -493,6 +493,47 @@ async function assertDeleteSheet() {
   );
 }
 
+async function assertImportSheet() {
+  const source = Workbook.create();
+  const target = Workbook.create();
+  source.setNumber("Sheet1", "A1", 3);
+  source.setFormula("Sheet1", "B1", "=Sheet1!A1*2");
+  const receipt = target.importSheet(
+    target.summary().semanticRevision,
+    source,
+    "sheet1",
+    1,
+  );
+  assert.deepEqual(receipt.createdSheetIds, [2]);
+  assert.notEqual(receipt.inverse, null);
+  assert.deepEqual(
+    target.summary().sheets.map((sheet) => sheet.name),
+    ["Sheet1", "Sheet1 (2)"],
+  );
+  assert.equal(
+    target.readRange("Sheet1 (2)", "B1", "B1").cells[0].formula,
+    "='Sheet1 (2)'!A1*2",
+  );
+  // A workbook can import from itself.
+  const own = target.importSheet(
+    target.summary().semanticRevision,
+    target,
+    "Sheet1",
+    0,
+  );
+  assert.deepEqual(own.createdSheetIds, [3]);
+  source.setFormula("Sheet1", "C1", "=Sheet9!A1");
+  assert.throws(
+    () =>
+      target.importSheet(target.summary().semanticRevision, source, "Sheet1", 0),
+    validationError("validation.sheet_import_unsupported"),
+  );
+  assert.throws(
+    () => target.importSheet(target.summary().semanticRevision, {}, "Sheet1", 0),
+    (error) => error.code === "interop.input.invalid",
+  );
+}
+
 function validationError(code) {
   return (error) =>
     error instanceof CellRuneError &&
@@ -1134,6 +1175,7 @@ async function main() {
   await assertSheetStructureChanges();
   await assertGridEdits();
   await assertDeleteSheet();
+  await assertImportSheet();
   await assertSurfaceAuthoring();
   await assertRangeValues();
   await assertRangeReadForms();

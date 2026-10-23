@@ -391,6 +391,7 @@ reaches every surface:
 | Cell number formats, hidden rows, sheet autoFilter ranges and filtered columns, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
 | Sheet move and copy, defined-name rename, sheet autoFilter set and removal, table creation, range change, and conversion to a range | yes | yes | yes | yes |
+| Sheet import from another open workbook (`import_sheet`, Node.js `importSheet`, MCP `workbook_import_sheet`) | yes | yes | yes | yes |
 | Row and column insertion, deletion, and moves, range moves and copies, and the inverse changes in the receipt of these and of sheet, defined-name, table, and autoFilter edits | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
 | Data validation rules, hyperlinks, and comments (read-only) | yes | yes | yes | yes |
@@ -583,12 +584,12 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 29 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
+Its 30 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
 `workbook_summary`, `workbook_export_csv`, `workbook_read_range`, `workbook_read_formats`,
 `workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_phonetics`,
 `workbook_precedents`, `workbook_dependents`, `workbook_function_usage`,
 `workbook_scan_capabilities`, `workbook_apply_changes`, `workbook_apply_changes_v2`,
-`workbook_recalculate`, `workbook_calculate_targets`, `workbook_changes_since`, `workbook_save_as`,
+`workbook_import_sheet`, `workbook_recalculate`, `workbook_calculate_targets`, `workbook_changes_since`, `workbook_save_as`,
 `workbook_save_edits_as`, `workbook_preview_changes`, `workbook_preview_changes_page`,
 `workbook_commit_preview`, `workbook_discard_preview`, and the sessionless `format_display_text`
 and `function_catalog`, which pages through the calculated functions with their canonical name,

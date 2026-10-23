@@ -1455,6 +1455,16 @@ export class Workbook {
    * Deletes a sheet with its scoped names and tables; references to them in the remaining
    * formulas and names become `#REF!`.
    */
+  /**
+   * Imports the worksheet `sheet` of `source` at zero-based tab `position`, as Excel copies a
+   * sheet into another workbook; `source` may be this workbook.
+   */
+  importSheet(
+    expectedRevision: bigint,
+    source: Workbook,
+    sheet: string,
+    position: number,
+  ): EditReceipt;
   deleteSheet(name: string): void;
   /**
    * Reads the workbook when the save runs on a worker, so do not edit it until the Promise

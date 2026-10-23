@@ -569,6 +569,30 @@ impl Workbook {
         conversion::edit_receipt(py, &receipt)
     }
 
+    #[pyo3(signature = (expected_revision, source, sheet, position))]
+    pub fn import_sheet<'py>(
+        &self,
+        py: Python<'py>,
+        expected_revision: &Bound<'_, PyAny>,
+        source: PyRef<'_, Workbook>,
+        sheet: String,
+        position: usize,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let expected_revision =
+            revision_from_python(expected_revision).map_err(|error| into_py_error(py, error))?;
+        let source = &source.session;
+        // The source is released before the target is taken, so a workbook can import from
+        // itself.
+        let receipt = py
+            .detach(move || {
+                let imported = source.lock()?.read_sheet_for_import(&sheet)?;
+                self.lock_interop_wait()?
+                    .import_sheet(expected_revision, imported, position)
+            })
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::edit_receipt(py, &receipt)
+    }
+
     pub fn apply_changes_v2<'py>(
         &self,
         py: Python<'py>,

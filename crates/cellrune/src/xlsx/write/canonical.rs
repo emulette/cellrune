@@ -19,7 +19,7 @@ use crate::presentation::canonical_default_format;
 use crate::{
     Border, CalculationSnapshot, CellAddress, CellContent, CellFormat, DateSystem,
     DefinedNameScope, Fill, Font, FormulaMetadata, MaterializedResultOrigin, NumberFormat,
-    PatternFill, Sheet, SheetVisibility, WorkbookDraft, WorkbookSnapshot, XlsxDocumentKind,
+    PatternFill, Row, Sheet, SheetVisibility, WorkbookDraft, WorkbookSnapshot, XlsxDocumentKind,
 };
 
 const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -528,12 +528,18 @@ pub(super) fn generated_worksheet_xml(
     for (row, height) in presentation.row_heights(sheet.id()) {
         rows.entry(row.get()).or_default().0 = Some(height);
     }
+    for row in sheet.hidden_rows() {
+        rows.entry(row.get()).or_default();
+    }
     for (row, (height, row_cells)) in rows {
         xml.push_str("<row r=\"");
         xml.push_str(&row.to_string());
         xml.push('"');
         if let Some(height) = height {
             xml.push_str(&format!(" ht=\"{height}\" customHeight=\"1\""));
+        }
+        if Row::new(row).is_ok_and(|row| sheet.is_row_hidden(row)) {
+            xml.push_str(" hidden=\"1\"");
         }
         if row_cells.is_empty() {
             xml.push_str("/>");
@@ -559,6 +565,20 @@ pub(super) fn generated_worksheet_xml(
         xml.push(':');
         xml.push_str(&filter.range().end().to_string());
         xml.push_str("\"/>");
+    }
+    if !sheet.merged_ranges().is_empty() {
+        xml.push_str(&format!(
+            "<mergeCells count=\"{}\">",
+            sheet.merged_ranges().len()
+        ));
+        for range in sheet.merged_ranges() {
+            xml.push_str(&format!(
+                "<mergeCell ref=\"{}:{}\"/>",
+                range.start(),
+                range.end()
+            ));
+        }
+        xml.push_str("</mergeCells>");
     }
     super::table::push_table_parts(&mut xml, sheet);
     xml.push_str("</worksheet>");

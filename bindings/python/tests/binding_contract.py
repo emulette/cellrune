@@ -546,6 +546,33 @@ def assert_delete_sheet() -> None:
         assert_error("interop.sheet.not_found", lambda: workbook.delete_sheet("Data"))
 
 
+def assert_import_sheet() -> None:
+    with Workbook.create() as source, Workbook.create() as target:
+        source.set_number("Sheet1", "A1", 3.0)
+        source.set_formula("Sheet1", "B1", "=Sheet1!A1*2")
+        receipt = target.import_sheet(
+            target.summary()["semantic_revision"], source, "sheet1", 1
+        )
+        assert receipt["created_sheet_ids"] == [2]
+        assert receipt["inverse"] is not None
+        assert [sheet["name"] for sheet in target.summary()["sheets"]] == [
+            "Sheet1",
+            "Sheet1 (2)",
+        ]
+        cell = target.read_range("Sheet1 (2)", "B1", "B1")["cells"][0]
+        assert cell["formula"] == "='Sheet1 (2)'!A1*2"
+        # A workbook can import from itself.
+        own = target.import_sheet(target.summary()["semantic_revision"], target, "Sheet1", 0)
+        assert own["created_sheet_ids"] == [3]
+        source.set_formula("Sheet1", "C1", "=Sheet9!A1")
+        assert_validation_error(
+            "validation.sheet_import_unsupported",
+            lambda: target.import_sheet(
+                target.summary()["semantic_revision"], source, "Sheet1", 0
+            ),
+        )
+
+
 def assert_validation_error(code: str, operation: Callable[[], object]) -> None:
     try:
         operation()
@@ -1081,6 +1108,7 @@ def assert_csv() -> None:
 def main() -> None:
     assert_sheet_structure_changes()
     assert_delete_sheet()
+    assert_import_sheet()
     assert_grid_edits()
     assert_surface_authoring()
     assert_range_values()

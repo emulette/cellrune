@@ -129,3 +129,65 @@ fn a_batch_targets_its_added_sheet_by_the_id_core_assigns_past_a_chartsheet() {
     ));
     assert_eq!(inspect("Data"), DefinedNameInspectionResultDto::NotFound);
 }
+
+#[test]
+fn a_sheet_read_from_one_session_imports_into_another_with_its_names() {
+    let mut source = WorkbookSession::create();
+    apply(
+        &mut source,
+        vec![
+            WorkbookChangeDto::SetValue {
+                sheet: "Sheet1".to_owned(),
+                address: "A1".to_owned(),
+                value: WritableCellValueDto::Number { value: 3.0 },
+            },
+            WorkbookChangeDto::SetFormula {
+                sheet: "Sheet1".to_owned(),
+                address: "B1".to_owned(),
+                formula: "=Rate*2".to_owned(),
+                dynamic_array: false,
+                dynamic_range: None,
+            },
+            WorkbookChangeDto::SetDefinedName {
+                name: "Rate".to_owned(),
+                scope_sheet: None,
+                formula: "=Sheet1!$A$1".to_owned(),
+                hidden: false,
+            },
+        ],
+    )
+    .expect("source edits");
+    let mut target = chartsheet_session();
+    let imported = source
+        .read_sheet_for_import("sheet1")
+        .expect("readable sheet");
+    let revision = target.summary().semantic_revision;
+    let receipt = target.import_sheet(revision, imported, 1).expect("import");
+    assert_eq!(receipt.created_sheet_ids, vec![4]);
+    let summary = target.summary();
+    assert_eq!(
+        summary
+            .sheets
+            .iter()
+            .map(|sheet| sheet.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Data", "Sheet1", "Summary"]
+    );
+    assert!(matches!(
+        target
+            .inspect_defined_name(&DefinedNameInspectionRequestDto {
+                name: "Rate".to_owned(),
+                current_sheet: Some("Data".to_owned()),
+            })
+            .expect("inspection")
+            .result,
+        DefinedNameInspectionResultDto::Rectangular { sheet_id: 4, .. }
+    ));
+    let inverse = receipt.inverse.expect("an import carries its inverse");
+    assert!(inverse.unrestored.is_empty());
+
+    let error = source
+        .read_sheet_for_import("Missing")
+        .expect_err("no such sheet");
+    assert_eq!(error.code(), "interop.sheet.not_found");
+}

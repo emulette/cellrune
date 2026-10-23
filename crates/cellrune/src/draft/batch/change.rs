@@ -98,6 +98,14 @@ pub enum WorkbookChange {
         /// Zero-based tab position the copy takes, counted after the copy.
         position: usize,
     },
+    /// Adds a worksheet read from another workbook at a tab position, with its tables and names,
+    /// as Excel copies a sheet into another workbook. Reports a topology change.
+    ImportSheet {
+        /// The sheet read with [`crate::ImportedSheet::from_draft`].
+        sheet: crate::ImportedSheet,
+        /// Zero-based tab position the sheet takes, counted after the import.
+        position: usize,
+    },
     /// Changes sheet visibility while retaining at least one visible sheet.
     SetSheetVisibility {
         /// Target sheet.
@@ -484,6 +492,12 @@ impl WorkbookChange {
     /// Constructs a worksheet copy to zero-based `position` of the tab order.
     pub const fn copy_sheet(sheet_id: SheetId, position: usize) -> Self {
         Self::CopySheet { sheet_id, position }
+    }
+
+    /// Constructs the import of a sheet read from another workbook to zero-based `position` of
+    /// the tab order.
+    pub const fn import_sheet(sheet: crate::ImportedSheet, position: usize) -> Self {
+        Self::ImportSheet { sheet, position }
     }
 
     /// Constructs a sheet-visibility change.

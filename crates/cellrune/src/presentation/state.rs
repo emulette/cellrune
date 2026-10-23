@@ -668,6 +668,11 @@ impl DocumentPresentation {
         }
     }
 
+    /// Gives an imported sheet the panes and phonetics it had in its own workbook.
+    pub(crate) fn import_sheet(&mut self, sheet_id: SheetId, sheet: SheetPresentation) {
+        self.sheets.insert(sheet_id, sheet);
+    }
+
     /// Drops the presentation of a deleted sheet: its panes and phonetics, its cell formats, and
     /// its column widths and row heights.
     pub(crate) fn remove_sheet(&mut self, sheet_id: SheetId) {

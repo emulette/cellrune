@@ -801,6 +801,12 @@ impl Sheet {
         self.name = name;
     }
 
+    /// Drops the source styles of empty positions and line styles, as an imported sheet's
+    /// formats are carried explicitly.
+    pub(crate) fn clear_new_cell_styles(&mut self) {
+        self.new_cell_styles = Arc::default();
+    }
+
     /// Gives a copied sheet its own ID.
     pub(crate) fn set_id(&mut self, id: SheetId) {
         self.semantic_fingerprint = OnceLock::new();

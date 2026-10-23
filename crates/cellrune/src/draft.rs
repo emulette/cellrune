@@ -19,7 +19,8 @@ pub(crate) use batch::{
     rewrite_limit_detail,
 };
 pub use batch::{
-    EditBatch, EditInverse, EditReceipt, UnrestoredContent, UnrestoredContentKind, WorkbookChange,
+    EditBatch, EditInverse, EditReceipt, ImportedSheet, UnrestoredContent, UnrestoredContentKind,
+    WorkbookChange,
 };
 pub(crate) use format::effective_cell_format;
 

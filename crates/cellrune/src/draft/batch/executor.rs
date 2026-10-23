@@ -566,6 +566,39 @@ impl WorkbookDraft {
                     topology_changed = true;
                     semantic_changed = true;
                 }
+                WorkbookChange::ImportSheet { sheet, position } => {
+                    let next = highest_sheet_id
+                        .checked_add(1)
+                        .ok_or(ValidationError::SheetIdExhausted)?;
+                    let sheet_id =
+                        SheetId::new(next).map_err(|_| ValidationError::SheetIdExhausted)?;
+                    let mut number_formats =
+                        super::sheet_import::used_number_formats(self.source_document(), &sheets)?;
+                    let tables = super::sheet_import::import_sheet(
+                        &mut sheets,
+                        &mut defined_names,
+                        &mut non_worksheet_tabs,
+                        date_system,
+                        rewrite_budget,
+                        super::sheet_import::SheetImport {
+                            imported: sheet,
+                            position: *position,
+                            sheet_id,
+                            number_formats: &mut number_formats,
+                        },
+                    )?;
+                    highest_sheet_id = next;
+                    super::sheet_import::import_presentation(&mut presentation, sheet, sheet_id)?;
+                    added_sheets.insert(sheet_id);
+                    created_sheet_ids.push(sheet_id);
+                    changed_table_ids.extend(tables);
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
                 WorkbookChange::MoveSheet { sheet_id, position } => {
                     let from = tab_position(&sheets, &non_worksheet_tabs, *sheet_id);
                     let Some(step) = move_sheet(

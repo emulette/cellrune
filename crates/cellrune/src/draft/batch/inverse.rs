@@ -1020,6 +1020,7 @@ pub(super) const fn has_inverse(change: &WorkbookChange) -> bool {
             | WorkbookChange::DeleteSheet { .. }
             | WorkbookChange::MoveSheet { .. }
             | WorkbookChange::CopySheet { .. }
+            | WorkbookChange::ImportSheet { .. }
             | WorkbookChange::RenameDefinedName { .. }
             | WorkbookChange::CreateTable { .. }
             | WorkbookChange::ConvertTableToRange { .. }

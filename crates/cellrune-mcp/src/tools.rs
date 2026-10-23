@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::error::McpError;
 use crate::model::{
     ApplyChangesArgs, ApplyChangesV2Args, CapabilityArgs, ChangesSinceArgs, CreateWorkbookArgs,
-    CsvExported, ExportCsvArgs, OpenCsvArgs, OpenWorkbookArgs, PreviewChangesArgs,
+    CsvExported, ExportCsvArgs, ImportSheetArgs, OpenCsvArgs, OpenWorkbookArgs, PreviewChangesArgs,
     PreviewChangesPageArgs, PreviewDiscarded, PreviewIdArgs, ReadFormatsArgs, ReadRangeArgs,
     RecalculateArgs, SaveEditsArgs, SaveWorkbookArgs, SessionArgs, SessionClosed, SessionStarted,
     SessionSummary, SheetPageArgs, WorkbookEditsSaved, WorkbookSaved,
@@ -783,6 +783,63 @@ workbook_apply_changes_v2, and the content they cannot restore.",
         let receipt = workbook.install_changes(prepared)?;
         drop(workbook);
         self.sessions.touch(&args.session_id)?;
+        Ok(Json(receipt))
+    }
+
+    /// Copy a worksheet from one resident workbook into another.
+    #[tool(
+        name = "workbook_import_sheet",
+        input_schema = crate::schema::mcp_schema::<ImportSheetArgs>(),
+        output_schema = crate::schema::mcp_schema::<EditReceiptDto>(),
+        description = "Copy the worksheet sheet of the workbook source_session_id into the \
+workbook session_id at a zero-based tab position, after checking expected_revision, as Excel \
+copies a sheet into another workbook. The sheet keeps its name, or becomes 'Data (2)' when the \
+receiving workbook has it, and its references to itself follow; its tables keep their names \
+unless taken; its scoped names and the workbook names that read it come too. A sheet whose \
+formulas or names read another sheet or workbook, or that holds data validations, hyperlinks, \
+comments, conditional formats, drawings, or other content the copy cannot carry, fails with \
+validation.sheet_import_unsupported naming it. Print settings are not copied. The receipt \
+carries an inverse that removes the sheet through workbook_apply_changes_v2.",
+        annotations(
+            title = "Import a sheet",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn workbook_import_sheet(
+        &self,
+        Parameters(args): Parameters<ImportSheetArgs>,
+    ) -> Result<Json<EditReceiptDto>, McpError> {
+        let source = self
+            .sessions
+            .get(&args.source_session_id)?
+            .workbook()
+            .clone();
+        let target = self.sessions.get(&args.session_id)?.workbook().clone();
+        let ImportSheetArgs {
+            expected_revision,
+            sheet,
+            position,
+            ..
+        } = args.clone();
+        // The source is released before the target is taken, so a workbook can import from
+        // itself.
+        let receipt = join_result(
+            tokio::task::spawn_blocking(move || {
+                let imported = source.blocking_lock_owned().read_sheet_for_import(&sheet)?;
+                target.blocking_lock_owned().import_sheet(
+                    expected_revision,
+                    imported,
+                    position as usize,
+                )
+            })
+            .await,
+        )?;
+        self.ensure_json_size(&receipt)?;
+        self.sessions.touch(&args.session_id)?;
+        self.sessions.touch(&args.source_session_id)?;
         Ok(Json(receipt))
     }
 

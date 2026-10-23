@@ -55,6 +55,7 @@ export declare class NativeWorkbook {
   clearCell(sheet: string, address: string): boolean
   addSheet(name: string): number
   renameSheet(currentName: string, newName: string): void
+  importSheet(expectedRevision: string, source: NativeWorkbook, sheet: string, position: number): NativeEditReceipt
   deleteSheet(name: string): void
   toBytes(invalidateUnavailable: boolean): Promise<Buffer>
   savePath(path: string, invalidateUnavailable: boolean, replaceExisting: boolean): Promise<NativeWriteReport>

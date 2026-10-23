@@ -20,6 +20,7 @@ mod generated_workbook {
     mod sheet_auto_filter_write;
     mod sheet_copy_write;
     mod sheet_deletion_write;
+    mod sheet_import_write;
     mod sheet_move_write;
     mod sheet_rename_write;
     mod style_record_write;

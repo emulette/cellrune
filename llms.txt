@@ -95,13 +95,13 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 29 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 30 tools are `workbook_create`,
 `workbook_open`, `workbook_open_csv`, `workbook_close`, `workbook_summary`,
 `workbook_export_csv`, `workbook_read_range`,
 `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
 `workbook_comments`, `workbook_phonetics`, `workbook_precedents`, `workbook_dependents`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
-`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
+`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_import_sheet`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
 `workbook_discard_preview`, and the sessionless `format_display_text` and
@@ -958,6 +958,34 @@ than guessing a name from a different XLSX crate (`calamine`,
   leaves the copy. A pivot table, form control, threaded comment, slicer,
   timeline, query table, or ActiveX control fails with
   `xlsx.write.unsupported_preservation`.
+- `ImportedSheet::from_draft(&WorkbookDraft, SheetId)` reads a worksheet of
+  one workbook for `import_sheet(ImportedSheet, position)` into another, as
+  Excel 16.114 copies a sheet into another workbook: the sheet keeps its name,
+  or takes `Name (2)` when the target has it, and its self-references follow;
+  a table keeps its name, or takes the copy's numbered name with the target's
+  table count when the name is taken; its scoped names come scoped to it, and
+  a workbook name that reads only the sheet comes as a workbook name, or
+  scoped to the sheet when the target has that workbook name. Cells, number
+  formats (a custom ID the target uses for another code is renumbered), cell
+  formats, column widths, row heights, the frozen pane, merged ranges, hidden
+  rows, tables, and the auto-filter come along; print and view settings such
+  as margins, page setup, headers and footers, and the default row height do
+  not. A formula or name that does not parse or that reads another sheet,
+  workbook, or table, a 3-D reference, data validations, hyperlinks,
+  comments, auto-filter criteria, row or column styles, a right-to-left view,
+  phonetic settings, and worksheet content only the source package carries,
+  such as `conditionalFormatting`, `drawing`, or `pivotTable`, fail with
+  `ValidationError::SheetImportUnsupported` (`validation.sheet_import_unsupported`)
+  naming it, as does a different date system when the change applies. The
+  receipt reports a topology change and an inverse that removes the sheet and
+  the names it brought. Interop reads the sheet with
+  `session.read_sheet_for_import(sheet)` and applies it with
+  `session.import_sheet(expected_revision, imported, position)`; Python
+  `workbook.import_sheet(expected_revision, source, sheet, position)`, Node.js
+  `workbook.importSheet(expectedRevision, source, sheet, position)`, and the
+  MCP `workbook_import_sheet` tool (`session_id`, `expected_revision`,
+  `source_session_id`, `sheet`, `position`) do both, and a workbook may import
+  from itself.
 - `rename_defined_name(DefinedNameScope, name, new_name)` renames a defined
   name and rewrites the uses that resolve to it, as Excel does, in cell
   formulas, defined names, table formulas, and data validations, and on

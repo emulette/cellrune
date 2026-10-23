@@ -577,6 +577,25 @@ class Workbook {
     withSyncErrors(() => this.#session().renameSheet(currentName, newName));
   }
 
+  importSheet(expectedRevision, source, sheet, position) {
+    requireU64BigInt(expectedRevision, "expectedRevision");
+    if (!(source instanceof Workbook)) {
+      throw inputError("source must be a Workbook");
+    }
+    requireString(sheet, "sheet");
+    requireNonNegativeInteger(position, "position");
+    return normalizeEditReceipt(
+      withSyncErrors(() =>
+        this.#session().importSheet(
+          expectedRevision.toString(),
+          source.#session(),
+          sheet,
+          position,
+        ),
+      ),
+    );
+  }
+
   deleteSheet(name) {
     requireString(name, "name");
     withSyncErrors(() => this.#session().deleteSheet(name));

@@ -20,6 +20,7 @@ mod phonetic_preservation;
 mod recalculation;
 mod report;
 mod serialization;
+mod sheet_content;
 mod sheet_copy_parts;
 mod sheet_deletion;
 mod sheet_positions;

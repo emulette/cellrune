@@ -214,6 +214,7 @@ These codes come from the `cellrune` crate. Interop, Python, Node.js, and MCP re
 | `validation.table_split` | A structural edit would delete, move, or overwrite part of a table or its totals row. |
 | `validation.copy_destination_shape` | A copy destination does not repeat the source range a whole number of times. |
 | `validation.copy_unsupported_formula` | A copy would copy a formula with a spill reference, a legacy array formula, or a data-table formula. |
+| `validation.sheet_import_unsupported` | An imported sheet holds content the target workbook cannot hold as Excel would: a reference to another sheet or workbook, a name that reads another sheet, a different date system, or content the model does not write, such as data validations, comments, conditional formats, or drawings. The detail names it. |
 
 ### Calculation sessions (`SessionErrorCode`)
 

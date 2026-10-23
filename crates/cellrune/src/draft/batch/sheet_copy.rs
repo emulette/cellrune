@@ -186,7 +186,7 @@ pub(super) fn copy_sheet(
 }
 
 /// Applies `requests` in turn to every cell formula and table formula of the copy.
-fn rewrite_copy(
+pub(super) fn rewrite_copy(
     copy: &mut Sheet,
     requests: &[FormulaRewriteRequest<'_>],
     budget: &mut FormulaRewriteBudget<'_>,
@@ -241,7 +241,7 @@ fn rewrite_copy(
 }
 
 /// Applies `requests` in turn and returns the result when any changed the text.
-fn rewrite_text(
+pub(super) fn rewrite_text(
     text: &str,
     requests: &[FormulaRewriteRequest<'_>],
     budget: &mut FormulaRewriteBudget<'_>,

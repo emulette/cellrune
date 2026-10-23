@@ -143,8 +143,8 @@ pub use diagnostic::{
     ProviderIdentity, SourceId, SourceLocation,
 };
 pub use draft::{
-    EditBatch, EditInverse, EditReceipt, UnrestoredContent, UnrestoredContentKind, WorkbookChange,
-    WorkbookDraft,
+    EditBatch, EditInverse, EditReceipt, ImportedSheet, UnrestoredContent, UnrestoredContentKind,
+    WorkbookChange, WorkbookDraft,
 };
 pub use error::{ValidationError, ValidationErrorCode};
 pub use formula::{

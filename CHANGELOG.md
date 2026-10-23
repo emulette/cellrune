@@ -417,6 +417,17 @@ inventories, and measurements belong in the linked documentation rather than in 
   whole-column, and whole-row ranges. `FormulaText::from_user_input` stores them as
   `_xlfn.TRIMRANGE(A1:B9,2,2)` with mode 1, 2, or 3; trim references read from storage text keep
   their dots through structural edits and copies.
+- `WorkbookChange::import_sheet(ImportedSheet, position)` adds a worksheet read with
+  `ImportedSheet::from_draft` from another workbook, as Excel copies a sheet into another workbook:
+  the sheet keeps its name or takes `Name (2)`, its tables keep their names unless taken, its
+  scoped names and the workbook names that read it come too, and custom number formats are
+  renumbered where the target uses the ID for another code. Cells, formats, column widths, row
+  heights, the frozen pane, merged ranges, hidden rows, tables, and the auto-filter come along, and
+  print settings do not. References to another sheet or workbook, data validations, hyperlinks,
+  comments, and package-only content such as conditional formats or drawings fail with the new
+  `validation.sheet_import_unsupported`. Interop `read_sheet_for_import` and `import_sheet`, Python
+  `import_sheet`, Node.js `importSheet`, and the MCP `workbook_import_sheet` tool expose it. A
+  generated worksheet now writes its merged ranges and hidden rows.
 - `ExcelError::from_spelling(&str)` returns the error whose canonical spelling, such as `#N/A` or
   `#PYTHON!`, is the given text, and `None` for any other text.
 

@@ -406,7 +406,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 29);
+    assert_eq!(tools.len(), 30);
     assert!(
         tools
             .iter()
@@ -1210,6 +1210,59 @@ fn sheet_copies_moves_and_table_creation_are_stdio_changes() {
     assert_eq!(sheets[1]["name"], "Sheet1");
     assert_eq!(sheets[0]["tables"][0]["display_name"], "Prices");
     assert_eq!(sheets[0]["tables"][0]["range"], "A1:B2");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn a_sheet_imports_from_one_stdio_session_into_another() {
+    let root = TestDirectory::new("sheet-import");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session = |mcp: &mut McpProcess| {
+        successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let source = session(&mut mcp);
+    let target = session(&mut mcp);
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({"session_id": source, "expected_revision": 0, "changes": [
+            {"kind": "set_value", "sheet": "Sheet1", "address": "A1",
+             "value": {"kind": "number", "value": 3}},
+            {"kind": "set_formula", "sheet": "Sheet1", "address": "B1", "formula": "=Sheet1!A1*2"}
+        ]}),
+    ));
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_import_sheet",
+        json!({"session_id": target, "expected_revision": 0, "source_session_id": source,
+               "sheet": "sheet1", "position": 1}),
+    ));
+    assert_eq!(receipt["created_sheet_ids"], json!([2]));
+    assert!(receipt["inverse"].is_object());
+    let summary = successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": target})));
+    assert_eq!(summary["summary"]["sheets"][1]["name"], "Sheet1 (2)");
+    let page = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({"session_id": target, "sheet": "Sheet1 (2)", "start": "B1", "end": "B1"}),
+    ));
+    assert_eq!(page["cells"][0]["formula"], "='Sheet1 (2)'!A1*2");
+
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({"session_id": source, "expected_revision": 1, "changes": [
+            {"kind": "set_formula", "sheet": "Sheet1", "address": "C1", "formula": "=Sheet9!A1"}
+        ]}),
+    ));
+    let error = failed_tool(mcp.call_tool(
+        "workbook_import_sheet",
+        json!({"session_id": target, "expected_revision": 1, "source_session_id": source,
+               "sheet": "Sheet1", "position": 0}),
+    ));
+    assert_eq!(error["code"], "validation.sheet_import_unsupported");
 
     let (status, _, _) = mcp.finish();
     assert!(status.success());

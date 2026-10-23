@@ -219,6 +219,7 @@ mod tests {
                 "workbook_export_csv",
                 "workbook_function_usage",
                 "workbook_hyperlinks",
+                "workbook_import_sheet",
                 "workbook_open",
                 "workbook_open_csv",
                 "workbook_phonetics",

@@ -492,6 +492,27 @@ impl NativeWorkbook {
     }
 
     #[napi(catch_unwind)]
+    pub fn import_sheet(
+        &self,
+        expected_revision: String,
+        source: &NativeWorkbook,
+        sheet: String,
+        position: u32,
+    ) -> napi::Result<NativeEditReceipt> {
+        let expected_revision = parse_u64(&expected_revision)?;
+        // The source is released before the target is taken, so a workbook can import from
+        // itself.
+        let imported = source
+            .lock()?
+            .read_sheet_for_import(&sheet)
+            .map_err(napi_error)?;
+        self.lock()?
+            .import_sheet(expected_revision, imported, position as usize)
+            .map(crate::conversion::edit_receipt)
+            .map_err(napi_error)
+    }
+
+    #[napi(catch_unwind)]
     pub fn delete_sheet(&self, name: String) -> napi::Result<()> {
         self.lock()?.delete_sheet(&name).map_err(napi_error)
     }
