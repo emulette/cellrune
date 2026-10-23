@@ -302,6 +302,42 @@ fn deleting_a_sheet_a_preserved_pivot_cache_or_chart_reads_is_refused_with_the_p
 }
 
 #[test]
+fn deleting_a_sheet_skips_relationship_targets_that_cannot_be_parts() {
+    let hyperlink = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+    // Producers write cell and mail links in drawing, chart, and VML relationships without
+    // `TargetMode="External"`, empty targets, and repeated IDs; none of them names a part.
+    let unusual = format!(
+        r##"<Relationship Id="rId3" Type="{hyperlink}" Target="#S3!A1"/><Relationship Id="rId4" Type="{hyperlink}" Target="mailto:someone@example.com"/><Relationship Id="rId5" Type="{hyperlink}" Target=""/><Relationship Id="rId5" Type="{hyperlink}" Target="#'S4'!A1"/></Relationships>"##
+    );
+    let source = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "</Relationships>",
+        &unusual,
+    );
+    let output = write(&delete(&source, &["S2"])).expect("deletion despite unusual targets");
+    let parts = support::archive_parts(&output);
+    assert!(!parts.contains_key("xl/worksheets/sheet2.xml"));
+    assert_eq!(
+        support::archive_parts(&source)["xl/drawings/_rels/drawing1.xml.rels"],
+        parts["xl/drawings/_rels/drawing1.xml.rels"]
+    );
+
+    let unreadable = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "</Relationships>",
+        "<Relationship></Relationships>",
+    );
+    let error = write(&delete(&unreadable, &["S2"])).expect_err("unreadable relationships");
+    assert_eq!(error.code(), XlsxWriteErrorCode::InvalidPackagePlan);
+    assert_eq!(
+        error.source_id().map(|source| source.as_str()),
+        Some("xl/drawings/_rels/drawing1.xml.rels")
+    );
+}
+
+#[test]
 fn edit_only_write_clears_the_results_a_deleted_sheet_changes() {
     let source = generated_sheet_deletion_fixture();
     let draft = delete(&source, &["S2"]);

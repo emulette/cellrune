@@ -11,7 +11,7 @@ use quick_xml::reader::NsReader;
 
 use super::package::PackageReader;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
-use crate::xlsx::package::{PartPath, RelationshipTarget, parse_relationships, relationship_type};
+use crate::xlsx::package::{PartPath, relationship_type, scan_internal_relationships};
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, namespace_reader,
     read_event,
@@ -172,7 +172,8 @@ pub(super) fn plan_sheet_deletion(
 }
 
 /// Reads every relationship part of the package and returns, for each internal target, the
-/// relationships that refer to it.
+/// relationships that refer to it. Relationships are read leniently: one whose target cannot be a
+/// part refers to nothing.
 fn package_referrers(
     document: &XlsxDocument,
     reader: &mut PackageReader<'_>,
@@ -196,21 +197,21 @@ fn package_referrers(
         }
         let bytes = reader.read_part(&relationship_part)?;
         let relationships =
-            parse_relationships(&bytes, &relationship_part, source.as_ref(), limits).map_err(
-                |error| {
+            scan_internal_relationships(&bytes, &relationship_part, source.as_ref(), limits)
+                .map_err(|error| {
                     XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
                         .at_source(relationship_part.source_id())
                         .with_cause(error)
-                },
-            )?;
+                })?;
         for relationship in relationships {
-            if let RelationshipTarget::Internal(target) = relationship.target {
-                referrers.entry(target).or_default().push(Referrer {
+            referrers
+                .entry(relationship.target)
+                .or_default()
+                .push(Referrer {
                     source: source.clone(),
                     id: relationship.id,
                     kind: relationship.kind,
                 });
-            }
         }
     }
     Ok(referrers)
