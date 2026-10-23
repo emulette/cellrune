@@ -274,12 +274,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   formatting text, as Excel's `TEXT("abc","@")` does, is not in 0.1.27.
 - `CalculationOptions::with_locale_profile(LocaleProfile)` selects built-in locale conventions
   instead of the host's: `Locale::EnUs`, the default, which keeps every earlier result, or
-  `Locale::KoKr`. The regional format decides the `DOLLAR` currency symbol (`₩` in Korean) and the
-  decimals it shows when the formula omits them (none in Korean), the names `TEXT` shows, and the
-  double-byte rules of the byte functions; `LocaleProfile::with_display_language` sets the
-  language of the `GROUPBY` and `PIVOTBY` total labels (`합계` in Korean) apart. Korean month,
-  weekday, and `AM`/`PM` names, a negative Korean `DOLLAR` amount, and the Korean label of a grand
-  total over several levels report `calculation.unsupported_expression` until measured. The Excel
+  `Locale::KoKr`. The regional format decides the `DOLLAR` currency symbol (`₩` in Korean, which
+  Excel 16.114 writes as `₩1.50` and `(₩1.50)` with the default two decimals), the names `TEXT`
+  shows, and the double-byte rules of the byte functions; `LocaleProfile::with_display_language`
+  sets the language of the `GROUPBY` and `PIVOTBY` total labels (`합계` in Korean) apart. Korean
+  month, weekday, and `AM`/`PM` names and the Korean label of a grand total over several levels
+  report `calculation.unsupported_expression` until measured. The Excel
   oracle audit calculates each host profile with its locale conventions.
 - The locale profile is `CalculationOptionsDto::locale_profile`, a `LocaleProfileDto` of `"en-US"`
   or `"ko-KR"` tags with an optional `display_language`, and the transaction report's calculation

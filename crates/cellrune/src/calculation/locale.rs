@@ -14,8 +14,7 @@ pub enum Locale {
 
 /// The locale conventions a calculation follows.
 ///
-/// `locale` stands for Excel's regional format: the `DOLLAR` currency symbol and the decimals it
-/// shows when the formula omits them, the month, weekday, and `AM`/`PM` names of `TEXT`, and the
+/// `locale` stands for Excel's regional format: the `DOLLAR` currency symbol, the month, weekday, and `AM`/`PM` names of `TEXT`, and the
 /// double-byte character rules of `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
 /// `REPLACEB`, `ASC`, and `DBCS`.
 /// `display_language` stands for the language of the labels Excel generates, such as the
@@ -60,15 +59,6 @@ impl Locale {
         match self {
             Self::EnUs => "$",
             Self::KoKr => "₩",
-        }
-    }
-
-    /// The decimals `DOLLAR` shows when the formula omits them: Excel with Korean regional
-    /// settings writes `DOLLAR(1)` as `₩1`.
-    pub(in crate::calculation) const fn currency_decimals(self) -> i32 {
-        match self {
-            Self::EnUs => 2,
-            Self::KoKr => 0,
         }
     }
 

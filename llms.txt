@@ -1601,10 +1601,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `#[non_exhaustive]` with `EnUs` (the default, which keeps every earlier
   result) and `KoKr`; both use `.` and `,` as decimal and thousands
   separators. The regional format decides the `DOLLAR` currency symbol (`$`
-  or `₩`) and the decimals it shows when the formula omits them (2 or none;
-  a negative amount is parenthesized in `EnUs` and
-  `calculation.unsupported_expression` in `KoKr` until measured), and the
-  names `TEXT` shows:
+  or `₩`; both default to two decimals and parenthesize a negative amount,
+  as in `(₩1.50)`), and the names `TEXT` shows:
   English for `EnUs`, while Korean month, weekday, and `AM`/`PM` names are
   `calculation.unsupported_expression` until measured (a `[$-409]` section
   still shows English names), and the double-byte rules of `LENB`, `LEFTB`,

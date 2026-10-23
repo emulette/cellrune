@@ -6,7 +6,6 @@ use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
 use super::util::{required_number, required_text};
-use crate::Locale;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -72,21 +71,16 @@ fn code(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         })
 }
 
-/// `DOLLAR`; an omitted `decimals` takes the locale's currency decimals, which `written`, the
-/// arguments as the formula wrote them, tells apart from an explicit value.
+/// `DOLLAR`; an omitted `decimals` is 2, which `written`, the arguments as the formula wrote them,
+/// tells apart from an explicit value. The locale chooses the currency symbol; Excel 16.114 with
+/// Korean regional settings writes `DOLLAR(1.5)` as `₩1.50` and `DOLLAR(-1.5)` as `(₩1.50)`.
 fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], written: &[Expr]) -> Value {
     if args.is_empty() || args.len() > 2 {
         return Value::Error(ErrorKind::Value);
     }
     let locale = engine.locale_profile().locale();
     let decimals = written.get(1).filter(|expr| !matches!(expr, Expr::Missing));
-    let (rounded, decimals) = match rounded_to_decimals(
-        engine,
-        context,
-        &args[0],
-        decimals,
-        locale.currency_decimals(),
-    ) {
+    let (rounded, decimals) = match rounded_to_decimals(engine, context, &args[0], decimals, 2) {
         Ok(rounded) => rounded,
         Err(kind) => return Value::Error(kind),
     };
@@ -100,11 +94,6 @@ fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], written:
         Err(kind) => return Value::Error(kind),
     };
     let output = if rounded.is_sign_negative() && rounded != 0.0 {
-        // How Excel with Korean regional settings writes a negative amount has not been
-        // established.
-        if locale != Locale::EnUs {
-            return Value::Error(ErrorKind::Unsupported);
-        }
         format!("({formatted})")
     } else {
         formatted

@@ -111,8 +111,11 @@ fn the_korean_profile_shows_won_and_korean_total_labels() {
         CalculationOptions::default().with_locale_profile(LocaleProfile::new(Locale::KoKr));
     let calculation = calculate_workbook(&workbook, options);
 
+    // Excel 16.114 with Korean regional settings (excel-measure I2) writes a negative amount in
+    // parentheses with the default two decimals.
     for (address, expected) in [
         ("A1", "₩1,234.57"),
+        ("B1", "(₩5.00)"),
         ("D1", "July"),
         ("E1", "2026-07-27"),
         ("A5", "합계"),
@@ -123,9 +126,8 @@ fn the_korean_profile_shows_won_and_korean_total_labels() {
             "{address}"
         );
     }
-    // A negative amount, the names, and the grand-total label of the Korean regional format have
-    // not been measured.
-    for address in ["B1", "C1", "F1", "D3"] {
+    // The names and the grand-total label of the Korean regional format have not been measured.
+    for address in ["C1", "F1", "D3"] {
         assert_unsupported(&calculation, sheet_id, address);
     }
 }

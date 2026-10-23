@@ -97,18 +97,18 @@ they give up.
 
 ### Selectable: locale conventions
 
-Microsoft documents the currency symbol of `DOLLAR` as dependent on system regional settings, so an
-Excel installation with Korean regional settings saves `₩0` and `₩1` where an English (United
-States) one saves `$0.00` and `$1.00` for the same formula. CellRune never reads
+Microsoft documents the currency symbol of `DOLLAR` as dependent on system regional settings, so
+Excel 16.114 for Mac with Korean regional settings shows `₩1.50` and `(₩1.50)` where an English
+(United States) one shows `$1.50` and `($1.50)` for the same formulas. CellRune never reads
 host locale as an implicit calculation input, because doing so would make the same workbook
 calculate differently on two machines and break the determinism the rest of the API depends on.
 Instead `CalculationOptions::with_locale_profile` selects one of the built-in locales, English
-(United States) by default or Korean (Korea). The profile decides the `DOLLAR` currency symbol and
-the decimals it shows when the formula omits them, the month, weekday, and `AM`/`PM` names `TEXT`
+(United States) by default or Korean (Korea). The profile decides the `DOLLAR` currency symbol, the
+month, weekday, and `AM`/`PM` names `TEXT`
 shows, and the `GROUPBY` and `PIVOTBY` total labels (`Total` or `합계`). The labels follow a separate
 display language, because an Excel with an English interface and Korean regional settings may
-label totals in English. The Korean names, a negative `DOLLAR` amount in the Korean format, and the
-label of a grand total over several levels have not been measured, so they remain unsupported.
+label totals in English. The Korean names and the label of a grand total over several levels have
+not been measured, so they remain unsupported.
 
 ### Selectable: arithmetic that cancels to near zero
 
