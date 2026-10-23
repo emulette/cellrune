@@ -920,6 +920,10 @@ impl Table {
     /// insertion inside the table adds, in order. The filter and sort ranges follow the table:
     /// one spanning the header and data rows, or the data rows, keeps spanning them.
     pub(crate) fn grid_mapped(&self, edit: GridEdit, inserted: Vec<TableColumn>) -> Option<Self> {
+        // Rows reordered within the data keep the table where it is.
+        if self.reorders_data(edit) {
+            return Some(self.clone());
+        }
         let range = edit.map_range(self.range, RangeRule::Reference)?;
         let spans = |table: CellRange| {
             let top = table.start().row().get();
@@ -966,6 +970,20 @@ impl Table {
             let position = (at - self.range.start().column().get()) as usize;
             columns.splice(position..position, inserted);
         }
+        if let GridEdit::Delete {
+            axis: GridAxis::Columns,
+            first,
+            last,
+        } = edit
+        {
+            let start = self.range.start().column().get();
+            let mut position = start;
+            columns.retain(|_| {
+                let kept = !(first..=last).contains(&position);
+                position += 1;
+                kept
+            });
+        }
         Some(Self {
             range,
             columns,
@@ -975,6 +993,27 @@ impl Table {
                 .and_then(|filter| filter.mapped(&map, &column)),
             sort_state: self.sort_state.as_ref().and_then(|sort| sort.mapped(&map)),
             ..self.clone()
+        })
+    }
+
+    /// Reports whether a row move takes rows of the table's data to another place within it, which
+    /// Excel 16.114 does without changing the table.
+    pub(crate) fn reorders_data(&self, edit: GridEdit) -> bool {
+        let GridEdit::Move {
+            axis: GridAxis::Rows,
+            first,
+            last,
+            destination,
+        } = edit
+        else {
+            return false;
+        };
+        self.data_range().is_some_and(|data| {
+            let (top, bottom) = (data.start().row().get(), data.end().row().get());
+            top <= first
+                && last <= bottom
+                && top <= destination
+                && destination + (last - first) <= bottom
         })
     }
 

@@ -11,7 +11,7 @@ use super::copy_edit::{CopyEditState, copy_range};
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
-use super::grid_edit::{GridEditState, apply_grid_edit, grid_change};
+use super::grid_edit::{GridEditState, apply_grid_edit, grid_change, remove_deleted_table_columns};
 use super::inverse::{
     InverseSeed, TableShape, UndoStep, edit_inverse, has_inverse, moves_preserved_content,
 };
@@ -954,6 +954,24 @@ impl WorkbookDraft {
                     if records_history && moves_preserved_content(edit) {
                         inverse_seed.preserved_sheets.insert(sheet_id);
                     }
+                    remove_deleted_table_columns(
+                        &mut sheets,
+                        &mut defined_names,
+                        &non_worksheet_tabs,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        sheet_id,
+                        edit,
+                    )?;
                     let outcome = apply_grid_edit(
                         GridEditState {
                             sheets: &mut sheets,

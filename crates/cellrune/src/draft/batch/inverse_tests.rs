@@ -389,3 +389,11 @@ fn mixed_batches_undo_every_structural_edit_in_reverse() {
         assert!(unrestored.is_empty(), "{changes:?}: {unrestored:?}");
     }
 }
+
+#[test]
+fn a_column_inserted_inside_a_table_is_undone_by_deleting_it() {
+    let unrestored = round_trip(vec![
+        WorkbookChange::insert_columns(id(1), Column::new(4).expect("D"), 1).expect("insertion"),
+    ]);
+    assert!(unrestored.is_empty(), "{unrestored:?}");
+}

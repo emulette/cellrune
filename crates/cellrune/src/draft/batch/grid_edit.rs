@@ -4,13 +4,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::DraftCellMutationStore;
+use super::formula_edit::{
+    FormulaEditState, WorkbookFormulaEdit, WorkbookFormulaRename, rewrite_workbook_formulas,
+};
 use super::staged::mark_upsert;
+use super::tab_order::TabOrder;
 use super::{BatchExecutionError, TableMaterializationBudget, WorkbookChange};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteRequest, rewrite_formula,
 };
 use crate::calculation::grid_rewrite::{GridChange, move_anchored_formulas};
+use crate::calculation::sheet_changes::SheetChanges;
 use crate::grid::{GridAxis, GridEdit, GridHistory};
+use crate::workbook::NonWorksheetTabs;
 use crate::{
     CalculationCellId, CellAddress, CellContent, CellRange, CellValue, Column, DataValidation,
     DefinedName, DefinedNameScope, DocumentPresentation, FormulaMetadata, FormulaText, Sheet,
@@ -397,20 +403,142 @@ fn validate_table(table: &Table, edit: GridEdit) -> Result<(), ValidationError> 
             first,
             last,
         } => {
+            // Excel 16.114 deletes the table columns the deletion reaches, and the table with its
+            // last column (excel-measure K). Filter criteria and sort state name columns, which a
+            // removed column would leave stale.
             let (left, right) = lines(GridAxis::Columns);
-            if first <= right && left <= last {
-                return Err(if table.header_row_count() > 0 {
-                    ValidationError::TableHeaderShift { table_id }
-                } else {
-                    ValidationError::TableSplit { table_id }
-                });
+            let filtered = table.auto_filter().is_some_and(|filter| {
+                !filter.filter_columns().is_empty() || filter.sort_state().is_some()
+            });
+            if first <= right
+                && left <= last
+                && (table.table_type() != TableType::Worksheet
+                    || table.header_row_count() > 1
+                    || filtered
+                    || table.sort_state().is_some())
+            {
+                return Err(ValidationError::UnsupportedTableAuthoringMetadata { table_id });
             }
         }
+        // Excel 16.114 reorders rows within a table's data and keeps its range.
+        GridEdit::Move { .. } if table.reorders_data(edit) => {}
         GridEdit::Move { .. } | GridEdit::MoveRange { .. } => {
             if edit.splits(range) || edit.overwrites(range) {
                 return Err(ValidationError::TableSplit { table_id });
             }
         }
+    }
+    Ok(())
+}
+
+/// Rewrites the structured references to the table columns a column deletion of sheet `sheet_id`
+/// removes: a reference naming one, alone or as an end of a column range, becomes `#REF!`, and
+/// every reference to a table the deletion removes whole does, as Excel 16.114 saves them
+/// (excel-measure K). Runs before the grid edit moves the cells.
+pub(super) fn remove_deleted_table_columns(
+    sheets: &mut [Sheet],
+    defined_names: &mut [DefinedName],
+    non_worksheet_tabs: &NonWorksheetTabs,
+    edit_state: WorkbookFormulaEdit<'_, '_>,
+    sheet_id: SheetId,
+    edit: GridEdit,
+) -> Result<(), BatchExecutionError> {
+    let GridEdit::Delete {
+        axis: GridAxis::Columns,
+        first,
+        last,
+    } = edit
+    else {
+        return Ok(());
+    };
+    let Some(sheet_index) = sheets.iter().position(|sheet| sheet.id() == sheet_id) else {
+        return Ok(());
+    };
+    let affected = sheets[sheet_index]
+        .tables()
+        .iter()
+        .filter_map(|table| {
+            let start = table.range().start().column().get();
+            let removed = table
+                .columns()
+                .iter()
+                .zip(start..)
+                .filter(|(_, column)| (first..=last).contains(column))
+                .map(|(column, _)| column.name().to_owned())
+                .collect::<Vec<_>>();
+            (!removed.is_empty()).then(|| {
+                let whole = removed.len() == table.columns().len();
+                (
+                    table.id(),
+                    table.range(),
+                    table.display_name().as_str().to_owned(),
+                    removed,
+                    whole,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let WorkbookFormulaEdit {
+        state,
+        changed_table_ids,
+        table_formula_locations,
+        budget,
+    } = edit_state;
+    let FormulaEditState {
+        mutations,
+        changed_cells,
+        calculation_changed_cells,
+        touched_sheets,
+    } = state;
+    let tab_names = TabOrder::of(sheets, non_worksheet_tabs)
+        .names()
+        .into_iter()
+        .map(|(name, id)| (name.to_owned(), id))
+        .collect::<Vec<_>>();
+    for (table_id, range, name, removed, whole) in affected {
+        let removed = removed.iter().map(String::as_str).collect::<Vec<_>>();
+        let before = tab_names
+            .iter()
+            .map(|(name, id)| (name.as_str(), *id))
+            .collect::<Vec<_>>();
+        let after = tab_names
+            .iter()
+            .map(|(name, id)| (*id, name.as_str()))
+            .collect::<Vec<_>>();
+        let deleted_tables = [name.as_str()];
+        let rename = if whole {
+            WorkbookFormulaRename::SheetChanges(SheetChanges {
+                before: &before,
+                after: &after,
+                steps: &[],
+                retarget: None,
+                deleted_tables: &deleted_tables,
+            })
+        } else {
+            WorkbookFormulaRename::TableColumnsRemoved {
+                table_id,
+                target_sheet_index: sheet_index,
+                target_range: range,
+                table_name: &name,
+                removed: &removed,
+            }
+        };
+        rewrite_workbook_formulas(
+            sheets,
+            defined_names,
+            WorkbookFormulaEdit {
+                state: FormulaEditState {
+                    mutations: &mut *mutations,
+                    changed_cells: &mut *changed_cells,
+                    calculation_changed_cells: &mut *calculation_changed_cells,
+                    touched_sheets: &mut *touched_sheets,
+                },
+                changed_table_ids: &mut *changed_table_ids,
+                table_formula_locations,
+                budget: &mut *budget,
+            },
+            rename,
+        )?;
     }
     Ok(())
 }
@@ -427,12 +555,22 @@ fn moved_tables(
     let mut moved = Vec::with_capacity(sheet.tables().len());
     for table in sheet.tables() {
         let (inserted, headers) = inserted_table_columns(table, edit)?;
-        let mapped = table
-            .grid_mapped(edit, inserted)
-            .ok_or(ValidationError::TableSplit {
-                table_id: table.id().get(),
-            })?;
-        moved.push((mapped, headers));
+        match table.grid_mapped(edit, inserted) {
+            Some(mapped) => moved.push((mapped, headers)),
+            // A column deletion reaching every column deletes the table.
+            None if matches!(
+                edit,
+                GridEdit::Delete {
+                    axis: GridAxis::Columns,
+                    ..
+                }
+            ) => {}
+            None => {
+                return Err(ValidationError::TableSplit {
+                    table_id: table.id().get(),
+                });
+            }
+        }
     }
     Ok(moved)
 }

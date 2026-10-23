@@ -812,3 +812,62 @@ fn a_range_move_splits_relative_rules_as_excel_does() {
         assert!(worksheet.contains(expected), "{expected}\n{worksheet}");
     }
 }
+
+#[test]
+fn deleting_table_columns_saves_the_narrowed_or_removed_table() {
+    let column = |index| cellrune::Column::new(index).expect("column");
+    for (first, last, expected) in [(2, 2, vec![("A1", "A5", vec!["key"])]), (1, 2, Vec::new())] {
+        let draft = edited(
+            &generated_grid_edit_fixture(),
+            vec![
+                WorkbookChange::delete_columns(sheet(1), column(first), column(last))
+                    .expect("deletion"),
+            ],
+        );
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let output = write_xlsx_draft_bytes(
+            &draft,
+            &calculation,
+            RecalculationWriteOptions::default()
+                .with_policy(RecalculationWritePolicy::InvalidateUnavailable),
+        )
+        .expect("saved deletion");
+        let reopened = open(output.bytes());
+        let data = reopened.workbook().sheet_by_name("Data").expect("Data");
+        let tables = data
+            .tables()
+            .iter()
+            .map(|table| {
+                (
+                    table.range().start().to_string(),
+                    table.range().end().to_string(),
+                    table
+                        .columns()
+                        .iter()
+                        .map(|column| column.name().to_owned())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected = expected
+            .into_iter()
+            .map(|(start, end, columns)| {
+                (
+                    start.to_owned(),
+                    end.to_owned(),
+                    columns.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tables, expected, "{first}:{last}");
+        // SUM(Things[val]) in A7 names a removed column, then a removed table.
+        let reads_ref = data.cells().any(|cell| {
+            matches!(
+                cell.content(),
+                CellContent::Formula(formula)
+                    if formula.text().is_some_and(|text| text.as_str() == "SUM(#REF!)")
+            )
+        });
+        assert!(reads_ref, "{first}:{last}");
+    }
+}

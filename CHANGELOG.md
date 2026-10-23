@@ -105,10 +105,15 @@ inventories, and measurements belong in the linked documentation rather than in 
   hyperlinks, spill and array ranges, row heights, and column widths move with their cells, and
   inserted lines take the cell formats of the line before them; in a calculation session those
   copied formats count against the table materialization limit
-  (`session.table_materialization_limit_exceeded`). An edit fails with the new `validation.structural_edit_empty`,
-  `validation.content_shifted_off_sheet`, `validation.merged_range_split`,
-  `validation.table_header_shift`, `validation.table_data_rows_deleted`, or
-  `validation.table_split` where Excel refuses it.
+  (`session.table_materialization_limit_exceeded`). As Excel 16.114 does, a column deletion removes
+  the table columns it reaches, turning structured references naming them, alone or as an end of a
+  column range, into `#REF!`, and removes a table it reaches whole with every reference to it; a
+  row move within a table's data reorders the rows and keeps the table. An edit fails with the new
+  `validation.structural_edit_empty`, `validation.content_shifted_off_sheet`,
+  `validation.merged_range_split`, `validation.table_header_shift`,
+  `validation.table_data_rows_deleted`, or `validation.table_split` where Excel refuses it, and a
+  column deletion reaching a table with filter criteria, a sort, or more than one header row with
+  `validation.unsupported_table_authoring_metadata`.
 - `WorkbookChange::move_range(SheetId, CellRange, CellAddress)` cuts and pastes cells within a
   sheet: references to the moved cells follow them, a range only partly moved keeps its text, and
   moved formulas keep theirs. As Excel 16.114 does, a reference to cells the paste overwrites
@@ -134,8 +139,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   added again under its name at its position and filled from its cells, formats, names, and
   tables), and the `UnrestoredContent` they cannot bring back by kind, sheet, and table; preserved
   package content a deletion or move changes is listed. An inverse without changes means the batch
-  left nothing to undo. The engine keeps no undo stack, and a batch whose undo needs an edit Excel
-  refuses, such as deleting columns an insertion added inside a table, has no inverse. Interop and
+  left nothing to undo. The engine keeps no undo stack, and a batch whose undo needs an edit the
+  workbook refuses has no inverse. Interop and
   Python receipts
   carry it as `inverse`, edit-schema-v2 `changes` and `unrestored` (a `set_formula` change's new
   optional `dynamic_array` restores a dynamic-array formula without a known spill range), Node.js

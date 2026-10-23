@@ -325,10 +325,6 @@ fn tables_grow_inside_their_body_and_refuse_losing_their_header_or_data() {
             delete_rows(1, 2, 4),
             ValidationError::TableDataRowsDeleted { table_id: 1 },
         ),
-        (
-            WorkbookChange::delete_columns(id(1), column(7), column(8)).expect("deletion"),
-            ValidationError::TableHeaderShift { table_id: 1 },
-        ),
     ] {
         assert_eq!(refused(&mut draft, change), error);
     }
@@ -1098,5 +1094,164 @@ fn copies_carry_number_formats_and_cell_formats() {
     assert_eq!(
         draft.cell_format(sheet, address("C3")).expect("format"),
         draft.cell_format(sheet, address("A1")).expect("format")
+    );
+}
+
+/// `T` holds the table `T` over A1:C5 with columns `a`, `b`, and `c`, and formulas in H1:H8 that
+/// read it.
+fn table_probe() -> WorkbookDraft {
+    let mut cells = vec![
+        ("H1", "=SUM(T[b])"),
+        ("H2", "=SUM(T[c])"),
+        ("H3", "=SUM(T[[a]:[b]])"),
+        ("H4", "=SUM(T[[b]:[c]])"),
+        ("H5", "=ROWS(T[#All])"),
+        ("H6", "=SUM(B2:B5)"),
+        ("H7", "=SUM(A3:C3)"),
+        ("H8", "=B3"),
+    ];
+    let values = (2..=5)
+        .flat_map(|row| {
+            [
+                (format!("A{row}"), row.to_string()),
+                (format!("B{row}"), (row * 10).to_string()),
+                (format!("C{row}"), (row * 100).to_string()),
+            ]
+        })
+        .collect::<Vec<_>>();
+    cells.extend(
+        values
+            .iter()
+            .map(|(cell, value)| (cell.as_str(), value.as_str())),
+    );
+    let mut t = sheet(1, "T", &cells);
+    for (cell, header) in [("A1", "a"), ("B1", "b"), ("C1", "c")] {
+        t.upsert_cell(
+            address(cell),
+            CellContent::Literal(CellValue::Text(header.to_owned())),
+            crate::NumberFormat::default(),
+        );
+    }
+    t.set_tables(vec![table(1, "T", "A1:C5", 0, &["a", "b", "c"])]);
+    draft(vec![t], Vec::new())
+}
+
+#[test]
+fn column_deletions_remove_table_columns_and_tables_as_excel_does() {
+    // Excel 16.114 (excel-measure K): each deletion, the table range and columns left, and the
+    // formulas that read the table, moved left with their cells.
+    for (first, last, table_range, columns, formulas) in [
+        (
+            2,
+            2,
+            Some("A1:B5"),
+            vec!["a", "c"],
+            [
+                "=SUM(#REF!)",
+                "=SUM(T[c])",
+                "=SUM(#REF!)",
+                "=SUM(#REF!)",
+                "=ROWS(T[#All])",
+                "=SUM(#REF!)",
+                "=SUM(A3:B3)",
+                "=#REF!",
+            ],
+        ),
+        (
+            3,
+            4,
+            Some("A1:B5"),
+            vec!["a", "b"],
+            [
+                "=SUM(T[b])",
+                "=SUM(#REF!)",
+                "=SUM(T[[a]:[b]])",
+                "=SUM(#REF!)",
+                "=ROWS(T[#All])",
+                "=SUM(B2:B5)",
+                "=SUM(A3:B3)",
+                "=B3",
+            ],
+        ),
+        (
+            1,
+            3,
+            None,
+            Vec::new(),
+            [
+                "=SUM(#REF!)",
+                "=SUM(#REF!)",
+                "=SUM(#REF!)",
+                "=SUM(#REF!)",
+                "=ROWS(#REF!)",
+                "=SUM(#REF!)",
+                "=SUM(#REF!)",
+                "=#REF!",
+            ],
+        ),
+    ] {
+        let mut draft = table_probe();
+        apply(
+            &mut draft,
+            WorkbookChange::delete_columns(id(1), column(first), column(last)).expect("deletion"),
+        );
+        let workbook = draft.workbook();
+        let sheet = workbook.sheet_by_name("T").expect("T");
+        assert_eq!(
+            sheet.tables().first().map(Table::range),
+            table_range.map(range),
+            "{first}:{last}"
+        );
+        if let Some(table) = sheet.tables().first() {
+            assert_eq!(
+                table
+                    .columns()
+                    .iter()
+                    .map(TableColumn::name)
+                    .collect::<Vec<_>>(),
+                columns
+            );
+        }
+        let formula_column = 8 - (last - first + 1);
+        for (row, expected) in (1..).zip(formulas) {
+            let cell = CellAddress::new(crate::Row::new(row).expect("row"), column(formula_column));
+            assert_eq!(
+                text(workbook, "T", &cell.to_string()),
+                expected,
+                "{first}:{last} {cell}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rows_move_within_a_table_s_data_and_keep_its_range() {
+    // Excel 16.114 (excel-measure K): row 3 cut and inserted before row 6 lands on row 5.
+    let mut draft = table_probe();
+    apply(
+        &mut draft,
+        WorkbookChange::move_rows(id(1), row(3), row(3), row(5)).expect("move"),
+    );
+    let workbook = draft.workbook();
+    assert_eq!(
+        workbook.sheet_by_name("T").expect("T").tables()[0].range(),
+        range("A1:C5")
+    );
+    for (cell, expected) in [
+        ("A5", "3"),
+        ("A3", "4"),
+        ("H1", "=SUM(T[b])"),
+        ("H7", "=SUM(A5:C5)"),
+        ("H8", "=B5"),
+    ] {
+        assert_eq!(text(workbook, "T", cell), expected, "{cell}");
+    }
+    // A move out of the data rows still splits the table.
+    assert_eq!(
+        refused(
+            &mut table_probe(),
+            WorkbookChange::move_rows(id(1), row(3), row(3), row(8)).expect("move"),
+        ),
+        ValidationError::TableSplit { table_id: 1 }
     );
 }
