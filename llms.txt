@@ -157,6 +157,14 @@ xlsxwriter set while storing placeholder results. An
 formulas in `details.cells`. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
 
+Sheets are deleted with the `delete_sheet` change (`{"kind": "delete_sheet",
+"sheet": name}` in interop JSON, Python, and MCP; `{ kind: "deleteSheet",
+sheet }` in Node) or the Python `delete_sheet(name)` and Node
+`deleteSheet(name)` methods. Within a batch, later changes no longer reach a
+deleted sheet by name. A delta, including one read later through
+`changes_since`/`changesSince` or a committed preview's, names a deleted
+sheet's removed results by the name the sheet had.
+
 ## Naming conventions
 
 These patterns are consistent across the entire public API. When a function
@@ -296,7 +304,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.defined_names()`, `.diagnostics()`, `.date_system()`,
   `.calculation_hints()`, `.source()`, `.provenance()`, and
   `.non_worksheet_tab_ids()` (chartsheet, dialogsheet, and macrosheet IDs,
-  which added sheets never reuse).
+  which added sheets never reuse), and `.highest_sheet_id() -> Option<SheetId>`
+  (the highest ID the workbook has used, deleted sheets included; an added
+  sheet receives the next one, so a deleted sheet's ID is never reused).
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
@@ -451,7 +461,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.set_cell_number_format(...)`.
 - `.set_annotated_text(...)`, `.set_phonetics(...)`, `.clear_phonetics(...)`,
   `.set_frozen_pane(...)`, `.clear_frozen_pane(...)`.
-- `.add_sheet(...)`, `.rename_sheet(...)`, `.set_sheet_visibility(...)`.
+- `.add_sheet(...)`, `.rename_sheet(...)`, `.delete_sheet(SheetId)`,
+  `.set_sheet_visibility(...)`.
 - `.set_defined_name(...)`, `.remove_defined_name(...)`,
   `.set_date_system(...)`, `.set_calculation_hints(...)`.
 - `NumberFormat::built_in(...)` and `NumberFormat::custom(...)` validate the
@@ -473,8 +484,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   and the full reach of an `INDEX` range end; formulas naming a changed
   defined name, directly, through other names, through a sheet-qualified
   name such as `Data!Rate`, or while it did not exist; formulas referring to
-  a changed table; references to an added or renamed sheet, and `SHEET`,
-  `SHEETS`, `CELL`, and 3-D references when sheets are added or renamed; a
+  a changed table; references to an added, renamed, or deleted sheet, and
+  `SHEET`, `SHEETS`, `CELL`, and 3-D references when sheets are added,
+  renamed, or deleted; a
   spill anchor whose area was written; anchors with a saved `#SPILL!` after
   a clear; and every dependent of those. Formulas whose references are known
   only after evaluation (dynamic references, unparsed formulas, rejected
@@ -499,6 +511,24 @@ than guessing a name from a different XLSX crate (`calamine`,
   Writing text to a table header cell, also with `.set_annotated_text`,
   renames the column; edits inside a legacy array other than at its anchor
   fail with `validation.array_formula_part_edit`.
+- Saving a document draft with deleted sheets drops each one's `<sheet>`
+  entry, workbook relationship, and every part only deleted sheets reached,
+  found through the package relationships: tables, drawings, charts,
+  comments, pivot tables, and a pivot cache all of whose pivot tables went,
+  with its `<pivotCache>` entry. A part another sheet still reaches stays,
+  removed parts lose their content-type overrides, and `docProps/app.xml`
+  keeps its bytes. Sheet-scoped names get renumbered `localSheetId`s, and
+  `workbookView` `activeTab` and `firstSheet` count down by the deleted tabs
+  before them, a deleted active tab handing activity to the tab now at its
+  place (the last tab when it was last); `tabSelected` is left as it was.
+  Conditional formats, data validations, x14 formulas, and chart series that
+  name a deleted sheet become `#REF!`; a sparkline whose data names one loses
+  its data source and keeps its location, and an internal hyperlink keeps its
+  location, as Excel saves them. A remaining pivot cache whose source is a
+  deleted sheet or a table on one, a remaining pivot chart of a pivot table
+  on one, and any slicer or timeline cache while a deleted sheet holds a
+  pivot table or table fail with `UnsupportedPreservation`, the detail naming
+  the parts.
 - Dynamic formulas can be authored in canonical drafts. Existing
   document-backed dynamic formulas can be recalculated and cache-rewritten,
   but adding or replacing one through a document draft fails with
@@ -555,7 +585,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `WorkbookChange` is the non-exhaustive typed mutation union. Construct
   changes with `set_cell_value`, `set_cell_formula`,
   `set_cell_dynamic_formula`, `clear_cell`, `set_cell_number_format`,
-  `add_sheet`, `rename_sheet`, `set_sheet_visibility`, `set_defined_name`,
+  `add_sheet`, `rename_sheet`, `delete_sheet`, `set_sheet_visibility`,
+  `set_defined_name`,
   `remove_defined_name`, `set_date_system`, `set_calculation_hints`,
   `rename_table(TableId, TableName)`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
@@ -580,6 +611,21 @@ than guessing a name from a different XLSX crate (`calamine`,
   calculated/totals/header cells, and can expand a header-only empty table.
   Unsupported metadata, collisions, formula rewrite failures, limits, and
   cancellation roll back the complete batch.
+- `delete_sheet(SheetId)` removes the sheet, the names scoped to it, and its
+  tables, and rewrites the remaining cell formulas, defined names, and table
+  formulas as Excel saves them: a reference or qualified name on the deleted
+  sheet, a structured reference to one of its tables, and a range or spill
+  reference with such an operand become `#REF!` (`SUM('S2'!A1:A3)` becomes
+  `SUM(#REF!)`, and `'S2'!Name` becomes `#REF!` where Excel writes
+  `[0]!Name`); a deleted end of a 3-D reference moves to the nearest
+  remaining tab toward the other end, tabs that are not worksheets included,
+  and an end left alone collapses (`'S2:S3'!A1` becomes `'S3'!A1`), while a
+  deleted middle sheet leaves the text as it is. `INDIRECT` text and
+  external references are untouched. Later tabs move forward, the draft
+  drops what it recorded for the sheet, and the receipt reports a topology
+  change, so a session rebuilds and recalculates fully. Deleting the last
+  visible sheet fails with `ValidationError::LastVisibleSheet`
+  (`validation.last_visible_sheet`), an unknown sheet with `UnknownSheetId`.
 - `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
   draft plus persistent parsed formulas, dependency state, results, dirty
   roots, and bounded delta history.

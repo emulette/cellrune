@@ -57,9 +57,9 @@ cellrune = "0.1.26"
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
 - writes `WorkbookDraft` edits into an existing package without calculating, clearing only the
   saved results the edits can affect and asking the host to recalculate on open only when needed;
-- creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet, name, table rename,
-  table-column rename, table-row resize, table and autoFilter column widening, number-format,
-  date-system, and calculation-property edits through `WorkbookDraft`;
+- creates canonical `.xlsx` workbooks and applies typed cell, formula, sheet (including sheet
+  deletion), name, table rename, table-column rename, table-row resize, table and autoFilter column
+  widening, number-format, date-system, and calculation-property edits through `WorkbookDraft`;
 - reads, queries, preserves, and explicitly authors SpreadsheetML phonetic annotations and default
   frozen panes without mixing presentation state into formula calculation;
 - exposes the versioned read/edit/calculate/write contract through typed Python and
@@ -265,6 +265,17 @@ cells, and supports expanding a header-only empty table. Through
 `SessionLimits`. A successful `EditReceipt` lists the affected stable table IDs; any invalid
 target, collision, rewrite error, resource limit, or cancellation rolls the whole batch back.
 
+`WorkbookChange::delete_sheet` and `WorkbookDraft::delete_sheet` delete a sheet with the names
+scoped to it and its tables. References to them in the remaining formulas, defined names, and table
+formulas become `#REF!` as Excel saves them, a deleted end of a 3-D reference moves to the nearest
+remaining sheet, and `INDIRECT` text is left as it is. Deleting the last visible sheet fails with
+`validation.last_visible_sheet`, and a deleted sheet's ID is never reused. Saving into the source
+package removes the parts only the deleted sheet reached and rewrites references in conditional
+formats, data validations, and chart series to `#REF!`; a remaining pivot cache or pivot chart that
+reads the deleted sheet, or a slicer or timeline cache while it holds a pivot table or table, fails
+with `xlsx.write.unsupported_preservation`. See
+[llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for the complete rules.
+
 Use `analyze_defined_name`, `analyze_defined_name_with_options`, or
 `analyze_defined_name_cancellable` to inspect a defined name against an immutable
 `WorkbookSnapshot`. The typed result distinguishes a single rectangle, a 3-D span, ordered
@@ -342,6 +353,7 @@ reaches every surface:
 | Save calculated results | yes | yes | yes | yes |
 | Save edits without calculating | yes | yes | yes | yes |
 | Cell number formats, sheet autoFilter ranges, `fullCalcOnLoad` | yes | yes | yes | yes |
+| Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
 | Defined-name inspection | yes | yes | yes | no |
 | Sheet autoFilter and table column widening edits | yes | no | no | no |
