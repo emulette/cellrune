@@ -255,16 +255,16 @@ fn parts(tokens: &[Token]) -> Result<Vec<Part>, ErrorKind> {
         let part = match token {
             Token::Literal(text) => Part::Literal(text.clone()),
             Token::Letters { letter, count, .. } => match (letter, count) {
-                // Excel 16.114 shows `y yyy ee` as `24 2024 2024` (excel-measure RESULTS.md,
-                // section B).
+                // Excel 16.114 shows `y yyy ee` as `24 2024 2024` and `yyyyy` as the four-digit
+                // year (excel-measure RESULTS.md, sections B and N2).
                 ('y', 1 | 2) => Part::Year(2),
-                ('y', 3 | 4) | ('e', 1 | 2) => Part::Year(4),
+                ('y', 3..=5) | ('e', 1 | 2) => Part::Year(4),
                 ('m', 1..=5) => Part::MonthOrMinute(*count),
                 ('d', 1..=4) => Part::Day(*count),
                 ('h', 1..=2) => Part::Hour(*count),
                 ('s', 1..=2) => Part::Second(*count),
-                // Other lengths, the era, Buddhist-year, and weekday-letter codes, and letters
-                // that are not codes, which some hosts read as codes, are unmeasured.
+                // Other lengths, the era and Buddhist-year codes `g` and `b`, and letters outside
+                // ASCII are unmeasured.
                 _ => return Err(ErrorKind::Unsupported),
             },
             Token::Elapsed { unit, width } => Part::Elapsed {
@@ -293,6 +293,7 @@ fn parts(tokens: &[Token]) -> Result<Vec<Part>, ErrorKind> {
             Token::Meridiem(Meridiem::UnmeasuredCase) => return Err(ErrorKind::Unsupported),
             Token::Meridiem(meridiem) => Part::Meridiem(meridiem.clone()),
             Token::Placeholder(_)
+            | Token::Invalid(_)
             | Token::Percent
             | Token::Exponent { .. }
             | Token::TextValue

@@ -1355,11 +1355,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   the last; colors such as `[Red]` and the palette colors `[Color1]` through
   `[Color56]` are accepted and not shown. Quoted text,
   `\x`, `[$symbol-lcid]` symbols, and characters other than codes and letters
-  are literal. An unquoted letter that is not a code is shown as written only
-  in the one-section digit codes 0.1.26 formatted (`TEXT(5,"0 x")` is `5 x`)
-  and is otherwise `calculation.unsupported_expression`, because hosts read
-  such letters differently: for the zero section `zero` Excel Online stores
-  `z1900ro` and Mac Excel 2021 `z3333o`.
+  are literal. A lone unquoted letter among `a c f i j k l o p q r t u v w x
+  z` in either case is shown as written and a lone `n`, `N`, `B`, or `E` is
+  `#VALUE!`, as Excel 16.114 for Mac and Excel for the web show them: the zero
+  section `zero` is `z1900ro` (`e` is the year), where Mac Excel 2021 shows
+  `z3333o`. The one-section digit codes 0.1.26 formatted keep showing every
+  unquoted letter as written (`TEXT(5,"0 x")` is `5 x`, `TEXT(5,"0n")` is
+  `5n`). Runs of such letters, as the weekday code `aaa`, and the era and
+  Buddhist-year codes `g` and `b` are `calculation.unsupported_expression`.
   Digit layouts use `0`, `#`, and `?` (a space when empty), `.`, `,` between
   integer placeholders for grouping, trailing `,` to divide by 1,000 each, `%`,
   `_x` as one space, `*x` fills, which `TEXT` drops, literals between
@@ -1385,7 +1388,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   characters, minus sign included, as `&` does; a longer number, which Excel
   rounds or writes in scientific notation, and a nonzero magnitude below
   0.001 are `calculation.unsupported_expression`. Date sections read `y` and
-  `yy` as a two-digit year, `yyy`, `yyyy`, `e`, and `ee` as a four-digit year,
+  `yy` as a two-digit year, `yyy`, `yyyy`, `yyyyy`, `e`, and `ee` as a four-digit year,
   `m` through `mmmmm`, `d` through `dddd`, `h`, `hh`, minutes as
   `m`/`mm` after an hour or before a second, `s`, `ss`, `.0` to `.000`
   fractional seconds, `[h]`, `[m]`, `[s]`, `AM/PM`, and `A/P`, in the

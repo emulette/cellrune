@@ -168,6 +168,14 @@ fn render_number_section(
     if tokens.iter().any(|token| matches!(token, Token::TextValue)) {
         return Err(ErrorKind::Unsupported);
     }
+    // Excel rejects `n`, `N`, `B`, and `E` as codes; the 0.1.26 subset showed them as written.
+    if !earlier_subset
+        && tokens
+            .iter()
+            .any(|token| matches!(token, Token::Invalid(_)))
+    {
+        return Err(ErrorKind::Value);
+    }
     if datetime::is_date_section(tokens) {
         if chosen.value < 0.0 {
             return Err(ErrorKind::Unsupported);

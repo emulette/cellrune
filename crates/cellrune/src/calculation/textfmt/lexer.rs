@@ -77,6 +77,8 @@ pub(super) enum Token {
     /// `*x`, which repeats `x` to fill the cell.
     Fill,
     General,
+    /// `n`, `N`, `B`, or `E` outside an exponent, which Excel rejects as a code.
+    Invalid(char),
     /// A run of one letter, compared without case; `text` keeps the letters as written.
     Letters {
         letter: char,
@@ -195,6 +197,21 @@ pub(super) fn lex(format: &str) -> Result<Vec<RawSection>, ErrorKind> {
                     evening: characters[index + 1],
                 }));
                 index += "a/p".len() - 1;
+            }
+            // Excel 16.114 for Mac shows these unquoted letters, each alone, as written beside
+            // digits, dates, or nothing else, and rejects a lone `n`, `N`, `B`, or `E` with
+            // `#VALUE!` there (excel-measure RESULTS.md, section N2). Runs such as the weekday
+            // code `aaa` are unmeasured.
+            _ if !characters
+                .get(index)
+                .is_some_and(|next| same_letter(*next, character))
+                && "acfijklopqrtuvwxzACFIJKLOPQRTUVWXZnNBE".contains(character) =>
+            {
+                section.tokens.push(if "nNBE".contains(character) {
+                    Token::Invalid(character)
+                } else {
+                    Token::Literal(character.to_string())
+                });
             }
             _ if character.is_alphabetic() => {
                 let mut text = character.to_string();

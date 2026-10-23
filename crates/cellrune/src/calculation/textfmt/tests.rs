@@ -105,18 +105,29 @@ fn sections_select_positive_negative_and_zero_layouts() {
 }
 
 #[test]
-fn unquoted_letters_outside_the_earlier_subset_are_unsupported() {
-    // For TEXT(0*-1,"0.00;-0.00;zero") Excel Online stores "z1900ro" and Mac Excel 2021
-    // "z3333o": whether an unquoted letter is a code depends on the host.
-    assert_unsupported(-0.0, "0.00;-0.00;zero");
+fn unquoted_letters_follow_excel_16_114() {
+    // Excel 16.114 for Mac, as Excel Online for curated:arithmetic:c019, shows the letters that are
+    // not codes as written and `e` as the four-digit year (excel-measure RESULTS.md, sections N
+    // and N2); Mac Excel 2021 stored "z3333o" for the first.
+    assert_text(-0.0, "0.00;-0.00;zero", "z1900ro");
+    assert_text(45_000.0, "zero", "z2023ro");
+    assert_text(0.0, "x", "x");
+    assert_text(-5.0, "0 \"x\";0 x", "5 x");
+    assert_text(46_230.0, "yyyy r", "2026 r");
+    assert_text(3.0, "General x", "3 x");
+    assert_text(45_000.25, "yyyyy", "2023");
+    // Excel rejects n, N, B, and E as codes.
+    for format in ["n", "N", "B", "E", "0n;0", "yyyyE"] {
+        assert_eq!(text(0.0, format), Err(ErrorKind::Value), "{format}");
+    }
+    // The era and Buddhist-year codes and A/P beside digits are unmeasured.
     assert_unsupported(5.0, "abc");
-    assert_unsupported(-5.0, "0 \"x\";0 x");
+    assert_unsupported(0.0, "g");
     assert_unsupported(5.0, "0 a/p;0");
-    assert_unsupported(46_230.0, "yyyy r");
-    assert_unsupported(3.0, "General x");
-    // The 0.1.26 subset showed them as written.
+    // The 0.1.26 subset showed letters as written, the rejected ones included.
     assert_text(5.0, "0 x", "5 x");
     assert_text(5.0, "0 \"x\";0", "5 x");
+    assert_text(1234.5, "0n", "1235n");
 }
 
 #[test]
@@ -246,7 +257,7 @@ fn dates_follow_both_date_systems() {
     );
     assert_unsupported(-1.0, "yyyy");
     assert_unsupported(2_958_466.0, "yyyy");
-    assert_unsupported(46_230.0, "yyyyy");
+    assert_text(46_230.0, "yyyyy", "2026");
     assert_unsupported(46_230.0, "eee");
 }
 

@@ -293,9 +293,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   `TEXT(1.999,"# ?/?")` is `2    `. Fixed fraction denominators such as `# ?/8`, conditional
   sections that select a negative number, a third section after one without a condition, elapsed
   codes beside `AM/PM`, lowercase `am/pm`, era, Buddhist-year, and weekday-letter codes, system
-  date formats, unquoted letters that are not codes outside the 0.1.26 codes (hosts read them
-  differently), `General` numbers Excel would shorten, and numbers past 2^53 rounded units in the
-  other codes report `calculation.unsupported_expression`. A text value is still `#VALUE!`;
+  date formats, runs of unquoted letters that are not codes, `General` numbers Excel would shorten,
+  and numbers past 2^53 rounded units in the other codes report
+  `calculation.unsupported_expression`. A lone unquoted letter that is not a code shows as written
+  and a lone `n`, `N`, `B`, or `E` is `#VALUE!`, as in Excel 16.114 for Mac and Excel for the web:
+  `TEXT(0,"0.00;-0.00;zero")` is `z1900ro`, where Mac Excel 2021 shows `z3333o`. `yyyyy` is the
+  four-digit year. A text value is still `#VALUE!`;
   formatting text, as Excel's `TEXT("abc","@")` does, is not in 0.1.27.
 - `CalculationOptions::with_locale_profile(LocaleProfile)` selects built-in locale conventions
   instead of the host's: `Locale::EnUs`, the default, which keeps every earlier result, or

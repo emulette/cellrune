@@ -264,11 +264,13 @@
     "excel_rich_error": false
   },
   "curated:arithmetic:c019": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "z3333o",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "cellrune_value": "z1900ro",
+    "cellrune_type": "str",
+    "note": "Excel for the web and Excel 16.114 for Mac show the unquoted e of the zero section as the four-digit year 1900 and r as itself; this Mac 2021 build differs."
   },
   "curated:arithmetic:c020": {
     "classification": "match",

@@ -68,11 +68,12 @@ pub(super) fn render(
 }
 
 /// Reads a token inside a digit layout. The 0.1.26 subset showed unquoted letters and `A/P` as
-/// written; in other codes they are unsupported, because some hosts read letters as codes.
+/// written; in other codes the letters Excel reads as codes are unsupported.
 fn item(token: &Token, earlier_subset: bool) -> Result<Item, ErrorKind> {
     Ok(match token {
         Token::Literal(text) => Item::Literal(text.clone()),
         Token::Letters { text, .. } if earlier_subset => Item::Literal(text.clone()),
+        Token::Invalid(letter) if earlier_subset => Item::Literal(letter.to_string()),
         Token::Meridiem(Meridiem::Letter { morning, evening }) if earlier_subset => {
             Item::Literal(format!("{morning}/{evening}"))
         }
