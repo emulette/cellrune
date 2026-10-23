@@ -58,12 +58,14 @@ inventories, and measurements belong in the linked documentation rather than in 
   `column_width`, `row_heights`, and `row_height` read explicit widths and heights. Package-backed
   documents capture them on open; a gradient fill reads as `Fill::Gradient` and its stops stay in
   the source record.
-- `WorkbookChange::set_cell_format` (a `CellFormatEdit` that replaces any of the four components),
-  `set_column_width`, and `set_row_height` are presentation changes: they advance the presentation
+- `WorkbookChange::set_cell_format` (a `CellFormatEdit` whose font, border, and alignment parts
+  change only the properties they name, and whose fill replaces the fill), `set_column_width`, and
+  `set_row_height` are presentation changes: they advance the presentation
   revision, keep the semantic revision and any calculation current, and validate their values
   with the new `validation.font_name_invalid` and `validation.format_value_out_of_range` codes.
   The document writer adds only the font, fill, border, and `cellXfs` records an edit needs,
-  keeping every unedited record, attribute, and component of the source style; it splits `<col>`
+  reusing an identical existing record and placing new fills after the two reserved ones, keeping
+  every unedited record, attribute, and component of the source style; it splits `<col>`
   spans, writes rows that gain a height, and keeps an edited cell's format when its content is
   cleared. The canonical writer writes the same model, and both verify the reopened output. A
   session rejects a batch prepared before another presentation-only batch was installed with
@@ -82,13 +84,17 @@ inventories, and measurements belong in the linked documentation rather than in 
   writes UTF-8 with CRLF records from A1 through the last used cell, formulas as their calculated
   values. Reading never creates a formula: unquoted decimal numbers, `TRUE`/`FALSE`, and Excel error
   spellings become numbers, logicals, and errors, quoted fields and everything else text, and
-  writing quotes text that would read back as anything else, so a write and a read keep every
-  value at its address. Failures carry the new `csv.*` codes. Interop
+  writing quotes text that would read back as anything else, including text that starts with a
+  byte order mark, so a write and a read keep every value at its address. The delimiter is `,`,
+  `;`, tab, `|`, or a space; a field longer than 32,767 UTF-16 code units fails with
+  `csv.read.field_too_long`, and a sheet without formulas exports without a calculation. Failures
+  carry the new `csv.*` codes. Interop
   `WorkbookSession::open_csv_bytes`/`save_csv_bytes`, Python `Workbook.from_csv`/`to_csv`,
   Node.js `Workbook.fromCsv`/`toCsv`, and the MCP tools `workbook_open_csv` and
   `workbook_export_csv` expose them.
 - Interop `WorkbookSession::read_formats` returns a row-major `CellFormatPageDto` with the
-  range's column widths and the page's row heights, and edit schema v2 accepts `set_cell_format`,
+  range's column widths and the page's row heights, the longest complete prefix that fits the
+  response limit when it is bounded, and edit schema v2 accepts `set_cell_format`,
   `set_column_width`, and `set_row_height`. Python `Workbook.read_formats`, Node.js
   `Workbook.readFormats`, the MCP tool `workbook_read_formats`, and every surface's
   `apply_changes_v2` expose them.
@@ -279,7 +285,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   `#CONNECT!`, `#BUSY!`, `#UNKNOWN!`, or `#PYTHON!` reads as the new `ExcelError` variant, which a
   formula reading it reports as an unsupported capability instead of a guessed value; and a
   shared formula whose relative reference shifts past the last row or column wraps around the
-  grid, as Excel's copy does.
+  grid, as Excel's copy does. A worksheet that a save rewrites gets an explicit `r` on such rows
+  and cells; other sheets keep their bytes.
 - A document open no longer fails on a sheet view or pane it cannot model, such as one without
   `workbookViewId`, with a fractional or negative split, or whose `activePane` or `topLeftCell`
   disagrees with its split; the pane stays preserved but unmodeled with an `xlsx.pane.invalid`
