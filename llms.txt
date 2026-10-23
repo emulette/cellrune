@@ -372,9 +372,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.as_str()` returns the OOXML token. A rule with a malformed `sqref`, a
   repeated formula, or an unknown token is left unmodeled; its XML is
   preserved. A sheet rename rewrites rule formulas as the saved part does,
-  and fails with `validation.formula_rewrite_parse_failed` when a rule
-  formula naming the sheet does not parse. Rules are not part of the
-  semantic fingerprint.
+  without charging the session's formula-rewrite budget; a rule formula that
+  does not parse keeps its text, and saving such a rename still fails as it
+  did. Rules are not part of the semantic fingerprint.
 - `Sheet::hyperlinks() -> &[Hyperlink]` (worksheet order) and
   `Sheet::comments() -> &[Comment]` (comments-part order) are read-only.
   `Hyperlink`: `.range()`, `.target()` (external target from the worksheet
@@ -384,8 +384,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   from the legacy comments part, which Excel also writes for threaded
   comments. A malformed hyperlink `ref`, an unreadable worksheet relationship
   part, or an unreadable comments part leaves that metadata out without
-  failing the read. A sheet rename rewrites internal hyperlink locations;
-  an external hyperlink's location points into its target and is kept.
+  failing the read. A sheet rename rewrites internal hyperlink locations, as
+  it does rule formulas, without charging the rewrite budget and keeping a
+  location that does not parse; an external hyperlink's location points into
+  its target and is kept.
 - `Table`: `.id() -> TableId` (OOXML-valid non-zero, workbook-global stable ID),
   `.name() -> &TableName` (worksheet-local programmatic name),
   `.display_name() -> &TableName` (workbook-global formula/UI name),

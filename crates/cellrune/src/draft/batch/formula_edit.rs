@@ -4,7 +4,7 @@ use super::super::DraftCellMutationStore;
 use super::BatchExecutionError;
 use super::staged::{mark_upsert, sheet_by_id_mut};
 use crate::calculation::formula_rewrite::{
-    FormulaRewriteBudget, FormulaRewriteRequest, SheetChanges, rewrite_formula,
+    FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteRequest, SheetChanges, rewrite_formula,
 };
 use crate::{
     CalculationCellId, CellAddress, CellContent, DefinedName, FormulaCell, FormulaText, Sheet,
@@ -297,7 +297,7 @@ pub(super) fn rename_sheet(
             old_name: old_name.as_str(),
             new_name: name.as_str(),
         },
-        &mut *edit.budget,
+        &mut edit.budget.unmetered(),
     )?;
     rewrite_workbook_formulas(
         sheets,
@@ -314,13 +314,16 @@ pub(super) fn rename_sheet(
 
 /// Rewrites a renamed sheet's qualifiers in the data validation formulas and internal hyperlink
 /// locations the workbook model carries, as the writer rewrites them in the saved worksheet part.
+///
+/// This read-only metadata was not rewritten before it was modeled, so it is not charged to the
+/// session's rewrite budget and text that does not parse stays as it is; saving such text keeps
+/// refusing the rename as it did.
 fn rewrite_sheet_metadata_formulas(
     sheets: &mut [Sheet],
     request: &FormulaRewriteRequest<'_>,
     budget: &mut FormulaRewriteBudget<'_>,
 ) -> Result<(), BatchExecutionError> {
     for sheet in sheets.iter_mut() {
-        let sheet_id = sheet.id().get();
         let mut rewrites = Vec::new();
         for (index, validation) in sheet.data_validations().iter().enumerate() {
             for (slot, formula) in [validation.formula1(), validation.formula2()]
@@ -331,13 +334,7 @@ fn rewrite_sheet_metadata_formulas(
                 let Some(formula) = formula else {
                     continue;
                 };
-                let rewritten = rewrite_formula(formula, request, budget).map_err(|error| {
-                    error.with_owner(format!(
-                        "data_validation:sheet_id={sheet_id},index={index},formula={}",
-                        slot + 1
-                    ))
-                })?;
-                if let Some(rewritten) = rewritten {
+                if let Some(rewritten) = rewrite_metadata_text(formula, request, budget)? {
                     rewrites.push((index, slot, rewritten));
                 }
             }
@@ -355,10 +352,7 @@ fn rewrite_sheet_metadata_formulas(
             if hyperlink.is_external() {
                 continue;
             }
-            let rewritten = rewrite_formula(location, request, budget).map_err(|error| {
-                error.with_owner(format!("hyperlink:sheet_id={sheet_id},index={index}"))
-            })?;
-            if let Some(rewritten) = rewritten {
+            if let Some(rewritten) = rewrite_metadata_text(location, request, budget)? {
                 locations.push((index, rewritten));
             }
         }
@@ -367,4 +361,17 @@ fn rewrite_sheet_metadata_formulas(
         }
     }
     Ok(())
+}
+
+/// Returns the rewritten text, or `None` to keep it, including when it does not parse.
+fn rewrite_metadata_text(
+    text: &str,
+    request: &FormulaRewriteRequest<'_>,
+    budget: &mut FormulaRewriteBudget<'_>,
+) -> Result<Option<String>, BatchExecutionError> {
+    match rewrite_formula(text, request, budget) {
+        Ok(rewritten) => Ok(rewritten),
+        Err(FormulaRewriteError::Cancelled) => Err(FormulaRewriteError::Cancelled.into()),
+        Err(_) => Ok(None),
+    }
 }

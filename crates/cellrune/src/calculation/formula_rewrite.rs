@@ -247,6 +247,11 @@ impl<'a> FormulaRewriteBudget<'a> {
         }
     }
 
+    /// Returns a budget that observes the same cancellation but charges nothing to this one.
+    pub(crate) fn unmetered(&self) -> FormulaRewriteBudget<'a> {
+        Self::new(FormulaRewriteLimits::UNBOUNDED, self.cancelled)
+    }
+
     pub(crate) fn check_cancelled(&self) -> Result<(), FormulaRewriteError> {
         if (self.cancelled)() {
             Err(FormulaRewriteError::Cancelled)

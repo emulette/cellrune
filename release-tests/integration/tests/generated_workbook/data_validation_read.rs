@@ -1,7 +1,7 @@
 use cellrune::{
     CellRange, DataValidation, DataValidationErrorStyle, DataValidationOperator,
-    DataValidationType, EditBatch, OpenOptions, ReadOptions, SheetName, ValidationError,
-    WorkbookChange, WorkbookDraft, WriteOptions, open_xlsx_document_bytes, read_xlsx_bytes,
+    DataValidationType, EditBatch, OpenOptions, ReadOptions, SheetName, WorkbookChange,
+    WorkbookDraft, WriteOptions, open_xlsx_document_bytes, read_xlsx_bytes,
     write_xlsx_draft_edits_bytes,
 };
 
@@ -228,26 +228,70 @@ fn sheet_rename_rewrites_data_validation_formulas_as_the_saved_part_does() {
 }
 
 #[test]
-fn sheet_rename_fails_like_a_cell_formula_when_a_validation_formula_naming_it_does_not_parse() {
+fn sheet_rename_keeps_a_validation_formula_naming_it_that_does_not_parse() {
     let source = generated_data_validation_workbook();
     let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
     let mut draft = WorkbookDraft::from_document(&document);
     let lists = draft.workbook().sheet_by_name("Lists").expect("Lists").id();
-    let revision = draft.semantic_revision();
-    let error = draft
+    let rule = |draft: &WorkbookDraft| {
+        draft.workbook().sheets()[0].data_validations()[9]
+            .formula1()
+            .map(str::to_owned)
+    };
+    let unparsable = rule(&draft);
+    draft
         .apply_changes(EditBatch::new([WorkbookChange::rename_sheet(
             lists,
             SheetName::new("Regions").expect("sheet name"),
         )]))
-        .expect_err("the H1 rule names Lists in a formula that does not parse");
-    assert!(
-        matches!(
-            &error,
-            ValidationError::FormulaRewriteParseFailed { owner: Some(owner), .. }
-                if owner == "data_validation:sheet_id=1,index=9,formula=1"
-        ),
-        "{error:?}"
+        .expect("a rename succeeds as it did before rules were modeled");
+    assert!(draft.workbook().sheet_by_name("Regions").is_some());
+    assert_eq!(
+        rule(&draft),
+        unparsable,
+        "the H1 rule names Lists in a formula that does not parse and stays as it is"
     );
-    assert_eq!(draft.semantic_revision(), revision, "the batch rolls back");
-    assert!(draft.workbook().sheet_by_name("Lists").is_some());
+    let error = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+        .expect_err("saving still refuses the rule it cannot rewrite");
+    assert_eq!(
+        error.code().as_str(),
+        "xlsx.write.unsupported_preservation",
+        "{error}"
+    );
+}
+
+#[test]
+fn rule_and_hyperlink_rewrites_are_not_charged_to_the_session_rewrite_budget() {
+    let source = generated_sheet_reference_fixture();
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let draft = WorkbookDraft::from_document(&document);
+    let rules = draft
+        .workbook()
+        .sheets()
+        .iter()
+        .map(|sheet| sheet.data_validations().len() + sheet.hyperlinks().len())
+        .sum::<usize>();
+    assert!(rules > 0);
+    let cell_formulas = draft
+        .workbook()
+        .sheets()
+        .iter()
+        .flat_map(|sheet| sheet.cells())
+        .filter(|cell| matches!(cell.content(), cellrune::CellContent::Formula(_)))
+        .count();
+    let limits = cellrune::SessionLimits::default()
+        .with_formula_rewrite_limits(cell_formulas.max(1), 1 << 24, 1 << 24, 1 << 24)
+        .expect("limits");
+    let mut session = cellrune::WorkbookCalculationSession::with_limits(draft, limits);
+    let data = session.workbook().sheet_by_name("Data").expect("Data").id();
+    let revision = session.workbook().semantic_revision();
+    session
+        .apply_changes(
+            revision,
+            EditBatch::new([WorkbookChange::rename_sheet(
+                data,
+                SheetName::new("New Data").expect("sheet name"),
+            )]),
+        )
+        .expect("only cell formulas count toward the rewrite budget");
 }

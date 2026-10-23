@@ -255,9 +255,6 @@ inventories, and measurements belong in the linked documentation rather than in 
   `C1`, as reading the cells it resolves to, so an unrelated edit keeps its saved result.
   `INDIRECT` and an `OFFSET` whose position reads a formula, directly or through a function such
   as `COUNTIF`, are still affected by any edit.
-- A sheet rename fails with `validation.formula_rewrite_parse_failed`, as it does for a cell
-  formula, when a data validation formula that names the sheet does not parse. Such a rename was
-  accepted before but could not be saved.
 
 ### Fixed
 
