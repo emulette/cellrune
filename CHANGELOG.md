@@ -10,6 +10,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Changed
+
+- The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or later. Supported Python
+  versions are unchanged.
+
 ### Fixed
 
 - Node.js `previewChangesPage` continues from the `nextCursor` it returned instead of failing with

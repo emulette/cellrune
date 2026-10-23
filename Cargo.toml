@@ -41,8 +41,8 @@ napi-derive = ">=3.6.11, <4"
 # release in this range whose published graph fixes that native engine baseline.
 pcre2 = ">=0.2.11, <0.3"
 pcre2-sys = "=0.2.10"
-pyo3 = { version = "0.29.0", features = ["macros"] }
-pyo3-build-config = "0.29.0"
+pyo3 = { version = "0.30.1", features = ["macros"] }
+pyo3-build-config = "0.30.1"
 quick-xml = { version = "0.42.0", default-features = false }
 rmcp = { version = ">=3.0.1, <4", default-features = false, features = [
     "macros",
