@@ -173,7 +173,7 @@ pub(super) fn plan_sheet_deletion(
 
 /// Reads every relationship part of the package and returns, for each internal target, the
 /// relationships that refer to it. Relationships are read leniently: one whose target cannot be a
-/// part refers to nothing.
+/// part, or names a part the package does not hold, refers to nothing.
 fn package_referrers(
     document: &XlsxDocument,
     reader: &mut PackageReader<'_>,
@@ -203,7 +203,12 @@ fn package_referrers(
                         .at_source(relationship_part.source_id())
                         .with_cause(error)
                 })?;
-        for relationship in relationships {
+        // A relationship to a part the package does not hold, such as a dangling printer
+        // settings target, has nothing to remove.
+        for relationship in relationships
+            .into_iter()
+            .filter(|relationship| reader.contains(&relationship.target))
+        {
             referrers
                 .entry(relationship.target)
                 .or_default()

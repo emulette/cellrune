@@ -338,6 +338,20 @@ fn deleting_a_sheet_skips_relationship_targets_that_cannot_be_parts() {
 }
 
 #[test]
+fn deleting_a_sheet_with_a_dangling_relationship_removes_only_parts_the_package_holds() {
+    let source = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        "</Relationships>",
+        r#"<Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings" Target="../printerSettings/printerSettings1.bin"/></Relationships>"#,
+    );
+    let output = write(&delete(&source, &["S2"])).expect("deletion with a dangling relationship");
+    let parts = support::archive_parts(&output);
+    assert!(!parts.contains_key("xl/worksheets/sheet2.xml"));
+    assert!(!parts.contains_key("xl/worksheets/_rels/sheet2.xml.rels"));
+}
+
+#[test]
 fn edit_only_write_clears_the_results_a_deleted_sheet_changes() {
     let source = generated_sheet_deletion_fixture();
     let draft = delete(&source, &["S2"]);
