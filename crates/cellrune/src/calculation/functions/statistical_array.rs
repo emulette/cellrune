@@ -33,7 +33,10 @@ pub(super) fn frequency(
     let mut order = (0..edges.len()).collect::<Vec<_>>();
     if edges.windows(2).any(|pair| pair[0] > pair[1]) {
         order.sort_by(|&left, &right| edges[left].total_cmp(&edges[right]));
-        if order.windows(2).any(|pair| edges[pair[0]] == edges[pair[1]]) {
+        if order
+            .windows(2)
+            .any(|pair| edges[pair[0]] == edges[pair[1]])
+        {
             return Err(ErrorKind::Unsupported);
         }
     }

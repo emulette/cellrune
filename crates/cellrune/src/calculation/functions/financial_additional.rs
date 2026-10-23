@@ -179,7 +179,12 @@ fn vdb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         if no_switch {
             return Value::Error(ErrorKind::Unsupported);
         }
-        return partial_vdb(engine, context, [cost, salvage, life, start, end], factor / life);
+        return partial_vdb(
+            engine,
+            context,
+            [cost, salvage, life, start, end],
+            factor / life,
+        );
     }
     if let Err(kind) = engine.charge_function_iterations(context, end as u64) {
         return Value::Error(kind);

@@ -149,8 +149,16 @@ fn cumulative_payments_split_level_payments_into_interest_and_principal() {
         // Excel counts as period 2 alone.
         ("CUMIPMT(0.1,3,1000,2,3,1)", -96.676_737_160_121_09, 1e-12),
         ("CUMPRINC(0.1,3,1000,2,3,1)", -634.441_087_613_293, 1e-12),
-        ("CUMIPMT(0.1,12,1000,1.5,2,0)", -95.323_668_489_971_31, 1e-12),
-        ("CUMPRINC(0.1,12,1000,1.5,2,0)", -51.439_646_610_316_04, 1e-12),
+        (
+            "CUMIPMT(0.1,12,1000,1.5,2,0)",
+            -95.323_668_489_971_31,
+            1e-12,
+        ),
+        (
+            "CUMPRINC(0.1,12,1000,1.5,2,0)",
+            -51.439_646_610_316_04,
+            1e-12,
+        ),
         // The first beginning-of-period payment is all principal, so its interest is 0, and its
         // principal is PMT(0.1,3,1000,0,1).
         ("CUMIPMT(0.1,3,1000,1,1,1)", 0.0, 0.0),
@@ -158,7 +166,11 @@ fn cumulative_payments_split_level_payments_into_interest_and_principal() {
         ("CUMPRINC(0.1,3,1000,1,3,1)", -1_000.0, 1e-12),
         ("CUMIPMT(0.1,3,1000,1,3,1)", -96.676_737_160_120_85, 1e-12),
         // 3.5 rounds up whether ties go up or to even.
-        ("CUMPRINC(0.1,12,1000,3.5,4,0)", -62.241_972_398_482_4, 1e-12),
+        (
+            "CUMPRINC(0.1,12,1000,3.5,4,0)",
+            -62.241_972_398_482_4,
+            1e-12,
+        ),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula)]);
         assert!(scan_formula_capabilities(&workbook).is_supported());
@@ -388,14 +400,14 @@ fn french_depreciation_follows_excel_through_the_life_and_at_invalid_arguments()
         (asset("AMORDEGRC", "2400", "1", "0.15", "1"), 0.0),
         (asset("AMORLINC", "2400", "1", "0.15", "1"), 0.0),
         // AMORLINC at rates whose first period leaves less than one whole period.
-        (asset("AMORLINC", "300", "1", "1", "1"), 1_221.311_475_409_836),
+        (
+            asset("AMORLINC", "300", "1", "1", "1"),
+            1_221.311_475_409_836,
+        ),
         (asset("AMORLINC", "300", "1", "0.5", "1"), 1_200.0),
         // Bought on the first period's end, AMORLINC period 1 is 360 whether the first share is
         // 0 or a whole year.
-        (
-            "AMORLINC(2400,39813,39813,300,1,0.15,1)".to_owned(),
-            360.0,
-        ),
+        ("AMORLINC(2400,39813,39813,300,1,0.15,1)".to_owned(), 360.0),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula.as_str())]);
         assert_number(
@@ -418,8 +430,14 @@ fn french_depreciation_follows_excel_through_the_life_and_at_invalid_arguments()
         }
     }
     // A life of 1 or 2 years has no AMORDEGRC coefficient.
-    assert_error(&asset("AMORDEGRC", "300", "1", "1", "1"), ExcelError::Number);
-    assert_error(&asset("AMORDEGRC", "300", "1", "0.5", "1"), ExcelError::Number);
+    assert_error(
+        &asset("AMORDEGRC", "300", "1", "1", "1"),
+        ExcelError::Number,
+    );
+    assert_error(
+        &asset("AMORDEGRC", "300", "1", "0.5", "1"),
+        ExcelError::Number,
+    );
     for formula in [
         // Excel's AMORDEGRC for a period between 0 and 1 is not a defined number.
         asset("AMORDEGRC", "300", "0.5", "0.15", "1"),

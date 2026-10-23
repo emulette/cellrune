@@ -136,7 +136,11 @@ fn skewness_and_kurtosis_charge_both_passes_over_the_numbers() {
             )
         };
         // The mean pass and the standardizing pass each take one iteration per number.
-        assert_issue(&calculate(7), 1, CalculationIssueCode::ResourceLimitExceeded);
+        assert_issue(
+            &calculate(7),
+            1,
+            CalculationIssueCode::ResourceLimitExceeded,
+        );
         assert!(
             matches!(
                 calculate(8).cell(cell_id(1)),
