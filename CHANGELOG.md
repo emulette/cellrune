@@ -54,6 +54,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - The sessionless `function_catalog` MCP tool pages through the calculated functions with each
   name's canonical name and alias, array-result, and official-list flags, over the new interop
   `function_catalog_page`.
+- `docs/ERROR_CODES.md` lists every stable error and calculation issue code by surface: the Rust
+  core enums, interop, MCP, and the Node.js wrapper.
 
 ### Changed
 

@@ -760,6 +760,17 @@ async function assertDependencies() {
   workbook.close();
 }
 
+function assertErrorCodesAreDocumented() {
+  const { ERROR } = require("../lib/errors.js");
+  const reference = fs.readFileSync(
+    path.join(__dirname, "..", "..", "..", "docs", "ERROR_CODES.md"),
+    "utf8",
+  );
+  for (const [code] of Object.values(ERROR)) {
+    assert.ok(reference.includes(`| \`${code}\` |`), `${code} is not in docs/ERROR_CODES.md`);
+  }
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -928,6 +939,7 @@ async function main() {
   await assertRangeReadForms();
   await assertAbortSignal();
   await assertDependencies();
+  assertErrorCodesAreDocumented();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

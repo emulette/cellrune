@@ -57,8 +57,10 @@ cellrune = "0.1.26"
 - never executes macros, never follows external links, never reads the host clock for
   `TODAY()` or `NOW()`, and draws `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` from an explicit
   seed instead of host randomness;
-- returns stable error and issue codes for programmatic handling; read, formula, and
-  targeted-calculation limit failures also name the exceeded limit or report the observed value;
+- returns stable error and issue codes for programmatic handling, listed in
+  [`docs/ERROR_CODES.md`](https://github.com/emulette/cellrune/blob/main/docs/ERROR_CODES.md);
+  read, formula, and targeted-calculation limit failures also name the exceeded limit or report
+  the observed value;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
 - writes `WorkbookDraft` edits into an existing package without calculating, clearing only the

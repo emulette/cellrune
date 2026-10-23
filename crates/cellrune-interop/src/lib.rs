@@ -11,6 +11,7 @@ mod csv;
 mod dependencies;
 mod dto;
 mod error;
+mod error_code;
 mod format_convert;
 mod format_dto;
 mod json_object;

@@ -6,6 +6,8 @@ use cellrune_interop::{
     LimitDiagnosticsDto,
 };
 use rmcp::handler::server::tool::IntoCallToolResult;
+
+use crate::error_code::McpCode;
 use rmcp::model::{CallToolResponse, CallToolResult};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -33,11 +35,6 @@ const MESSAGE_WORKER: &str = "blocking workbook operation failed";
 const MESSAGE_RESOURCE_NOT_FOUND: &str = "MCP resource does not exist";
 const MESSAGE_RESOURCE_CURSOR_INVALID: &str = "MCP resource cursor is invalid";
 const MESSAGE_CANCELLED: &str = "MCP workbook operation was cancelled";
-
-const CODE_RESOURCE_NOT_FOUND: &str = "mcp.resource.not_found";
-const CODE_RESOURCE_CURSOR_INVALID: &str = "mcp.resource.cursor_invalid";
-const CODE_SESSION_NOT_FOUND: &str = "mcp.session.not_found";
-const CODE_SESSION_EXPIRED: &str = "mcp.session.expired";
 
 /// Broad stable MCP error category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -110,7 +107,7 @@ pub struct McpError {
 impl McpError {
     fn new(
         kind: McpErrorKind,
-        code: &'static str,
+        code: McpCode,
         message: &'static str,
         details: McpErrorDetails,
     ) -> Self {
@@ -118,7 +115,7 @@ impl McpError {
             payload: Box::new(McpErrorPayload {
                 schema_version: cellrune_interop::INTEROP_SCHEMA_VERSION,
                 kind,
-                code: code.to_owned(),
+                code: code.as_str().to_owned(),
                 message: message.to_owned(),
                 details,
             }),
@@ -128,7 +125,7 @@ impl McpError {
     pub(crate) fn root_required() -> Self {
         Self::new(
             McpErrorKind::Input,
-            "mcp.config.root_required",
+            McpCode::ConfigRootRequired,
             MESSAGE_ROOT_REQUIRED,
             McpErrorDetails::default(),
         )
@@ -137,7 +134,7 @@ impl McpError {
     pub(crate) fn root_invalid(detail: String) -> Self {
         Self::new(
             McpErrorKind::Path,
-            "mcp.config.root_invalid",
+            McpCode::ConfigRootInvalid,
             MESSAGE_ROOT_INVALID,
             McpErrorDetails {
                 detail: Some(detail),
@@ -149,7 +146,7 @@ impl McpError {
     pub(crate) fn config_limit(detail: String) -> Self {
         Self::new(
             McpErrorKind::Input,
-            "mcp.config.limit_invalid",
+            McpCode::ConfigLimitInvalid,
             MESSAGE_CONFIG_LIMIT,
             McpErrorDetails {
                 detail: Some(detail),
@@ -161,7 +158,7 @@ impl McpError {
     pub(crate) fn path_absolute() -> Self {
         Self::new(
             McpErrorKind::Path,
-            "mcp.path.absolute_required",
+            McpCode::PathAbsoluteRequired,
             MESSAGE_PATH_ABSOLUTE,
             McpErrorDetails::default(),
         )
@@ -170,7 +167,7 @@ impl McpError {
     pub(crate) fn path_outside_root() -> Self {
         Self::new(
             McpErrorKind::Path,
-            "mcp.path.outside_root",
+            McpCode::PathOutsideRoot,
             MESSAGE_PATH_OUTSIDE_ROOT,
             McpErrorDetails::default(),
         )
@@ -179,7 +176,7 @@ impl McpError {
     pub(crate) fn path_invalid(detail: String) -> Self {
         Self::new(
             McpErrorKind::Path,
-            "mcp.path.invalid",
+            McpCode::PathInvalid,
             MESSAGE_PATH_INVALID,
             McpErrorDetails {
                 detail: Some(detail),
@@ -191,7 +188,7 @@ impl McpError {
     pub(crate) fn input_not_file() -> Self {
         Self::new(
             McpErrorKind::Path,
-            "mcp.path.input_not_file",
+            McpCode::PathInputNotFile,
             MESSAGE_INPUT_NOT_FILE,
             McpErrorDetails::default(),
         )
@@ -200,7 +197,7 @@ impl McpError {
     pub(crate) fn input_too_large(actual: u64, maximum: u64) -> Self {
         Self::new(
             McpErrorKind::Policy,
-            "mcp.input.byte_limit_exceeded",
+            McpCode::InputByteLimitExceeded,
             MESSAGE_INPUT_TOO_LARGE,
             McpErrorDetails {
                 maximum_bytes: Some(maximum),
@@ -213,7 +210,7 @@ impl McpError {
     pub(crate) fn overwrite_disallowed() -> Self {
         Self::new(
             McpErrorKind::Policy,
-            "mcp.output.overwrite_disallowed",
+            McpCode::OutputOverwriteDisallowed,
             MESSAGE_OVERWRITE_DISALLOWED,
             McpErrorDetails::default(),
         )
@@ -222,7 +219,7 @@ impl McpError {
     pub(crate) fn session_not_found() -> Self {
         Self::new(
             McpErrorKind::Session,
-            CODE_SESSION_NOT_FOUND,
+            McpCode::SessionNotFound,
             MESSAGE_SESSION_NOT_FOUND,
             McpErrorDetails::default(),
         )
@@ -231,7 +228,7 @@ impl McpError {
     pub(crate) fn session_expired() -> Self {
         Self::new(
             McpErrorKind::Session,
-            CODE_SESSION_EXPIRED,
+            McpCode::SessionExpired,
             MESSAGE_SESSION_EXPIRED,
             McpErrorDetails::default(),
         )
@@ -240,7 +237,7 @@ impl McpError {
     pub(crate) fn session_busy() -> Self {
         Self::new(
             McpErrorKind::Session,
-            "mcp.session.busy",
+            McpCode::SessionBusy,
             MESSAGE_SESSION_BUSY,
             McpErrorDetails::default(),
         )
@@ -249,7 +246,7 @@ impl McpError {
     pub(crate) fn session_cache_full() -> Self {
         Self::new(
             McpErrorKind::Session,
-            "mcp.session.cache_full",
+            McpCode::SessionCacheFull,
             MESSAGE_SESSION_CACHE_FULL,
             McpErrorDetails::default(),
         )
@@ -258,7 +255,7 @@ impl McpError {
     pub(crate) fn session_id_exhausted() -> Self {
         Self::new(
             McpErrorKind::Session,
-            "mcp.session.id_exhausted",
+            McpCode::SessionIdExhausted,
             MESSAGE_SESSION_ID_EXHAUSTED,
             McpErrorDetails::default(),
         )
@@ -267,7 +264,7 @@ impl McpError {
     pub(crate) fn session_state() -> Self {
         Self::new(
             McpErrorKind::Internal,
-            "mcp.session.unavailable",
+            McpCode::SessionUnavailable,
             MESSAGE_SESSION_STATE,
             McpErrorDetails::default(),
         )
@@ -276,7 +273,7 @@ impl McpError {
     pub(crate) fn response_too_large(actual: u64, maximum: u64) -> Self {
         Self::new(
             McpErrorKind::Policy,
-            "mcp.response.byte_limit_exceeded",
+            McpCode::ResponseByteLimitExceeded,
             MESSAGE_RESPONSE_TOO_LARGE,
             McpErrorDetails {
                 maximum_bytes: Some(maximum),
@@ -294,7 +291,7 @@ impl McpError {
     ) -> Self {
         Self::new(
             McpErrorKind::Policy,
-            "mcp.recalculation.response_byte_limit_exceeded",
+            McpCode::RecalculationResponseByteLimitExceeded,
             MESSAGE_RECALCULATION_RESPONSE_TOO_LARGE,
             McpErrorDetails {
                 maximum_bytes: Some(maximum),
@@ -309,7 +306,7 @@ impl McpError {
     pub(crate) fn serialization(detail: String) -> Self {
         Self::new(
             McpErrorKind::Internal,
-            "mcp.response.serialization_failed",
+            McpCode::ResponseSerializationFailed,
             MESSAGE_SERIALIZATION,
             McpErrorDetails {
                 detail: Some(detail),
@@ -321,7 +318,7 @@ impl McpError {
     pub(crate) fn worker(detail: String) -> Self {
         Self::new(
             McpErrorKind::Internal,
-            "mcp.worker.failed",
+            McpCode::WorkerFailed,
             MESSAGE_WORKER,
             McpErrorDetails {
                 detail: Some(detail),
@@ -333,7 +330,7 @@ impl McpError {
     pub(crate) fn resource_not_found() -> Self {
         Self::new(
             McpErrorKind::Input,
-            CODE_RESOURCE_NOT_FOUND,
+            McpCode::ResourceNotFound,
             MESSAGE_RESOURCE_NOT_FOUND,
             McpErrorDetails::default(),
         )
@@ -342,27 +339,30 @@ impl McpError {
     pub(crate) fn resource_cursor_invalid() -> Self {
         Self::new(
             McpErrorKind::Input,
-            CODE_RESOURCE_CURSOR_INVALID,
+            McpCode::ResourceCursorInvalid,
             MESSAGE_RESOURCE_CURSOR_INVALID,
             McpErrorDetails::default(),
         )
     }
 
     pub(crate) fn is_missing_resource(&self) -> bool {
-        matches!(
-            self.payload.code.as_str(),
-            CODE_RESOURCE_NOT_FOUND | CODE_SESSION_NOT_FOUND | CODE_SESSION_EXPIRED
-        )
+        [
+            McpCode::ResourceNotFound,
+            McpCode::SessionNotFound,
+            McpCode::SessionExpired,
+        ]
+        .iter()
+        .any(|code| self.payload.code == code.as_str())
     }
 
     pub(crate) fn is_invalid_resource_request(&self) -> bool {
-        self.payload.code == CODE_RESOURCE_CURSOR_INVALID
+        self.payload.code == McpCode::ResourceCursorInvalid.as_str()
     }
 
     pub(crate) fn cancelled() -> Self {
         Self::new(
             McpErrorKind::Session,
-            "mcp.operation.cancelled",
+            McpCode::OperationCancelled,
             MESSAGE_CANCELLED,
             McpErrorDetails::default(),
         )

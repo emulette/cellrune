@@ -87,6 +87,8 @@ mod defined_name;
 mod diagnostic;
 mod draft;
 mod error;
+#[cfg(test)]
+mod error_code_registry_tests;
 mod formula;
 mod presentation;
 mod table;

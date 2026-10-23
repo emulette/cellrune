@@ -1524,6 +1524,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 
 ## Error taxonomy — pick the right one, never mix
 
+`docs/ERROR_CODES.md` lists every stable code these types, the interop layer, MCP, and the
+Node.js wrapper report.
+
 | Type | Means | Result exists? | Machine check |
 | --- | --- | --- | --- |
 | `ValidationError` | Caller-supplied address/name/number/model value violates an invariant | No object is produced | `.code(): ValidationErrorCode`; match on the non-exhaustive enum only when structured fields are needed |

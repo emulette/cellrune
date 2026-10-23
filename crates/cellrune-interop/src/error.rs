@@ -3,12 +3,13 @@ use std::fmt;
 
 use cellrune::{
     ApplyChangesError, DefinedNameAnalysisError, DefinedNameAnalysisErrorKind, SessionError,
-    ValidationError, WorkbookSnapshot, XlsxReadError, XlsxWriteError,
+    SessionErrorCode, ValidationError, WorkbookSnapshot, XlsxReadError, XlsxWriteError,
 };
 use schemars::JsonSchema;
 
 use crate::CellReferenceDto;
 use crate::convert::cell_reference;
+use crate::error_code::InteropCode;
 use serde::{Deserialize, Serialize};
 
 const MESSAGE_SHEET_NOT_FOUND: &str = "workbook does not contain the requested sheet";
@@ -144,14 +145,19 @@ pub struct InteropError {
 impl InteropError {
     pub(crate) fn target_limit() -> Self {
         let code = cellrune::TargetCalculationErrorCode::TargetLimitExceeded;
-        Self::input(code.as_str(), code.message())
+        Self::new(
+            InteropErrorKind::Input,
+            code.as_str(),
+            code.message(),
+            ErrorDetails::default(),
+        )
     }
 
     /// Creates the stable invalid partial-calculation payload error used by native bindings.
     pub fn invalid_target_payload(detail: String) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.calculation.target.invalid_payload",
+            InteropCode::CalculationTargetInvalidPayload,
             "targeted calculation payload is invalid",
             ErrorDetails {
                 detail: Some(detail),
@@ -179,8 +185,8 @@ impl InteropError {
         &self.details
     }
 
-    pub(crate) fn input(code: &'static str, message: &'static str) -> Self {
-        Self::new(
+    pub(crate) fn input(code: InteropCode, message: &'static str) -> Self {
+        Self::owned(
             InteropErrorKind::Input,
             code,
             message,
@@ -188,8 +194,8 @@ impl InteropError {
         )
     }
 
-    pub(crate) fn state(code: &'static str, message: &'static str) -> Self {
-        Self::new(
+    pub(crate) fn state(code: InteropCode, message: &'static str) -> Self {
+        Self::owned(
             InteropErrorKind::State,
             code,
             message,
@@ -197,55 +203,68 @@ impl InteropError {
         )
     }
 
+    /// A state error that reports a session code, such as `session.cancelled`, unchanged.
+    fn passthrough_state(code: SessionErrorCode, message: &'static str) -> Self {
+        Self::new(
+            InteropErrorKind::State,
+            code.as_str(),
+            message,
+            ErrorDetails::default(),
+        )
+    }
+
     /// Creates the stable closed-session error used by binding lifecycle guards.
     pub fn session_closed() -> Self {
-        Self::state("interop.session.closed", MESSAGE_SESSION_CLOSED)
+        Self::state(InteropCode::SessionClosed, MESSAGE_SESSION_CLOSED)
     }
 
     /// Creates the stable lock-state error used when concurrent work holds a shared session.
     pub fn session_busy() -> Self {
-        Self::state("interop.session.unavailable", MESSAGE_SESSION_BUSY)
+        Self::state(InteropCode::SessionUnavailable, MESSAGE_SESSION_BUSY)
     }
 
     /// Creates the stable lock-state error used when a panic poisoned a shared session.
     pub fn session_poisoned() -> Self {
-        Self::state("interop.session.poisoned", MESSAGE_SESSION_POISONED)
+        Self::state(InteropCode::SessionPoisoned, MESSAGE_SESSION_POISONED)
     }
 
     pub(crate) fn sheet_not_found() -> Self {
-        Self::input("interop.sheet.not_found", MESSAGE_SHEET_NOT_FOUND)
+        Self::input(InteropCode::SheetNotFound, MESSAGE_SHEET_NOT_FOUND)
     }
 
     pub(crate) fn page_limit() -> Self {
-        Self::input("interop.page.limit_exceeded", MESSAGE_PAGE_LIMIT)
+        Self::input(InteropCode::PageLimitExceeded, MESSAGE_PAGE_LIMIT)
     }
 
     pub(crate) fn page_byte_limit() -> Self {
-        Self::input("interop.page.byte_limit_exceeded", MESSAGE_PAGE_BYTE_LIMIT)
+        Self::input(InteropCode::PageByteLimitExceeded, MESSAGE_PAGE_BYTE_LIMIT)
     }
 
     pub(crate) fn page_offset() -> Self {
-        Self::input("interop.page.offset_out_of_range", MESSAGE_PAGE_OFFSET)
+        Self::input(InteropCode::PageOffsetOutOfRange, MESSAGE_PAGE_OFFSET)
     }
 
     /// Creates the stable invalid page-offset error used by typed bindings.
     pub fn invalid_page_offset() -> Self {
-        Self::input("interop.page.offset_invalid", MESSAGE_PAGE_OFFSET_INVALID)
+        Self::input(InteropCode::PageOffsetInvalid, MESSAGE_PAGE_OFFSET_INVALID)
     }
 
     /// Creates the stable invalid page-limit error used by typed bindings.
     pub fn invalid_page_limit() -> Self {
-        Self::input("interop.page.limit_invalid", MESSAGE_PAGE_LIMIT_INVALID)
+        Self::input(InteropCode::PageLimitInvalid, MESSAGE_PAGE_LIMIT_INVALID)
     }
 
     pub(crate) fn calculation_required() -> Self {
-        Self::state("interop.calculation.required", MESSAGE_CALCULATION_REQUIRED)
+        Self::state(
+            InteropCode::CalculationRequired,
+            MESSAGE_CALCULATION_REQUIRED,
+        )
     }
 
     pub(crate) fn excel_error(detail: String) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.value.excel_error_invalid",
+            InteropCode::ValueExcelErrorInvalid,
             MESSAGE_EXCEL_ERROR,
             ErrorDetails {
                 detail: Some(detail),
@@ -255,9 +274,9 @@ impl InteropError {
     }
 
     pub(crate) fn invalid_change(detail: String) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.change.invalid",
+            InteropCode::ChangeInvalid,
             MESSAGE_INVALID_CHANGE,
             ErrorDetails {
                 detail: Some(detail),
@@ -267,29 +286,29 @@ impl InteropError {
     }
 
     pub(crate) fn sheet_creation_failed() -> Self {
-        Self::state("interop.sheet.id_exhausted", MESSAGE_SHEET_CREATION_FAILED)
+        Self::state(InteropCode::SheetIdExhausted, MESSAGE_SHEET_CREATION_FAILED)
     }
 
     pub(crate) fn session_request_id_exhausted() -> Self {
         Self::state(
-            "interop.calculation.request_id_exhausted",
+            InteropCode::CalculationRequestIdExhausted,
             MESSAGE_REQUEST_ID_EXHAUSTED,
         )
     }
 
     pub(crate) fn calculation_cancelled() -> Self {
-        Self::state("session.cancelled", MESSAGE_CALCULATION_CANCELLED)
+        Self::passthrough_state(SessionErrorCode::Cancelled, MESSAGE_CALCULATION_CANCELLED)
     }
 
     pub(crate) fn edit_cancelled() -> Self {
-        Self::state("session.cancelled", MESSAGE_EDIT_CANCELLED)
+        Self::passthrough_state(SessionErrorCode::Cancelled, MESSAGE_EDIT_CANCELLED)
     }
 
     /// Creates the stable malformed typed-change payload error used by bindings.
     pub fn invalid_change_payload(detail: String) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.change.payload_invalid",
+            InteropCode::ChangePayloadInvalid,
             MESSAGE_CHANGE_PAYLOAD_INVALID,
             ErrorDetails {
                 detail: Some(detail),
@@ -301,7 +320,7 @@ impl InteropError {
     /// Creates the stable invalid revision or delta-cursor error used by bindings.
     pub fn invalid_revision_or_cursor() -> Self {
         Self::input(
-            "interop.session.revision_or_cursor_invalid",
+            InteropCode::SessionRevisionOrCursorInvalid,
             MESSAGE_REVISION_OR_CURSOR_INVALID,
         )
     }
@@ -309,7 +328,7 @@ impl InteropError {
     /// Creates the stable invalid recalculation-mode error used by bindings.
     pub fn invalid_recalculation_mode() -> Self {
         Self::input(
-            "interop.calculation.mode_invalid",
+            InteropCode::CalculationModeInvalid,
             MESSAGE_RECALCULATION_MODE_INVALID,
         )
     }
@@ -317,7 +336,7 @@ impl InteropError {
     /// Creates the stable invalid arithmetic-semantics error used by typed bindings.
     pub fn invalid_arithmetic_semantics() -> Self {
         Self::input(
-            "interop.calculation.arithmetic_semantics_invalid",
+            InteropCode::CalculationArithmeticSemanticsInvalid,
             MESSAGE_ARITHMETIC_SEMANTICS_INVALID,
         )
     }
@@ -325,16 +344,16 @@ impl InteropError {
     /// Creates the stable invalid financial-solver-semantics error used by typed bindings.
     pub fn invalid_financial_solver_semantics() -> Self {
         Self::input(
-            "interop.calculation.financial_solver_semantics_invalid",
+            InteropCode::CalculationFinancialSolverSemanticsInvalid,
             MESSAGE_FINANCIAL_SOLVER_SEMANTICS_INVALID,
         )
     }
 
     /// Creates the stable error for a display-format request a binding could not read.
     pub fn invalid_display_format_request(detail: String) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.display_format.request_invalid",
+            InteropCode::DisplayFormatRequestInvalid,
             MESSAGE_DISPLAY_FORMAT_REQUEST_INVALID,
             ErrorDetails {
                 detail: Some(detail),
@@ -346,21 +365,21 @@ impl InteropError {
     /// Creates the stable invalid locale-profile error used by typed bindings.
     pub fn invalid_locale_profile() -> Self {
         Self::input(
-            "interop.calculation.locale_profile_invalid",
+            InteropCode::CalculationLocaleProfileInvalid,
             MESSAGE_LOCALE_PROFILE_INVALID,
         )
     }
 
     /// Creates the stable numeric type error used by dynamically typed bindings.
     pub fn invalid_number() -> Self {
-        Self::input("interop.value.number_invalid", MESSAGE_NUMBER_INVALID)
+        Self::input(InteropCode::ValueNumberInvalid, MESSAGE_NUMBER_INVALID)
     }
 
     /// Converts a rejected read or calculation limit, naming the limit in the detail.
     pub(crate) fn invalid_limit(error: impl fmt::Display) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.limit.invalid",
+            InteropCode::LimitInvalid,
             MESSAGE_LIMIT_INVALID,
             ErrorDetails {
                 detail: Some(error.to_string()),
@@ -371,9 +390,9 @@ impl InteropError {
 
     /// Creates the stable error for a limit object a binding could not read.
     pub fn invalid_limit_payload(detail: String) -> Self {
-        Self::new(
+        Self::owned(
             InteropErrorKind::Input,
-            "interop.limit.payload_invalid",
+            InteropCode::LimitPayloadInvalid,
             MESSAGE_LIMIT_PAYLOAD_INVALID,
             ErrorDetails {
                 detail: Some(detail),
@@ -384,54 +403,68 @@ impl InteropError {
 
     pub(crate) fn invalid_archive_limit() -> Self {
         Self::input(
-            "interop.workbook.archive_limit_invalid",
+            InteropCode::WorkbookArchiveLimitInvalid,
             MESSAGE_ARCHIVE_LIMIT_INVALID,
         )
     }
 
     pub(crate) fn defined_name_sheet_identity() -> Self {
         Self::state(
-            "interop.defined_name.sheet_identity_invalid",
+            InteropCode::DefinedNameSheetIdentityInvalid,
             MESSAGE_DEFINED_NAME_SHEET_IDENTITY,
         )
     }
 
     pub(crate) fn preview_not_found() -> Self {
-        Self::state("interop.preview.not_found", MESSAGE_PREVIEW_NOT_FOUND)
+        Self::state(InteropCode::PreviewNotFound, MESSAGE_PREVIEW_NOT_FOUND)
     }
 
     /// Creates the stable malformed retained-preview cursor error used by bindings.
     pub fn preview_cursor_invalid() -> Self {
         Self::input(
-            "interop.preview.cursor_invalid",
+            InteropCode::PreviewCursorInvalid,
             MESSAGE_PREVIEW_CURSOR_INVALID,
         )
     }
 
     pub(crate) fn preview_response_limit() -> Self {
         Self::state(
-            "interop.preview.response_limit_exceeded",
+            InteropCode::PreviewResponseLimitExceeded,
             MESSAGE_PREVIEW_RESPONSE_LIMIT,
         )
     }
 
     pub(crate) fn preview_id_exhausted() -> Self {
-        Self::state("interop.preview.id_exhausted", MESSAGE_PREVIEW_ID_EXHAUSTED)
+        Self::state(
+            InteropCode::PreviewIdExhausted,
+            MESSAGE_PREVIEW_ID_EXHAUSTED,
+        )
     }
 
     /// Creates the stable invalid-preview-section input error used by bindings and MCP.
     pub fn invalid_preview_section() -> Self {
         Self::input(
-            "interop.preview.section_invalid",
+            InteropCode::PreviewSectionInvalid,
             MESSAGE_PREVIEW_SECTION_INVALID,
         )
     }
 
     /// Creates the stable DTO serialization error used by native bindings.
     pub fn serialization() -> Self {
-        Self::state("interop.dto.serialization", MESSAGE_SERIALIZATION)
+        Self::state(InteropCode::DtoSerialization, MESSAGE_SERIALIZATION)
     }
 
+    /// An error with one of the codes the interop layer owns.
+    fn owned(
+        kind: InteropErrorKind,
+        code: InteropCode,
+        message: &'static str,
+        details: ErrorDetails,
+    ) -> Self {
+        Self::new(kind, code.as_str(), message, details)
+    }
+
+    /// An error with a lower layer's code, which passes through unchanged.
     fn new(
         kind: InteropErrorKind,
         code: impl Into<String>,

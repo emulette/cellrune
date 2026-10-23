@@ -145,6 +145,7 @@ function protocolError(detail) {
 
 module.exports = {
   CellRuneError,
+  ERROR,
   INPUT_DETAIL,
   PROTOCOL_DETAIL,
   closedError,
