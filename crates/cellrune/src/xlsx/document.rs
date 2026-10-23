@@ -53,6 +53,7 @@ pub struct XlsxDocument {
     worksheet_parts: BTreeMap<SheetId, PartPath>,
     table_parts: BTreeMap<TableId, PartPath>,
     chart_parts: Vec<PartPath>,
+    link_parts: Vec<PartPath>,
     pivot_cache_parts: Vec<PartPath>,
     package: PreservedPackage,
 }
@@ -146,6 +147,11 @@ impl XlsxDocument {
 
     pub(in crate::xlsx) fn chart_part_paths(&self) -> &[PartPath] {
         &self.chart_parts
+    }
+
+    /// Returns the form control, drawing, and VML drawing parts.
+    pub(in crate::xlsx) fn link_part_paths(&self) -> &[PartPath] {
+        &self.link_parts
     }
 
     pub(in crate::xlsx) fn pivot_cache_part_paths(&self) -> &[PartPath] {
@@ -265,6 +271,7 @@ fn open_retained(
         worksheet_parts: read.worksheet_parts,
         table_parts: read.table_parts,
         chart_parts: read.chart_parts,
+        link_parts: read.link_parts,
         pivot_cache_parts: read.pivot_cache_parts,
         package: PreservedPackage::new(bytes, input_hash, kind),
     })

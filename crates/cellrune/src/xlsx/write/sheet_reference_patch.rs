@@ -47,6 +47,11 @@ const DETAIL_DELETED_PIVOT_SOURCE: &str =
     "a preserved pivot cache reads a deleted sheet or a table on one";
 const DETAIL_DELETED_PIVOT_CHART: &str =
     "a preserved pivot chart reads a pivot table on a deleted sheet";
+const DETAIL_DELETED_LINK: &str = "a preserved form control, VML control, linked shape, or data consolidation names a deleted sheet";
+/// Holds the `x:FmlaLink` and `x:FmlaRange` of legacy VML controls.
+const VML_EXCEL: &[&str] = &["urn:schemas-microsoft-com:office:excel"];
+/// The VML control elements whose text is a formula.
+const VML_FORMULAS: &[&str] = &["FmlaLink", "FmlaRange", "FmlaTxbx", "FmlaGroup"];
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
@@ -209,32 +214,151 @@ pub(crate) fn rewrite_sheet_references(
             .iter()
             .map(|part| (part, ReferencePart::PivotCache)),
     );
+    // Parts that link a deleted sheet in a way no rewrite reaches, refused together.
+    let mut deleted_links = Vec::new();
     for (part, kind) in parts {
         if removed_parts.contains(part) {
             continue;
         }
+        let mut links_deleted = false;
         let patched = match replacements.get(part) {
-            Some(bytes) => patch_sheet_references(bytes, part, kind, &requests, limits)?,
+            Some(bytes) => {
+                patch_sheet_references(bytes, part, kind, &requests, &mut links_deleted, limits)?
+            }
             None => patch_sheet_references(
                 &source_reader.read_part(part)?,
                 part,
                 kind,
                 &requests,
+                &mut links_deleted,
                 limits,
             )?,
         };
+        if links_deleted {
+            deleted_links.push(part);
+        }
         if let Some(bytes) = patched {
             replacements.insert(part.clone(), bytes);
         }
     }
+    if !deleted.is_empty() {
+        for part in document.link_part_paths() {
+            if !removed_parts.contains(part)
+                && links_deleted_sheet(&source_reader.read_part(part)?, part, &requests, limits)?
+            {
+                deleted_links.push(part);
+            }
+        }
+    }
+    if let Some(first) = deleted_links.first() {
+        let parts = deleted_links
+            .iter()
+            .map(|part| part.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(
+            XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
+                .with_detail(format!("{DETAIL_DELETED_LINK}: {parts}"))
+                .at_source(first.source_id()),
+        );
+    }
     Ok(())
 }
 
+/// Reports whether a form control's `fmla*` attributes, a linked shape's `textlink`, or a VML
+/// control's `x:Fmla*` text names a deleted sheet. Excel would turn such a link into `#REF!`, but
+/// these parts carry formulas outside the grammar the rewrite edits in place, so the deletion is
+/// refused rather than leaving the link stale.
+fn links_deleted_sheet(
+    bytes: &[u8],
+    source: &PartPath,
+    requests: &SheetReferenceRequests<'_>,
+    limits: WriteLimits,
+) -> Result<bool, XlsxWriteError> {
+    let never_cancelled = || false;
+    let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
+    let mut names_deleted = |formula: &str| {
+        Ok::<_, XlsxWriteError>(
+            rewrite_formula(formula, &requests.deletions_only, &mut budget)
+                .map_or(true, |rewritten| rewritten.is_some()),
+        )
+    };
+    let mut xml = namespace_reader(bytes, limits.max_xml_depth());
+    // VML is HTML-like and may leave elements such as `<br>` unclosed.
+    xml.config_mut().check_end_names = false;
+    xml.config_mut().allow_unmatched_ends = true;
+    xml.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut formula = None::<String>;
+    loop {
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        match event {
+            Event::Start(element) | Event::Empty(element) => {
+                let local_name = element.local_name();
+                let attributes = match local_name.as_ref() {
+                    "formControlPr" => Some(true),
+                    "sp" => Some(false),
+                    _ => None,
+                };
+                if let Some(control) = attributes {
+                    for attribute in element.attributes().with_checks(true) {
+                        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+                        let key = attribute.key.local_name();
+                        let linked = if control {
+                            key.as_ref().starts_with("fmla")
+                        } else {
+                            key.as_ref() == "textlink"
+                        };
+                        if linked
+                            && names_deleted(
+                                &attribute
+                                    .normalized_value(XmlVersion::Implicit1_0)
+                                    .map_err(|error| invalid_xml(source, error))?,
+                            )?
+                        {
+                            return Ok(true);
+                        }
+                    }
+                }
+                if VML_FORMULAS.contains(&local_name.as_ref())
+                    && in_namespace(&xml, element.name(), VML_EXCEL)
+                {
+                    formula = Some(String::new());
+                }
+            }
+            Event::Text(content) => {
+                if let Some(formula) = &mut formula {
+                    formula.push_str(&content.xml_content(XmlVersion::Implicit1_0));
+                }
+            }
+            Event::GeneralRef(reference) => {
+                if let Some(formula) = &mut formula {
+                    formula.push_str(&decode_reference(&reference, source)?);
+                }
+            }
+            Event::End(_) => {
+                if let Some(text) = formula.take()
+                    && names_deleted(text.trim())?
+                {
+                    return Ok(true);
+                }
+            }
+            Event::Eof => return Ok(false),
+            _ => {}
+        }
+        buffer.clear();
+    }
+}
+
+/// Rewrites one part's references and returns the part when it changed. `links_deleted` is set
+/// when a worksheet's data consolidation reads a deleted sheet, which no rewrite reaches.
 fn patch_sheet_references(
     bytes: &[u8],
     source: &PartPath,
     part: ReferencePart,
     requests: &SheetReferenceRequests<'_>,
+    links_deleted: &mut bool,
     limits: WriteLimits,
 ) -> Result<Option<Vec<u8>>, XlsxWriteError> {
     let never_cancelled = || false;
@@ -320,6 +444,8 @@ fn patch_sheet_references(
                 {
                     sparkline_groups_depth = Some(depth);
                 }
+                *links_deleted |=
+                    consolidates_deleted_sheet(&xml, &element, part, requests, source)?;
                 let patched = patch_attribute(&xml, &element, part, requests, &mut budget, source)?;
                 changed |= patched.is_some();
                 let element = patched.unwrap_or_else(|| element.into_owned());
@@ -342,6 +468,8 @@ fn patch_sheet_references(
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
+                *links_deleted |=
+                    consolidates_deleted_sheet(&xml, &element, part, requests, source)?;
                 let patched = patch_attribute(&xml, &element, part, requests, &mut budget, source)?;
                 changed |= patched.is_some();
                 write_event(
@@ -417,6 +545,47 @@ fn held_text_kind(
         ReferencePart::PivotCache => false,
     };
     formula.then_some(HeldTextKind::Formula)
+}
+
+/// Reports whether a worksheet's `<dataRef>` consolidates a range of a deleted sheet of this
+/// workbook, which has no rewritten form.
+fn consolidates_deleted_sheet(
+    xml: &NsReader<&[u8]>,
+    element: &BytesStart<'_>,
+    part: ReferencePart,
+    requests: &SheetReferenceRequests<'_>,
+    source: &PartPath,
+) -> Result<bool, XlsxWriteError> {
+    if part != ReferencePart::Worksheet
+        || requests.changes.deleted.is_empty()
+        || element.local_name().as_ref() != "dataRef"
+        || !in_namespace(xml, element.name(), SPREADSHEETML)
+    {
+        return Ok(false);
+    }
+    let mut sheet = None;
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        let (namespace, local_name) = xml.resolver().resolve_attribute(attribute.key);
+        match (namespace, local_name.as_ref()) {
+            // A relationship ID points the consolidation into another workbook.
+            (ResolveResult::Bound(namespace), "id")
+                if RELATIONSHIPS.contains(&namespace.as_ref()) =>
+            {
+                return Ok(false);
+            }
+            (ResolveResult::Unbound, "sheet") => {
+                sheet = Some(
+                    attribute
+                        .normalized_value(XmlVersion::Implicit1_0)
+                        .map_err(|error| invalid_xml(source, error))?
+                        .into_owned(),
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(sheet.is_some_and(|sheet| requests.deleted(&sheet)))
 }
 
 /// Rewrites the one attribute that can name a sheet: an internal hyperlink location, a
@@ -724,6 +893,7 @@ mod tests {
             &source,
             part,
             &rename_requests(),
+            &mut false,
             WriteLimits::default(),
         )
         .expect("patch")
@@ -737,6 +907,7 @@ mod tests {
             &source,
             part,
             &deletion_requests(),
+            &mut false,
             WriteLimits::default(),
         )
         .map(|bytes| bytes.map(|bytes| String::from_utf8(bytes).expect("UTF-8")))
@@ -857,6 +1028,7 @@ mod tests {
             &source,
             ReferencePart::Chart,
             &rename_requests(),
+            &mut false,
             WriteLimits::default(),
         )
         .expect_err("a chart that cannot be read cannot be rewritten");
@@ -887,6 +1059,7 @@ mod tests {
             &source,
             ReferencePart::Chart,
             &rename_requests(),
+            &mut false,
             WriteLimits::default(),
         )
         .expect_err("257 declarations on one element");
@@ -907,6 +1080,7 @@ mod tests {
             &source,
             ReferencePart::Worksheet,
             &rename_requests(),
+            &mut false,
             WriteLimits::default(),
         )
         .expect_err("a rewrite would drop the comment");

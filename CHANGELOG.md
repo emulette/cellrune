@@ -29,9 +29,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   relationships, and relationships to parts the package lacks are ignored. Conditional formats,
   data validations, and chart series that name the sheet become `#REF!`, a sparkline reading it
   loses its data source, and internal hyperlinks keep their location, as in Excel. A remaining
-  pivot cache or pivot chart that reads the deleted sheet, or a slicer or timeline cache while it
-  holds a pivot table or table, fails with `xlsx.write.unsupported_preservation` and a detail
-  naming the parts. Saving edits without calculating also clears the results of formulas that read
+  pivot cache or pivot chart that reads the deleted sheet, a form control (`fmlaLink`,
+  `fmlaRange`), VML control (`x:FmlaLink`, `x:FmlaRange`), linked shape (`textlink`), or data
+  consolidation (`dataRef`) that names it, or a slicer or timeline cache while it holds a pivot
+  table or table, fails with `xlsx.write.unsupported_preservation` and a detail naming the parts. Saving edits without calculating also clears the results of formulas that read
   the sheet list or a 3-D range across the deleted sheet.
 - `WorkbookSnapshot::highest_sheet_id()` returns the highest sheet ID a workbook has used,
   including sheets deleted in the same draft or session; added sheets take the next ID, so within

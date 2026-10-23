@@ -301,8 +301,9 @@ deleted sheet's ID; a saved file does not record deleted IDs, so after reopening
 take one. Saving into the source
 package removes the parts only the deleted sheet reached and rewrites references in conditional
 formats, data validations, and chart series to `#REF!`; a remaining pivot cache or pivot chart that
-reads the deleted sheet, or a slicer or timeline cache while it holds a pivot table or table, fails
-with `xlsx.write.unsupported_preservation`. See
+reads the deleted sheet, a form control, VML control, linked shape, or data consolidation that names
+it, or a slicer or timeline cache while it holds a pivot table or table, fails with
+`xlsx.write.unsupported_preservation`. See
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for the complete rules.
 
 Use `analyze_defined_name`, `analyze_defined_name_with_options`, or

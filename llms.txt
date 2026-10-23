@@ -635,9 +635,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   its data source and keeps its location, and an internal hyperlink keeps its
   location, as Excel saves them. A remaining pivot cache whose source is a
   deleted sheet or a table on one, a remaining pivot chart of a pivot table
-  on one, and any slicer or timeline cache while a deleted sheet holds a
-  pivot table or table fail with `UnsupportedPreservation`, the detail naming
-  the parts.
+  on one, a form control (`fmlaLink`, `fmlaRange`, `fmlaTxbx`, `fmlaGroup`),
+  VML control (`x:FmlaLink`, `x:FmlaRange`), linked shape (`textlink`), or
+  data consolidation (`dataRef sheet`) that names a deleted sheet, and any
+  slicer or timeline cache while a deleted sheet holds a pivot table or
+  table fail with `UnsupportedPreservation`, the detail naming the parts.
 - Dynamic formulas can be authored in canonical drafts. Existing
   document-backed dynamic formulas can be recalculated and cache-rewritten,
   but adding or replacing one through a document draft fails with
