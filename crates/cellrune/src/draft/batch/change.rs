@@ -228,6 +228,110 @@ pub enum WorkbookChange {
         /// Filtered range, including its header row, or `None` to remove the filter.
         range: Option<CellRange>,
     },
+    /// Inserts `count` empty rows before `row`, moving that row and every later one down.
+    ///
+    /// References to the moved cells follow them, and a range the rows are inserted strictly
+    /// inside grows. The inserted rows take the height and formats of the row above them.
+    InsertRows {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First inserted row.
+        row: Row,
+        /// Number of inserted rows, at least one.
+        count: u32,
+    },
+    /// Deletes rows `first..=last`, moving every later row up.
+    ///
+    /// A reference to deleted cells becomes `#REF!`, and a range that loses only some of its
+    /// rows shrinks.
+    DeleteRows {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First deleted row.
+        first: Row,
+        /// Last deleted row.
+        last: Row,
+    },
+    /// Inserts `count` empty columns before `column`, moving that column and every later one
+    /// right, as [`Self::InsertRows`] moves rows.
+    InsertColumns {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First inserted column.
+        column: Column,
+        /// Number of inserted columns, at least one.
+        count: u32,
+    },
+    /// Deletes columns `first..=last`, moving every later column left, as [`Self::DeleteRows`]
+    /// deletes rows.
+    DeleteColumns {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First deleted column.
+        first: Column,
+        /// Last deleted column.
+        last: Column,
+    },
+    /// Moves rows `first..=last` so that they start at row `destination` afterwards, as cutting
+    /// them and inserting the cut rows does.
+    ///
+    /// References to the moved rows follow them, and each end of a range follows its row; a range
+    /// whose ends would cross shrinks as if the moved rows were deleted.
+    MoveRows {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First moved row.
+        first: Row,
+        /// Last moved row.
+        last: Row,
+        /// Row the first moved row lands on.
+        destination: Row,
+    },
+    /// Moves columns `first..=last` so that they start at column `destination` afterwards, as
+    /// [`Self::MoveRows`] moves rows.
+    MoveColumns {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First moved column.
+        first: Column,
+        /// Last moved column.
+        last: Column,
+        /// Column the first moved column lands on.
+        destination: Column,
+    },
+    /// Moves the cells of `source` so that its top-left cell lands on `destination`, as cutting
+    /// and pasting them does, replacing the cells there.
+    ///
+    /// A reference that lies wholly inside the moved cells follows them, and one that lies only
+    /// partly inside stays as it is; moved formulas keep their text. Conditional formats and data
+    /// validations split into the cells that stay and the cells that move. Pasting over cells
+    /// that a formula outside the moved cells reads is refused.
+    MoveRange {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Cut cells.
+        source: CellRange,
+        /// Cell the top-left cut cell lands on.
+        destination: CellAddress,
+    },
+    /// Copies the cells of `source` on `sheet_id` into `destination` on `destination_sheet_id`,
+    /// repeating them over a destination that is a whole multiple of their size, as pasting and
+    /// filling do.
+    ///
+    /// Each copied formula's relative references move by the distance it is copied; absolute
+    /// parts, structured references, and names stay as written, and a formula whose reference
+    /// would leave the sheet becomes `#REF!`. Values, number formats, and cell formats are
+    /// copied, and an empty source cell clears its destination.
+    CopyRange {
+        /// Source sheet.
+        sheet_id: SheetId,
+        /// Copied cells.
+        source: CellRange,
+        /// Destination sheet, which may be the source sheet.
+        destination_sheet_id: SheetId,
+        /// Cells the copy fills, a whole multiple of the source's size.
+        destination: CellRange,
+    },
     /// Sets font, fill, border, or alignment properties of the format one cell displays with,
     /// merged into its current format as [`CellFormatEdit`] describes.
     ///
@@ -479,6 +583,176 @@ impl WorkbookChange {
         Self::SetSheetAutoFilter { sheet_id, range }
     }
 
+    /// Constructs a row insertion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::StructuralEditEmpty`] when `count` is zero and
+    /// [`ValidationError::RowOutOfRange`] when the inserted rows would end past the last row.
+    pub fn insert_rows(sheet_id: SheetId, row: Row, count: u32) -> Result<Self, ValidationError> {
+        validate_insertion(row.get(), count, crate::EXCEL_MAX_ROWS, |value| {
+            ValidationError::RowOutOfRange { value }
+        })?;
+        Ok(Self::InsertRows {
+            sheet_id,
+            row,
+            count,
+        })
+    }
+
+    /// Constructs a row deletion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last`.
+    pub fn delete_rows(sheet_id: SheetId, first: Row, last: Row) -> Result<Self, ValidationError> {
+        if first > last {
+            return Err(ValidationError::RangeStartAfterEnd);
+        }
+        Ok(Self::DeleteRows {
+            sheet_id,
+            first,
+            last,
+        })
+    }
+
+    /// Constructs a column insertion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::StructuralEditEmpty`] when `count` is zero and
+    /// [`ValidationError::ColumnOutOfRange`] when the inserted columns would end past the last
+    /// column.
+    pub fn insert_columns(
+        sheet_id: SheetId,
+        column: Column,
+        count: u32,
+    ) -> Result<Self, ValidationError> {
+        validate_insertion(column.get(), count, crate::EXCEL_MAX_COLUMNS, |value| {
+            ValidationError::ColumnOutOfRange { value }
+        })?;
+        Ok(Self::InsertColumns {
+            sheet_id,
+            column,
+            count,
+        })
+    }
+
+    /// Constructs a column deletion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last`.
+    pub fn delete_columns(
+        sheet_id: SheetId,
+        first: Column,
+        last: Column,
+    ) -> Result<Self, ValidationError> {
+        if first > last {
+            return Err(ValidationError::RangeStartAfterEnd);
+        }
+        Ok(Self::DeleteColumns {
+            sheet_id,
+            first,
+            last,
+        })
+    }
+
+    /// Constructs a row move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last` and
+    /// [`ValidationError::RowOutOfRange`] when the moved rows would end past the last row.
+    pub fn move_rows(
+        sheet_id: SheetId,
+        first: Row,
+        last: Row,
+        destination: Row,
+    ) -> Result<Self, ValidationError> {
+        validate_move(
+            first.get(),
+            last.get(),
+            destination.get(),
+            crate::EXCEL_MAX_ROWS,
+            |value| ValidationError::RowOutOfRange { value },
+        )?;
+        Ok(Self::MoveRows {
+            sheet_id,
+            first,
+            last,
+            destination,
+        })
+    }
+
+    /// Constructs a column move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last` and
+    /// [`ValidationError::ColumnOutOfRange`] when the moved columns would end past the last
+    /// column.
+    pub fn move_columns(
+        sheet_id: SheetId,
+        first: Column,
+        last: Column,
+        destination: Column,
+    ) -> Result<Self, ValidationError> {
+        validate_move(
+            first.get(),
+            last.get(),
+            destination.get(),
+            crate::EXCEL_MAX_COLUMNS,
+            |value| ValidationError::ColumnOutOfRange { value },
+        )?;
+        Ok(Self::MoveColumns {
+            sheet_id,
+            first,
+            last,
+            destination,
+        })
+    }
+
+    /// Constructs a range move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RowOutOfRange`] or [`ValidationError::ColumnOutOfRange`] when
+    /// the moved cells would end past the last row or column.
+    pub fn move_range(
+        sheet_id: SheetId,
+        source: CellRange,
+        destination: CellAddress,
+    ) -> Result<Self, ValidationError> {
+        validate_range_move(source, destination)?;
+        Ok(Self::MoveRange {
+            sheet_id,
+            source,
+            destination,
+        })
+    }
+
+    /// Constructs a copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::CopyDestinationShape`] when `destination` does not repeat
+    /// `source` a whole number of times.
+    pub fn copy_range(
+        sheet_id: SheetId,
+        source: CellRange,
+        destination_sheet_id: SheetId,
+        destination: CellRange,
+    ) -> Result<Self, ValidationError> {
+        validate_copy_shape(source, destination)?;
+        Ok(Self::CopyRange {
+            sheet_id,
+            source,
+            destination_sheet_id,
+            destination,
+        })
+    }
+
     /// Constructs a cell format change.
     pub const fn set_cell_format(
         sheet_id: SheetId,
@@ -515,6 +789,75 @@ impl WorkbookChange {
             height,
         }
     }
+}
+
+/// Rejects an insertion of no lines or of lines that would end past the last one.
+pub(super) fn validate_insertion(
+    at: u32,
+    count: u32,
+    maximum: u32,
+    out_of_range: impl Fn(u32) -> ValidationError,
+) -> Result<(), ValidationError> {
+    if count == 0 {
+        return Err(ValidationError::StructuralEditEmpty);
+    }
+    let end = at
+        .checked_add(count - 1)
+        .ok_or_else(|| out_of_range(u32::MAX))?;
+    if end > maximum {
+        return Err(out_of_range(end));
+    }
+    Ok(())
+}
+
+/// Rejects a move of reversed lines or of lines that would land past the last one.
+pub(super) fn validate_move(
+    first: u32,
+    last: u32,
+    destination: u32,
+    maximum: u32,
+    out_of_range: impl Fn(u32) -> ValidationError,
+) -> Result<(), ValidationError> {
+    if first > last {
+        return Err(ValidationError::RangeStartAfterEnd);
+    }
+    let end = destination
+        .checked_add(last - first)
+        .ok_or_else(|| out_of_range(u32::MAX))?;
+    if end > maximum {
+        return Err(out_of_range(end));
+    }
+    Ok(())
+}
+
+/// Rejects a copy destination that does not repeat the source a whole number of times.
+pub(super) fn validate_copy_shape(
+    source: CellRange,
+    destination: CellRange,
+) -> Result<(), ValidationError> {
+    if destination.height().is_multiple_of(source.height())
+        && destination.width().is_multiple_of(source.width())
+    {
+        Ok(())
+    } else {
+        Err(ValidationError::CopyDestinationShape)
+    }
+}
+
+/// Rejects a range move whose cells would land past the last row or column.
+pub(super) fn validate_range_move(
+    source: CellRange,
+    destination: CellAddress,
+) -> Result<(), ValidationError> {
+    let last_row = destination.row().get() + (source.height() - 1);
+    if last_row > crate::EXCEL_MAX_ROWS {
+        return Err(ValidationError::RowOutOfRange { value: last_row });
+    }
+    let last_column = destination.column().get() + (source.width() - 1);
+    if last_column > crate::EXCEL_MAX_COLUMNS {
+        return Err(ValidationError::ColumnOutOfRange { value: last_column });
+    }
+    Ok(())
 }
 
 /// An ordered collection of workbook changes committed atomically.

@@ -1310,7 +1310,7 @@ fn follower_verification_rejects_a_stale_wrong_or_missing_result_after_an_edit()
         verify_draft_output(
             &ExpectedDraftOutput {
                 workbook: draft.workbook(),
-                source: Some(document.workbook()),
+                source: Some(draft.source_cells()),
                 presentation: draft.presentation(),
                 materialization: &plan,
                 kind: XlsxDocumentKind::Xlsx,

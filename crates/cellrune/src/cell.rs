@@ -328,6 +328,15 @@ impl Cell {
         }
     }
 
+    /// Returns this cell at another address, sharing its content and number format.
+    pub(crate) fn moved_to(&self, address: CellAddress) -> Self {
+        Self {
+            address,
+            content: Arc::clone(&self.content),
+            number_format: Arc::clone(&self.number_format),
+        }
+    }
+
     pub(crate) fn with_replaced_number_format(&self, number_format: NumberFormat) -> Self {
         Self {
             address: self.address,

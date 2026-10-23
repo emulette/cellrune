@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod change_dto;
 mod convert;
 mod csv;
 mod dto;
@@ -33,17 +34,18 @@ pub use dto::{
     DefinedNameDynamicKindDto, DefinedNameExternalTargetKindDto, DefinedNameInspectionDto,
     DefinedNameInspectionRequestDto, DefinedNameInspectionResultDto, DefinedNameInvalidReasonDto,
     DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto,
-    DisplayFormatRequestDto, DisplayFormatResultDto, EditBatchDto, EditBatchV2Dto, EditReceiptDto,
-    EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto, FinancialSolverSemanticsDto,
-    FunctionCatalogEntryDto, FunctionCatalogReportDto, FunctionUsageEntryDto,
-    FunctionUsageReportDto, LocaleDto, LocaleProfileDto, MaterializedResultOriginDto,
-    NumberFormatDto, PreviewChangesDto, PreviewCursorDto, ProviderIdentityDto, RangePageDto,
-    RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto,
-    SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
-    TransactionDetailItemDto, TransactionDetailSectionDto, TransactionImpactCoverageDto,
-    TransactionImpactPageDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto,
-    WorkbookSummaryDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    DisplayFormatRequestDto, DisplayFormatResultDto, EditBatchDto, EditBatchV2Dto, EditInverseDto,
+    EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto,
+    FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
+    FunctionUsageEntryDto, FunctionUsageReportDto, LocaleDto, LocaleProfileDto,
+    MaterializedResultOriginDto, NumberFormatDto, PreviewChangesDto, PreviewCursorDto,
+    ProviderIdentityDto, RangePageDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto,
+    SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto,
+    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
+    TransactionImpactCoverageDto, TransactionImpactPageDto, UnrestoredContentDto,
+    WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto, WorkbookSummaryDto,
+    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
+    WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use format_dto::{

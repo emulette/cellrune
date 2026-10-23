@@ -604,7 +604,10 @@ expected_revision. Supported changes include setting or clearing cells, formulas
 formats; adding, renaming, deleting, moving, or copying sheets; sheet visibility and autoFilters; \
 setting, removing, or renaming defined names; and the date system and calculation hints. Deleting \
 a sheet turns references to it and its tables into #REF!. A copy is named like 'Data (2)', and \
-later changes in the batch can use that name.",
+later changes in the batch can use that name. insert_rows, delete_rows, insert_columns, \
+delete_columns, move_rows, move_columns, move_range, and copy_range move references with the \
+cells as Excel does; their receipt carries an inverse, edit-schema-v2 changes that undo the batch \
+through workbook_apply_changes_v2, and the content they cannot restore.",
         annotations(
             title = "Apply workbook changes",
             read_only_hint = false,

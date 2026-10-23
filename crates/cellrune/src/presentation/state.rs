@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::grid::{GridAxis, GridEdit};
 use crate::{
     CellAddress, Column, Diagnostic, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, Row, SheetId,
     ValidationError,
@@ -116,6 +117,20 @@ pub(crate) struct SheetPresentation {
     pub(crate) cell_phonetics: BTreeMap<CellAddress, CellPresentation>,
     pub(crate) frozen_pane: Option<FrozenPane>,
     pub(crate) right_to_left: bool,
+}
+
+/// Returns how many of the first lines stay frozen after an edit along their axis: lines
+/// inserted among them are frozen too, and deleted ones leave the frozen area.
+fn frozen_lines(count: u32, edit: GridEdit) -> u32 {
+    match edit {
+        GridEdit::Insert {
+            at, count: added, ..
+        } if at <= count => count + added,
+        GridEdit::Delete { first, last, .. } if first <= count => {
+            count - (last.min(count) - first + 1)
+        }
+        _ => count,
+    }
 }
 
 /// Borrowed effective phonetic metadata for one cell.
@@ -500,6 +515,87 @@ impl DocumentPresentation {
         self.revision = next_revision;
         self.retain_nonempty_sheets();
         Ok(true)
+    }
+
+    /// Moves one sheet's presentation through a structural edit: cell phonetics and formats
+    /// follow their cells, row and column settings their lines, and a frozen pane keeps freezing
+    /// the same lines, growing over lines inserted inside it. Returns whether the frozen pane
+    /// changed.
+    pub(crate) fn apply_grid_edit(&mut self, sheet_id: SheetId, edit: GridEdit) -> bool {
+        self.apply_grid_edit_to_formats(sheet_id, edit);
+        let Some(sheet) = self.sheets.get_mut(&sheet_id) else {
+            return false;
+        };
+        sheet.cell_phonetics = std::mem::take(&mut sheet.cell_phonetics)
+            .into_iter()
+            .filter_map(|(address, cell)| Some((edit.map_address(address)?, cell)))
+            .collect();
+        let previous = sheet.frozen_pane;
+        match edit.line_axis() {
+            Some(GridAxis::Rows) => {
+                sheet.row_phonetic_visibility = std::mem::take(&mut sheet.row_phonetic_visibility)
+                    .into_iter()
+                    .filter_map(|(row, visible)| {
+                        Some((Row::new(edit.map_line(row.get())?).ok()?, visible))
+                    })
+                    .collect();
+                sheet.frozen_pane = sheet.frozen_pane.and_then(|pane| {
+                    let rows = frozen_lines(pane.frozen_rows, edit);
+                    FrozenPane::new(rows, pane.frozen_columns)
+                        .ok()
+                        .filter(|pane| !pane.is_clear())
+                });
+            }
+            Some(GridAxis::Columns) => {
+                let mut columns = Vec::<ColumnPhoneticVisibility>::new();
+                for column in 1..=EXCEL_MAX_COLUMNS {
+                    let Some(visible) = sheet
+                        .column_phonetic_visibility
+                        .iter()
+                        .rev()
+                        .find(|span| (span.first.get()..=span.last.get()).contains(&column))
+                        .map(|span| span.visible)
+                    else {
+                        continue;
+                    };
+                    let Some(target) = edit
+                        .map_line(column)
+                        .and_then(|line| Column::new(line).ok())
+                    else {
+                        continue;
+                    };
+                    columns.push(ColumnPhoneticVisibility {
+                        first: target,
+                        last: target,
+                        visible,
+                    });
+                }
+                columns.sort_by_key(|span| span.first);
+                let mut merged = Vec::<ColumnPhoneticVisibility>::new();
+                for span in columns {
+                    match merged.last_mut() {
+                        Some(last)
+                            if last.visible == span.visible
+                                && last.last.get() + 1 == span.first.get() =>
+                        {
+                            last.last = span.last;
+                        }
+                        _ => merged.push(span),
+                    }
+                }
+                sheet.column_phonetic_visibility = merged;
+                sheet.frozen_pane = sheet.frozen_pane.and_then(|pane| {
+                    let columns = frozen_lines(pane.frozen_columns, edit);
+                    FrozenPane::new(pane.frozen_rows, columns)
+                        .ok()
+                        .filter(|pane| !pane.is_clear())
+                });
+            }
+            None => {}
+        }
+        let changed = sheet.frozen_pane != previous;
+        self.retain_nonempty_sheets();
+        changed
     }
 
     pub(crate) fn has_cell_annotation(&self, sheet_id: SheetId, address: CellAddress) -> bool {

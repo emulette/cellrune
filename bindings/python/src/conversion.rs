@@ -148,6 +148,9 @@ pub(crate) fn edit_receipt<'py>(
         "calculation_metadata_changed",
         value.calculation_metadata_changed,
     )?;
+    if let Some(inverse) = &value.inverse {
+        result.set_item("inverse", json_dict(py, inverse)?)?;
+    }
     Ok(result)
 }
 

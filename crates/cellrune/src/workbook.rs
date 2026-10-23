@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock};
 mod annotations;
 mod auto_filter;
 mod data_validation;
+mod grid_transform;
 mod new_cell_styles;
 mod sheet_tabs;
 mod table_index;
@@ -18,6 +19,7 @@ pub(crate) use data_validation::DataValidationRule;
 pub use data_validation::{
     DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
 };
+pub(crate) use grid_transform::grid_metadata;
 pub(crate) use new_cell_styles::NewCellStyles;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;
@@ -621,6 +623,10 @@ impl Sheet {
 
     pub(crate) fn data_validations_mut(&mut self) -> &mut [DataValidation] {
         Arc::make_mut(&mut self.data_validations).as_mut_slice()
+    }
+
+    pub(crate) fn set_data_validations(&mut self, data_validations: Vec<DataValidation>) {
+        self.data_validations = Arc::new(data_validations);
     }
 
     /// Returns the sheet's hyperlinks in worksheet order.

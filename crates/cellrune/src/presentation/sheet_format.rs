@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use super::format::{validate_column_width, validate_row_height};
 use super::{Alignment, Border, CellFormat, DocumentPresentation, Fill, Font};
-use crate::{CellAddress, Column, Row, SheetId, ValidationError};
+use crate::grid::{GridAxis, GridEdit};
+use crate::{CellAddress, Column, EXCEL_MAX_COLUMNS, Row, SheetId, ValidationError};
 
 /// One span of columns that share an explicit width, in characters of the default font.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,6 +80,108 @@ impl SheetFormats {
         }
         spans.sort_by_key(|span| span.first);
         self.column_widths = spans;
+    }
+}
+
+impl SheetFormats {
+    /// Moves column widths, row heights, and edited cell formats through a structural edit.
+    /// Lines an insertion adds take the width, height, and cell formats of the line before them.
+    pub(crate) fn apply_grid_edit(&mut self, edit: GridEdit) {
+        let inherited_line = match edit {
+            GridEdit::Insert { at, count, .. } if at > 1 => Some((at - 1, at..at + count)),
+            _ => None,
+        };
+        let mut cell_formats = self
+            .cell_formats
+            .iter()
+            .filter_map(|(address, format)| Some((edit.map_address(*address)?, format.clone())))
+            .collect::<BTreeMap<_, _>>();
+        if let (Some((before, lines)), Some(axis)) = (inherited_line.clone(), edit.line_axis()) {
+            for (address, format) in &self.cell_formats {
+                if axis.of(*address) != before {
+                    continue;
+                }
+                for line in lines.clone() {
+                    let target = match axis {
+                        GridAxis::Rows => {
+                            Row::new(line).map(|row| CellAddress::new(row, address.column()))
+                        }
+                        GridAxis::Columns => {
+                            Column::new(line).map(|column| CellAddress::new(address.row(), column))
+                        }
+                    };
+                    if let Ok(target) = target {
+                        cell_formats.insert(target, format.clone());
+                    }
+                }
+            }
+        }
+        self.cell_formats = cell_formats;
+        match edit.line_axis() {
+            Some(GridAxis::Rows) => {
+                let mut row_heights = self
+                    .row_heights
+                    .iter()
+                    .filter_map(|(row, height)| {
+                        Some((Row::new(edit.map_line(row.get())?).ok()?, *height))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                if let Some((before, lines)) = inherited_line
+                    && let Some(height) = Row::new(before)
+                        .ok()
+                        .and_then(|row| self.row_heights.get(&row))
+                {
+                    for line in lines {
+                        if let Ok(row) = Row::new(line) {
+                            row_heights.insert(row, *height);
+                        }
+                    }
+                }
+                self.row_heights = row_heights;
+            }
+            Some(GridAxis::Columns) => {
+                let mut widths = vec![None; EXCEL_MAX_COLUMNS as usize + 1];
+                for span in &self.column_widths {
+                    for column in span.first.get()..=span.last.get() {
+                        widths[column as usize] = Some(span.width);
+                    }
+                }
+                let mut moved = vec![None; EXCEL_MAX_COLUMNS as usize + 1];
+                for (column, width) in widths.iter().enumerate().skip(1) {
+                    if let Some(width) = width
+                        && let Some(target) = edit.map_line(column as u32)
+                    {
+                        moved[target as usize] = Some(*width);
+                    }
+                }
+                if let Some((before, lines)) = inherited_line {
+                    for line in lines {
+                        moved[line as usize] = widths[before as usize];
+                    }
+                }
+                let mut spans = Vec::<ColumnWidth>::new();
+                for (column, width) in moved.iter().enumerate().skip(1) {
+                    let (Some(width), Ok(column)) = (width, Column::new(column as u32)) else {
+                        continue;
+                    };
+                    match spans.last_mut() {
+                        Some(span)
+                            if span.width.to_bits() == width.to_bits()
+                                && span.last.get() + 1 == column.get() =>
+                        {
+                            span.last = column;
+                        }
+                        _ => spans.push(ColumnWidth {
+                            first: column,
+                            last: column,
+                            width: *width,
+                        }),
+                    }
+                }
+                self.column_widths = spans;
+            }
+            None => {}
+        }
     }
 }
 
@@ -254,6 +357,14 @@ impl DocumentPresentation {
             formats.cell_formats.insert(address, format);
         });
         Ok(true)
+    }
+
+    /// Moves one sheet's column widths, row heights, and edited cell formats through a
+    /// structural edit.
+    pub(crate) fn apply_grid_edit_to_formats(&mut self, sheet_id: SheetId, edit: GridEdit) {
+        if self.formats.contains_key(&sheet_id) {
+            self.edit_sheet_formats(sheet_id, |formats| formats.apply_grid_edit(edit));
+        }
     }
 
     fn edit_sheet_formats(&mut self, sheet_id: SheetId, edit: impl FnOnce(&mut SheetFormats)) {

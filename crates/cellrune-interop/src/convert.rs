@@ -433,6 +433,9 @@ pub(crate) fn edit_receipt(workbook: &WorkbookSnapshot, receipt: &EditReceipt) -
             .collect(),
         topology_changed: receipt.topology_changed(),
         calculation_metadata_changed: receipt.calculation_metadata_changed(),
+        inverse: receipt
+            .inverse()
+            .and_then(|inverse| crate::change_dto::inverse_dto(workbook, inverse)),
     }
 }
 
@@ -690,6 +693,9 @@ fn transaction_edit_receipt(
             .collect(),
         topology_changed: receipt.topology_changed(),
         calculation_metadata_changed: receipt.calculation_metadata_changed(),
+        inverse: receipt
+            .inverse()
+            .and_then(|inverse| crate::change_dto::inverse_dto(candidate, inverse)),
     }
 }
 

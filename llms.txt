@@ -210,6 +210,17 @@ optional `name`), `set_table_range` (`table_id`, A1 `range`), and
 ID in `created_sheet_ids`, and later changes of the batch reach it by that
 name.
 
+Grid edits are v1 changes in interop JSON, Python, and MCP (not yet in Node):
+`insert_rows` (`sheet`, one-based `row`, `count`), `delete_rows` (`sheet`,
+`first`, `last`), `insert_columns` (`column`, `count`), `delete_columns`,
+`move_rows` and `move_columns` (`first`, `last`, `destination`, the line the
+first moved line lands on), `move_range` (`sheet`, A1 `source`, A1
+`destination` corner), and `copy_range` (`sheet`, A1 `source`, optional
+`destination_sheet`, A1 `destination` that repeats the source a whole number
+of times). Their receipt carries `inverse`: edit-schema-v2 `changes` that undo
+the batch when applied as one v2 batch, and `unrestored` content kinds the
+changes cannot bring back.
+
 ## Naming conventions
 
 These patterns are consistent across the entire public API. When a function
@@ -756,6 +767,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `set_cell_dynamic_formula`, `clear_cell`, `set_cell_number_format`,
   `add_sheet`, `rename_sheet`, `delete_sheet`,
   `move_sheet(SheetId, position)`, `copy_sheet(SheetId, position)`,
+  `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`,
+  `move_rows`, `move_columns`, `move_range(SheetId, CellRange, CellAddress)`,
+  `copy_range(SheetId, CellRange, SheetId, CellRange)`,
   `set_sheet_visibility`, `set_defined_name`,
   `remove_defined_name`, `rename_defined_name(scope, name, new_name)`,
   `set_date_system`, `set_calculation_hints`,

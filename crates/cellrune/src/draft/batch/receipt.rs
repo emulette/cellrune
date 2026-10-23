@@ -1,3 +1,4 @@
+use super::EditInverse;
 use crate::{CalculationCellId, SheetId, TableId};
 
 /// Result of committing one atomic edit batch.
@@ -14,6 +15,7 @@ pub struct EditReceipt {
     /// Whether every topology change came from a cell gaining, losing, or replacing a formula.
     pub(super) cell_formulas_changed_topology_only: bool,
     pub(super) calculation_metadata_changed: bool,
+    pub(super) inverse: Option<Box<EditInverse>>,
 }
 
 impl EditReceipt {
@@ -46,6 +48,7 @@ impl EditReceipt {
             topology_changed: self.topology_changed,
             cell_formulas_changed_topology_only: self.cell_formulas_changed_topology_only,
             calculation_metadata_changed: self.calculation_metadata_changed,
+            inverse: self.inverse.clone(),
         })
     }
 
@@ -98,5 +101,13 @@ impl EditReceipt {
     /// Returns whether workbook-wide calculation interpretation changed.
     pub const fn calculation_metadata_changed(&self) -> bool {
         self.calculation_metadata_changed
+    }
+
+    /// Returns the changes that undo the batch and what they cannot restore, for a batch that
+    /// inserted, deleted, or moved rows, columns, or ranges, or copied ranges. `None` for any
+    /// other batch, and for one whose structural edits cannot be undone by changes, as when a
+    /// later change in it filled the rows a deletion freed.
+    pub fn inverse(&self) -> Option<&EditInverse> {
+        self.inverse.as_deref()
     }
 }

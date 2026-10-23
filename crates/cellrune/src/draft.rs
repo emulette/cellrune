@@ -1,6 +1,7 @@
 use crate::calculation::sheet_changes::TabStep;
+use crate::grid::GridHistory;
 use crate::{
-    CalculationCellId, CellAddress, DocumentPresentation, SheetId, TableId, ValidationError,
+    CalculationCellId, Cell, CellAddress, DocumentPresentation, SheetId, TableId, ValidationError,
     WorkbookSnapshot, XlsxDocument,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +18,9 @@ pub(crate) use batch::{
     BatchExecutionError, TableMaterializationBudget, TableMaterializationError,
     rewrite_limit_detail,
 };
-pub use batch::{EditBatch, EditReceipt, WorkbookChange};
+pub use batch::{
+    EditBatch, EditInverse, EditReceipt, UnrestoredContent, UnrestoredContentKind, WorkbookChange,
+};
 pub(crate) use format::effective_cell_format;
 
 /// One explicit cell mutation retained for document-backed package patching.
@@ -103,6 +106,26 @@ impl DraftCellMutationStore {
         }
     }
 
+    /// Moves every mutation recorded for one sheet to the address `map` gives it, dropping the
+    /// ones whose cell `map` removes.
+    pub(crate) fn remap_sheet(
+        &mut self,
+        sheet_id: SheetId,
+        map: impl Fn(CellAddress) -> Option<CellAddress>,
+    ) {
+        let entries = self
+            .chunks
+            .range((sheet_id, 0)..=(sheet_id, u32::MAX))
+            .flat_map(|(_, chunk)| chunk.iter().map(|(id, mutation)| (*id, *mutation)))
+            .collect::<Vec<_>>();
+        self.remove_sheet(sheet_id);
+        for (id, mutation) in entries {
+            if let Some(address) = map(id.address()) {
+                self.insert(CalculationCellId::new(sheet_id, address), mutation);
+            }
+        }
+    }
+
     pub(crate) fn sheet_keys(&self, sheet_id: SheetId) -> impl Iterator<Item = &CalculationCellId> {
         self.chunks
             .range((sheet_id, 0)..=(sheet_id, u32::MAX))
@@ -111,6 +134,60 @@ impl DraftCellMutationStore {
 
     pub(crate) const fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+/// The source document's cells where the draft's structural edits moved them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SourceCells<'a> {
+    workbook: Option<&'a WorkbookSnapshot>,
+    histories: &'a BTreeMap<SheetId, GridHistory>,
+}
+
+impl<'a> SourceCells<'a> {
+    pub(crate) const fn new(
+        workbook: Option<&'a WorkbookSnapshot>,
+        histories: &'a BTreeMap<SheetId, GridHistory>,
+    ) -> Self {
+        Self {
+            workbook,
+            histories,
+        }
+    }
+
+    /// Returns the container metadata of the source formula that now sits at `address`, moved as
+    /// the structural edits moved its cell.
+    pub(crate) fn formula_metadata(
+        &self,
+        sheet_id: SheetId,
+        address: CellAddress,
+    ) -> Option<crate::FormulaMetadata> {
+        let crate::CellContent::Formula(formula) = self.cell(sheet_id, address)?.content() else {
+            return None;
+        };
+        let mut metadata = formula.metadata().clone();
+        if let Some(history) = self.histories.get(&sheet_id) {
+            let mut current = history.to_source(address)?;
+            for edit in history.edits() {
+                current = edit.map_address(current)?;
+                metadata = crate::workbook::grid_metadata(&metadata, *edit, current);
+            }
+        }
+        Some(metadata)
+    }
+
+    /// Returns the source document's workbook, `None` for a draft without one.
+    pub(crate) const fn workbook(&self) -> Option<&'a WorkbookSnapshot> {
+        self.workbook
+    }
+
+    /// Returns the source cell that now sits at `address`.
+    pub(crate) fn cell(&self, sheet_id: SheetId, address: CellAddress) -> Option<&'a Cell> {
+        let sheet = self.workbook?.sheet_by_id(sheet_id)?;
+        match self.histories.get(&sheet_id) {
+            Some(history) => sheet.cell(history.to_source(address)?),
+            None => sheet.cell(address),
+        }
     }
 }
 
@@ -138,6 +215,9 @@ pub struct WorkbookDraft {
     /// Each table of such a copy that duplicates a table the source package holds, with that
     /// table, whose part the writer duplicates for it.
     copied_tables: BTreeMap<TableId, TableId>,
+    /// The structural edits applied to each source worksheet, which the writer replays on the
+    /// preserved part.
+    grid_histories: BTreeMap<SheetId, GridHistory>,
 }
 
 impl WorkbookDraft {
@@ -157,6 +237,7 @@ impl WorkbookDraft {
             name_renames: Vec::new(),
             copied_sheets: BTreeMap::new(),
             copied_tables: BTreeMap::new(),
+            grid_histories: BTreeMap::new(),
         }
     }
 
@@ -176,6 +257,7 @@ impl WorkbookDraft {
             name_renames: Vec::new(),
             copied_sheets: BTreeMap::new(),
             copied_tables: BTreeMap::new(),
+            grid_histories: BTreeMap::new(),
         }
     }
 
@@ -256,6 +338,7 @@ impl WorkbookDraft {
             name_renames: self.name_renames.clone(),
             copied_sheets: self.copied_sheets.clone(),
             copied_tables: self.copied_tables.clone(),
+            grid_histories: self.grid_histories.clone(),
         })
     }
 
@@ -275,6 +358,7 @@ impl WorkbookDraft {
             name_renames: Vec::new(),
             copied_sheets: BTreeMap::new(),
             copied_tables: BTreeMap::new(),
+            grid_histories: BTreeMap::new(),
         }
     }
 }

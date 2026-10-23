@@ -1,7 +1,10 @@
 mod auto_filter_edit;
 mod change;
+mod copy_edit;
 mod executor;
 mod formula_edit;
+mod grid_edit;
+mod inverse;
 mod name_rename;
 mod receipt;
 mod sheet_copy;
@@ -16,6 +19,7 @@ mod table_range;
 mod widen_edit;
 
 pub use change::{EditBatch, WorkbookChange};
+pub use inverse::{EditInverse, UnrestoredContent, UnrestoredContentKind};
 pub(crate) use name_rename::DefinedNameRename;
 pub use receipt::EditReceipt;
 
@@ -101,6 +105,9 @@ impl BatchExecutionError {
                     end: span.end,
                     owner,
                 }
+            }
+            Self::Rewrite(FormulaRewriteError::OverwrittenReference { owner }) => {
+                ValidationError::MovedRangeOverwritesReferences { owner }
             }
             Self::Rewrite(FormulaRewriteError::SourceEdit(_)) => {
                 ValidationError::FormulaRewriteParseFailed {

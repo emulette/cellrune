@@ -24,6 +24,7 @@ pub(crate) mod formula_rewrite;
 pub(crate) mod formula_storage;
 mod functions;
 mod graph;
+pub(crate) mod grid_rewrite;
 pub(crate) mod identity;
 mod lambda;
 mod lexer;

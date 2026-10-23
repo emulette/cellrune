@@ -92,6 +92,42 @@ inventories, and measurements belong in the linked documentation rather than in 
   `convert_table_to_range`, so interop, Python, Node.js, and the MCP `workbook_apply_changes` tools
   expose the sheet, name, and table edits. A copy reports its ID in `created_sheet_ids`, and the
   tables `create_table` and `copy_sheet` create are in `changed_table_ids`.
+- `WorkbookChange::insert_rows(SheetId, Row, count)`, `delete_rows(SheetId, first, last)`,
+  `insert_columns`, `delete_columns`, `move_rows(SheetId, first, last, destination)`, and
+  `move_columns` edit a sheet's grid as Excel 16.114 does. References in cell formulas, defined
+  names, and table formulas follow the cells they read; a reference to deleted cells becomes
+  `#REF!` (`'S1'!#REF!` from another sheet) and a range a deletion reaches in part shrinks; an
+  insertion at a range's first line moves it and one inside it widens it; a moved range follows
+  its ends. 3-D references, `INDIRECT` text, and internal hyperlink locations keep their text.
+  Merged ranges, tables, autoFilters, conditional formats, data validations, comments,
+  hyperlinks, spill and array ranges, row heights, and column widths move with their cells. An
+  edit fails with the new `validation.structural_edit_empty`,
+  `validation.content_shifted_off_sheet`, `validation.merged_range_split`,
+  `validation.table_header_shift`, `validation.table_data_rows_deleted`, or
+  `validation.table_split` where Excel refuses it.
+- `WorkbookChange::move_range(SheetId, CellRange, CellAddress)` cuts and pastes cells within a
+  sheet: references to the moved cells follow them, a range only partly moved keeps its text, and
+  moved formulas keep theirs. Pasting over cells that a formula outside the moved cells reads
+  fails with the new `validation.moved_range_overwrites_references`.
+- `WorkbookChange::copy_range(SheetId, CellRange, SheetId, CellRange)` copies or fills a range
+  onto a destination that repeats it a whole number of times, shifting the relative parts of
+  references, so `SUM(A2:A5)` copied from B2 to C6 becomes `SUM(B6:B9)` and a reference shifted
+  off the grid becomes `#REF!`. Another shape fails with the new
+  `validation.copy_destination_shape`, and a spill reference, legacy array formula, or data-table
+  formula with the new `validation.copy_unsupported_formula`.
+- `EditReceipt::inverse()` returns, for a batch with these edits, an `EditInverse`: the changes
+  that undo the batch when applied as one batch to its result, and the `UnrestoredContent` they
+  cannot bring back by kind, sheet, and table. The engine keeps no undo stack. Interop and Python
+  receipts carry it as `inverse`, edit-schema-v2 `changes` and `unrestored`, and the MCP
+  `workbook_apply_changes` tools return it; interop edit schema v1, Python, and MCP accept the new
+  `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `move_rows`, `move_columns`,
+  `move_range`, and `copy_range` kinds.
+- Saving into the source package rewrites the edited worksheet's rows, cells, and dimension, its
+  drawing anchors, notes, comments, and threaded comments, and the qualified references other
+  sheets, charts, and pivot caches make to it. It fails with `xlsx.write.unsupported_preservation`
+  naming the part for coordinates it cannot rewrite, a pivot table the edit moves or splits, a
+  form control it moves, a pivot cache that reads cells it moves, and a sheet copy whose source or
+  copy has such edits.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and

@@ -26,7 +26,7 @@ pub(super) struct TableEditState<'a> {
     pub(super) touched_sheets: &'a mut BTreeSet<SheetId>,
     pub(super) changed_table_ids: &'a mut BTreeSet<TableId>,
     pub(super) presentation: &'a crate::DocumentPresentation,
-    pub(super) source: Option<&'a crate::WorkbookSnapshot>,
+    pub(super) source: super::super::SourceCells<'a>,
 }
 
 impl TableEditState<'_> {

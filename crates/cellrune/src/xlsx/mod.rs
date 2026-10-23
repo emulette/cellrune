@@ -16,6 +16,7 @@ pub use document::{
 pub use error::{PhoneticRunLimitKind, ReadOptionsError, XlsxErrorCode, XlsxReadError};
 pub use options::{ReadLimits, ReadOptions};
 pub use package::{PackageSummary, inspect_package};
+pub(crate) use reader::shift_shared_formula;
 pub use reader::{read_xlsx, read_xlsx_bytes, read_xlsx_path};
 pub use write::{
     EditWriteReport, EditedWorkbook, RecalculatedWorkbook, RecalculationWriteOptions,

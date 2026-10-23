@@ -2,13 +2,16 @@ use std::collections::BTreeSet;
 
 use super::super::format::effective_cell_format;
 use super::super::{
-    WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
+    SourceCells, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
 };
 use super::auto_filter_edit::set_sheet_auto_filter;
+use super::copy_edit::{CopyEditState, copy_range};
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
+use super::grid_edit::{GridEditState, apply_grid_edit, grid_change};
+use super::inverse::{InverseSeed, edit_inverse, has_inverse, moves_preserved_content};
 use super::name_rename::rename_defined_name;
 use super::sheet_copy::{SheetCopy, copy_sheet};
 use super::sheet_delete::delete_sheet;
@@ -61,6 +64,17 @@ impl WorkbookDraft {
         rewrite_budget: &mut FormulaRewriteBudget<'_>,
         materialization_budget: &mut TableMaterializationBudget<'_>,
     ) -> Result<EditReceipt, BatchExecutionError> {
+        self.apply_batch(batch, rewrite_budget, materialization_budget, true)
+    }
+
+    /// Applies a batch; `with_inverse` builds the inverse a structural batch's receipt carries.
+    pub(super) fn apply_batch(
+        &mut self,
+        batch: EditBatch,
+        rewrite_budget: &mut FormulaRewriteBudget<'_>,
+        materialization_budget: &mut TableMaterializationBudget<'_>,
+        with_inverse: bool,
+    ) -> Result<EditReceipt, BatchExecutionError> {
         let base_revision = self.semantic_revision();
         if batch.is_empty() {
             return Ok(EditReceipt {
@@ -74,8 +88,11 @@ impl WorkbookDraft {
                 topology_changed: false,
                 cell_formulas_changed_topology_only: false,
                 calculation_metadata_changed: false,
+                inverse: None,
             });
         }
+        let with_inverse = with_inverse && batch.changes().iter().any(has_inverse);
+        let mut inverse_seed = InverseSeed::default();
 
         rewrite_budget.check_cancelled()?;
         let mut sheets = clone_sheets(self.workbook.sheets(), rewrite_budget)?;
@@ -85,10 +102,11 @@ impl WorkbookDraft {
         let mut defined_names = clone_slice(self.workbook.defined_names(), rewrite_budget)?;
         let mut date_system = self.workbook.date_system();
         let mut calculation_hints = self.workbook.calculation_hints();
-        let source = self
+        let source_workbook = self
             .source_document
             .as_deref()
             .map(crate::XlsxDocument::workbook);
+        let mut grid_histories = self.grid_histories.clone();
         let mut cell_mutations = self.cell_mutations.clone();
         let mut presentation = self
             .presentation
@@ -158,7 +176,7 @@ impl WorkbookDraft {
                                     touched_sheets: &mut touched_sheets,
                                     changed_table_ids: &mut changed_table_ids,
                                     presentation: &presentation,
-                                    source,
+                                    source: SourceCells::new(source_workbook, &grid_histories),
                                 },
                                 locations: &table_locations,
                                 formula_locations: &table_formula_locations,
@@ -199,7 +217,12 @@ impl WorkbookDraft {
                     }
                     if *value == CellValue::Blank {
                         if sheet.remove_cell_deferred(*address) {
-                            if !mark_removed(&mut cell_mutations, source, *sheet_id, *address) {
+                            if !mark_removed(
+                                &mut cell_mutations,
+                                SourceCells::new(source_workbook, &grid_histories),
+                                *sheet_id,
+                                *address,
+                            ) {
                                 presentation_cell_mutations
                                     .remove(&CalculationCellId::new(*sheet_id, *address));
                             }
@@ -326,7 +349,12 @@ impl WorkbookDraft {
                         .cell(*address)
                         .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)));
                     if sheet.remove_cell_deferred(*address) {
-                        if !mark_removed(&mut cell_mutations, source, *sheet_id, *address) {
+                        if !mark_removed(
+                            &mut cell_mutations,
+                            SourceCells::new(source_workbook, &grid_histories),
+                            *sheet_id,
+                            *address,
+                        ) {
                             presentation_cell_mutations
                                 .remove(&CalculationCellId::new(*sheet_id, *address));
                         }
@@ -439,6 +467,7 @@ impl WorkbookDraft {
                     touched_sheets.remove(sheet_id);
                     added_sheets.remove(sheet_id);
                     copied_sheets.remove(sheet_id);
+                    grid_histories.remove(sheet_id);
                     for table in removed.tables() {
                         changed_table_ids.remove(&table.id());
                         previous_changed_table_ids.remove(&table.id());
@@ -460,7 +489,7 @@ impl WorkbookDraft {
                         &mut sheets,
                         &mut defined_names,
                         &mut non_worksheet_tabs,
-                        source,
+                        source_workbook,
                         rewrite_budget,
                         SheetCopy {
                             sheet_id: *sheet_id,
@@ -472,18 +501,19 @@ impl WorkbookDraft {
                     presentation.copy_sheet(*sheet_id, copy_id);
                     // The writer duplicates the source part of a sheet the document holds, which a
                     // copy of a copy reaches through its own source.
-                    let origin =
-                        if source.is_some_and(|source| source.sheet_by_id(*sheet_id).is_some()) {
-                            Some(*sheet_id)
-                        } else {
-                            copied_sheets.get(sheet_id).copied()
-                        };
+                    let origin = if source_workbook
+                        .is_some_and(|source| source.sheet_by_id(*sheet_id).is_some())
+                    {
+                        Some(*sheet_id)
+                    } else {
+                        copied_sheets.get(sheet_id).copied()
+                    };
                     match origin {
                         Some(origin) => {
                             copied_sheets.insert(copy_id, origin);
                             // A copied table duplicates the source table its own source does.
                             for (source_table, copied) in &tables {
-                                let duplicated = if source.is_some_and(|source| {
+                                let duplicated = if source_workbook.is_some_and(|source| {
                                     source.table_by_id(*source_table).is_some()
                                 }) {
                                     Some(*source_table)
@@ -653,7 +683,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -683,7 +713,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -713,7 +743,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             rewrite_budget,
@@ -742,7 +772,7 @@ impl WorkbookDraft {
                             touched_sheets: &mut touched_sheets,
                             changed_table_ids: &mut changed_table_ids,
                             presentation: &presentation,
-                            source,
+                            source: SourceCells::new(source_workbook, &grid_histories),
                         },
                         *sheet_id,
                         *range,
@@ -767,7 +797,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             formula_locations: &table_formula_locations,
@@ -795,7 +825,7 @@ impl WorkbookDraft {
                                 touched_sheets: &mut touched_sheets,
                                 changed_table_ids: &mut changed_table_ids,
                                 presentation: &presentation,
-                                source,
+                                source: SourceCells::new(source_workbook, &grid_histories),
                             },
                             locations: &table_locations,
                             rewrite_budget,
@@ -842,6 +872,76 @@ impl WorkbookDraft {
                         topology_changed = true;
                     }
                 }
+                WorkbookChange::InsertRows { .. }
+                | WorkbookChange::DeleteRows { .. }
+                | WorkbookChange::InsertColumns { .. }
+                | WorkbookChange::DeleteColumns { .. }
+                | WorkbookChange::MoveRows { .. }
+                | WorkbookChange::MoveColumns { .. }
+                | WorkbookChange::MoveRange { .. } => {
+                    let (sheet_id, edit) =
+                        grid_change(change)?.expect("a structural change has a grid edit");
+                    // A copy of a source sheet records its edits too, which its saved part
+                    // cannot take.
+                    let records_history = (source_workbook
+                        .is_some_and(|workbook| workbook.sheet_by_id(sheet_id).is_some())
+                        || copied_sheets.contains_key(&sheet_id))
+                        && !added_sheets.contains(&sheet_id);
+                    inverse_seed.edits.push((sheet_id, edit));
+                    if records_history && moves_preserved_content(edit) {
+                        inverse_seed.preserved_sheets.insert(sheet_id);
+                    }
+                    let outcome = apply_grid_edit(
+                        GridEditState {
+                            sheets: &mut sheets,
+                            defined_names: &mut defined_names,
+                            presentation: &mut presentation,
+                            mutations: &mut cell_mutations,
+                            presentation_cell_mutations: &mut presentation_cell_mutations,
+                            presentation_sheet_mutations: &mut presentation_sheet_mutations,
+                            changed_cells: &mut changed_cells,
+                            calculation_changed_cells: &mut calculation_changed_cells,
+                            touched_sheets: &mut touched_sheets,
+                            changed_table_ids: &mut changed_table_ids,
+                            history: records_history
+                                .then(|| grid_histories.entry(sheet_id).or_default()),
+                            budget: rewrite_budget,
+                        },
+                        sheet_id,
+                        edit,
+                    )?;
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed |= outcome.names_changed;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::CopyRange {
+                    sheet_id,
+                    source,
+                    destination_sheet_id,
+                    destination,
+                } => {
+                    cell_formulas_changed |= copy_range(
+                        CopyEditState {
+                            sheets: &mut sheets,
+                            presentation: &mut presentation,
+                            mutations: &mut cell_mutations,
+                            presentation_cell_mutations: &mut presentation_cell_mutations,
+                            changed_cells: &mut changed_cells,
+                            calculation_changed_cells: &mut calculation_changed_cells,
+                            touched_sheets: &mut touched_sheets,
+                            source: SourceCells::new(source_workbook, &grid_histories),
+                            budget: rewrite_budget,
+                        },
+                        *sheet_id,
+                        *source,
+                        *destination_sheet_id,
+                        *destination,
+                    )?;
+                    semantic_changed = true;
+                }
                 WorkbookChange::SetCellFormat {
                     sheet_id,
                     address,
@@ -851,7 +951,7 @@ impl WorkbookDraft {
                     let current = effective_cell_format(
                         &presentation,
                         sheet,
-                        source,
+                        SourceCells::new(source_workbook, &grid_histories),
                         &cell_mutations,
                         *address,
                     );
@@ -922,21 +1022,33 @@ impl WorkbookDraft {
         .with_highest_sheet_id(highest_sheet_id)
         .with_semantic_revision(result_revision);
 
-        self.workbook = std::sync::Arc::new(workbook);
-        self.cell_mutations = cell_mutations;
-        self.presentation = presentation;
-        self.presentation_cell_mutations = presentation_cell_mutations;
-        self.presentation_sheet_mutations = presentation_sheet_mutations;
-        self.added_sheets = added_sheets;
-        self.changed_table_ids = previous_changed_table_ids
-            .union(&changed_table_ids)
-            .copied()
-            .collect();
-        self.workbook_changed = workbook_changed;
-        self.tab_steps = tab_steps;
-        self.name_renames = name_renames;
-        self.copied_sheets = copied_sheets;
-        self.copied_tables = copied_tables;
+        let next = Self {
+            workbook: std::sync::Arc::new(workbook),
+            presentation,
+            source_document: self.source_document.clone(),
+            cell_mutations,
+            presentation_cell_mutations,
+            presentation_sheet_mutations,
+            added_sheets,
+            changed_table_ids: previous_changed_table_ids
+                .union(&changed_table_ids)
+                .copied()
+                .collect(),
+            workbook_changed,
+            tab_steps,
+            name_renames,
+            copied_sheets,
+            copied_tables,
+            grid_histories,
+        };
+        // The inverse is built before the batch is installed, so a cancelled build leaves the
+        // draft unchanged.
+        let inverse = if with_inverse {
+            edit_inverse(self, &next, inverse_seed, rewrite_budget.cancellation())?.map(Box::new)
+        } else {
+            None
+        };
+        *self = next;
 
         Ok(EditReceipt {
             base_revision,
@@ -949,6 +1061,7 @@ impl WorkbookDraft {
             topology_changed: topology_changed || cell_formulas_changed,
             cell_formulas_changed_topology_only: !topology_changed,
             calculation_metadata_changed,
+            inverse,
         })
     }
 }

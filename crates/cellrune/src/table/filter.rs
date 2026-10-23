@@ -1010,6 +1010,13 @@ impl TableSortCondition {
         self.icon_id
     }
 
+    fn mapped(&self, map: &dyn Fn(CellRange) -> Option<CellRange>) -> Option<Self> {
+        Some(Self {
+            range: map(self.range)?,
+            ..self.clone()
+        })
+    }
+
     fn resized(&self, old_data_range: CellRange, new_data_range: CellRange) -> Result<Self, ()> {
         let range = if self.range.start().row() == old_data_range.start().row()
             && self.range.end().row() == old_data_range.end().row()
@@ -1142,6 +1149,20 @@ impl TableSortState {
             column_sort: self.column_sort,
             sort_method: self.sort_method,
             conditions,
+        })
+    }
+
+    /// Returns this sort state with every range moved by `map`, dropping conditions whose range
+    /// `map` removes; `None` when it removes the sorted range.
+    pub(crate) fn mapped(&self, map: &dyn Fn(CellRange) -> Option<CellRange>) -> Option<Self> {
+        Some(Self {
+            range: map(self.range)?,
+            conditions: self
+                .conditions
+                .iter()
+                .filter_map(|condition| condition.mapped(map))
+                .collect(),
+            ..self.clone()
         })
     }
 
@@ -1288,6 +1309,35 @@ impl TableAutoFilter {
             filter_columns: Vec::new(),
             sort_state: None,
         }
+    }
+
+    /// Returns this filter with its ranges moved by `map` and each filter column moved by
+    /// `column`, which maps sheet columns; a column `column` removes loses its filter. `None` when
+    /// `map` removes the filter range.
+    pub(crate) fn mapped(
+        &self,
+        map: &dyn Fn(CellRange) -> Option<CellRange>,
+        column: &dyn Fn(u32) -> Option<u32>,
+    ) -> Option<Self> {
+        let range = map(self.range)?;
+        let first = self.range.start().column().get();
+        let new_first = range.start().column().get();
+        Some(Self {
+            range,
+            range_is_explicit: self.range_is_explicit,
+            filter_columns: self
+                .filter_columns
+                .iter()
+                .filter_map(|filter| {
+                    let moved = column(first + filter.column_id)?.checked_sub(new_first)?;
+                    (moved < range.width()).then(|| TableFilterColumn {
+                        column_id: moved,
+                        ..filter.clone()
+                    })
+                })
+                .collect(),
+            sort_state: self.sort_state.as_ref().and_then(|sort| sort.mapped(map)),
+        })
     }
 
     pub(crate) fn resized_from_empty(&self, range: CellRange) -> Self {

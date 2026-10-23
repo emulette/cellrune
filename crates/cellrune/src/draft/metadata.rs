@@ -1,6 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use super::{DraftCellMutationStore, WorkbookDraft};
+use super::{DraftCellMutationStore, SourceCells, WorkbookDraft};
+use crate::grid::GridHistory;
 use crate::{CalculationCellId, SheetId, TableId, ValidationError, XlsxDocument};
 
 impl WorkbookDraft {
@@ -30,6 +31,18 @@ impl WorkbookDraft {
 
     pub(crate) const fn workbook_changed(&self) -> bool {
         self.workbook_changed
+    }
+
+    pub(crate) const fn grid_histories(&self) -> &BTreeMap<SheetId, GridHistory> {
+        &self.grid_histories
+    }
+
+    /// Returns the source document's cells where the draft's structural edits moved them.
+    pub(crate) fn source_cells(&self) -> SourceCells<'_> {
+        SourceCells::new(
+            self.source_document.as_deref().map(XlsxDocument::workbook),
+            &self.grid_histories,
+        )
     }
 
     pub(super) fn require_sheet(&self, sheet_id: SheetId) -> Result<(), ValidationError> {

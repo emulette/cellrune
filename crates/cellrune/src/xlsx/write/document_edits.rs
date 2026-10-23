@@ -31,17 +31,23 @@ pub(crate) fn write_document_edits(
         XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
             .with_detail(DETAIL_SOURCE_DOCUMENT)
     })?;
-    validate_dynamic_formula_edits(draft, document)?;
+    validate_dynamic_formula_edits(draft)?;
     let limits = options.limits();
     validate_draft_edits(draft, limits)?;
     let source = document.workbook();
-    let changed_cells = calculation_changed_cells(draft, source);
+    let grid_sheets = draft
+        .grid_histories()
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let changed_cells = calculation_changed_cells(draft, &grid_sheets);
     let affected = affected_formulas(
         &DraftEdits {
             source,
             draft: draft.workbook(),
             changed_cells: &changed_cells,
             changed_tables: draft.changed_table_ids(),
+            grid_sheets: &grid_sheets,
         },
         &|| false,
     )
@@ -78,15 +84,23 @@ pub(crate) fn write_document_edits(
 }
 
 /// Cells whose calculation input the draft changed. A shared-formula follower that only became an
-/// ordinary formula with the same text is not one.
+/// ordinary formula with the same text is not one. The cells of a sheet whose rows or columns
+/// moved are left out, since the analysis treats that sheet as changed throughout.
 fn calculation_changed_cells(
     draft: &WorkbookDraft,
-    source: &WorkbookSnapshot,
+    grid_sheets: &BTreeSet<SheetId>,
 ) -> BTreeSet<CalculationCellId> {
+    let source = draft.source_cells();
     draft
         .cell_mutations()
         .keys()
-        .filter(|id| !same_calculation_input(cell(source, **id), cell(draft.workbook(), **id)))
+        .filter(|id| !grid_sheets.contains(&id.sheet_id()))
+        .filter(|id| {
+            !same_calculation_input(
+                source.cell(id.sheet_id(), id.address()),
+                cell(draft.workbook(), **id),
+            )
+        })
         .copied()
         .collect()
 }

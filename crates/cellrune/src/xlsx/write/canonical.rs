@@ -846,9 +846,10 @@ fn write_archive(
 /// What a verified draft output must reopen as.
 pub(super) struct ExpectedDraftOutput<'a> {
     pub(super) workbook: &'a WorkbookSnapshot,
-    /// The workbook a document draft was opened from, whose saved array and spill followers the
-    /// materialization replaces; `None` for a canonical draft.
-    pub(super) source: Option<&'a WorkbookSnapshot>,
+    /// The cells of the workbook a document draft was opened from, where its structural edits
+    /// moved them, whose saved array and spill followers the materialization replaces; `None`
+    /// for a canonical draft.
+    pub(super) source: Option<crate::draft::SourceCells<'a>>,
     pub(super) presentation: &'a crate::DocumentPresentation,
     pub(super) materialization: &'a MaterializationPlan,
     pub(super) kind: crate::XlsxDocumentKind,
@@ -959,6 +960,7 @@ fn edited_formats_match(
     reopened: &crate::XlsxDocument,
 ) -> bool {
     let unchanged = crate::draft::DraftCellMutationStore::default();
+    let unmoved = std::collections::BTreeMap::new();
     expected.sheets().iter().all(|sheet| {
         let Some(actual_sheet) = reopened.workbook().sheet_by_id(sheet.id()) else {
             return false;
@@ -969,7 +971,7 @@ fn edited_formats_match(
                 crate::draft::effective_cell_format(
                     reopened.presentation(),
                     actual_sheet,
-                    Some(reopened.workbook()),
+                    crate::draft::SourceCells::new(Some(reopened.workbook()), &unmoved),
                     &unchanged,
                     address,
                 ) == *format
@@ -980,7 +982,7 @@ fn edited_formats_match(
 fn draft_semantics_match(
     expected: &WorkbookSnapshot,
     actual: &WorkbookSnapshot,
-    source: Option<&WorkbookSnapshot>,
+    source: Option<crate::draft::SourceCells<'_>>,
     materialization: &MaterializationPlan,
     host_recalculation: HostRecalculation,
 ) -> bool {
@@ -1007,7 +1009,6 @@ fn draft_semantics_match(
         {
             return false;
         }
-        let source_sheet = source.and_then(|source| source.sheet_by_id(expected_sheet.id()));
         for expected_cell in expected_sheet.cells() {
             // A follower the source saved and the draft kept still holds the source's result,
             // which the materialization overwrites or removes; the materialization check in
@@ -1016,8 +1017,10 @@ fn draft_semantics_match(
                 let id =
                     crate::CalculationCellId::new(expected_sheet.id(), expected_cell.address());
                 planned_follower(materialization, id).is_some()
-                    && source_sheet
-                        .and_then(|sheet| sheet.cell(expected_cell.address()))
+                    && source
+                        .and_then(|source| {
+                            source.cell(expected_sheet.id(), expected_cell.address())
+                        })
                         .is_some_and(|saved| saved.content() == expected_cell.content())
             };
             let Some(actual_cell) = actual_sheet.cell(expected_cell.address()) else {

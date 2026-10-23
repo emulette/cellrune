@@ -1,7 +1,7 @@
 use crate::{CellAddress, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FormulaShiftError {
+pub(crate) enum FormulaShiftError {
     MalformedQuotedSection,
 }
 
@@ -21,7 +21,7 @@ struct AxisReference {
     absolute: bool,
 }
 
-pub(super) fn shift_formula(
+pub(crate) fn shift_formula(
     formula: &str,
     anchor: CellAddress,
     follower: CellAddress,

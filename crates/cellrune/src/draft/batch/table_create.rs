@@ -32,7 +32,13 @@ pub(super) fn create_table(
     // A source table converted to a range keeps its part until the save, so its ID stays taken.
     let next_id = sheets
         .iter()
-        .chain(state.source.into_iter().flat_map(|source| source.sheets()))
+        .chain(
+            state
+                .source
+                .workbook()
+                .into_iter()
+                .flat_map(|source| source.sheets()),
+        )
         .flat_map(Sheet::tables)
         .map(|table| table.id().get())
         .max()

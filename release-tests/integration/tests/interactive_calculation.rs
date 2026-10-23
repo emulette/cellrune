@@ -2973,7 +2973,7 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 
 #[test]
 fn random_static_edit_sequences_match_a_fresh_full_calculation_and_stay_incremental() {
-    let modes = random_edit_sequences(EditProfile::Static, 1..=8);
+    let modes = random_edit_sequences(EditProfile::Static, 1..=8, false);
     // Formula edits recompile in place, value edits recalculate their dependents, and both stay
     // incremental.
     assert!(
@@ -2988,12 +2988,18 @@ fn random_static_edit_sequences_match_a_fresh_full_calculation_and_stay_incremen
 
 #[test]
 fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
-    let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108);
+    let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108, false);
     assert!(
         modes.contains_key("Full/DynamicTopology/parsed")
             || modes.contains_key("Full/DynamicTopology/unparsed"),
         "no recalculation of a workbook with dynamic references: {modes:?}"
     );
+}
+
+#[test]
+fn random_structural_edit_sequences_match_a_fresh_full_calculation() {
+    // Batches also insert, delete, or move rows, columns, or ranges, or copy ranges.
+    random_edit_sequences(EditProfile::Dynamic, 1..=8, true);
 }
 
 /// Which formulas a generated edit sequence writes.
@@ -3009,10 +3015,13 @@ enum EditProfile {
 
 /// Edits a 12-by-24 grid on two sheets for each seed, in batches of one to three changes, up to
 /// four batches before each automatic recalculation, and checks every recalculation against a
-/// fresh full calculation. Returns how often each mode, reason, and parsing ran.
+/// fresh full calculation. With `structural`, a batch now and then also inserts, deletes, or moves
+/// rows or columns, and a range move or copy follows some batches. Returns how often each mode,
+/// reason, and parsing ran.
 fn random_edit_sequences(
     profile: EditProfile,
     seeds: std::ops::RangeInclusive<u64>,
+    structural: bool,
 ) -> std::collections::BTreeMap<String, usize> {
     let mut modes = std::collections::BTreeMap::new();
     for seed in seeds {
@@ -3047,15 +3056,58 @@ fn random_edit_sequences(
             )
             .expect("generated workbook");
         for step in 0..80 {
-            let changes = (0..=generator.random.below(3))
+            let mut changes = (0..=generator.random.below(3))
                 .map(|_| generator.change())
                 .collect::<Vec<_>>();
-            session
-                .apply_changes(
+            if structural && generator.random.below(4) == 0 {
+                let position = generator.random.below(changes.len() as u32 + 1) as usize;
+                changes.insert(
+                    position,
+                    random_structural_change(&mut generator.random, generator.sheets),
+                );
+            }
+            // A structural edit refuses to move references that a formula which does not parse
+            // may hold, and the generator writes such formulas.
+            match session.apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new(changes),
+            ) {
+                Ok(_) => {}
+                Err(ApplyChangesError::Validation(
+                    cellrune::ValidationError::FormulaRewriteParseFailed { .. },
+                )) if structural => {}
+                Err(error) => panic!("seed {seed}, step {step}: {error}"),
+            }
+            if structural && generator.random.below(4) == 0 {
+                // Pasting over cells another formula reads is refused, as is moving references
+                // a formula that does not parse may hold, so a range move may not apply.
+                match session.apply_changes(
                     session.workbook().semantic_revision(),
-                    EditBatch::new(changes),
-                )
-                .expect("generated edit");
+                    EditBatch::new([random_range_move(&mut generator.random, generator.sheets)]),
+                ) {
+                    Ok(_)
+                    | Err(ApplyChangesError::Validation(
+                        cellrune::ValidationError::MovedRangeOverwritesReferences { .. }
+                        | cellrune::ValidationError::FormulaRewriteParseFailed { .. },
+                    )) => {}
+                    Err(error) => panic!("seed {seed}, step {step}: {error}"),
+                }
+            }
+            if structural && generator.random.below(4) == 0 {
+                // Copying a spill reference or a formula that does not parse is refused, so a
+                // copy may not apply.
+                match session.apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([random_copy(&mut generator.random, generator.sheets)]),
+                ) {
+                    Ok(_)
+                    | Err(ApplyChangesError::Validation(
+                        cellrune::ValidationError::CopyUnsupportedFormula { .. }
+                        | cellrune::ValidationError::FormulaRewriteParseFailed { .. },
+                    )) => {}
+                    Err(error) => panic!("seed {seed}, step {step}: {error}"),
+                }
+            }
             if step % 4 != 3 && generator.random.below(3) == 0 {
                 continue;
             }
@@ -3217,6 +3269,102 @@ impl EditGenerator {
         };
         WorkbookChange::set_cell_value(sheet, target, value)
     }
+}
+
+/// Inserts, deletes, or moves one to three rows or columns of the generated grid.
+fn random_structural_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let sheet = sheets[random.below(2) as usize];
+    let count = random.below(3) + 1;
+    match random.below(6) {
+        4 => {
+            let first = random.below(22) + 1;
+            WorkbookChange::move_rows(
+                sheet,
+                row(first),
+                row(first + count - 1),
+                row(random.below(22) + 1),
+            )
+        }
+        5 => {
+            let first = random.below(10) + 1;
+            WorkbookChange::move_columns(
+                sheet,
+                column(first),
+                column(first + count - 1),
+                column(random.below(10) + 1),
+            )
+        }
+        0 => WorkbookChange::insert_rows(sheet, row(random.below(24) + 1), count),
+        1 => {
+            let first = random.below(24) + 1;
+            WorkbookChange::delete_rows(sheet, row(first), row(first + count - 1))
+        }
+        2 => WorkbookChange::insert_columns(sheet, column(random.below(12) + 1), count),
+        _ => {
+            let first = random.below(12) + 1;
+            WorkbookChange::delete_columns(sheet, column(first), column(first + count - 1))
+        }
+    }
+    .expect("generated structural edit")
+}
+
+/// Cuts a block of up to three by three cells of the generated grid and pastes it elsewhere.
+fn random_range_move(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let sheet = sheets[random.below(2) as usize];
+    let start = CellAddress::from_indices(random.below(22) + 1, random.below(10) + 1)
+        .expect("generated start");
+    let end = CellAddress::from_indices(
+        start.row().get() + random.below(3),
+        start.column().get() + random.below(3),
+    )
+    .expect("generated end");
+    let destination = CellAddress::from_indices(random.below(22) + 1, random.below(10) + 1)
+        .expect("generated destination");
+    WorkbookChange::move_range(
+        sheet,
+        CellRange::new(start, end).expect("generated range"),
+        destination,
+    )
+    .expect("generated range move")
+}
+
+/// Copies a block of up to two by two cells of the generated grid over one to two times its
+/// size elsewhere, on either sheet.
+fn random_copy(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let (height, width) = (random.below(2) + 1, random.below(2) + 1);
+    let corner = |random: &mut Lcg| {
+        CellAddress::from_indices(random.below(20) + 1, random.below(9) + 1)
+            .expect("generated corner")
+    };
+    let block = |start: CellAddress, rows: u32, columns: u32| {
+        CellRange::new(
+            start,
+            CellAddress::from_indices(
+                start.row().get() + rows - 1,
+                start.column().get() + columns - 1,
+            )
+            .expect("generated end"),
+        )
+        .expect("generated block")
+    };
+    let source = block(corner(random), height, width);
+    let repeat = random.below(2) + 1;
+    let destination = block(corner(random), height * repeat, width);
+    WorkbookChange::copy_range(
+        sheets[random.below(2) as usize],
+        source,
+        sheets[random.below(2) as usize],
+        destination,
+    )
+    .expect("generated copy")
+}
+
+fn row(value: u32) -> cellrune::Row {
+    cellrune::Row::new(value).expect("generated row")
+}
+
+fn column(value: u32) -> cellrune::Column {
+    cellrune::Column::new(value).expect("generated column")
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use cellrune::{
     Alignment, AlignmentEdit, Border, BorderEdge, BorderEdit, BorderStyle, CellAddress, CellFormat,
-    CellFormatEdit, Color, ColorKind, Column, Fill, FillPattern, FontEdit, FontUnderline,
+    CellFormatEdit, Color, ColorKind, Column, Fill, FillPattern, Font, FontEdit, FontUnderline,
     HorizontalAlignment, PatternFill, Row, SheetId, VerticalAlignment, WorkbookChange,
 };
 
@@ -16,17 +16,8 @@ use crate::{
 };
 
 pub(crate) fn cell_format_dto(format: &CellFormat) -> CellFormatDto {
-    let font = format.font();
     CellFormatDto {
-        font: FontDto {
-            name: font.name().map(str::to_owned),
-            size: font.size(),
-            bold: font.bold(),
-            italic: font.italic(),
-            underline: font.underline().as_str().to_owned(),
-            strike: font.strike(),
-            color: font.color().map(color_dto),
-        },
+        font: font_dto(format.font()),
         fill: match format.fill() {
             Fill::Pattern(fill) => FillDto::Pattern {
                 pattern: fill.pattern().as_str().to_owned(),
@@ -37,6 +28,85 @@ pub(crate) fn cell_format_dto(format: &CellFormat) -> CellFormatDto {
         },
         border: border_dto(&format.border()),
         alignment: alignment_dto(&format.alignment()),
+    }
+}
+
+/// Converts a cell format edit into the edit-schema-v2 operation that applies it.
+pub(crate) fn format_edit_dto(
+    sheet: String,
+    address: CellAddress,
+    edit: &CellFormatEdit,
+) -> FormatChangeV2Dto {
+    FormatChangeV2Dto::SetCellFormat {
+        sheet,
+        address: address.to_string(),
+        font: edit.font().map(|font| Box::new(font_edit_dto(font))),
+        fill: edit.fill().map(|fill| {
+            Box::new(PatternFillDto {
+                pattern: fill.pattern().as_str().to_owned(),
+                foreground: fill.foreground().map(color_dto),
+                background: fill.background().map(color_dto),
+            })
+        }),
+        border: edit
+            .border()
+            .map(|border| Box::new(border_edit_dto(&border))),
+        alignment: edit
+            .alignment()
+            .map(|alignment| Box::new(alignment_edit_dto(&alignment))),
+    }
+}
+
+fn font_edit_dto(font: &FontEdit) -> FontEditDto {
+    FontEditDto {
+        name: font.name().map(|name| name.map(str::to_owned)),
+        size: font.size(),
+        bold: font.bold(),
+        italic: font.italic(),
+        underline: font
+            .underline()
+            .map(|underline| underline.as_str().to_owned()),
+        strike: font.strike(),
+        color: font.color().map(|color| color.map(color_dto)),
+    }
+}
+
+fn border_edit_dto(border: &BorderEdit) -> BorderEditDto {
+    BorderEditDto {
+        left: border.left().map(edge_dto),
+        right: border.right().map(edge_dto),
+        top: border.top().map(edge_dto),
+        bottom: border.bottom().map(edge_dto),
+        diagonal: border.diagonal().map(edge_dto),
+        diagonal_up: border.diagonal_up(),
+        diagonal_down: border.diagonal_down(),
+    }
+}
+
+fn alignment_edit_dto(alignment: &AlignmentEdit) -> AlignmentEditDto {
+    AlignmentEditDto {
+        horizontal: alignment
+            .horizontal()
+            .map(|horizontal| horizontal.as_str().to_owned()),
+        vertical: alignment
+            .vertical()
+            .map(|vertical| vertical.as_str().to_owned()),
+        wrap_text: alignment.wrap_text(),
+        shrink_to_fit: alignment.shrink_to_fit(),
+        indent: alignment.indent(),
+        text_rotation: alignment.text_rotation(),
+    }
+}
+
+fn font_dto(font: &Font) -> FontDto {
+    FontDto {
+        name: font.name().map(str::to_owned),
+        size: font.size(),
+        bold: font.bold(),
+        italic: font.italic(),
+        underline: font.underline().as_str().to_owned(),
+        strike: font.strike(),
+        color: font.color().map(color_dto),
     }
 }
 
@@ -53,11 +123,15 @@ fn color_dto(color: Color) -> ColorDto {
     }
 }
 
-fn border_dto(border: &Border) -> BorderDto {
-    let edge = |edge: BorderEdge| BorderEdgeDto {
+fn edge_dto(edge: BorderEdge) -> BorderEdgeDto {
+    BorderEdgeDto {
         style: edge.style().as_str().to_owned(),
         color: edge.color().map(color_dto),
-    };
+    }
+}
+
+fn border_dto(border: &Border) -> BorderDto {
+    let edge = edge_dto;
     BorderDto {
         left: edge(border.left()),
         right: edge(border.right()),

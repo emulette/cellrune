@@ -1215,6 +1215,82 @@ fn sheet_copies_moves_and_table_creation_are_stdio_changes() {
 }
 
 #[test]
+fn row_insertion_is_a_stdio_change_whose_receipt_undoes_it() {
+    let root = TestDirectory::new("grid-edit");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let listed = mcp.request("tools/list", json!({}));
+    let apply = listed["result"]["tools"]
+        .as_array()
+        .expect("tool list must be an array")
+        .iter()
+        .find(|tool| tool["name"] == "workbook_apply_changes")
+        .expect("apply changes tool")
+        .clone();
+    for kind in ["insert_rows", "delete_columns", "move_range", "copy_range"] {
+        assert!(apply["inputSchema"].to_string().contains(kind), "{kind}");
+    }
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "set_value", "sheet": "Sheet1", "address": "A2", "value": {"kind": "number", "value": 2}},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "B1", "formula": "=A2*10", "dynamic_range": null}
+            ]
+        }),
+    ));
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{"kind": "insert_rows", "sheet": "Sheet1", "row": 1, "count": 2}]
+        }),
+    ));
+    assert_eq!(receipt["topology_changed"], true);
+    assert_eq!(
+        receipt["inverse"],
+        json!({
+            "changes": [{"kind": "delete_rows", "sheet": "Sheet1", "first": 1, "last": 2}],
+            "unrestored": []
+        })
+    );
+    let range = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({"session_id": session_id, "sheet": "Sheet1", "start": "B3", "end": "B3"}),
+    ));
+    assert_eq!(range["cells"][0]["formula"], "=A4*10");
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 2,
+            "changes": receipt["inverse"]["changes"]
+        }),
+    ));
+    let range = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({"session_id": session_id, "sheet": "Sheet1", "start": "B1", "end": "B1"}),
+    ));
+    assert_eq!(range["cells"][0]["formula"], "=A2*10");
+    let error = failed_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 3,
+            "changes": [{"kind": "copy_range", "sheet": "Sheet1", "source": "A1:A2", "destination": "C1:C3"}]
+        }),
+    ));
+    assert_eq!(error["code"], "validation.copy_destination_shape");
+}
+
+#[test]
 fn stdio_numbers_reach_the_workbook_exactly() {
     // Both have 17 significant digits; a JSON parser without correct rounding reads them one
     // ULP away.

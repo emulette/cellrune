@@ -88,6 +88,7 @@ mod diagnostic;
 mod draft;
 mod error;
 mod formula;
+mod grid;
 mod presentation;
 mod table;
 mod workbook;
@@ -138,7 +139,10 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, InputHash, OutputHash, Provenance,
     ProviderIdentity, SourceId, SourceLocation,
 };
-pub use draft::{EditBatch, EditReceipt, WorkbookChange, WorkbookDraft};
+pub use draft::{
+    EditBatch, EditInverse, EditReceipt, UnrestoredContent, UnrestoredContentKind, WorkbookChange,
+    WorkbookDraft,
+};
 pub use error::{ValidationError, ValidationErrorCode};
 pub use formula::{
     FormulaCell, FormulaDialect, FormulaMetadata, FormulaText, SavedResult, SavedResultIssue,

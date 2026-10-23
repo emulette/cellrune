@@ -16,7 +16,7 @@ use zip::read::ZipArchive;
 pub(super) use self::path::PartPath;
 pub use self::summary::PackageSummary;
 pub(in crate::xlsx) use self::xml::{
-    ContentTypes, Relationship, RelationshipTarget, parse_content_types,
+    ContentTypes, Relationship, RelationshipTarget, parse_content_types, parse_relationships,
     scan_internal_relationships,
 };
 use super::error::detail;

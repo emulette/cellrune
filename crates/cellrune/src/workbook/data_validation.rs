@@ -256,4 +256,8 @@ impl DataValidation {
     pub(crate) fn formulas_mut(&mut self) -> [&mut Option<Box<str>>; 2] {
         [&mut self.formula1, &mut self.formula2]
     }
+
+    pub(crate) fn set_ranges(&mut self, ranges: Vec<CellRange>) {
+        self.ranges = ranges;
+    }
 }

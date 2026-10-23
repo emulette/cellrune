@@ -70,6 +70,14 @@ impl Hyperlink {
     pub(crate) fn location_mut(&mut self) -> &mut Option<Box<str>> {
         &mut self.location
     }
+
+    /// Returns this hyperlink over other cells.
+    pub(crate) fn with_range(&self, range: CellRange) -> Self {
+        Self {
+            range,
+            ..self.clone()
+        }
+    }
 }
 
 /// One cell comment (a note), read-only.
@@ -106,5 +114,13 @@ impl Comment {
     /// Returns the plain text of every run, without formatting or phonetic runs.
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Returns this comment on another cell.
+    pub(crate) fn moved_to(&self, address: CellAddress) -> Self {
+        Self {
+            address,
+            ..self.clone()
+        }
     }
 }
