@@ -1,4 +1,5 @@
 from cellrune import (
+    RangeValue,
     PhoneticPage,
     CapabilityPage,
     CellFormatPage,
@@ -152,6 +153,14 @@ def check() -> None:
         rule["ranges"][0].upper()
         if rule["validation_type"] == "list" and rule["formula1"] is not None:
             rule["formula1"].upper()
+    grid: list[list[RangeValue]] = reopened.read_values("Sheet1", "A1", "B2")
+    for grid_row in grid:
+        for grid_value in grid_row:
+            if grid_value["kind"] == "unavailable":
+                grid_value["code"].upper()
+    reopened.write_values(
+        "Sheet1", "C1", [[{"kind": "number", "value": 1.0}, {"kind": "blank"}]]
+    )
     phonetics: PhoneticPage = reopened.phonetics("Sheet1", limit=10)
     for annotated in phonetics["entries"]:
         annotated["address"].upper()

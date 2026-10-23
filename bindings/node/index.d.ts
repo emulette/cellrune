@@ -665,6 +665,12 @@ export interface CellReference {
 
 export type WritableCellValue = Exclude<CellValue, { readonly kind: "unsupported" }>;
 
+/**
+ * A cell's value in a rectangle read: its current calculated result when the workbook has
+ * calculated the current revision, otherwise its literal or saved value.
+ */
+export type RangeValue = CellValue | Extract<CalculationResult, { readonly kind: "unavailable" }>;
+
 export type NumberFormatKind =
   | "general"
   | "number"
@@ -1165,6 +1171,10 @@ export class Workbook {
   dataValidations(sheet: string, options?: SheetPageOptions): DataValidationPage;
   /** Reads one bounded page of a sheet's phonetic annotations in row-major address order. */
   phonetics(sheet: string, options?: SheetPageOptions): PhoneticPage;
+  /** Reads every value of an inclusive rectangle, at most 1,048,576 cells, as rows. */
+  readValues(sheet: string, start: string, end: string): RangeValue[][];
+  /** Writes equal-length rows of values from `start` as one atomic edit; blank clears a cell. */
+  writeValues(sheet: string, start: string, rows: readonly (readonly WritableCellValue[])[]): EditReceipt;
   /** Statically reports whether each formula can be calculated, one bounded page at a time. */
   scanCapabilities(options?: CapabilityScanOptions): Promise<CapabilityPage>;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;

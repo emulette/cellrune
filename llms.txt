@@ -204,6 +204,24 @@ exceeded a calculation limit carries `limit`, its `CalculationLimitKind::as_str`
 name such as `max_formula_tokens`, and omits it otherwise. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
 
+`WorkbookSession::read_values(&RangeValuesRequestDto { sheet, start, end })`
+returns `RangeValuesDto { rows }`, one row per worksheet row of
+`RangeValueDto`: a tagged `CellValueDto`, or `{"kind": "unavailable", code,
+message, detail}` (plus `limit` when it exceeded one). A cell holds its
+current calculated result, including spill followers, when the session has
+calculated the current revision, and otherwise its literal value or a
+formula's saved value (blank when none). A rectangle over
+`MAX_RANGE_VALUE_CELLS` (1,048,576) cells fails with
+`interop.page.limit_exceeded`. `WorkbookSession::write_values(RangeWriteRequestDto
+{ sheet, start, rows })` writes equal-length rows of `WritableCellValueDto`
+from `start` as one `set_value` batch at the current revision and returns the
+edit receipt; empty or ragged rows fail with `interop.change.invalid`, and the
+session's `max_batch_operations` bounds the cell count. Python
+`read_values(sheet, start, end) -> list[list[RangeValue]]` and
+`write_values(sheet, start, rows)`, and Node.js `readValues(sheet, start,
+end)` and `writeValues(sheet, start, rows)`, expose them with no numpy or Arrow
+dependency.
+
 Sheets are deleted with the `delete_sheet` change (`{"kind": "delete_sheet",
 "sheet": name}` in interop JSON, Python, and MCP; `{ kind: "deleteSheet",
 sheet }` in Node) or the Python `delete_sheet(name)` and Node

@@ -726,6 +726,55 @@ def assert_surface_authoring() -> None:
             raise AssertionError("three cells passed a result limit of two")
 
 
+def assert_range_values() -> None:
+    with Workbook.create() as workbook:
+        receipt = workbook.write_values(
+            "Sheet1",
+            "B2",
+            [
+                [{"kind": "number", "value": 1.5}, {"kind": "text", "value": "a"}],
+                [{"kind": "logical", "value": True}, {"kind": "error", "value": "#N/A"}],
+            ],
+        )
+        assert (receipt["base_revision"], receipt["result_revision"]) == (0, 1)
+        assert receipt["applied_change_count"] == 4
+        assert workbook.read_values("sheet1", "A2", "C3") == [
+            [{"kind": "blank"}, {"kind": "number", "value": 1.5}, {"kind": "text", "value": "a"}],
+            [
+                {"kind": "blank"},
+                {"kind": "logical", "value": True},
+                {"kind": "error", "value": "#N/A"},
+            ],
+        ]
+        workbook.set_formula("Sheet1", "D2", "=B2*2")
+        workbook.set_formula("Sheet1", "D3", "=NOT_A_FUNCTION(1)")
+        assert workbook.read_values("Sheet1", "D2", "D2") == [[{"kind": "blank"}]]
+        workbook.calculate()
+        calculated = workbook.read_values("Sheet1", "D2", "D3")
+        assert calculated[0] == [{"kind": "number", "value": 3.0}]
+        unavailable = calculated[1][0]
+        assert unavailable["kind"] == "unavailable"
+        assert unavailable["code"] == "calculation.unsupported_function"
+        for rows in ([], [[]], [[{"kind": "blank"}], []]):
+            try:
+                workbook.write_values("Sheet1", "A1", rows)
+            except CellRuneError as error:
+                assert error.code == "interop.change.invalid"
+            else:
+                raise AssertionError("a non-rectangular write was accepted")
+        assert_error(
+            "interop.change.payload_invalid",
+            lambda: workbook.write_values(
+                "Sheet1", "A1", [[{"kind": "number", "value": True}]]
+            ),
+        )
+        assert_error(
+            "interop.page.limit_exceeded",
+            lambda: workbook.read_values("Sheet1", "A1", "B1048576"),
+        )
+        assert workbook.summary()["semantic_revision"] == 3
+
+
 def assert_csv() -> None:
     workbook = Workbook.from_csv(
         b'item;amount\r\n"Widget; large";2.5\r\n', sheet_name="Import", delimiter=";"
@@ -753,6 +802,7 @@ def assert_csv() -> None:
 def main() -> None:
     assert_delete_sheet()
     assert_surface_authoring()
+    assert_range_values()
     assert_csv()
     assert_annotations()
     assert_formats()

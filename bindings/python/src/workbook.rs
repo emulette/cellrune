@@ -5,12 +5,12 @@ use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto, CsvReadOptionsDto,
     CsvWriteRequestDto, DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto,
     EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto,
-    PreviewCursorDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto,
-    SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    PreviewCursorDto, RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto,
+    ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
+    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
+use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt, PyList};
 
 use crate::conversion;
 use crate::error::into_py_error;
@@ -224,6 +224,45 @@ impl Workbook {
         let result = py.detach(move || self.lock_interop_wait()?.comments(&request));
         let page = result.map_err(|error| into_py_error(py, error))?;
         conversion::json_dict(py, &page)
+    }
+
+    pub fn read_values<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        start: String,
+        end: String,
+    ) -> PyResult<Bound<'py, PyList>> {
+        let request = RangeValuesRequestDto { sheet, start, end };
+        let values = py
+            .detach(move || self.lock_interop_wait()?.read_values(&request))
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::range_value_rows(py, &values.rows)
+    }
+
+    pub fn write_values<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: &str,
+        start: &str,
+        rows: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let payload = PyDict::new(py);
+        payload.set_item("sheet", sheet)?;
+        payload.set_item("start", start)?;
+        payload.set_item("rows", rows)?;
+        let serialized = py
+            .import("json")?
+            .call_method1("dumps", (payload,))?
+            .extract::<String>()?;
+        let request =
+            serde_json::from_str::<RangeWriteRequestDto>(&serialized).map_err(|error| {
+                into_py_error(py, InteropError::invalid_change_payload(error.to_string()))
+            })?;
+        let receipt = py
+            .detach(move || self.lock_interop_wait()?.write_values(request))
+            .map_err(|error| into_py_error(py, error))?;
+        conversion::edit_receipt(py, &receipt)
     }
 
     #[pyo3(signature = (sheet, *, offset=None, limit=None))]

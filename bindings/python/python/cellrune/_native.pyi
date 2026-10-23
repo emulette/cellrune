@@ -18,6 +18,8 @@ from ._types import (
     CommentPage,
     DataValidationPage,
     PhoneticPage,
+    RangeValue,
+    WritableCellValue,
     HyperlinkPage,
     DefinedNameInspection,
     EditReceipt,
@@ -125,6 +127,13 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> DataValidationPage: ...
+    def read_values(self, sheet: str, start: str, end: str) -> list[list[RangeValue]]: ...
+    def write_values(
+        self,
+        sheet: str,
+        start: str,
+        rows: Sequence[Sequence[WritableCellValue]],
+    ) -> EditReceipt: ...
     def phonetics(
         self,
         sheet: str,

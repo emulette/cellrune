@@ -17,6 +17,8 @@ export declare class NativeWorkbook {
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
   toCsv(sheet: string, delimiter?: string | undefined | null): Buffer
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
+  readValues(sheet: string, start: string, end: string): string
+  writeValues(requestJson: string): NativeEditReceipt
   phonetics(sheet: string, offset: number, limit: number): string
   hyperlinks(sheet: string, offset: number, limit: number): NativeHyperlinkPage
   comments(sheet: string, offset: number, limit: number): NativeCommentPage

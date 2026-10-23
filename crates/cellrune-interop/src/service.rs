@@ -11,6 +11,7 @@ mod query;
 mod save;
 mod sheet_metadata;
 mod targeted;
+mod values;
 pub use targeted::{CompletedTargetRequest, PreparedTargetRequest};
 
 use std::collections::BTreeMap;
@@ -33,6 +34,7 @@ pub use preview::{
 };
 pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog};
 pub use save::{PreparedEditsSave, PreparedWorkbookSave};
+pub use values::MAX_RANGE_VALUE_CELLS;
 
 /// An owned high-level workbook editing, calculation, and save session.
 #[derive(Debug)]

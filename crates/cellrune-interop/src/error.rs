@@ -62,6 +62,8 @@ pub(crate) const DETAIL_VERTICAL_ALIGNMENT: &str = "vertical alignment is not re
 pub(crate) const DETAIL_COLOR_ARGB: &str = "argb color must be eight hexadecimal digits";
 pub(crate) const DETAIL_PHONETIC_TYPE: &str = "phonetic type is not recognized";
 pub(crate) const DETAIL_PHONETIC_ALIGNMENT: &str = "phonetic alignment is not recognized";
+pub(crate) const DETAIL_RANGE_WRITE_NOT_RECTANGULAR: &str =
+    "rows must be non-empty and of one non-zero length";
 
 /// Broad error boundary used by all language bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

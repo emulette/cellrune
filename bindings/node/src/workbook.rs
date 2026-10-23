@@ -5,8 +5,9 @@ use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
     FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
-    RangeRequestDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto, RecalculationModeDto,
+    SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
+    WriteOptionsDto,
 };
 use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
@@ -112,6 +113,25 @@ impl NativeWorkbook {
         };
         let page = self.lock()?.read_formats(&request).map_err(napi_error)?;
         serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn read_values(&self, sheet: String, start: String, end: String) -> napi::Result<String> {
+        let values = self
+            .lock()?
+            .read_values(&RangeValuesRequestDto { sheet, start, end })
+            .map_err(napi_error)?;
+        serde_json::to_string(&values.rows).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn write_values(&self, request_json: String) -> napi::Result<NativeEditReceipt> {
+        let request = serde_json::from_str::<RangeWriteRequestDto>(&request_json)
+            .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
+        self.lock()?
+            .write_values(request)
+            .map(crate::conversion::edit_receipt)
+            .map_err(napi_error)
     }
 
     #[napi(catch_unwind)]

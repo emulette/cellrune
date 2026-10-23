@@ -8,6 +8,7 @@ from ._native import (
     function_catalog,
 )
 from ._types import (
+    RangeValue,
     ClearPhoneticsChange,
     FrozenPane,
     LimitDiagnostics,
@@ -149,6 +150,7 @@ from ._types import (
 )
 
 __all__ = [
+    "RangeValue",
     "ClearPhoneticsChange",
     "FrozenPane",
     "LimitDiagnostics",

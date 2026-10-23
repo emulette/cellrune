@@ -8,6 +8,7 @@ const {
   normalizeHyperlinkPage,
 } = require("./lib/sheet_metadata.js");
 const { normalizePhoneticPage } = require("./lib/presentation.js");
+const { parseRangeValues, serializeRangeRows } = require("./lib/values.js");
 const { targetRequest } = require("./lib/targeted.js");
 const {
   serializeWorkbookChange,
@@ -160,6 +161,24 @@ class Workbook {
       withSyncErrors(() =>
         this.#session().readFormats(sheet, start, end, offset, limit),
       ),
+    );
+  }
+
+  readValues(sheet, start, end) {
+    requireString(sheet, "sheet");
+    requireString(start, "start");
+    requireString(end, "end");
+    return parseRangeValues(
+      withSyncErrors(() => this.#session().readValues(sheet, start, end)),
+    );
+  }
+
+  writeValues(sheet, start, rows) {
+    requireString(sheet, "sheet");
+    requireString(start, "start");
+    const request = { sheet, start, rows: serializeRangeRows(rows) };
+    return normalizeEditReceipt(
+      withSyncErrors(() => this.#session().writeValues(JSON.stringify(request))),
     );
   }
 

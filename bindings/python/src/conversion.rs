@@ -3,8 +3,9 @@ use cellrune_interop::{
     CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
-    FunctionUsageReportDto, PreviewChangesDto, RangePageDto, TransactionImpactPageDto,
-    WorkbookFingerprintDto, WorkbookSummaryDto, WorkbookTransactionReceiptDto, WriteReportDto,
+    FunctionUsageReportDto, PreviewChangesDto, RangePageDto, RangeValueDto,
+    TransactionImpactPageDto, UnavailableValueDto, WorkbookFingerprintDto, WorkbookSummaryDto,
+    WorkbookTransactionReceiptDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -539,6 +540,39 @@ fn calculation_result<'py>(
                 result.set_item("limit", limit)?;
             }
         }
+    }
+    Ok(result)
+}
+
+pub(crate) fn range_value_rows<'py>(
+    py: Python<'py>,
+    rows: &[Vec<RangeValueDto>],
+) -> PyResult<Bound<'py, PyList>> {
+    let result = PyList::empty(py);
+    for row in rows {
+        let values = PyList::empty(py);
+        for value in row {
+            values.append(match value {
+                RangeValueDto::Value(value) => cell_value(py, value)?,
+                RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
+                    code,
+                    message,
+                    detail,
+                    limit,
+                }) => {
+                    let unavailable = PyDict::new(py);
+                    unavailable.set_item("kind", "unavailable")?;
+                    unavailable.set_item("code", code)?;
+                    unavailable.set_item("message", message)?;
+                    unavailable.set_item("detail", detail.as_deref())?;
+                    if let Some(limit) = limit {
+                        unavailable.set_item("limit", limit)?;
+                    }
+                    unavailable
+                }
+            })?;
+        }
+        result.append(values)?;
     }
     Ok(result)
 }

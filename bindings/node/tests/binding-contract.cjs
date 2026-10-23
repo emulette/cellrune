@@ -592,6 +592,44 @@ async function assertSurfaceAuthoring() {
   workbook.close();
 }
 
+async function assertRangeValues() {
+  const workbook = Workbook.create();
+  const receipt = workbook.writeValues("Sheet1", "B2", [
+    [{ kind: "number", value: 1.5 }, { kind: "text", value: "a" }],
+    [{ kind: "logical", value: true }, { kind: "error", value: "#N/A" }],
+  ]);
+  assert.equal(receipt.resultRevision, 1n);
+  assert.equal(receipt.appliedChangeCount, 4);
+  assert.deepEqual(workbook.readValues("sheet1", "A2", "C3"), [
+    [{ kind: "blank" }, { kind: "number", value: 1.5 }, { kind: "text", value: "a" }],
+    [{ kind: "blank" }, { kind: "logical", value: true }, { kind: "error", value: "#N/A" }],
+  ]);
+  workbook.setFormula("Sheet1", "D2", "=B2*2");
+  workbook.setFormula("Sheet1", "D3", "=NOT_A_FUNCTION(1)");
+  assert.deepEqual(workbook.readValues("Sheet1", "D2", "D2"), [[{ kind: "blank" }]]);
+  await workbook.calculate();
+  const [[doubled], [unavailable]] = workbook.readValues("Sheet1", "D2", "D3");
+  assert.deepEqual(doubled, { kind: "number", value: 3 });
+  assert.equal(unavailable.kind, "unavailable");
+  assert.equal(unavailable.code, "calculation.unsupported_function");
+  for (const rows of [[], [[]], [[{ kind: "blank" }], []]]) {
+    assert.throws(
+      () => workbook.writeValues("Sheet1", "A1", rows),
+      (error) => error.code === "interop.change.invalid",
+    );
+  }
+  assert.throws(
+    () => workbook.writeValues("Sheet1", "A1", [[{ kind: "unsupported" }]]),
+    (error) => error.code === "interop.input.invalid" && error.details.detail.includes("rows[0][0]"),
+  );
+  assert.throws(
+    () => workbook.readValues("Sheet1", "A1", "B1048576"),
+    (error) => error.code === "interop.page.limit_exceeded",
+  );
+  assert.equal(workbook.summary().semanticRevision, 3n);
+  workbook.close();
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -756,6 +794,7 @@ async function assertCsv() {
 async function main() {
   await assertDeleteSheet();
   await assertSurfaceAuthoring();
+  await assertRangeValues();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

@@ -1,4 +1,5 @@
 import {
+  type RangeValue,
   type PhoneticPage,
   type LimitDiagnostics,
   type CapabilityPage,
@@ -181,6 +182,15 @@ async function check(): Promise<void> {
   }
   // @ts-expect-error Sheet metadata pages take only an offset and a limit.
   reopened.dataValidations("Sheet1", { cursor: 1 });
+  const grid: RangeValue[][] = reopened.readValues("Sheet1", "A1", "B2");
+  for (const value of grid.flat()) {
+    if (value.kind === "unavailable") {
+      value.code.toUpperCase();
+    }
+  }
+  reopened.writeValues("Sheet1", "C1", [[{ kind: "number", value: 1 }, { kind: "blank" }]]);
+  // @ts-expect-error A rectangle write takes writable values only.
+  reopened.writeValues("Sheet1", "C1", [[{ kind: "unsupported" }]]);
   const phonetics: PhoneticPage = reopened.phonetics("Sheet1", { limit: 10 });
   for (const annotated of phonetics.entries) {
     annotated.runs[0]?.text.toUpperCase();

@@ -390,6 +390,7 @@ reaches every surface:
 | Sheet autoFilter and table column widening edits | yes | yes | yes | yes |
 | Phonetic annotations and frozen panes (read and edit) | yes | yes | yes | yes |
 | Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | yes | yes | yes |
+| Rectangle value read and write as rows (interop `read_values`/`write_values`) | yes | yes | yes | no |
 
 Native package availability remains platform-specific; package managers must select a wheel or
 exact-version npm platform package compatible with the current runtime.
@@ -523,6 +524,13 @@ failure that exceeded a resource limit carries its figures in `details.limit` (`
 `observed`, `requested_cell_count`/`requestedCellCount`, `evaluated_count`/`evaluatedCount`), and
 an unavailable result that exceeded a calculation limit names it in `limit`; both are absent
 otherwise.
+
+Python `read_values(sheet, start, end)` and Node.js `readValues(sheet, start, end)` read a
+rectangle of up to 1,048,576 cells as rows of typed values without numpy or Arrow: each cell holds
+its current calculated result, or an `unavailable` result, once the workbook has calculated the
+current revision, and otherwise its literal or saved value. `write_values(sheet, start, rows)` and
+`writeValues(sheet, start, rows)` write equal-length rows of values from `start` as one atomic
+edit batch, where a blank value clears its cell, and return the edit receipt.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview

@@ -159,6 +159,7 @@ class UnavailableValue(UnavailableValueOptions):
 
 
 CalculationResult = CalculatedValue | UnavailableValue
+RangeValue = CellValue | UnavailableValue
 
 
 class NumberFormat(TypedDict):

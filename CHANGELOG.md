@@ -26,6 +26,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   calculation issues that exceeded a calculation limit name it in an optional `limit`. Both are
   omitted when there is nothing to report, so other responses are unchanged.
   `CalculationLimitKind::as_str` and `PhoneticRunLimitKind::as_str` return the limit names.
+- Python `read_values` and `write_values` and Node.js `readValues` and `writeValues`, over interop
+  `WorkbookSession::read_values` and `write_values`, read a rectangle of up to 1,048,576 cells as
+  rows of typed values and write equal-length rows of values as one atomic edit batch, without a
+  numpy or Arrow dependency. A read returns each cell's current calculated result, or its
+  `unavailable` result, once the workbook has calculated the current revision, and otherwise its
+  literal or saved value.
 
 ### Changed
 

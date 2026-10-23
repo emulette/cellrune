@@ -18,6 +18,7 @@ mod service;
 mod sheet_metadata;
 mod targeted;
 mod usage_count;
+mod values;
 pub use service::{CompletedTargetRequest, PreparedTargetRequest};
 pub use targeted::{
     CalculationTargetDto, TargetCalculationCellDto, TargetCalculationLimitsDto,
@@ -57,13 +58,16 @@ pub use phonetic::{
 };
 pub use service::{
     CompletedPreview, CompletedRecalculation, DEFAULT_PAGE_SIZE, DEFAULT_PREVIEW_PAGE_SIZE,
-    MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedChanges, PreparedChangesV2, PreparedEditsSave,
-    PreparedPreview, PreparedRecalculation, PreparedWorkbookSave, WorkbookSession,
-    format_display_text, function_catalog,
+    MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, MAX_RANGE_VALUE_CELLS, PreparedChanges,
+    PreparedChangesV2, PreparedEditsSave, PreparedPreview, PreparedRecalculation,
+    PreparedWorkbookSave, WorkbookSession, format_display_text, function_catalog,
 };
 pub use sheet_metadata::{
     CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
     HyperlinkPageDto, SheetPageRequestDto,
+};
+pub use values::{
+    RangeValueDto, RangeValuesDto, RangeValuesRequestDto, RangeWriteRequestDto, UnavailableValueDto,
 };
 
 /// Version of the serialized interop contract.

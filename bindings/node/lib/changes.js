@@ -20,7 +20,7 @@ function serializeWorkbookChange(change, index) {
         kind: "set_value",
         sheet: requiredChangeString(change.sheet, index, "sheet"),
         address: requiredChangeString(change.address, index, "address"),
-        value: serializeCellValue(change.value, index),
+        value: serializeCellValue(change.value, `changes[${index}].value`),
       };
     case "setFormula":
       if (
@@ -287,28 +287,29 @@ function validateV2CellValueKeys(value, index) {
   }
 }
 
-function serializeCellValue(value, index) {
+/** Validates one writable cell value, naming it `path` in errors. */
+function serializeCellValue(value, path) {
   requireOptions(value);
-  requireString(value.kind, `changes[${index}].value.kind`);
+  requireString(value.kind, `${path}.kind`);
   switch (value.kind) {
     case "blank":
       return { kind: "blank" };
     case "number":
-      requireFinite(value.value, `changes[${index}].value.value`);
+      requireFinite(value.value, `${path}.value`);
       return { kind: "number", value: value.value };
     case "text":
-      requireString(value.value, `changes[${index}].value.value`);
+      requireString(value.value, `${path}.value`);
       return { kind: "text", value: value.value };
     case "logical":
       if (typeof value.value !== "boolean") {
-        throw inputError(`changes[${index}].value.value must be a boolean`);
+        throw inputError(`${path}.value must be a boolean`);
       }
       return { kind: "logical", value: value.value };
     case "error":
-      requireString(value.value, `changes[${index}].value.value`);
+      requireString(value.value, `${path}.value`);
       return { kind: "error", value: value.value };
     default:
-      throw inputError(`changes[${index}].value.kind is not writable`);
+      throw inputError(`${path}.kind is not writable`);
   }
 }
 
@@ -317,4 +318,4 @@ function requiredChangeString(value, index, name) {
   return value;
 }
 
-module.exports = { serializeWorkbookChange, serializeWorkbookChangeV2 };
+module.exports = { serializeCellValue, serializeWorkbookChange, serializeWorkbookChangeV2 };
