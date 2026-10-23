@@ -42,6 +42,7 @@ const CONTENT_SHEET_METADATA: &str =
 const CONTENT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CONTENT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
+const CONTENT_THREADED_COMMENTS: &str = "application/vnd.ms-excel.threadedcomments+xml";
 const CONTENT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CONTENT_CHART_EX: &str = "application/vnd.ms-office.chartex+xml";
 const CONTENT_CONTROL_PROPERTIES: &str = "application/vnd.ms-excel.controlproperties+xml";
@@ -56,8 +57,14 @@ pub(super) enum WorkbookPackageKind {
     Xlsm,
 }
 
-/// A worksheet's external hyperlink targets by relationship ID, and its comments part.
-pub(super) type AnnotationRelationships = (BTreeMap<Box<str>, Box<str>>, Option<PartPath>);
+/// A worksheet's external hyperlink targets by relationship ID, its comments part, and its threaded
+/// comments part.
+#[derive(Debug, Default)]
+pub(super) struct AnnotationRelationships {
+    pub(super) targets: BTreeMap<Box<str>, Box<str>>,
+    pub(super) comments: Option<PartPath>,
+    pub(super) threaded_comments: Option<PartPath>,
+}
 
 /// The outcome of reading a part the workbook opens without.
 pub(super) enum OptionalPart {
@@ -232,11 +239,42 @@ impl<R: Read + Seek> OpenedPackage<R> {
     /// Returns whether the package holds a comments part, so that worksheets without hyperlink
     /// relationships need their relationships read only then.
     pub(super) fn has_comment_parts(&self) -> bool {
-        !self.parts_with_content_type(&[CONTENT_COMMENTS]).is_empty()
+        !self
+            .parts_with_content_type(&[CONTENT_COMMENTS, CONTENT_THREADED_COMMENTS])
+            .is_empty()
     }
 
-    /// Returns a worksheet's external hyperlink targets by relationship ID and its comments part,
-    /// or `None` when its relationship part exceeds the remaining read budget.
+    /// Returns the persons part that names the authors of threaded comments. It was not read
+    /// before threaded comments were modeled, so a workbook relationship part that does not read
+    /// yields none instead of failing the read.
+    pub(super) fn persons_part(&mut self) -> Option<PartPath> {
+        let relationship_part = self.workbook_part.relationship_part().ok()?;
+        let OptionalPart::Read(bytes) = self.read_optional_part(&relationship_part) else {
+            return None;
+        };
+        let relationships = xml::parse_relationships(
+            &bytes,
+            &relationship_part,
+            Some(&self.workbook_part),
+            self.limits,
+        )
+        .ok()?;
+        relationships
+            .into_iter()
+            .find_map(|relationship| match relationship.target {
+                RelationshipTarget::Internal(part)
+                    if relationship_type::is_person(&relationship.kind)
+                        && self.entries.contains_key(&part) =>
+                {
+                    Some(part)
+                }
+                _ => None,
+            })
+    }
+
+    /// Returns a worksheet's external hyperlink targets by relationship ID and its comments and
+    /// threaded comments parts, or `None` when its relationship part exceeds the remaining read
+    /// budget.
     ///
     /// These relationships were not read before hyperlinks and comments were modeled, so a
     /// relationship part that does not read or parse yields none instead of failing the read.
@@ -244,18 +282,17 @@ impl<R: Read + Seek> OpenedPackage<R> {
         &mut self,
         worksheet_part: &PartPath,
     ) -> Option<AnnotationRelationships> {
-        let mut targets = BTreeMap::new();
-        let mut comments = None;
+        let mut found = AnnotationRelationships::default();
         let Ok(relationship_part) = worksheet_part.relationship_part() else {
-            return Some((targets, comments));
+            return Some(found);
         };
         if !self.entries.contains_key(&relationship_part) {
-            return Some((targets, comments));
+            return Some(found);
         }
         let bytes = match self.read_optional_part(&relationship_part) {
             OptionalPart::Read(bytes) => bytes,
             OptionalPart::OverBudget => return None,
-            OptionalPart::Unreadable => return Some((targets, comments)),
+            OptionalPart::Unreadable => return Some(found),
         };
         let Ok(relationships) = xml::parse_relationships(
             &bytes,
@@ -263,26 +300,34 @@ impl<R: Read + Seek> OpenedPackage<R> {
             Some(worksheet_part),
             self.limits,
         ) else {
-            return Some((targets, comments));
+            return Some(found);
         };
         for relationship in relationships {
             match relationship.target {
                 RelationshipTarget::External(target)
                     if relationship_type::is_hyperlink(&relationship.kind) =>
                 {
-                    targets.insert(relationship.id, target);
+                    found.targets.insert(relationship.id, target);
                 }
                 RelationshipTarget::Internal(part)
                     if relationship_type::is_comments(&relationship.kind)
-                        && comments.is_none()
+                        && found.comments.is_none()
                         && self.content_types.content_type(&part) == Some(CONTENT_COMMENTS) =>
                 {
-                    comments = Some(part);
+                    found.comments = Some(part);
+                }
+                RelationshipTarget::Internal(part)
+                    if relationship_type::is_threaded_comments(&relationship.kind)
+                        && found.threaded_comments.is_none()
+                        && self.content_types.content_type(&part)
+                            == Some(CONTENT_THREADED_COMMENTS) =>
+                {
+                    found.threaded_comments = Some(part);
                 }
                 _ => {}
             }
         }
-        Some((targets, comments))
+        Some(found)
     }
 
     /// Returns the chart parts, whose series formulas name worksheets outside the workbook model.

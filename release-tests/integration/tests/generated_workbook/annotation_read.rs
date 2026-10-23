@@ -6,6 +6,7 @@ use cellrune::{
 
 use crate::support::generated_xlsx::{
     generated_annotation_workbook, generated_sheet_reference_fixture,
+    generated_threaded_comment_workbook,
 };
 
 fn reference(range: CellRange) -> String {
@@ -259,4 +260,40 @@ fn annotation_reads_never_spend_the_budget_a_required_part_needs() {
         Some("https://example.com/1")
     );
     assert!(roomy.presentation().diagnostics().is_empty());
+}
+
+#[test]
+fn threaded_comments_replace_their_placeholder_notes() {
+    let source = generated_threaded_comment_workbook();
+    let snapshot = read_xlsx_bytes(&source, ReadOptions::default()).expect("read");
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    for workbook in [&snapshot, document.workbook()] {
+        let sheet = workbook.sheet_by_name("Thread").expect("sheet");
+        assert_eq!(
+            comments(sheet.comments()),
+            [
+                (
+                    "A1".to_owned(),
+                    some("Ana Kim"),
+                    "Check this & that".to_owned()
+                ),
+                ("B2".to_owned(), None, "Who wrote this?".to_owned()),
+                ("C3".to_owned(), some("Bo Lee"), "Plain note".to_owned()),
+            ]
+        );
+        let replies = sheet.comments()[0]
+            .replies()
+            .iter()
+            .map(|reply| (reply.author().map(str::to_owned), reply.text().to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replies,
+            [
+                (some("Bo Lee"), "Done".to_owned()),
+                (some("Ana Kim"), "Thanks".to_owned()),
+            ]
+        );
+        assert!(sheet.comments()[1].replies().is_empty());
+        assert!(sheet.comments()[2].replies().is_empty());
+    }
 }

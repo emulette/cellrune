@@ -80,12 +80,37 @@ impl Hyperlink {
     }
 }
 
-/// One cell comment (a note), read-only.
+/// One cell comment, read-only: a legacy note, or the first comment of an Excel 365 comment
+/// thread, whose replies follow it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Comment {
     address: CellAddress,
     author: Option<Box<str>>,
     text: Box<str>,
+    replies: Vec<CommentReply>,
+}
+
+/// One reply in a comment thread, read-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentReply {
+    author: Option<Box<str>>,
+    text: Box<str>,
+}
+
+impl CommentReply {
+    pub(crate) const fn from_xlsx(author: Option<Box<str>>, text: Box<str>) -> Self {
+        Self { author, text }
+    }
+
+    /// Returns the author's display name.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
+    }
+
+    /// Returns the plain text.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 impl Comment {
@@ -98,7 +123,18 @@ impl Comment {
             address,
             author,
             text,
+            replies: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_replies(mut self, replies: Vec<CommentReply>) -> Self {
+        self.replies = replies;
+        self
+    }
+
+    /// Returns the replies of a comment thread in order; a legacy note has none.
+    pub fn replies(&self) -> &[CommentReply] {
+        &self.replies
     }
 
     /// Returns the commented cell.

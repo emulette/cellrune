@@ -52,6 +52,14 @@ function normalizeCommentPage(value) {
     address: comment.address,
     author: comment.author ?? null,
     text: comment.text,
+    ...(comment.replies.length === 0
+      ? {}
+      : {
+          replies: comment.replies.map((reply) => ({
+            author: reply.author ?? null,
+            text: reply.text,
+          })),
+        }),
   }));
 }
 

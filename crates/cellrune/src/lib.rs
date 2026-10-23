@@ -169,10 +169,10 @@ pub use table::{
     TableValueFilters, TotalsRowFunction,
 };
 pub use workbook::{
-    CalculationHints, CalculationMode, Comment, DataValidation, DataValidationErrorStyle,
-    DataValidationOperator, DataValidationType, DateSystem, Hyperlink, Sheet, SheetAutoFilter,
-    SheetId, SheetName, SheetVisibility, WorkbookFingerprint, WorkbookSnapshot, WorkbookSource,
-    WorkbookSourceKind,
+    CalculationHints, CalculationMode, Comment, CommentReply, DataValidation,
+    DataValidationErrorStyle, DataValidationOperator, DataValidationType, DateSystem, Hyperlink,
+    Sheet, SheetAutoFilter, SheetId, SheetName, SheetVisibility, WorkbookFingerprint,
+    WorkbookSnapshot, WorkbookSource, WorkbookSourceKind,
 };
 pub use xlsx::{
     EditWriteReport, EditedWorkbook, OpenOptions, PackageSummary, PhoneticRunLimitKind, ReadLimits,

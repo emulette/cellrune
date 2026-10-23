@@ -13,7 +13,7 @@ mod new_cell_styles;
 mod sheet_tabs;
 mod table_index;
 
-pub use annotations::{Comment, Hyperlink};
+pub use annotations::{Comment, CommentReply, Hyperlink};
 pub use auto_filter::SheetAutoFilter;
 pub(crate) use data_validation::DataValidationRule;
 pub use data_validation::{

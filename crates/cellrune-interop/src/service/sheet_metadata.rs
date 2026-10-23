@@ -6,8 +6,8 @@ use super::WorkbookSession;
 use super::query::normalized_limit;
 use crate::convert::count_u64;
 use crate::{
-    CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
-    HyperlinkPageDto, INTEROP_SCHEMA_VERSION, InteropError, SheetPageRequestDto,
+    CommentDto, CommentPageDto, CommentReplyDto, DataValidationDto, DataValidationPageDto,
+    HyperlinkDto, HyperlinkPageDto, INTEROP_SCHEMA_VERSION, InteropError, SheetPageRequestDto,
 };
 
 /// One bounded slice of a sheet's entries.
@@ -157,5 +157,13 @@ fn comment_dto(comment: &Comment) -> CommentDto {
         address: comment.address().to_string(),
         author: comment.author().map(str::to_owned),
         text: comment.text().to_owned(),
+        replies: comment
+            .replies()
+            .iter()
+            .map(|reply| CommentReplyDto {
+                author: reply.author().map(str::to_owned),
+                text: reply.text().to_owned(),
+            })
+            .collect(),
     }
 }

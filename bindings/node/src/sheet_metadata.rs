@@ -98,6 +98,13 @@ pub struct NativeComment {
     pub address: String,
     pub author: Option<String>,
     pub text: String,
+    pub replies: Vec<NativeCommentReply>,
+}
+
+#[napi(object)]
+pub struct NativeCommentReply {
+    pub author: Option<String>,
+    pub text: String,
 }
 
 pub(crate) fn hyperlink_page(value: HyperlinkPageDto) -> NativeHyperlinkPage {
@@ -135,6 +142,14 @@ pub(crate) fn comment_page(value: CommentPageDto) -> NativeCommentPage {
                 address: entry.address,
                 author: entry.author,
                 text: entry.text,
+                replies: entry
+                    .replies
+                    .into_iter()
+                    .map(|reply| NativeCommentReply {
+                        author: reply.author,
+                        text: reply.text,
+                    })
+                    .collect(),
             })
             .collect(),
     }

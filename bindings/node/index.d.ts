@@ -389,6 +389,13 @@ export interface Comment {
   readonly author: string | null;
   /** Plain text of every run. */
   readonly text: string;
+  /** The other comments of an Excel 365 comment thread in order; absent for a note. */
+  readonly replies?: readonly CommentReply[];
+}
+
+export interface CommentReply {
+  readonly author: string | null;
+  readonly text: string;
 }
 
 export interface CommentPage {

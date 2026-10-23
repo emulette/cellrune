@@ -183,7 +183,7 @@ error and prompt titles and messages. `hyperlinks(sheet, ...)` and
 `comments(sheet, ...)` (interop `WorkbookSession::hyperlinks`/`comments`,
 MCP `workbook_hyperlinks`/`workbook_comments`) page the same way through
 `range`, `target`, `location`, `display`, `tooltip` and `address`, `author`,
-`text` entries. Python `read_formats(sheet, start, end,
+`text` entries, a thread's with `replies` (`author`, `text`). Python `read_formats(sheet, start, end,
 offset=, limit=)` and Node.js `readFormats(sheet, start, end, { offset, limit
 })` (`WorkbookSession::read_formats(&RangeRequestDto) -> CellFormatPageDto`,
 MCP `workbook_read_formats`) return each cell's `font`, `fill` (tagged
@@ -487,9 +487,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   `Hyperlink`: `.range()`, `.target()` (external target from the worksheet
   relationship; `None` for an internal or unresolved one), `.location()`,
   `.display()`, `.tooltip()`. `Comment`: `.address()`, `.author()`,
-  `.text()` (plain text of every run, phonetic runs excluded). Comments come
-  from the legacy comments part, which Excel also writes for threaded
-  comments. A malformed hyperlink `ref`, an unreadable worksheet relationship
+  `.text()` (plain text of every run, phonetic runs excluded), `.replies()`
+  (`CommentReply`: `.author()`, `.text()`). An Excel 365 comment thread is one
+  `Comment` with its first comment, the author's display name from the
+  persons part, and the other comments as replies; it replaces the
+  placeholder note Excel writes for the cell. Notes come from the legacy
+  comments part and threads from the threaded comments part. A malformed hyperlink `ref`, an unreadable worksheet relationship
   part, or an unreadable comments part leaves that metadata out without
   failing the read. These parts are read after every required part, and one
   that would exceed what remains of `max_total_uncompressed_bytes` is not

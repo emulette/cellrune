@@ -233,13 +233,16 @@ inventories, and measurements belong in the linked documentation rather than in 
   `session.revision_mismatch`, so neither batch's edits are lost.
 - `Sheet::hyperlinks()` and `Sheet::comments()` read worksheet hyperlinks (`Hyperlink`: range,
   external target from the worksheet relationship, in-workbook location, display text, screen
-  tip) and legacy cell comments (`Comment`: address, author, plain text without phonetic runs) as
-  read-only metadata. These parts were not read before, so a hyperlink with a malformed `ref`, a
+  tip) and cell comments (`Comment`: address, author, plain text without phonetic runs) as
+  read-only metadata. An Excel 365 comment thread reads as one `Comment` with the author's display
+  name from the persons part and its other comments as `replies()` (`CommentReply`: author, text)
+  in place of the placeholder note Excel writes for it. These parts were not read before, so a hyperlink with a malformed `ref`, a
   relationship part that does not parse, or a comments part that does not read leaves only that
   metadata out and never fails the read. A sheet rename rewrites internal hyperlink locations as
   the saved part does. Interop `WorkbookSession::hyperlinks`/`comments`, Python
   `Workbook.hyperlinks`/`comments`, Node.js `Workbook.hyperlinks`/`comments`, and the MCP tools
-  `workbook_hyperlinks` and `workbook_comments` page through them.
+  `workbook_hyperlinks` and `workbook_comments` page through them; a thread's entry carries
+  `replies`, omitted for a note.
 - RFC 4180 CSV import and export of one sheet: `read_csv(bytes, &CsvReadOptions)` returns a
   one-sheet `WorkbookDraft`, and `write_csv(workbook, calculation, sheet_id, CsvWriteOptions)`
   writes UTF-8 with CRLF records from A1 through the last used cell, formulas as their calculated

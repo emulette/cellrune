@@ -397,7 +397,18 @@ class HyperlinkPage(TypedDict):
     entries: list[Hyperlink]
 
 
-class Comment(TypedDict):
+class CommentReply(TypedDict):
+    author: str | None
+    text: str
+
+
+class CommentOptions(TypedDict, total=False):
+    """The other comments of an Excel 365 comment thread in order; absent for a note."""
+
+    replies: list[CommentReply]
+
+
+class Comment(CommentOptions):
     address: str
     author: str | None
     text: str

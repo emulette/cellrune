@@ -167,6 +167,7 @@ export interface NativeComment {
   address: string
   author?: string
   text: string
+  replies: Array<NativeCommentReply>
 }
 
 export interface NativeCommentPage {
@@ -176,6 +177,11 @@ export interface NativeCommentPage {
   offset: number
   nextOffset?: number
   entries: Array<NativeComment>
+}
+
+export interface NativeCommentReply {
+  author?: string
+  text: string
 }
 
 export interface NativeDataValidation {

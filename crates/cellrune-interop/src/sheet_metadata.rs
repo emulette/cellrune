@@ -136,4 +136,17 @@ pub struct CommentDto {
     pub author: Option<String>,
     /// Plain text of every run.
     pub text: String,
+    /// The other comments of an Excel 365 comment thread in order; omitted for a note.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replies: Vec<CommentReplyDto>,
+}
+
+/// One reply in a comment thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentReplyDto {
+    /// Author's display name, when the workbook's persons part names them.
+    pub author: Option<String>,
+    /// Plain text.
+    pub text: String,
 }

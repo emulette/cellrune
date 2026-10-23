@@ -13,6 +13,7 @@ mod shared_strings;
 mod style_formats;
 mod styles;
 mod table;
+mod threaded_comments;
 mod workbook_xml;
 mod worksheet;
 mod worksheet_cell;
@@ -36,16 +37,17 @@ use self::shared_strings::SharedStrings;
 use self::styles::Styles;
 use super::error::{compatibility, detail};
 use super::package::{
-    OpenedPackage, OptionalPart, PackageSummary, PartPath, WorkbookPackageKind, open_package,
+    AnnotationRelationships, OpenedPackage, OptionalPart, PackageSummary, PartPath,
+    WorkbookPackageKind, open_package,
 };
 use super::{ReadOptions, XlsxErrorCode, XlsxReadError};
 use crate::workbook::{
     NonWorksheetTab, NonWorksheetTabs, SheetBuilder, TableRangeIndex, WorkbookSnapshotInput,
 };
 use crate::{
-    Diagnostic, DiagnosticCode, DiagnosticSeverity, DocumentPresentation, InputHash, Provenance,
-    ProviderIdentity, Sheet, SheetId, SourceLocation, TableId, WorkbookSnapshot, WorkbookSource,
-    WorkbookSourceKind,
+    Comment, Diagnostic, DiagnosticCode, DiagnosticSeverity, DocumentPresentation, InputHash,
+    Provenance, ProviderIdentity, Sheet, SheetId, SourceLocation, TableId, WorkbookSnapshot,
+    WorkbookSource, WorkbookSourceKind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,12 +258,14 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     }
     // Annotation parts are optional, so they are read only after every required part and never
     // spend budget a required part needs.
+    let mut persons = None;
     for (index, worksheet_part, hyperlinks) in pending_annotations {
         read_sheet_annotations(
             &mut package,
             &worksheet_part,
             hyperlinks,
             has_comment_parts,
+            &mut persons,
             &mut sheets[index],
             &mut presentation,
         )?;
@@ -447,9 +451,11 @@ fn read_sheet_tables<R: Read + Seek>(
     Ok(())
 }
 
-/// Resolves the external targets of a worksheet's hyperlinks and reads its comments part.
+/// Resolves the external targets of a worksheet's hyperlinks and reads its comments and threaded
+/// comments parts. A threaded comment replaces the placeholder note Excel writes for its cell in
+/// the comments part; `persons`, the authors' display names, is read once for the workbook.
 ///
-/// Neither was read before hyperlinks and comments were modeled, so a relationship or comments
+/// None was read before hyperlinks and comments were modeled, so a relationship or comments
 /// part that does not read leaves the sheet without them instead of failing the read, and one
 /// that would exceed what remains of `max_total_uncompressed_bytes` is not read and leaves an
 /// `xlsx.annotations.skipped` presentation diagnostic.
@@ -458,11 +464,12 @@ fn read_sheet_annotations<R: Read + Seek>(
     worksheet_part: &PartPath,
     hyperlinks: Vec<hyperlink::PendingHyperlink>,
     has_comment_parts: bool,
+    persons: &mut Option<BTreeMap<Box<str>, Box<str>>>,
     sheet: &mut Sheet,
     presentation: &mut DocumentPresentation,
 ) -> Result<(), XlsxReadError> {
     let mut skipped = false;
-    let (targets, comments_part) = if has_comment_parts
+    let relationships = if has_comment_parts
         || hyperlinks
             .iter()
             .any(hyperlink::PendingHyperlink::has_relationship)
@@ -471,26 +478,49 @@ fn read_sheet_annotations<R: Read + Seek>(
             .worksheet_annotation_relationships(worksheet_part)
             .unwrap_or_else(|| {
                 skipped = true;
-                (BTreeMap::new(), None)
+                AnnotationRelationships::default()
             })
     } else {
-        (BTreeMap::new(), None)
+        AnnotationRelationships::default()
     };
     let limits = package.limits();
-    let comments = match comments_part.map(|part| (package.read_optional_part(&part), part)) {
-        Some((OptionalPart::Read(bytes), part)) => {
-            comments::parse(&bytes, &part, limits).unwrap_or_default()
-        }
+    let mut read = |package: &mut OpenedPackage<R>, part: Option<PartPath>| match part
+        .map(|part| (package.read_optional_part(&part), part))
+    {
+        Some((OptionalPart::Read(bytes), part)) => Some((bytes, part)),
         Some((OptionalPart::OverBudget, _)) => {
             skipped = true;
-            Vec::new()
+            None
         }
-        Some((OptionalPart::Unreadable, _)) | None => Vec::new(),
+        Some((OptionalPart::Unreadable, _)) | None => None,
     };
+    let mut comments = read(package, relationships.comments)
+        .map(|(bytes, part)| comments::parse(&bytes, &part, limits).unwrap_or_default())
+        .unwrap_or_default();
+    if let Some((bytes, part)) = read(package, relationships.threaded_comments) {
+        if persons.is_none() {
+            let persons_part = package.persons_part();
+            let names = read(package, persons_part)
+                .and_then(|(bytes, part)| {
+                    threaded_comments::parse_persons(&bytes, &part, limits).ok()
+                })
+                .unwrap_or_default();
+            *persons = Some(names);
+        }
+        let names = persons.as_ref().map_or_else(BTreeMap::new, Clone::clone);
+        let threads = threaded_comments::parse(&bytes, &part, limits, &names).unwrap_or_default();
+        comments.retain(|note| {
+            threads
+                .iter()
+                .all(|thread| thread.address() != note.address())
+        });
+        comments.extend(threads);
+        comments.sort_by_key(Comment::address);
+    }
     sheet.set_annotations(
         hyperlinks
             .into_iter()
-            .map(|hyperlink| hyperlink.resolve(&targets))
+            .map(|hyperlink| hyperlink.resolve(&relationships.targets))
             .collect(),
         comments,
     );

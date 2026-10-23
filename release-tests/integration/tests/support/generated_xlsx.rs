@@ -1091,6 +1091,80 @@ pub fn generated_annotation_workbook(broken_comments: bool) -> Vec<u8> {
     )
 }
 
+/// One sheet `Thread` as Excel 365 saves comment threads: the legacy comments part holds the
+/// placeholder notes Excel writes for A1 and B2, the threaded comments part holds a thread on A1
+/// with two replies and one on B2 by an author the persons part does not name, and C3 holds a plain
+/// note.
+pub fn generated_threaded_comment_workbook() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/comments1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>
+  <Override PartName="/xl/threadedComments/threadedComment1.xml" ContentType="application/vnd.ms-excel.threadedcomments+xml"/>
+  <Override PartName="/xl/persons/person.xml" ContentType="application/vnd.ms-excel.person+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Thread" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2017/10/relationships/person" Target="persons/person.xml"/>
+</Relationships>"#;
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
+</worksheet>"#;
+    let sheet_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2017/10/relationships/threadedComment" Target="../threadedComments/threadedComment1.xml"/>
+</Relationships>"#;
+    let comments = r#"<?xml version="1.0" encoding="UTF-8"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors><author>tc={00000000-0000-0000-0000-000000000001}</author><author>tc={00000000-0000-0000-0000-000000000004}</author><author>Bo Lee</author></authors>
+  <commentList>
+    <comment ref="A1" authorId="0"><text><t>[Threaded comment]
+
+Your version of Excel allows you to read this threaded comment; however, any edits to it will get removed if the file is opened in a newer version of Excel. Learn more: https://go.microsoft.com/fwlink/?linkid=870924
+
+Comment:
+    Check this</t></text></comment>
+    <comment ref="B2" authorId="1"><text><t>[Threaded comment] Placeholder</t></text></comment>
+    <comment ref="C3" authorId="2"><text><t>Plain note</t></text></comment>
+  </commentList>
+</comments>"#;
+    let threaded = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments" xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <threadedComment ref="A1" dT="2026-10-24T01:00:00.00" personId="{AAAAAAAA-0000-0000-0000-000000000001}" id="{00000000-0000-0000-0000-000000000001}"><text>Check this &amp; that</text></threadedComment>
+  <threadedComment ref="A1" dT="2026-10-24T01:05:00.00" personId="{AAAAAAAA-0000-0000-0000-000000000002}" id="{00000000-0000-0000-0000-000000000002}" parentId="{00000000-0000-0000-0000-000000000001}"><text>Done</text></threadedComment>
+  <threadedComment ref="A1" dT="2026-10-24T01:06:00.00" personId="{AAAAAAAA-0000-0000-0000-000000000001}" id="{00000000-0000-0000-0000-000000000003}" parentId="{00000000-0000-0000-0000-000000000001}"><text>Thanks</text></threadedComment>
+  <threadedComment ref="B2" dT="2026-10-24T02:00:00.00" personId="{AAAAAAAA-0000-0000-0000-000000000009}" id="{00000000-0000-0000-0000-000000000004}"><text>Who wrote this?</text></threadedComment>
+</ThreadedComments>"#;
+    let persons = r#"<?xml version="1.0" encoding="UTF-8"?>
+<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments" xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <person displayName="Ana Kim" id="{AAAAAAAA-0000-0000-0000-000000000001}" userId="ana@example.com" providerId="AD"/>
+  <person displayName="Bo Lee" id="{AAAAAAAA-0000-0000-0000-000000000002}" userId="bo@example.com" providerId="AD"/>
+</personList>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", sheet),
+            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_relationships),
+            ("xl/comments1.xml", comments),
+            ("xl/threadedComments/threadedComment1.xml", threaded),
+            ("xl/persons/person.xml", persons),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }

@@ -72,8 +72,8 @@ pub use service::{
     function_catalog_page,
 };
 pub use sheet_metadata::{
-    CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
-    HyperlinkPageDto, SheetPageRequestDto,
+    CommentDto, CommentPageDto, CommentReplyDto, DataValidationDto, DataValidationPageDto,
+    HyperlinkDto, HyperlinkPageDto, SheetPageRequestDto,
 };
 pub use values::{
     RangeCellValueDto, RangeReadOptionsDto, RangeValueDto, RangeValuesDto, RangeValuesRequestDto,

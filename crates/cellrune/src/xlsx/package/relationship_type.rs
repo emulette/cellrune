@@ -38,6 +38,9 @@ const HYPERLINK_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relati
 const COMMENTS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
 const COMMENTS_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/comments";
+const THREADED_COMMENTS: &str =
+    "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
+const PERSON: &str = "http://schemas.microsoft.com/office/2017/10/relationships/person";
 const VBA_PROJECT: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
 const PIVOT_TABLE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
@@ -117,6 +120,14 @@ pub(super) fn is_hyperlink(value: &str) -> bool {
 
 pub(super) fn is_comments(value: &str) -> bool {
     matches!(value, COMMENTS | COMMENTS_STRICT)
+}
+
+pub(super) fn is_threaded_comments(value: &str) -> bool {
+    value == THREADED_COMMENTS
+}
+
+pub(super) fn is_person(value: &str) -> bool {
+    value == PERSON
 }
 
 pub(super) fn is_vba_project(value: &str) -> bool {
