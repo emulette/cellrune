@@ -659,7 +659,7 @@ fn a_row_move_that_crosses_a_drawing_anchor_shrinks_it_instead_of_inverting_it()
 }
 
 #[test]
-fn cutting_part_of_a_relative_conditional_format_is_refused_with_the_part() {
+fn cutting_part_of_a_relative_conditional_format_splits_it_in_the_saved_part() {
     let source = support::replace_part_text(
         &generated_grid_edit_fixture(),
         DATA,
@@ -685,15 +685,26 @@ fn cutting_part_of_a_relative_conditional_format_is_refused_with_the_part() {
         ],
     );
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
-    let error = write_xlsx_draft_bytes(
+    let output = write_xlsx_draft_bytes(
         &draft,
         &calculation,
         RecalculationWriteOptions::default()
             .with_policy(RecalculationWritePolicy::InvalidateUnavailable),
     )
-    .expect_err("the moved cells would read other cells");
-    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
-    assert_eq!(error.source_id().map(|source| source.as_str()), Some(DATA));
+    .expect("split rule");
+    let worksheet = support::part_text(output.bytes(), DATA);
+    assert!(
+        worksheet.contains(r#"<conditionalFormatting sqref="H2:H3"><cfRule type="expression" dxfId="0" priority="1"><formula>H2&gt;2</formula>"#),
+        "{worksheet}"
+    );
+    assert!(
+        worksheet.contains(r#"<conditionalFormatting sqref="P20:P21"><cfRule type="expression" dxfId="0" priority="#),
+        "{worksheet}"
+    );
+    assert!(
+        worksheet.contains("<formula>P20&gt;2</formula>"),
+        "{worksheet}"
+    );
 }
 
 #[test]
@@ -769,4 +780,35 @@ fn a_drawing_anchor_outside_the_grid_is_refused_with_its_part() {
         error.source_id().map(|source| source.as_str()),
         Some("xl/drawings/drawing1.xml")
     );
+}
+
+#[test]
+fn a_range_move_splits_relative_rules_as_excel_does() {
+    use super::style_record_write::{address, edit_and_save, one_sheet_package, sheet1};
+
+    // Excel 16.114 (excel-measure I4): cutting A2:A3 of a rule on A1:A6 to D2 leaves the rule on
+    // A1 and A4:A6 and adds one on D2:D3 that reads as the rule did at A2, following the move.
+    const SHEET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>3</v></c></row><row r="2"><c r="A2"><v>2</v></c></row></sheetData><conditionalFormatting sqref="A1:A6"><cfRule type="expression" dxfId="0" priority="3"><formula>A1&gt;B1</formula></cfRule></conditionalFormatting><dataValidations count="1"><dataValidation type="custom" sqref="A1:A6"><formula1>A1&lt;B1+10</formula1></dataValidation></dataValidations></worksheet>"#;
+    let output = edit_and_save(
+        &one_sheet_package(SHEET, None),
+        vec![
+            WorkbookChange::move_range(
+                sheet1(),
+                cellrune::CellRange::new(address("A2"), address("A3")).expect("range"),
+                address("D2"),
+            )
+            .expect("move"),
+        ],
+    );
+    let worksheet = support::part_text(&output, "xl/worksheets/sheet1.xml");
+    for expected in [
+        r#"<conditionalFormatting sqref="A1 A4:A6"><cfRule type="expression" dxfId="0" priority="3"><formula>A1&gt;B1</formula></cfRule></conditionalFormatting>"#,
+        r#"<conditionalFormatting sqref="D2:D3"><cfRule type="expression" dxfId="0" priority="4"><formula>D2&gt;B2</formula></cfRule></conditionalFormatting>"#,
+        r#"<dataValidation type="custom" sqref="A1 A4:A6"><formula1>A1&lt;B1+10</formula1></dataValidation>"#,
+        r#"<dataValidation type="custom" sqref="D2:D3"><formula1>D2&lt;B2+10</formula1></dataValidation>"#,
+        r#"<dataValidations count="2">"#,
+    ] {
+        assert!(worksheet.contains(expected), "{expected}\n{worksheet}");
+    }
 }

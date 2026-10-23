@@ -240,10 +240,6 @@ pub(crate) enum FormulaRewriteError {
         owner: Option<String>,
     },
     SourceEdit(SourceEditError),
-    /// A range move would move part of the cells of a rule whose formula reads relative to them.
-    SplitRule {
-        owner: Option<String>,
-    },
 }
 
 impl FormulaRewriteError {
@@ -258,7 +254,6 @@ impl FormulaRewriteError {
                 span,
                 owner: Some(owner),
             },
-            Self::SplitRule { owner: None } => Self::SplitRule { owner: Some(owner) },
             other => other,
         }
     }

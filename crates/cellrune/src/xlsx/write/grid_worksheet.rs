@@ -15,6 +15,8 @@ use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteLimits, FormulaRewriteRequest, rewrite_formula,
 };
+use std::cell::Cell;
+
 use crate::calculation::grid_rewrite::{AnchoredFormulas, GridChange, move_anchored_formulas};
 use crate::grid::{GridAxis, GridEdit, RangeRule};
 use crate::xlsx::package::PartPath;
@@ -53,6 +55,9 @@ struct Pass<'a> {
     edit: GridEdit,
     change: GridChange<'a>,
     source: &'a PartPath,
+    /// The priority the next conditional-format rule a range move splits off takes, past every
+    /// priority of the worksheet.
+    next_priority: Cell<u64>,
 }
 
 /// Moves the coordinates of a preserved worksheet through `edit` and sets its `dimension` to
@@ -66,6 +71,16 @@ pub(super) fn patch_worksheet_grid(
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     let mut document = XmlDocument::parse(bytes, source, limits)?;
+    let root = document.root_mut();
+    let mut highest_priority = 0_u64;
+    for rule in root.descendants_mut("cfRule") {
+        if let Some(priority) = rule
+            .attribute("priority", source)?
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            highest_priority = highest_priority.max(priority);
+        }
+    }
     let pass = Pass {
         edit,
         change: GridChange {
@@ -74,8 +89,8 @@ pub(super) fn patch_worksheet_grid(
             edit,
         },
         source,
+        next_priority: Cell::new(highest_priority.saturating_add(1)),
     };
-    let root = document.root_mut();
     let mut kept = Vec::with_capacity(root.children.len());
     for node in std::mem::take(&mut root.children) {
         let XmlNode::Element(mut element) = node else {
@@ -100,7 +115,12 @@ pub(super) fn patch_worksheet_grid(
         } else if element.is("mergeCells") {
             pass.merged_ranges(&mut element)?
         } else if element.is("conditionalFormatting") {
-            pass.conditional_format(&mut element, false)?
+            kept.extend(
+                pass.conditional_format(element, false)?
+                    .into_iter()
+                    .map(XmlNode::Element),
+            );
+            continue;
         } else if element.is("dataValidations") {
             pass.data_validations(&mut element, false)?
         } else if element.is("hyperlinks") {
@@ -497,13 +517,14 @@ impl Pass<'_> {
     }
 
     /// Moves a conditional format: its ranges, then every formula of its rules relative to its
-    /// first cell. Returns `false` when every cell it formats is deleted.
+    /// first cell. Returns the formats it makes: none when every cell it formats is deleted, and a
+    /// second one, whose rules take new priorities, for the part a range move cuts away.
     fn conditional_format(
         &self,
-        format: &mut XmlElement,
+        mut format: XmlElement,
         extension: bool,
-    ) -> Result<bool, XlsxWriteError> {
-        let ranges = self.anchored_ranges(format, extension)?;
+    ) -> Result<Vec<XmlElement>, XlsxWriteError> {
+        let ranges = self.anchored_ranges(&format, extension)?;
         let mut formulas = Vec::new();
         let mut values = Vec::new();
         if extension {
@@ -525,27 +546,42 @@ impl Pass<'_> {
             .chain(&values)
             .map(String::as_str)
             .collect::<Vec<_>>();
-        let Some(moved) = self.move_anchored(&ranges, &texts)? else {
-            return Ok(false);
-        };
-        self.set_anchored_ranges(format, extension, &moved.ranges)?;
-        let mut rewritten = moved.formulas.into_iter();
-        let name = if extension { "f" } else { "formula" };
-        for formula in format.descendants_mut(name) {
-            if let Some(Some(text)) = rewritten.next() {
-                formula.set_text(&text)?;
-            }
+        let rules = self.move_anchored(&ranges, &texts)?;
+        if rules.len() > 1 && links_extension_rules(&mut format, self.source)? {
+            // A data bar or icon set pairs its rule with an extension rule by ID, which a copy
+            // would duplicate.
+            return Err(self.unrewritable_formula());
         }
-        if !extension {
-            for threshold in format.descendants_mut("cfvo") {
-                if threshold.attribute("val", self.source)?.is_some()
-                    && let Some(Some(text)) = rewritten.next()
-                {
-                    threshold.set_attribute("val", Some(&text), self.source)?;
+        let mut formats = Vec::with_capacity(rules.len());
+        for (index, rule) in rules.into_iter().enumerate() {
+            let mut piece = format.clone();
+            self.set_anchored_ranges(&mut piece, extension, &rule.ranges)?;
+            let mut rewritten = rule.formulas.into_iter();
+            let name = if extension { "f" } else { "formula" };
+            for formula in piece.descendants_mut(name) {
+                if let Some(Some(text)) = rewritten.next() {
+                    formula.set_text(&text)?;
                 }
             }
+            if !extension {
+                for threshold in piece.descendants_mut("cfvo") {
+                    if threshold.attribute("val", self.source)?.is_some()
+                        && let Some(Some(text)) = rewritten.next()
+                    {
+                        threshold.set_attribute("val", Some(&text), self.source)?;
+                    }
+                }
+            }
+            if index > 0 {
+                for cf_rule in piece.descendants_mut("cfRule") {
+                    let priority = self.next_priority.get();
+                    self.next_priority.set(priority.saturating_add(1));
+                    cf_rule.set_attribute("priority", Some(&priority.to_string()), self.source)?;
+                }
+            }
+            formats.push(piece);
         }
-        Ok(true)
+        Ok(formats)
     }
 
     /// Moves every data validation of a `dataValidations` element and drops the ones whose cells
@@ -580,26 +616,26 @@ impl Pass<'_> {
                 }
             }
             let texts = formulas.iter().map(String::as_str).collect::<Vec<_>>();
-            let Some(moved) = self.move_anchored(&ranges, &texts)? else {
-                continue;
-            };
-            self.set_anchored_ranges(&mut validation, extension, &moved.ranges)?;
-            let mut rewritten = moved.formulas.into_iter();
-            for slot in ["formula1", "formula2"] {
-                if let Some(holder) = validation.child_mut(slot) {
-                    let formula = if extension {
-                        holder
-                            .child_mut("f")
-                            .ok_or_else(|| self.unrewritable_formula())?
-                    } else {
-                        holder
-                    };
-                    if let Some(Some(text)) = rewritten.next() {
-                        formula.set_text(&text)?;
+            for rule in self.move_anchored(&ranges, &texts)? {
+                let mut piece = validation.clone();
+                self.set_anchored_ranges(&mut piece, extension, &rule.ranges)?;
+                let mut rewritten = rule.formulas.into_iter();
+                for slot in ["formula1", "formula2"] {
+                    if let Some(holder) = piece.child_mut(slot) {
+                        let formula = if extension {
+                            holder
+                                .child_mut("f")
+                                .ok_or_else(|| self.unrewritable_formula())?
+                        } else {
+                            holder
+                        };
+                        if let Some(Some(text)) = rewritten.next() {
+                            formula.set_text(&text)?;
+                        }
                     }
                 }
+                kept.push(XmlNode::Element(piece));
             }
-            kept.push(XmlNode::Element(validation));
         }
         let count = kept
             .iter()
@@ -826,10 +862,12 @@ impl Pass<'_> {
                         let mut formats = Vec::new();
                         for node in std::mem::take(&mut content.children) {
                             match node {
-                                XmlNode::Element(mut format) => {
-                                    if self.conditional_format(&mut format, true)? {
-                                        formats.push(XmlNode::Element(format));
-                                    }
+                                XmlNode::Element(format) => {
+                                    formats.extend(
+                                        self.conditional_format(format, true)?
+                                            .into_iter()
+                                            .map(XmlNode::Element),
+                                    );
                                 }
                                 other => formats.push(other),
                             }
@@ -968,15 +1006,15 @@ impl Pass<'_> {
         &self,
         ranges: &[CellRange],
         formulas: &[&str],
-    ) -> Result<Option<AnchoredFormulas>, XlsxWriteError> {
+    ) -> Result<Vec<AnchoredFormulas>, XlsxWriteError> {
         let never_cancelled = || false;
         let mut budget =
             FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
         if ranges.is_empty() {
-            return Ok(Some(AnchoredFormulas {
+            return Ok(vec![AnchoredFormulas {
                 ranges: Vec::new(),
                 formulas: vec![None; formulas.len()],
-            }));
+            }]);
         }
         move_anchored_formulas(ranges, formulas, self.change, &mut budget)
             .map_err(|_| self.unrewritable_formula())
@@ -1072,3 +1110,20 @@ pub(super) fn unrewritable(source: &PartPath, detail: &str, what: &str) -> XlsxW
 #[cfg(test)]
 #[path = "grid_worksheet_tests.rs"]
 mod tests;
+
+/// Reports whether a conditional format's rules pair with extension rules by ID, as a data bar,
+/// icon set, or color scale written by Excel 2010 and later does.
+fn links_extension_rules(
+    format: &mut XmlElement,
+    source: &PartPath,
+) -> Result<bool, XlsxWriteError> {
+    if !format.descendants_mut("id").is_empty() {
+        return Ok(true);
+    }
+    for rule in format.descendants_mut("cfRule") {
+        if rule.attribute("id", source)?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}

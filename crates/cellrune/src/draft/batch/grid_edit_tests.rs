@@ -573,25 +573,48 @@ fn data_validations_keep_their_cells_and_read_from_their_first_cell() {
         owned(&[("A1:A3", "A1>0"), ("D1:D2", "D1>0")])
     );
 
-    // Cutting part of a validation away from its first cell would make the moved cells read
-    // other cells, unless the formula reads none relative to them.
+    // Cutting part of a validation away makes it a validation of its own that reads as the rule
+    // did there, as Excel 16.114 splits it (excel-measure I4); the cells left keep the rule.
     let mut split = build();
-    assert!(matches!(
-        refused(
-            &mut split,
-            WorkbookChange::move_range(id(1), range("A4:A5"), address("F10")).expect("move"),
-        ),
-        ValidationError::MovedRangeSplitsRule { owner: Some(_) }
-    ));
     apply(
         &mut split,
-        WorkbookChange::move_range(id(1), range("B2"), address("F10")).expect("move"),
+        WorkbookChange::move_range(id(1), range("A4:A5"), address("F10")).expect("move"),
     );
     assert_eq!(
         summary(&split),
         owned(&[
+            ("A1:A3", "A1>0"),
+            ("F10:F11", "F10>0"),
+            ("B1:B2", "$C$1>0"),
+            ("D3:D4", "D3>0")
+        ])
+    );
+    // Cutting the first cell away leaves the rest reading from the cell that now comes first.
+    let mut first = build();
+    apply(
+        &mut first,
+        WorkbookChange::move_range(id(1), range("A1:A2"), address("F10")).expect("move"),
+    );
+    assert_eq!(
+        summary(&first),
+        owned(&[
+            ("A3:A5", "A3>0"),
+            ("F10:F11", "F10>0"),
+            ("B1:B2", "$C$1>0"),
+            ("D3:D4", "D3>0")
+        ])
+    );
+    let mut absolute = build();
+    apply(
+        &mut absolute,
+        WorkbookChange::move_range(id(1), range("B2"), address("F10")).expect("move"),
+    );
+    assert_eq!(
+        summary(&absolute),
+        owned(&[
             ("A1:A5", "A1>0"),
-            ("B1:B1 F10:F10", "$C$1>0"),
+            ("B1:B1", "$C$1>0"),
+            ("F10:F10", "$C$1>0"),
             ("D3:D4", "D3>0")
         ])
     );

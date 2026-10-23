@@ -114,8 +114,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   moved formulas keep theirs. As Excel 16.114 does, a reference to cells the paste overwrites
   becomes `#REF!` when they cover it, and a range shrinks to its part left when they cover its
   whole width or height and run past one of its ends, while a range they only reach the end of or
-  lie inside keeps its text. Moving part of a data validation whose formula reads relative to its
-  cells fails with the new `validation.moved_range_splits_rule`; cutting part of a spill range fails with
+  lie inside keeps its text. Moving part of the cells of a data validation or conditional format
+  splits it as Excel does: the cells left keep the rule, and the moved cells get a rule of their
+  own whose formulas read as the rule did there, following the move (`A1>B1` on A1:A6 with A2:A3
+  cut to D2 adds `D2>B2` on D2:D3), with new conditional-format priorities; a data bar, icon set,
+  or color scale paired with an extension rule by ID is refused at save with
+  `xlsx.write.unsupported_preservation`. Cutting part of a spill range fails with
   `validation.array_formula_part_edit`, as Excel refuses it.
 - `WorkbookChange::copy_range(SheetId, CellRange, SheetId, CellRange)` copies or fills a range
   onto a destination that repeats it a whole number of times, shifting the relative parts of

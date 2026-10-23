@@ -523,7 +523,8 @@ fn rewritten_validation(
 }
 
 /// Moves a data validation of the edited sheet: its ranges keep the cells they validate, cells
-/// inserted right after a range join it, and a validation whose cells are all deleted goes.
+/// inserted right after a range join it, a validation whose cells are all deleted goes, and the
+/// part of its cells a range move cuts away becomes a validation of its own.
 fn moved_validation(
     validation: &DataValidation,
     edit: GridEdit,
@@ -531,10 +532,10 @@ fn moved_validation(
     sheet_id: SheetId,
     validation_index: usize,
     budget: &mut FormulaRewriteBudget<'_>,
-) -> Result<Option<DataValidation>, BatchExecutionError> {
+) -> Result<Vec<DataValidation>, BatchExecutionError> {
     let formulas = [validation.formula1(), validation.formula2()];
     let present = formulas.iter().flatten().copied().collect::<Vec<_>>();
-    let Some(moved_formulas) = move_anchored_formulas(
+    let rules = move_anchored_formulas(
         validation.ranges(),
         &present,
         GridChange {
@@ -544,21 +545,23 @@ fn moved_validation(
         },
         budget,
     )
-    .map_err(|error| error.with_owner(validation_owner(sheet_id, validation_index, 0)))?
-    else {
-        return Ok(None);
-    };
-    let mut moved = validation.clone();
-    moved.set_ranges(moved_formulas.ranges);
-    let mut rewritten = moved_formulas.formulas.into_iter();
-    for formula in moved.formulas_mut() {
-        if formula.is_some()
-            && let Some(Some(text)) = rewritten.next()
-        {
-            *formula = Some(text.into_boxed_str());
-        }
-    }
-    Ok(Some(moved))
+    .map_err(|error| error.with_owner(validation_owner(sheet_id, validation_index, 0)))?;
+    Ok(rules
+        .into_iter()
+        .map(|rule| {
+            let mut moved = validation.clone();
+            moved.set_ranges(rule.ranges);
+            let mut rewritten = rule.formulas.into_iter();
+            for formula in moved.formulas_mut() {
+                if formula.is_some()
+                    && let Some(Some(text)) = rewritten.next()
+                {
+                    *formula = Some(text.into_boxed_str());
+                }
+            }
+            moved
+        })
+        .collect())
 }
 
 fn validation_owner(sheet_id: SheetId, validation_index: usize, slot: usize) -> String {

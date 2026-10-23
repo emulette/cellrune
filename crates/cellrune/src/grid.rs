@@ -530,7 +530,7 @@ fn offset_address(address: CellAddress, (rows, columns): (i64, i64)) -> Option<C
     CellAddress::from_indices(row, column).ok()
 }
 
-fn offset_range(range: CellRange, offset: (i64, i64)) -> Option<CellRange> {
+pub(crate) fn offset_range(range: CellRange, offset: (i64, i64)) -> Option<CellRange> {
     Some(CellRange::from_ordered(
         offset_address(range.start(), offset)?,
         offset_address(range.end(), offset)?,

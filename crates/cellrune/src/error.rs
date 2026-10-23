@@ -126,7 +126,6 @@ const MESSAGE_TABLE_DATA_ROWS_DELETED: &str =
     "deleting every data row of a table is refused because Excel keeps one";
 const MESSAGE_TABLE_SPLIT: &str =
     "a structural edit cannot delete, move, or overwrite part of a table or its totals row";
-const MESSAGE_MOVED_RANGE_SPLITS_RULE: &str = "a range move cannot move part of a data validation or conditional format whose formula reads relative to its cells";
 const MESSAGE_COPY_DESTINATION_SHAPE: &str =
     "a copy destination must repeat the source range a whole number of times";
 const MESSAGE_COPY_UNSUPPORTED_FORMULA: &str = "a formula with a spill reference, a legacy array formula, or a data-table formula cannot be copied";
@@ -334,9 +333,6 @@ pub enum ValidationErrorCode {
     TableDataRowsDeleted,
     /// A structural edit would delete, move, or overwrite part of a table or its totals row.
     TableSplit,
-    /// A range move would move part of a data validation or conditional format whose formula
-    /// reads relative to its cells.
-    MovedRangeSplitsRule,
     /// A copy destination does not repeat the source range a whole number of times.
     CopyDestinationShape,
     /// A copy would copy a formula with a spill reference, a legacy array formula, or a data-table
@@ -452,7 +448,6 @@ impl ValidationErrorCode {
             Self::TableHeaderShift => "validation.table_header_shift",
             Self::TableDataRowsDeleted => "validation.table_data_rows_deleted",
             Self::TableSplit => "validation.table_split",
-            Self::MovedRangeSplitsRule => "validation.moved_range_splits_rule",
             Self::CopyDestinationShape => "validation.copy_destination_shape",
             Self::CopyUnsupportedFormula => "validation.copy_unsupported_formula",
         }
@@ -909,12 +904,6 @@ pub enum ValidationError {
         /// Affected table.
         table_id: u32,
     },
-    /// A range move would move part of a data validation whose formula reads relative to its
-    /// cells; one rule cannot read the same cells from both places.
-    MovedRangeSplitsRule {
-        /// Stable workbook owner context for the rule's formula, when available.
-        owner: Option<String>,
-    },
     /// A copy destination does not repeat the source range a whole number of times.
     CopyDestinationShape,
     /// A copy would copy a formula with a spill reference, a legacy array formula, or a data-table
@@ -1067,7 +1056,6 @@ impl ValidationError {
             Self::TableHeaderShift { .. } => ValidationErrorCode::TableHeaderShift,
             Self::TableDataRowsDeleted { .. } => ValidationErrorCode::TableDataRowsDeleted,
             Self::TableSplit { .. } => ValidationErrorCode::TableSplit,
-            Self::MovedRangeSplitsRule { .. } => ValidationErrorCode::MovedRangeSplitsRule,
             Self::CopyDestinationShape => ValidationErrorCode::CopyDestinationShape,
             Self::CopyUnsupportedFormula { .. } => ValidationErrorCode::CopyUnsupportedFormula,
         }
@@ -1435,13 +1423,6 @@ impl fmt::Display for ValidationError {
             }
             Self::TableSplit { table_id } => {
                 write!(formatter, "{MESSAGE_TABLE_SPLIT}: table {table_id}")
-            }
-            Self::MovedRangeSplitsRule { owner } => {
-                formatter.write_str(MESSAGE_MOVED_RANGE_SPLITS_RULE)?;
-                if let Some(owner) = owner {
-                    write!(formatter, ": owner {owner}")?;
-                }
-                Ok(())
             }
             Self::CopyDestinationShape => formatter.write_str(MESSAGE_COPY_DESTINATION_SHAPE),
             Self::CopyUnsupportedFormula {
@@ -1834,10 +1815,6 @@ mod tests {
                 "validation.table_data_rows_deleted",
             ),
             (ValidationErrorCode::TableSplit, "validation.table_split"),
-            (
-                ValidationErrorCode::MovedRangeSplitsRule,
-                "validation.moved_range_splits_rule",
-            ),
             (
                 ValidationErrorCode::CopyDestinationShape,
                 "validation.copy_destination_shape",

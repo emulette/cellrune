@@ -11,7 +11,9 @@ use super::formula_rewrite::{
 };
 use super::syntax::{NodeSpanTree, SourceComponent, SourceComponentKind, SourceEdit, SourceSpan};
 use crate::case_insensitive_eq;
-use crate::grid::{GridAxis, GridEdit, RangeRule, intersect, range_contains, subtract};
+use crate::grid::{
+    GridAxis, GridEdit, RangeRule, intersect, offset_range, range_contains, subtract,
+};
 use crate::{CellAddress, CellRange, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
 /// The text a reference to deleted cells becomes, as Excel saves it.
@@ -53,59 +55,100 @@ enum Outcome {
 }
 
 /// Moves cells whose formulas read relative to their first cell, as a conditional format or a
-/// data validation does, through a structural edit of their own sheet. Returns `None` when the
-/// edit deletes every cell, and otherwise the moved ranges with each formula's rewritten text,
-/// `None` where it is unchanged.
+/// data validation does, through a structural edit of their own sheet. Returns the rules the cells
+/// make afterwards: none when the edit deletes every cell, else the rule itself, and for a range
+/// move that cuts away part of its cells, that part as a second rule.
 ///
 /// While the first cell survives, the formulas move by the range rule. Once it is deleted, they
 /// are first shifted to the cell that now comes first, as if copied there, so each cell keeps
-/// reading the cells it read.
+/// reading the cells it read. A part a range move cuts away reads as the rule did there: its
+/// formulas are shifted to its first cell before the move, then follow the move, as Excel 16.114
+/// splits the rule (excel-measure I4: cutting A2:A3 of `A1>B1` on A1:A6 to D2 leaves the rule on A1
+/// and A4:A6 and adds `D2>B2` on D2:D3).
 pub(crate) fn move_anchored_formulas(
     ranges: &[CellRange],
     formulas: &[&str],
     change: GridChange<'_>,
     budget: &mut FormulaRewriteBudget<'_>,
-) -> Result<Option<AnchoredFormulas>, FormulaRewriteError> {
+) -> Result<Vec<AnchoredFormulas>, FormulaRewriteError> {
     let edit = change.edit;
-    let moved = edit.map_ranges(ranges, RangeRule::Format);
-    let (Some(old_anchor), Some(new_anchor)) = (
-        ranges.first().map(|range| range.start()),
-        moved.first().map(|range| range.start()),
-    ) else {
-        return Ok(None);
+    let Some(old_anchor) = ranges.first().map(|range| range.start()) else {
+        return Ok(Vec::new());
     };
-    let rebase = (edit.map_address(old_anchor) != Some(new_anchor))
-        .then(|| edit.unmap_address(new_anchor))
-        .flatten()
-        .map(|origin| CopyOffset {
-            rows: i64::from(origin.row().get()) - i64::from(old_anchor.row().get()),
-            columns: i64::from(origin.column().get()) - i64::from(old_anchor.column().get()),
-        });
-    // One rule reads relative to its first cell, so cells cut away from it would read other
-    // cells unless the formula reads none relative to them.
-    if let GridEdit::MoveRange { source, .. } = edit {
-        let moves = ranges
-            .iter()
-            .any(|range| intersect(*range, source).is_some());
-        let stays = ranges
-            .iter()
-            .any(|range| !subtract(*range, source).is_empty());
-        if moves && stays {
-            let probe = FormulaRewriteRequest::Copy(CopyOffset {
-                rows: 1,
-                columns: 1,
-            });
-            for formula in formulas {
-                if rewrite_formula(formula, &probe, budget)?.is_some() {
-                    return Err(FormulaRewriteError::SplitRule { owner: None });
-                }
-            }
-        }
-    }
     let request = FormulaRewriteRequest::Grid(GridChange {
         host_is_sheet: true,
         ..change
     });
+    let (kept, cut) = match edit {
+        GridEdit::MoveRange { source, .. } => {
+            let overwritten = edit.overwritten();
+            let mut kept = Vec::new();
+            for range in ranges {
+                let mut pieces = subtract(*range, source);
+                for piece in &overwritten {
+                    pieces = pieces
+                        .into_iter()
+                        .flat_map(|left| subtract(left, *piece))
+                        .collect();
+                }
+                kept.extend(pieces);
+            }
+            let cut = ranges
+                .iter()
+                .filter_map(|range| intersect(*range, source))
+                .collect::<Vec<_>>();
+            (kept, cut)
+        }
+        GridEdit::Insert { .. } | GridEdit::Delete { .. } | GridEdit::Move { .. } => {
+            (edit.map_ranges(ranges, RangeRule::Format), Vec::new())
+        }
+    };
+    let mut rules = Vec::new();
+    if let Some(new_anchor) = kept.first().map(|range| range.start()) {
+        // A range move keeps the cells it leaves where they are.
+        let origin = match edit {
+            GridEdit::MoveRange { .. } => Some(new_anchor),
+            _ => (edit.map_address(old_anchor) != Some(new_anchor))
+                .then(|| edit.unmap_address(new_anchor))
+                .flatten(),
+        };
+        let rebase = origin
+            .filter(|origin| *origin != old_anchor)
+            .map(|origin| offset_between(old_anchor, origin));
+        rules.push(AnchoredFormulas {
+            formulas: rebased_and_moved(formulas, rebase, &request, budget)?,
+            ranges: kept,
+        });
+    }
+    if let Some(origin) = cut.first().map(|range| range.start()) {
+        let rebase = (origin != old_anchor).then(|| offset_between(old_anchor, origin));
+        let ranges = cut
+            .iter()
+            .filter_map(|range| offset_range(*range, edit.range_offset()))
+            .collect();
+        rules.push(AnchoredFormulas {
+            formulas: rebased_and_moved(formulas, rebase, &request, budget)?,
+            ranges,
+        });
+    }
+    Ok(rules)
+}
+
+fn offset_between(from: CellAddress, to: CellAddress) -> CopyOffset {
+    CopyOffset {
+        rows: i64::from(to.row().get()) - i64::from(from.row().get()),
+        columns: i64::from(to.column().get()) - i64::from(from.column().get()),
+    }
+}
+
+/// Shifts each formula as if copied by `rebase`, then moves it by the edit; `None` where the text
+/// stays the same.
+fn rebased_and_moved(
+    formulas: &[&str],
+    rebase: Option<CopyOffset>,
+    request: &FormulaRewriteRequest<'_>,
+    budget: &mut FormulaRewriteBudget<'_>,
+) -> Result<Vec<Option<String>>, FormulaRewriteError> {
     let mut rewritten = Vec::with_capacity(formulas.len());
     for formula in formulas {
         let mut text = None::<String>;
@@ -113,15 +156,12 @@ pub(crate) fn move_anchored_formulas(
             text = rewrite_formula(formula, &FormulaRewriteRequest::Copy(offset), budget)?;
         }
         let current = text.as_deref().unwrap_or(formula);
-        if let Some(moved) = rewrite_formula(current, &request, budget)? {
+        if let Some(moved) = rewrite_formula(current, request, budget)? {
             text = Some(moved);
         }
         rewritten.push(text);
     }
-    Ok(Some(AnchoredFormulas {
-        ranges: moved,
-        formulas: rewritten,
-    }))
+    Ok(rewritten)
 }
 
 /// Cells with formulas that read relative to their first cell, after a structural edit.
