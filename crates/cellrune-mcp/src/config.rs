@@ -35,6 +35,7 @@ const DETAIL_WORKBOOK_BYTES: &str = "max_workbook_bytes must be between 1 and 10
 const DETAIL_PATH_METADATA: &str = "workbook path metadata is unavailable";
 const DETAIL_DESTINATION_PARENT: &str =
     "workbook destination must have an existing parent directory";
+const DETAIL_PARENT_COMPONENT: &str = "workbook path must not contain `..` components";
 
 #[derive(Debug, Clone)]
 struct AllowedRoot {
@@ -229,20 +230,18 @@ impl ServerConfig {
 
     /// Resolves and validates an existing workbook input file.
     ///
-    /// Paths that are not lexically below an allowed root, including UNC shares and device
-    /// namespaces outside every root, are rejected before any filesystem access, so the outcome
-    /// for a path outside every root does not depend on whether it exists. Only a lexical candidate is canonicalized and
-    /// checked again against the canonical roots.
+    /// Paths with a `..` component, and paths that are not lexically below an allowed root,
+    /// including UNC shares and device namespaces outside every root, are rejected before any
+    /// filesystem access, so the outcome for a path outside every root does not depend on whether
+    /// it exists. Only a lexical candidate is canonicalized and checked again against the
+    /// canonical roots.
     ///
     /// # Errors
     ///
     /// Returns a stable path or size-policy error.
     pub fn resolve_input(&self, requested: &str) -> Result<ResolvedInput, McpError> {
         let requested = absolute_path(requested)?;
-        if self
-            .lexical_root(&lexically_normalized(&requested))
-            .is_none()
-        {
+        if self.lexical_root(&requested).is_none() {
             return Err(McpError::path_outside_root());
         }
         let canonical = fs::canonicalize(&requested)
@@ -400,29 +399,23 @@ fn components_match(actual: &Component<'_>, expected: &Component<'_>) -> bool {
     actual == expected
 }
 
-/// Folds `..` components into their parent without consulting the filesystem.
+/// Returns `requested` when it is absolute and has no `..` component.
 ///
-/// A parent component can move an absolute path out of an allowed root, so it is folded before
-/// the lexical root comparison. Symlinks are resolved later by canonicalizing the original path.
-fn lexically_normalized(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        if component == Component::ParentDir {
-            normalized.pop();
-        } else {
-            normalized.push(component);
-        }
-    }
-    normalized
-}
-
+/// The filesystem resolves `..` after following symlinks, so no lexical folding matches it, and
+/// resolving the spelled path would consult directories outside every root. Such a path is
+/// therefore refused before the root comparison.
 fn absolute_path(requested: &str) -> Result<PathBuf, McpError> {
     let path = PathBuf::from(requested);
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Err(McpError::path_absolute())
+    if !path.is_absolute() {
+        return Err(McpError::path_absolute());
     }
+    if path
+        .components()
+        .any(|component| component == Component::ParentDir)
+    {
+        return Err(McpError::path_invalid(DETAIL_PARENT_COMPONENT.to_owned()));
+    }
+    Ok(path)
 }
 
 fn path_detail(path: &Path, error: &io::Error) -> String {
@@ -490,6 +483,48 @@ mod tests {
             .expect_err("outside path must fail");
 
         assert_eq!(error.payload().code, "mcp.path.outside_root");
+    }
+
+    #[test]
+    fn paths_with_parent_components_are_rejected_before_any_filesystem_access() {
+        let allowed = TestDirectory::new("parent-allowed");
+        let outside = TestDirectory::new("parent-outside");
+        fs::create_dir(outside.path.join("exists")).expect("outside directory must be created");
+        let workbook = allowed.path.join("book.xlsx");
+        fs::write(&workbook, b"inside root").expect("fixture must be written");
+        let allowed_name = allowed.path.file_name().expect("root has a name");
+        let through = |directory: &str| {
+            outside
+                .path
+                .join(directory)
+                .join("..")
+                .join("..")
+                .join(allowed_name)
+                .join("book.xlsx")
+        };
+        let config = config(&allowed.path);
+
+        // Folding `..` would place both inside the root, and only one of the outside
+        // directories exists: the answer must not reveal which.
+        for requested in [through("exists"), through("missing")] {
+            let error = config
+                .resolve_input(requested.to_str().expect("path must be UTF-8"))
+                .expect_err("an input with `..` must fail");
+            assert_eq!(error.payload().code, "mcp.path.invalid");
+            assert_eq!(
+                error.payload().details.detail.as_deref(),
+                Some(DETAIL_PARENT_COMPONENT)
+            );
+        }
+        let destination = allowed.path.join("..").join(allowed_name).join("new.xlsx");
+        let error = config
+            .resolve_output(destination.to_str().expect("path must be UTF-8"), false)
+            .expect_err("a destination with `..` must fail");
+        assert_eq!(error.payload().code, "mcp.path.invalid");
+        assert_eq!(
+            error.payload().details.detail.as_deref(),
+            Some(DETAIL_PARENT_COMPONENT)
+        );
     }
 
     #[test]

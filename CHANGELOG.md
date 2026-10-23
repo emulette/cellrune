@@ -12,13 +12,17 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
-- The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or later. Supported Python
-  versions are unchanged.
+- The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
+  Supported Python versions are unchanged.
 
 ### Fixed
 
 - Node.js `previewChangesPage` continues from the `nextCursor` it returned instead of failing with
   `interop.preview.cursor_invalid`.
+- MCP rejects a workbook path that contains a `..` component with `mcp.path.invalid`. An input
+  such as `/outside/dir/../../root/book.xlsx` was matched to its root after folding `..` but opened
+  as spelled, so whether `/outside/dir` existed changed the result, and Save As already refused
+  such destinations with a misleading detail or `mcp.path.outside_root`.
 
 ## [0.1.26] - 2026-10-23
 

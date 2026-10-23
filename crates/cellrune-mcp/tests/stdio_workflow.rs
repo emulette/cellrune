@@ -1669,11 +1669,7 @@ fn input_paths_outside_every_root_are_rejected_regardless_of_existence() {
     let outside = TestDirectory::new("input-boundary-outside");
     let existing_outside = outside.path.join("existing.xlsx");
     fs::write(&existing_outside, b"outside root").expect("outside fixture must be written");
-    let mut requests = vec![
-        existing_outside,
-        outside.path.join("missing.xlsx"),
-        root.path.join("..").join("missing.xlsx"),
-    ];
+    let mut requests = vec![existing_outside, outside.path.join("missing.xlsx")];
     if cfg!(windows) {
         let inside = root.path.join("inside.xlsx");
         fs::write(&inside, b"inside root").expect("inside fixture must be written");
@@ -1697,6 +1693,9 @@ fn input_paths_outside_every_root_are_rejected_regardless_of_existence() {
             path.display()
         );
     }
+    let parent = root.path.join("..").join("missing.xlsx");
+    let error = failed_tool(mcp.call_tool("workbook_open", json!({"path": parent})));
+    assert_eq!(error["code"], "mcp.path.invalid");
 
     let (status, _, _) = mcp.finish();
     assert!(status.success());

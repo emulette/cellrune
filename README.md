@@ -514,10 +514,12 @@ An MCP client can launch a release binary with configuration equivalent to:
 ```
 
 The server canonicalizes configured roots at startup. Every workbook path supplied to a tool must
-be absolute, name a location under a root as configured or as canonicalized, and resolve inside
-that root; a path outside every root, including a UNC share or device path, is rejected before any
-filesystem access. Another spelling of a root, such as a different symlink or junction to it or a
-Windows 8.3 short name, is outside every root. The server bounds workbook/session/response
+be absolute, contain no `..` component, and name a location under a root as configured or as
+canonicalized; components are compared exactly, except that ASCII case is ignored on Windows.
+Another spelling of a root, such as a different symlink or junction to it or a Windows 8.3 short
+name, is outside every root. A path outside every root, including a UNC share or device path, is
+rejected before any filesystem access. An input must then resolve inside an allowed root, and a Save
+As destination inside the root it names. The server bounds workbook/session/response
 resources, writes protocol traffic only to stdout, writes diagnostics only to stderr, and never
 provides a remote transport. Inputs are opened through an approved-root capability and read from
 the same file handle under the configured archive-byte ceiling. Existing destinations are
