@@ -90,8 +90,14 @@ fn copy_bracketed(source: &str, start: usize) -> Result<usize, String> {
     Err("unterminated bracketed token in shared formula".to_owned())
 }
 
-fn is_identifier(byte: Option<&u8>) -> bool {
-    byte.is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
+/// Matches the core lexer: a name continues with any alphanumeric character, `_`, or `.`, and may
+/// also start with `\`, so a reference-shaped run touching one of these is part of a name.
+fn continues_name(character: Option<char>) -> bool {
+    character.is_some_and(|character| character.is_alphanumeric() || matches!(character, '_' | '.'))
+}
+
+fn precedes_name_part(character: Option<char>) -> bool {
+    continues_name(character) || character == Some('\\')
 }
 
 fn translate_plain(plain: &str, column_delta: i32, row_delta: i32) -> Result<String, String> {
@@ -123,8 +129,8 @@ fn translate_plain(plain: &str, column_delta: i32, row_delta: i32) -> Result<Str
         }
         let looks_like_reference = column_end > column_start
             && row_start < index
-            && !is_identifier(start.checked_sub(1).and_then(|at| bytes.get(at)))
-            && !is_identifier(bytes.get(index))
+            && !precedes_name_part(plain[..start].chars().next_back())
+            && !continues_name(plain[index..].chars().next())
             && bytes.get(index) != Some(&b'(')
             && bytes.get(index) != Some(&b'!');
         let original_column = column_number(&plain[column_start..column_end]);
@@ -235,6 +241,14 @@ mod tests {
             )
             .expect("translated"),
             "SUM('입력 시트'!A2,Table1[A1],\"A1\",LOG10(A2))"
+        );
+    }
+
+    #[test]
+    fn shared_formulas_leave_references_inside_defined_names() {
+        assert_eq!(
+            translate("이름A1+A1이름+\\A1+A1", "F5", "F6").expect("translated"),
+            "이름A1+A1이름+\\A1+A2"
         );
     }
 }
