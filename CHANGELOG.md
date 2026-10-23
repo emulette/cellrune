@@ -371,7 +371,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - MCP `workbook_apply_changes` stages its batch on a blocking worker, as `workbook_apply_changes_v2`
   does, so a large batch no longer holds the server's async runtime, and a cancelled request stops
   the staging cooperatively and fails with `mcp.operation.cancelled` without changing the session.
-  Interop `WorkbookSession::prepare_changes_cancellable` stages a v1 batch with a cancellation
+  The worker holds the session from staging through installation, so a concurrent recalculation or
+  edit cannot fail the batch with `session.stale_result` or `session.revision_mismatch` after it was
+  staged. Interop `WorkbookSession::prepare_changes_cancellable` stages a v1 batch with a cancellation
   token.
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
   Supported Python versions are unchanged.
@@ -430,6 +432,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- MCP `workbook_apply_changes_v2` keeps the session locked from staging through installation. It
+  released the session in between, so a recalculation, targeted calculation, or presentation edit
+  that ran in that gap failed the staged batch with `session.stale_result` or
+  `session.revision_mismatch`.
 - Node.js `previewChangesPage` continues from the `nextCursor` it returned instead of failing with
   `interop.preview.cursor_invalid`.
 - MCP rejects a workbook path that contains a `..` component with `mcp.path.invalid`. An input

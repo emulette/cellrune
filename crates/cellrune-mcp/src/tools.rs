@@ -758,14 +758,18 @@ through workbook_apply_changes_v2, and the content they cannot restore.",
         let worker_cancellation = edit_cancellation.clone();
         let expected_revision = args.expected_revision;
         let batch = args.batch;
+        // The worker keeps the session lock from preparation through installation, so no
+        // calculation or edit can make the prepared batch stale in between.
         let mut worker = tokio::task::spawn_blocking(move || {
-            workbook.blocking_lock().prepare_changes_cancellable(
+            let workbook = workbook.blocking_lock_owned();
+            let prepared = workbook.prepare_changes_cancellable(
                 expected_revision,
                 batch,
                 &worker_cancellation,
-            )
+            );
+            prepared.map(|prepared| (workbook, prepared))
         });
-        let prepared = tokio::select! {
+        let (mut workbook, prepared) = tokio::select! {
             joined = &mut worker => join_result(joined)?,
             () = cancellation.cancelled() => {
                 edit_cancellation.cancel();
@@ -774,10 +778,8 @@ through workbook_apply_changes_v2, and the content they cannot restore.",
             }
         };
         self.ensure_json_size(prepared.receipt())?;
-        let receipt = {
-            let mut workbook = handle.workbook().lock().await;
-            workbook.install_changes(prepared)?
-        };
+        let receipt = workbook.install_changes(prepared)?;
+        drop(workbook);
         self.sessions.touch(&args.session_id)?;
         Ok(Json(receipt))
     }
@@ -814,14 +816,18 @@ changed_table_ids includes the tables create_table and copy_sheet create.",
         let worker_cancellation = edit_cancellation.clone();
         let expected_revision = args.expected_revision;
         let batch = args.batch;
+        // The worker keeps the session lock from preparation through installation, so no
+        // calculation or edit can make the prepared batch stale in between.
         let mut worker = tokio::task::spawn_blocking(move || {
-            workbook.blocking_lock().prepare_changes_v2_cancellable(
+            let workbook = workbook.blocking_lock_owned();
+            let prepared = workbook.prepare_changes_v2_cancellable(
                 expected_revision,
                 batch,
                 &worker_cancellation,
-            )
+            );
+            prepared.map(|prepared| (workbook, prepared))
         });
-        let prepared = tokio::select! {
+        let (mut workbook, prepared) = tokio::select! {
             joined = &mut worker => join_result(joined)?,
             () = cancellation.cancelled() => {
                 edit_cancellation.cancel();
@@ -830,10 +836,8 @@ changed_table_ids includes the tables create_table and copy_sheet create.",
             }
         };
         self.ensure_json_size(prepared.receipt())?;
-        let receipt = {
-            let mut workbook = handle.workbook().lock().await;
-            workbook.install_changes_v2(prepared)?
-        };
+        let receipt = workbook.install_changes_v2(prepared)?;
+        drop(workbook);
         self.sessions.touch(&args.session_id)?;
         Ok(Json(receipt))
     }
