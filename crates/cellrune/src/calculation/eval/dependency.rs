@@ -406,7 +406,7 @@ impl Engine<'_> {
         shadow != CallableShadow::CyclicNonCallable
     }
 
-    fn shadowed_call_arguments_are_reachable(
+    pub(super) fn shadowed_call_arguments_are_reachable(
         &self,
         context: EvalContext<'_>,
         name: &str,

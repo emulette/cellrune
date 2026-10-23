@@ -30,6 +30,7 @@ mod formula_columns;
 mod materialization;
 mod name_graph;
 mod orchestration;
+mod pass_dependencies;
 mod recompile;
 mod reference;
 pub(in crate::calculation) mod static_impact;

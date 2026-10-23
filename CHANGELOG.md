@@ -436,6 +436,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- A full calculation that takes more than one pass resolves again, after each pass, only the
+  references of formulas that can follow values, such as `INDIRECT`, `OFFSET`, a range ending in
+  `INDEX`, `LET`, `LAMBDA`, a name, or a spill reference, and keeps the dependencies of the
+  others, unless the pass changed the array areas or the last collection reached
+  `max_dependency_edges`; results are the same.
 - A call whose omitted arguments take defaults, such as `IF` without its third argument, no
   longer copies its arguments each time it is evaluated: a formula or a `LAMBDA` whose calls are
   evaluated again, as in the function `MAP` and the other helpers invoke, keeps the prepared

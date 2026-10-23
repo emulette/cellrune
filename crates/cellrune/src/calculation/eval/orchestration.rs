@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use super::dependency::CollectedDependencies;
 use super::dependency_areas::AreaNodes;
 
 /// Passes a full calculation makes at most when references known only from values form chains.
@@ -114,6 +115,11 @@ impl<'workbook> Engine<'workbook> {
             // previous pass's values resolve, until a pass reads every formula after calculating
             // it.
             let undeclared_dynamic_arrays = engine.has_undeclared_dynamic_arrays(cancelled)?;
+            // A pass resolves again only the formulas whose targets can follow values, unless the
+            // array regions the other formulas' nodes were built with changed or the last
+            // collection limited formulas.
+            let value_dependent = engine.value_dependent_formulas(cancelled)?;
+            let mut collected_regions = engine.array_regions.clone();
             let mut passes = 0;
             loop {
                 engine.read_formula_before_calculation.set(false);
@@ -125,7 +131,23 @@ impl<'workbook> Engine<'workbook> {
                 if passes > 1 && (ordered || passes == MAX_DYNAMIC_REFERENCE_PASSES) {
                     break;
                 }
-                let next = engine.dependencies_cancellable(cancelled)?;
+                let next = if engine.dependency_limit_cells.is_empty()
+                    && engine.array_regions == collected_regions
+                    && engine.recollect_formulas(
+                        &mut collected.graph,
+                        &mut collected.areas,
+                        &value_dependent,
+                        cancelled,
+                    )? {
+                    CollectedDependencies {
+                        graph: std::mem::take(&mut collected.graph),
+                        areas: std::mem::take(&mut collected.areas),
+                        limited: BTreeSet::new(),
+                    }
+                } else {
+                    engine.dependencies_cancellable(cancelled)?
+                };
+                collected_regions.clone_from(&engine.array_regions);
                 // A first pass that read every formula in order already holds the results the
                 // resolved graph gives, unless that graph limits or cycles other formulas, or an
                 // undeclared spill, which each pass discovers again, could collide differently.

@@ -7,7 +7,7 @@ use crate::calculation::runtime::{CellId, Rect};
 use crate::calculation::scope::ArrayEvaluation;
 use crate::calculation::value::{ErrorKind, Value};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ArrayRegion {
     pub(super) anchor: CellId,
     pub(super) rect: Rect,
