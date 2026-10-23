@@ -103,9 +103,18 @@ fn sections_select_positive_negative_and_zero_layouts() {
 }
 
 #[test]
-fn unquoted_letters_in_a_zero_section_read_e_as_the_year() {
-    // Excel Online stores "z1900ro" for TEXT(0*-1,"0.00;-0.00;zero").
-    assert_text(-0.0, "0.00;-0.00;zero", "z1900ro");
+fn unquoted_letters_outside_the_earlier_subset_are_unsupported() {
+    // For TEXT(0*-1,"0.00;-0.00;zero") Excel Online stores "z1900ro" and Mac Excel 2021
+    // "z3333o": whether an unquoted letter is a code depends on the host.
+    assert_unsupported(-0.0, "0.00;-0.00;zero");
+    assert_unsupported(5.0, "abc");
+    assert_unsupported(-5.0, "0 \"x\";0 x");
+    assert_unsupported(5.0, "0 a/p;0");
+    assert_unsupported(46_230.0, "yyyy r");
+    assert_unsupported(3.0, "General x");
+    // The 0.1.26 subset showed them as written.
+    assert_text(5.0, "0 x", "5 x");
+    assert_text(5.0, "0 \"x\";0", "5 x");
 }
 
 #[test]
@@ -197,7 +206,18 @@ fn dates_follow_both_date_systems() {
     );
     assert_unsupported(-1.0, "yyyy");
     assert_unsupported(2_958_466.0, "yyyy");
-    assert_unsupported(46_230.0, "yyy");
+    assert_unsupported(46_230.0, "yyyyy");
+    assert_unsupported(46_230.0, "eee");
+}
+
+#[test]
+fn year_codes_follow_the_measured_lengths() {
+    // Excel 16.114 shows DATE(2024,1,15) with "y yyy ee" as "24 2024 2024" and with "e" as
+    // "2024" (excel-measure RESULTS.md, section B).
+    assert_text(45_306.0, "y yyy ee", "24 2024 2024");
+    assert_text(45_306.0, "e", "2024");
+    assert_text(45_306.0, "y", "24");
+    assert_text(45_306.0, "yyy", "2024");
 }
 
 #[test]

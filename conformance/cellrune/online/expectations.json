@@ -264,10 +264,11 @@
     "excel_rich_error": false
   },
   "curated:arithmetic:c019": {
-    "classification": "match",
+    "classification": "not_implemented",
     "excel_value": "z1900ro",
     "excel_type": "str",
-    "excel_rich_error": false
+    "excel_rich_error": false,
+    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
   },
   "curated:arithmetic:c020": {
     "classification": "match",

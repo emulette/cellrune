@@ -995,7 +995,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   shows a minus sign, and an empty section shows nothing. `[<=100]`-style
   conditions on the first two sections select a section for a non-negative
   number; colors such as `[Red]` are accepted and not shown. Quoted text,
-  `\x`, `[$symbol-lcid]` symbols, and characters other than codes are literal.
+  `\x`, `[$symbol-lcid]` symbols, and characters other than codes and letters
+  are literal. An unquoted letter that is not a code is shown as written only
+  in the one-section digit codes 0.1.26 formatted (`TEXT(5,"0 x")` is `5 x`)
+  and is otherwise `calculation.unsupported_expression`, because hosts read
+  such letters differently: for the zero section `zero` Excel Online stores
+  `z1900ro` and Mac Excel 2021 `z3333o`.
   Digit layouts use `0`, `#`, and `?` (a space when empty), `.`, `,` between
   integer placeholders for grouping, trailing `,` to divide by 1,000 each, `%`,
   `_x` as one space, literals between placeholders (`000-00-0000` fills digits
@@ -1016,8 +1021,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `calculation.unsupported_expression`. `General` shows a number of up to 11
   characters, minus sign included, as `&` does; a longer number, which Excel
   rounds or writes in scientific notation, and a nonzero magnitude below
-  0.001 are `calculation.unsupported_expression`. Date sections read `yy`,
-  `yyyy`, `e`, `m` through `mmmmm`, `d` through `dddd`, `h`, `hh`, minutes as
+  0.001 are `calculation.unsupported_expression`. Date sections read `y` and
+  `yy` as a two-digit year, `yyy`, `yyyy`, `e`, and `ee` as a four-digit year,
+  `m` through `mmmmm`, `d` through `dddd`, `h`, `hh`, minutes as
   `m`/`mm` after an hour or before a second, `s`, `ss`, `.0` to `.000`
   fractional seconds, `[h]`, `[m]`, `[s]`, `AM/PM`, and `A/P`, in the
   workbook's date system with serial 60 as 1900-02-29, rounded to the second

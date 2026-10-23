@@ -223,22 +223,16 @@ fn general_number(magnitude: f64, negative: bool) -> Result<String, ErrorKind> {
     Ok(text)
 }
 
-/// Returns the text a token shows in a section without digit placeholders.
+/// Returns the text a token shows in a section without digit placeholders. An unquoted letter is
+/// unsupported, because some hosts read letters other than the documented codes as codes: Excel
+/// Online stores `z1900ro` and Mac Excel 2021 `z3333o` for the section `zero`.
 fn literal_text(token: &Token) -> Result<String, ErrorKind> {
     match token {
         Token::Literal(text) => Ok(text.clone()),
-        Token::Letters { letter, text, .. } if !is_reserved_letter(*letter) => Ok(text.clone()),
         Token::Skip => Ok(" ".to_owned()),
         Token::Comma => Ok(",".to_owned()),
         Token::DecimalPoint => Ok(".".to_owned()),
         Token::Slash => Ok("/".to_owned()),
         _ => Err(ErrorKind::Unsupported),
     }
-}
-
-/// Letters that are never literal text outside a digit layout: the date and time codes, the `e`
-/// year, and the codes other locales and calendars read (`aaa` weekdays, `b` Buddhist years, and
-/// `g` eras), whose output has not been measured.
-const fn is_reserved_letter(letter: char) -> bool {
-    matches!(letter, 'd' | 'm' | 'y' | 'h' | 's' | 'e' | 'g' | 'b' | 'a')
 }

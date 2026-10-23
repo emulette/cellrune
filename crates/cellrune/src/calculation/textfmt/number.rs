@@ -39,7 +39,10 @@ pub(super) fn render(
     signed: bool,
     earlier_subset: bool,
 ) -> Result<String, ErrorKind> {
-    let items = tokens.iter().map(item).collect::<Result<Vec<_>, _>>()?;
+    let items = tokens
+        .iter()
+        .map(|token| item(token, earlier_subset))
+        .collect::<Result<Vec<_>, _>>()?;
     if items
         .iter()
         .any(|item| matches!(item, Item::Exponent { .. }))
@@ -52,16 +55,13 @@ pub(super) fn render(
     }
 }
 
-/// Reads a token inside a digit layout, where letters other than codes are literal text.
-fn item(token: &Token) -> Result<Item, ErrorKind> {
+/// Reads a token inside a digit layout. The 0.1.26 subset showed unquoted letters and `A/P` as
+/// written; in other codes they are unsupported, because some hosts read letters as codes.
+fn item(token: &Token, earlier_subset: bool) -> Result<Item, ErrorKind> {
     Ok(match token {
         Token::Literal(text) => Item::Literal(text.clone()),
-        Token::Letters { letter, text, .. }
-            if !matches!(letter, 'd' | 'm' | 'y' | 'h' | 's' | 'e' | 'g') =>
-        {
-            Item::Literal(text.clone())
-        }
-        Token::Meridiem(Meridiem::Letter { morning, evening }) => {
+        Token::Letters { text, .. } if earlier_subset => Item::Literal(text.clone()),
+        Token::Meridiem(Meridiem::Letter { morning, evening }) if earlier_subset => {
             Item::Literal(format!("{morning}/{evening}"))
         }
         Token::Skip => Item::Literal(" ".to_owned()),
