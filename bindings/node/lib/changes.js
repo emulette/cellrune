@@ -139,6 +139,76 @@ function serializeWorkbookChange(change, index) {
         ),
         new_name: requiredChangeString(change.newName, index, "newName"),
       };
+    case "insertRows":
+      requireNonNegativeInteger(change.row, `changes[${index}].row`);
+      requireNonNegativeInteger(change.count, `changes[${index}].count`);
+      return {
+        kind: "insert_rows",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        row: change.row,
+        count: change.count,
+      };
+    case "deleteRows":
+    case "deleteColumns":
+      requireNonNegativeInteger(change.first, `changes[${index}].first`);
+      requireNonNegativeInteger(change.last, `changes[${index}].last`);
+      return {
+        kind: change.kind === "deleteRows" ? "delete_rows" : "delete_columns",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        first: change.first,
+        last: change.last,
+      };
+    case "insertColumns":
+      requireNonNegativeInteger(change.column, `changes[${index}].column`);
+      requireNonNegativeInteger(change.count, `changes[${index}].count`);
+      return {
+        kind: "insert_columns",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        column: change.column,
+        count: change.count,
+      };
+    case "moveRows":
+    case "moveColumns":
+      requireNonNegativeInteger(change.first, `changes[${index}].first`);
+      requireNonNegativeInteger(change.last, `changes[${index}].last`);
+      requireNonNegativeInteger(
+        change.destination,
+        `changes[${index}].destination`,
+      );
+      return {
+        kind: change.kind === "moveRows" ? "move_rows" : "move_columns",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        first: change.first,
+        last: change.last,
+        destination: change.destination,
+      };
+    case "moveRange":
+      return {
+        kind: "move_range",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        source: requiredChangeString(change.source, index, "source"),
+        destination: requiredChangeString(
+          change.destination,
+          index,
+          "destination",
+        ),
+      };
+    case "copyRange":
+      return {
+        kind: "copy_range",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        source: requiredChangeString(change.source, index, "source"),
+        destination_sheet: optionalChangeString(
+          change.destinationSheet,
+          index,
+          "destinationSheet",
+        ),
+        destination: requiredChangeString(
+          change.destination,
+          index,
+          "destination",
+        ),
+      };
     case "setDateSystem":
       return {
         kind: "set_date_system",
@@ -293,6 +363,17 @@ const V2_CHANGE_KEYS = new Map([
   ],
   ["removeDefinedName", ["kind", "name", "scopeSheet"]],
   ["renameDefinedName", ["kind", "name", "scopeSheet", "newName"]],
+  ["insertRows", ["kind", "sheet", "row", "count"]],
+  ["deleteRows", ["kind", "sheet", "first", "last"]],
+  ["insertColumns", ["kind", "sheet", "column", "count"]],
+  ["deleteColumns", ["kind", "sheet", "first", "last"]],
+  ["moveRows", ["kind", "sheet", "first", "last", "destination"]],
+  ["moveColumns", ["kind", "sheet", "first", "last", "destination"]],
+  ["moveRange", ["kind", "sheet", "source", "destination"]],
+  [
+    "copyRange",
+    ["kind", "sheet", "source", "destinationSheet", "destination"],
+  ],
   ["setDateSystem", ["kind", "dateSystem"]],
   [
     "setCalculationHints",

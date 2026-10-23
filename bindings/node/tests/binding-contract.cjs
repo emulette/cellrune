@@ -616,6 +616,71 @@ const SURFACE_AUTHORING_FIXTURE = path.join(
   "surface-authoring.xlsx",
 );
 
+async function assertGridEdits() {
+  const workbook = Workbook.create();
+  for (let row = 1; row <= 5; row += 1) {
+    workbook.setNumber("Sheet1", `A${row}`, row);
+  }
+  workbook.setFormula("Sheet1", "B1", "=SUM(A1:A5)");
+  workbook.setFormula("Sheet1", "B2", "=A3*10");
+  const formula = (address) =>
+    workbook.readRange("Sheet1", address, address).cells[0].formula;
+
+  const receipt = workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "insertRows", sheet: "sheet1", row: 2, count: 2 },
+  ]);
+  assert.equal(receipt.topologyChanged, true);
+  assert.deepEqual([formula("B1"), formula("B4")], ["=SUM(A1:A7)", "=A5*10"]);
+  assert.deepEqual(receipt.inverse, {
+    changes: [{ kind: "deleteRows", sheet: "Sheet1", first: 2, last: 3 }],
+    unrestored: [],
+  });
+  workbook.applyChangesV2(
+    workbook.summary().semanticRevision,
+    receipt.inverse.changes,
+  );
+  assert.deepEqual([formula("B1"), formula("B2")], ["=SUM(A1:A5)", "=A3*10"]);
+
+  const copied = workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "copyRange", sheet: "Sheet1", source: "B2", destination: "C2:C3" },
+    {
+      kind: "moveColumns",
+      sheet: "Sheet1",
+      first: 3,
+      last: 3,
+      destination: 5,
+    },
+    { kind: "moveRows", sheet: "Sheet1", first: 5, last: 5, destination: 1 },
+    { kind: "moveRange", sheet: "Sheet1", source: "A2", destination: "G9" },
+  ]);
+  assert.ok(copied.inverse);
+  workbook.applyChangesV2(
+    workbook.summary().semanticRevision,
+    copied.inverse.changes,
+  );
+  assert.deepEqual([formula("B1"), formula("B2")], ["=SUM(A1:A5)", "=A3*10"]);
+  assert.equal(
+    workbook.applyChanges(workbook.summary().semanticRevision, [
+      { kind: "setValue", sheet: "Sheet1", address: "Z1", value: { kind: "number", value: 1 } },
+    ]).inverse,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      workbook.applyChanges(workbook.summary().semanticRevision, [
+        { kind: "moveRange", sheet: "Sheet1", source: "D1", destination: "A3" },
+      ]),
+    validationError("validation.moved_range_overwrites_references"),
+  );
+  assert.throws(
+    () =>
+      workbook.applyChangesV2(workbook.summary().semanticRevision, [
+        { kind: "insertRows", sheet: "Sheet1", row: 1, count: 1, extra: 1 },
+      ]),
+    (error) => error instanceof CellRuneError && error.code === "interop.input.invalid",
+  );
+}
+
 async function assertSurfaceAuthoring() {
   const bytes = fs.readFileSync(SURFACE_AUTHORING_FIXTURE);
   const workbook = await Workbook.fromBytes(bytes);
@@ -1046,6 +1111,7 @@ async function assertCsv() {
 
 async function main() {
   await assertSheetStructureChanges();
+  await assertGridEdits();
   await assertDeleteSheet();
   await assertSurfaceAuthoring();
   await assertRangeValues();

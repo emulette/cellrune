@@ -832,6 +832,65 @@ export type WorkbookChange =
       readonly newName: string;
     }
   | {
+      /** Inserts `count` empty rows before one-based `row`; references follow the moved cells. */
+      readonly kind: "insertRows";
+      readonly sheet: string;
+      readonly row: number;
+      readonly count: number;
+    }
+  | {
+      /** Deletes rows `first` through `last`; references to their cells become `#REF!`. */
+      readonly kind: "deleteRows";
+      readonly sheet: string;
+      readonly first: number;
+      readonly last: number;
+    }
+  | {
+      readonly kind: "insertColumns";
+      readonly sheet: string;
+      readonly column: number;
+      readonly count: number;
+    }
+  | {
+      readonly kind: "deleteColumns";
+      readonly sheet: string;
+      readonly first: number;
+      readonly last: number;
+    }
+  | {
+      /** Moves rows `first` through `last` so the first lands on `destination`. */
+      readonly kind: "moveRows";
+      readonly sheet: string;
+      readonly first: number;
+      readonly last: number;
+      readonly destination: number;
+    }
+  | {
+      readonly kind: "moveColumns";
+      readonly sheet: string;
+      readonly first: number;
+      readonly last: number;
+      readonly destination: number;
+    }
+  | {
+      /** Cuts the A1 `source` range and pastes it with its top-left cell at `destination`. */
+      readonly kind: "moveRange";
+      readonly sheet: string;
+      readonly source: string;
+      readonly destination: string;
+    }
+  | {
+      /**
+       * Copies the A1 `source` range onto `destination`, on `destinationSheet` or the same sheet,
+       * which repeats it a whole number of times; relative references shift.
+       */
+      readonly kind: "copyRange";
+      readonly sheet: string;
+      readonly source: string;
+      readonly destinationSheet?: string | null;
+      readonly destination: string;
+    }
+  | {
       readonly kind: "setDateSystem";
       readonly dateSystem: "excel_1900" | "excel_1904";
     }
@@ -943,6 +1002,36 @@ export interface EditReceipt {
   readonly createdSheetIds: readonly number[];
   readonly topologyChanged: boolean;
   readonly calculationMetadataChanged: boolean;
+  /**
+   * For a batch that inserted, deleted, or moved rows, columns, or ranges, or copied ranges: the
+   * `applyChangesV2` changes that undo it when applied as one batch, and what they cannot bring
+   * back. Absent for other batches and for one no changes can undo.
+   */
+  readonly inverse?: EditInverse;
+}
+
+export interface EditInverse {
+  readonly changes: readonly WorkbookChangeV2[];
+  readonly unrestored: readonly UnrestoredContent[];
+}
+
+export interface UnrestoredContent {
+  readonly kind:
+    | "merged_ranges"
+    | "data_validations"
+    | "hyperlinks"
+    | "comments"
+    | "hidden_rows"
+    | "auto_filter"
+    | "frozen_pane"
+    | "phonetics"
+    | "cell_formats"
+    | "formula_containers"
+    | "table"
+    | "preserved_content"
+    | "sheet";
+  readonly sheet: string | null;
+  readonly tableId: number | null;
 }
 
 export interface EditReceiptV2 extends EditReceipt {

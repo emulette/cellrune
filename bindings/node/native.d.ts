@@ -253,6 +253,8 @@ export interface NativeEditReceipt {
   createdSheetIds: Array<number>
   topologyChanged: boolean
   calculationMetadataChanged: boolean
+  /** The interop `EditInverseDto` as JSON, which the wrapper turns into Node.js changes. */
+  inverseJson?: string
 }
 
 export interface NativeEditReceiptV2 {
@@ -265,6 +267,8 @@ export interface NativeEditReceiptV2 {
   createdSheetIds: Array<number>
   topologyChanged: boolean
   calculationMetadataChanged: boolean
+  /** The interop `EditInverseDto` as JSON, which the wrapper turns into Node.js changes. */
+  inverseJson?: string
   changedTableIds: Array<number>
 }
 

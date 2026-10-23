@@ -154,6 +154,10 @@ exceeded a calculation limit names it in `limit`.
 empty cells, as address and value pairs, as compact rows, or as the longest prefix within a byte
 limit. `readValues(sheet, start, end)` reads a rectangle as rows of typed values, and
 `writeValues(sheet, start, rows)` writes equal-length rows of values as one atomic edit.
+`applyChanges` and `applyChangesV2` take the grid edits `insertRows`, `deleteRows`,
+`insertColumns`, `deleteColumns`, `moveRows`, `moveColumns`, `moveRange`, and `copyRange`, whose
+receipt's `inverse` holds the `applyChangesV2` changes that undo the batch and the `unrestored`
+content they cannot bring back.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
 README.

@@ -53,9 +53,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `WorkbookChange::rename_defined_name(scope, name, new_name)` renames a defined name and rewrites
   the uses that resolve to it, by Excel's scope rules, in cell formulas, defined names, table
   formulas, and data validations, and on save in preserved conditional formats, data validations,
-  x14 formulas, chart series, and pivot cache sources that read a workbook name. Removing a name
-  and adding it under a new one left those uses as `#NAME?`. A rename fails with the new `validation.unknown_defined_name` for a missing name and
-  `validation.defined_name_rename_shadowed` when the other scope already uses the new name.
+  x14 formulas, chart series, and pivot cache sources that read a workbook name. Removing a name and
+  adding it under a new one left those uses as `#NAME?`. A rename fails with the new
+  `validation.unknown_defined_name` for a missing name and `validation.defined_name_rename_shadowed`
+  when the other scope already uses the new name.
 - `WorkbookChange::create_table(SheetId, CellRange, Option<TableName>)` creates a table whose first
   row is its header, naming blank headers `Column1`, `Column2`, and so on, with Excel's default
   name `Table` and the number after the workbook's table count. Saving into the source package adds
@@ -118,15 +119,17 @@ inventories, and measurements belong in the linked documentation rather than in 
   off the grid becomes `#REF!`. Another shape fails with the new
   `validation.copy_destination_shape`, and a spill reference, legacy array formula, or data-table
   formula with the new `validation.copy_unsupported_formula`.
-- `EditReceipt::inverse()` returns, for a batch with these edits, an `EditInverse`: the changes
-  that undo the batch when applied as one batch to its result, and the `UnrestoredContent` they
-  cannot bring back by kind, sheet, and table; preserved package content a deletion or move
-  changes is listed. The engine keeps no undo stack, and a batch whose undo needs an edit Excel
-  refuses, such as deleting columns an insertion added inside a table, has no inverse. Interop and Python
-  receipts carry it as `inverse`, edit-schema-v2 `changes` and `unrestored`, and the MCP
-  `workbook_apply_changes` tools return it; interop edit schema v1, Python, and MCP accept the new
-  `insert_rows`, `delete_rows`, `insert_columns`, `delete_columns`, `move_rows`, `move_columns`,
-  `move_range`, and `copy_range` kinds.
+- `EditReceipt::inverse()` returns, for a batch with these edits, an `EditInverse`: the changes that
+  undo the batch when applied as one batch to its result, and the `UnrestoredContent` they cannot
+  bring back by kind, sheet, and table; preserved package content a deletion or move changes is
+  listed. The engine keeps no undo stack, and a batch whose undo needs an edit Excel refuses, such
+  as deleting columns an insertion added inside a table, has no inverse. Interop and Python receipts
+  carry it as `inverse`, edit-schema-v2 `changes` and `unrestored`, Node.js receipts as camel-case
+  `applyChangesV2` changes, and the MCP `workbook_apply_changes` tools return it; interop edit
+  schema v1, Python, and MCP accept the new `insert_rows`, `delete_rows`, `insert_columns`,
+  `delete_columns`, `move_rows`, `move_columns`, `move_range`, and `copy_range` kinds, and Node.js
+  `insertRows`, `deleteRows`, `insertColumns`, `deleteColumns`, `moveRows`, `moveColumns`,
+  `moveRange`, and `copyRange`.
 - Saving into the source package rewrites the edited worksheet's rows, cells, and dimension, its
   drawing anchors, notes, comments, and threaded comments, and the qualified references other
   sheets, charts, and pivot caches make to it. It fails with `xlsx.write.unsupported_preservation`
@@ -158,7 +161,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `read_range`, and Node.js `readRange` take optional forms: `omit_empty` leaves out empty cells,
   `values_only` returns address and value pairs in `values`, `compact` returns `rows` of values
   grouped by worksheet row, and `max_bytes` returns the longest prefix that fits, failing with the
-  new `interop.page.byte_limit_exceeded` code when not even one position does. Offset and limit
+  new `interop.page.byte_limit_exceeded` code when not even one position does; a Python
+  `max_bytes` that is not a non-negative integer fails with the new
+  `interop.page.byte_limit_invalid`. Offset and limit
   still count positions of the range, and a read without them returns the same page as before.
 - Node.js `calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an optional
   `signal` (`AbortSignal`) that cancels that call cooperatively; the Promise rejects with the

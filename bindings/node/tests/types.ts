@@ -254,6 +254,19 @@ async function check(): Promise<void> {
   reopened
     .applyChanges(reopened.summary().semanticRevision, structure)
     .createdSheetIds.map((sheetId) => sheetId.toFixed(0));
+  const gridEdits: readonly WorkbookChange[] = [
+    { kind: "insertRows", sheet: "Sheet1", row: 1, count: 1 },
+    { kind: "deleteColumns", sheet: "Sheet1", first: 9, last: 9 },
+    { kind: "moveRows", sheet: "Sheet1", first: 20, last: 20, destination: 30 },
+    { kind: "copyRange", sheet: "Sheet1", source: "A1", destination: "Z1:Z2" },
+  ];
+  const inverse = reopened.applyChanges(reopened.summary().semanticRevision, gridEdits).inverse;
+  if (inverse !== undefined) {
+    for (const content of inverse.unrestored) {
+      content.kind.toUpperCase();
+    }
+    reopened.applyChangesV2(reopened.summary().semanticRevision, inverse.changes);
+  }
   const tables: readonly WorkbookChangeV2[] = [
     { kind: "createTable", sheet: "Sheet1", range: "D1:E3", name: "Scores" },
     { kind: "createTable", sheet: "Sheet1", range: "G1:H3" },

@@ -174,6 +174,8 @@ pub struct NativeEditReceipt {
     pub created_sheet_ids: Vec<u32>,
     pub topology_changed: bool,
     pub calculation_metadata_changed: bool,
+    /// The interop `EditInverseDto` as JSON, which the wrapper turns into Node.js changes.
+    pub inverse_json: Option<String>,
 }
 
 #[napi(object)]
@@ -187,6 +189,8 @@ pub struct NativeEditReceiptV2 {
     pub created_sheet_ids: Vec<u32>,
     pub topology_changed: bool,
     pub calculation_metadata_changed: bool,
+    /// The interop `EditInverseDto` as JSON, which the wrapper turns into Node.js changes.
+    pub inverse_json: Option<String>,
     pub changed_table_ids: Vec<u32>,
 }
 
@@ -390,6 +394,9 @@ pub(crate) fn edit_receipt(value: EditReceiptDto) -> NativeEditReceipt {
         created_sheet_ids: value.created_sheet_ids,
         topology_changed: value.topology_changed,
         calculation_metadata_changed: value.calculation_metadata_changed,
+        inverse_json: value.inverse.as_ref().map(|inverse| {
+            serde_json::to_string(inverse).expect("an edit inverse DTO serializes as JSON")
+        }),
     }
 }
 
@@ -405,6 +412,7 @@ pub(crate) fn edit_receipt_v2(value: EditReceiptV2Dto) -> NativeEditReceiptV2 {
         created_sheet_ids: receipt.created_sheet_ids,
         topology_changed: receipt.topology_changed,
         calculation_metadata_changed: receipt.calculation_metadata_changed,
+        inverse_json: receipt.inverse_json,
         changed_table_ids: value.changed_table_ids,
     }
 }

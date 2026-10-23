@@ -411,7 +411,48 @@ function normalizeEditReceipt(receipt) {
     createdSheetIds: receipt.createdSheetIds,
     topologyChanged: receipt.topologyChanged,
     calculationMetadataChanged: receipt.calculationMetadataChanged,
+    ...(receipt.inverseJson === null || receipt.inverseJson === undefined
+      ? {}
+      : { inverse: normalizeEditInverse(JSON.parse(receipt.inverseJson)) }),
   };
+}
+
+/**
+ * Turns an interop edit inverse into Node.js `applyChangesV2` changes: each change's kind and
+ * every field name become camel case, and values keep their spelling.
+ */
+function normalizeEditInverse(inverse) {
+  requireObject(inverse, "edit inverse");
+  return {
+    changes: inverse.changes.map((change) => ({
+      ...camelCaseKeys(change),
+      kind: camelCase(change.kind),
+    })),
+    unrestored: inverse.unrestored.map((content) => ({
+      kind: content.kind,
+      sheet: content.sheet ?? null,
+      tableId: content.table_id ?? null,
+    })),
+  };
+}
+
+function camelCaseKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(camelCaseKeys);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [
+      camelCase(key),
+      camelCaseKeys(field),
+    ]),
+  );
+}
+
+function camelCase(name) {
+  return name.replace(/_([a-z0-9])/g, (_, letter) => letter.toUpperCase());
 }
 
 function normalizeEditReceiptV2(receipt) {
