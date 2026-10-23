@@ -2916,13 +2916,50 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 }
 
 #[test]
-fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
-    // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
-    // totals, conditional aggregates, lookups, dynamic references, spills, and cycles, in batches
-    // of one to three changes. After every batch the session's automatic recalculation must
-    // equal a fresh full one.
-    for seed in 1..=8_u64 {
-        let mut random = Lcg(seed);
+fn random_static_edit_sequences_match_a_fresh_full_calculation_and_stay_incremental() {
+    let modes = random_edit_sequences(EditProfile::Static, 1..=8);
+    // Formula edits recompile in place, value edits recalculate their dependents, and both stay
+    // incremental.
+    assert!(
+        modes.contains_key("Incremental/DirtySubset/parsed"),
+        "no in-place formula recompilation: {modes:?}"
+    );
+    assert!(
+        modes.contains_key("Incremental/DirtySubset/unparsed"),
+        "no incremental value edit: {modes:?}"
+    );
+}
+
+#[test]
+fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
+    let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108);
+    assert!(
+        modes.contains_key("Full/DynamicTopology/parsed")
+            || modes.contains_key("Full/DynamicTopology/unparsed"),
+        "no recalculation of a workbook with dynamic references: {modes:?}"
+    );
+}
+
+/// Which formulas a generated edit sequence writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditProfile {
+    /// References incremental calculation follows, undefined and changing names, unknown
+    /// functions, parse failures, and cycles.
+    Static,
+    /// The static formulas, `OFFSET` with constant and cell positions, ranges ending in `INDEX`,
+    /// spill references, and `SEQUENCE` with and without a declared spill range.
+    Dynamic,
+}
+
+/// Edits a 12-by-24 grid on two sheets for each seed, in batches of one to three changes, up to
+/// four batches before each automatic recalculation, and checks every recalculation against a
+/// fresh full calculation. Returns how often each mode, reason, and parsing ran.
+fn random_edit_sequences(
+    profile: EditProfile,
+    seeds: std::ops::RangeInclusive<u64>,
+) -> std::collections::BTreeMap<String, usize> {
+    let mut modes = std::collections::BTreeMap::new();
+    for seed in seeds {
         let mut session = WorkbookCalculationSession::create();
         let first = SheetId::new(1).expect("constant sheet ID");
         let second = session
@@ -2934,10 +2971,18 @@ fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
             )
             .expect("second sheet")
             .created_sheet_ids()[0];
-        let sheets = [first, second];
-        let mut initial = Vec::new();
+        let mut generator = EditGenerator {
+            random: Lcg(seed),
+            sheets: [first, second],
+            profile,
+            nb_defined: true,
+        };
+        let mut initial = vec![
+            WorkbookChange::set_defined_name(defined_name("NA", "Sheet1!$A$1:$A$8")),
+            WorkbookChange::set_defined_name(defined_name("NB", "Data!$B$2")),
+        ];
         for _ in 0..120 {
-            initial.push(random_change(&mut random, sheets));
+            initial.push(generator.cell_change());
         }
         session
             .apply_changes(
@@ -2945,9 +2990,9 @@ fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
                 EditBatch::new(initial),
             )
             .expect("generated workbook");
-        for step in 0..60 {
-            let changes = (0..=random.below(3))
-                .map(|_| random_change(&mut random, sheets))
+        for step in 0..80 {
+            let changes = (0..=generator.random.below(3))
+                .map(|_| generator.change())
                 .collect::<Vec<_>>();
             session
                 .apply_changes(
@@ -2955,27 +3000,41 @@ fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
                     EditBatch::new(changes),
                 )
                 .expect("generated edit");
-            session
+            if step % 4 != 3 && generator.random.below(3) == 0 {
+                continue;
+            }
+            let delta = session
                 .recalculate(
                     RecalculationMode::Auto,
                     CalculationOptions::default(),
                     CancellationToken::new(),
                 )
                 .unwrap_or_else(|error| panic!("seed {seed}, step {step}: {error}"));
+            let parsed = if delta.parsed_formula_count() == 0 {
+                "unparsed"
+            } else {
+                "parsed"
+            };
+            *modes
+                .entry(format!("{:?}/{:?}/{parsed}", delta.mode(), delta.reason()))
+                .or_insert(0) += 1;
             let full = calculate_workbook(session.workbook(), CalculationOptions::default());
             let calculation = session.calculation().expect("installed calculation");
             assert_eq!(
                 calculation.cells().collect::<Vec<_>>(),
                 full.cells().collect::<Vec<_>>(),
-                "seed {seed}, step {step}",
+                "seed {seed}, step {step}, {:?}",
+                delta.reason(),
             );
             assert_eq!(
                 calculation.materialized_cells().collect::<Vec<_>>(),
                 full.materialized_cells().collect::<Vec<_>>(),
-                "seed {seed}, step {step}",
+                "seed {seed}, step {step}, {:?}",
+                delta.reason(),
             );
         }
     }
+    modes
 }
 
 /// A linear congruential generator, so every run edits the same cells.
@@ -3000,60 +3059,108 @@ impl Lcg {
     }
 }
 
-fn random_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
-    let sheet = sheets[random.below(2) as usize];
-    let target = CellAddress::from_a1(&random.cell()).expect("valid generated address");
-    let value = match random.below(10) {
-        0 => return WorkbookChange::clear_cell(sheet, target),
-        1 => CellValue::Text(["k1", "k2", "K1", " 3 "][random.below(4) as usize].to_owned()),
-        2 => CellValue::Logical(random.below(2) == 0),
-        3 | 4 => number(f64::from(random.below(10))),
-        _ => {
-            let (a, b, column) = (random.cell(), random.cell(), random.column());
-            let (top, bottom) = (random.below(12) + 1, random.below(12) + 13);
-            if random.below(15) == 0 {
-                let declared = random.below(2) == 0;
-                let range = declared.then(|| {
-                    CellRange::new(
-                        target,
-                        CellAddress::from_indices(target.row().get() + 2, target.column().get())
-                            .expect("valid spill end"),
-                    )
-                    .expect("declared range")
-                });
-                return WorkbookChange::set_cell_dynamic_formula(
-                    sheet,
-                    target,
-                    formula(&format!("SEQUENCE(3,1,{a})")),
-                    range,
-                )
-                .expect("dynamic formula");
-            }
-            let text = match random.below(16) {
-                12 => format!("OFFSET({a},{},0)", random.below(3)),
-                13 => format!("SUM(A1:INDEX(A1:A24,{}))", random.below(24) + 1),
-                14 => format!("OFFSET(A1,{b},1)"),
-                15 => format!("SUM({column}{top}#)"),
-                0 => format!("{a}+{b}"),
-                1 => format!("{a}*2-{b}"),
-                2 => format!("SUM({column}{top}:{column}{bottom})"),
-                3 => format!("SUM(${column}$1:{column}{bottom})"),
-                4 => format!(
-                    "SUMIFS({column}1:{column}24,A1:A24,\"k1\",B1:B24,{})",
-                    random.below(5)
-                ),
-                5 => format!("COUNTIFS(A1:A24,\"K1\",C1:C24,{})", random.below(5)),
-                6 => format!("IF({a}>4,{b},{a})"),
-                7 => format!("AVERAGE({column}{top}:{column}{bottom})"),
-                8 => format!("IFERROR(VLOOKUP({a},A1:D24,2,FALSE),-1)"),
-                9 => format!("Data!{a}+{b}"),
-                10 => format!("MAX(A{top}:H{bottom})"),
-                _ => format!("COUNTIF(B1:B24,{a})"),
-            };
-            return WorkbookChange::set_cell_formula(sheet, target, formula(&text));
+struct EditGenerator {
+    random: Lcg,
+    sheets: [SheetId; 2],
+    profile: EditProfile,
+    /// Whether the workbook defines `NB`, which formulas read as an undefined name otherwise.
+    nb_defined: bool,
+}
+
+impl EditGenerator {
+    /// A cell edit, or now and then a change to the names `NA` and `NB`.
+    fn change(&mut self) -> WorkbookChange {
+        if self.random.below(30) != 0 {
+            return self.cell_change();
         }
-    };
-    WorkbookChange::set_cell_value(sheet, target, value)
+        let sheet = ["Sheet1", "Data"][self.random.below(2) as usize];
+        let (column, top) = (self.random.column(), self.random.below(16) + 1);
+        match self.random.below(3) {
+            0 => WorkbookChange::set_defined_name(defined_name(
+                "NA",
+                &format!("{sheet}!${column}${top}:${column}${}", top + 7),
+            )),
+            1 if self.nb_defined => {
+                self.nb_defined = false;
+                WorkbookChange::remove_defined_name(DefinedNameScope::Workbook, "NB")
+            }
+            _ => {
+                self.nb_defined = true;
+                WorkbookChange::set_defined_name(defined_name(
+                    "NB",
+                    &format!("{sheet}!${column}${top}"),
+                ))
+            }
+        }
+    }
+
+    fn cell_change(&mut self) -> WorkbookChange {
+        let random = &mut self.random;
+        let sheet = self.sheets[random.below(2) as usize];
+        let target = CellAddress::from_a1(&random.cell()).expect("valid generated address");
+        let value = match random.below(10) {
+            0 => return WorkbookChange::clear_cell(sheet, target),
+            1 => CellValue::Text(["k1", "k2", "K1", " 3 "][random.below(4) as usize].to_owned()),
+            2 => CellValue::Logical(random.below(2) == 0),
+            3 | 4 => number(f64::from(random.below(10))),
+            _ => {
+                let (a, b, column) = (random.cell(), random.cell(), random.column());
+                let (top, bottom) = (random.below(12) + 1, random.below(12) + 13);
+                let dynamic = self.profile == EditProfile::Dynamic;
+                if dynamic && random.below(15) == 0 {
+                    let declared = random.below(2) == 0;
+                    let range = declared.then(|| {
+                        CellRange::new(
+                            target,
+                            CellAddress::from_indices(
+                                target.row().get() + 2,
+                                target.column().get(),
+                            )
+                            .expect("valid spill end"),
+                        )
+                        .expect("declared range")
+                    });
+                    return WorkbookChange::set_cell_dynamic_formula(
+                        sheet,
+                        target,
+                        formula(&format!("SEQUENCE(3,1,{a})")),
+                        range,
+                    )
+                    .expect("dynamic formula");
+                }
+                let text = match random.below(if dynamic { 23 } else { 19 }) {
+                    0 => format!("{a}+{b}"),
+                    1 => format!("{a}*2-{b}"),
+                    2 => format!("SUM({column}{top}:{column}{bottom})"),
+                    3 => format!("SUM(${column}$1:{column}{bottom})"),
+                    4 => format!(
+                        "SUMIFS({column}1:{column}24,A1:A24,\"k1\",B1:B24,{})",
+                        random.below(5)
+                    ),
+                    5 => format!("COUNTIFS(A1:A24,\"K1\",C1:C24,{})", random.below(5)),
+                    6 => format!("IF({a}>4,{b},{a})"),
+                    7 => format!("AVERAGE({column}{top}:{column}{bottom})"),
+                    8 => format!("IFERROR(VLOOKUP({a},A1:D24,2,FALSE),-1)"),
+                    9 => format!("Data!{a}+{b}"),
+                    10 => format!("MAX(A{top}:H{bottom})"),
+                    11 => format!("COUNTIF(B1:B24,{a})"),
+                    12 => format!("NB*3+{a}"),
+                    13 => format!("SUM(NA)+COUNT(NA)*{a}"),
+                    14 => format!("FOOBAR({a})"),
+                    15 => format!("IF({a}>4,{b},FOOBAR())"),
+                    16 => format!("SUM(({a}"),
+                    17 => format!("ISFORMULA({a})+N({b})"),
+                    18 => format!("{a}-1"),
+                    19 => format!("OFFSET({a},{},0)", random.below(3)),
+                    20 => format!("SUM(A1:INDEX(A1:A24,{}))", random.below(24) + 1),
+                    21 => format!("OFFSET(A1,{b},1)"),
+                    _ => format!("SUM({column}{top}#)"),
+                };
+                return WorkbookChange::set_cell_formula(sheet, target, formula(&text));
+            }
+        };
+        WorkbookChange::set_cell_value(sheet, target, value)
+    }
 }
 
 #[test]
