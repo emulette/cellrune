@@ -188,22 +188,49 @@ inventories, and measurements belong in the linked documentation rather than in 
   totals; 3-D references, a missing `k`, and out-of-range arguments are `#VALUE!`. `SUBTOTAL` is
   unchanged. With these and the other functions added in 0.1.27, the catalog has 495 official
   names and 496 accepted entries.
-- The functions added in 0.1.27 follow Excel 16.114 for Mac measurements at their edges, and
-  inputs Excel was not measured on still report `calculation.unsupported_expression`.
-  `FREQUENCY` keeps the given bin order and leaves text and blank bins out of the result;
-  `CHISQ.TEST` and `CHITEST` accept equal counts in different shapes, drop pairs with text, and
-  return `#DIV/0!` for an expected 0 and `#NUM!` for a negative one; `CUMIPMT` and `CUMPRINC`
-  accept beginning-of-period payments and a start such as 1.5, and keep their digits at small
-  rates; `VDB` accepts fractional periods and returns `#NUM!` for an end after the life;
-  `AMORDEGRC` and `AMORLINC` cover the end of the life, truncate the basis and period, and return
-  `#NUM!` for basis 2, a rate of 0, a negative period, or a purchase after the first period;
-  `BAHTTEXT` spells zero, negative, sub-baht, and rounded amounts and every final one after a
-  higher digit as เอ็ด; `CELL` returns the row of a range, 0 for an empty cell's contents, and `"l"`
-  for a formula's text result, in any info-type case; `IMTAN` and `IMCOT` keep their digits near a
-  real pole, `IMCOT`, `IMCSC`, and `IMCSCH` return `#NUM!` at zero, and results past an overflow
-  that underflow return their limit. `ENCODEURL` encodes only the characters Microsoft documents
-  and is stored as `_xlfn.ENCODEURL`, and `SKEW`, `SKEW.P`, and `KURT` count both passes over
-  their numbers toward `max_function_iterations`.
+- `FREQUENCY` and `MODE.MULT` spill one column. `FREQUENCY` counts the numbers at or below each
+  bin and above the next lower one, in the given bin order, then those above the highest bin;
+  text and blank bins add no row, a logical value in a data array constant is ignored, and an
+  error in the data is the whole result, as in Excel. Logical values elsewhere, errors in the bins
+  or of two kinds in the data, and equal bins out of order report
+  `calculation.unsupported_expression`. `MODE.MULT` returns every most frequent number in
+  first-occurrence order, and `#N/A` when none repeats.
+- `CHISQ.TEST` (and `CHITEST`), `CHISQ.INV`, and `CHISQ.INV.RT` (and `CHIINV`) calculate the
+  chi-square test and both quantiles with Microsoft's argument errors; the right tail is inverted
+  directly so tiny probabilities keep their precision. As in Excel, the test accepts tables whose
+  counts match in any shape, takes the degrees of freedom from the first table's shape, drops
+  pairs with text, and returns `#DIV/0!` for an expected 0 and `#NUM!` for a negative one; blanks,
+  logical values, and errors in the tables report `calculation.unsupported_expression`.
+- `CUMIPMT` and `CUMPRINC` total the interest or principal of end- or beginning-of-period level
+  payments from closed forms that keep their digits at small rates, and `VDB` totals
+  declining-balance depreciation with the switch to straight line, with Microsoft's argument
+  errors and `#NUM!` for a `VDB` end period after the life. A `CUMIPMT` or `CUMPRINC` start of 1.5
+  counts as period 2, and `VDB` takes fractional periods as Excel does while they stay on the
+  declining balance; other fractional periods report `calculation.unsupported_expression`.
+- `AMORLINC` and `AMORDEGRC` calculate French accounting depreciation with the prorated first
+  period, Microsoft's `AMORDEGRC` coefficients and whole-number rounding, and Excel's results
+  through the end of the life of Microsoft's example. They return `#NUM!` for a salvage above
+  cost, basis 2 or 5, a rate of 0, a negative period, a purchase after the first period, or an
+  `AMORDEGRC` life below 3 or between 4 and 5 years, and 0 from period 1 on for a salvage equal to
+  the cost. An `AMORDEGRC` period between 0 and 1, a purchase on the first period's end, other end
+  periods, and other undocumented edges report `calculation.unsupported_expression`.
+- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, and `IMCSCH` return
+  complex text like the other complex functions, `#VALUE!` for a logical inumber, and `#NUM!` at
+  the pole zero. `IMTAN` and `IMCOT` keep their digits near a real pole, and a bounded result past
+  an overflow is its limit once the rest underflows (`IMTAN("1+400i")` is `i`); before that it
+  reports `calculation.unsupported_expression`.
+- `ENCODEURL` keeps ASCII letters, digits, and `.` and encodes `:`, `/`, and the space, as
+  Microsoft documents; text with other characters reports `calculation.unsupported_expression`.
+  Authored `ENCODEURL` formulas are stored as `_xlfn.ENCODEURL`.
+- `CELL` returns the `"address"`, `"contents"`, `"row"`, `"col"`, and `"type"` information defined
+  by the workbook alone, as Excel does for a range's row, an empty cell's contents (0), a formula's
+  text result (`"l"`), and an info type in any case. Formatting, width, protection, and file-name
+  info types, an omitted or empty reference, another sheet's address, and a range's `"col"` or
+  `"type"` report `calculation.unsupported_expression`.
+- `BAHTTEXT` reads amounts as Thai baht text as Excel does, including zero, negative amounts,
+  amounts below one baht, rounding to the nearest satang, and เอ็ด for every final one after a
+  higher digit; a half satang whose direction depends on the rounding rule reports
+  `calculation.unsupported_expression`.
 
 ### Changed
 
