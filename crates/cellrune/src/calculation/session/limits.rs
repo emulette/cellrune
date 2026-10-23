@@ -157,7 +157,9 @@ impl SessionLimits {
         self.max_rewrite_source_edits
     }
 
-    /// Replaces the cumulative table-resize materialization-cell limit.
+    /// Replaces the cumulative limit on the cells one edit batch materializes: the worksheet cells a
+    /// table resize inspects and the cell formats a row or column insertion copies into the lines
+    /// it adds.
     ///
     /// # Errors
     ///
@@ -173,7 +175,8 @@ impl SessionLimits {
         Ok(self)
     }
 
-    /// Returns the maximum worksheet cells inspected for table materialization by one edit batch.
+    /// Returns the maximum cells one edit batch materializes for table resizes and the cell
+    /// formats insertions copy.
     pub const fn max_table_materialized_cells(self) -> usize {
         self.max_table_materialized_cells
     }

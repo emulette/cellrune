@@ -237,7 +237,7 @@ These codes come from the `cellrune` crate. Interop, Python, Node.js, and MCP re
 | `session.delta_page_limit_exceeded` | A requested delta page exceeded its configured limit. |
 | `session.cancelled` | Cooperative cancellation stopped a calculation before installation. |
 | `session.formula_rewrite_limit_exceeded` | A whole-workbook typed formula rewrite exceeded its configured budget. |
-| `session.table_materialization_limit_exceeded` | A table resize exceeded its configured worksheet-materialization budget. |
+| `session.table_materialization_limit_exceeded` | A table resize, or the cell formats a row or column insertion copies into the added lines, exceeded the configured worksheet-materialization budget. |
 | `session.transaction_consumed` | A completed transaction was already installed, discarded, or found stale. |
 | `session.transaction_cursor_invalid` | A transaction detail cursor belongs to another report or section. |
 | `session.transaction_detail_limit_exceeded` | A transaction report exceeded its configured retained-detail budget. |

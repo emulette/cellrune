@@ -75,8 +75,12 @@ impl<'a> TableMaterializationBudget<'a> {
     }
 
     pub(crate) fn charge_cell(&mut self) -> Result<(), TableMaterializationError> {
+        self.charge_cells(1)
+    }
+
+    pub(crate) fn charge_cells(&mut self, cells: usize) -> Result<(), TableMaterializationError> {
         self.check_cancelled()?;
-        let actual = self.cells.saturating_add(1);
+        let actual = self.cells.saturating_add(cells);
         if actual > self.limit {
             return Err(TableMaterializationError::LimitExceeded {
                 limit: self.limit,

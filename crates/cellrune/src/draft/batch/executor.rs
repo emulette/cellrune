@@ -907,6 +907,7 @@ impl WorkbookDraft {
                             history: records_history
                                 .then(|| grid_histories.entry(sheet_id).or_default()),
                             budget: rewrite_budget,
+                            materialization: materialization_budget,
                         },
                         sheet_id,
                         edit,

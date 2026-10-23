@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::DraftCellMutationStore;
 use super::staged::mark_upsert;
-use super::{BatchExecutionError, WorkbookChange};
+use super::{BatchExecutionError, TableMaterializationBudget, WorkbookChange};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteRequest, rewrite_formula,
 };
@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// The staged draft state a structural edit changes.
-pub(super) struct GridEditState<'a, 'cancel> {
+pub(super) struct GridEditState<'a, 'cancel, 'materialize> {
     pub(super) sheets: &'a mut [Sheet],
     pub(super) defined_names: &'a mut [DefinedName],
     pub(super) presentation: &'a mut DocumentPresentation,
@@ -33,6 +33,8 @@ pub(super) struct GridEditState<'a, 'cancel> {
     /// replays on the preserved part.
     pub(super) history: Option<&'a mut GridHistory>,
     pub(super) budget: &'a mut FormulaRewriteBudget<'cancel>,
+    /// Charged for the cell formats an insertion copies into the lines it adds.
+    pub(super) materialization: &'a mut TableMaterializationBudget<'materialize>,
 }
 
 /// What a structural edit changed outside the edited sheet's cells.
@@ -48,7 +50,7 @@ pub(super) struct GridEditOutcome {
 /// edited sheet's cells and structures move, and the draft's per-cell bookkeeping moves with
 /// them.
 pub(super) fn apply_grid_edit(
-    state: GridEditState<'_, '_>,
+    state: GridEditState<'_, '_, '_>,
     sheet_id: SheetId,
     edit: GridEdit,
 ) -> Result<GridEditOutcome, BatchExecutionError> {
@@ -65,6 +67,7 @@ pub(super) fn apply_grid_edit(
         changed_table_ids,
         history,
         budget,
+        materialization,
     } = state;
     let index = sheets
         .iter()
@@ -73,6 +76,7 @@ pub(super) fn apply_grid_edit(
             value: sheet_id.get(),
         })?;
     validate_sheet(&sheets[index], edit)?;
+    materialization.charge_cells(presentation.inherited_format_cells(sheet_id, edit))?;
     let name = sheets[index].name().as_str().to_owned();
     let change = |host_is_sheet| {
         FormulaRewriteRequest::Grid(GridChange {

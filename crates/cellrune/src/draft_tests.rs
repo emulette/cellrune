@@ -802,6 +802,49 @@ fn table_resize_materialization_limit_fails_before_installation() {
 }
 
 #[test]
+fn formats_an_insertion_copies_count_against_the_materialization_limit() {
+    let mut draft = WorkbookDraft::new();
+    let sheet = draft.workbook().sheets()[0].id();
+    let bold = crate::CellFormatEdit::new().with_font(crate::FontEdit::new().with_bold(true));
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_format(sheet, address("A1"), bold.clone()),
+            WorkbookChange::set_cell_format(sheet, address("B1"), bold),
+        ]))
+        .expect("formats");
+    let limits = SessionLimits::default()
+        .with_table_materialization_limit(5)
+        .expect("limits");
+    let mut session = WorkbookCalculationSession::with_limits(draft, limits);
+    let insert = |count| {
+        EditBatch::new([
+            WorkbookChange::insert_rows(sheet, Row::new(2).expect("row"), count).expect("insert"),
+        ])
+    };
+    let revision = session.workbook().semantic_revision();
+    let error = session
+        .apply_changes(revision, insert(3))
+        .expect_err("two formatted cells copied into three rows exceed five");
+    assert!(matches!(
+        error,
+        ApplyChangesError::Session(ref error)
+            if error.code() == SessionErrorCode::TableMaterializationLimitExceeded
+    ));
+    assert_eq!(session.workbook().semantic_revision(), revision);
+    session
+        .apply_changes(revision, insert(2))
+        .expect("four copied formats fit");
+    assert!(
+        session
+            .draft()
+            .cell_format(sheet, address("B3"))
+            .expect("B3")
+            .font()
+            .bold()
+    );
+}
+
+#[test]
 fn table_column_rename_preserves_annotation_and_exact_change_ledger_invariants() {
     let table_id = TableId::new(1).expect("table ID");
     let column_id = TableColumnId::new(2).expect("column ID");

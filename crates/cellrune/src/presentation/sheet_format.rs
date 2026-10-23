@@ -84,6 +84,22 @@ impl SheetFormats {
 }
 
 impl SheetFormats {
+    /// Returns how many cell formats an insertion copies into the lines it adds: the formatted
+    /// cells of the line before them, once per added line.
+    pub(crate) fn inherited_cell_count(&self, edit: GridEdit) -> usize {
+        let (GridEdit::Insert { at, count, .. }, Some(axis)) = (edit, edit.line_axis()) else {
+            return 0;
+        };
+        if at <= 1 {
+            return 0;
+        }
+        self.cell_formats
+            .keys()
+            .filter(|address| axis.of(**address) == at - 1)
+            .count()
+            .saturating_mul(count as usize)
+    }
+
     /// Moves column widths, row heights, and edited cell formats through a structural edit.
     /// Lines an insertion adds take the width, height, and cell formats of the line before them.
     pub(crate) fn apply_grid_edit(&mut self, edit: GridEdit) {
@@ -357,6 +373,14 @@ impl DocumentPresentation {
             formats.cell_formats.insert(address, format);
         });
         Ok(true)
+    }
+
+    /// Returns how many cell formats a structural edit of sheet `sheet_id` copies into the lines
+    /// it inserts.
+    pub(crate) fn inherited_format_cells(&self, sheet_id: SheetId, edit: GridEdit) -> usize {
+        self.formats
+            .get(&sheet_id)
+            .map_or(0, |formats| formats.inherited_cell_count(edit))
     }
 
     /// Moves one sheet's column widths, row heights, and edited cell formats through a

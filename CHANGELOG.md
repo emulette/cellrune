@@ -101,8 +101,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   insertion at a range's first line moves it and one inside it widens it; a moved range follows
   its ends. 3-D references, `INDIRECT` text, and internal hyperlink locations keep their text.
   Merged ranges, tables, autoFilters, conditional formats, data validations, comments,
-  hyperlinks, spill and array ranges, row heights, and column widths move with their cells. An
-  edit fails with the new `validation.structural_edit_empty`,
+  hyperlinks, spill and array ranges, row heights, and column widths move with their cells, and
+  inserted lines take the cell formats of the line before them; in a calculation session those
+  copied formats count against the table materialization limit
+  (`session.table_materialization_limit_exceeded`). An edit fails with the new `validation.structural_edit_empty`,
   `validation.content_shifted_off_sheet`, `validation.merged_range_split`,
   `validation.table_header_shift`, `validation.table_data_rows_deleted`, or
   `validation.table_split` where Excel refuses it.
