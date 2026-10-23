@@ -497,6 +497,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- A custom number format whose code is `General`, as Numbers declares the built-in format 0,
+  reads as General instead of a date format, and saving an edit of a workbook Numbers exported no
+  longer fails with `xlsx.write.output_verification_failed`.
 - Saving a draft whose dynamic-array formula was set without a declared range writes the spill
   range the calculation resolved as the anchor's `ref`, as Excel does. It was written as
   `<f t="array">` without `ref`, so on reopening, in CellRune or Excel, the spilled values were

@@ -253,6 +253,8 @@ fn built_in_format(id: u32) -> (Option<&'static str>, NumberFormatKind) {
     }
 }
 
+const GENERAL: &str = "General";
+
 fn classify_custom_format(code: &str) -> NumberFormatKind {
     let mut escaped = false;
     let mut quoted = false;
@@ -260,7 +262,19 @@ fn classify_custom_format(code: &str) -> NumberFormatKind {
     let mut has_date = false;
     let mut has_time = false;
     let mut has_month = false;
-    for character in code.chars() {
+    let mut characters = code.char_indices();
+    while let Some((index, character)) = characters.next() {
+        // `General` is a keyword, not the letters of date and time codes.
+        if !escaped
+            && !quoted
+            && bracket.is_none()
+            && code
+                .get(index..index + GENERAL.len())
+                .is_some_and(|word| word.eq_ignore_ascii_case(GENERAL))
+        {
+            characters.nth(GENERAL.len() - 2);
+            continue;
+        }
         if escaped {
             escaped = false;
             continue;
@@ -301,7 +315,9 @@ fn classify_custom_format(code: &str) -> NumberFormatKind {
             _ => {}
         }
     }
-    if has_date && has_time {
+    if code.trim().eq_ignore_ascii_case(GENERAL) {
+        NumberFormatKind::General
+    } else if has_date && has_time {
         NumberFormatKind::DateTime
     } else if has_date {
         NumberFormatKind::Date

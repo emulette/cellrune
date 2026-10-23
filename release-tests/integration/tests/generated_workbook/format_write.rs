@@ -1,14 +1,14 @@
 use cellrune::{
     Alignment, Border, BorderEdge, BorderStyle, CalculationOptions, CellAddress, CellFormat,
     CellFormatEdit, CellValue, Color, Column, EditBatch, Fill, FillPattern, Font, FontUnderline,
-    HorizontalAlignment, OpenOptions, PatternFill, RecalculationWriteOptions, Row, SheetId,
-    ValidationError, VerticalAlignment, WorkbookChange, WorkbookDraft, WriteOptions,
+    HorizontalAlignment, NumberFormatKind, OpenOptions, PatternFill, RecalculationWriteOptions,
+    Row, SheetId, ValidationError, VerticalAlignment, WorkbookChange, WorkbookDraft, WriteOptions,
     calculate_workbook, open_xlsx_document_bytes, write_xlsx_draft_bytes,
     write_xlsx_draft_edits_bytes,
 };
 
 use super::recalculation_write_support as support;
-use crate::support::generated_xlsx::generated_format_workbook;
+use crate::support::generated_xlsx::{generated_format_workbook, generated_package};
 
 const SHEET_PART: &str = "xl/worksheets/sheet1.xml";
 
@@ -462,4 +462,58 @@ fn clearing_the_width_of_a_styled_column_keeps_a_standard_width() {
                 .is_some()
         );
     }
+}
+
+/// Numbers writes `<numFmt numFmtId="0" formatCode="General"/>`, redeclaring the built-in General.
+#[test]
+fn a_general_format_declared_as_custom_reads_as_general_and_saves_edits() {
+    let styles = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="0" formatCode="General"/></numFmts><fonts count="1"><font><sz val="10"/><name val="Helvetica Neue"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" applyNumberFormat="0"/></cellXfs></styleSheet>"#;
+    let bytes = generated_package(&[
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/workbook.xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet 1" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>"#,
+        ),
+        ("xl/styles.xml", styles),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="0"><v>3</v></c></row></sheetData></worksheet>"#,
+        ),
+    ]);
+    let document = open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("open");
+    let sheet_id = document.workbook().sheets()[0].id();
+    let a1 = document.workbook().sheets()[0]
+        .cell(address("A1"))
+        .expect("A1");
+    assert_eq!(a1.number_format().kind(), NumberFormatKind::General);
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .set_cell_value(
+            sheet_id,
+            address("B1"),
+            CellValue::number(9.0).expect("number"),
+        )
+        .expect("edit");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("an edit of the sheet saves");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    assert_eq!(
+        reopened.workbook().sheets()[0]
+            .cell(address("B1"))
+            .map(|cell| cell.number_format().kind()),
+        Some(NumberFormatKind::General)
+    );
 }
