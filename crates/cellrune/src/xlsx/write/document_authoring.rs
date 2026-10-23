@@ -13,8 +13,10 @@ use super::package_metadata_patch::{
 };
 use super::phonetic_preservation::ensure_phonetic_edit_preservation;
 use super::serialization::validate_phonetic_limits;
+use super::sheet_copy_parts::{CopySource, duplicate_sheet_parts, highest_vml_block};
 use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
 use super::sheet_reference_patch::rewrite_sheet_references;
+use super::sheet_reference_patch::{CopiedParts, CopyReferences};
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table::{TABLE_CONTENT_TYPE, table_xml};
 use super::table_parts::{
@@ -35,7 +37,7 @@ use super::{
     XlsxWriteError, XlsxWriteErrorCode,
 };
 use crate::draft::DraftCellMutation;
-use crate::xlsx::package::PartPath;
+use crate::xlsx::package::{PartPath, parse_content_types};
 use crate::{
     CalculationCellId, CalculationSnapshot, CellAddress, CellFormat, MaterializedResultOrigin,
     Sheet, SheetId, SourceId, WorkbookDraft, XlsxDocument,
@@ -61,7 +63,12 @@ const DETAIL_RTL_FROZEN_PANE: &str =
     "right-to-left frozen-pane authoring requires a verified native contract";
 
 struct ExistingSheetSource {
+    /// The source part read, a copy's source sheet's for a copy.
     part: PartPath,
+    /// The part written: the source part, or a copy's new part.
+    output: PartPath,
+    /// The source sheet whose cells and presentation the part holds.
+    origin: SheetId,
     bytes: Vec<u8>,
     styles: BTreeMap<crate::CellAddress, usize>,
 }
@@ -207,8 +214,13 @@ fn layout_sheets(
         .iter()
         .filter(|sheet| !draft.added_sheets().contains(&sheet.id()))
         .filter_map(|sheet| {
-            let changes =
-                LayoutChanges::between(document.presentation(), draft.presentation(), sheet.id());
+            let source_id = source_sheet_id(draft, sheet.id());
+            let changes = LayoutChanges::between(
+                document.presentation(),
+                source_id,
+                draft.presentation(),
+                sheet.id(),
+            );
             (!changes.is_empty()).then_some((sheet.id(), changes))
         })
         .collect()
@@ -244,7 +256,7 @@ pub(super) fn write_document_package(
         .transpose()?;
     let mut replacements = BTreeMap::<PartPath, Vec<u8>>::new();
     let mut additions = BTreeMap::<PartPath, Vec<u8>>::new();
-    let mut new_content_types = BTreeMap::<PartPath, &'static str>::new();
+    let mut new_content_types = BTreeMap::<PartPath, std::borrow::Cow<'static, str>>::new();
     let mut new_relationships = Vec::<NewRelationship>::new();
 
     for table_id in draft.changed_table_ids() {
@@ -285,20 +297,30 @@ pub(super) fn write_document_package(
         RelationshipIdAllocator::from_xml(&relationship_bytes, &relationship_part, limits)?;
     let mut added_relationship_ids = BTreeMap::<SheetId, String>::new();
     let mut added_parts = BTreeMap::<SheetId, PartPath>::new();
-    for sheet_id in draft.added_sheets() {
+    // A copy of a source sheet is a new worksheet part too, duplicated from its source's.
+    let mut copy_parts = BTreeMap::<SheetId, PartPath>::new();
+    for sheet_id in draft
+        .added_sheets()
+        .iter()
+        .chain(draft.copied_sheets().keys())
+    {
         let relationship_id =
             relationship_ids.allocate(&format!("rIdCellRuneSheet{}", sheet_id.get()));
         let target = format!("worksheets/cellrune-sheet-{}.xml", sheet_id.get());
         let part = PartPath::resolve_relationship(Some(workbook_part), &target)
             .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
         added_relationship_ids.insert(*sheet_id, relationship_id.clone());
-        added_parts.insert(*sheet_id, part.clone());
+        if draft.copied_sheets().contains_key(sheet_id) {
+            copy_parts.insert(*sheet_id, part.clone());
+        } else {
+            added_parts.insert(*sheet_id, part.clone());
+        }
         new_relationships.push(NewRelationship {
             id: relationship_id,
             kind: REL_WORKSHEET,
             target,
         });
-        new_content_types.insert(part, CONTENT_WORKSHEET);
+        new_content_types.insert(part, CONTENT_WORKSHEET.into());
     }
 
     let relevant_existing_sheets = draft
@@ -317,6 +339,7 @@ pub(super) fn write_document_package(
         .chain(date_typed_literals.keys().copied())
         .chain(format_edits.keys().copied())
         .chain(layout_changes.keys().copied())
+        .chain(copy_parts.keys().copied())
         .filter(|sheet_id| !draft.added_sheets().contains(sheet_id))
         .collect::<BTreeSet<_>>();
     enforce_count(
@@ -328,15 +351,18 @@ pub(super) fn write_document_package(
     )?;
     let mut sheet_sources = BTreeMap::<SheetId, ExistingSheetSource>::new();
     for sheet_id in relevant_existing_sheets {
+        let origin = source_sheet_id(draft, sheet_id);
         let part = document
-            .worksheet_part_path(sheet_id)
+            .worksheet_part_path(origin)
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let bytes = source_reader.read_part(&part)?;
         // Only a valued source cell's own style is read. A cell written over a removed source
         // cell is styled as a new cell, and so is one written over a blank source cell: the
         // reader records a blank cell's style for new cells unless it names no `cellXfs` entry.
-        let source_sheet = document.workbook().sheet_by_id(sheet_id);
+        let source_sheet = document.workbook().sheet_by_id(origin);
+        // A copy writes every cell over its source's part, so every source style is read.
+        let copied = copy_parts.contains_key(&sheet_id);
         let targets = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -370,12 +396,23 @@ pub(super) fn write_document_package(
                 )
             })
             .map(|id| id.address())
+            .chain(
+                source_sheet
+                    .filter(|_| copied)
+                    .into_iter()
+                    .flat_map(|sheet| sheet.cells().map(crate::Cell::address)),
+            )
             .filter(|address| source_sheet.is_some_and(|sheet| sheet.cell(*address).is_some()))
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
         sheet_sources.insert(
             sheet_id,
             ExistingSheetSource {
+                output: copy_parts
+                    .get(&sheet_id)
+                    .cloned()
+                    .unwrap_or_else(|| part.clone()),
+                origin,
                 part,
                 bytes,
                 styles,
@@ -486,7 +523,7 @@ pub(super) fn write_document_package(
             replacements.insert(target_styles_part.clone(), plan.bytes);
         } else {
             additions.insert(target_styles_part.clone(), plan.bytes);
-            new_content_types.insert(target_styles_part.clone(), CONTENT_STYLES);
+            new_content_types.insert(target_styles_part.clone(), CONTENT_STYLES.into());
             new_relationships.push(NewRelationship {
                 id: relationship_ids.allocate("rIdCellRuneStyles"),
                 kind: REL_STYLES,
@@ -519,6 +556,18 @@ pub(super) fn write_document_package(
             .get(&sheet_id)
             .cloned()
             .unwrap_or_default();
+        let copied = copy_parts.contains_key(&sheet_id);
+        let origin_sheet = document.workbook().sheet_by_id(sheet_source.origin);
+        // A copy's part starts as its source's, so each cell of either is an edit.
+        let copy_addresses = if copied {
+            origin_sheet
+                .into_iter()
+                .flat_map(|sheet| sheet.cells().map(crate::Cell::address))
+                .chain(draft_sheet.cells().map(crate::Cell::address))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let edit_addresses = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -536,6 +585,7 @@ pub(super) fn write_document_package(
                     .flat_map(BTreeMap::keys)
                     .copied(),
             )
+            .chain(copy_addresses)
             .collect::<BTreeSet<_>>();
         let sheet_format_edits = format_edits.get(&sheet_id);
         for address in edit_addresses {
@@ -555,15 +605,15 @@ pub(super) fn write_document_package(
             }
             let edit = match mutation {
                 Some(DraftCellMutation::Remove) => WorksheetSemanticEdit::Remove,
+                None if copied && draft_sheet.cell(address).is_none() => {
+                    WorksheetSemanticEdit::Remove
+                }
                 Some(DraftCellMutation::Upsert { .. }) | None => {
                     let cell = draft_sheet
                         .cell(address)
                         .cloned()
                         .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
-                    let original_cell = document
-                        .workbook()
-                        .sheet_by_id(sheet_id)
-                        .and_then(|sheet| sheet.cell(address));
+                    let original_cell = origin_sheet.and_then(|sheet| sheet.cell(address));
                     let content_changed = original_cell.map(crate::Cell::content)
                         != Some(cell.content())
                         || draft.presentation_cell_mutations().contains(&id)
@@ -599,8 +649,11 @@ pub(super) fn write_document_package(
         if !cache_updates.is_empty() {
             bytes = patch_worksheet(&bytes, &sheet_source.part, &cache_updates, limits)?;
         }
-        if draft.presentation_sheet_mutations().contains(&sheet_id) {
-            if document.presentation().right_to_left(sheet_id) {
+        let copied_pane = copied
+            && draft.presentation().frozen_pane(sheet_id)
+                != document.presentation().frozen_pane(sheet_source.origin);
+        if draft.presentation_sheet_mutations().contains(&sheet_id) || copied_pane {
+            if document.presentation().right_to_left(sheet_source.origin) {
                 return Err(
                     XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
                         .with_detail(DETAIL_RTL_FROZEN_PANE),
@@ -614,10 +667,7 @@ pub(super) fn write_document_package(
             )?;
         }
         if auto_filter_sheets.contains(&sheet_id) {
-            let original = document
-                .workbook()
-                .sheet_by_id(sheet_id)
-                .and_then(Sheet::auto_filter);
+            let original = origin_sheet.and_then(Sheet::auto_filter);
             bytes = rewrite_sheet_auto_filter(
                 &bytes,
                 &sheet_source.part,
@@ -629,13 +679,89 @@ pub(super) fn write_document_package(
         if let Some(changes) = layout_changes.get(&sheet_id) {
             bytes = patch_sheet_layout(&bytes, &sheet_source.part, changes, limits)?;
         }
-        replacements.insert(sheet_source.part, bytes);
+        if copied {
+            additions.insert(sheet_source.output, bytes);
+        } else {
+            replacements.insert(sheet_source.part, bytes);
+        }
+    }
+
+    // A copy duplicates every part its source sheet reaches, renaming and repointing them.
+    let mut copy_references = Vec::new();
+    if !copy_parts.is_empty() {
+        let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
+            .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
+        let content_types = parse_content_types(
+            &source_reader.read_part(&content_types_part)?,
+            &content_types_part,
+            document.read_options().limits(),
+        )
+        .map_err(|error| invalid_plan_with_cause(&content_types_part, error))?;
+        let vml = document
+            .link_part_paths()
+            .iter()
+            .filter(|part| part.extension() == Some("vml"))
+            .map(|part| source_reader.read_part(part))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut next_vml_block = highest_vml_block(&vml) + 1;
+        for (copy_id, copy_part) in &copy_parts {
+            let origin = source_sheet_id(draft, *copy_id);
+            let origin_part = document
+                .worksheet_part_path(origin)
+                .cloned()
+                .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+            let copy_sheet = draft
+                .workbook()
+                .sheet_by_id(*copy_id)
+                .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+            let origin_tables = document
+                .workbook()
+                .sheet_by_id(origin)
+                .map(Sheet::tables)
+                .unwrap_or_default();
+            let tables = origin_tables
+                .iter()
+                .zip(copy_sheet.tables())
+                .map(|(source, copied)| {
+                    document
+                        .table_part_path(source.id())
+                        .cloned()
+                        .map(|part| (part, copied))
+                        .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            let duplicated = duplicate_sheet_parts(
+                &mut source_reader,
+                &CopySource {
+                    origin: &origin_part,
+                    copy: copy_part,
+                    copy_id: *copy_id,
+                    tables: &tables,
+                    content_types: &content_types,
+                    chart_parts: document.chart_part_paths(),
+                },
+                &mut next_vml_block,
+                limits,
+            )?;
+            additions.extend(duplicated.parts);
+            new_content_types.extend(duplicated.content_types);
+            copy_references.push(CopyReferences {
+                copy: *copy_id,
+                origin,
+                worksheet: copy_part.clone(),
+                charts: duplicated.charts,
+            });
+        }
     }
     rewrite_sheet_references(
         document,
         draft,
         &mut source_reader,
         &mut replacements,
+        CopiedParts {
+            copies: &copy_references,
+            parts: &mut additions,
+        },
         &deletion.removed_parts,
         limits,
     )?;
@@ -658,12 +784,9 @@ pub(super) fn write_document_package(
     }
 
     // Each table the draft created on a source sheet: a new part, a relationship, and an entry.
-    for sheet in draft
-        .workbook()
-        .sheets()
-        .iter()
-        .filter(|sheet| !draft.added_sheets().contains(&sheet.id()))
-    {
+    for sheet in draft.workbook().sheets().iter().filter(|sheet| {
+        !draft.added_sheets().contains(&sheet.id()) && !copy_parts.contains_key(&sheet.id())
+    }) {
         let created = sheet
             .tables()
             .iter()
@@ -699,7 +822,7 @@ pub(super) fn write_document_package(
                 allocator.allocate(&format!("rIdCellRuneTable{}", table.id().get()));
             let addition = TableAddition::new(&worksheet, table.id().get(), relationship_id)?;
             additions.insert(addition.part.clone(), table_xml(table)?.into_bytes());
-            new_content_types.insert(addition.part.clone(), TABLE_CONTENT_TYPE);
+            new_content_types.insert(addition.part.clone(), TABLE_CONTENT_TYPE.into());
             table_additions.push(addition);
         }
         match current {
@@ -753,7 +876,7 @@ pub(super) fn write_document_package(
                     super::table::table_relationship_id(table),
                 )?;
                 additions.insert(addition.part.clone(), table_xml(table)?.into_bytes());
-                new_content_types.insert(addition.part.clone(), TABLE_CONTENT_TYPE);
+                new_content_types.insert(addition.part.clone(), TABLE_CONTENT_TYPE.into());
                 table_additions.push(addition);
             }
             let sheet_relationships = part
@@ -977,11 +1100,21 @@ fn changed_auto_filter_sheets(draft: &WorkbookDraft, document: &XlsxDocument) ->
         .filter(|sheet| {
             document
                 .workbook()
-                .sheet_by_id(sheet.id())
+                .sheet_by_id(source_sheet_id(draft, sheet.id()))
                 .is_some_and(|source| source.auto_filter() != sheet.auto_filter())
         })
         .map(Sheet::id)
         .collect()
+}
+
+/// Returns the source sheet whose part a draft sheet's part patches: the sheet itself, or for a
+/// copy, the source sheet whose part it duplicates.
+fn source_sheet_id(draft: &WorkbookDraft, sheet_id: SheetId) -> SheetId {
+    draft
+        .copied_sheets()
+        .get(&sheet_id)
+        .copied()
+        .unwrap_or(sheet_id)
 }
 
 pub(super) fn validate_dynamic_formula_edits(

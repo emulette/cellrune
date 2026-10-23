@@ -29,20 +29,23 @@ pub(super) struct LayoutChanges {
 
 impl LayoutChanges {
     /// Returns the changes from the source layout of a sheet to the draft's.
+    /// Compares the draft sheet `sheet_id` with the source sheet `source_id`, which differs only
+    /// for a copy, whose part duplicates its source sheet's.
     pub(super) fn between(
         source: &DocumentPresentation,
+        source_id: SheetId,
         draft: &DocumentPresentation,
         sheet_id: SheetId,
     ) -> Self {
-        let width_spans = |presentation: &DocumentPresentation| {
+        let width_spans = |presentation: &DocumentPresentation, sheet_id: SheetId| {
             presentation
                 .column_widths(sheet_id)
                 .iter()
                 .map(|span| (span.first().get(), span.last().get(), span.width()))
                 .collect::<Vec<_>>()
         };
-        let source_spans = width_spans(source);
-        let draft_spans = width_spans(draft);
+        let source_spans = width_spans(source, source_id);
+        let draft_spans = width_spans(draft, sheet_id);
         let mut boundaries = source_spans
             .iter()
             .chain(&draft_spans)
@@ -70,7 +73,7 @@ impl LayoutChanges {
                 _ => columns.push((first, last, width)),
             }
         }
-        let source_rows = source.row_heights(sheet_id).collect::<BTreeMap<_, _>>();
+        let source_rows = source.row_heights(source_id).collect::<BTreeMap<_, _>>();
         let draft_rows = draft.row_heights(sheet_id).collect::<BTreeMap<_, _>>();
         let rows = source_rows
             .keys()

@@ -84,6 +84,19 @@ pub enum WorkbookChange {
         /// Zero-based tab position the tab takes, counted after the move.
         position: usize,
     },
+    /// Copies a worksheet to a tab position, as Excel's Move or Copy does within a workbook.
+    ///
+    /// The copy takes the next sheet ID and the name `Name (2)`, or the next free number. In its
+    /// formulas, a reference to the source sheet names the copy, while other sheets' and 3-D
+    /// references keep their text. Its tables take new IDs and names, its source's scoped names
+    /// are copied to it, and each workbook name that reads the source sheet becomes a name of the
+    /// copy too.
+    CopySheet {
+        /// Source worksheet.
+        sheet_id: SheetId,
+        /// Zero-based tab position the copy takes, counted after the copy.
+        position: usize,
+    },
     /// Changes sheet visibility while retaining at least one visible sheet.
     SetSheetVisibility {
         /// Target sheet.
@@ -331,6 +344,11 @@ impl WorkbookChange {
     /// Constructs a tab move to zero-based `position` of the tab order.
     pub const fn move_sheet(sheet_id: SheetId, position: usize) -> Self {
         Self::MoveSheet { sheet_id, position }
+    }
+
+    /// Constructs a worksheet copy to zero-based `position` of the tab order.
+    pub const fn copy_sheet(sheet_id: SheetId, position: usize) -> Self {
+        Self::CopySheet { sheet_id, position }
     }
 
     /// Constructs a sheet-visibility change.

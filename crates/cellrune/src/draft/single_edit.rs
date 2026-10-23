@@ -170,6 +170,28 @@ impl WorkbookDraft {
         Ok(())
     }
 
+    /// Copies a worksheet to zero-based `position` of the tab order and returns the copy's ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::UnknownSheetId`],
+    /// [`ValidationError::SheetPositionOutOfRange`], [`ValidationError::SheetIdExhausted`], or
+    /// [`ValidationError::SemanticRevisionExhausted`].
+    pub fn copy_sheet(
+        &mut self,
+        sheet_id: SheetId,
+        position: usize,
+    ) -> Result<SheetId, ValidationError> {
+        let receipt = self.apply_changes(EditBatch::new([WorkbookChange::copy_sheet(
+            sheet_id, position,
+        )]))?;
+        receipt
+            .created_sheet_ids()
+            .first()
+            .copied()
+            .ok_or(ValidationError::SheetIdExhausted)
+    }
+
     /// Changes sheet visibility while retaining at least one visible sheet.
     ///
     /// # Errors

@@ -123,6 +123,26 @@ impl SheetName {
     pub(crate) fn lookup_key(&self) -> &str {
         &self.lookup_key
     }
+
+    /// Returns the name Excel gives a copy of this sheet: this name and ` (2)`, or the next number
+    /// for which `is_taken` is false, with the name shortened to keep the copy within 31 UTF-16
+    /// code units.
+    pub fn copy_name(&self, is_taken: impl Fn(&str) -> bool) -> Self {
+        let mut number = 2_u32;
+        loop {
+            let suffix = format!(" ({number})");
+            let mut base = self.original.to_string();
+            while base.encode_utf16().count() + suffix.encode_utf16().count() > 31 {
+                base.pop();
+            }
+            if let Ok(candidate) = Self::new(format!("{base}{suffix}"))
+                && !is_taken(candidate.as_str())
+            {
+                return candidate;
+            }
+            number += 1;
+        }
+    }
 }
 
 /// Sheet visibility as represented by `SpreadsheetML`.
@@ -749,6 +769,12 @@ impl Sheet {
     pub(crate) fn rename(&mut self, name: SheetName) {
         self.semantic_fingerprint = OnceLock::new();
         self.name = name;
+    }
+
+    /// Gives a copied sheet its own ID.
+    pub(crate) fn set_id(&mut self, id: SheetId) {
+        self.semantic_fingerprint = OnceLock::new();
+        self.id = id;
     }
 
     pub(crate) fn set_visibility(&mut self, visibility: SheetVisibility) {
@@ -1531,6 +1557,13 @@ impl WorkbookSnapshot {
     /// worksheet and tab ID.
     pub fn non_worksheet_tab_ids(&self) -> impl ExactSizeIterator<Item = SheetId> {
         self.non_worksheet_tabs.iter().map(NonWorksheetTab::id)
+    }
+
+    /// Returns the name of each tab that is not a worksheet, such as a chartsheet, in tab order.
+    ///
+    /// Such names stay taken: an added, renamed, or copied sheet cannot use one.
+    pub fn non_worksheet_tab_names(&self) -> impl ExactSizeIterator<Item = &SheetName> {
+        self.non_worksheet_tabs.iter().map(NonWorksheetTab::name)
     }
 
     /// Returns the highest sheet ID the workbook has used, counting tabs that are not worksheets

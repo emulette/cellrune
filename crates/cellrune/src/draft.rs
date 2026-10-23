@@ -132,6 +132,9 @@ pub struct WorkbookDraft {
     /// The defined-name renames in the order they were made, which the writer replays on the
     /// formulas of the parts it preserves.
     name_renames: Vec<DefinedNameRename>,
+    /// Each copy of a sheet the source package holds, with the source sheet whose part the writer
+    /// duplicates for it; copies of other sheets are added sheets.
+    copied_sheets: BTreeMap<SheetId, SheetId>,
 }
 
 impl WorkbookDraft {
@@ -149,6 +152,7 @@ impl WorkbookDraft {
             workbook_changed: true,
             tab_steps: Vec::new(),
             name_renames: Vec::new(),
+            copied_sheets: BTreeMap::new(),
         }
     }
 
@@ -166,6 +170,7 @@ impl WorkbookDraft {
             workbook_changed: false,
             tab_steps: Vec::new(),
             name_renames: Vec::new(),
+            copied_sheets: BTreeMap::new(),
         }
     }
 
@@ -199,6 +204,10 @@ impl WorkbookDraft {
 
     pub(crate) fn name_renames(&self) -> &[DefinedNameRename] {
         &self.name_renames
+    }
+
+    pub(crate) const fn copied_sheets(&self) -> &BTreeMap<SheetId, SheetId> {
+        &self.copied_sheets
     }
 
     /// Returns whether the draft preserves an existing XLSX or XLSM package.
@@ -236,6 +245,7 @@ impl WorkbookDraft {
             workbook_changed: self.workbook_changed,
             tab_steps: self.tab_steps.clone(),
             name_renames: self.name_renames.clone(),
+            copied_sheets: self.copied_sheets.clone(),
         })
     }
 
@@ -253,6 +263,7 @@ impl WorkbookDraft {
             workbook_changed: true,
             tab_steps: Vec::new(),
             name_renames: Vec::new(),
+            copied_sheets: BTreeMap::new(),
         }
     }
 }

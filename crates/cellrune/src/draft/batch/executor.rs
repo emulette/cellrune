@@ -10,6 +10,7 @@ use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
 use super::name_rename::rename_defined_name;
+use super::sheet_copy::{SheetCopy, copy_sheet};
 use super::sheet_delete::delete_sheet;
 use super::sheet_move::move_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
@@ -103,6 +104,7 @@ impl WorkbookDraft {
         let mut workbook_changed = self.workbook_changed;
         let mut tab_steps = clone_slice(&self.tab_steps, rewrite_budget)?;
         let mut name_renames = clone_slice(&self.name_renames, rewrite_budget)?;
+        let mut copied_sheets = self.copied_sheets.clone();
         let mut changed_cells = BTreeSet::new();
         let mut calculation_changed_cells = BTreeSet::new();
         let mut touched_sheets = BTreeSet::new();
@@ -435,10 +437,56 @@ impl WorkbookDraft {
                     presentation_sheet_mutations.remove(sheet_id);
                     touched_sheets.remove(sheet_id);
                     added_sheets.remove(sheet_id);
+                    copied_sheets.remove(sheet_id);
                     for table in removed.tables() {
                         changed_table_ids.remove(&table.id());
                         previous_changed_table_ids.remove(&table.id());
                     }
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::CopySheet { sheet_id, position } => {
+                    let next = highest_sheet_id
+                        .checked_add(1)
+                        .ok_or(ValidationError::SheetIdExhausted)?;
+                    let copy_id =
+                        SheetId::new(next).map_err(|_| ValidationError::SheetIdExhausted)?;
+                    let copied_tables = copy_sheet(
+                        &mut sheets,
+                        &mut defined_names,
+                        &mut non_worksheet_tabs,
+                        source,
+                        rewrite_budget,
+                        SheetCopy {
+                            sheet_id: *sheet_id,
+                            position: *position,
+                            copy_id,
+                        },
+                    )?;
+                    highest_sheet_id = next;
+                    presentation.copy_sheet(*sheet_id, copy_id);
+                    // The writer duplicates the source part of a sheet the document holds, which a
+                    // copy of a copy reaches through its own source.
+                    let origin =
+                        if source.is_some_and(|source| source.sheet_by_id(*sheet_id).is_some()) {
+                            Some(*sheet_id)
+                        } else {
+                            copied_sheets.get(sheet_id).copied()
+                        };
+                    match origin {
+                        Some(origin) => {
+                            copied_sheets.insert(copy_id, origin);
+                        }
+                        None => {
+                            added_sheets.insert(copy_id);
+                        }
+                    }
+                    created_sheet_ids.push(copy_id);
+                    changed_table_ids.extend(copied_tables.into_iter().map(|(_, copied)| copied));
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
@@ -873,6 +921,7 @@ impl WorkbookDraft {
         self.workbook_changed = workbook_changed;
         self.tab_steps = tab_steps;
         self.name_renames = name_renames;
+        self.copied_sheets = copied_sheets;
 
         Ok(EditReceipt {
             base_revision,

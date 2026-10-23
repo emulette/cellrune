@@ -281,6 +281,21 @@ impl<'a> SheetReferenceRequests<'a> {
     }
 }
 
+/// A copied sheet's new worksheet and chart parts, whose references to its source sheet name the
+/// copy.
+pub(crate) struct CopyReferences {
+    pub(crate) copy: SheetId,
+    pub(crate) origin: SheetId,
+    pub(crate) worksheet: PartPath,
+    pub(crate) charts: Vec<PartPath>,
+}
+
+/// The copies a save writes and the new parts that hold them.
+pub(crate) struct CopiedParts<'a> {
+    pub(crate) copies: &'a [CopyReferences],
+    pub(crate) parts: &'a mut BTreeMap<PartPath, Vec<u8>>,
+}
+
 /// Rewrites references to renamed and deleted sheets in the worksheet, chart, and pivot cache
 /// parts the workbook model does not carry: conditional formats, data validations, sparklines,
 /// internal hyperlinks, chart series, and pivot cache sources. Only parts that change are
@@ -294,6 +309,7 @@ pub(crate) fn rewrite_sheet_references(
     draft_edits: &WorkbookDraft,
     source_reader: &mut PackageReader<'_>,
     replacements: &mut BTreeMap<PartPath, Vec<u8>>,
+    copied: CopiedParts<'_>,
     removed_parts: &BTreeSet<PartPath>,
     limits: WriteLimits,
 ) -> Result<(), XlsxWriteError> {
@@ -311,7 +327,12 @@ pub(crate) fn rewrite_sheet_references(
         .iter()
         .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
         .collect::<Vec<_>>();
-    if !renamed && deleted_sheets.is_empty() && steps.is_empty() && name_renames.is_empty() {
+    if !renamed
+        && deleted_sheets.is_empty()
+        && steps.is_empty()
+        && name_renames.is_empty()
+        && copied.copies.is_empty()
+    {
         return Ok(());
     }
     let deleted_tables = deleted_sheets
@@ -377,6 +398,39 @@ pub(crate) fn rewrite_sheet_references(
         }
         if let Some(bytes) = patched {
             replacements.insert(part.clone(), bytes);
+        }
+    }
+    // A copy's parts read its source sheet by name; those references name the copy.
+    for copy in copied.copies {
+        let mut copy_requests = SheetReferenceRequests::new(&names, steps, &deleted_tables);
+        let retarget = SheetChanges {
+            retarget: Some((copy.origin, copy.copy)),
+            ..copy_requests.changes
+        };
+        copy_requests.changes = retarget;
+        copy_requests.combined = FormulaRewriteRequest::Sheets(retarget);
+        let owner = original
+            .sheet_by_id(copy.origin)
+            .map(|sheet| sheet.name().as_str());
+        let parts = std::iter::once((&copy.worksheet, ReferencePart::Worksheet, owner)).chain(
+            copy.charts
+                .iter()
+                .map(|chart| (chart, ReferencePart::Chart, None)),
+        );
+        for (part, kind, owner) in parts {
+            let Some(bytes) = copied.parts.get(part) else {
+                continue;
+            };
+            let target = PatchTarget {
+                source: part,
+                part: kind,
+                owner,
+            };
+            if let Some(patched) =
+                patch_sheet_references(bytes, target, &copy_requests, &mut false, limits)?
+            {
+                copied.parts.insert(part.clone(), patched);
+            }
         }
     }
     if !deleted_sheets.is_empty() {

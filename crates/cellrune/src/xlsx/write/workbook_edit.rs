@@ -361,32 +361,29 @@ pub(crate) fn patch_workbook_semantics(
                     if existing_sheet_index != original.sheets().len() {
                         return Err(invalid_generated(source, DETAIL_SHEET_COUNT));
                     }
+                    let relationship = relationship_attribute
+                        .as_ref()
+                        .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?;
+                    let sheets_element = sheets_name.as_deref().unwrap_or("sheets");
                     std::mem::take(&mut source_sheets).write_in_order(
                         &mut writer,
                         draft,
                         source,
+                        |writer, sheet| {
+                            let relationship_id =
+                                added_relationships.get(&sheet.id()).ok_or_else(|| {
+                                    invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE)
+                                })?;
+                            write_added_sheet(
+                                writer,
+                                sheets_element,
+                                relationship,
+                                sheet,
+                                relationship_id,
+                                source,
+                            )
+                        },
                     )?;
-                    let relationship = relationship_attribute
-                        .as_ref()
-                        .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?;
-                    for sheet in draft
-                        .sheets()
-                        .iter()
-                        .filter(|sheet| original.sheet_by_id(sheet.id()).is_none())
-                    {
-                        let relationship_id =
-                            added_relationships.get(&sheet.id()).ok_or_else(|| {
-                                invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE)
-                            })?;
-                        write_added_sheet(
-                            &mut writer,
-                            sheets_name.as_deref().unwrap_or("sheets"),
-                            relationship,
-                            sheet,
-                            relationship_id,
-                            source,
-                        )?;
-                    }
                 }
                 if workbook_depth == Some(depth)
                     && element.local_name().as_ref() == "workbook"
@@ -504,39 +501,61 @@ impl SourceSheets {
         }
     }
 
-    /// Writes the kept entries in the draft's tab order, each into a slot a kept source entry
-    /// held, so the text between entries stays where it was.
+    /// Writes every draft tab's entry in the draft's tab order: a kept source entry as captured,
+    /// and a sheet the draft added or copied through `added`. The text before the first source
+    /// entry and after the last one stays around the entries.
     fn write_in_order(
         self,
         writer: &mut Writer<Cursor<Vec<u8>>>,
         draft: &WorkbookSnapshot,
         source: &PartPath,
+        mut added: impl FnMut(&mut Writer<Cursor<Vec<u8>>>, &Sheet) -> Result<(), XlsxWriteError>,
     ) -> Result<(), XlsxWriteError> {
+        let first_entry = self
+            .items
+            .iter()
+            .position(|item| matches!(item, SheetsItem::Sheet { .. }))
+            .unwrap_or(self.items.len());
+        let last_entry = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, SheetsItem::Sheet { .. }))
+            .map_or(self.items.len(), |index| index + 1);
         let mut entries = BTreeMap::new();
-        for item in &self.items {
-            if let SheetsItem::Sheet { id, events } = item
-                && !events.is_empty()
-            {
-                entries.insert(*id, events.clone());
+        let mut prefix = Vec::new();
+        let mut suffix = Vec::new();
+        for (index, item) in self.items.into_iter().enumerate() {
+            match item {
+                SheetsItem::Sheet { id, events } => {
+                    if !events.is_empty() {
+                        entries.insert(id, events);
+                    }
+                }
+                SheetsItem::Between(event) if index < first_entry => prefix.push(event),
+                SheetsItem::Between(event) if index >= last_entry => suffix.push(event),
+                SheetsItem::Between(_) => {}
             }
         }
-        let mut order = draft
-            .tab_order()
-            .into_iter()
-            .filter_map(|(id, _)| entries.remove(&id));
-        for item in self.items {
-            match item {
-                SheetsItem::Between(event) => write_event(writer, event, source)?,
-                SheetsItem::Sheet { events, .. } if events.is_empty() => {}
-                SheetsItem::Sheet { .. } => {
-                    for event in order
-                        .next()
-                        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?
-                    {
+        for event in prefix {
+            write_event(writer, event, source)?;
+        }
+        for (id, _) in draft.tab_order() {
+            match entries.remove(&id) {
+                Some(events) => {
+                    for event in events {
                         write_event(writer, event, source)?;
                     }
                 }
+                None => {
+                    let sheet = draft
+                        .sheet_by_id(id)
+                        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
+                    added(writer, sheet)?;
+                }
             }
+        }
+        for event in suffix {
+            write_event(writer, event, source)?;
         }
         Ok(())
     }

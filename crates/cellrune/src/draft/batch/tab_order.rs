@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::calculation::sheet_changes::TabEntry;
-use crate::workbook::NonWorksheetTabs;
-use crate::{Sheet, SheetId, SheetName};
+use crate::workbook::{NonWorksheetTab, NonWorksheetTabs};
+use crate::{Sheet, SheetId, SheetName, ValidationError};
 
 /// The staged workbook's tabs in tab order, worksheets and others, as a formula rewrite names
 /// them and as a deletion or move records them.
@@ -47,4 +47,41 @@ impl TabOrder {
             .map(|(name, id)| (*id, name.as_str()))
             .collect()
     }
+}
+
+/// Puts the worksheets and the other tabs in `order`: worksheets in their order, and each other
+/// tab at its position.
+pub(super) fn place_tabs(
+    sheets: &mut Vec<Sheet>,
+    non_worksheet_tabs: &mut NonWorksheetTabs,
+    order: &[TabEntry],
+) -> Result<(), ValidationError> {
+    let mut taken = std::mem::take(sheets)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    let mut tabs = Vec::new();
+    for (index, entry) in order.iter().enumerate() {
+        let unknown = ValidationError::UnknownSheetId {
+            value: entry.id.get(),
+        };
+        if entry.worksheet {
+            let sheet = taken
+                .iter_mut()
+                .find(|sheet| sheet.as_ref().is_some_and(|sheet| sheet.id() == entry.id))
+                .and_then(Option::take)
+                .ok_or(unknown)?;
+            sheets.push(sheet);
+        } else {
+            let tab = non_worksheet_tabs.by_id(entry.id).ok_or(unknown)?;
+            tabs.push(NonWorksheetTab::new(
+                index,
+                tab.id(),
+                tab.name().clone(),
+                tab.visibility(),
+            ));
+        }
+    }
+    *non_worksheet_tabs = NonWorksheetTabs::new(tabs);
+    Ok(())
 }

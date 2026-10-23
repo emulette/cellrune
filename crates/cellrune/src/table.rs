@@ -803,6 +803,11 @@ impl Table {
         self.display_name = name;
     }
 
+    /// Gives a copied table its own ID.
+    pub(crate) fn set_id(&mut self, id: TableId) {
+        self.id = id;
+    }
+
     pub(crate) fn rename_column(
         &mut self,
         column_id: TableColumnId,

@@ -5,10 +5,10 @@ use super::formula_edit::{
     WorkbookFormulaEdit, WorkbookFormulaRename, rewrite_sheet_metadata_formulas,
     rewrite_workbook_formulas, table_formula_locations,
 };
-use super::tab_order::TabOrder;
+use super::tab_order::{TabOrder, place_tabs};
 use crate::calculation::formula_rewrite::SheetChanges;
 use crate::calculation::sheet_changes::TabStep;
-use crate::workbook::{NonWorksheetTab, NonWorksheetTabs};
+use crate::workbook::NonWorksheetTabs;
 use crate::{DefinedName, Sheet, SheetId, ValidationError};
 
 /// Moves the tab `sheet_id`, a worksheet or not, to zero-based `position` of the tab order and
@@ -53,38 +53,7 @@ pub(super) fn move_sheet(
     let tab = moved.remove(from);
     moved.insert(position, tab);
 
-    // Worksheets take their new order, and the other tabs their new positions.
-    let mut taken = std::mem::take(sheets)
-        .into_iter()
-        .map(Some)
-        .collect::<Vec<_>>();
-    let mut tabs = Vec::new();
-    for (index, entry) in moved.iter().enumerate() {
-        if entry.worksheet {
-            let slot = taken
-                .iter_mut()
-                .find(|sheet| sheet.as_ref().is_some_and(|sheet| sheet.id() == entry.id))
-                .and_then(Option::take)
-                .ok_or(ValidationError::UnknownSheetId {
-                    value: entry.id.get(),
-                })?;
-            sheets.push(slot);
-        } else {
-            let tab =
-                non_worksheet_tabs
-                    .by_id(entry.id)
-                    .ok_or(ValidationError::UnknownSheetId {
-                        value: entry.id.get(),
-                    })?;
-            tabs.push(NonWorksheetTab::new(
-                index,
-                tab.id(),
-                tab.name().clone(),
-                tab.visibility(),
-            ));
-        }
-    }
-    *non_worksheet_tabs = NonWorksheetTabs::new(tabs);
+    place_tabs(sheets, non_worksheet_tabs, &moved)?;
 
     let before = order.names();
     let after = order.unchanged_names();

@@ -17,6 +17,7 @@ mod generated_workbook {
     mod recalculation_write_support;
     mod round_trip_document;
     mod sheet_auto_filter_write;
+    mod sheet_copy_write;
     mod sheet_deletion_write;
     mod sheet_move_write;
     mod sheet_rename_write;

@@ -77,7 +77,7 @@ pub(crate) fn patch_table_xml(
                 if depth == 1 && spreadsheet && local == "table" {
                     saw_root = true;
                     root_depth = Some(depth);
-                    let patched = patch_attributes(
+                    let patched = patch_table_root(
                         &element,
                         source,
                         &[
@@ -88,6 +88,7 @@ pub(crate) fn patch_table_xml(
                             ),
                             ("ref", Some(range_text(table.range()))),
                         ],
+                        table,
                     )?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if root_depth.is_some_and(|root| depth == root + 1)
@@ -225,7 +226,7 @@ pub(crate) fn patch_table_xml(
                 let spreadsheet = is_spreadsheet_element(&xml, element.name());
                 let output = if depth == 0 && spreadsheet && local == "table" {
                     saw_root = true;
-                    patch_attributes(
+                    patch_table_root(
                         &element,
                         source,
                         &[
@@ -236,6 +237,7 @@ pub(crate) fn patch_table_xml(
                             ),
                             ("ref", Some(range_text(table.range()))),
                         ],
+                        table,
                     )?
                 } else if root_depth.is_some_and(|root| element_depth == root + 1)
                     && spreadsheet
@@ -562,6 +564,18 @@ pub(super) fn replace_changed_attribute(
         return Ok(element.into_owned());
     }
     patch_attributes(&element, source, &[(name, Some(value))])
+}
+
+/// Patches the `<table>` root: its names and reference, and its `id` in place when a copy gave
+/// the table a new one.
+fn patch_table_root(
+    element: &BytesStart<'_>,
+    source: &PartPath,
+    replacements: &[(&str, Option<String>)],
+    table: &Table,
+) -> Result<BytesStart<'static>, XlsxWriteError> {
+    let patched = patch_attributes(element, source, replacements)?;
+    replace_changed_attribute(patched, source, "id", table.id().get().to_string())
 }
 
 pub(super) fn patch_attributes(

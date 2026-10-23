@@ -17,6 +17,7 @@ mod phonetic_preservation;
 mod recalculation;
 mod report;
 mod serialization;
+mod sheet_copy_parts;
 mod sheet_deletion;
 mod sheet_reference_patch;
 mod styles_patch;

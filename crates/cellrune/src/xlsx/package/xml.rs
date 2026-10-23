@@ -18,13 +18,18 @@ const RELATIONSHIPS_NAMESPACE: &str =
     "http://schemas.openxmlformats.org/package/2006/relationships";
 
 #[derive(Debug)]
-pub(super) struct ContentTypes {
+pub(in crate::xlsx) struct ContentTypes {
     defaults: BTreeMap<Box<str>, Box<str>>,
     overrides: BTreeMap<PartPath, Box<str>>,
 }
 
 impl ContentTypes {
-    pub(super) fn content_type<'a>(&'a self, part: &PartPath) -> Option<&'a str> {
+    /// Reports whether `part` has an `<Override>` of its own rather than a type by extension.
+    pub(in crate::xlsx) fn overrides(&self, part: &PartPath) -> bool {
+        self.overrides.contains_key(part)
+    }
+
+    pub(in crate::xlsx) fn content_type<'a>(&'a self, part: &PartPath) -> Option<&'a str> {
         self.overrides.get(part).map_or_else(
             || {
                 part.extension().and_then(|extension| {
@@ -51,7 +56,7 @@ pub(in crate::xlsx) struct Relationship {
     pub(in crate::xlsx) target: RelationshipTarget,
 }
 
-pub(super) fn parse_content_types(
+pub(in crate::xlsx) fn parse_content_types(
     bytes: &[u8],
     source: &PartPath,
     limits: ReadLimits,

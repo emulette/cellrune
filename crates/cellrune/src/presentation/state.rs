@@ -561,6 +561,17 @@ impl DocumentPresentation {
         Ok(true)
     }
 
+    /// Gives a copied sheet the presentation of its source: panes, phonetics, cell formats, and
+    /// column widths and row heights.
+    pub(crate) fn copy_sheet(&mut self, source: SheetId, copy: SheetId) {
+        if let Some(sheet) = self.sheets.get(&source).cloned() {
+            self.sheets.insert(copy, sheet);
+        }
+        if let Some(formats) = self.formats.get(&source).cloned() {
+            self.formats.insert(copy, formats);
+        }
+    }
+
     /// Drops the presentation of a deleted sheet: its panes and phonetics, its cell formats, and
     /// its column widths and row heights.
     pub(crate) fn remove_sheet(&mut self, sheet_id: SheetId) {

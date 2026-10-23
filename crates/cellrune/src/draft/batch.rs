@@ -4,6 +4,7 @@ mod executor;
 mod formula_edit;
 mod name_rename;
 mod receipt;
+mod sheet_copy;
 mod sheet_delete;
 mod sheet_move;
 mod staged;
