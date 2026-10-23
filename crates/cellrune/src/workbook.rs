@@ -1534,9 +1534,11 @@ impl WorkbookSnapshot {
     }
 
     /// Returns the highest sheet ID the workbook has used, counting tabs that are not worksheets
-    /// and deleted sheets, or `None` for a workbook without tabs.
+    /// and the sheets deleted in this draft or session, or `None` for a workbook without tabs.
     ///
-    /// A deleted sheet's ID is never reused: an added sheet receives an ID above this one.
+    /// Within a draft or session a deleted sheet's ID is never reused: an added sheet receives an
+    /// ID above this one. A saved file does not record deleted IDs, so opening it computes this
+    /// from the tabs it declares, and a sheet added after reopening can take a deleted sheet's ID.
     pub fn highest_sheet_id(&self) -> Option<SheetId> {
         NonZeroU32::new(self.highest_sheet_id).map(SheetId)
     }

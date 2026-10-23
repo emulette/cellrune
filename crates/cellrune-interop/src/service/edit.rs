@@ -358,7 +358,7 @@ impl ChangeConverter {
                 .iter()
                 .map(|sheet| (case_insensitive_key(sheet.name().as_str()), sheet.id()))
                 .collect(),
-            // The core never reuses a deleted sheet's ID, so an added sheet's ID follows the
+            // A draft never reuses a deleted sheet's ID, so an added sheet's ID follows the
             // highest one the workbook has used.
             maximum_sheet_id: workbook.highest_sheet_id().map_or(0, SheetId::get),
         }

@@ -12,6 +12,37 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Added
 
+- `WorkbookChange::delete_sheet(SheetId)` and `WorkbookDraft::delete_sheet` delete a sheet with
+  the names scoped to it and its tables, and rewrite the remaining cell formulas, defined names,
+  and table formulas as Excel saves them: a reference to the sheet or to one of its tables becomes
+  `#REF!` (`SUM('S2'!A1:A3)` becomes `SUM(#REF!)`), a deleted end of a 3-D reference moves to the
+  nearest remaining worksheet, passing over chartsheets (`'S2:S3'!A1` becomes `'S3'!A1`), and
+  `INDIRECT` text is untouched. A qualified use of a name scoped to the deleted sheet becomes
+  `#REF!` where Excel writes `[0]!Name`. Deleting the last visible sheet fails with
+  `validation.last_visible_sheet`. The receipt reports a topology change, so a session
+  recalculates fully.
+- Saving a document draft removes a deleted sheet's entry and every package part only it reached,
+  a pivot cache once all of its pivot tables went, and their content-type overrides, renumbers
+  `localSheetId`, and moves `workbookView` `activeTab` and `firstSheet` past the deleted tab; a
+  deleted active sheet hands activity to the nearest visible sheet after it, else before it, as
+  Excel does. Relationship targets that cannot be parts, such as cell links in drawing
+  relationships, and relationships to parts the package lacks are ignored. Conditional formats,
+  data validations, and chart series that name the sheet become `#REF!`, a sparkline reading it
+  loses its data source, and internal hyperlinks keep their location, as in Excel. A remaining
+  pivot cache or pivot chart that reads the deleted sheet, or a slicer or timeline cache while it
+  holds a pivot table or table, fails with `xlsx.write.unsupported_preservation` and a detail
+  naming the parts. Saving edits without calculating also clears the results of formulas that read
+  the sheet list or a 3-D range across the deleted sheet.
+- `WorkbookSnapshot::highest_sheet_id()` returns the highest sheet ID a workbook has used,
+  including sheets deleted in the same draft or session; added sheets take the next ID, so within
+  a draft or session a deleted sheet's ID is never reused, even by a later change of the batch
+  that deleted it. A saved file does not record deleted IDs, so after reopening it an added sheet
+  can take one.
+- Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
+  Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
+  `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and
+  Node.js `deleteSheet` methods. Deltas name a deleted sheet's removed results by the name it had.
+
 ### Changed
 
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
@@ -55,6 +86,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- A sheet rename that gives an end of a 3-D reference a name that needs quotes writes the range as
+  one quoted token, `'New Name:End'!A1`, as MS-XLSX requires, instead of `'New Name':End!A1`.
 
 ## [0.1.26] - 2026-10-23
 

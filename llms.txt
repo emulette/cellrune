@@ -330,8 +330,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.calculation_hints()`, `.source()`, `.provenance()`, and
   `.non_worksheet_tab_ids()` (chartsheet, dialogsheet, and macrosheet IDs,
   which added sheets never reuse), and `.highest_sheet_id() -> Option<SheetId>`
-  (the highest ID the workbook has used, deleted sheets included; an added
-  sheet receives the next one, so a deleted sheet's ID is never reused).
+  (the highest ID the workbook has used, including sheets deleted in the
+  same draft or session; an added sheet receives the next one, so within a
+  draft or session a deleted sheet's ID is never reused. Opening a file
+  computes it from the tabs the file declares, so after a save and reopen
+  a deleted sheet's ID can be given to an added sheet).
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,

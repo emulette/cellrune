@@ -296,7 +296,9 @@ target, collision, rewrite error, resource limit, or cancellation rolls the whol
 scoped to it and its tables. References to them in the remaining formulas, defined names, and table
 formulas become `#REF!` as Excel saves them, a deleted end of a 3-D reference moves to the nearest
 remaining worksheet, and `INDIRECT` text is left as it is. Deleting the last visible sheet fails with
-`validation.last_visible_sheet`, and a deleted sheet's ID is never reused. Saving into the source
+`validation.last_visible_sheet`. A sheet added later in the same draft or session never takes a
+deleted sheet's ID; a saved file does not record deleted IDs, so after reopening, an added sheet can
+take one. Saving into the source
 package removes the parts only the deleted sheet reached and rewrites references in conditional
 formats, data validations, and chart series to `#REF!`; a remaining pivot cache or pivot chart that
 reads the deleted sheet, or a slicer or timeline cache while it holds a pivot table or table, fails
