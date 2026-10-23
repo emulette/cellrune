@@ -12,14 +12,21 @@ from cellrune import (
     CalculationDelta,
     CellRuneError,
     CellValue,
+    ConvertTableToRangeChange,
+    CopySheetChange,
+    CreateTableChange,
     DefinedNameInspection,
     EditReceipt,
     EditReceiptV2,
     EditWriteReport,
     FunctionCatalogReport,
+    MoveSheetChange,
     PreviewChanges,
     PreviewCursor,
     RangePage,
+    RenameDefinedNameChange,
+    SetSheetAutoFilterChange,
+    SetTableRangeChange,
     TableSummary,
     TransactionImpactPage,
     Workbook,
@@ -157,6 +164,44 @@ def check() -> None:
     reopened.apply_changes(reopened.summary()["semantic_revision"], removal)
     reopened.add_sheet("Other")
     reopened.delete_sheet("Other")
+    copy: CopySheetChange = {"kind": "copy_sheet", "sheet": "Sheet1", "position": 1}
+    move: MoveSheetChange = {"kind": "move_sheet", "sheet": "Sheet1 (2)", "position": 0}
+    sheet_filter: SetSheetAutoFilterChange = {
+        "kind": "set_sheet_auto_filter",
+        "sheet": "Sheet1",
+        "range": "A1:B2",
+    }
+    rename: RenameDefinedNameChange = {
+        "kind": "rename_defined_name",
+        "name": "Typed",
+        "scope_sheet": None,
+        "new_name": "Renamed",
+    }
+    structure: list[WorkbookChange] = [
+        copy,
+        move,
+        sheet_filter,
+        {"kind": "set_defined_name", "name": "Typed", "formula": "=Sheet1!$A$1", "hidden": False},
+        rename,
+        {"kind": "set_sheet_auto_filter", "sheet": "Sheet1"},
+    ]
+    copied: EditReceipt = reopened.apply_changes(
+        reopened.summary()["semantic_revision"], structure
+    )
+    copied["created_sheet_ids"][0].bit_length()
+    create: CreateTableChange = {
+        "kind": "create_table",
+        "sheet": "Sheet1",
+        "range": "D1:E3",
+        "name": "Scores",
+    }
+    created: EditReceiptV2 = reopened.apply_changes_v2(
+        reopened.summary()["semantic_revision"], [create]
+    )
+    table_id = created["changed_table_ids"][0]
+    resize: SetTableRangeChange = {"kind": "set_table_range", "table_id": table_id, "range": "D1:E4"}
+    convert: ConvertTableToRangeChange = {"kind": "convert_table_to_range", "table_id": table_id}
+    reopened.apply_changes_v2(reopened.summary()["semantic_revision"], [resize, convert])
     reopened.close()
     write_report: WriteReport = workbook.save("typing-check.xlsx")
     write_report["output_sha256"].upper()

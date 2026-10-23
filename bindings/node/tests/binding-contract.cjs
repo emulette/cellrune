@@ -487,6 +487,117 @@ async function assertDeleteSheet() {
   );
 }
 
+function validationError(code) {
+  return (error) =>
+    error instanceof CellRuneError &&
+    error.code === code &&
+    error.kind === "validation";
+}
+
+async function assertSheetStructureChanges() {
+  const workbook = Workbook.create();
+  workbook.addSheet("Data");
+  workbook.setNumber("Data", "A1", 2);
+  workbook.setFormula("Data", "B1", "=Data!A1*10");
+  workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "setDefinedName", name: "Rate", formula: "=Data!$A$1", hidden: false },
+    { kind: "setFormula", sheet: "Sheet1", address: "A1", formula: "=Rate*2" },
+  ]);
+
+  const receipt = workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "copySheet", sheet: "data", position: 1 },
+    {
+      kind: "setValue",
+      sheet: "Data (2)",
+      address: "A1",
+      value: { kind: "number", value: 7 },
+    },
+    { kind: "moveSheet", sheet: "Data", position: 0 },
+    { kind: "renameDefinedName", name: "rate", newName: "Price" },
+    { kind: "setSheetAutoFilter", sheet: "Sheet1", range: "A1:C9" },
+  ]);
+  assert.deepEqual(receipt.createdSheetIds, [3]);
+  assert.equal(receipt.topologyChanged, true);
+  let summary = workbook.summary();
+  assert.deepEqual(
+    summary.sheets.map((sheet) => [sheet.id, sheet.name]),
+    [
+      [2, "Data"],
+      [1, "Sheet1"],
+      [3, "Data (2)"],
+    ],
+  );
+  assert.equal(summary.sheets[1].autoFilter, "A1:C9");
+  const copied = workbook.readRange("Data (2)", "A1", "B1").cells;
+  assert.deepEqual(copied[0].sourceValue, { kind: "number", value: 7 });
+  assert.equal(copied[1].formula, "='Data (2)'!A1*10");
+  assert.equal(
+    workbook.readRange("Sheet1", "A1", "A1").cells[0].formula,
+    "=Price*2",
+  );
+
+  workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "setSheetAutoFilter", sheet: "Sheet1" },
+  ]);
+  assert.equal(workbook.summary().sheets[1].autoFilter, null);
+  const revision = workbook.summary().semanticRevision;
+  assert.throws(
+    () =>
+      workbook.applyChanges(revision, [
+        { kind: "moveSheet", sheet: "Data", position: 3 },
+      ]),
+    validationError("validation.sheet_position_out_of_range"),
+  );
+  assert.throws(
+    () =>
+      workbook.applyChanges(revision, [
+        { kind: "renameDefinedName", name: "Rate", newName: "Other" },
+      ]),
+    validationError("validation.unknown_defined_name"),
+  );
+  assert.throws(
+    () =>
+      workbook.applyChanges(revision, [
+        { kind: "copySheet", sheet: "Data", position: -1 },
+      ]),
+    (error) => error.code === "interop.input.invalid",
+  );
+
+  for (const [address, text] of [
+    ["F1", "Item"],
+    ["G1", "Amount"],
+    ["F2", "Pen"],
+    ["F3", "Ink"],
+  ]) {
+    workbook.setText("Sheet1", address, text);
+  }
+  workbook.setNumber("Sheet1", "G2", 2);
+  workbook.setNumber("Sheet1", "G3", 3);
+  assert.throws(
+    () =>
+      workbook.applyChangesV2(workbook.summary().semanticRevision, [
+        { kind: "createTable", sheet: "Sheet1", range: "F1:G1" },
+      ]),
+    validationError("validation.table_range_invalid"),
+  );
+  const created = workbook.applyChangesV2(workbook.summary().semanticRevision, [
+    { kind: "createTable", sheet: "sheet1", range: "F1:G2" },
+    { kind: "setTableRange", tableId: 1, range: "F1:G3" },
+  ]);
+  assert.deepEqual(created.changedTableIds, [1]);
+  summary = workbook.summary();
+  const table = summary.sheets[1].tables[0];
+  assert.deepEqual(
+    [table.id, table.displayName, table.range],
+    [1, "Table1", "F1:G3"],
+  );
+  workbook.applyChangesV2(workbook.summary().semanticRevision, [
+    { kind: "convertTableToRange", tableId: 1 },
+  ]);
+  assert.deepEqual(workbook.summary().sheets[1].tables, []);
+  workbook.close();
+}
+
 const SHEET_METADATA_FIXTURE = path.join(
   __dirname,
   "..",
@@ -658,6 +769,7 @@ async function assertCsv() {
 }
 
 async function main() {
+  await assertSheetStructureChanges();
   await assertDeleteSheet();
   await assertCsv();
   await assertAnnotations();

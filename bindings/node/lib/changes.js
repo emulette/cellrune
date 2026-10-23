@@ -74,6 +74,20 @@ function serializeWorkbookChange(change, index) {
         kind: "delete_sheet",
         sheet: requiredChangeString(change.sheet, index, "sheet"),
       };
+    case "moveSheet":
+      requireNonNegativeInteger(change.position, `changes[${index}].position`);
+      return {
+        kind: "move_sheet",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        position: change.position,
+      };
+    case "copySheet":
+      requireNonNegativeInteger(change.position, `changes[${index}].position`);
+      return {
+        kind: "copy_sheet",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        position: change.position,
+      };
     case "setSheetVisibility":
       return {
         kind: "set_sheet_visibility",
@@ -83,6 +97,12 @@ function serializeWorkbookChange(change, index) {
           index,
           "visibility",
         ),
+      };
+    case "setSheetAutoFilter":
+      return {
+        kind: "set_sheet_auto_filter",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        range: optionalChangeString(change.range, index, "range"),
       };
     case "setDefinedName":
       if (change.scopeSheet !== undefined && change.scopeSheet !== null) {
@@ -106,6 +126,17 @@ function serializeWorkbookChange(change, index) {
         kind: "remove_defined_name",
         name: requiredChangeString(change.name, index, "name"),
         scope_sheet: change.scopeSheet ?? null,
+      };
+    case "renameDefinedName":
+      return {
+        kind: "rename_defined_name",
+        name: requiredChangeString(change.name, index, "name"),
+        scope_sheet: optionalChangeString(
+          change.scopeSheet,
+          index,
+          "scopeSheet",
+        ),
+        new_name: requiredChangeString(change.newName, index, "newName"),
       };
     case "setDateSystem":
       return {
@@ -199,6 +230,26 @@ function serializeWorkbookChangeV2(change, index) {
         first_data_row: change.firstDataRow,
         last_data_row: change.lastDataRow,
       };
+    case "createTable":
+      return {
+        kind: "create_table",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        range: requiredChangeString(change.range, index, "range"),
+        name: optionalChangeString(change.name, index, "name"),
+      };
+    case "setTableRange":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      return {
+        kind: "set_table_range",
+        table_id: change.tableId,
+        range: requiredChangeString(change.range, index, "range"),
+      };
+    case "convertTableToRange":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      return {
+        kind: "convert_table_to_range",
+        table_id: change.tableId,
+      };
     default:
       return serializeWorkbookChange(change, index);
   }
@@ -214,12 +265,16 @@ const V2_CHANGE_KEYS = new Map([
   ],
   ["addSheet", ["kind", "name"]],
   ["renameSheet", ["kind", "sheet", "newName"]],
+  ["moveSheet", ["kind", "sheet", "position"]],
+  ["copySheet", ["kind", "sheet", "position"]],
   ["setSheetVisibility", ["kind", "sheet", "visibility"]],
+  ["setSheetAutoFilter", ["kind", "sheet", "range"]],
   [
     "setDefinedName",
     ["kind", "name", "scopeSheet", "formula", "hidden"],
   ],
   ["removeDefinedName", ["kind", "name", "scopeSheet"]],
+  ["renameDefinedName", ["kind", "name", "scopeSheet", "newName"]],
   ["setDateSystem", ["kind", "dateSystem"]],
   [
     "setCalculationHints",
@@ -238,6 +293,9 @@ const V2_CHANGE_KEYS = new Map([
     "resizeTableRows",
     ["kind", "tableId", "firstDataRow", "lastDataRow"],
   ],
+  ["createTable", ["kind", "sheet", "range", "name"]],
+  ["setTableRange", ["kind", "tableId", "range"]],
+  ["convertTableToRange", ["kind", "tableId"]],
 ]);
 
 function validateV2ChangeKeys(change, index) {
@@ -295,6 +353,13 @@ function serializeCellValue(value, index) {
 function requiredChangeString(value, index, name) {
   requireString(value, `changes[${index}].${name}`);
   return value;
+}
+
+/** Returns an optional string field, or `null` when it is omitted. */
+function optionalChangeString(value, index, name) {
+  return value === undefined || value === null
+    ? null
+    : requiredChangeString(value, index, name);
 }
 
 module.exports = { serializeWorkbookChange, serializeWorkbookChangeV2 };

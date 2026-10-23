@@ -300,12 +300,6 @@ export interface NativeFunctionUsageReport {
   entries: Array<NativeFunctionUsageEntry>
 }
 
-/** A locale profile as JavaScript passes it: BCP 47 tags that native code validates. */
-export interface NativeLocaleProfile {
-  locale: string
-  displayLanguage?: string
-}
-
 export interface NativeHyperlink {
   range: string
   target?: string
@@ -321,6 +315,12 @@ export interface NativeHyperlinkPage {
   offset: number
   nextOffset?: number
   entries: Array<NativeHyperlink>
+}
+
+/** A locale profile as JavaScript passes it: BCP 47 tags that native code validates. */
+export interface NativeLocaleProfile {
+  locale: string
+  displayLanguage?: string
 }
 
 export interface NativeNumberFormat {

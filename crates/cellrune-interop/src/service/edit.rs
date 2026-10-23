@@ -1,6 +1,6 @@
 //! Typed edit conversion, staging, and guarded installation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cellrune::{
     CalculationHints, CalculationMode, CancellationToken, CellAddress, CellRange, DateSystem,
@@ -343,10 +343,15 @@ fn convert_edit_batch(
     Ok(EditBatch::new(changes))
 }
 
+/// Sheets by case-insensitive name, each with its ID and current spelling.
+type SheetMap = BTreeMap<String, (SheetId, SheetName)>;
+
 /// Converts operations in batch order, resolving each sheet name against the sheets earlier
-/// operations added or renamed.
+/// operations added, renamed, copied, or deleted.
 struct ChangeConverter {
-    sheets: BTreeMap<String, SheetId>,
+    sheets: SheetMap,
+    /// Case-insensitive names of the tabs that are not worksheets, which a copy cannot take.
+    non_worksheet_names: BTreeSet<String>,
     maximum_sheet_id: u32,
 }
 
@@ -356,7 +361,16 @@ impl ChangeConverter {
             sheets: workbook
                 .sheets()
                 .iter()
-                .map(|sheet| (case_insensitive_key(sheet.name().as_str()), sheet.id()))
+                .map(|sheet| {
+                    (
+                        case_insensitive_key(sheet.name().as_str()),
+                        (sheet.id(), sheet.name().clone()),
+                    )
+                })
+                .collect(),
+            non_worksheet_names: workbook
+                .non_worksheet_tab_names()
+                .map(|name| case_insensitive_key(name.as_str()))
                 .collect(),
             // A draft never reuses a deleted sheet's ID, so an added sheet's ID follows the
             // highest one the workbook has used.
@@ -371,6 +385,7 @@ impl ChangeConverter {
     fn convert(&mut self, change: WorkbookChangeDto) -> Result<WorkbookChange, InteropError> {
         let sheets = &mut self.sheets;
         let maximum_sheet_id = &mut self.maximum_sheet_id;
+        let non_worksheet_names = &self.non_worksheet_names;
         Ok(match change {
             WorkbookChangeDto::SetValue {
                 sheet,
@@ -430,11 +445,7 @@ impl ChangeConverter {
                         "added sheet name is already present".to_owned(),
                     ));
                 }
-                *maximum_sheet_id = maximum_sheet_id
-                    .checked_add(1)
-                    .ok_or_else(InteropError::sheet_creation_failed)?;
-                let sheet_id = SheetId::new(*maximum_sheet_id)?;
-                sheets.insert(key, sheet_id);
+                sheets.insert(key, (next_sheet_id(maximum_sheet_id)?, name.clone()));
                 WorkbookChange::add_sheet(name)
             }
             WorkbookChangeDto::RenameSheet { sheet, new_name } => {
@@ -444,14 +455,14 @@ impl ChangeConverter {
                 let new_key = case_insensitive_key(new_name.as_str());
                 if sheets
                     .get(&new_key)
-                    .is_some_and(|existing| *existing != sheet_id)
+                    .is_some_and(|(existing, _)| *existing != sheet_id)
                 {
                     return Err(InteropError::invalid_change(
                         "renamed sheet name is already present".to_owned(),
                     ));
                 }
                 sheets.remove(&old_key);
-                sheets.insert(new_key, sheet_id);
+                sheets.insert(new_key, (sheet_id, new_name.clone()));
                 WorkbookChange::rename_sheet(sheet_id, new_name)
             }
             WorkbookChangeDto::DeleteSheet { sheet } => {
@@ -459,10 +470,35 @@ impl ChangeConverter {
                 sheets.remove(&case_insensitive_key(&sheet));
                 WorkbookChange::delete_sheet(sheet_id)
             }
+            WorkbookChangeDto::MoveSheet { sheet, position } => {
+                WorkbookChange::move_sheet(resolve_sheet_map(sheets, &sheet)?, position as usize)
+            }
+            WorkbookChangeDto::CopySheet { sheet, position } => {
+                let (sheet_id, name) = sheets
+                    .get(&case_insensitive_key(&sheet))
+                    .cloned()
+                    .ok_or_else(InteropError::sheet_not_found)?;
+                // The core names the copy against every tab name, as Excel does.
+                let copy_name = name.copy_name(|candidate| {
+                    let key = case_insensitive_key(candidate);
+                    sheets.contains_key(&key) || non_worksheet_names.contains(&key)
+                });
+                sheets.insert(
+                    case_insensitive_key(copy_name.as_str()),
+                    (next_sheet_id(maximum_sheet_id)?, copy_name),
+                );
+                WorkbookChange::copy_sheet(sheet_id, position as usize)
+            }
             WorkbookChangeDto::SetSheetVisibility { sheet, visibility } => {
                 WorkbookChange::set_sheet_visibility(
                     resolve_sheet_map(sheets, &sheet)?,
                     parse_visibility(&visibility)?,
+                )
+            }
+            WorkbookChangeDto::SetSheetAutoFilter { sheet, range } => {
+                WorkbookChange::set_sheet_auto_filter(
+                    resolve_sheet_map(sheets, &sheet)?,
+                    range.as_deref().map(parse_range).transpose()?,
                 )
             }
             WorkbookChangeDto::SetDefinedName {
@@ -485,6 +521,15 @@ impl ChangeConverter {
                     name,
                 )
             }
+            WorkbookChangeDto::RenameDefinedName {
+                name,
+                scope_sheet,
+                new_name,
+            } => WorkbookChange::rename_defined_name(
+                parse_defined_name_scope(sheets, scope_sheet.as_deref())?,
+                name,
+                new_name,
+            ),
             WorkbookChangeDto::SetDateSystem { date_system } => {
                 WorkbookChange::set_date_system(match date_system.as_str() {
                     "excel_1900" => DateSystem::Excel1900,
@@ -528,7 +573,7 @@ pub(super) fn convert_edit_batch_v2(
         }
         changes.push(match change {
             WorkbookChangeV2Dto::V1(change) => converter.convert(change)?,
-            WorkbookChangeV2Dto::Table(change) => table_change(change)?,
+            WorkbookChangeV2Dto::Table(change) => table_change(&converter, change)?,
             WorkbookChangeV2Dto::Format(change) => {
                 format_change(converter.resolve(change.sheet())?, change)?
             }
@@ -537,7 +582,10 @@ pub(super) fn convert_edit_batch_v2(
     Ok(EditBatch::new(changes))
 }
 
-fn table_change(change: TableChangeV2Dto) -> Result<WorkbookChange, InteropError> {
+fn table_change(
+    converter: &ChangeConverter,
+    change: TableChangeV2Dto,
+) -> Result<WorkbookChange, InteropError> {
     Ok(match change {
         TableChangeV2Dto::RenameTable {
             table_id,
@@ -563,16 +611,32 @@ fn table_change(change: TableChangeV2Dto) -> Result<WorkbookChange, InteropError
             Row::new(first_data_row)?,
             Row::new(last_data_row)?,
         )?,
+        TableChangeV2Dto::CreateTable { sheet, range, name } => WorkbookChange::create_table(
+            converter.resolve(&sheet)?,
+            parse_range(&range)?,
+            name.map(TableName::new).transpose()?,
+        ),
+        TableChangeV2Dto::SetTableRange { table_id, range } => {
+            WorkbookChange::set_table_range(TableId::new(table_id)?, parse_range(&range)?)
+        }
+        TableChangeV2Dto::ConvertTableToRange { table_id } => {
+            WorkbookChange::convert_table_to_range(TableId::new(table_id)?)
+        }
     })
 }
 
-fn resolve_sheet_map(
-    sheets: &BTreeMap<String, SheetId>,
-    name: &str,
-) -> Result<SheetId, InteropError> {
+/// Returns the ID the core assigns the next added or copied sheet.
+fn next_sheet_id(maximum_sheet_id: &mut u32) -> Result<SheetId, InteropError> {
+    *maximum_sheet_id = maximum_sheet_id
+        .checked_add(1)
+        .ok_or_else(InteropError::sheet_creation_failed)?;
+    Ok(SheetId::new(*maximum_sheet_id)?)
+}
+
+fn resolve_sheet_map(sheets: &SheetMap, name: &str) -> Result<SheetId, InteropError> {
     sheets
         .get(&case_insensitive_key(name))
-        .copied()
+        .map(|(sheet_id, _)| *sheet_id)
         .ok_or_else(InteropError::sheet_not_found)
 }
 
@@ -602,7 +666,7 @@ fn parse_visibility(value: &str) -> Result<SheetVisibility, InteropError> {
 }
 
 fn parse_defined_name_scope(
-    sheets: &BTreeMap<String, SheetId>,
+    sheets: &SheetMap,
     scope_sheet: Option<&str>,
 ) -> Result<DefinedNameScope, InteropError> {
     scope_sheet.map_or(Ok(DefinedNameScope::Workbook), |sheet| {

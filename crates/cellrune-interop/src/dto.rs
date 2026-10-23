@@ -330,12 +330,35 @@ pub enum WorkbookChangeDto {
         /// Case-insensitive sheet name.
         sheet: String,
     },
+    /// Moves one sheet to another position of the tab order, which counts chartsheets and other
+    /// tabs that are not worksheets; the sheet keeps its ID and its scoped names follow it.
+    MoveSheet {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Zero-based tab position the sheet takes, counted after the move.
+        position: u32,
+    },
+    /// Copies one sheet to a tab position as the next sheet ID, named `Name (2)` or the next free
+    /// number; references to the source sheet in the copy name the copy.
+    CopySheet {
+        /// Case-insensitive source sheet name.
+        sheet: String,
+        /// Zero-based tab position the copy takes, counted after the copy.
+        position: u32,
+    },
     /// Changes one sheet's visibility.
     SetSheetVisibility {
         /// Case-insensitive sheet name.
         sheet: String,
         /// `visible`, `hidden`, or `very_hidden`.
         visibility: String,
+    },
+    /// Creates, changes, or removes one sheet's sheet-level autoFilter.
+    SetSheetAutoFilter {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Filtered A1 range, header row included; omitted or `null` removes the filter.
+        range: Option<String>,
     },
     /// Adds or replaces a workbook or sheet-scoped defined name.
     SetDefinedName {
@@ -354,6 +377,16 @@ pub enum WorkbookChangeDto {
         name: String,
         /// Optional case-insensitive sheet scope; omitted for workbook scope.
         scope_sheet: Option<String>,
+    },
+    /// Renames a workbook or sheet-scoped defined name and rewrites the references that resolve
+    /// to it.
+    RenameDefinedName {
+        /// Current defined-name spelling, matched case-insensitively.
+        name: String,
+        /// Optional case-insensitive sheet scope; omitted for workbook scope.
+        scope_sheet: Option<String>,
+        /// New defined-name spelling.
+        new_name: String,
     },
     /// Changes the workbook date system.
     SetDateSystem {
@@ -401,7 +434,7 @@ pub struct EditReceiptDto {
     pub changed_cells: Vec<CellReferenceDto>,
     /// Cells whose source value or formula changed calculation semantics.
     pub calculation_changed_cells: Vec<CellReferenceDto>,
-    /// Sheet IDs allocated by add-sheet operations.
+    /// Sheet IDs allocated by add-sheet and copy-sheet operations.
     pub created_sheet_ids: Vec<u32>,
     /// Whether formula, name, or sheet topology changed.
     pub topology_changed: bool,
@@ -438,11 +471,34 @@ pub enum TableChangeV2Dto {
         /// Last one-based data-body row.
         last_data_row: u32,
     },
+    /// Creates a table over a range whose first row is its header; the receipt reports its new
+    /// stable ID.
+    CreateTable {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Table A1 range, header row included.
+        range: String,
+        /// Display name; omitted for `Table` and the number after the workbook's table count.
+        name: Option<String>,
+    },
+    /// Changes a table's range: its header row stays, and its columns and data rows grow or
+    /// shrink.
+    SetTableRange {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+        /// New full A1 range, header and totals rows included.
+        range: String,
+    },
+    /// Converts a table to a plain range; structured references to it become cell references.
+    ConvertTableToRange {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+    },
 }
 
 /// One v2 workbook mutation.
 ///
-/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the three
+/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the
 /// table-authoring operations and the third the cell format, column width, and row height
 /// operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
