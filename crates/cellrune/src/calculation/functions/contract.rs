@@ -1365,7 +1365,8 @@ const NUMBER_VALUE_DEFAULTS: &[ArgumentDefault] = &[
 impl TextAdditionalFunction {
     const fn call_contract(self) -> CallContract {
         match self {
-            Self::Char
+            Self::BahtText
+            | Self::Char
             | Self::Code
             | Self::Clean
             | Self::EncodeUrl

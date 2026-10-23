@@ -21,6 +21,7 @@ mod array;
 mod array_common;
 mod array_reshape;
 mod array_sort;
+mod baht_text;
 mod calendar;
 mod combinatorics;
 mod complex;
@@ -997,10 +998,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 484);
+        assert_eq!(catalog.len(), 485);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            483
+            484
         );
         assert!(
             catalog

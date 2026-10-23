@@ -734,9 +734,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 483 official
+  `.is_official()`. The 0.1.27 catalog contains 484 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 484 accepted entries. The descriptor registry
+  dummy-function marker, for 485 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
@@ -745,7 +745,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `AMORLINC`,
   `AMORDEGRC`, `IMSIN`, `IMCOS`,
   `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, `IMCSCH`,
-  `ENCODEURL`, and `CELL`. `CHITEST` and `CHIINV` are legacy aliases of
+  `ENCODEURL`, `BAHTTEXT`, and `CELL`. `CHITEST` and `CHIINV` are legacy
+  aliases of
   `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
   `.returns_array()`; the others return scalars.
 - `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
@@ -821,6 +822,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   component: ASCII letters, digits, `-`, `.`, `_`, and `~` stay, and every other
   UTF-8 byte becomes `%` and two uppercase hexadecimal digits. Authored
   `ENCODEURL` formulas are stored without a prefix.
+- `BAHTTEXT(number)` reads the baht as Thai numerals (สิบ for ten, ยี่สิบ for
+  twenty, เอ็ด for a one after a nonzero tens digit, หนึ่ง before the other
+  place words, and ล้าน for each million), then บาท, then ถ้วน for a whole amount
+  or the satang and สตางค์. Text that is not a number returns `#VALUE!`. Zero,
+  negative amounts, amounts below one baht, more than two decimal places, and a
+  final one after a zero tens digit (101, 1000001) report
+  `calculation.unsupported_expression`.
 - `CELL(info_type, reference)` calculates the info types defined by the
   workbook alone: `"address"` of the upper-left cell as `$A$1` text when the
   reference is on the formula's sheet, `"contents"` (the upper-left cell's

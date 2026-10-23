@@ -1666,25 +1666,22 @@
     "excel_rich_error": false
   },
   "function:bahttext": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "หนึ่งพันสองร้อยสามสิบสี่บาทห้าสิบสตางค์",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BAHTTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:bahttext:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "สองบาทถ้วน",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BAHTTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:bahttext:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (BAHTTEXT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:base": {
     "classification": "match",

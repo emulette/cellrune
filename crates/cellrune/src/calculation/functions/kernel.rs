@@ -280,6 +280,7 @@ function_enum!(TextFunction {
 });
 
 function_enum!(TextAdditionalFunction {
+    BahtText,
     Char,
     Code,
     NumberValue,

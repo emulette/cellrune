@@ -14,6 +14,7 @@ pub(super) fn call(
     args: &[Expr],
 ) -> Value {
     match function {
+        TextAdditionalFunction::BahtText => super::baht_text::baht_text(engine, context, args),
         TextAdditionalFunction::Char => character(engine, context, args),
         TextAdditionalFunction::Code => code(engine, context, args),
         TextAdditionalFunction::NumberValue => {

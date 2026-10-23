@@ -814,6 +814,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(TextJoin, "TEXTJOIN", Text),
     function!(Trim, "TRIM", Text),
     function!(Upper, "UPPER", Text),
+    function!(BahtText, "BAHTTEXT", TextAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Char, "CHAR", TextAdditional),
     function!(Code, "CODE", TextAdditional).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(NumberValue, "NUMBERVALUE", TextAdditional)
@@ -1815,15 +1817,21 @@ mod tests {
         assert!(!vdb.call_contract().arity().accepts(4));
         assert!(!vdb.call_contract().arity().accepts(8));
 
-        let encode_url = descriptor("ENCODEURL").expect("ENCODEURL descriptor");
-        assert_eq!(encode_url.minimum_version(), CompatibilityVersion::V0_1_27);
-        assert!(matches!(
-            encode_url.evaluator(),
-            Evaluator::TextAdditional(_)
-        ));
-        assert!(encode_url.call_contract().arity().accepts(1));
-        assert!(!encode_url.call_contract().arity().accepts(2));
-        assert!(!encode_url.catalog_returns_array());
+        for name in ["BAHTTEXT", "ENCODEURL"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_27,
+                "{name}"
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::TextAdditional(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
 
         let cell = descriptor("CELL").expect("CELL descriptor");
         assert_eq!(cell.minimum_version(), CompatibilityVersion::V0_1_27);

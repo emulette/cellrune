@@ -163,6 +163,47 @@ fn encodeurl_percent_encodes_everything_but_the_unreserved_characters() {
     assert_error("ENCODEURL(#N/A)", ExcelError::NotAvailable);
 }
 
+#[test]
+fn bahttext_reads_baht_and_satang_as_thai_numerals() {
+    for (formula, expected) in [
+        // Microsoft's example and the Oracle.
+        ("BAHTTEXT(1234)", "หนึ่งพันสองร้อยสามสิบสี่บาทถ้วน"),
+        ("BAHTTEXT(1234.5)", "หนึ่งพันสองร้อยสามสิบสี่บาทห้าสิบสตางค์"),
+        ("BAHTTEXT(\"2\")", "สองบาทถ้วน"),
+        // Ten, twenty, a one after a nonzero tens digit, and millions.
+        ("BAHTTEXT(10.01)", "สิบบาทหนึ่งสตางค์"),
+        ("BAHTTEXT(21)", "ยี่สิบเอ็ดบาทถ้วน"),
+        ("BAHTTEXT(1000000)", "หนึ่งล้านบาทถ้วน"),
+        ("BAHTTEXT(21000011.21)", "ยี่สิบเอ็ดล้านสิบเอ็ดบาทยี่สิบเอ็ดสตางค์"),
+        ("BAHTTEXT(2500000)", "สองล้านห้าแสนบาทถ้วน"),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula)]);
+        assert!(scan_formula_capabilities(&workbook).is_supported());
+        assert_eq!(
+            calculate_workbook(&workbook, CalculationOptions::default()).cell(cell_id(1)),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            ))),
+            "{formula}"
+        );
+    }
+    assert_error("BAHTTEXT(\"K001\")", ExcelError::Value);
+    for formula in [
+        "BAHTTEXT(101)",
+        "BAHTTEXT(1000001)",
+        "BAHTTEXT(0)",
+        "BAHTTEXT(0.5)",
+        "BAHTTEXT(-5)",
+        "BAHTTEXT(1.234)",
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+}
+
 fn assert_error(formula: &str, expected: ExcelError) {
     let result = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, formula)]),

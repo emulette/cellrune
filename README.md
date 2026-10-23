@@ -140,8 +140,8 @@ CellRune 0.1.27 adds the shape statistics `SKEW`, `SKEW.P`, and `KURT`, the arra
 `CHISQ.INV.RT` with their legacy names, the financial functions `CUMIPMT`, `CUMPRINC`, `VDB`,
 `AMORLINC`, and `AMORDEGRC`,
 the complex trigonometric functions `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`,
-`IMSINH`, `IMSECH`, and `IMCSCH`, `ENCODEURL`, and `CELL` for the information that depends only on
-the workbook; the exact list is in
+`IMSINH`, `IMSECH`, and `IMCSCH`, `ENCODEURL`, `BAHTTEXT`, and `CELL` for the information that
+depends only on the workbook; the exact list is in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
