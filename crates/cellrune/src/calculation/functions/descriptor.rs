@@ -744,6 +744,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(PivotBy, "PIVOTBY", Grouped)
         .with_array_evaluator(ArrayEvaluator::Grouped(GroupedArrayFunction::PivotBy))
         .with_minimum_version(CompatibilityVersion::V0_1_10),
+    function!(Cell, "CELL", Information).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(ErrorType, "ERROR.TYPE", Information).with_array_evaluator(
         ArrayEvaluator::Information(InformationArrayFunction::ErrorType),
     ),
@@ -1812,6 +1813,14 @@ mod tests {
         assert!(encode_url.call_contract().arity().accepts(1));
         assert!(!encode_url.call_contract().arity().accepts(2));
         assert!(!encode_url.catalog_returns_array());
+
+        let cell = descriptor("CELL").expect("CELL descriptor");
+        assert_eq!(cell.minimum_version(), CompatibilityVersion::V0_1_27);
+        assert!(matches!(cell.evaluator(), Evaluator::Information(_)));
+        assert!((1..=2).all(|arity| cell.call_contract().arity().accepts(arity)));
+        assert!(!cell.call_contract().arity().accepts(0));
+        assert!(!cell.call_contract().arity().accepts(3));
+        assert!(!cell.catalog_returns_array());
 
         for name in [
             "IMCOS", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSIN", "IMSINH", "IMTAN",

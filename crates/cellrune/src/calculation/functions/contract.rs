@@ -1284,10 +1284,18 @@ impl LookupFunction {
     }
 }
 
+const CELL_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
+    1,
+    DefaultTrigger::Absent,
+    ArgumentDefaultValue::Omitted,
+)];
+
 impl InformationFunction {
     const fn call_contract(self) -> CallContract {
         match self {
             Self::Na => CallContract::uniform(Arity::exact(0), SCALAR),
+            Self::Cell => CallContract::positional(Arity::range(1, 2), &[SCALAR, REFERENCE])
+                .with_defaults(CELL_DEFAULTS),
             Self::FormulaText | Self::IsFormula | Self::IsRef => {
                 CallContract::uniform(Arity::exact(1), REFERENCE)
             }

@@ -996,10 +996,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 481);
+        assert_eq!(catalog.len(), 482);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            480
+            481
         );
         assert!(
             catalog

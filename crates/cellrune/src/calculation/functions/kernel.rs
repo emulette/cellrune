@@ -240,6 +240,7 @@ function_enum!(LookupFunction {
 });
 
 function_enum!(InformationFunction {
+    Cell,
     ErrorType,
     FormulaText,
     IsBlank,

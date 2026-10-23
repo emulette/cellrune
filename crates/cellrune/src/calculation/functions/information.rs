@@ -11,6 +11,9 @@ pub(super) fn call(
     function: InformationFunction,
     args: &[Expr],
 ) -> Value {
+    if function == InformationFunction::Cell {
+        return super::reference_introspection::cell(engine, context, args);
+    }
     if function == InformationFunction::FormulaText {
         return super::reference_introspection::formula_text(engine, context, args);
     }
@@ -104,7 +107,8 @@ fn apply(function: InformationFunction, value: Value) -> Value {
         InformationFunction::T => t(value),
         InformationFunction::Type => value_type(value),
         InformationFunction::ErrorType => error_type(value),
-        InformationFunction::FormulaText
+        InformationFunction::Cell
+        | InformationFunction::FormulaText
         | InformationFunction::IsFormula
         | InformationFunction::Na
         | InformationFunction::IsRef => {

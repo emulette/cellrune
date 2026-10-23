@@ -734,17 +734,17 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 480 official
+  `.is_official()`. The 0.1.27 catalog contains 481 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 481 accepted entries. The descriptor registry
+  dummy-function marker, for 482 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
 - The official names added in 0.1.27 are `SKEW`, `SKEW.P`, `KURT`,
   `FREQUENCY`, `MODE.MULT`, `CHISQ.TEST`, `CHITEST`, `CHISQ.INV`,
   `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `IMSIN`, `IMCOS`,
-  `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, `IMCSCH`, and
-  `ENCODEURL`. `CHITEST` and `CHIINV` are legacy aliases of
+  `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, `IMCSCH`,
+  `ENCODEURL`, and `CELL`. `CHITEST` and `CHIINV` are legacy aliases of
   `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
   `.returns_array()`; the others return scalars.
 - `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
@@ -806,6 +806,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   component: ASCII letters, digits, `-`, `.`, `_`, and `~` stay, and every other
   UTF-8 byte becomes `%` and two uppercase hexadecimal digits. Authored
   `ENCODEURL` formulas are stored without a prefix.
+- `CELL(info_type, reference)` calculates the info types defined by the
+  workbook alone: `"address"` of the upper-left cell as `$A$1` text when the
+  reference is on the formula's sheet, `"contents"` (the upper-left cell's
+  value), and for a single cell `"row"`, `"col"`, and `"type"` (`"b"` for an
+  empty cell, `"l"` for a text constant, and `"v"` otherwise). The other info
+  types (formatting, width, protection, file name), an omitted reference,
+  another sheet's address, a multi-cell `"row"`, `"col"`, or `"type"`, an empty
+  cell's `"contents"`, a formula with a text result for `"type"`, and other
+  info_type spellings report `calculation.unsupported_expression`. Because
+  `CELL` depends on the referenced cells, a `CELL` formula that refers to its
+  own cell is a circular reference.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
   `[0, 1)`. `RANDBETWEEN(bottom, top)` returns `#NUM!` when `bottom` exceeds

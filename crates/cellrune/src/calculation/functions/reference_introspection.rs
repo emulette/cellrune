@@ -1,7 +1,8 @@
-use super::super::ast::Expr;
+use super::super::ast::{Expr, column_label};
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::CellId;
 use super::super::value::{ErrorKind, Value};
+use super::util::required_text;
 
 const MAX_DISPLAYED_FORMULA_CHARACTERS: usize = 8_192;
 
@@ -82,6 +83,57 @@ pub(super) fn sheets(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
     match u32::try_from(count) {
         Ok(count) => Value::Number(f64::from(count)),
         Err(_) => Value::Error(ErrorKind::Num),
+    }
+}
+
+/// CELL(info_type, reference) for the info types Microsoft defines by the workbook alone:
+/// `"address"` and `"contents"` of the upper-left cell, and `"col"`, `"row"`, and `"type"` of a
+/// single cell. The other info types read formatting, column widths, or the file path, an omitted
+/// reference reads the selection, and the address of another sheet names the file, so those are
+/// unsupported, as are a multi-cell `"col"`, `"row"`, or `"type"` (Microsoft documents the active
+/// cell), a blank `"contents"`, a formula with a text result for `"type"`, and info_type spellings
+/// other than these lowercase ones.
+pub(super) fn cell(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [info_type, reference] = args else {
+        return Value::Error(ErrorKind::Unsupported);
+    };
+    let info_type = match required_text(engine, context, info_type) {
+        Ok(info_type) => info_type,
+        Err(kind) => return Value::Error(kind),
+    };
+    let rect = match engine
+        .resolve_reference_value_expr(context, reference)
+        .and_then(|reference| reference.single_rect())
+    {
+        Ok(rect) => rect,
+        Err(kind) => return Value::Error(kind),
+    };
+    let first = (rect.sheet, rect.row_start, rect.col_start);
+    let single = rect.is_single_cell();
+    match info_type.as_str() {
+        "address" if rect.sheet == context.sheet() => engine.bounded_text(format!(
+            "${}${}",
+            column_label(rect.col_start),
+            rect.row_start
+        )),
+        "col" if single => Value::Number(f64::from(rect.col_start)),
+        "row" if single => Value::Number(f64::from(rect.row_start)),
+        "contents" => match engine.read_reference_cell(context, first) {
+            Ok(Value::Blank) => Value::Error(ErrorKind::Unsupported),
+            Ok(value) => value,
+            Err(kind) => Value::Error(kind),
+        },
+        "type" if single => match engine.read_reference_cell(context, first) {
+            Ok(value) if engine.cell_has_formula(first) => match value {
+                Value::Blank | Value::Text(_) => Value::Error(ErrorKind::Unsupported),
+                _ => Value::Text("v".to_owned()),
+            },
+            Ok(Value::Blank) => Value::Text("b".to_owned()),
+            Ok(Value::Text(_)) => Value::Text("l".to_owned()),
+            Ok(_) => Value::Text("v".to_owned()),
+            Err(kind) => Value::Error(kind),
+        },
+        _ => Value::Error(ErrorKind::Unsupported),
     }
 }
 
