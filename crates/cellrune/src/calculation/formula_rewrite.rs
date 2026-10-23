@@ -590,16 +590,54 @@ fn plan_sheet_prefix_edits(
         .and_then(|changes| changes.remaining_span(&prefix.name, end_name))
         .unwrap_or((&prefix.name, end_name));
     let collapsed = (deleted(&prefix.name) || deleted(end_name)) && case_insensitive_eq(start, end);
+    let bytes = source.as_bytes();
+    let opening = qualifier
+        .span()
+        .start
+        .checked_sub(1)
+        .filter(|offset| bytes.get(*offset) == Some(&b'\''));
+    let closing =
+        (bytes.get(range_end.span().end) == Some(&b'\'')).then_some(range_end.span().end + 1);
+    // The whole prefix, with the quotes around either end.
+    let prefix_span = SourceSpan::new(
+        opening.unwrap_or(qualifier.span().start),
+        closing.unwrap_or(range_end.span().end),
+    );
     if !collapsed {
-        for (component, original, remaining) in [
-            (qualifier, prefix.name.as_str(), start),
-            (range_end, end_name, end),
-        ] {
-            let new_name = if deleted(original) {
+        let new_name = |original: &str, remaining| {
+            if deleted(original) {
                 Some(request.renamed_sheet(remaining).unwrap_or(remaining))
             } else {
                 request.renamed_sheet(original)
-            };
+            }
+        };
+        let new_start = new_name(&prefix.name, start);
+        let new_end = new_name(end_name, end);
+        if new_start.is_none() && new_end.is_none() {
+            return Ok(());
+        }
+        let final_start = new_start.unwrap_or(&prefix.name);
+        let final_end = new_end.unwrap_or(end_name);
+        // MS-XLSX quotes a sheet range as one token, so `My Data:S3` is written `'My Data:S3'`
+        // rather than `'My Data':S3`.
+        let wholly_quoted = opening.is_some()
+            && closing.is_some()
+            && source.get(qualifier.span().end..range_end.span().start) == Some(":");
+        if !wholly_quoted
+            && (sheet_name_needs_quotes(final_start) || sheet_name_needs_quotes(final_end))
+        {
+            budget.charge_edit()?;
+            edits.push(SourceEdit::new(
+                prefix_span,
+                format!(
+                    "'{}:{}'",
+                    final_start.replace('\'', "''"),
+                    final_end.replace('\'', "''")
+                ),
+            ));
+            return Ok(());
+        }
+        for (component, new_name) in [(qualifier, new_start), (range_end, new_end)] {
             if let Some(new_name) = new_name {
                 budget.charge_edit()?;
                 edits.push(SourceEdit::new(
@@ -611,23 +649,12 @@ fn plan_sheet_prefix_edits(
         return Ok(());
     }
     // `'S2:S3'!A1` keeps one sheet once `S2` is deleted and becomes `'S3'!A1`.
-    let bytes = source.as_bytes();
-    let opening = qualifier
-        .span()
-        .start
-        .checked_sub(1)
-        .filter(|offset| bytes.get(*offset) == Some(&b'\''));
-    let closing =
-        (bytes.get(range_end.span().end) == Some(&b'\'')).then_some(range_end.span().end + 1);
     let name = request.renamed_sheet(start).unwrap_or(start);
     let escaped = name.replace('\'', "''");
     let quoted = opening.is_some() || closing.is_some() || sheet_name_needs_quotes(name);
     budget.charge_edit()?;
     edits.push(SourceEdit::new(
-        SourceSpan::new(
-            opening.unwrap_or(qualifier.span().start),
-            closing.unwrap_or(range_end.span().end),
-        ),
+        prefix_span,
         if quoted {
             format!("'{escaped}'")
         } else {
@@ -1056,7 +1083,7 @@ mod tests {
         };
         assert_eq!(
             rewrite("SUM( Old!A1 , 'Old'!Tax , Old:End!B2 )", request),
-            Some("SUM( 'New Sheet'!A1 , 'New Sheet'!Tax , 'New Sheet':End!B2 )".to_owned())
+            Some("SUM( 'New Sheet'!A1 , 'New Sheet'!Tax , 'New Sheet:End'!B2 )".to_owned())
         );
     }
 
@@ -1168,7 +1195,9 @@ mod tests {
         };
         for (source, rewritten) in [
             ("SUM('S2:S3'!A1)", "SUM('New Name'!A1)"),
-            ("SUM(S2:S4!A1)", "SUM('New Name':S4!A1)"),
+            ("SUM(S2:S4!A1)", "SUM('New Name:S4'!A1)"),
+            ("SUM('S2:S4'!A1)", "SUM('New Name:S4'!A1)"),
+            ("SUM(S1:S4!A1)", "SUM(S2:S4!A1)"),
             ("S2!A1+S1!A1+S3!A1", "#REF!+S2!A1+'New Name'!A1"),
         ] {
             assert_eq!(
@@ -1177,6 +1206,54 @@ mod tests {
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn a_3d_prefix_whose_end_needs_quotes_is_quoted_as_a_whole() {
+        // MS-XLSX quotes a sheet range as one token, `'My Data:S4'!A1`, never per end.
+        let tabs = &["S1", "S2", "My Data", "S4"];
+        for (source, rewritten) in [
+            ("SUM(S2:S4!A1)", "SUM('My Data:S4'!A1)"),
+            ("SUM('S2:S4'!A1)", "SUM('My Data:S4'!A1)"),
+            ("SUM(S1:S2!A1)", "SUM(S1!A1)"),
+            ("SUM(S1:'S2'!A1)", "SUM('S1'!A1)"),
+            ("SUM(S4:S2!A1)", "SUM('S4:My Data'!A1)"),
+        ] {
+            assert_eq!(
+                rewrite(
+                    source,
+                    FormulaRewriteRequest::Sheets(SheetChanges {
+                        renames: &[],
+                        deleted: &["S2"],
+                        tabs,
+                        non_worksheets: &[],
+                        deleted_tables: &[],
+                    })
+                ),
+                Some(rewritten.to_owned()),
+                "{source}"
+            );
+        }
+        assert_eq!(
+            rewrite(
+                "SUM(S1:'S2'!A1)",
+                FormulaRewriteRequest::Sheet {
+                    old_name: "S1",
+                    new_name: "First Sheet",
+                }
+            ),
+            Some("SUM('First Sheet:S2'!A1)".to_owned())
+        );
+        assert_eq!(
+            rewrite(
+                "SUM('S1:S2'!A1)",
+                FormulaRewriteRequest::Sheet {
+                    old_name: "S1",
+                    new_name: "O'Hara",
+                }
+            ),
+            Some("SUM('O''Hara:S2'!A1)".to_owned())
+        );
     }
 
     #[test]
