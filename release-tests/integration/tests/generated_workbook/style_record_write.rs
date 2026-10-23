@@ -414,3 +414,49 @@ fn styles_of_cells_out_of_row_major_order_resolve_to_their_own_record() {
         );
     }
 }
+
+#[test]
+fn added_fonts_and_borders_never_take_an_index_an_unedited_style_names() {
+    use cellrune::{BorderEdge, BorderEdit, BorderStyle, FontEdit};
+
+    let thick = BorderEdge::new(BorderStyle::Thick, None);
+    // No font or border records at all, and fewer records than the xfs name.
+    for records in [
+        "",
+        r#"<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><borders count="1"><border/></borders>"#,
+    ] {
+        let styles = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{records}<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="0" fontId="2" borderId="3"/></cellXfs></styleSheet>"#
+        );
+        const SHEET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1" s="1"><v>3</v></c></row></sheetData></worksheet>"#;
+        let source = one_sheet_package(SHEET, Some(&styles));
+        let before = WorkbookDraft::from_document(
+            &open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open"),
+        );
+        let output = edit_and_save(
+            &source,
+            vec![WorkbookChange::set_cell_format(
+                sheet1(),
+                address("A1"),
+                CellFormatEdit::new()
+                    .with_font(FontEdit::new().with_bold(true))
+                    .with_border(BorderEdit::new().with_left(thick)),
+            )],
+        );
+        let reopened = WorkbookDraft::from_document(
+            &open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen"),
+        );
+        for cell in ["B1", "C1"] {
+            assert_eq!(
+                reopened.cell_format(sheet1(), address(cell)).expect("cell"),
+                before.cell_format(sheet1(), address(cell)).expect("cell"),
+                "{cell}: {}",
+                support::part_text(&output, STYLES_PART)
+            );
+        }
+        let edited = reopened.cell_format(sheet1(), address("A1")).expect("A1");
+        assert!(edited.font().bold());
+        assert_eq!(edited.border().left(), thick);
+    }
+}

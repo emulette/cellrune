@@ -76,6 +76,8 @@ struct StyleAnalysis {
     xfs: Vec<XfTemplate>,
     /// Record counts of the sections the styles part holds, by section name.
     sections: BTreeMap<&'static str, usize>,
+    /// For `fonts`, `fills`, and `borders`, one past the highest record index an `xf` names.
+    referenced: BTreeMap<&'static str, usize>,
     /// The source font, fill, border, and xf records an edit can reuse.
     records: SourceRecords,
 }
@@ -83,6 +85,32 @@ struct StyleAnalysis {
 impl StyleAnalysis {
     fn existing(&self, section: &str) -> usize {
         self.sections.get(section).copied().unwrap_or(0)
+    }
+
+    /// Returns how many records of `section` precede the first added one. An `xf` that names a
+    /// record the section lacks reads as the default record, so added records start past every
+    /// index an `xf` names.
+    fn added_base(&self, section: &str) -> usize {
+        self.existing(section)
+            .max(self.referenced.get(section).copied().unwrap_or(0))
+    }
+
+    /// Notes the font, fill, and border indexes a `cellXfs` or `cellStyleXfs` entry names.
+    fn reference(&mut self, element: &BytesStart<'_>) {
+        for (attribute, section) in [
+            ("fontId", "fonts"),
+            ("fillId", "fills"),
+            ("borderId", "borders"),
+        ] {
+            let index = element
+                .try_get_attribute(attribute)
+                .ok()
+                .flatten()
+                .and_then(|value| value.value.parse::<usize>().ok())
+                .unwrap_or(0);
+            let named = self.referenced.entry(section).or_default();
+            *named = (*named).max(index.saturating_add(1));
+        }
     }
 
     /// Keeps the `index`th record of a font, fill, border, or `cellXfs` section.
@@ -133,7 +161,12 @@ impl RecordAdditions {
         {
             return Ok(index);
         }
-        Ok(analysis.existing("fonts") + position_or_push(&mut self.fonts, font))
+        let existing = analysis.existing("fonts");
+        if self.fonts.is_empty() {
+            let missing = analysis.added_base("fonts") - existing;
+            self.fonts.resize(missing, Font::default());
+        }
+        Ok(existing + position_or_push(&mut self.fonts, font))
     }
 
     /// Returns the index of a source fill equal to `fill`, else of an added one.
@@ -153,12 +186,14 @@ impl RecordAdditions {
         // Excel reads fill records 0 and 1 as `none` and `gray125` whatever they hold, so a source
         // with fewer than two fills first receives the missing reserved records.
         if self.fills.is_empty() {
-            let reserved = [
-                PatternFill::default(),
-                PatternFill::new(FillPattern::Gray125),
-            ];
-            self.fills
-                .extend(reserved.into_iter().skip(existing.min(reserved.len())));
+            let base = analysis.added_base("fills").max(2);
+            self.fills.extend((existing..base).map(|index| {
+                if index == 1 {
+                    PatternFill::new(FillPattern::Gray125)
+                } else {
+                    PatternFill::default()
+                }
+            }));
         }
         Ok(existing + position_or_push(&mut self.fills, fill))
     }
@@ -176,7 +211,12 @@ impl RecordAdditions {
         {
             return Ok(index);
         }
-        Ok(analysis.existing("borders") + position_or_push(&mut self.borders, border))
+        let existing = analysis.existing("borders");
+        if self.borders.is_empty() {
+            let missing = analysis.added_base("borders") - existing;
+            self.borders.resize(missing, Border::default());
+        }
+        Ok(existing + position_or_push(&mut self.borders, border))
     }
 
     fn section_xml(&self, section: &str, prefix: &str) -> Result<Vec<String>, XlsxWriteError> {
@@ -403,6 +443,11 @@ fn analyze_styles(
                     let count = analysis.sections.entry(name).or_default();
                     let index = *count;
                     *count += 1;
+                    if matches!(name, "cellXfs" | "cellStyleXfs")
+                        && element.local_name().as_ref() == "xf"
+                    {
+                        analysis.reference(element);
+                    }
                     if name == "numFmts" && element.local_name().as_ref() == "numFmt" {
                         insert_custom_format(element, &mut analysis.custom_formats, source)?;
                     } else if name != "numFmts" && name != "cellStyleXfs" {
