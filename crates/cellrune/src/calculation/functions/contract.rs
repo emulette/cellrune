@@ -1218,6 +1218,7 @@ impl EngineeringFunction {
             | Self::ImReal
             | Self::ImSqrt
             | Self::ImCos
+            | Self::ImCosh
             | Self::ImCot
             | Self::ImCsc
             | Self::ImCsch

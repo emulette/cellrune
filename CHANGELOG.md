@@ -380,9 +380,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   `AMORDEGRC` life below 3 or between 4 and 5 years, and 0 from period 1 on for a salvage equal to
   the cost. An `AMORDEGRC` period between 0 and 1, a purchase on the first period's end, other end
   periods, and other undocumented edges report `calculation.unsupported_expression`.
-- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, and `IMCSCH` return
-  complex text like the other complex functions, `#VALUE!` for a logical inumber, and `#NUM!` at
-  the pole zero. `IMTAN` and `IMCOT` keep their digits near a real pole, and a bounded result past
+- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMCOSH`, `IMSECH`, and
+  `IMCSCH` return complex text like the other complex functions, `#VALUE!` for a logical inumber,
+  and `#NUM!` at the pole zero. `IMCOSH(COMPLEX(3,4))` gives Mac Excel 2021's
+  `-6.58066304055116-7.58155274274655i`; Excel Online writes the correctly rounded `...654i`,
+  which f64 `sinh` and `sin` miss by one ULP. `IMTAN` and `IMCOT` keep their digits near a real pole, and a bounded result past
   an overflow is its limit once the rest underflows (`IMTAN("1+400i")` is `i`); before that it
   reports `calculation.unsupported_expression`.
 - `ENCODEURL` keeps ASCII letters, digits, and `.` and encodes `:`, `/`, and the space, as

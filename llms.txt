@@ -1161,8 +1161,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   `FREQUENCY`, `MODE.MULT`, `CHISQ.TEST`, `CHITEST`, `CHISQ.INV`,
   `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `AMORLINC`,
   `AMORDEGRC`, `IMSIN`, `IMCOS`,
-  `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, `IMCSCH`,
-  `ENCODEURL`, `BAHTTEXT`, and `CELL`. `CHITEST` and `CHIINV` are legacy
+  `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMCOSH`, `IMSECH`, `IMCSCH`,
+  `ENCODEURL`, `BAHTTEXT`, `CELL`, `AGGREGATE`, `FIXED`, `LENB`, `LEFTB`,
+  `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`, `REPLACEB`, `ASC`, and `DBCS`. `CHITEST` and `CHIINV` are legacy
   aliases of
   `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
   `.returns_array()`; the others return scalars.
@@ -1260,7 +1261,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   2(sin² a + sinh² b) when the imaginary part is below 1, so arguments near a
   real pole such as `IMTAN("1.5707963")` or `IMCOT("1E-9")` keep their digits.
   A logical inumber returns `#VALUE!` and other text that
-  is not a complex number `#NUM!`. `IMSIN`, `IMCOS`, and `IMSINH` return
+  is not a complex number `#NUM!`. `IMSIN`, `IMCOS`, `IMSINH`, and `IMCOSH` return
   `#NUM!` when the result overflows, and `IMCOT`, `IMCSC`, and `IMCSCH` return
   `#NUM!` at zero. Where the bounded functions divide by an overflowing value,
   the result is its limit once the remaining parts underflow, as Excel returns

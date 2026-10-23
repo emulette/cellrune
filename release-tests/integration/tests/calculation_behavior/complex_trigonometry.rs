@@ -36,6 +36,14 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
             "0.0051744731840194+0.036275889628626i",
         ),
         ("IMSINH(COMPLEX(3,4))", "-6.548120040911-7.61923172032141i"),
+        // Mac Excel 2021 in the Oracle; Excel Online writes the correctly rounded
+        // -7.58155274274654 for the imaginary part, which f64 sinh and sin miss by an ULP.
+        (
+            "IMCOSH(COMPLEX(3,4))",
+            "-6.58066304055116-7.58155274274655i",
+        ),
+        // Microsoft's example.
+        ("IMCOSH(\"4+3i\")", "-27.0349456030742+3.85115333481178i"),
         (
             "IMSECH(COMPLEX(3,4))",
             "-0.065294027857947+0.0752249603027732i",
@@ -63,6 +71,7 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
         ("IMTAN(\"0\")", "0"),
         ("IMSEC(\"0\")", "1"),
         ("IMSINH(\"0\")", "0"),
+        ("IMCOSH(\"0\")", "1"),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula)]);
         assert!(
@@ -139,6 +148,8 @@ fn complex_trigonometry_rejects_logical_and_invalid_inumbers() {
         // The unbounded functions overflow like IMEXP.
         ("IMSIN(\"1+1000i\")", ExcelError::Number),
         ("IMSINH(\"1000\")", ExcelError::Number),
+        ("IMCOSH(\"1000\")", ExcelError::Number),
+        ("IMCOSH(TRUE)", ExcelError::Value),
     ] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),

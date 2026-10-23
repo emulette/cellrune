@@ -199,6 +199,7 @@ function_enum!(EngineeringFunction {
     ImArgument,
     ImConjugate,
     ImCos,
+    ImCosh,
     ImCot,
     ImCsc,
     ImCsch,

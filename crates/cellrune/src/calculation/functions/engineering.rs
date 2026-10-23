@@ -128,6 +128,9 @@ pub(super) fn call(
         EngineeringFunction::ImSinh => {
             trigonometry(engine, context, args, ComplexTrigonometry::HyperbolicSine)
         }
+        EngineeringFunction::ImCosh => {
+            trigonometry(engine, context, args, ComplexTrigonometry::HyperbolicCosine)
+        }
         EngineeringFunction::ImSech => {
             trigonometry(engine, context, args, ComplexTrigonometry::HyperbolicSecant)
         }

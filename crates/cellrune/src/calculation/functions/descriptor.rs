@@ -693,6 +693,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ImSub, "IMSUB", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImSum, "IMSUM", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImCos, "IMCOS", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImCosh, "IMCOSH", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(ImCot, "IMCOT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(ImCsc, "IMCSC", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(ImCsch, "IMCSCH", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
@@ -1854,7 +1855,8 @@ mod tests {
         assert!(!cell.catalog_returns_array());
 
         for name in [
-            "IMCOS", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSIN", "IMSINH", "IMTAN",
+            "IMCOS", "IMCOSH", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSIN", "IMSINH",
+            "IMTAN",
         ] {
             let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
             assert_eq!(

@@ -4610,11 +4610,13 @@
     "excel_rich_error": false
   },
   "function:imcosh": {
-    "classification": "not_implemented",
+    "classification": "divergent",
     "excel_value": "-6.58066304055116-7.58155274274654i",
     "excel_type": "str",
     "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCOSH) for this oracle case."
+    "cellrune_value": "-6.58066304055116-7.58155274274655i",
+    "cellrune_type": "str",
+    "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "function:imcot": {
     "classification": "match",

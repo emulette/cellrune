@@ -4620,11 +4620,10 @@
     "excel_rich_error": false
   },
   "function:imcosh": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-6.58066304055116-7.58155274274655i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCOSH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imcot": {
     "classification": "match",

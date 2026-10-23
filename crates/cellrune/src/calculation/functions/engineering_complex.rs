@@ -201,6 +201,7 @@ pub(super) enum ComplexTrigonometry {
     Secant,
     Cosecant,
     HyperbolicSine,
+    HyperbolicCosine,
     HyperbolicSecant,
     HyperbolicCosecant,
 }
@@ -246,6 +247,7 @@ pub(super) fn trigonometry(
         ComplexTrigonometry::Secant => reciprocal(value.cosine(), value.imaginary(), value),
         ComplexTrigonometry::Cosecant => reciprocal(value.sine(), value.imaginary(), value),
         ComplexTrigonometry::HyperbolicSine => value.hyperbolic_sine(),
+        ComplexTrigonometry::HyperbolicCosine => value.hyperbolic_cosine(),
         ComplexTrigonometry::HyperbolicSecant => {
             reciprocal(value.hyperbolic_cosine(), value.real(), value)
         }
@@ -260,6 +262,7 @@ pub(super) fn trigonometry(
         ComplexTrigonometry::Sine
             | ComplexTrigonometry::Cosine
             | ComplexTrigonometry::HyperbolicSine
+            | ComplexTrigonometry::HyperbolicCosine
     );
     match result {
         Err(ErrorKind::Num) if bounded => Value::Error(ErrorKind::Unsupported),
