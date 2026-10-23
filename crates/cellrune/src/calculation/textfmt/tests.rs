@@ -49,6 +49,21 @@ fn single_section_digit_codes_keep_their_earlier_results() {
     assert_text(2.5, "0/2", "3/2");
     assert_text(5.0, "0 a/p", "5 a/p");
     assert_eq!(text(1e16, "0"), Err(ErrorKind::Num));
+    assert_eq!(text(1e14, "#,##0.00"), Err(ErrorKind::Num));
+}
+
+#[test]
+fn numbers_past_the_engine_digits_are_unsupported_outside_the_earlier_subset() {
+    for (value, format) in [
+        (1e16, "0.00;(0.00)"),
+        (-1e16, "0.00;(0.00)"),
+        (1e16, "0.00?"),
+        (1e16, "0 ?/?"),
+        (1.0, "0.0000000000000000E+0"),
+        (1e14, "#,##0.00_)"),
+    ] {
+        assert_unsupported(value, format);
+    }
 }
 
 #[test]

@@ -1005,7 +1005,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   the double, a minus sign appears only when a digit or `0` placeholder is
   shown, an integer `0` is kept unless decimals follow, the decimal point is
   omitted when no decimal digit is shown, and 2^53 or more rounded units is
-  `#NUM!`. `General` shows a number of up to 11 characters, minus sign
+  `#NUM!` in the one-section digit codes 0.1.26 formatted and
+  `calculation.unsupported_expression` in every other code. `General` shows a number of up to 11 characters, minus sign
   included, as `&` does; a longer number, which Excel rounds or writes in
   scientific notation, and a nonzero magnitude below 0.001 are
   `calculation.unsupported_expression`. Date sections read `yy`,

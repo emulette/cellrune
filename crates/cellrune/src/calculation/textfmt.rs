@@ -7,6 +7,7 @@
 //! rather than a guess.
 
 mod datetime;
+mod legacy;
 mod lexer;
 mod number;
 #[cfg(test)]
@@ -33,7 +34,15 @@ pub(crate) fn format_number(
 ) -> Result<String, ErrorKind> {
     let sections = lexer::lex(format)?;
     let chosen = choose_number_section(&sections, value)?;
-    render_number_section(&chosen.section.tokens, chosen, context)
+    render_number_section(&chosen.section.tokens, chosen, context).map_err(|kind| {
+        // Only the 0.1.26 subset reported a number past the engine's digits as `#NUM!`; Excel
+        // still shows such a number, so other codes report it as unsupported, as `FIXED` does.
+        if kind == ErrorKind::Num && !legacy::accepts(format) {
+            ErrorKind::Unsupported
+        } else {
+            kind
+        }
+    })
 }
 
 /// Formats text with `format`: the fourth section, or a lone section holding `@`, places the text
