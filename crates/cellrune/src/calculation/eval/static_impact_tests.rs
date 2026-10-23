@@ -103,6 +103,66 @@ fn affected_formulas_cover_every_formula_whose_syntax_reaches_an_edit() {
     }
 }
 
+/// An OFFSET whose position the draft resolves without calculating anything is affected only by
+/// the cells it reads; INDIRECT and an OFFSET whose position comes from a formula are affected by
+/// any edit.
+#[test]
+fn resolvable_offsets_are_affected_only_by_the_cells_they_read() {
+    let mut draft = WorkbookDraft::new();
+    let sheet = draft.workbook().sheets()[0].id();
+    for (cell, value) in [
+        ("A1", 1.0),
+        ("A2", 2.0),
+        ("A3", 3.0),
+        ("A4", 4.0),
+        ("C1", 2.0),
+    ] {
+        draft
+            .set_cell_value(sheet, address(cell), number(value))
+            .expect("value");
+    }
+    for (cell, text) in [
+        ("B1", "OFFSET(A1,1,0)"),
+        ("B2", "OFFSET(A1,C1,0)"),
+        ("B3", "INDIRECT(\"A4\")"),
+        ("B4", "OFFSET(A1,D1,0)"),
+        ("D1", "1+0"),
+    ] {
+        draft
+            .set_cell_formula(sheet, address(cell), formula(text))
+            .expect("formula");
+    }
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("fixture output");
+    let document =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("fixture");
+    let affected_by = |cell: &str| {
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .set_cell_value(sheet, address(cell), number(10.0))
+            .expect("edit");
+        write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+            .expect("edited output")
+            .report()
+            .affected_formulas()
+            .iter()
+            .map(|formula| formula.address())
+            .collect::<BTreeSet<_>>()
+    };
+    let addresses = |cells: &[&str]| {
+        cells
+            .iter()
+            .map(|cell| address(cell))
+            .collect::<BTreeSet<_>>()
+    };
+
+    assert_eq!(affected_by("Z9"), addresses(&["B3", "B4"]));
+    assert_eq!(affected_by("A2"), addresses(&["B1", "B3", "B4"]));
+    assert_eq!(affected_by("A3"), addresses(&["B2", "B3", "B4"]));
+    assert_eq!(affected_by("C1"), addresses(&["B2", "B3", "B4"]));
+}
+
 /// A workbook whose formulas reach their inputs in every way the analysis traces: plain, whole
 /// column, `INDEX`-ended, and 3-D ranges, workbook and sheet-scoped names, a sheet-qualified
 /// name, nested names, a name holding a rejected call, a sheet that does not exist yet, LET and

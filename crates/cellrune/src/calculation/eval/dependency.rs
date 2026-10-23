@@ -257,6 +257,13 @@ impl CollectedDependencies {
     }
 }
 
+/// Who asks whether a formula holds references that depend on values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DynamicReferenceUse {
+    Incremental,
+    DraftImpact,
+}
+
 #[derive(Default)]
 struct VisitedDefinitions {
     values: BTreeSet<DefinedLambdaId>,
@@ -627,7 +634,8 @@ impl Engine<'_> {
                 .any(|region| rects_intersect(&region.rect, rect))
     }
 
-    /// Reports whether a formula's references depend on values, as dynamic references do.
+    /// Reports whether a formula's references depend on values in a way draft impact analysis
+    /// cannot follow from the targets it resolves.
     pub(super) fn formula_contains_dynamic_reference(
         &self,
         cell: super::CellId,
@@ -636,7 +644,7 @@ impl Engine<'_> {
         self.asts.get(&cell).is_some_and(|parsed| {
             let budget = EvaluationBudget::default();
             self.expr_contains_dynamic_reference_function(
-                false,
+                DynamicReferenceUse::DraftImpact,
                 EvalContext::for_cancellable(cell, &budget, cancelled),
                 parsed.root(),
                 &mut VisitedDefinitions::default(),
@@ -684,7 +692,7 @@ impl Engine<'_> {
         };
         let budget = EvaluationBudget::default();
         let found = self.expr_contains_dynamic_reference_function(
-            true,
+            DynamicReferenceUse::Incremental,
             EvalContext::for_cancellable(cell, &budget, cancelled),
             parsed.root(),
             &mut VisitedDefinitions::default(),
@@ -1787,15 +1795,19 @@ impl Engine<'_> {
         })
     }
 
-    /// Reports whether `expr` holds a reference whose cells depend on values.
+    /// Reports whether `expr` holds a reference whose cells depend on values in a way `usage`
+    /// cannot follow.
     ///
-    /// With `bounded_range_ends`, a range with an end such as INDEX also counts when a formula or
-    /// an array result lies in its reach: calculation order follows only the cells the range
-    /// covers when its dependencies are collected, so those cells may be read out of order once
-    /// the end moves. Literal cells in the reach are safe to read in any order.
+    /// For incremental calculation every dynamic reference counts, and so does a range with an
+    /// end such as INDEX when a formula or an array result lies in its reach: calculation order
+    /// follows only the cells the range covers when its dependencies are collected, so those
+    /// cells may be read out of order once the end moves. Literal cells in the reach are safe to
+    /// read in any order. Draft impact analysis follows the cells an OFFSET resolves to now, so
+    /// only an OFFSET it cannot resolve counts there, besides INDIRECT, whose text can name any
+    /// sheet or name.
     fn expr_contains_dynamic_reference_function(
         &self,
-        bounded_range_ends: bool,
+        usage: DynamicReferenceUse,
         context: EvalContext<'_>,
         expr: &Expr,
         visited: &mut VisitedDefinitions,
@@ -1823,7 +1835,7 @@ impl Engine<'_> {
                             && visited.values.insert(id.clone())
                         {
                             found |= self.expr_contains_dynamic_reference_function(
-                                bounded_range_ends,
+                                usage,
                                 context
                                     .without_bindings()
                                     .with_defined_name_scope(Some(id.scope())),
@@ -1836,7 +1848,7 @@ impl Engine<'_> {
                             || (arguments_are_reachable
                                 && args.iter().any(|arg| {
                                     self.expr_contains_dynamic_reference_function(
-                                        bounded_range_ends,
+                                        usage,
                                         context,
                                         arg,
                                         visited,
@@ -1847,10 +1859,12 @@ impl Engine<'_> {
                     if !self.builtin_arguments_are_reachable(name, args) {
                         return false;
                     }
-                    if matches!(
-                        function_dependency_kind(name),
-                        Some(DependencyKind::DynamicReference(_))
-                    ) {
+                    if let Some(DependencyKind::DynamicReference(kind)) =
+                        function_dependency_kind(name)
+                        && (usage == DynamicReferenceUse::Incremental
+                            || kind == DynamicReferenceKind::Indirect
+                            || self.resolve_dynamic_rect(context, kind, args).is_err())
+                    {
                         return true;
                     }
                     let mut found = false;
@@ -1861,11 +1875,7 @@ impl Engine<'_> {
                         self.calculation_limits().max_let_bindings(),
                         |arg, scope| {
                             found |= self.expr_contains_dynamic_reference_function(
-                                bounded_range_ends,
-                                context,
-                                arg,
-                                visited,
-                                scope,
+                                usage, context, arg, visited, scope,
                             );
                         },
                     ) {
@@ -1873,7 +1883,7 @@ impl Engine<'_> {
                     }
                     args.iter().any(|arg| {
                         self.expr_contains_dynamic_reference_function(
-                            bounded_range_ends,
+                            usage,
                             context,
                             arg,
                             visited,
@@ -1885,7 +1895,7 @@ impl Engine<'_> {
                     let callee_contains_dynamic =
                         self.builtin_invocation_callee_is_reachable(context, callee, local_names)
                             && self.expr_contains_dynamic_reference_function(
-                                bounded_range_ends,
+                                usage,
                                 context,
                                 callee,
                                 visited,
@@ -1899,7 +1909,7 @@ impl Engine<'_> {
                             local_names,
                         ) && args.iter().any(|arg| {
                             self.expr_contains_dynamic_reference_function(
-                                bounded_range_ends,
+                                usage,
                                 context,
                                 arg,
                                 visited,
@@ -1914,7 +1924,7 @@ impl Engine<'_> {
                         return false;
                     };
                     self.expr_contains_dynamic_reference_function(
-                        bounded_range_ends,
+                        usage,
                         defined_context,
                         named,
                         visited,
@@ -1929,7 +1939,7 @@ impl Engine<'_> {
                         return false;
                     };
                     self.expr_contains_dynamic_reference_function(
-                        bounded_range_ends,
+                        usage,
                         defined_context,
                         named,
                         visited,
@@ -1939,7 +1949,8 @@ impl Engine<'_> {
                 Expr::Range { .. }
                     if match self.range_extent(context, expr, local_names, &mut Vec::new()) {
                         RangeExtent::Bounded(rect) => {
-                            bounded_range_ends && self.rect_holds_calculated_cells(&rect)
+                            usage == DynamicReferenceUse::Incremental
+                                && self.rect_holds_calculated_cells(&rect)
                         }
                         RangeExtent::ValueDependent => true,
                         RangeExtent::Fixed(_) | RangeExtent::Invalid => false,
@@ -1952,7 +1963,7 @@ impl Engine<'_> {
                 | Expr::Paren(inner)
                 | Expr::Unary { operand: inner, .. } => self
                     .expr_contains_dynamic_reference_function(
-                        bounded_range_ends,
+                        usage,
                         context,
                         inner,
                         visited,
@@ -1966,13 +1977,13 @@ impl Engine<'_> {
                     end: right,
                 } => {
                     self.expr_contains_dynamic_reference_function(
-                        bounded_range_ends,
+                        usage,
                         context,
                         left,
                         visited,
                         local_names,
                     ) || self.expr_contains_dynamic_reference_function(
-                        bounded_range_ends,
+                        usage,
                         context,
                         right,
                         visited,
@@ -1981,7 +1992,7 @@ impl Engine<'_> {
                 }
                 Expr::Array(rows) => rows.iter().flatten().any(|element| {
                     self.expr_contains_dynamic_reference_function(
-                        bounded_range_ends,
+                        usage,
                         context,
                         element,
                         visited,
@@ -2000,7 +2011,7 @@ impl Engine<'_> {
                     .reachable_qualified_name(context, sheet, name, visited)
                     .is_some_and(|(defined_context, named)| {
                         self.expr_contains_dynamic_reference_function(
-                            bounded_range_ends,
+                            usage,
                             defined_context,
                             named,
                             visited,

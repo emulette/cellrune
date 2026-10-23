@@ -488,10 +488,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   `SHEET`, `SHEETS`, `CELL`, and 3-D references when sheets are added,
   renamed, or deleted; a
   spill anchor whose area was written; anchors with a saved `#SPILL!` after
-  a clear; and every dependent of those. Formulas whose references are known
-  only after evaluation (dynamic references, unparsed formulas, rejected
-  calls, also inside a defined name they use, formulas without text) are
-  always affected once anything changed, and every formula is affected when
+  a clear; and every dependent of those. An `OFFSET` whose position the
+  edited workbook gives without calculating anything counts as reading the
+  cells it resolves to. Formulas whose references are known only after
+  evaluation (`INDIRECT`, any other `OFFSET`, a range end computed from
+  values, unparsed formulas, rejected calls, also inside a defined name they
+  use, formulas without text) are always affected once anything changed,
+  and every formula is affected when
   the analysis exceeds `max_dependency_edges` or the date system or
   calculation hints changed. Affected formulas lose their saved
   results and only then does `calcPr` gain `fullCalcOnLoad="1"`, keeping

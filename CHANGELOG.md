@@ -70,6 +70,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   limit nor cycle other formulas; workbooks with a dynamic array formula without a declared spill
   range still take two passes. The function iterations and reference cells a calculation reports
   are then those of one pass.
+- Minimal-write impact analysis treats an `OFFSET` whose position the edited workbook gives
+  without calculating anything, such as `OFFSET(A1,1,0)` or `OFFSET(A1,C1,0)` with a value in
+  `C1`, as reading the cells it resolves to, so an unrelated edit keeps its saved result.
+  `INDIRECT` and an `OFFSET` positioned by a formula are still affected by any edit.
 
 ### Fixed
 
