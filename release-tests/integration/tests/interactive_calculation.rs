@@ -1992,6 +1992,67 @@ fn formula_edits_evaluate_only_the_edited_formulas_and_their_dependents() {
 }
 
 #[test]
+fn repeated_formula_edits_inside_a_range_keep_recompiling_in_place() {
+    // Each time A40 gains or loses its formula, the areas of C1's range around it are built again.
+    // The areas they replace must not count toward max_dependency_edges, which the workbook
+    // stays well below.
+    let limits = CalculationLimits::default()
+        .with_max_dependency_edges(200)
+        .expect("nonzero edge limit");
+    let options = CalculationOptions::default().with_limits(limits);
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut initial = (1..=64)
+        .map(|row| {
+            WorkbookChange::set_cell_formula(
+                sheet_id,
+                CellAddress::from_indices(row, 1).expect("valid formula"),
+                formula("1"),
+            )
+        })
+        .collect::<Vec<_>>();
+    initial.push(WorkbookChange::set_cell_formula(
+        sheet_id,
+        address("C1"),
+        formula("SUM(A1:A64)"),
+    ));
+    session
+        .apply_changes(0, EditBatch::new(initial))
+        .expect("workbook");
+    session
+        .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+        .expect("initial calculation");
+    for step in 0..12 {
+        let change = if step % 2 == 0 {
+            WorkbookChange::set_cell_value(sheet_id, address("A40"), number(5.0))
+        } else {
+            WorkbookChange::set_cell_formula(sheet_id, address("A40"), formula("2"))
+        };
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([change]),
+            )
+            .expect("formula edit");
+        let delta = session
+            .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+            .expect("formula edit calculation");
+        assert_eq!(
+            (delta.mode(), delta.reason()),
+            (
+                CalculationExecutionMode::Incremental,
+                CalculationDecisionReason::DirtySubset,
+            ),
+            "step {step}"
+        );
+        assert_calculations_equal(
+            session.calculation().expect("installed result"),
+            &calculate_workbook(session.workbook(), options),
+        );
+    }
+}
+
+#[test]
 fn a_formula_edit_the_compiled_state_cannot_take_reports_the_full_run() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");

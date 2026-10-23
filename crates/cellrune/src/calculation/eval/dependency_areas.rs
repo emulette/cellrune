@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use super::Engine;
-use crate::calculation::graph::{DependencyGraph, DependencyNode};
+use crate::calculation::graph::{AreaId, DependencyGraph, DependencyNode};
 use crate::calculation::runtime::{CellId, Rect};
 
 /// A block holding at most this many cells and array anchors keeps them directly.
@@ -185,6 +185,19 @@ impl AreaNodes {
                 },
             )
         });
+    }
+
+    /// Follows [`DependencyGraph::retain_referenced_areas`]: forgets the ranges and blocks whose
+    /// area it dropped, so later ranges build them again, and renumbers the rest.
+    pub(super) fn renumber(&mut self, renumbered: &[Option<AreaId>]) {
+        let keep = |node: &mut Option<DependencyNode>| match node {
+            Some(DependencyNode::Area(area)) => renumbered[*area as usize]
+                .map(|kept| *area = kept)
+                .is_some(),
+            Some(DependencyNode::Cell(_)) | None => true,
+        };
+        self.ranges.retain(|_, node| keep(node));
+        self.blocks.retain(|_, node| keep(node));
     }
 
     /// Returns the node a formula reading the multi-cell `rect` waits for, or `None` when no

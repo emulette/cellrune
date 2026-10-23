@@ -70,6 +70,58 @@ impl DependencyGraph {
         self.area_edges
     }
 
+    /// Drops the areas no formula waits for, directly or through other areas, and renumbers the
+    /// rest in their order. Returns the new id of each old area, `None` for a dropped one.
+    pub(super) fn retain_referenced_areas(&mut self) -> Vec<Option<AreaId>> {
+        let area_of = |node: &DependencyNode| match node {
+            DependencyNode::Area(area) => Some(*area),
+            DependencyNode::Cell(_) => None,
+        };
+        let mut referenced = vec![false; self.areas.len()];
+        let mut pending = self
+            .formulas
+            .values()
+            .flatten()
+            .filter_map(area_of)
+            .collect::<Vec<_>>();
+        while let Some(area) = pending.pop() {
+            if !std::mem::replace(&mut referenced[area as usize], true) {
+                pending.extend(self.areas[area as usize].iter().filter_map(area_of));
+            }
+        }
+        let mut next: AreaId = 0;
+        let renumbered = referenced
+            .iter()
+            .map(|kept| {
+                kept.then(|| {
+                    next += 1;
+                    next - 1
+                })
+            })
+            .collect::<Vec<_>>();
+        if next as usize == self.areas.len() {
+            return renumbered;
+        }
+        let renumber = |node: &mut DependencyNode| {
+            if let DependencyNode::Area(area) = node {
+                *area = renumbered[*area as usize].expect("a referenced area's members are kept");
+            }
+        };
+        let areas = std::mem::take(&mut self.areas);
+        self.area_edges = 0;
+        for (mut members, kept) in areas.into_iter().zip(&referenced) {
+            if *kept {
+                members.iter_mut().for_each(renumber);
+                self.area_edges += members.len() as u64;
+                self.areas.push(members);
+            }
+        }
+        for nodes in self.formulas.values_mut() {
+            nodes.iter_mut().for_each(renumber);
+        }
+        renumbered
+    }
+
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.formulas.is_empty()

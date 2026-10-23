@@ -157,6 +157,11 @@ impl CompiledWorkbook {
             };
             graph.insert(*cell, nodes);
         }
+        // The areas of replaced ranges, and of blocks forgotten around a cell that appeared or
+        // disappeared, would otherwise stay in the graph, so every later recompilation and
+        // schedule would grow with every area ever built and the edge count with them.
+        let renumbered = graph.retain_referenced_areas();
+        areas.renumber(&renumbered);
         if graph.edge_count() > options.limits().max_dependency_edges() {
             return Ok(None);
         }
