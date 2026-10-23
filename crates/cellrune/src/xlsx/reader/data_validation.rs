@@ -3,7 +3,6 @@ use quick_xml::reader::NsReader;
 
 use super::super::XlsxReadError;
 use super::super::xml::{XmlAttributes, XmlBudget, is_element_in_namespace};
-use super::table::parse_reference;
 use crate::workbook::DataValidationRule;
 use crate::{
     CellRange, DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
@@ -286,7 +285,7 @@ fn parse_rule(attributes: &XmlAttributes) -> Option<DataValidationRule> {
 fn parse_ranges(sqref: &str) -> Option<Vec<CellRange>> {
     let ranges = sqref
         .split_ascii_whitespace()
-        .map(parse_reference)
+        .map(CellRange::from_sqref_item)
         .collect::<Option<Vec<_>>>()?;
     (!ranges.is_empty()).then_some(ranges)
 }

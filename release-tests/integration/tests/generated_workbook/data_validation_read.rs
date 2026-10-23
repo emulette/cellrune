@@ -295,3 +295,53 @@ fn rule_and_hyperlink_rewrites_are_not_charged_to_the_session_rewrite_budget() {
         )
         .expect("only cell formulas count toward the rewrite budget");
 }
+
+#[test]
+fn whole_column_and_row_validations_read_and_survive_a_row_insertion() {
+    use super::style_record_write::{edit_and_save, one_sheet_package, sheet1};
+
+    const SHEET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><dataValidations count="3"><dataValidation type="whole" sqref="C:C"><formula1>1</formula1></dataValidation><dataValidation type="whole" sqref="$2:$3"><formula1>2</formula1></dataValidation><dataValidation type="whole" sqref="A1 B:D"><formula1>3</formula1></dataValidation></dataValidations><extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:dataValidations count="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:dataValidation type="list"><x14:formula1><xm:f>$A$1:$A$3</xm:f></x14:formula1><xm:sqref>E:E</xm:sqref></x14:dataValidation></x14:dataValidations></ext></extLst></worksheet>"#;
+    let read = |bytes: &[u8]| {
+        let workbook = read_xlsx_bytes(bytes, ReadOptions::default()).expect("read");
+        workbook
+            .sheet_by_id(sheet1())
+            .expect("Sheet1")
+            .data_validations()
+            .iter()
+            .map(ranges)
+            .collect::<Vec<_>>()
+    };
+    let source = one_sheet_package(SHEET, None);
+    assert_eq!(
+        read(&source),
+        [
+            vec!["C1:C1048576"],
+            vec!["A2:XFD3"],
+            vec!["A1", "B1:D1048576"],
+            vec!["E1:E1048576"],
+        ]
+    );
+    let output = edit_and_save(
+        &source,
+        vec![
+            WorkbookChange::insert_rows(sheet1(), cellrune::Row::new(1).expect("row"), 1)
+                .expect("insert"),
+        ],
+    );
+    let worksheet =
+        super::recalculation_write_support::part_text(&output, "xl/worksheets/sheet1.xml");
+    assert!(
+        worksheet.contains(r#"sqref="C:C""#) && worksheet.contains(r#"sqref="3:4""#),
+        "{worksheet}"
+    );
+    assert_eq!(
+        read(&output),
+        [
+            vec!["C1:C1048576"],
+            vec!["A3:XFD4"],
+            vec!["A2", "B1:D1048576"],
+            vec!["E1:E1048576"],
+        ]
+    );
+}

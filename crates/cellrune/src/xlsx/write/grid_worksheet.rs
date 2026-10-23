@@ -1044,31 +1044,15 @@ fn cell_address(cell: &XmlElement, source: &PartPath) -> Result<CellAddress, Xls
     CellAddress::from_a1(&text).map_err(|error| invalid_xml(source, error))
 }
 
-/// Parses `A1` or `A1:B2`, ignoring `$` markers.
+/// Parses `A1`, `A1:B2`, or a span of whole columns or rows, ignoring `$` markers.
 pub(super) fn parse_range(text: &str) -> Option<CellRange> {
-    let text = text.replace('$', "");
-    let (start, end) = text.split_once(':').unwrap_or((&text, &text));
-    let start = CellAddress::from_a1(start).ok()?;
-    let end = CellAddress::from_a1(end).ok()?;
-    CellRange::new(
-        CellAddress::from_indices(
-            start.row().get().min(end.row().get()),
-            start.column().get().min(end.column().get()),
-        )
-        .ok()?,
-        CellAddress::from_indices(
-            start.row().get().max(end.row().get()),
-            start.column().get().max(end.column().get()),
-        )
-        .ok()?,
-    )
-    .ok()
+    CellRange::from_sqref_item(text)
 }
 
 pub(super) fn sqref_text(ranges: &[CellRange]) -> String {
     ranges
         .iter()
-        .map(|range| range_text(*range))
+        .map(|range| range.sqref_item_text())
         .collect::<Vec<_>>()
         .join(" ")
 }

@@ -182,6 +182,58 @@ impl CellRange {
         Self { start, end }
     }
 
+    /// Parses one item of a worksheet `sqref` or `ref`: `A1`, `A1:B2`, a span of whole columns
+    /// such as `C:D`, or a span of whole rows such as `2:5`, ignoring `$` markers and reading the
+    /// two ends in either order.
+    pub(crate) fn from_sqref_item(text: &str) -> Option<Self> {
+        let text = text.replace('$', "");
+        let (first, last) = text.split_once(':').unwrap_or((&text, &text));
+        let (first, last) = if first.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            (
+                CellAddress::from_a1(&format!("{first}1")).ok()?,
+                CellAddress::from_a1(&format!("{last}{EXCEL_MAX_ROWS}")).ok()?,
+            )
+        } else if first.bytes().all(|byte| byte.is_ascii_digit()) {
+            (
+                CellAddress::from_a1(&format!("A{first}")).ok()?,
+                CellAddress::from_a1(&format!("{}{last}", column_label(EXCEL_MAX_COLUMNS))).ok()?,
+            )
+        } else {
+            (
+                CellAddress::from_a1(first).ok()?,
+                CellAddress::from_a1(last).ok()?,
+            )
+        };
+        let (top, bottom) = (first.row.min(last.row), first.row.max(last.row));
+        let (left, right) = (first.column.min(last.column), first.column.max(last.column));
+        Some(Self::from_ordered(
+            CellAddress::new(top, left),
+            CellAddress::new(bottom, right),
+        ))
+    }
+
+    /// Returns the range as a `sqref` item, as whole columns or rows when it spans the other axis.
+    pub(crate) fn sqref_item_text(self) -> String {
+        let whole_rows = self.start.row.get() == 1 && self.end.row.get() == EXCEL_MAX_ROWS;
+        let whole_columns =
+            self.start.column.get() == 1 && self.end.column.get() == EXCEL_MAX_COLUMNS;
+        if whole_rows && !whole_columns {
+            return format!(
+                "{}:{}",
+                column_label(self.start.column.get()),
+                column_label(self.end.column.get())
+            );
+        }
+        if whole_columns && !whole_rows {
+            return format!("{}:{}", self.start.row.get(), self.end.row.get());
+        }
+        if self.start == self.end {
+            self.start.to_string()
+        } else {
+            format!("{}:{}", self.start, self.end)
+        }
+    }
+
     /// Returns the inclusive start address.
     pub const fn start(self) -> CellAddress {
         self.start
