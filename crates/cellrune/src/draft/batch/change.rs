@@ -184,6 +184,33 @@ pub enum WorkbookChange {
         /// Last deleted column.
         last: Column,
     },
+    /// Moves rows `first..=last` so that they start at row `destination` afterwards, as cutting
+    /// them and inserting the cut rows does.
+    ///
+    /// References to the moved rows follow them, and each end of a range follows its row; a range
+    /// whose ends would cross shrinks as if the moved rows were deleted.
+    MoveRows {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First moved row.
+        first: Row,
+        /// Last moved row.
+        last: Row,
+        /// Row the first moved row lands on.
+        destination: Row,
+    },
+    /// Moves columns `first..=last` so that they start at column `destination` afterwards, as
+    /// [`Self::MoveRows`] moves rows.
+    MoveColumns {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// First moved column.
+        first: Column,
+        /// Last moved column.
+        last: Column,
+        /// Column the first moved column lands on.
+        destination: Column,
+    },
     /// Replaces the font, fill, border, or alignment one cell displays with.
     ///
     /// This is a presentation change: it advances the presentation revision, not the semantic
@@ -458,6 +485,61 @@ impl WorkbookChange {
         })
     }
 
+    /// Constructs a row move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last` and
+    /// [`ValidationError::RowOutOfRange`] when the moved rows would end past the last row.
+    pub fn move_rows(
+        sheet_id: SheetId,
+        first: Row,
+        last: Row,
+        destination: Row,
+    ) -> Result<Self, ValidationError> {
+        validate_move(
+            first.get(),
+            last.get(),
+            destination.get(),
+            crate::EXCEL_MAX_ROWS,
+            |value| ValidationError::RowOutOfRange { value },
+        )?;
+        Ok(Self::MoveRows {
+            sheet_id,
+            first,
+            last,
+            destination,
+        })
+    }
+
+    /// Constructs a column move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RangeStartAfterEnd`] when `first` is after `last` and
+    /// [`ValidationError::ColumnOutOfRange`] when the moved columns would end past the last
+    /// column.
+    pub fn move_columns(
+        sheet_id: SheetId,
+        first: Column,
+        last: Column,
+        destination: Column,
+    ) -> Result<Self, ValidationError> {
+        validate_move(
+            first.get(),
+            last.get(),
+            destination.get(),
+            crate::EXCEL_MAX_COLUMNS,
+            |value| ValidationError::ColumnOutOfRange { value },
+        )?;
+        Ok(Self::MoveColumns {
+            sheet_id,
+            first,
+            last,
+            destination,
+        })
+    }
+
     /// Constructs a cell format change.
     pub const fn set_cell_format(
         sheet_id: SheetId,
@@ -508,6 +590,26 @@ pub(super) fn validate_insertion(
     }
     let end = at
         .checked_add(count - 1)
+        .ok_or_else(|| out_of_range(u32::MAX))?;
+    if end > maximum {
+        return Err(out_of_range(end));
+    }
+    Ok(())
+}
+
+/// Rejects a move of reversed lines or of lines that would land past the last one.
+pub(super) fn validate_move(
+    first: u32,
+    last: u32,
+    destination: u32,
+    maximum: u32,
+    out_of_range: impl Fn(u32) -> ValidationError,
+) -> Result<(), ValidationError> {
+    if first > last {
+        return Err(ValidationError::RangeStartAfterEnd);
+    }
+    let end = destination
+        .checked_add(last - first)
         .ok_or_else(|| out_of_range(u32::MAX))?;
     if end > maximum {
         return Err(out_of_range(end));

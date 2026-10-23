@@ -414,3 +414,51 @@ fn parts_holding_coordinates_no_pass_rewrites_are_refused() {
     );
     write_and_reopen(&draft);
 }
+
+#[test]
+fn moved_rows_reorder_the_saved_rows_and_carry_their_coordinates() {
+    let source = generated_grid_edit_fixture();
+    let draft = edited(
+        &source,
+        vec![WorkbookChange::move_rows(sheet(1), row(7), row(7), row(1)).expect("move")],
+    );
+    let (output, reopened) = write_and_reopen(&draft);
+    // Row 7 lands on row 1, so rows 1 through 6 move down one.
+    for (cell, expected) in [
+        ("A1", "SUM(Things[val])"),
+        ("B1", "ROW()"),
+        ("D2", "SUM(B3:B6)"),
+        ("D3", "B4*2"),
+    ] {
+        assert_eq!(formula(&reopened, "Data", cell), expected, "Data!{cell}");
+    }
+    assert_eq!(formula(&reopened, "Report", "A2"), "Data!B4");
+    assert_eq!(formula(&reopened, "Report", "A1"), "SUM(Data!B3:B6)");
+    let data = reopened.workbook().sheet_by_name("Data").expect("Data");
+    assert_eq!(data.tables()[0].range().start().to_string(), "A2");
+    assert_eq!(data.comments()[0].address().to_string(), "B5");
+    assert_eq!(
+        reopened.presentation().row_height(sheet(1), row(3)),
+        Some(25.0)
+    );
+    let parts = parts(&output);
+    let data_part = &parts[DATA];
+    assert!(
+        data_part.find(r#"<row r="1">"#) < data_part.find(r#"<row r="2">"#),
+        "{data_part}"
+    );
+    assert_contains(
+        data_part,
+        &[
+            r#"<mergeCell ref="G3:H4"/>"#,
+            r#"<conditionalFormatting sqref="B3:B6">"#,
+            r#"<autoFilter ref="L2:M5">"#,
+            r#"<brk id="5" max="16383" man="1"/>"#,
+        ],
+    );
+    assert_contains(
+        &parts["xl/charts/chart1.xml"],
+        &["<c:f>Data!$B$3:$B$6</c:f>"],
+    );
+    assert_contains(&parts["xl/drawings/vmlDrawing1.vml"], &["<x:Row>4</x:Row>"]);
+}

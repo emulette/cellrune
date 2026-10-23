@@ -2771,7 +2771,7 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
     // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
     // totals, conditional aggregates, lookups, dynamic references, spills, and cycles, in batches
-    // of one to three changes, some of which also insert or delete rows or columns. After every
+    // of one to three changes, some of which also insert, delete, or move rows or columns. After every
     // batch the session's automatic recalculation must equal a fresh full one.
     for seed in 1..=8_u64 {
         let mut random = Lcg(seed);
@@ -2856,11 +2856,29 @@ impl Lcg {
     }
 }
 
-/// Inserts or deletes one to three rows or columns of the generated grid.
+/// Inserts, deletes, or moves one to three rows or columns of the generated grid.
 fn random_structural_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
     let sheet = sheets[random.below(2) as usize];
     let count = random.below(3) + 1;
-    match random.below(4) {
+    match random.below(6) {
+        4 => {
+            let first = random.below(22) + 1;
+            WorkbookChange::move_rows(
+                sheet,
+                row(first),
+                row(first + count - 1),
+                row(random.below(22) + 1),
+            )
+        }
+        5 => {
+            let first = random.below(10) + 1;
+            WorkbookChange::move_columns(
+                sheet,
+                column(first),
+                column(first + count - 1),
+                column(random.below(10) + 1),
+            )
+        }
         0 => WorkbookChange::insert_rows(sheet, row(random.below(24) + 1), count),
         1 => {
             let first = random.below(24) + 1;

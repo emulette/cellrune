@@ -689,3 +689,101 @@ fn a_new_workbook_saves_structural_edits_and_recalculates_the_same_when_reopened
         Some(25.0)
     );
 }
+
+#[test]
+fn moved_rows_carry_their_references_and_each_range_end() {
+    let mut draft = draft(
+        vec![sheet(
+            1,
+            "S1",
+            &[
+                ("A1", "1"),
+                ("A2", "2"),
+                ("A3", "3"),
+                ("A4", "4"),
+                ("A8", "8"),
+                ("C1", "=SUM(A1:A3)"),
+                ("C2", "=SUM(A3:A4)"),
+                ("C3", "=A3"),
+                ("C4", "=A4"),
+            ],
+        )],
+        Vec::new(),
+    );
+    let receipt = apply(
+        &mut draft,
+        WorkbookChange::move_rows(id(1), row(3), row(3), row(8)).expect("move"),
+    );
+    assert!(receipt.topology_changed());
+    let workbook = draft.workbook();
+    // Row 3 lands on row 8, so rows 4 through 8 move up one.
+    for (cell, expected) in [
+        ("A3", "4"),
+        ("A7", "8"),
+        ("A8", "3"),
+        ("C1", "=SUM(A1:A8)"),
+        ("C2", "=SUM(A3:A3)"),
+        ("C3", "=A3"),
+        ("C8", "=A8"),
+    ] {
+        assert_eq!(text(workbook, "S1", cell), expected, "{cell}");
+    }
+    assert_eq!(value(&draft, 1, "C1"), CellValue::number(18.0).expect("18"));
+
+    apply(
+        &mut draft,
+        WorkbookChange::move_columns(id(1), column(3), column(3), column(1)).expect("move"),
+    );
+    assert_eq!(text(draft.workbook(), "S1", "A1"), "=SUM(B1:B8)");
+    assert_eq!(text(draft.workbook(), "S1", "B8"), "3");
+}
+
+#[test]
+fn moves_that_split_an_array_a_merge_or_a_table_are_refused() {
+    let mut s1 = sheet(1, "S1", &[("A1", "1"), ("A2", "2"), ("A3", "3")]);
+    s1.upsert_cell(
+        address("B1"),
+        formula(
+            "A1:A3*2",
+            FormulaMetadata::Array {
+                range: range("B1:B3"),
+                always_calculate: false,
+            },
+        ),
+        NumberFormat::default(),
+    );
+    s1.set_merged_ranges(vec![range("D5:D6")]);
+    s1.set_tables(vec![table(1, "Things", "F10:G12", 0, &["key", "val"])]);
+    let mut draft = draft(vec![s1], Vec::new());
+    let moved = |first, last, destination| {
+        WorkbookChange::move_rows(id(1), row(first), row(last), row(destination)).expect("move")
+    };
+    assert!(matches!(
+        refused(&mut draft, moved(2, 2, 20)),
+        ValidationError::ArrayFormulaPartEdit { .. }
+    ));
+    assert!(matches!(
+        refused(&mut draft, moved(6, 6, 20)),
+        ValidationError::MergedRangeSplit { .. }
+    ));
+    assert_eq!(
+        refused(&mut draft, moved(11, 11, 20)),
+        ValidationError::TableSplit { table_id: 1 }
+    );
+    assert_eq!(
+        refused(&mut draft, moved(30, 30, 11)),
+        ValidationError::TableSplit { table_id: 1 }
+    );
+    // Moving a whole table, merge, and array moves them with their rows.
+    apply(&mut draft, moved(1, 12, 21));
+    let sheet = draft.workbook().sheet_by_name("S1").expect("S1");
+    assert_eq!(sheet.tables()[0].range(), range("F30:G32"));
+    assert_eq!(sheet.merged_ranges(), &[range("D25:D26")]);
+    assert_eq!(
+        metadata(draft.workbook(), "S1", "B21"),
+        FormulaMetadata::Array {
+            range: range("B21:B23"),
+            always_calculate: false,
+        }
+    );
+}

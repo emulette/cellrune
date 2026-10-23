@@ -568,6 +568,18 @@ pub(super) fn grid_change(
         })?;
         Ok(GridEdit::Insert { axis, at, count })
     };
+    let movement = |axis: GridAxis, first: u32, last: u32, destination: u32| {
+        super::change::validate_move(first, last, destination, axis.max(), |value| match axis {
+            GridAxis::Rows => ValidationError::RowOutOfRange { value },
+            GridAxis::Columns => ValidationError::ColumnOutOfRange { value },
+        })?;
+        Ok(GridEdit::Move {
+            axis,
+            first,
+            last,
+            destination,
+        })
+    };
     let deletion = |axis: GridAxis, first: u32, last: u32| {
         if first > last {
             return Err(ValidationError::RangeStartAfterEnd);
@@ -603,6 +615,29 @@ pub(super) fn grid_change(
         } => (
             *sheet_id,
             deletion(GridAxis::Columns, first.get(), last.get())?,
+        ),
+        WorkbookChange::MoveRows {
+            sheet_id,
+            first,
+            last,
+            destination,
+        } => (
+            *sheet_id,
+            movement(GridAxis::Rows, first.get(), last.get(), destination.get())?,
+        ),
+        WorkbookChange::MoveColumns {
+            sheet_id,
+            first,
+            last,
+            destination,
+        } => (
+            *sheet_id,
+            movement(
+                GridAxis::Columns,
+                first.get(),
+                last.get(),
+                destination.get(),
+            )?,
         ),
         _ => return Ok(None),
     }))

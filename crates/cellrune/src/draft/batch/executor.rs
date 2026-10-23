@@ -626,7 +626,9 @@ impl WorkbookDraft {
                 WorkbookChange::InsertRows { .. }
                 | WorkbookChange::DeleteRows { .. }
                 | WorkbookChange::InsertColumns { .. }
-                | WorkbookChange::DeleteColumns { .. } => {
+                | WorkbookChange::DeleteColumns { .. }
+                | WorkbookChange::MoveRows { .. }
+                | WorkbookChange::MoveColumns { .. } => {
                     let (sheet_id, edit) =
                         grid_change(change)?.expect("a structural change has a grid edit");
                     let records_history = source_workbook
