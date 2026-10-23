@@ -17,6 +17,8 @@ use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits, FormulaRewriteRequest,
     SheetChanges, rewrite_formula,
 };
+use crate::calculation::grid_rewrite::GridChange;
+use crate::grid::RangeRule;
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, SPREADSHEETML_STRICT,
@@ -47,6 +49,8 @@ const DETAIL_DELETED_PIVOT_SOURCE: &str =
     "a preserved pivot cache reads a deleted sheet or a table on one";
 const DETAIL_DELETED_PIVOT_CHART: &str =
     "a preserved pivot chart reads a pivot table on a deleted sheet";
+const DETAIL_MOVED_PIVOT_SOURCE: &str =
+    "a preserved pivot cache reads cells a structural edit moves or deletes";
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
@@ -93,6 +97,85 @@ struct SheetReferenceRequests<'a> {
     combined: FormulaRewriteRequest<'a>,
     renames_only: FormulaRewriteRequest<'a>,
     deletions_only: FormulaRewriteRequest<'a>,
+}
+
+/// The change a preserved part is rewritten for: sheets renamed and deleted, or a structural edit
+/// of one sheet's grid, which other parts name only by qualified references.
+enum ReferenceRequests<'a> {
+    Sheets(SheetReferenceRequests<'a>),
+    Grid {
+        request: FormulaRewriteRequest<'a>,
+        change: GridChange<'a>,
+    },
+}
+
+impl<'a> ReferenceRequests<'a> {
+    /// The rewrite of formulas: conditional formats, data validations, sparklines, and charts.
+    const fn formula(&self) -> &FormulaRewriteRequest<'a> {
+        match self {
+            Self::Sheets(requests) => &requests.combined,
+            Self::Grid { request, .. } => request,
+        }
+    }
+
+    /// The rewrite of internal hyperlink locations, which only a rename changes.
+    const fn location(&self) -> Option<&FormulaRewriteRequest<'a>> {
+        match self {
+            Self::Sheets(requests) => Some(&requests.renames_only),
+            Self::Grid { .. } => None,
+        }
+    }
+
+    /// The rewrite that removes a sparkline's data source when it finds a reference to rewrite.
+    const fn sparkline_removal(&self) -> Option<&FormulaRewriteRequest<'a>> {
+        match self {
+            Self::Sheets(requests) => Some(&requests.deletions_only),
+            Self::Grid { .. } => None,
+        }
+    }
+
+    fn renamed(&self, name: &str) -> Option<&'a str> {
+        match self {
+            Self::Sheets(requests) => requests.renamed(name),
+            Self::Grid { .. } => None,
+        }
+    }
+
+    fn deleted(&self, name: &str) -> bool {
+        match self {
+            Self::Sheets(requests) => requests.deleted(name),
+            Self::Grid { .. } => false,
+        }
+    }
+
+    fn deleted_table(&self, name: &str) -> bool {
+        match self {
+            Self::Sheets(requests) => requests
+                .changes
+                .deleted_tables
+                .iter()
+                .any(|deleted| case_insensitive_eq(name, deleted)),
+            Self::Grid { .. } => false,
+        }
+    }
+
+    /// Reports whether a pivot cache reading `reference` on `sheet` would read other cells after
+    /// a structural edit of that sheet.
+    fn moves_pivot_source(&self, sheet: Option<&str>, reference: Option<&str>) -> bool {
+        let Self::Grid { change, .. } = self else {
+            return false;
+        };
+        let (Some(sheet), Some(reference)) = (sheet, reference) else {
+            return false;
+        };
+        if !case_insensitive_eq(sheet, change.sheet) {
+            return false;
+        }
+        super::grid_worksheet::parse_range(reference).is_none_or(|range| {
+            change.edit.overwrites(range)
+                || change.edit.map_range(range, RangeRule::Reference) != Some(range)
+        })
+    }
 }
 
 impl<'a> SheetReferenceRequests<'a> {
@@ -173,24 +256,87 @@ pub(crate) fn rewrite_sheet_references(
     let tabs = original
         .non_worksheet_tabs()
         .tab_names(original.sheets().iter().map(|sheet| sheet.name().as_str()));
-    let requests = SheetReferenceRequests::new(SheetChanges {
+    let requests = ReferenceRequests::Sheets(SheetReferenceRequests::new(SheetChanges {
         renames: &renames,
         deleted: &deleted,
         tabs: &tabs,
         deleted_tables: &deleted_tables,
-    });
-    let mut parts = Vec::new();
-    for sheet in draft
+    }));
+    let worksheets = draft
         .sheets()
         .iter()
         .filter(|sheet| original.sheet_by_id(sheet.id()).is_some())
-    {
-        let part = document.worksheet_part_path(sheet.id()).ok_or_else(|| {
-            XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
-                .with_detail(DETAIL_MISSING_SHEET_PART)
-        })?;
-        parts.push((part, ReferencePart::Worksheet));
-    }
+        .map(|sheet| {
+            document.worksheet_part_path(sheet.id()).ok_or_else(|| {
+                XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
+                    .with_detail(DETAIL_MISSING_SHEET_PART)
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    patch_parts(
+        document,
+        &worksheets,
+        &requests,
+        PartAccess {
+            source_reader,
+            replacements,
+            removed_parts,
+        },
+        limits,
+    )
+}
+
+/// Rewrites the qualified references to a sheet whose grid a structural edit changed, in every
+/// preserved worksheet part but the edited sheet's own, which the structural pass rewrites, in
+/// every chart part, and in pivot cache sources, refusing a pivot cache whose cells the edit
+/// moves. Internal hyperlink locations stay as they are, as Excel leaves them.
+pub(super) fn rewrite_grid_references(
+    document: &XlsxDocument,
+    edited: &PartPath,
+    change: GridChange<'_>,
+    access: PartAccess<'_, '_>,
+    limits: WriteLimits,
+) -> Result<(), XlsxWriteError> {
+    let worksheets = document
+        .workbook()
+        .sheets()
+        .iter()
+        .filter_map(|sheet| document.worksheet_part_path(sheet.id()))
+        .filter(|part| *part != edited)
+        .collect::<Vec<_>>();
+    let requests = ReferenceRequests::Grid {
+        request: FormulaRewriteRequest::Grid(GridChange {
+            host_is_sheet: false,
+            ..change
+        }),
+        change,
+    };
+    patch_parts(document, &worksheets, &requests, access, limits)
+}
+
+/// The package parts a reference rewrite reads and replaces.
+pub(super) struct PartAccess<'r, 'p> {
+    pub(super) source_reader: &'r mut PackageReader<'p>,
+    pub(super) replacements: &'r mut BTreeMap<PartPath, Vec<u8>>,
+    pub(super) removed_parts: &'r BTreeSet<PartPath>,
+}
+
+fn patch_parts(
+    document: &XlsxDocument,
+    worksheets: &[&PartPath],
+    requests: &ReferenceRequests<'_>,
+    access: PartAccess<'_, '_>,
+    limits: WriteLimits,
+) -> Result<(), XlsxWriteError> {
+    let PartAccess {
+        source_reader,
+        replacements,
+        removed_parts,
+    } = access;
+    let mut parts = worksheets
+        .iter()
+        .map(|part| (*part, ReferencePart::Worksheet))
+        .collect::<Vec<_>>();
     parts.extend(
         document
             .chart_part_paths()
@@ -208,12 +354,12 @@ pub(crate) fn rewrite_sheet_references(
             continue;
         }
         let patched = match replacements.get(part) {
-            Some(bytes) => patch_sheet_references(bytes, part, kind, &requests, limits)?,
+            Some(bytes) => patch_sheet_references(bytes, part, kind, requests, limits)?,
             None => patch_sheet_references(
                 &source_reader.read_part(part)?,
                 part,
                 kind,
-                &requests,
+                requests,
                 limits,
             )?,
         };
@@ -228,7 +374,7 @@ fn patch_sheet_references(
     bytes: &[u8],
     source: &PartPath,
     part: ReferencePart,
-    requests: &SheetReferenceRequests<'_>,
+    requests: &ReferenceRequests<'_>,
     limits: WriteLimits,
 ) -> Result<Option<Vec<u8>>, XlsxWriteError> {
     let never_cancelled = || false;
@@ -423,7 +569,7 @@ fn patch_attribute(
     xml: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
     part: ReferencePart,
-    requests: &SheetReferenceRequests<'_>,
+    requests: &ReferenceRequests<'_>,
     budget: &mut FormulaRewriteBudget<'_>,
     source: &PartPath,
 ) -> Result<Option<BytesStart<'static>>, XlsxWriteError> {
@@ -439,6 +585,7 @@ fn patch_attribute(
     }
     let mut value = None;
     let mut source_name = None;
+    let mut source_reference = None;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
         let (namespace, attribute_name) = xml.resolver().resolve_attribute(attribute.key);
@@ -452,15 +599,20 @@ fn patch_attribute(
         {
             return Ok(None);
         }
-        if attribute.key.as_ref() == target || attribute.key.as_ref() == "name" {
+        if attribute.key.as_ref() == target
+            || attribute.key.as_ref() == "name"
+            || attribute.key.as_ref() == "ref"
+        {
             let decoded = attribute
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map_err(|error| invalid_xml(source, error))?
                 .into_owned();
             if attribute.key.as_ref() == target {
                 value = Some(decoded);
-            } else {
+            } else if attribute.key.as_ref() == "name" {
                 source_name = Some(decoded);
+            } else {
+                source_reference = Some(decoded);
             }
         }
     }
@@ -468,23 +620,27 @@ fn patch_attribute(
         && (value
             .as_deref()
             .is_some_and(|sheet| requests.deleted(sheet))
-            || source_name.as_deref().is_some_and(|table| {
-                requests
-                    .changes
-                    .deleted_tables
-                    .iter()
-                    .any(|deleted| case_insensitive_eq(table, deleted))
-            }))
+            || source_name
+                .as_deref()
+                .is_some_and(|table| requests.deleted_table(table)))
     {
         return Err(reads_deleted_sheet(source, DETAIL_DELETED_PIVOT_SOURCE));
+    }
+    if part == ReferencePart::PivotCache
+        && requests.moves_pivot_source(value.as_deref(), source_reference.as_deref())
+    {
+        return Err(reads_deleted_sheet(source, DETAIL_MOVED_PIVOT_SOURCE));
     }
     let Some(value) = value else {
         return Ok(None);
     };
     let replacement = match part {
         ReferencePart::PivotCache => requests.renamed(&value).map(str::to_owned),
-        _ if target == "location" => rewrite(&value, &requests.renames_only, budget, source)?,
-        _ => rewrite(&value, &requests.combined, budget, source)?,
+        _ if target == "location" => match requests.location() {
+            Some(request) => rewrite(&value, request, budget, source)?,
+            None => None,
+        },
+        _ => rewrite(&value, requests.formula(), budget, source)?,
     };
     let Some(replacement) = replacement else {
         return Ok(None);
@@ -510,18 +666,22 @@ fn patch_attribute(
 fn write_held_text(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     held: HeldText,
-    requests: &SheetReferenceRequests<'_>,
+    requests: &ReferenceRequests<'_>,
     budget: &mut FormulaRewriteBudget<'_>,
     source: &PartPath,
 ) -> Result<HeldOutcome, XlsxWriteError> {
-    let replacement = match held.kind {
-        HeldTextKind::SparklineFormula
-            if rewrite(&held.text, &requests.deletions_only, budget, source)?.is_some() =>
-        {
-            return Ok(HeldOutcome::Removed);
+    let removal = match (held.kind, requests.sparkline_removal()) {
+        (HeldTextKind::SparklineFormula, Some(request)) => {
+            rewrite(&held.text, request, budget, source)?.is_some()
         }
+        _ => false,
+    };
+    if removal {
+        return Ok(HeldOutcome::Removed);
+    }
+    let replacement = match held.kind {
         HeldTextKind::Formula | HeldTextKind::SparklineFormula => {
-            rewrite(&held.text, &requests.combined, budget, source)?
+            rewrite(&held.text, requests.formula(), budget, source)?
         }
         HeldTextKind::PivotSourceName => {
             if pivot_source_names_sheet(&held.text, |sheet| requests.deleted(sheet)) {
@@ -684,29 +844,29 @@ fn resource_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{ReferencePart, SheetReferenceRequests, patch_sheet_references};
+    use super::{ReferencePart, ReferenceRequests, SheetReferenceRequests, patch_sheet_references};
     use crate::calculation::formula_rewrite::SheetChanges;
     use crate::xlsx::package::PartPath;
     use crate::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 
     const RENAMES: &[(&str, &str)] = &[("Data", "New Data")];
 
-    fn rename_requests() -> SheetReferenceRequests<'static> {
-        SheetReferenceRequests::new(SheetChanges {
+    fn rename_requests() -> ReferenceRequests<'static> {
+        ReferenceRequests::Sheets(SheetReferenceRequests::new(SheetChanges {
             renames: RENAMES,
             deleted: &[],
             tabs: &[],
             deleted_tables: &[],
-        })
+        }))
     }
 
-    fn deletion_requests() -> SheetReferenceRequests<'static> {
-        SheetReferenceRequests::new(SheetChanges {
+    fn deletion_requests() -> ReferenceRequests<'static> {
+        ReferenceRequests::Sheets(SheetReferenceRequests::new(SheetChanges {
             renames: &[("Other", "Renamed")],
             deleted: &["Data"],
             tabs: &["Data", "Other", "Summary"],
             deleted_tables: &["Things"],
-        })
+        }))
     }
 
     fn patch(part: ReferencePart, xml: &str) -> Option<String> {

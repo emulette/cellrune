@@ -444,6 +444,10 @@ impl GridHistory {
         self.edits.push(edit);
     }
 
+    pub(crate) fn edits(&self) -> &[GridEdit] {
+        &self.edits
+    }
+
     /// Maps a current cell back to the source cell it came from; `None` for a position the edits
     /// inserted or emptied.
     pub(crate) fn to_source(&self, address: CellAddress) -> Option<CellAddress> {

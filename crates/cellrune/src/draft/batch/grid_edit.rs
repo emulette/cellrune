@@ -7,10 +7,10 @@ use super::super::DraftCellMutationStore;
 use super::staged::mark_upsert;
 use super::{BatchExecutionError, WorkbookChange};
 use crate::calculation::formula_rewrite::{
-    FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteRequest, rewrite_formula,
+    FormulaRewriteBudget, FormulaRewriteRequest, rewrite_formula,
 };
-use crate::calculation::grid_rewrite::{CopyOffset, GridChange};
-use crate::grid::{GridAxis, GridEdit, GridHistory, RangeRule};
+use crate::calculation::grid_rewrite::{GridChange, move_anchored_formulas};
+use crate::grid::{GridAxis, GridEdit, GridHistory};
 use crate::{
     CalculationCellId, CellAddress, CellContent, CellValue, Column, DataValidation, DefinedName,
     DefinedNameScope, DocumentPresentation, FormulaMetadata, FormulaText, Sheet, SheetId, Table,
@@ -510,12 +510,8 @@ fn rewritten_validation(
     Ok(changed.then_some(rewritten))
 }
 
-/// Moves a data validation of the edited sheet. Its ranges keep the cells they validate, and
-/// cells inserted right after a range join it; a validation whose cells are all deleted goes.
-///
-/// Its formulas read relative to the first cell of its first range. While that cell survives,
-/// the formulas move by the range rule; once it is deleted, they are first shifted to the cell
-/// that now comes first, as if copied there.
+/// Moves a data validation of the edited sheet: its ranges keep the cells they validate, cells
+/// inserted right after a range join it, and a validation whose cells are all deleted goes.
 fn moved_validation(
     validation: &DataValidation,
     edit: GridEdit,
@@ -524,46 +520,31 @@ fn moved_validation(
     validation_index: usize,
     budget: &mut FormulaRewriteBudget<'_>,
 ) -> Result<Option<DataValidation>, BatchExecutionError> {
-    let ranges = edit.map_ranges(validation.ranges(), RangeRule::Format);
-    let (Some(old_anchor), Some(new_anchor)) = (
-        validation.ranges().first().map(|range| range.start()),
-        ranges.first().map(|range| range.start()),
-    ) else {
+    let formulas = [validation.formula1(), validation.formula2()];
+    let present = formulas.iter().flatten().copied().collect::<Vec<_>>();
+    let Some(moved_formulas) = move_anchored_formulas(
+        validation.ranges(),
+        &present,
+        GridChange {
+            sheet: sheet_name,
+            host_is_sheet: true,
+            edit,
+        },
+        budget,
+    )
+    .map_err(|error| error.with_owner(validation_owner(sheet_id, validation_index, 0)))?
+    else {
         return Ok(None);
     };
-    let rebase = (edit.map_address(old_anchor) != Some(new_anchor))
-        .then(|| edit.unmap_address(new_anchor))
-        .flatten()
-        .map(|origin| CopyOffset {
-            rows: i64::from(origin.row().get()) - i64::from(old_anchor.row().get()),
-            columns: i64::from(origin.column().get()) - i64::from(old_anchor.column().get()),
-        });
-    let request = FormulaRewriteRequest::Grid(GridChange {
-        sheet: sheet_name,
-        host_is_sheet: true,
-        edit,
-    });
     let mut moved = validation.clone();
-    moved.set_ranges(ranges);
-    for (slot, formula) in moved.formulas_mut().into_iter().enumerate() {
-        let Some(text) = formula.as_deref() else {
-            continue;
-        };
-        let owner = validation_owner(sheet_id, validation_index, slot);
-        let mut text = text.to_owned();
-        if let Some(offset) = rebase
-            && let Some(shifted) =
-                rewrite_formula(&text, &FormulaRewriteRequest::Copy(offset), budget)
-                    .map_err(|error| error.with_owner(owner.clone()))?
+    moved.set_ranges(moved_formulas.ranges);
+    let mut rewritten = moved_formulas.formulas.into_iter();
+    for formula in moved.formulas_mut() {
+        if formula.is_some()
+            && let Some(Some(text)) = rewritten.next()
         {
-            text = shifted;
+            *formula = Some(text.into_boxed_str());
         }
-        if let Some(rewritten) = rewrite_formula(&text, &request, budget)
-            .map_err(|error: FormulaRewriteError| error.with_owner(owner))?
-        {
-            text = rewritten;
-        }
-        *formula = Some(text.into_boxed_str());
     }
     Ok(Some(moved))
 }

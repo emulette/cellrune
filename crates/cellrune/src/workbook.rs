@@ -19,6 +19,7 @@ pub(crate) use data_validation::DataValidationRule;
 pub use data_validation::{
     DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
 };
+pub(crate) use grid_transform::grid_metadata;
 pub(crate) use new_cell_styles::NewCellStyles;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;

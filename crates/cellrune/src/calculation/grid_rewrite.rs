@@ -6,6 +6,9 @@
 //! place and leave the rest of the formula text as it was written.
 
 use super::ast::{CellRef, ColRef, Expr, ExternalReferenceTarget, RefBody, Reference, RowRef};
+use super::formula_rewrite::{
+    FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteRequest, rewrite_formula,
+};
 use super::syntax::{NodeSpanTree, SourceComponent, SourceComponentKind, SourceEdit, SourceSpan};
 use crate::case_insensitive_eq;
 use crate::grid::{GridAxis, GridEdit, RangeRule, range_contains};
@@ -51,6 +54,64 @@ enum Outcome {
     Unchanged,
     Changed(RefBody),
     Deleted,
+}
+
+/// Moves cells whose formulas read relative to their first cell, as a conditional format or a
+/// data validation does, through a structural edit of their own sheet. Returns `None` when the
+/// edit deletes every cell, and otherwise the moved ranges with each formula's rewritten text,
+/// `None` where it is unchanged.
+///
+/// While the first cell survives, the formulas move by the range rule. Once it is deleted, they
+/// are first shifted to the cell that now comes first, as if copied there, so each cell keeps
+/// reading the cells it read.
+pub(crate) fn move_anchored_formulas(
+    ranges: &[CellRange],
+    formulas: &[&str],
+    change: GridChange<'_>,
+    budget: &mut FormulaRewriteBudget<'_>,
+) -> Result<Option<AnchoredFormulas>, FormulaRewriteError> {
+    let edit = change.edit;
+    let moved = edit.map_ranges(ranges, RangeRule::Format);
+    let (Some(old_anchor), Some(new_anchor)) = (
+        ranges.first().map(|range| range.start()),
+        moved.first().map(|range| range.start()),
+    ) else {
+        return Ok(None);
+    };
+    let rebase = (edit.map_address(old_anchor) != Some(new_anchor))
+        .then(|| edit.unmap_address(new_anchor))
+        .flatten()
+        .map(|origin| CopyOffset {
+            rows: i64::from(origin.row().get()) - i64::from(old_anchor.row().get()),
+            columns: i64::from(origin.column().get()) - i64::from(old_anchor.column().get()),
+        });
+    let request = FormulaRewriteRequest::Grid(GridChange {
+        host_is_sheet: true,
+        ..change
+    });
+    let mut rewritten = Vec::with_capacity(formulas.len());
+    for formula in formulas {
+        let mut text = None::<String>;
+        if let Some(offset) = rebase {
+            text = rewrite_formula(formula, &FormulaRewriteRequest::Copy(offset), budget)?;
+        }
+        let current = text.as_deref().unwrap_or(formula);
+        if let Some(moved) = rewrite_formula(current, &request, budget)? {
+            text = Some(moved);
+        }
+        rewritten.push(text);
+    }
+    Ok(Some(AnchoredFormulas {
+        ranges: moved,
+        formulas: rewritten,
+    }))
+}
+
+/// Cells with formulas that read relative to their first cell, after a structural edit.
+pub(crate) struct AnchoredFormulas {
+    pub(crate) ranges: Vec<CellRange>,
+    /// Each formula's rewritten text, `None` where it is unchanged.
+    pub(crate) formulas: Vec<Option<String>>,
 }
 
 /// Plans the edits a grid change makes to one syntax node.

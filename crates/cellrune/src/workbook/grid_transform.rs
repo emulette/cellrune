@@ -260,7 +260,7 @@ impl Sheet {
 }
 
 /// Moves a formula's container metadata, now at `address`, through a structural edit.
-fn grid_metadata(
+pub(crate) fn grid_metadata(
     metadata: &FormulaMetadata,
     edit: GridEdit,
     address: CellAddress,

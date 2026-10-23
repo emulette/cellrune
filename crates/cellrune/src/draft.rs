@@ -151,6 +151,27 @@ impl<'a> SourceCells<'a> {
         }
     }
 
+    /// Returns the container metadata of the source formula that now sits at `address`, moved as
+    /// the structural edits moved its cell.
+    pub(crate) fn formula_metadata(
+        &self,
+        sheet_id: SheetId,
+        address: CellAddress,
+    ) -> Option<crate::FormulaMetadata> {
+        let crate::CellContent::Formula(formula) = self.cell(sheet_id, address)?.content() else {
+            return None;
+        };
+        let mut metadata = formula.metadata().clone();
+        if let Some(history) = self.histories.get(&sheet_id) {
+            let mut current = history.to_source(address)?;
+            for edit in history.edits() {
+                current = edit.map_address(current)?;
+                metadata = crate::workbook::grid_metadata(&metadata, *edit, current);
+            }
+        }
+        Some(metadata)
+    }
+
     /// Returns the source cell that now sits at `address`.
     pub(crate) fn cell(&self, sheet_id: SheetId, address: CellAddress) -> Option<&'a Cell> {
         let sheet = self.workbook?.sheet_by_id(sheet_id)?;

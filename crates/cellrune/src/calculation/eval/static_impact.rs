@@ -17,7 +17,7 @@ use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::CellId;
 use crate::{
     CalculationCellId, CalculationOptions, CellContent, CellValue, ExcelError, FormulaMetadata,
-    SavedResult, TableId, WorkbookSnapshot,
+    SavedResult, SheetId, TableId, WorkbookSnapshot,
 };
 
 /// The edits whose consequences the analysis traces.
@@ -30,6 +30,9 @@ pub(crate) struct DraftEdits<'a> {
     pub(crate) changed_cells: &'a BTreeSet<CalculationCellId>,
     /// Tables whose range, name, or columns changed.
     pub(crate) changed_tables: &'a BTreeSet<TableId>,
+    /// Sheets whose rows or columns a structural edit moved. Every formula on them, and every
+    /// formula naming them, is affected, since their cells hold other content at each address.
+    pub(crate) grid_sheets: &'a BTreeSet<SheetId>,
 }
 
 /// Returns every formula of the edited workbook whose result the edits can change.
@@ -67,6 +70,12 @@ pub(crate) fn affected_formulas(
                 .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
                 .map(|sheet| sheet.name().as_str()),
         )
+        .chain(edits.grid_sheets.iter().flat_map(|sheet_id| {
+            [source.sheet_by_id(*sheet_id), draft.sheet_by_id(*sheet_id)]
+                .into_iter()
+                .flatten()
+                .map(|sheet| sheet.name().as_str())
+        }))
         .map(case_insensitive_key)
         .collect::<BTreeSet<_>>();
     let sheets_changed = !changed_sheet_names.is_empty();
@@ -131,7 +140,8 @@ pub(crate) fn affected_formulas(
                 cell.address().row().get(),
                 cell.address().column().get(),
             );
-            let always = formula.text().is_none()
+            let always = edits.grid_sheets.contains(&sheet.id())
+                || formula.text().is_none()
                 || engine.parse_failures.contains_key(&internal)
                 || engine.name_cycle_cells.contains(&internal)
                 || engine.name_limit_cells.contains(&internal)

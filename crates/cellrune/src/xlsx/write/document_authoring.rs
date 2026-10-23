@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::auto_filter_patch::patch_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
+use super::grid_parts::replay_grid_edits;
 use super::layout_patch::{LayoutChanges, patch_sheet_layout};
 use super::materialization::{MaterializationAction, MaterializationPlan};
 use super::package::{PackageReader, PackageWritePlan};
@@ -55,8 +56,6 @@ const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
     "document-backed dynamic formula edits require source metadata index merging";
 const DETAIL_RTL_FROZEN_PANE: &str =
     "right-to-left frozen-pane authoring requires a verified native contract";
-const DETAIL_GRID_EDITS: &str =
-    "a preserved worksheet whose rows or columns were inserted or deleted cannot be saved yet";
 
 struct ExistingSheetSource {
     part: PartPath,
@@ -78,7 +77,7 @@ pub(crate) fn write_document_draft(
                 .with_detail(DETAIL_CALCULATION_IDENTITY),
         );
     }
-    validate_dynamic_formula_edits(draft, document)?;
+    validate_dynamic_formula_edits(draft)?;
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     if !draft.workbook_changed()
         && draft.grid_histories().is_empty()
@@ -88,7 +87,7 @@ pub(crate) fn write_document_draft(
         && draft.changed_table_ids().is_empty()
         && auto_filter_sheets.is_empty()
         && format_edits(draft).is_empty()
-        && layout_sheets(draft, document).is_empty()
+        && layout_sheets(draft, document.presentation()).is_empty()
     {
         return super::recalculation::write_recalculated_xlsx_bytes(document, calculation, options);
     }
@@ -195,10 +194,10 @@ fn format_edits(draft: &WorkbookDraft) -> BTreeMap<SheetId, BTreeMap<CellAddress
 }
 
 /// Returns the column width and row height changes of each source sheet whose layout the draft
-/// changed.
+/// changed, from `source`, the source presentation moved by the draft's structural edits.
 fn layout_sheets(
     draft: &WorkbookDraft,
-    document: &XlsxDocument,
+    source: &crate::DocumentPresentation,
 ) -> BTreeMap<SheetId, LayoutChanges> {
     draft
         .workbook()
@@ -206,8 +205,7 @@ fn layout_sheets(
         .iter()
         .filter(|sheet| !draft.added_sheets().contains(&sheet.id()))
         .filter_map(|sheet| {
-            let changes =
-                LayoutChanges::between(document.presentation(), draft.presentation(), sheet.id());
+            let changes = LayoutChanges::between(source, draft.presentation(), sheet.id());
             (!changes.is_empty()).then_some((sheet.id(), changes))
         })
         .collect()
@@ -221,21 +219,25 @@ pub(super) fn write_document_package(
     plan: &DocumentResultPlan<'_>,
     limits: WriteLimits,
 ) -> Result<DocumentPackageOutput, XlsxWriteError> {
-    if !draft.grid_histories().is_empty() {
-        return Err(
-            XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
-                .with_detail(DETAIL_GRID_EDITS),
-        );
-    }
     let materialization = plan.materialization;
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     let format_edits = format_edits(draft);
-    let layout_changes = layout_sheets(draft, document);
+    let source_presentation = moved_source_presentation(draft, document);
+    let layout_changes = layout_sheets(draft, &source_presentation);
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
     let deletion = plan_sheet_deletion(document, draft.workbook(), &mut source_reader)?;
+    let mut replacements = BTreeMap::<PartPath, Vec<u8>>::new();
+    replay_grid_edits(
+        draft,
+        document,
+        &mut source_reader,
+        &mut replacements,
+        &deletion.removed_parts,
+        limits,
+    )?;
     let date_typed_literals =
-        date_typed_literals_to_rewrite(draft, document, &mut source_reader, limits)?;
+        date_typed_literals_to_rewrite(draft, document, &mut source_reader, &replacements, limits)?;
     let shared_strings_source = document
         .package_summary()
         .shared_strings_part()
@@ -246,7 +248,6 @@ pub(super) fn write_document_package(
         .as_ref()
         .map(|part| source_reader.read_part(part))
         .transpose()?;
-    let mut replacements = BTreeMap::<PartPath, Vec<u8>>::new();
     let mut additions = BTreeMap::<PartPath, Vec<u8>>::new();
     let mut new_content_types = BTreeMap::<PartPath, &'static str>::new();
     let mut new_relationships = Vec::<NewRelationship>::new();
@@ -305,6 +306,13 @@ pub(super) fn write_document_package(
         .chain(date_typed_literals.keys().copied())
         .chain(format_edits.keys().copied())
         .chain(layout_changes.keys().copied())
+        .chain(
+            draft
+                .grid_histories()
+                .keys()
+                .copied()
+                .filter(|sheet_id| draft.workbook().sheet_by_id(*sheet_id).is_some()),
+        )
         .filter(|sheet_id| !draft.added_sheets().contains(sheet_id))
         .collect::<BTreeSet<_>>();
     enforce_count(
@@ -320,11 +328,14 @@ pub(super) fn write_document_package(
             .worksheet_part_path(sheet_id)
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
-        let bytes = source_reader.read_part(&part)?;
+        let bytes = match replacements.get(&part) {
+            Some(bytes) => bytes.clone(),
+            None => source_reader.read_part(&part)?,
+        };
         // Only a valued source cell's own style is read. A cell written over a removed source
         // cell is styled as a new cell, and so is one written over a blank source cell: the
         // reader records a blank cell's style for new cells unless it names no `cellXfs` entry.
-        let source_sheet = document.workbook().sheet_by_id(sheet_id);
+        let source_cells = draft.source_cells();
         let targets = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -358,7 +369,7 @@ pub(super) fn write_document_package(
                 )
             })
             .map(|id| id.address())
-            .filter(|address| source_sheet.is_some_and(|sheet| sheet.cell(*address).is_some()))
+            .filter(|address| source_cells.cell(sheet_id, *address).is_some())
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
         sheet_sources.insert(
@@ -548,10 +559,7 @@ pub(super) fn write_document_package(
                         .cell(address)
                         .cloned()
                         .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
-                    let original_cell = document
-                        .workbook()
-                        .sheet_by_id(sheet_id)
-                        .and_then(|sheet| sheet.cell(address));
+                    let original_cell = draft.source_cells().cell(sheet_id, address);
                     let content_changed = original_cell.map(crate::Cell::content)
                         != Some(cell.content())
                         || draft.presentation_cell_mutations().contains(&id)
@@ -778,7 +786,7 @@ pub(super) fn write_document_package(
     verify_draft_output(
         &ExpectedDraftOutput {
             workbook: draft.workbook(),
-            source: Some(document.workbook()),
+            source: Some(draft.source_cells()),
             presentation: draft.presentation(),
             materialization,
             kind: document.kind(),
@@ -804,6 +812,7 @@ fn date_typed_literals_to_rewrite(
     draft: &WorkbookDraft,
     document: &XlsxDocument,
     source_reader: &mut PackageReader<'_>,
+    replacements: &BTreeMap<PartPath, Vec<u8>>,
     limits: WriteLimits,
 ) -> Result<BTreeMap<SheetId, BTreeSet<crate::CellAddress>>, XlsxWriteError> {
     let mut literals = BTreeMap::new();
@@ -814,7 +823,11 @@ fn date_typed_literals_to_rewrite(
         let Some(part) = document.worksheet_part_path(sheet.id()) else {
             continue;
         };
-        let cells = read_date_typed_cells(&source_reader.read_part(part)?, part, limits)?
+        let bytes = match replacements.get(part) {
+            Some(bytes) => bytes.clone(),
+            None => source_reader.read_part(part)?,
+        };
+        let cells = read_date_typed_cells(&bytes, part, limits)?
             .into_iter()
             .filter(|address| {
                 matches!(
@@ -830,26 +843,43 @@ fn date_typed_literals_to_rewrite(
     Ok(literals)
 }
 
-/// Existing sheets whose sheet-level autoFilter the draft changed.
+/// Returns the source presentation with the draft's structural edits applied, which is what the
+/// worksheet parts they rewrite read back as.
+fn moved_source_presentation<'a>(
+    draft: &WorkbookDraft,
+    document: &'a XlsxDocument,
+) -> std::borrow::Cow<'a, crate::DocumentPresentation> {
+    if draft.grid_histories().is_empty() {
+        return std::borrow::Cow::Borrowed(document.presentation());
+    }
+    let mut presentation = document.presentation().clone();
+    for (sheet_id, history) in draft.grid_histories() {
+        for edit in history.edits() {
+            presentation.apply_grid_edit(*sheet_id, *edit);
+        }
+    }
+    std::borrow::Cow::Owned(presentation)
+}
+
+/// Existing sheets whose sheet-level autoFilter the draft changed and still has. A filter a
+/// structural edit deleted already left the worksheet with its range.
 fn changed_auto_filter_sheets(draft: &WorkbookDraft, document: &XlsxDocument) -> BTreeSet<SheetId> {
     draft
         .workbook()
         .sheets()
         .iter()
         .filter(|sheet| {
-            document
-                .workbook()
-                .sheet_by_id(sheet.id())
-                .is_some_and(|source| source.auto_filter() != sheet.auto_filter())
+            sheet.auto_filter().is_some()
+                && document
+                    .workbook()
+                    .sheet_by_id(sheet.id())
+                    .is_some_and(|source| source.auto_filter() != sheet.auto_filter())
         })
         .map(Sheet::id)
         .collect()
 }
 
-pub(super) fn validate_dynamic_formula_edits(
-    draft: &WorkbookDraft,
-    document: &crate::XlsxDocument,
-) -> Result<(), XlsxWriteError> {
+pub(super) fn validate_dynamic_formula_edits(draft: &WorkbookDraft) -> Result<(), XlsxWriteError> {
     for (id, mutation) in draft.cell_mutations().iter() {
         if !matches!(mutation, DraftCellMutation::Upsert { .. }) {
             continue;
@@ -872,18 +902,12 @@ pub(super) fn validate_dynamic_formula_edits(
             }
             _ => None,
         };
-        let source_content = document
-            .workbook()
-            .sheet_by_id(id.sheet_id())
-            .and_then(|sheet| sheet.cell(id.address()))
-            .map(crate::Cell::content);
-        let preserves_dynamic_metadata = current_formula.is_none_or(|current| {
-            matches!(
-                source_content,
-                Some(crate::CellContent::Formula(source))
-                    if source.metadata() == current.metadata()
-            )
-        });
+        // A structural edit moves a source formula's declared spill range with its cell.
+        let source_metadata = draft
+            .source_cells()
+            .formula_metadata(id.sheet_id(), id.address());
+        let preserves_dynamic_metadata = current_formula
+            .is_none_or(|current| source_metadata.as_ref() == Some(current.metadata()));
         if !preserves_dynamic_metadata {
             return Err(
                 XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
