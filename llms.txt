@@ -734,14 +734,16 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 462 official
+  `.is_official()`. The 0.1.27 catalog contains 467 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 463 accepted entries. The descriptor registry
+  dummy-function marker, for 468 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
 - The official names added in 0.1.27 are `SKEW`, `SKEW.P`, `KURT`,
-  `FREQUENCY`, and `MODE.MULT`. `FREQUENCY` and `MODE.MULT` are marked
+  `FREQUENCY`, `MODE.MULT`, `CHISQ.TEST`, `CHITEST`, `CHISQ.INV`,
+  `CHISQ.INV.RT`, and `CHIINV`. `CHITEST` and `CHIINV` are legacy aliases of
+  `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
   `.returns_array()`; the others return scalars.
 - `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
   numbers and logical values
@@ -761,6 +763,19 @@ than guessing a name from a different XLSX crate (`calamine`,
   least twice, in the order each first occurs, so its first row is the
   `MODE.SNGL` result; it collects numbers as `MODE.SNGL` does and returns
   `#N/A` when no number repeats.
+- `CHISQ.INV(probability, deg_freedom)` and `CHISQ.INV.RT` invert the left and
+  right tails of the chi-square distribution. They accept probabilities from 0
+  through 1 and truncate the degrees of freedom to 1 through 10^10, otherwise
+  `#NUM!`. A zero left tail or a full right tail is 0, the infinite quantile
+  (left tail 1, right tail 0) is `#NUM!`, and a search that does not converge
+  is `#N/A`. The right tail is solved directly, so tiny tails keep their
+  relative precision.
+- `CHISQ.TEST(actual_range, expected_range)` returns the right-tail probability
+  of Σ (A − E)² / E with (r − 1)(c − 1) degrees of freedom, or one less than
+  the length of a single row or column. Ranges with different numbers of values
+  or a single value return `#N/A`. Equal counts in different shapes, values
+  that are not numbers, and expected values that are not positive report
+  `calculation.unsupported_expression`.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
   `[0, 1)`. `RANDBETWEEN(bottom, top)` returns `#NUM!` when `bottom` exceeds

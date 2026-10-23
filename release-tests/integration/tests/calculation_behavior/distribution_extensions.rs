@@ -28,6 +28,85 @@ fn chi_square_names_share_the_gamma_cdf_density_and_direct_right_tail() {
 }
 
 #[test]
+fn chi_square_quantiles_invert_both_tails() {
+    for (formula, expected, tolerance) in [
+        // Two degrees of freedom have the closed forms −2·ln(1 − p) and −2·ln(p).
+        ("_xlfn.CHISQ.INV(0.6,2)", 1.832_581_463_748_31, 1e-13),
+        ("CHISQ.INV(1E-10,2.9)", 2.000_000_000_1e-10, 1e-9),
+        ("_xlfn.CHISQ.INV.RT(0.05,2)", 5.991_464_547_107_982, 1e-13),
+        ("CHIINV(0.05,2)", 5.991_464_547_107_982, 1e-13),
+        ("CHIINV(1E-200,2)", 921.034_037_197_618_3, 1e-13),
+        // Microsoft's examples publish 3.283020286, 18.306973, and the Oracle 7.81472790325118.
+        ("CHISQ.INV(0.93,1)", 3.283_020_286, 1e-9),
+        ("CHISQ.INV.RT(0.050001,10)", 18.306_973, 1e-7),
+        ("CHISQ.INV(0.95,3)", 7.814_727_903_251_18, 1e-13),
+        ("CHIINV(\"0.05\",3)", 7.814_727_903_251_18, 1e-13),
+    ] {
+        assert_formula_number(formula, expected, tolerance);
+    }
+    for (formula, expected) in [
+        ("CHISQ.INV(0,3)", 0.0),
+        ("CHISQ.INV.RT(1,3)", 0.0),
+        ("CHIINV(1,3)", 0.0),
+    ] {
+        assert_formula_number(formula, expected, 0.0);
+    }
+}
+
+#[test]
+fn chi_square_test_sums_the_statistic_over_the_contingency_table() {
+    for (formula, expected) in [
+        // Microsoft's example: χ² = 16.16957 with two degrees of freedom gives 0.0003082.
+        (
+            "_xlfn.CHISQ.TEST({58,35;11,25;10,23},{45.35,47.65;17.56,18.44;16.09,16.91})",
+            0.000_308_192_017_008_309_36,
+        ),
+        (
+            "CHITEST({58,35;11,25;10,23},{45.35,47.65;17.56,18.44;16.09,16.91})",
+            0.000_308_192_017_008_309_36,
+        ),
+        // A single row has c − 1 degrees of freedom: χ² = 1 with two gives e^(−1/2).
+        ("CHISQ.TEST({1,2,3},{2,2,2})", 0.606_530_659_712_633_4),
+        ("CHISQ.TEST({1;2;3},{2;2;2})", 0.606_530_659_712_633_4),
+    ] {
+        assert_formula_number(formula, expected, 1e-12);
+    }
+}
+
+#[test]
+fn chi_square_test_rejects_mismatched_and_undocumented_tables() {
+    for (formula, expected) in [
+        ("CHISQ.TEST({1,2},{1,2,3})", ExcelError::NotAvailable),
+        ("CHITEST(4,5)", ExcelError::NotAvailable),
+        ("CHISQ.TEST({1,2},{#DIV/0!,2,3})", ExcelError::NotAvailable),
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_eq!(
+            result.cell(cell_id(1)),
+            Some(&CalculationCellResult::Value(CellValue::Error(expected))),
+            "{formula}"
+        );
+    }
+    for formula in [
+        "CHISQ.TEST({1,2;3,4},{1,2,3,4})",
+        "CHISQ.TEST({1,\"a\"},{1,2})",
+        "CHISQ.TEST({1,2},{1,TRUE})",
+        "CHISQ.TEST({1,#N/A},{1,2})",
+        "CHISQ.TEST({1,2},{0,2})",
+        "CHISQ.TEST({1,2},{-1,2})",
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+}
+
+#[test]
 fn weibull_names_share_the_closed_form_cdf_and_density() {
     for (formula, expected) in [
         ("_xlfn.WEIBULL.DIST(105,20,100,TRUE)", 0.929_581_390_069_277),
@@ -99,6 +178,17 @@ fn new_distributions_reject_invalid_domains_with_excel_errors() {
         ("CONFIDENCE.T(\"2\",2.5,100)", ExcelError::Number),
         ("CONFIDENCE.T(0.05,2.5,1)", ExcelError::DivisionByZero),
         ("CONFIDENCE.T(0.05,-1,1)", ExcelError::Number),
+        ("CHISQ.INV(-0.1,3)", ExcelError::Number),
+        ("CHISQ.INV(1.1,3)", ExcelError::Number),
+        ("CHISQ.INV(1,3)", ExcelError::Number),
+        ("CHISQ.INV(0.5,0.9)", ExcelError::Number),
+        ("CHISQ.INV(0.5,10000000001)", ExcelError::Number),
+        ("CHISQ.INV.RT(0,3)", ExcelError::Number),
+        ("CHISQ.INV.RT(2,3)", ExcelError::Number),
+        ("CHIINV(\"2\",3)", ExcelError::Number),
+        ("CHIINV(-1,3)", ExcelError::Number),
+        ("CHIINV(\"x\",3)", ExcelError::Value),
+        ("CHISQ.INV.RT(0.5,#N/A)", ExcelError::NotAvailable),
     ] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),
@@ -117,6 +207,9 @@ fn iterative_distribution_kernels_charge_refinement_work() {
     for formula in [
         "CHISQ.DIST(4,3,TRUE)",
         "CHISQ.DIST.RT(4,3)",
+        "CHISQ.INV(0.95,3)",
+        "CHISQ.INV.RT(0.05,3)",
+        "CHISQ.TEST({1,2,3},{2,2,2})",
         "CONFIDENCE.NORM(0.05,2.5,100)",
         "CONFIDENCE.T(0.05,2.5,100)",
     ] {

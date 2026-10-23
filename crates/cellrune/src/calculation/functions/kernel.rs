@@ -370,6 +370,7 @@ function_enum!(RegressionFunction {
 });
 
 function_enum!(StatisticalFunction {
+    ChiSqTest,
     Correl,
     CovarianceP,
     CovarianceS,
@@ -445,6 +446,8 @@ function_enum!(DistributionFunction {
     BinomInv,
     ChiSqDist,
     ChiSqDistRt,
+    ChiSqInv,
+    ChiSqInvRt,
     ConfidenceNorm,
     ConfidenceT,
     FDist,

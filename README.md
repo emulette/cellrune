@@ -135,8 +135,9 @@ Weibull, and confidence-interval functions, and `IMLOG10`/`IMLOG2`; the exact li
 
 CellRune 0.1.26 adds the seeded random functions `RAND`, `RANDBETWEEN`, and `RANDARRAY`.
 
-CellRune 0.1.27 adds the shape statistics `SKEW`, `SKEW.P`, and `KURT` and the array statistics
-`FREQUENCY` and `MODE.MULT`; the exact list is in
+CellRune 0.1.27 adds the shape statistics `SKEW`, `SKEW.P`, and `KURT`, the array statistics
+`FREQUENCY` and `MODE.MULT`, and the chi-square test and quantiles `CHISQ.TEST`, `CHISQ.INV`, and
+`CHISQ.INV.RT` with their legacy names; the exact list is in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,

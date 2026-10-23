@@ -144,6 +144,166 @@ pub(super) fn chi_square_distribution_rt(
     }
 }
 
+/// CHISQ.INV(probability, df): the left-tail chi-square quantile, twice the gamma quantile with
+/// shape df/2. A zero probability is the origin; a probability of one is the infinite upper end.
+pub(super) fn chi_square_inverse(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    let [probability, df] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let result = chi_square_probability(engine, context, probability).and_then(|probability| {
+        let shape = chi_square_degrees_of_freedom(engine, context, df)? / 2.0;
+        if probability == 0.0 {
+            return Ok(0.0);
+        }
+        if probability == 1.0 {
+            return Err(ErrorKind::Num);
+        }
+        invert_monotone_cdf(
+            |x| {
+                regularized_gamma_p(shape, x, || {
+                    poll_cancellation(context)?;
+                    engine.charge_function_iterations(context, 1)
+                })
+            },
+            probability,
+            DomainPolicy::PositiveHalfLine {
+                initial_guess: shape,
+            },
+            || {
+                poll_cancellation(context)?;
+                engine.charge_function_iterations(context, 1)
+            },
+        )
+        .map(|half| 2.0 * half)
+        .map_err(quantile_solver_error)
+    });
+    match result {
+        Ok(value) => finite(value),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// CHISQ.INV.RT(probability, df), also spelled CHIINV: solves Q(df/2, x/2) = probability. The
+/// right tail falls as x grows, so the solver searches the rising Q(df/2, 1/t) over t = 1/(x/2),
+/// which keeps small tails at full relative precision instead of inverting 1 − P.
+pub(super) fn chi_square_inverse_rt(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    let [probability, df] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let result = chi_square_probability(engine, context, probability).and_then(|probability| {
+        let shape = chi_square_degrees_of_freedom(engine, context, df)? / 2.0;
+        if probability == 1.0 {
+            return Ok(0.0);
+        }
+        if probability == 0.0 {
+            return Err(ErrorKind::Num);
+        }
+        invert_monotone_cdf(
+            |reciprocal| {
+                regularized_gamma_q(shape, reciprocal.recip(), || {
+                    poll_cancellation(context)?;
+                    engine.charge_function_iterations(context, 1)
+                })
+            },
+            probability,
+            DomainPolicy::PositiveHalfLine {
+                initial_guess: shape.recip(),
+            },
+            || {
+                poll_cancellation(context)?;
+                engine.charge_function_iterations(context, 1)
+            },
+        )
+        .map(|reciprocal| 2.0 / reciprocal)
+        .map_err(quantile_solver_error)
+    });
+    match result {
+        Ok(value) => finite(value),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// CHISQ.TEST(actual_range, expected_range), also spelled CHITEST: the right-tail probability of
+/// χ² = Σ (A − E)² / E with (r − 1)(c − 1) degrees of freedom, or r − 1 or c − 1 for a single row
+/// or column. Ranges with different numbers of values, or a single value, return `#N/A`.
+///
+/// Microsoft documents neither text, logical values, blanks, or errors in the ranges, nor equal
+/// counts in different shapes, nor expected values that are not positive, so those inputs are
+/// unsupported rather than guessed.
+pub(in crate::calculation::functions) fn chi_square_test(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Value {
+    let [actual, expected] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let result = engine.eval_array(context, actual).and_then(|actual| {
+        let expected = engine.eval_array(context, expected)?;
+        if actual.data.len() != expected.data.len() || actual.data.len() == 1 {
+            return Err(ErrorKind::NA);
+        }
+        if actual.rows != expected.rows || actual.cols != expected.cols {
+            return Err(ErrorKind::Unsupported);
+        }
+        engine.charge_function_iterations(
+            context,
+            u64::try_from(actual.data.len()).map_err(|_| ErrorKind::Num)?,
+        )?;
+        let mut statistic = 0.0;
+        for (actual, expected) in actual.data.iter().zip(&expected.data) {
+            poll_cancellation(context)?;
+            match (actual, expected) {
+                (Value::Number(actual), Value::Number(expected)) if *expected > 0.0 => {
+                    statistic += (actual - expected) * (actual - expected) / expected;
+                }
+                (Value::Error(kind), _) | (_, Value::Error(kind)) if kind.is_engine_issue() => {
+                    return Err(*kind);
+                }
+                _ => return Err(ErrorKind::Unsupported),
+            }
+        }
+        let rows = f64::from(actual.rows);
+        let cols = f64::from(actual.cols);
+        let df = if actual.rows > 1 && actual.cols > 1 {
+            (rows - 1.0) * (cols - 1.0)
+        } else {
+            rows.max(cols) - 1.0
+        };
+        if !statistic.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        regularized_gamma_q(df / 2.0, statistic / 2.0, || {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)
+        })
+    });
+    match result {
+        Ok(value) => finite(value),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// The chi-square quantiles accept probabilities from 0 through 1.
+fn chi_square_probability(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    argument: &Expr,
+) -> Result<f64, ErrorKind> {
+    match required_number(engine, context, argument)? {
+        value if (0.0..=1.0).contains(&value) => Ok(value),
+        _ => Err(ErrorKind::Num),
+    }
+}
+
 /// The chi-square functions truncate their degrees of freedom and accept 1 through 10^10.
 fn chi_square_degrees_of_freedom(
     engine: &Engine<'_>,

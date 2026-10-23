@@ -945,6 +945,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Trend, "TREND", Regression)
         .with_array_evaluator(ArrayEvaluator::Regression(RegressionFunction::Trend))
         .with_minimum_version(CompatibilityVersion::V0_1_11),
+    function!(ChiSqTest, "CHISQ.TEST", Statistical)
+        .with_aliases(&[FunctionAlias::official("CHITEST")])
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Correl, "CORREL", Statistical),
     function!(CovarianceP, "COVARIANCE.P", Statistical)
         .with_aliases(&[FunctionAlias::official("COVAR")]),
@@ -1123,6 +1126,11 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ChiSqDistRt, "CHISQ.DIST.RT", Distribution)
         .with_aliases(&[FunctionAlias::official("CHIDIST")])
         .with_minimum_version(CompatibilityVersion::V0_1_22),
+    function!(ChiSqInv, "CHISQ.INV", Distribution)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ChiSqInvRt, "CHISQ.INV.RT", Distribution)
+        .with_aliases(&[FunctionAlias::official("CHIINV")])
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(ConfidenceNorm, "CONFIDENCE.NORM", Distribution)
         .with_aliases(&[FunctionAlias::official("CONFIDENCE")])
         .with_minimum_version(CompatibilityVersion::V0_1_22),
@@ -1727,6 +1735,33 @@ mod tests {
         assert!(mode_mult.call_contract().arity().accepts(1));
         assert!(mode_mult.call_contract().arity().accepts(255));
         assert!(!mode_mult.call_contract().arity().accepts(0));
+
+        // CHITEST and CHIINV are aliases, so the lookup resolves accepted spellings.
+        for name in [
+            "CHISQ.TEST",
+            "CHITEST",
+            "CHISQ.INV",
+            "CHISQ.INV.RT",
+            "CHIINV",
+        ] {
+            let descriptor = resolve(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_27,
+                "{name}",
+            );
+            assert!(
+                matches!(
+                    descriptor.evaluator(),
+                    Evaluator::Distribution(_) | Evaluator::Statistical(_)
+                ),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(3), "{name}");
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
     }
 
     #[test]

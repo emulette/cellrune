@@ -7,7 +7,7 @@ mod beta;
 mod binomial;
 mod confidence;
 pub(in crate::calculation::functions) mod f;
-mod gamma;
+pub(in crate::calculation::functions) mod gamma;
 mod hypergeometric;
 mod normal;
 pub(in crate::calculation::functions) mod t;
@@ -43,6 +43,8 @@ pub(super) fn call(
         DistributionFunction::ChiSqDistRt => {
             gamma::chi_square_distribution_rt(engine, context, args)
         }
+        DistributionFunction::ChiSqInv => gamma::chi_square_inverse(engine, context, args),
+        DistributionFunction::ChiSqInvRt => gamma::chi_square_inverse_rt(engine, context, args),
         DistributionFunction::ConfidenceNorm => {
             confidence::confidence_normal(engine, context, args)
         }

@@ -1553,7 +1553,8 @@ impl RegressionFunction {
 impl StatisticalFunction {
     const fn call_contract(self) -> CallContract {
         match self {
-            Self::Correl
+            Self::ChiSqTest
+            | Self::Correl
             | Self::CovarianceP
             | Self::CovarianceS
             | Self::FTest
@@ -1673,9 +1674,13 @@ impl DistributionFunction {
             | Self::GammaInv
             | Self::NegBinomDistLegacy => CallContract::uniform(Arity::exact(3), SCALAR),
             Self::TDist | Self::TDists => CallContract::uniform(Arity::exact(3), SCALAR),
-            Self::ChiSqDistRt | Self::TDistRt | Self::TDist2T | Self::TInv | Self::TInv2T => {
-                CallContract::uniform(Arity::exact(2), SCALAR)
-            }
+            Self::ChiSqDistRt
+            | Self::ChiSqInv
+            | Self::ChiSqInvRt
+            | Self::TDistRt
+            | Self::TDist2T
+            | Self::TInv
+            | Self::TInv2T => CallContract::uniform(Arity::exact(2), SCALAR),
             Self::BinomDistRange => CallContract::uniform(Arity::range(3, 4), SCALAR),
             Self::HypgeomDist => CallContract::uniform(Arity::exact(5), SCALAR),
         }

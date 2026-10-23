@@ -97,6 +97,9 @@ pub(super) fn call(
             args,
             PairedStatistic::Covariance(VarianceKind::Sample),
         ),
+        StatisticalFunction::ChiSqTest => {
+            super::distribution::gamma::chi_square_test(engine, context, args)
+        }
         StatisticalFunction::FTest => super::distribution::f::f_test(engine, context, args),
         StatisticalFunction::TTest => super::distribution::t::t_test(engine, context, args),
         StatisticalFunction::ZTest => z_test(engine, context, args),

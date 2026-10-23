@@ -2055,25 +2055,22 @@
     "excel_rich_error": false
   },
   "function:chiinv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "7.8147279032511792",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHIINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chiinv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHIINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chiinv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHIINV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-dist": {
     "classification": "match",
@@ -2112,88 +2109,76 @@
     "excel_rich_error": false
   },
   "function:chisq-inv": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "7.8147279032511774",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-inv-rt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "7.8147279032511792",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-inv-rt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-inv-rt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV.RT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-inv:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-inv:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.INV) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-test": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.3410806680592889E-108",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-test:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chisq-test:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.CHISQ.TEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chitest": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1.3410806680592889E-108",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHITEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chitest:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHITEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:chitest:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#N/A",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CHITEST) for this oracle case."
+    "excel_rich_error": false
   },
   "function:choose": {
     "classification": "match",
