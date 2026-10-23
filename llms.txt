@@ -755,8 +755,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   reference with such an operand become `#REF!` (`SUM('S2'!A1:A3)` becomes
   `SUM(#REF!)`, and `'S2'!Name` becomes `#REF!` where Excel writes
   `[0]!Name`); a deleted end of a 3-D reference moves to the nearest
-  remaining tab toward the other end, tabs that are not worksheets included,
-  and an end left alone collapses (`'S2:S3'!A1` becomes `'S3'!A1`), while a
+  remaining worksheet toward the other end, passing over chartsheets and
+  other tabs that are not worksheets as Excel does, and an end left alone
+  collapses (`'S2:S3'!A1` becomes `'S3'!A1`), while a
   deleted middle sheet leaves the text as it is. `INDIRECT` text and
   external references are untouched. Later tabs move forward, the draft
   drops what it recorded for the sheet, and the receipt reports a topology

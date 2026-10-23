@@ -36,6 +36,10 @@ pub(super) fn delete_sheet(
         .map(|sheet| sheet.name().clone())
         .collect::<Vec<_>>();
     let tab_names = tabs.tab_names(worksheet_names.iter().map(SheetName::as_str));
+    let non_worksheets = tabs
+        .iter()
+        .map(|tab| tab.name().as_str())
+        .collect::<Vec<_>>();
 
     let removed = sheets.remove(index);
     defined_names.retain(|name| name.scope() != DefinedNameScope::Sheet(sheet_id));
@@ -66,6 +70,7 @@ pub(super) fn delete_sheet(
             renames: &[],
             deleted: &[removed.name().as_str()],
             tabs: &tab_names,
+            non_worksheets: &non_worksheets,
             deleted_tables: &deleted_tables,
         }),
     )?;

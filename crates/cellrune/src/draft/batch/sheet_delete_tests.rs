@@ -360,11 +360,9 @@ fn deleting_a_worksheet_moves_later_non_worksheet_tabs_and_3d_ends_cross_them() 
         SheetName::new("Chart").expect("chart name"),
     )]));
     draft.delete_sheet(id(2)).expect("delete S2");
-    // `'S2:S3'!A1` keeps the chartsheet between them as its first tab, as tab order dictates.
-    assert_eq!(
-        formula_text(draft.workbook(), "S1", "B4"),
-        "SUM('Chart:S3'!A1)"
-    );
+    // Excel 16.114 moves the deleted start of `'S2:S3'!A1` past the chartsheet between them to
+    // the nearest worksheet, and the span collapses.
+    assert_eq!(formula_text(draft.workbook(), "S1", "B4"), "SUM('S3'!A1)");
     // A deleted ID is never reused, even when it was the highest.
     let added = draft
         .add_sheet(SheetName::new("Added").expect("sheet name"))

@@ -295,7 +295,7 @@ target, collision, rewrite error, resource limit, or cancellation rolls the whol
 `WorkbookChange::delete_sheet` and `WorkbookDraft::delete_sheet` delete a sheet with the names
 scoped to it and its tables. References to them in the remaining formulas, defined names, and table
 formulas become `#REF!` as Excel saves them, a deleted end of a 3-D reference moves to the nearest
-remaining sheet, and `INDIRECT` text is left as it is. Deleting the last visible sheet fails with
+remaining worksheet, and `INDIRECT` text is left as it is. Deleting the last visible sheet fails with
 `validation.last_visible_sheet`, and a deleted sheet's ID is never reused. Saving into the source
 package removes the parts only the deleted sheet reached and rewrites references in conditional
 formats, data validations, and chart series to `#REF!`; a remaining pivot cache or pivot chart that

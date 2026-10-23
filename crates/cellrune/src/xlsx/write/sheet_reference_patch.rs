@@ -173,10 +173,16 @@ pub(crate) fn rewrite_sheet_references(
     let tabs = original
         .non_worksheet_tabs()
         .tab_names(original.sheets().iter().map(|sheet| sheet.name().as_str()));
+    let non_worksheets = original
+        .non_worksheet_tabs()
+        .iter()
+        .map(|tab| tab.name().as_str())
+        .collect::<Vec<_>>();
     let requests = SheetReferenceRequests::new(SheetChanges {
         renames: &renames,
         deleted: &deleted,
         tabs: &tabs,
+        non_worksheets: &non_worksheets,
         deleted_tables: &deleted_tables,
     });
     let mut parts = Vec::new();
@@ -696,6 +702,7 @@ mod tests {
             renames: RENAMES,
             deleted: &[],
             tabs: &[],
+            non_worksheets: &[],
             deleted_tables: &[],
         })
     }
@@ -705,6 +712,7 @@ mod tests {
             renames: &[("Other", "Renamed")],
             deleted: &["Data"],
             tabs: &["Data", "Other", "Summary"],
+            non_worksheets: &[],
             deleted_tables: &["Things"],
         })
     }

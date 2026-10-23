@@ -43,6 +43,9 @@ pub(crate) struct SheetChanges<'a> {
     /// Every tab name in tab order, deleted tabs and tabs that are not worksheets included. A 3-D
     /// reference whose end sheet is deleted moves that end along this order.
     pub(crate) tabs: &'a [&'a str],
+    /// Names of the tabs that are not worksheets, such as chartsheets, which a moved 3-D end
+    /// passes over as Excel does.
+    pub(crate) non_worksheets: &'a [&'a str],
     /// Display names of the tables on deleted sheets.
     pub(crate) deleted_tables: &'a [&'a str],
 }
@@ -74,8 +77,8 @@ impl SheetChanges<'_> {
     }
 
     /// Resolves the sheets a reference from `start` through `end` keeps: each deleted end moves to
-    /// the nearest remaining tab toward the other end. `None` means no tab remains, or a deleted
-    /// end's span cannot be placed in the tab order, and the reference becomes `#REF!`.
+    /// the nearest remaining worksheet toward the other end. `None` means no worksheet remains, or
+    /// a deleted end's span cannot be placed in the tab order, and the reference becomes `#REF!`.
     fn remaining_span<'name>(
         &'name self,
         start: &'name str,
@@ -88,9 +91,18 @@ impl SheetChanges<'_> {
         let last = self.tab_position(end)?;
         let nearest_remaining = |from: usize, to: usize| {
             let mut position = from;
+            if !self.is_deleted(self.tabs[from]) {
+                return Some(self.tabs[from]);
+            }
             loop {
-                if !self.is_deleted(self.tabs[position]) {
-                    return Some(self.tabs[position]);
+                let tab = self.tabs[position];
+                if !self.is_deleted(tab)
+                    && !self
+                        .non_worksheets
+                        .iter()
+                        .any(|other| case_insensitive_eq(tab, other))
+                {
+                    return Some(tab);
                 }
                 if position == to {
                     return None;
@@ -1058,6 +1070,7 @@ mod tests {
                     renames: &renames,
                     deleted: &[],
                     tabs: &[],
+                    non_worksheets: &[],
                     deleted_tables: &[],
                 })
             ),
@@ -1072,6 +1085,7 @@ mod tests {
             renames: &[],
             deleted,
             tabs: TABS,
+            non_worksheets: &[],
             deleted_tables: &["Things"],
         })
     }
@@ -1148,6 +1162,7 @@ mod tests {
                 renames: &[("S3", "New Name"), ("S1", "S2")],
                 deleted,
                 tabs,
+                non_worksheets: &[],
                 deleted_tables: &[],
             })
         };
@@ -1162,19 +1177,34 @@ mod tests {
                 "{source}"
             );
         }
-        // A chartsheet keeps its place in the tab order a 3-D end moves along.
-        assert_eq!(
-            rewrite(
-                "SUM(S1:S3!A1)",
-                FormulaRewriteRequest::Sheets(SheetChanges {
-                    renames: &[],
-                    deleted: &["S1"],
-                    tabs: &["S1", "Chart1", "S3"],
-                    deleted_tables: &[],
-                })
-            ),
-            Some("SUM(Chart1:S3!A1)".to_owned())
-        );
+    }
+
+    #[test]
+    fn deleted_3d_ends_skip_tabs_that_are_not_worksheets() {
+        // Excel 16.114 with tabs S1, S2, a chartsheet, S3: deleting S2 turns `'S2:S3'!A1` into
+        // `'S3'!A1`, since a 3-D end moves to the nearest worksheet.
+        for (deleted, source, rewritten) in [
+            ("S2", "SUM('S2:S3'!A1)", "SUM('S3'!A1)"),
+            ("S2", "SUM(S2:S4!A1)", "SUM(S3:S4!A1)"),
+            ("S3", "SUM(S1:S3!A1)", "SUM(S1:S2!A1)"),
+            ("S3", "SUM(Chart1:S3!A1)", "SUM(#REF!)"),
+            ("S4", "SUM(Chart1:S4!A1)", "SUM(Chart1:S3!A1)"),
+        ] {
+            assert_eq!(
+                rewrite(
+                    source,
+                    FormulaRewriteRequest::Sheets(SheetChanges {
+                        renames: &[],
+                        deleted: &[deleted],
+                        tabs: &["S1", "S2", "Chart1", "S3", "S4"],
+                        non_worksheets: &["Chart1"],
+                        deleted_tables: &[],
+                    })
+                ),
+                Some(rewritten.to_owned()),
+                "{deleted} {source}"
+            );
+        }
     }
 
     #[test]
