@@ -730,6 +730,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
   `resize_table_rows(TableId, first_data_row, last_data_row)`,
   `create_table(SheetId, CellRange, Option<TableName>)`,
+  `set_table_range(TableId, CellRange)`,
   `convert_table_to_range(TableId)`,
   `widen_table_columns(TableId, CellRange)`,
   `widen_sheet_auto_filter(SheetId, CellRange)`, and
@@ -837,6 +838,19 @@ than guessing a name from a different XLSX crate (`calamine`,
   legacy array with `validation.table_range_overlap`. Saving into the source
   package writes a new table part with its relationship, `<tablePart>`
   entry, and content-type override.
+- `set_table_range(TableId, CellRange)` changes a table's range in one edit:
+  the header row stays, columns grow or shrink at either side, and data
+  rows grow or shrink above the totals row, as `resize_table_rows` does. A
+  new column is named by the text in its header cell; a removed column's
+  cells keep their content, and a structured reference that names it, alone
+  or as an end of a column range (`T[c]`, `T[[a]:[c]]`, `T[[#Totals],[c]]`),
+  becomes `#REF!`, as Excel 16.114 saves it. A range that moves the header
+  row, keeps none of the table's columns, or leaves no data row fails with
+  `validation.table_range_invalid`; removing a column of a table whose
+  filter has criteria or sort state, or of a query or XML table, fails with
+  `validation.unsupported_table_authoring_metadata`. `widen_table_columns` and
+  `resize_table_rows` keep their behavior. Saving rewrites the table part
+  and drops removed `<tableColumn>` elements.
 - `convert_table_to_range(TableId)` converts a table to a plain range, as
   Excel's Convert to Range does: the table and its filter leave the sheet,
   its cells keep their values and formulas, and every structured reference

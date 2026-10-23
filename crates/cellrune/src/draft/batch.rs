@@ -11,6 +11,7 @@ mod tab_order;
 mod table_convert;
 mod table_create;
 mod table_edit;
+mod table_range;
 mod widen_edit;
 
 pub use change::{EditBatch, WorkbookChange};

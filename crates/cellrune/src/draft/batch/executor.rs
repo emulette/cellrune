@@ -19,6 +19,7 @@ use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
     resize_table_rows, table_header_column, table_header_edit_error, table_locations,
 };
+use super::table_range::set_table_range;
 use super::widen_edit::{align_filter_database_name, widen_sheet_auto_filter, widen_table_columns};
 use super::{
     BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
@@ -719,6 +720,35 @@ impl WorkbookDraft {
                     workbook_changed = true;
                     topology_changed = true;
                     semantic_changed = true;
+                }
+                WorkbookChange::SetTableRange { table_id, range } => {
+                    if set_table_range(
+                        &mut sheets,
+                        &mut defined_names,
+                        TableResizeEdit {
+                            state: TableEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                                changed_table_ids: &mut changed_table_ids,
+                                presentation: &presentation,
+                                source,
+                            },
+                            locations: &table_locations,
+                            rewrite_budget,
+                            materialization_budget,
+                        },
+                        &table_formula_locations,
+                        *table_id,
+                        *range,
+                    )? {
+                        table_formula_locations =
+                            super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                        workbook_changed = true;
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
                 }
                 WorkbookChange::WidenTableColumns { table_id, range } => {
                     if widen_table_columns(&mut sheets, &table_locations, *table_id, *range)? {

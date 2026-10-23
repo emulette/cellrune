@@ -60,6 +60,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   name `Table` and the number after the workbook's table count. Saving into the source package adds
   the table part. A range without a data row fails with the new `validation.table_range_invalid`,
   and one over a merged range or legacy array with the new `validation.table_range_overlap`.
+- `WorkbookChange::set_table_range(TableId, CellRange)` grows or shrinks a table by rows and columns
+  in one edit. A structured reference that names a removed column, alone or as an end of a column
+  range, becomes `#REF!`, as Excel 16.114 saves it.
 - `WorkbookChange::convert_table_to_range(TableId)` converts a table to a plain range. Its cells
   keep their values and formulas, and every structured reference to it becomes a sheet-qualified
   absolute reference, as Excel 16.114 saves it (`Things[val]` becomes `'S2'!$D$2:$D$4`, `[@val]`

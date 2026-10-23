@@ -22,5 +22,6 @@ mod generated_workbook {
     mod sheet_rename_write;
     mod table_conversion_write;
     mod table_creation_write;
+    mod table_range_write;
 }
 mod support;

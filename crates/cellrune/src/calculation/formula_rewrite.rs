@@ -38,6 +38,13 @@ pub(crate) enum FormulaRewriteRequest<'a> {
     },
     /// Renames one defined name, rewriting only the references that resolve to it.
     DefinedName(NameRename<'a>),
+    /// Removes columns from one table, so a structured reference that names one of them, alone or
+    /// as an end of a column range, becomes `#REF!`.
+    TableColumnsRemoved {
+        table_name: &'a str,
+        removed: &'a [&'a str],
+        owner_is_target_table: bool,
+    },
     /// Converts one table to a range, so its structured references become A1 references.
     TableToRange {
         area: &'a TableArea<'a>,
@@ -104,6 +111,7 @@ impl FormulaRewriteRequest<'_> {
             | Self::Table { .. }
             | Self::TableColumn { .. }
             | Self::DefinedName(_)
+            | Self::TableColumnsRemoved { .. }
             | Self::TableToRange { .. } => SheetOutcome::Unchanged,
         }
     }
@@ -124,6 +132,7 @@ impl FormulaRewriteRequest<'_> {
             Self::Table { .. }
             | Self::TableColumn { .. }
             | Self::DefinedName(_)
+            | Self::TableColumnsRemoved { .. }
             | Self::TableToRange { .. } => SpanOutcome::Unchanged,
         }
     }
@@ -135,6 +144,7 @@ impl FormulaRewriteRequest<'_> {
             | Self::Table { .. }
             | Self::TableColumn { .. }
             | Self::DefinedName(_)
+            | Self::TableColumnsRemoved { .. }
             | Self::TableToRange { .. } => None,
         }
     }
@@ -388,6 +398,39 @@ pub(crate) fn rewrite_formula(
         if let FormulaRewriteRequest::DefinedName(rename) = request {
             plan_name_edit(source, expr, source_node, rename, &mut edits, budget)?;
         }
+        if let (
+            FormulaRewriteRequest::TableColumnsRemoved {
+                table_name,
+                removed,
+                owner_is_target_table,
+            },
+            Expr::StructuredRef(reference),
+        ) = (request, expr)
+        {
+            let targets_table = reference
+                .table
+                .as_deref()
+                .map_or(*owner_is_target_table, |table| {
+                    case_insensitive_eq(table, table_name)
+                });
+            let removed_column = |name: &str| {
+                removed
+                    .iter()
+                    .any(|removed| case_insensitive_eq(name, removed))
+            };
+            let names_removed = match &reference.columns {
+                Some(StructuredColumns::Single(column)) => removed_column(column),
+                Some(StructuredColumns::Range { start, end }) => {
+                    removed_column(start) || removed_column(end)
+                }
+                None => false,
+            };
+            if targets_table && names_removed {
+                budget.charge_edit()?;
+                edits.push(SourceEdit::new(source_node.span(), DELETED_REFERENCE));
+                continue;
+            }
+        }
         if let FormulaRewriteRequest::TableToRange {
             area,
             owner_is_target_table,
@@ -487,6 +530,7 @@ pub(crate) fn rewrite_formula(
                 FormulaRewriteRequest::Sheet { .. }
                 | FormulaRewriteRequest::Sheets(_)
                 | FormulaRewriteRequest::DefinedName(_)
+                | FormulaRewriteRequest::TableColumnsRemoved { .. }
                 | FormulaRewriteRequest::TableToRange { .. } => {}
             },
             Expr::ExternalReference(_) => continue,
@@ -981,6 +1025,21 @@ fn formula_may_reference_target(
                 },
                 _ => false,
             }),
+        FormulaRewriteRequest::TableColumnsRemoved {
+            table_name,
+            owner_is_target_table,
+            ..
+        } => lexed
+            .tokens
+            .iter()
+            .enumerate()
+            .any(|(index, token)| match &token.token {
+                Token::StructuredRef(raw) => {
+                    raw_structured_targets_table(raw, table_name, *owner_is_target_table)
+                        && !structured_token_is_external(&lexed.tokens, index)
+                }
+                _ => false,
+            }),
         FormulaRewriteRequest::TableToRange {
             area,
             owner_is_target_table,
@@ -1009,6 +1068,7 @@ fn formula_may_reference_target(
                 FormulaRewriteRequest::Table { .. }
                 | FormulaRewriteRequest::TableColumn { .. }
                 | FormulaRewriteRequest::DefinedName(_)
+                | FormulaRewriteRequest::TableColumnsRemoved { .. }
                 | FormulaRewriteRequest::TableToRange { .. } => false,
             };
             let deleted_table = |raw: &str| {
@@ -1536,6 +1596,28 @@ mod tests {
             owner_sheet: Some("S1"),
         });
         assert_eq!(rewrite("SUM(1)", builtin), None);
+    }
+
+    #[test]
+    fn a_reference_that_names_a_removed_table_column_becomes_a_ref_error() {
+        // Excel 16.114 turns `T[c]` and `T[[a]:[c]]`, whose end is the removed `c`, into `#REF!`.
+        let request = |owner_is_target_table| FormulaRewriteRequest::TableColumnsRemoved {
+            table_name: "T",
+            removed: &["c"],
+            owner_is_target_table,
+        };
+        assert_eq!(
+            rewrite(
+                "SUM(T[c])+SUM(T[[a]:[c]])+SUM(T[[a]:[b]])+SUM(T)+Other[c]+T[[#Totals],[C]]",
+                request(false)
+            ),
+            Some("SUM(#REF!)+SUM(#REF!)+SUM(T[[a]:[b]])+SUM(T)+Other[c]+#REF!".to_owned())
+        );
+        assert_eq!(
+            rewrite("[@c]*2+[@a]", request(true)),
+            Some("#REF!*2+[@a]".to_owned())
+        );
+        assert_eq!(rewrite("[@c]*2", request(false)), None);
     }
 
     #[test]

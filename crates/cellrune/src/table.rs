@@ -896,6 +896,19 @@ impl Table {
         self.columns = columns;
     }
 
+    /// Narrows the table to `range`, which keeps its rows inside its columns. `columns` holds every
+    /// remaining column in column order, and its filter, which has no filter columns or sort,
+    /// spans the remaining columns.
+    pub(crate) fn narrow_columns(&mut self, range: CellRange, columns: Vec<TableColumn>) {
+        debug_assert_eq!(columns.len() as u64, u64::from(range.width()));
+        self.auto_filter = self
+            .auto_filter
+            .as_ref()
+            .map(|filter| filter.narrowed(range.start().column(), range.end().column()));
+        self.range = range;
+        self.columns = columns;
+    }
+
     pub(crate) fn data_range(&self) -> Option<CellRange> {
         let first = self
             .range

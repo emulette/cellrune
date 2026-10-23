@@ -406,6 +406,78 @@ pub(crate) fn patch_table_xml(
     Ok(output)
 }
 
+/// Drops the `<tableColumn>` elements, with their content, whose `id` is in `removed`: the columns
+/// a range change took out of the table. [`patch_table_xml`] then renumbers the column count.
+pub(crate) fn remove_table_columns(
+    source_bytes: &[u8],
+    source: &PartPath,
+    removed: &BTreeSet<u32>,
+    limits: WriteLimits,
+) -> Result<Vec<u8>, XlsxWriteError> {
+    let mut xml = namespace_reader(source_bytes, limits.max_xml_depth());
+    xml.config_mut().check_end_names = true;
+    xml.config_mut().allow_unmatched_ends = false;
+    xml.config_mut().expand_empty_elements = false;
+    xml.config_mut().trim_text(false);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let mut buffer = Vec::new();
+    let mut depth = 0_u64;
+    let mut skip_depth = None::<u64>;
+    let removed_column = |xml: &NsReader<&[u8]>, element: &BytesStart<'_>, depth: u64| {
+        depth == 3
+            && element.local_name().as_ref() == "tableColumn"
+            && is_spreadsheet_element(xml, element.name())
+            && element
+                .try_get_attribute("id")
+                .ok()
+                .flatten()
+                .and_then(|attribute| attribute.value.parse::<u32>().ok())
+                .is_some_and(|id| removed.contains(&id))
+    };
+    loop {
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        if let Some(skip) = skip_depth {
+            match event {
+                Event::Start(_) => depth = depth.saturating_add(1),
+                Event::End(_) => {
+                    if depth == skip {
+                        skip_depth = None;
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            buffer.clear();
+            continue;
+        }
+        match event {
+            Event::Start(element) => {
+                depth = depth.saturating_add(1);
+                enforce_depth(depth, limits, source)?;
+                if removed_column(&xml, &element, depth) {
+                    skip_depth = Some(depth);
+                } else {
+                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                }
+            }
+            Event::Empty(element) => {
+                if !removed_column(&xml, &element, depth.saturating_add(1)) {
+                    write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
+                }
+            }
+            Event::End(element) => {
+                write_event(&mut writer, Event::End(element.into_owned()), source)?;
+                depth = depth.saturating_sub(1);
+            }
+            Event::Eof => break,
+            other => write_event(&mut writer, other.into_owned(), source)?,
+        }
+        buffer.clear();
+    }
+    Ok(writer.into_inner().into_inner())
+}
+
 fn column_for_element<'a>(
     element: &BytesStart<'_>,
     table: &'a Table,

@@ -177,6 +177,18 @@ pub enum WorkbookChange {
         /// Target table.
         table_id: TableId,
     },
+    /// Changes a table's range: its header row stays, its columns grow or shrink at either side,
+    /// and its data rows grow or shrink above its totals row.
+    ///
+    /// A new column is named by the text in its header cell. A removed column's cells keep their
+    /// content, and a structured reference that names it, alone or as an end of a column range,
+    /// becomes `#REF!`, as Excel does.
+    SetTableRange {
+        /// Target table.
+        table_id: TableId,
+        /// New full table range, header and totals rows included.
+        range: CellRange,
+    },
     /// Widens one table by columns, naming each new column from the text in its header cell.
     WidenTableColumns {
         /// Target table.
@@ -426,6 +438,11 @@ impl WorkbookChange {
     /// Constructs a conversion of a table to a plain range.
     pub const fn convert_table_to_range(table_id: TableId) -> Self {
         Self::ConvertTableToRange { table_id }
+    }
+
+    /// Constructs a table range change.
+    pub const fn set_table_range(table_id: TableId, range: CellRange) -> Self {
+        Self::SetTableRange { table_id, range }
     }
 
     /// Constructs a stable-ID table column widening.

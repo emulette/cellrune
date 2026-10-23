@@ -102,6 +102,14 @@ pub(super) enum WorkbookFormulaRename<'a> {
         old_name: &'a str,
         new_name: &'a str,
     },
+    /// Columns removed from a table, references naming them becoming `#REF!`.
+    TableColumnsRemoved {
+        table_id: TableId,
+        target_sheet_index: usize,
+        target_range: crate::CellRange,
+        table_name: &'a str,
+        removed: &'a [&'a str],
+    },
     /// A table converted to a range, its structured references becoming A1 references.
     TableToRange {
         table_id: TableId,
@@ -142,6 +150,11 @@ pub(super) fn rewrite_workbook_formulas(
             area,
             ..
         } => Some((target_sheet_index, area.range)),
+        WorkbookFormulaRename::TableColumnsRemoved {
+            target_sheet_index,
+            target_range,
+            ..
+        } => Some((target_sheet_index, target_range)),
         WorkbookFormulaRename::Sheet { .. }
         | WorkbookFormulaRename::SheetChanges(_)
         | WorkbookFormulaRename::Table { .. }
@@ -246,6 +259,7 @@ pub(super) fn rewrite_workbook_formulas(
         let current_table_id = table.id();
         let owner_is_target_table = match rename {
             WorkbookFormulaRename::TableColumn { table_id, .. }
+            | WorkbookFormulaRename::TableColumnsRemoved { table_id, .. }
             | WorkbookFormulaRename::TableToRange { table_id, .. } => current_table_id == table_id,
             WorkbookFormulaRename::Sheet { .. }
             | WorkbookFormulaRename::SheetChanges(_)
@@ -324,6 +338,15 @@ fn request_for<'a>(
                 ..*name
             })
         }
+        WorkbookFormulaRename::TableColumnsRemoved {
+            table_name,
+            removed,
+            ..
+        } => FormulaRewriteRequest::TableColumnsRemoved {
+            table_name,
+            removed,
+            owner_is_target_table,
+        },
         WorkbookFormulaRename::TableToRange { area, .. } => FormulaRewriteRequest::TableToRange {
             area,
             owner_is_target_table,

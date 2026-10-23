@@ -21,7 +21,7 @@ use super::table_parts::{
     TABLE_RELATIONSHIP, TableAddition, add_table_parts, plan_table_removal, relationships_xml,
     remove_table_parts,
 };
-use super::table_patch::patch_table_xml;
+use super::table_patch::{patch_table_xml, remove_table_columns};
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
 use super::workbook_patch::HostRecalculation;
 use super::worksheet_edit::{
@@ -260,7 +260,19 @@ pub(super) fn write_document_package(
             .workbook()
             .table_by_id(*table_id)
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
-        let bytes = source_reader.read_part(&part)?;
+        let mut bytes = source_reader.read_part(&part)?;
+        // A range change can take columns out of the table.
+        let removed_columns = document
+            .workbook()
+            .table_by_id(*table_id)
+            .into_iter()
+            .flat_map(|source| source.columns())
+            .map(crate::TableColumn::id)
+            .filter(|id| !table.columns().iter().any(|column| column.id() == *id))
+            .collect::<BTreeSet<_>>();
+        if !removed_columns.is_empty() {
+            bytes = remove_table_columns(&bytes, &part, &removed_columns, limits)?;
+        }
         replacements.insert(part.clone(), patch_table_xml(&bytes, &part, table, limits)?);
     }
 
