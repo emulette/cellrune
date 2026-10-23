@@ -49,6 +49,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   Saving into the source package reorders the `<sheet>` entries, renumbers `localSheetId`, and
   keeps `activeTab` and `firstSheet` on their sheets. A position past the last tab fails with the
   new `validation.sheet_position_out_of_range`.
+- `WorkbookChange::rename_defined_name(scope, name, new_name)` renames a defined name and rewrites
+  the uses that resolve to it, by Excel's scope rules, in cell formulas, defined names, table
+  formulas, and data validations, and on save in preserved conditional formats, data validations,
+  x14 formulas, and chart series. Removing a name and adding it under a new one left those uses as
+  `#NAME?`. A rename fails with the new `validation.unknown_defined_name` for a missing name and
+  `validation.defined_name_rename_shadowed` when the other scope already uses the new name.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and

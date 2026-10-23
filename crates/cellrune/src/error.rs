@@ -118,6 +118,10 @@ const MESSAGE_FORMULA_REWRITE_PARSE_FAILED: &str =
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
+const MESSAGE_DEFINED_NAME_RENAME_SHADOWED: &str =
+    "a defined name in the other scope already uses the new name";
+const MESSAGE_UNKNOWN_DEFINED_NAME: &str =
+    "no defined name has the supplied name in the supplied scope";
 const MESSAGE_SHEET_POSITION_OUT_OF_RANGE: &str = "sheet position is outside the tab order";
 
 /// Stable machine-readable code for a format-neutral validation failure.
@@ -290,6 +294,10 @@ pub enum ValidationErrorCode {
     ColumnWideningOverlap,
     /// A target-related formula could not be parsed for typed rewriting.
     FormulaRewriteParseFailed,
+    /// A defined-name rename would let a name in the other scope take over references.
+    DefinedNameRenameShadowed,
+    /// A defined-name edit names no defined name in the supplied scope.
+    UnknownDefinedName,
     /// A sheet move or copy names a tab position past the end of the tab order.
     SheetPositionOutOfRange,
 }
@@ -391,6 +399,8 @@ impl ValidationErrorCode {
             Self::ColumnWideningRangeInvalid => "validation.column_widening_range_invalid",
             Self::ColumnWideningOverlap => "validation.column_widening_overlap",
             Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
+            Self::DefinedNameRenameShadowed => "validation.defined_name_rename_shadowed",
+            Self::UnknownDefinedName => "validation.unknown_defined_name",
             Self::SheetPositionOutOfRange => "validation.sheet_position_out_of_range",
         }
     }
@@ -787,6 +797,16 @@ pub enum ValidationError {
         /// Stable workbook owner context for the rejected formula, when available.
         owner: Option<String>,
     },
+    /// A defined-name rename would let a name in the other scope take over references.
+    DefinedNameRenameShadowed {
+        /// Rejected new name.
+        name: String,
+    },
+    /// A defined-name edit names no defined name in the supplied scope.
+    UnknownDefinedName {
+        /// Missing defined name.
+        name: String,
+    },
     /// A sheet move or copy names a tab position past the end of the tab order.
     SheetPositionOutOfRange {
         /// Rejected zero-based tab position.
@@ -921,6 +941,10 @@ impl ValidationError {
             Self::FormulaRewriteParseFailed { .. } => {
                 ValidationErrorCode::FormulaRewriteParseFailed
             }
+            Self::DefinedNameRenameShadowed { .. } => {
+                ValidationErrorCode::DefinedNameRenameShadowed
+            }
+            Self::UnknownDefinedName { .. } => ValidationErrorCode::UnknownDefinedName,
             Self::SheetPositionOutOfRange { .. } => ValidationErrorCode::SheetPositionOutOfRange,
         }
     }
@@ -1238,6 +1262,12 @@ impl fmt::Display for ValidationError {
                     write!(formatter, ", owner {owner}")?;
                 }
                 Ok(())
+            }
+            Self::DefinedNameRenameShadowed { name } => {
+                write!(formatter, "{MESSAGE_DEFINED_NAME_RENAME_SHADOWED}: {name}")
+            }
+            Self::UnknownDefinedName { name } => {
+                write!(formatter, "{MESSAGE_UNKNOWN_DEFINED_NAME}: {name}")
             }
             Self::SheetPositionOutOfRange {
                 position,
@@ -1586,6 +1616,14 @@ mod tests {
             (
                 ValidationErrorCode::FormulaRewriteParseFailed,
                 "validation.formula_rewrite_parse_failed",
+            ),
+            (
+                ValidationErrorCode::DefinedNameRenameShadowed,
+                "validation.defined_name_rename_shadowed",
+            ),
+            (
+                ValidationErrorCode::UnknownDefinedName,
+                "validation.unknown_defined_name",
             ),
             (
                 ValidationErrorCode::SheetPositionOutOfRange,

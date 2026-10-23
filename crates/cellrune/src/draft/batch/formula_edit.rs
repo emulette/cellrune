@@ -4,7 +4,7 @@ use super::super::DraftCellMutationStore;
 use super::BatchExecutionError;
 use super::staged::{mark_upsert, sheet_by_id_mut};
 use crate::calculation::formula_rewrite::{
-    FormulaRewriteBudget, FormulaRewriteRequest, SheetChanges, rewrite_formula,
+    FormulaRewriteBudget, FormulaRewriteRequest, NameRename, SheetChanges, rewrite_formula,
 };
 use crate::{
     CalculationCellId, CellAddress, CellContent, DefinedName, FormulaCell, FormulaText, Sheet,
@@ -87,6 +87,8 @@ pub(super) enum WorkbookFormulaRename<'a> {
     },
     /// Sheets deleted, moved, or copied, with their tables.
     SheetChanges(SheetChanges<'a>),
+    /// A defined name renamed in one scope; each formula resolves it from its own sheet.
+    DefinedName(NameRename<'a>),
     Table {
         old_name: &'a str,
         new_name: &'a str,
@@ -121,10 +123,16 @@ pub(super) fn rewrite_workbook_formulas(
         } => Some((target_sheet_index, target_range)),
         WorkbookFormulaRename::Sheet { .. }
         | WorkbookFormulaRename::SheetChanges(_)
-        | WorkbookFormulaRename::Table { .. } => None,
+        | WorkbookFormulaRename::Table { .. }
+        | WorkbookFormulaRename::DefinedName(_) => None,
     };
+    let sheet_names = sheets
+        .iter()
+        .map(|sheet| (sheet.id(), sheet.name().clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut changed = false;
     for (sheet_index, sheet) in sheets.iter_mut().enumerate() {
+        let owner = sheet.name().clone();
         let mut previous_address = None;
         loop {
             budget.check_cancelled()?;
@@ -136,7 +144,7 @@ pub(super) fn rewrite_workbook_formulas(
             let owner_is_target_table = target_location.is_some_and(|(target_sheet, range)| {
                 target_sheet == sheet_index && range.contains(address)
             });
-            let request = request_for(&rename, owner_is_target_table);
+            let request = request_for(&rename, owner_is_target_table, Some(owner.as_str()));
             let CellContent::Formula(formula) = cell.content() else {
                 unreachable!("formula traversal returned a non-formula cell");
             };
@@ -165,7 +173,11 @@ pub(super) fn rewrite_workbook_formulas(
     }
 
     for defined_name in defined_names.iter_mut() {
-        let request = request_for(&rename, false);
+        let owner = match defined_name.scope() {
+            crate::DefinedNameScope::Workbook => None,
+            crate::DefinedNameScope::Sheet(sheet_id) => sheet_names.get(&sheet_id),
+        };
+        let request = request_for(&rename, false, owner.map(SheetName::as_str));
         let owner = match defined_name.scope() {
             crate::DefinedNameScope::Workbook => {
                 format!("defined_name:scope=workbook,name={}", defined_name.name())
@@ -192,18 +204,20 @@ pub(super) fn rewrite_workbook_formulas(
 
     for &(sheet_index, table_index, column_index) in table_formula_locations {
         budget.check_cancelled()?;
+        let owner = sheets[sheet_index].name().clone();
         let table = &mut sheets[sheet_index].tables_mut()[table_index];
         let current_table_id = table.id();
         let owner_is_target_table = match rename {
             WorkbookFormulaRename::TableColumn { table_id, .. } => current_table_id == table_id,
             WorkbookFormulaRename::Sheet { .. }
             | WorkbookFormulaRename::SheetChanges(_)
-            | WorkbookFormulaRename::Table { .. } => false,
+            | WorkbookFormulaRename::Table { .. }
+            | WorkbookFormulaRename::DefinedName(_) => false,
         };
         let column = &mut table.columns_mut()[column_index];
         let table_id = current_table_id.get();
         let column_id = column.column_id().get();
-        let request = request_for(&rename, owner_is_target_table);
+        let request = request_for(&rename, owner_is_target_table, Some(owner.as_str()));
         let calculated = column
             .calculated_column_formula()
             .map(|formula| {
@@ -239,11 +253,19 @@ pub(super) fn rewrite_workbook_formulas(
     Ok(changed)
 }
 
+/// Returns the rewrite request for one formula, `owner_sheet` being the sheet it belongs to.
 fn request_for<'a>(
     rename: &'a WorkbookFormulaRename<'a>,
     owner_is_target_table: bool,
+    owner_sheet: Option<&'a str>,
 ) -> FormulaRewriteRequest<'a> {
     match rename {
+        WorkbookFormulaRename::DefinedName(name) => {
+            FormulaRewriteRequest::DefinedName(NameRename {
+                owner_sheet,
+                ..*name
+            })
+        }
         WorkbookFormulaRename::Sheet { old_name, new_name } => {
             FormulaRewriteRequest::Sheet { old_name, new_name }
         }
@@ -294,7 +316,7 @@ pub(super) fn rename_sheet(
     }
     rewrite_sheet_metadata_formulas(
         sheets,
-        &FormulaRewriteRequest::Sheet {
+        &WorkbookFormulaRename::Sheet {
             old_name: old_name.as_str(),
             new_name: name.as_str(),
         },
@@ -319,12 +341,15 @@ pub(super) fn rename_sheet(
 /// worksheet part. A deletion leaves hyperlink locations as they are, as Excel does.
 pub(super) fn rewrite_sheet_metadata_formulas(
     sheets: &mut [Sheet],
-    request: &FormulaRewriteRequest<'_>,
+    rename: &WorkbookFormulaRename<'_>,
     hyperlinks: bool,
     budget: &mut FormulaRewriteBudget<'_>,
 ) -> Result<(), BatchExecutionError> {
     for sheet in sheets.iter_mut() {
         let sheet_id = sheet.id().get();
+        let owner = sheet.name().clone();
+        let request = request_for(rename, false, Some(owner.as_str()));
+        let request = &request;
         let mut rewrites = Vec::new();
         for (index, validation) in sheet.data_validations().iter().enumerate() {
             for (slot, formula) in [validation.formula1(), validation.formula2()]

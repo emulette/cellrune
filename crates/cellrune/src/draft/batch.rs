@@ -1,6 +1,7 @@
 mod change;
 mod executor;
 mod formula_edit;
+mod name_rename;
 mod receipt;
 mod sheet_delete;
 mod sheet_move;
@@ -10,6 +11,7 @@ mod table_edit;
 mod widen_edit;
 
 pub use change::{EditBatch, WorkbookChange};
+pub(crate) use name_rename::DefinedNameRename;
 pub use receipt::EditReceipt;
 
 use crate::ValidationError;

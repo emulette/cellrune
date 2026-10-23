@@ -8,6 +8,7 @@ use super::super::{
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
+use super::name_rename::rename_defined_name;
 use super::sheet_delete::delete_sheet;
 use super::sheet_move::move_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
@@ -97,6 +98,7 @@ impl WorkbookDraft {
         let mut changed_table_ids = BTreeSet::new();
         let mut workbook_changed = self.workbook_changed;
         let mut tab_steps = clone_slice(&self.tab_steps, rewrite_budget)?;
+        let mut name_renames = clone_slice(&self.name_renames, rewrite_budget)?;
         let mut changed_cells = BTreeSet::new();
         let mut calculation_changed_cells = BTreeSet::new();
         let mut touched_sheets = BTreeSet::new();
@@ -523,6 +525,36 @@ impl WorkbookDraft {
                         semantic_changed = true;
                     }
                 }
+                WorkbookChange::RenameDefinedName {
+                    scope,
+                    name,
+                    new_name,
+                } => {
+                    if let Some(rename) = rename_defined_name(
+                        &mut sheets,
+                        &mut defined_names,
+                        &non_worksheet_tabs,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *scope,
+                        name,
+                        new_name,
+                    )? {
+                        name_renames.push(rename);
+                        workbook_changed = true;
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
                 WorkbookChange::SetDateSystem { date_system: next } => {
                     if date_system != *next {
                         date_system = *next;
@@ -739,6 +771,7 @@ impl WorkbookDraft {
             .collect();
         self.workbook_changed = workbook_changed;
         self.tab_steps = tab_steps;
+        self.name_renames = name_renames;
 
         Ok(EditReceipt {
             base_revision,

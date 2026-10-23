@@ -605,8 +605,7 @@ pub(super) fn write_document_package(
     }
     rewrite_sheet_references(
         document,
-        draft.workbook(),
-        draft.tab_steps(),
+        draft,
         &mut source_reader,
         &mut replacements,
         &deletion.removed_parts,

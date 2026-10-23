@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod batch;
+pub(crate) use batch::DefinedNameRename;
 mod format;
 mod metadata;
 mod presentation;
@@ -128,6 +129,9 @@ pub struct WorkbookDraft {
     /// The sheet deletions and moves in the order they were made, which the writer replays on the
     /// 3-D references of the parts it preserves.
     tab_steps: Vec<TabStep>,
+    /// The defined-name renames in the order they were made, which the writer replays on the
+    /// formulas of the parts it preserves.
+    name_renames: Vec<DefinedNameRename>,
 }
 
 impl WorkbookDraft {
@@ -144,6 +148,7 @@ impl WorkbookDraft {
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
             tab_steps: Vec::new(),
+            name_renames: Vec::new(),
         }
     }
 
@@ -160,6 +165,7 @@ impl WorkbookDraft {
             changed_table_ids: BTreeSet::new(),
             workbook_changed: false,
             tab_steps: Vec::new(),
+            name_renames: Vec::new(),
         }
     }
 
@@ -189,6 +195,10 @@ impl WorkbookDraft {
 
     pub(crate) fn tab_steps(&self) -> &[TabStep] {
         &self.tab_steps
+    }
+
+    pub(crate) fn name_renames(&self) -> &[DefinedNameRename] {
+        &self.name_renames
     }
 
     /// Returns whether the draft preserves an existing XLSX or XLSM package.
@@ -225,6 +235,7 @@ impl WorkbookDraft {
             changed_table_ids: clone_set_cancellable(&self.changed_table_ids, cancelled)?,
             workbook_changed: self.workbook_changed,
             tab_steps: self.tab_steps.clone(),
+            name_renames: self.name_renames.clone(),
         })
     }
 
@@ -241,6 +252,7 @@ impl WorkbookDraft {
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
             tab_steps: Vec::new(),
+            name_renames: Vec::new(),
         }
     }
 }

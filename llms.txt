@@ -724,7 +724,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `add_sheet`, `rename_sheet`, `delete_sheet`,
   `move_sheet(SheetId, position)`, `set_sheet_visibility`,
   `set_defined_name`,
-  `remove_defined_name`, `set_date_system`, `set_calculation_hints`,
+  `remove_defined_name`, `rename_defined_name(scope, name, new_name)`,
+  `set_date_system`, `set_calculation_hints`,
   `rename_table(TableId, TableName)`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
   `resize_table_rows(TableId, first_data_row, last_data_row)`,
@@ -794,6 +795,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   `workbookView` `activeTab` and `firstSheet` at the same tabs, replays the
   draft's deletions and moves on 3-D references in preserved parts, and an
   edit-only save clears the results of 3-D references and sheet functions.
+- `rename_defined_name(DefinedNameScope, name, new_name)` renames a defined
+  name and rewrites the uses that resolve to it, as Excel does, in cell
+  formulas, defined names, table formulas, and data validations, and on
+  save in preserved conditional formats, data validations, x14 formulas,
+  and chart series (`[0]!Name` included). A use resolves to a sheet's own
+  name on that sheet or qualified with it (`'S2'!Rate`), else to the
+  workbook name, so a workbook rename leaves uses of a sheet's own name as
+  they are and a sheet rename rewrites only that sheet's and its qualified
+  uses; a LAMBDA name is renamed where it is called, `INDIRECT` text and
+  other workbooks' names stay. An unknown name fails with
+  `validation.unknown_defined_name`, a collision in the same scope with
+  `DuplicateDefinedName`, and a new name the other scope already uses,
+  which would take over uses, with `validation.defined_name_rename_shadowed`.
+  The receipt reports a topology change.
 - `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
   draft plus persistent parsed formulas, dependency state, results, dirty
   roots, and bounded delta history.

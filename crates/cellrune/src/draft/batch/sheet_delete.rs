@@ -4,7 +4,7 @@ use super::formula_edit::{
     rewrite_workbook_formulas, table_formula_locations,
 };
 use super::tab_order::TabOrder;
-use crate::calculation::formula_rewrite::{FormulaRewriteRequest, SheetChanges};
+use crate::calculation::formula_rewrite::SheetChanges;
 use crate::calculation::sheet_changes::TabStep;
 use crate::workbook::NonWorksheetTabs;
 use crate::{DefinedName, DefinedNameScope, Sheet, SheetId, SheetVisibility, ValidationError};
@@ -74,7 +74,7 @@ pub(super) fn delete_sheet(
     };
     rewrite_sheet_metadata_formulas(
         sheets,
-        &FormulaRewriteRequest::Sheets(changes),
+        &WorkbookFormulaRename::SheetChanges(changes),
         false,
         &mut *budget,
     )?;

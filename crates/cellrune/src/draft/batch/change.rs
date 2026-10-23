@@ -103,6 +103,20 @@ pub enum WorkbookChange {
         /// Name to remove.
         name: Box<str>,
     },
+    /// Renames a defined name and rewrites the references that resolve to it in cell formulas,
+    /// defined names, table formulas, and data validation formulas.
+    ///
+    /// A use resolves to a sheet's own name on that sheet or qualified with it, else to the
+    /// workbook name, so only those uses are rewritten; `INDIRECT` text and other workbooks'
+    /// names keep their text.
+    RenameDefinedName {
+        /// Workbook or sheet scope of the renamed name.
+        scope: DefinedNameScope,
+        /// Current name, matched case-insensitively.
+        name: Box<str>,
+        /// New name.
+        new_name: Box<str>,
+    },
     /// Changes the workbook date system.
     SetDateSystem {
         /// New date system.
@@ -289,6 +303,19 @@ impl WorkbookChange {
         Self::RemoveDefinedName {
             scope,
             name: name.into(),
+        }
+    }
+
+    /// Constructs a defined-name rename in `scope`.
+    pub fn rename_defined_name(
+        scope: DefinedNameScope,
+        name: impl Into<Box<str>>,
+        new_name: impl Into<Box<str>>,
+    ) -> Self {
+        Self::RenameDefinedName {
+            scope,
+            name: name.into(),
+            new_name: new_name.into(),
         }
     }
 

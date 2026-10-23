@@ -1,8 +1,9 @@
 use super::ast::{
-    Expr, Reference, SheetPrefix, StructuredColumns, StructuredReference,
+    Expr, ExternalReferenceTarget, Reference, SheetPrefix, StructuredColumns, StructuredReference,
     structured_column_needs_grouping, structured_simple_column_needs_grouping,
 };
 use super::error::ParseErrorCode;
+use super::functions::function_evaluator;
 use super::lexer::{Token, lex_spanned};
 use super::parser::parse_formula_with_limits;
 pub(crate) use super::sheet_changes::SheetChanges;
@@ -34,6 +35,51 @@ pub(crate) enum FormulaRewriteRequest<'a> {
         new_name: &'a str,
         owner_is_target_table: bool,
     },
+    /// Renames one defined name, rewriting only the references that resolve to it.
+    DefinedName(NameRename<'a>),
+}
+
+/// A defined name renamed in one scope, with what decides which references resolve to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NameRename<'a> {
+    pub(crate) old_name: &'a str,
+    pub(crate) new_name: &'a str,
+    /// The sheet the name is scoped to, as formulas spell it; `None` for workbook scope.
+    pub(crate) scope_sheet: Option<&'a str>,
+    /// Sheets with a name of their own spelled `old_name`, which a reference on such a sheet or
+    /// qualified with it resolves to instead of a workbook name.
+    pub(crate) shadowing_sheets: &'a [&'a str],
+    /// The sheet the rewritten formula belongs to; `None` for a workbook name's definition or a
+    /// chart.
+    pub(crate) owner_sheet: Option<&'a str>,
+}
+
+impl NameRename<'_> {
+    fn shadowed(&self, sheet: &str) -> bool {
+        self.shadowing_sheets
+            .iter()
+            .any(|shadowing| case_insensitive_eq(sheet, shadowing))
+    }
+
+    /// Reports whether an unqualified use of `old_name` resolves to the renamed name: a sheet's
+    /// own name wins over a workbook name on that sheet.
+    fn resolves_unqualified(&self) -> bool {
+        match self.scope_sheet {
+            None => self.owner_sheet.is_none_or(|owner| !self.shadowed(owner)),
+            Some(scope) => self
+                .owner_sheet
+                .is_some_and(|owner| case_insensitive_eq(owner, scope)),
+        }
+    }
+
+    /// Reports whether `sheet!old_name` resolves to the renamed name: the sheet's own name, else
+    /// the workbook name.
+    fn resolves_qualified(&self, sheet: &str) -> bool {
+        match self.scope_sheet {
+            None => !self.shadowed(sheet),
+            Some(scope) => case_insensitive_eq(sheet, scope),
+        }
+    }
 }
 
 impl FormulaRewriteRequest<'_> {
@@ -44,9 +90,10 @@ impl FormulaRewriteRequest<'_> {
                 SheetOutcome::Renamed(new_name)
             }
             Self::Sheets(changes) => changes.single(name),
-            Self::Sheet { .. } | Self::Table { .. } | Self::TableColumn { .. } => {
-                SheetOutcome::Unchanged
-            }
+            Self::Sheet { .. }
+            | Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::DefinedName(_) => SheetOutcome::Unchanged,
         }
     }
 
@@ -63,14 +110,19 @@ impl FormulaRewriteRequest<'_> {
                 }
             }
             Self::Sheets(changes) => changes.span(start, end),
-            Self::Table { .. } | Self::TableColumn { .. } => SpanOutcome::Unchanged,
+            Self::Table { .. } | Self::TableColumn { .. } | Self::DefinedName(_) => {
+                SpanOutcome::Unchanged
+            }
         }
     }
 
     const fn sheet_changes(&self) -> Option<&SheetChanges<'_>> {
         match self {
             Self::Sheets(changes) => Some(changes),
-            Self::Sheet { .. } | Self::Table { .. } | Self::TableColumn { .. } => None,
+            Self::Sheet { .. }
+            | Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::DefinedName(_) => None,
         }
     }
 
@@ -320,6 +372,9 @@ pub(crate) fn rewrite_formula(
             edits.push(SourceEdit::new(source_node.span(), DELETED_REFERENCE));
             continue;
         }
+        if let FormulaRewriteRequest::DefinedName(rename) = request {
+            plan_name_edit(source, expr, source_node, rename, &mut edits, budget)?;
+        }
         match expr {
             Expr::Ref(reference) => {
                 if let Some(prefix) = &reference.sheet {
@@ -381,7 +436,9 @@ pub(crate) fn rewrite_formula(
                         )?;
                     }
                 }
-                FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {}
+                FormulaRewriteRequest::Sheet { .. }
+                | FormulaRewriteRequest::Sheets(_)
+                | FormulaRewriteRequest::DefinedName(_) => {}
             },
             Expr::ExternalReference(_) => continue,
             _ => {}
@@ -485,6 +542,72 @@ fn replaced_by_deletion(expr: &Expr, request: &FormulaRewriteRequest<'_>) -> boo
         Expr::Invoke { callee, .. } => request.deletes_reference(callee),
         _ => false,
     }
+}
+
+/// Plans the edit of a name that resolves to the renamed name: an unqualified or sheet-qualified
+/// name, the name of a LAMBDA called like a function, or a `[0]!Name` reference, the form charts
+/// use for this workbook's names.
+fn plan_name_edit(
+    source: &str,
+    expr: &Expr,
+    source_node: &NodeSpanTree,
+    rename: &NameRename<'_>,
+    edits: &mut Vec<SourceEdit>,
+    budget: &mut FormulaRewriteBudget<'_>,
+) -> Result<(), FormulaRewriteError> {
+    let resolves = match expr {
+        Expr::Name(name) => {
+            case_insensitive_eq(name, rename.old_name) && rename.resolves_unqualified()
+        }
+        Expr::QualifiedName { sheet, name } => {
+            sheet.end_name.is_none()
+                && case_insensitive_eq(name, rename.old_name)
+                && rename.resolves_qualified(&sheet.name)
+        }
+        Expr::ExternalReference(reference) => {
+            reference.workbook.as_ref() == "[0]"
+                && reference.sheet_end.is_none()
+                && matches!(
+                    &reference.target,
+                    ExternalReferenceTarget::DefinedName(name)
+                        if case_insensitive_eq(name, rename.old_name)
+                )
+                && reference.sheet.as_deref().map_or_else(
+                    || rename.scope_sheet.is_none(),
+                    |sheet| rename.resolves_qualified(sheet),
+                )
+        }
+        Expr::Call { name, .. } => {
+            // A built-in function keeps its name; only a name defined as a LAMBDA is renamed.
+            if case_insensitive_eq(name, rename.old_name)
+                && function_evaluator(name).is_none()
+                && rename.resolves_unqualified()
+            {
+                let start = source_node.span().start;
+                let end = start + name.len();
+                if source
+                    .get(start..end)
+                    .is_some_and(|spelled| case_insensitive_eq(spelled, name))
+                {
+                    budget.charge_edit()?;
+                    edits.push(SourceEdit::new(
+                        SourceSpan::new(start, end),
+                        rename.new_name,
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        _ => false,
+    };
+    if resolves
+        && let Some(component) =
+            component(source_node.components(), SourceComponentKind::DefinedName)
+    {
+        budget.charge_edit()?;
+        edits.push(SourceEdit::new(component.span(), rename.new_name));
+    }
+    Ok(())
 }
 
 fn plan_sheet_prefix_edits(
@@ -809,15 +932,18 @@ fn formula_may_reference_target(
                 },
                 _ => false,
             }),
+        FormulaRewriteRequest::DefinedName(rename) => lexed.tokens.iter().any(|token| {
+            matches!(&token.token, Token::Ident(name) if case_insensitive_eq(name, rename.old_name))
+        }),
         FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {
             let targeted = |name: &str| match request {
                 FormulaRewriteRequest::Sheet { old_name, .. } => {
                     case_insensitive_eq(name, old_name)
                 }
                 FormulaRewriteRequest::Sheets(changes) => changes.targets(name),
-                FormulaRewriteRequest::Table { .. } | FormulaRewriteRequest::TableColumn { .. } => {
-                    false
-                }
+                FormulaRewriteRequest::Table { .. }
+                | FormulaRewriteRequest::TableColumn { .. }
+                | FormulaRewriteRequest::DefinedName(_) => false,
             };
             let deleted_table = |raw: &str| {
                 request.sheet_changes().is_some_and(|changes| {
@@ -934,7 +1060,8 @@ fn structured_reference_has_column(reference: &StructuredReference, target: &str
 mod tests {
     use super::{
         FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimitKind, FormulaRewriteLimits,
-        FormulaRewriteRequest, SheetChanges, raw_structured_targets_table, rewrite_formula,
+        FormulaRewriteRequest, NameRename, SheetChanges, raw_structured_targets_table,
+        rewrite_formula,
     };
     use crate::SheetId;
     use crate::calculation::sheet_changes::{TabEntry, TabStep};
@@ -1273,6 +1400,75 @@ mod tests {
                 "{new_name}"
             );
         }
+    }
+
+    #[test]
+    fn a_renamed_name_rewrites_only_the_references_that_resolve_to_it() {
+        let workbook_rename = |owner_sheet| {
+            FormulaRewriteRequest::DefinedName(NameRename {
+                old_name: "Rate",
+                new_name: "Tax",
+                scope_sheet: None,
+                shadowing_sheets: &["S2"],
+                owner_sheet,
+            })
+        };
+        // `S2` has its own `Rate`, which `'S2'!Rate` and an unqualified `Rate` on `S2` mean.
+        assert_eq!(
+            rewrite(
+                "rate*2+S1!Rate+'S2'!Rate+S3!Rate+[0]!Rate+INDIRECT(\"Rate\")+Rates+[Book.xlsx]S1!Rate",
+                workbook_rename(Some("S1"))
+            ),
+            Some(
+                "Tax*2+S1!Tax+'S2'!Rate+S3!Tax+[0]!Tax+INDIRECT(\"Rate\")+Rates+[Book.xlsx]S1!Rate"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            rewrite("Rate+S1!Rate", workbook_rename(Some("S2"))),
+            Some("Rate+S1!Tax".to_owned())
+        );
+        assert_eq!(
+            rewrite("Rate*2", workbook_rename(None)),
+            Some("Tax*2".to_owned())
+        );
+        let sheet_rename = |owner_sheet| {
+            FormulaRewriteRequest::DefinedName(NameRename {
+                old_name: "Rate",
+                new_name: "Local",
+                scope_sheet: Some("S2"),
+                shadowing_sheets: &[],
+                owner_sheet,
+            })
+        };
+        assert_eq!(
+            rewrite("Rate+'S2'!Rate+S1!Rate", sheet_rename(Some("S2"))),
+            Some("Local+'S2'!Local+S1!Rate".to_owned())
+        );
+        assert_eq!(
+            rewrite("Rate+s2!Rate", sheet_rename(Some("S1"))),
+            Some("Rate+s2!Local".to_owned())
+        );
+        // A name defined as a LAMBDA is renamed where it is called; a built-in keeps its name.
+        let lambda = FormulaRewriteRequest::DefinedName(NameRename {
+            old_name: "Double",
+            new_name: "Twice",
+            scope_sheet: None,
+            shadowing_sheets: &[],
+            owner_sheet: Some("S1"),
+        });
+        assert_eq!(
+            rewrite("Double(2)+SUM(Double(1))", lambda),
+            Some("Twice(2)+SUM(Twice(1))".to_owned())
+        );
+        let builtin = FormulaRewriteRequest::DefinedName(NameRename {
+            old_name: "SUM",
+            new_name: "Total",
+            scope_sheet: None,
+            shadowing_sheets: &[],
+            owner_sheet: Some("S1"),
+        });
+        assert_eq!(rewrite("SUM(1)", builtin), None);
     }
 
     #[test]
