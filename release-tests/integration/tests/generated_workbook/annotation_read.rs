@@ -170,3 +170,93 @@ fn sheet_rename_rewrites_internal_hyperlink_locations_as_the_saved_part_does() {
         summary
     );
 }
+
+/// Sheet `Data` holds a table and 300 external hyperlinks, so its relationship part is read once
+/// for the table and again for the hyperlinks; sheet `After` follows it.
+fn table_and_hyperlinks_workbook() -> Vec<(&'static str, String)> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let root = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="After" sheetId="2" r:id="rId2"/></sheets></workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#;
+    let links = (1..=300)
+        .map(|row| format!(r#"<hyperlink ref="C{row}" r:id="rIdL{row}"/>"#))
+        .collect::<String>();
+    let data = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Key</t></is></c></row><row r="2"><c r="A2"><v>1</v></c></row></sheetData><hyperlinks>{links}</hyperlinks><tableParts count="1"><tablePart r:id="rIdT"/></tableParts></worksheet>"#
+    );
+    let targets = (1..=300)
+        .map(|row| format!(r#"<Relationship Id="rIdL{row}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/{row}" TargetMode="External"/>"#))
+        .collect::<String>();
+    let data_relationships = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdT" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>{targets}</Relationships>"#
+    );
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Keys" displayName="Keys" ref="A1:A2" headerRowCount="1"><tableColumns count="1"><tableColumn id="1" name="Key"/></tableColumns></table>"#;
+    let after = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>7</v></c></row></sheetData></worksheet>"#;
+    vec![
+        ("[Content_Types].xml", content_types.to_owned()),
+        ("_rels/.rels", root.to_owned()),
+        ("xl/workbook.xml", workbook.to_owned()),
+        (
+            "xl/_rels/workbook.xml.rels",
+            workbook_relationships.to_owned(),
+        ),
+        ("xl/worksheets/sheet1.xml", data),
+        ("xl/worksheets/_rels/sheet1.xml.rels", data_relationships),
+        ("xl/tables/table1.xml", table.to_owned()),
+        ("xl/worksheets/sheet2.xml", after.to_owned()),
+    ]
+}
+
+#[test]
+fn annotation_reads_never_spend_the_budget_a_required_part_needs() {
+    let parts = table_and_hyperlinks_workbook();
+    let entries = parts
+        .iter()
+        .map(|(name, contents)| (*name, contents.as_str()))
+        .collect::<Vec<_>>();
+    let bytes = crate::support::generated_xlsx::generated_package(&entries);
+    // Every part fits the limit once, as 0.1.26 read it; the hyperlinks need the relationship
+    // part a second time.
+    let total = parts
+        .iter()
+        .map(|(_, contents)| contents.len() as u64)
+        .sum::<u64>();
+    let limits = cellrune::ReadLimits::default()
+        .with_max_total_uncompressed_bytes(total)
+        .expect("limit");
+    let document = open_xlsx_document_bytes(&bytes, OpenOptions::new(ReadOptions::new(limits)))
+        .expect("an open that read every required part within the limit succeeds");
+    let workbook = document.workbook();
+    assert_eq!(workbook.sheets().len(), 2);
+    assert_eq!(workbook.sheets()[0].tables().len(), 1);
+    let links = workbook.sheets()[0].hyperlinks();
+    assert_eq!(links.len(), 300);
+    assert!(links.iter().all(|link| link.target().is_none()));
+    let codes = document
+        .presentation()
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.code().as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["xlsx.annotations.skipped"]);
+
+    let roomy = open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("open");
+    assert_eq!(
+        roomy.workbook().sheets()[0].hyperlinks()[0].target(),
+        Some("https://example.com/1")
+    );
+    assert!(roomy.presentation().diagnostics().is_empty());
+}

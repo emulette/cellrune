@@ -58,6 +58,9 @@ pub(crate) mod compatibility {
     pub(crate) const PHONETIC_OVERLAP_CODE: &str = "xlsx.phonetic.overlap";
     pub(crate) const PHONETIC_OVERLAP_MESSAGE: &str =
         "phonetic runs overlap or are not in ascending order; source order was preserved";
+    pub(crate) const ANNOTATIONS_SKIPPED_CODE: &str = "xlsx.annotations.skipped";
+    pub(crate) const ANNOTATIONS_SKIPPED_MESSAGE: &str = "worksheet hyperlink targets or comments \
+         were not read because they exceed the remaining max_total_uncompressed_bytes budget";
     pub(crate) const INVALID_PANE_CODE: &str = "xlsx.pane.invalid";
     pub(crate) const INVALID_PANE_MESSAGE: &str =
         "worksheet view or pane is malformed; it is preserved but not exposed as a frozen pane";

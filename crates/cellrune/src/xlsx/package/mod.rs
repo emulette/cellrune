@@ -51,6 +51,15 @@ pub(super) enum WorkbookPackageKind {
     Xlsm,
 }
 
+/// The outcome of reading a part the workbook opens without.
+pub(super) enum OptionalPart {
+    Read(Vec<u8>),
+    /// The part would exceed what remains of the total read budget and was not read.
+    OverBudget,
+    /// The part is missing or does not read.
+    Unreadable,
+}
+
 pub(super) struct OpenedPackage<R: Read + Seek> {
     archive: ZipArchive<R>,
     entries: BTreeMap<PartPath, usize>,
@@ -139,6 +148,24 @@ impl<R: Read + Seek> OpenedPackage<R> {
         )
     }
 
+    /// Reads a part the workbook opens without, unless its declared size exceeds what remains of
+    /// [`ReadLimits::max_total_uncompressed_bytes`], so that reading it can never fail the open.
+    pub(super) fn read_optional_part(&mut self, part: &PartPath) -> OptionalPart {
+        let Some(index) = self.entries.get(part).copied() else {
+            return OptionalPart::Unreadable;
+        };
+        let Ok(declared) = self.archive.by_index(index).map(|file| file.size()) else {
+            return OptionalPart::Unreadable;
+        };
+        if self.uncompressed_spent.saturating_add(declared)
+            > self.limits.max_total_uncompressed_bytes()
+        {
+            return OptionalPart::OverBudget;
+        }
+        self.read_part(part)
+            .map_or(OptionalPart::Unreadable, OptionalPart::Read)
+    }
+
     /// Resolves one worksheet's table relationships to their package parts.
     ///
     /// A worksheet without a relationship part has no tables; that is the common case and
@@ -200,24 +227,27 @@ impl<R: Read + Seek> OpenedPackage<R> {
         !self.parts_with_content_type(&[CONTENT_COMMENTS]).is_empty()
     }
 
-    /// Returns a worksheet's external hyperlink targets by relationship ID and its comments part.
+    /// Returns a worksheet's external hyperlink targets by relationship ID and its comments part,
+    /// or `None` when its relationship part exceeds the remaining read budget.
     ///
     /// These relationships were not read before hyperlinks and comments were modeled, so a
     /// relationship part that does not read or parse yields none instead of failing the read.
     pub(super) fn worksheet_annotation_relationships(
         &mut self,
         worksheet_part: &PartPath,
-    ) -> (BTreeMap<Box<str>, Box<str>>, Option<PartPath>) {
+    ) -> Option<(BTreeMap<Box<str>, Box<str>>, Option<PartPath>)> {
         let mut targets = BTreeMap::new();
         let mut comments = None;
         let Ok(relationship_part) = worksheet_part.relationship_part() else {
-            return (targets, comments);
+            return Some((targets, comments));
         };
         if !self.entries.contains_key(&relationship_part) {
-            return (targets, comments);
+            return Some((targets, comments));
         }
-        let Ok(bytes) = self.read_part(&relationship_part) else {
-            return (targets, comments);
+        let bytes = match self.read_optional_part(&relationship_part) {
+            OptionalPart::Read(bytes) => bytes,
+            OptionalPart::OverBudget => return None,
+            OptionalPart::Unreadable => return Some((targets, comments)),
         };
         let Ok(relationships) = xml::parse_relationships(
             &bytes,
@@ -225,7 +255,7 @@ impl<R: Read + Seek> OpenedPackage<R> {
             Some(worksheet_part),
             self.limits,
         ) else {
-            return (targets, comments);
+            return Some((targets, comments));
         };
         for relationship in relationships {
             match relationship.target {
@@ -244,7 +274,7 @@ impl<R: Read + Seek> OpenedPackage<R> {
                 _ => {}
             }
         }
-        (targets, comments)
+        Some((targets, comments))
     }
 
     /// Returns the chart parts, whose series formulas name worksheets outside the workbook model.

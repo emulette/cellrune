@@ -384,7 +384,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   from the legacy comments part, which Excel also writes for threaded
   comments. A malformed hyperlink `ref`, an unreadable worksheet relationship
   part, or an unreadable comments part leaves that metadata out without
-  failing the read. A sheet rename rewrites internal hyperlink locations, as
+  failing the read. These parts are read after every required part, and one
+  that would exceed what remains of `max_total_uncompressed_bytes` is not
+  read, leaving an `xlsx.annotations.skipped` presentation diagnostic. A sheet rename rewrites internal hyperlink locations, as
   it does rule formulas, without charging the rewrite budget and keeping a
   location that does not parse; an external hyperlink's location points into
   its target and is kept.

@@ -33,7 +33,9 @@ use self::phonetic::PhoneticReadBudget;
 use self::shared_strings::SharedStrings;
 use self::styles::Styles;
 use super::error::{compatibility, detail};
-use super::package::{OpenedPackage, PackageSummary, PartPath, WorkbookPackageKind, open_package};
+use super::package::{
+    OpenedPackage, OptionalPart, PackageSummary, PartPath, WorkbookPackageKind, open_package,
+};
 use super::{ReadOptions, XlsxErrorCode, XlsxReadError};
 use crate::workbook::{
     NonWorksheetTab, NonWorksheetTabs, SheetBuilder, TableRangeIndex, WorkbookSnapshotInput,
@@ -176,6 +178,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     }
     let mut non_worksheet_tabs = Vec::new();
     let has_comment_parts = package.has_comment_parts();
+    let mut pending_annotations = Vec::new();
     for (position, metadata) in workbook.sheets.into_iter().enumerate() {
         let Some(worksheet_part) = package.worksheet_part(&metadata.relationship_id).cloned()
         else {
@@ -240,14 +243,20 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             total_formula_bytes: &mut total_formula_bytes,
             diagnostics: &mut diagnostics,
         })?;
+        pending_annotations.push((sheets.len(), worksheet_part.clone(), hyperlinks));
+        sheets.push(sheet);
+    }
+    // Annotation parts are optional, so they are read only after every required part and never
+    // spend budget a required part needs.
+    for (index, worksheet_part, hyperlinks) in pending_annotations {
         read_sheet_annotations(
             &mut package,
             &worksheet_part,
             hyperlinks,
             has_comment_parts,
-            &mut sheet,
-        );
-        sheets.push(sheet);
+            &mut sheets[index],
+            &mut presentation,
+        )?;
     }
     presentation.set_style_formats(styles.into_cell_formats());
     if used_relationships.len() != package.worksheet_count() {
@@ -432,30 +441,43 @@ fn read_sheet_tables<R: Read + Seek>(
 /// Resolves the external targets of a worksheet's hyperlinks and reads its comments part.
 ///
 /// Neither was read before hyperlinks and comments were modeled, so a relationship or comments
-/// part that does not read leaves the sheet without them instead of failing the read.
+/// part that does not read leaves the sheet without them instead of failing the read, and one
+/// that would exceed what remains of `max_total_uncompressed_bytes` is not read and leaves an
+/// `xlsx.annotations.skipped` presentation diagnostic.
 fn read_sheet_annotations<R: Read + Seek>(
     package: &mut OpenedPackage<R>,
     worksheet_part: &PartPath,
     hyperlinks: Vec<hyperlink::PendingHyperlink>,
     has_comment_parts: bool,
     sheet: &mut Sheet,
-) {
+    presentation: &mut DocumentPresentation,
+) -> Result<(), XlsxReadError> {
+    let mut skipped = false;
     let (targets, comments_part) = if has_comment_parts
         || hyperlinks
             .iter()
             .any(hyperlink::PendingHyperlink::has_relationship)
     {
-        package.worksheet_annotation_relationships(worksheet_part)
+        package
+            .worksheet_annotation_relationships(worksheet_part)
+            .unwrap_or_else(|| {
+                skipped = true;
+                (BTreeMap::new(), None)
+            })
     } else {
         (BTreeMap::new(), None)
     };
     let limits = package.limits();
-    let comments = comments_part
-        .and_then(|part| {
-            let bytes = package.read_part(&part).ok()?;
-            comments::parse(&bytes, &part, limits).ok()
-        })
-        .unwrap_or_default();
+    let comments = match comments_part.map(|part| (package.read_optional_part(&part), part)) {
+        Some((OptionalPart::Read(bytes), part)) => {
+            comments::parse(&bytes, &part, limits).unwrap_or_default()
+        }
+        Some((OptionalPart::OverBudget, _)) => {
+            skipped = true;
+            Vec::new()
+        }
+        Some((OptionalPart::Unreadable, _)) | None => Vec::new(),
+    };
     sheet.set_annotations(
         hyperlinks
             .into_iter()
@@ -463,6 +485,27 @@ fn read_sheet_annotations<R: Read + Seek>(
             .collect(),
         comments,
     );
+    if skipped {
+        let code =
+            DiagnosticCode::new(compatibility::ANNOTATIONS_SKIPPED_CODE).map_err(|error| {
+                XlsxReadError::new(XlsxErrorCode::InvalidWorkbook).with_cause(error)
+            })?;
+        presentation.push_diagnostic(
+            Diagnostic::new(
+                code,
+                DiagnosticSeverity::Warning,
+                compatibility::ANNOTATIONS_SKIPPED_MESSAGE,
+                Some(SourceLocation::sheet(
+                    worksheet_part.source_id().clone(),
+                    sheet.id(),
+                )),
+            )
+            .map_err(|error| {
+                XlsxReadError::new(XlsxErrorCode::InvalidWorkbook).with_cause(error)
+            })?,
+        );
+    }
+    Ok(())
 }
 
 fn read_cell_metadata<R: Read + Seek>(
