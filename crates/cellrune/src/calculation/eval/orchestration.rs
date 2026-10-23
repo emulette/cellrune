@@ -48,7 +48,7 @@ impl<'workbook> Engine<'workbook> {
             table_topologies,
             asts: Arc::new(BTreeMap::new()),
             defined_name_asts: Arc::new(Vec::new()),
-            dependencies: Arc::new(BTreeMap::new()),
+            dependencies: Arc::new(DependencyGraph::default()),
             results: BTreeMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),

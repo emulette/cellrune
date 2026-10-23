@@ -41,6 +41,13 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
   Supported Python versions are unchanged.
+- Formulas over overlapping ranges share the dependency areas those ranges are stored as, so a
+  running total such as `SUM($B$2:Bn)` over formula cells adds a few dependency edges per row
+  instead of one per formula above it. A formula counts toward `max_dependency_edges` one edge per
+  cell or area it waits for and one per member of each area it adds, but never more than the
+  distinct formula cells and array anchors its references cover, so a formula that calculated
+  before still does; a 5,000-row running total over formulas no longer reports the limit for its
+  last thousand rows. Calculation order and every other result are unchanged.
 
 ### Fixed
 

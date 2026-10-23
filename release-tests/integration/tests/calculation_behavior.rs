@@ -4162,6 +4162,37 @@ fn dependency_edge_limit_leaves_formulas_collected_before_it_calculated() {
 }
 
 #[test]
+fn running_totals_over_formulas_share_their_dependency_edges() {
+    // Every C row sums the B formulas above it. Counted once per covered formula the 400 totals
+    // need 80,200 edges; their ranges share areas instead, so a 20,000-edge limit leaves every
+    // total calculated.
+    let rows = 400_u32;
+    let formulas = (1..=rows)
+        .flat_map(|row| {
+            [
+                (row, 2, "1".to_owned()),
+                (row, 3, format!("SUM($B$1:B{row})")),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let workbook = workbook_with_formulas(
+        &formulas
+            .iter()
+            .map(|(row, column, text)| (*row, *column, text.as_str()))
+            .collect::<Vec<_>>(),
+    );
+    let limits = CalculationLimits::default()
+        .with_max_dependency_edges(20_000)
+        .expect("nonzero dependency limit");
+    let calculation =
+        calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
+
+    for row in 1..=rows {
+        assert_number_at(&calculation, row, 3, f64::from(row), 0.0);
+    }
+}
+
+#[test]
 fn array_budget_cannot_be_hidden_by_iferror() {
     let workbook = workbook_with_formulas(&[(1, 1, "IFERROR(SUM({1,2,3}),42)")]);
     let limits = CalculationLimits::default()

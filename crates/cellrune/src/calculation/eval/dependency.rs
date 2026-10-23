@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 
+use super::dependency_areas::AreaNodes;
 use super::{Engine, EvalContext, EvaluationBudget};
 use crate::calculation::ast::{Expr, SheetPrefix, StructuredReference};
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
@@ -13,7 +14,7 @@ use crate::calculation::functions::{
     direct_builtin_callable, function_arguments_are_reachable, function_dependency_kind,
     function_evaluator, normalize_name, prepare_evaluator_arguments, with_let_scope,
 };
-use crate::calculation::graph::DependencyGraph;
+use crate::calculation::graph::{DependencyGraph, DependencyNode};
 use crate::calculation::lambda::{is_local_name, walk_local_scope};
 use crate::calculation::runtime::{Rect, RectSpan, ReferenceArea, ReferenceValue};
 use crate::calculation::scope::{CallableValue, DefinedLambdaId, ScopeValue};
@@ -951,12 +952,18 @@ impl Engine<'_> {
     /// The formula that would cross the limit and every formula after it are returned instead of
     /// collected: their dependencies are unknown, so they report the limit, and formulas that
     /// depend on them read that error. Formulas collected before the limit calculate normally.
+    ///
+    /// A formula counts the edges it adds to the graph: one per node it waits for and one per
+    /// member of each area it builds. An area another formula already built adds nothing but the
+    /// edge to it. A formula never counts more than the distinct formula cells it waits for, the
+    /// count before ranges were stored as shared areas.
     fn collect_dependencies(
         &self,
         retain_graph: bool,
         cancelled: &impl Fn() -> bool,
     ) -> Result<(DependencyGraph, BTreeSet<super::CellId>), ()> {
-        let mut dependencies = BTreeMap::new();
+        let mut graph = DependencyGraph::default();
+        let mut areas = AreaNodes::default();
         if cancelled() {
             return Err(());
         }
@@ -967,9 +974,7 @@ impl Engine<'_> {
                 return Err(());
             }
             if self.name_cycle_cells.contains(cell) || self.name_limit_cells.contains(cell) {
-                if retain_graph {
-                    dependencies.insert(*cell, Vec::new());
-                }
+                graph.insert(*cell, Vec::new());
                 continue;
             }
             let mut targets = Vec::new();
@@ -984,19 +989,12 @@ impl Engine<'_> {
             if cancelled() {
                 return Err(());
             }
-            let mut cell_dependencies = Vec::new();
+            let area_edges = graph.area_edges();
+            let mut nodes = Vec::new();
             for target in targets {
                 match target {
                     DependencyTarget::Cell(cell) | DependencyTarget::SpillAnchor(cell) => {
-                        if self.workbook.sheets()[cell.0].formula_addresses().contains(
-                            &CellAddress::from_indices(cell.1, cell.2)
-                                .expect("resolved cell address"),
-                        ) {
-                            cell_dependencies.push(cell);
-                        }
-                        if let Some(owner) = self.cancellable_array_owner(cell, cancelled)? {
-                            cell_dependencies.push(owner);
-                        }
+                        self.push_cell_dependency(cell, &mut nodes, cancelled)?;
                     }
                     DependencyTarget::TableIdentity(_)
                     | DependencyTarget::FormulaContent(_)
@@ -1007,49 +1005,34 @@ impl Engine<'_> {
                                 return Err(());
                             }
                             if rect.is_single_cell() {
-                                if self.workbook.sheets()[rect.sheet]
-                                    .formula_addresses()
-                                    .contains(
-                                        &CellAddress::from_indices(rect.row_start, rect.col_start)
-                                            .expect("resolved single-cell rectangle"),
-                                    )
-                                {
-                                    cell_dependencies.push((
-                                        rect.sheet,
-                                        rect.row_start,
-                                        rect.col_start,
-                                    ));
-                                }
-                                if let Some(owner) = self.cancellable_array_owner(
+                                self.push_cell_dependency(
                                     (rect.sheet, rect.row_start, rect.col_start),
+                                    &mut nodes,
                                     cancelled,
-                                )? {
-                                    cell_dependencies.push(owner);
-                                }
-                                continue;
-                            }
-                            for (row, column) in self.formula_cells_within(&rect) {
-                                if cancelled() {
-                                    return Err(());
-                                }
-                                cell_dependencies.push((rect.sheet, row, column));
-                            }
-                            for region in &self.array_regions {
-                                if cancelled() {
-                                    return Err(());
-                                }
-                                if rects_intersect(&rect, &region.rect) {
-                                    cell_dependencies.push(region.anchor);
-                                }
+                                )?;
+                            } else if let Some(node) =
+                                areas.range(self, &mut graph, &rect, cancelled)?
+                            {
+                                nodes.push(node);
                             }
                         }
                     }
                 }
             }
-            cell_dependencies.sort_unstable();
-            cell_dependencies.dedup();
+            nodes.sort_unstable();
+            nodes.dedup();
+            let added = nodes.len() as u64 + (graph.area_edges() - area_edges);
+            let edges = if graph.area_edges() == area_edges
+                && nodes
+                    .iter()
+                    .all(|node| matches!(node, DependencyNode::Cell(_)))
+            {
+                added
+            } else {
+                graph.count_cells(&nodes, added)
+            };
             match edge_count
-                .checked_add(cell_dependencies.len() as u64)
+                .checked_add(edges)
                 .filter(|total| *total <= self.options.limits().max_dependency_edges())
             {
                 Some(total) => edge_count = total,
@@ -1061,17 +1044,40 @@ impl Engine<'_> {
                         }
                         limited.insert(*cell);
                     }
-                    if retain_graph {
-                        dependencies.extend(limited.iter().map(|cell| (*cell, Vec::new())));
+                    if !retain_graph {
+                        return Ok((DependencyGraph::default(), limited));
                     }
-                    return Ok((dependencies, limited));
+                    for cell in &limited {
+                        graph.insert(*cell, Vec::new());
+                    }
+                    return Ok((graph, limited));
                 }
             }
-            if retain_graph {
-                dependencies.insert(*cell, cell_dependencies);
-            }
+            graph.insert(*cell, nodes);
         }
-        Ok((dependencies, BTreeSet::new()))
+        if !retain_graph {
+            return Ok((DependencyGraph::default(), BTreeSet::new()));
+        }
+        Ok((graph, BTreeSet::new()))
+    }
+
+    /// Adds the formula at `cell` and the array formula covering it, if any, to `nodes`.
+    fn push_cell_dependency(
+        &self,
+        cell: super::CellId,
+        nodes: &mut Vec<DependencyNode>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        if self.workbook.sheets()[cell.0]
+            .formula_addresses()
+            .contains(&CellAddress::from_indices(cell.1, cell.2).expect("resolved cell address"))
+        {
+            nodes.push(DependencyNode::Cell(cell));
+        }
+        if let Some(owner) = self.cancellable_array_owner(cell, cancelled)? {
+            nodes.push(DependencyNode::Cell(owner));
+        }
+        Ok(())
     }
 
     fn cancellable_array_owner(
@@ -1950,7 +1956,7 @@ impl Engine<'_> {
     }
 }
 
-fn rects_intersect(left: &Rect, right: &Rect) -> bool {
+pub(super) fn rects_intersect(left: &Rect, right: &Rect) -> bool {
     left.sheet == right.sheet
         && left.row_start <= right.row_end
         && right.row_start <= left.row_end

@@ -102,14 +102,7 @@ pub(super) fn affected_formula_impact(
         }
     }
     let mut all = direct.clone();
-    let mut pending = direct.iter().copied().collect::<Vec<_>>();
-    while let Some(cell) = pending.pop() {
-        for child in compiled.dependents(cell, &mut || charger.charge())? {
-            if all.insert(child) {
-                pending.push(child);
-            }
-        }
-    }
+    compiled.close_over_dependents(&mut all, direct.iter().copied(), &mut || charger.charge())?;
     let mut public_direct = BTreeSet::new();
     for cell in direct {
         charger.charge()?;
@@ -153,13 +146,7 @@ pub(super) fn volatile_input_formulas(
             }
         }
     }
-    while let Some(cell) = pending.pop() {
-        for child in compiled.dependents(cell, &mut || charger.charge())? {
-            if all.insert(child) {
-                pending.push(child);
-            }
-        }
-    }
+    compiled.close_over_dependents(&mut all, pending, &mut || charger.charge())?;
     let mut public = BTreeSet::new();
     for cell in all {
         charger.charge()?;

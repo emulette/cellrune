@@ -132,7 +132,7 @@ fn dependency_collection_polls_cancellation_between_formulas() {
         next >= 3
     };
 
-    assert_eq!(engine.dependencies_cancellable(&cancelled), Err(()));
+    assert!(engine.dependencies_cancellable(&cancelled).is_err());
     // A nested expression can observe cancellation before its caller checks it.
     // Bound the return latency without requiring the removed inventory scan.
     assert!((3..=4).contains(&polls.get()));
@@ -234,8 +234,8 @@ fn let_scope_resolves_dynamic_and_resized_dependencies() {
         .expect("dynamic LET formula");
     let engine = Engine::evaluate(dynamic.workbook(), CalculationOptions::default());
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 2)),
-        Some(&vec![(0, 2, 1)]),
+        engine.dependencies.cells((0, 1, 2)),
+        Some(vec![(0, 2, 1)]),
         "OFFSET must resolve LET bindings while collecting the second-pass graph",
     );
 
@@ -254,8 +254,8 @@ fn let_scope_resolves_dynamic_and_resized_dependencies() {
         .expect("resized LET formula");
     let engine = Engine::evaluate(resized.workbook(), CalculationOptions::default());
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 2)),
-        Some(&vec![
+        engine.dependencies.cells((0, 1, 2)),
+        Some(vec![
             (0, 1, 1),
             (0, 1, 3),
             (0, 2, 1),
@@ -290,13 +290,13 @@ fn multi_area_dependencies_keep_dynamic_reference_selection_inputs() {
     let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
     let expected = vec![(0, 1, 1), (0, 1, 3), (0, 1, 4), (0, 2, 1)];
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 6)),
-        Some(&expected),
+        engine.dependencies.cells((0, 1, 6)),
+        Some(expected),
         "the union keeps its final cells and OFFSET selector inputs",
     );
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 7)),
-        Some(&vec![(0, 1, 1), (0, 1, 4), (0, 2, 1)]),
+        engine.dependencies.cells((0, 1, 7)),
+        Some(vec![(0, 1, 1), (0, 1, 4), (0, 2, 1)]),
         "the intersection keeps its final cell and OFFSET selector inputs",
     );
 }
@@ -340,8 +340,8 @@ fn three_d_dependencies_stay_compact_and_cover_every_formula_sheet() {
         vec![0, 1, 2],
     );
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 2)),
-        Some(&vec![(0, 1, 1), (1, 1, 1), (2, 1, 1)]),
+        engine.dependencies.cells((0, 1, 2)),
+        Some(vec![(0, 1, 1), (1, 1, 1), (2, 1, 1)]),
     );
 
     for (max_edges, exceeded) in [(3, false), (2, true)] {
@@ -385,8 +385,8 @@ fn three_d_dependencies_connect_intermediate_array_owners() {
     let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
 
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 2)),
-        Some(&vec![(1, 1, 1)]),
+        engine.dependencies.cells((0, 1, 2)),
+        Some(vec![(1, 1, 1)]),
         "the referenced spill follower must depend on its intermediate-sheet anchor",
     );
 }
@@ -494,8 +494,8 @@ fn spill_references_record_typed_anchor_targets_and_schedule_producers() {
         Some(&vec![DependencyTarget::SpillAnchor((0, 1, 2))]),
     );
     assert_eq!(
-        engine.dependencies.get(&(0, 1, 6)),
-        Some(&vec![(0, 1, 2)]),
+        engine.dependencies.cells((0, 1, 6)),
+        Some(vec![(0, 1, 2)]),
         "the spill producer must be evaluated before its reference consumer",
     );
     assert_eq!(

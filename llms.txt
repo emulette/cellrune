@@ -1013,8 +1013,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   Incremental dependency state stores each 3-D input as one compact
   rectangle span rather than one rectangle per sheet, so compiled size grows
   with the number of references, not with the number of sheets spanned. The
-  span is expanded only while building graph edges, and
-  `max_dependency_edges` still counts the distinct edges produced.
+  span is expanded only while building graph edges. A multi-cell range
+  becomes shared areas of aligned row or column blocks, so formulas over
+  overlapping ranges, such as running totals `SUM($B$2:Bn)`, reuse them. A
+  formula counts toward `max_dependency_edges` one edge per cell or area it
+  waits for and one per member of each area it builds, but never more than
+  the distinct formula cells and array anchors its references cover.
 - Structured table references (`Table1[Amount]`, `[@Amount]`, item selectors,
   column spans, nested/escaped column spellings, a selector list's column
   name without brackets, as in xlsxwriter's `[[#This Row],Qty]`, and a

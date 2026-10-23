@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::reference::cell_at;
 use super::{DependencyTarget, Engine, public_to_internal};
+use crate::calculation::graph::{DependencyGraph, DependencyNode};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::CellId;
 use crate::calculation::targeted::source_provenance;
@@ -73,7 +74,7 @@ impl<'workbook> Engine<'workbook> {
             // matching the full evaluator's second scheduling pass without parsing unrelated formulas.
             planner.done.clear();
             planner.edges = 0;
-            engine.dependencies = Arc::new(BTreeMap::new());
+            engine.dependencies = Arc::new(DependencyGraph::default());
             engine.results.clear();
             engine.numeric_decimal_traces.clear();
             engine.retained_results.clear();
@@ -182,12 +183,16 @@ impl Planner {
         let targets = engine
             .target_dependencies(cell, cancelled)
             .map_err(|()| cancelled_error())?;
+        // A targeted calculation records only cells, never areas.
         let mut cells = engine
             .dependencies
-            .get(&cell)
+            .dependencies(cell)
             .into_iter()
             .flatten()
-            .copied()
+            .filter_map(|node| match node {
+                DependencyNode::Cell(cell) => Some(*cell),
+                DependencyNode::Area(_) => None,
+            })
             .collect::<BTreeSet<_>>();
         for target in targets {
             if cancelled() {
@@ -236,7 +241,7 @@ impl Planner {
                 break;
             }
         }
-        let previous = engine.dependencies.get(&cell).map_or(0, Vec::len);
+        let previous = engine.dependencies.dependencies(cell).map_or(0, <[_]>::len);
         let total = self
             .edges
             .saturating_sub(previous)
@@ -259,7 +264,7 @@ impl Planner {
             self.edges = total;
         }
         let dependencies = cells.into_iter().collect::<Vec<_>>();
-        Arc::make_mut(&mut engine.dependencies).insert(cell, dependencies.clone());
+        Arc::make_mut(&mut engine.dependencies).insert_cells(cell, dependencies.clone());
         Ok(dependencies)
     }
 
@@ -351,7 +356,7 @@ impl Planner {
                         } else {
                             frame.dependencies.extend(added);
                             Arc::make_mut(&mut engine.dependencies)
-                                .insert(cell, frame.dependencies.clone());
+                                .insert_cells(cell, frame.dependencies.clone());
                             continue;
                         }
                     }

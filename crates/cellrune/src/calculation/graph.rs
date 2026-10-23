@@ -1,8 +1,159 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashSet};
 
 use super::runtime::CellId;
 
-pub(super) type DependencyGraph = BTreeMap<CellId, Vec<CellId>>;
+/// Index of an area in its [`DependencyGraph`].
+pub(super) type AreaId = u32;
+
+/// Something a formula or an area waits for before it is complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) enum DependencyNode {
+    /// A formula cell, or the anchor of an array formula whose result covers a read cell.
+    Cell(CellId),
+    /// A group of cells that the ranges of several formulas share.
+    Area(AreaId),
+}
+
+/// Formula cells, the nodes each one waits for, and the areas among those nodes.
+///
+/// An area is complete once every node it holds is complete. A formula that reads a range waits
+/// for the areas covering it instead of one edge per formula cell inside it, and overlapping
+/// ranges share their areas.
+#[derive(Debug, Clone, Default)]
+pub(super) struct DependencyGraph {
+    formulas: BTreeMap<CellId, Vec<DependencyNode>>,
+    areas: Vec<Box<[DependencyNode]>>,
+    area_edges: u64,
+}
+
+impl DependencyGraph {
+    /// Records the nodes `formula` waits for.
+    pub(super) fn insert(&mut self, formula: CellId, mut nodes: Vec<DependencyNode>) {
+        nodes.sort_unstable();
+        nodes.dedup();
+        self.formulas.insert(formula, nodes);
+    }
+
+    /// Records a formula that waits only for other cells.
+    pub(super) fn insert_cells(&mut self, formula: CellId, cells: Vec<CellId>) {
+        self.insert(
+            formula,
+            cells.into_iter().map(DependencyNode::Cell).collect(),
+        );
+    }
+
+    /// Adds an area holding `members` and returns its node.
+    pub(super) fn add_area(&mut self, members: Vec<DependencyNode>) -> DependencyNode {
+        let id = AreaId::try_from(self.areas.len()).expect("area count fits the dependency graph");
+        self.area_edges += members.len() as u64;
+        self.areas.push(members.into_boxed_slice());
+        DependencyNode::Area(id)
+    }
+
+    /// Returns the number of members held by every area so far.
+    pub(super) const fn area_edges(&self) -> u64 {
+        self.area_edges
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.formulas.is_empty()
+    }
+
+    /// Returns the nodes `formula` waits for directly.
+    pub(super) fn dependencies(&self, formula: CellId) -> Option<&[DependencyNode]> {
+        self.formulas.get(&formula).map(Vec::as_slice)
+    }
+
+    pub(super) fn formulas(&self) -> impl Iterator<Item = (CellId, &[DependencyNode])> {
+        self.formulas
+            .iter()
+            .map(|(cell, nodes)| (*cell, nodes.as_slice()))
+    }
+
+    pub(super) fn areas(&self) -> impl Iterator<Item = (AreaId, &[DependencyNode])> {
+        self.areas.iter().enumerate().map(|(id, members)| {
+            (
+                AreaId::try_from(id).expect("area count fits the dependency graph"),
+                &**members,
+            )
+        })
+    }
+
+    pub(super) fn area_count(&self) -> usize {
+        self.areas.len()
+    }
+
+    /// Returns the members of `area`.
+    pub(super) fn area(&self, area: AreaId) -> &[DependencyNode] {
+        &self.areas[area as usize]
+    }
+
+    /// Counts the distinct cells `nodes` reach through their areas, stopping at `limit`.
+    pub(super) fn count_cells(&self, nodes: &[DependencyNode], limit: u64) -> u64 {
+        let mut cells = HashSet::new();
+        let mut areas = HashSet::new();
+        let mut pending = nodes.to_vec();
+        while let Some(node) = pending.pop() {
+            match node {
+                DependencyNode::Cell(cell) => {
+                    cells.insert(cell);
+                    if cells.len() as u64 >= limit {
+                        break;
+                    }
+                }
+                DependencyNode::Area(area) => {
+                    if areas.insert(area) {
+                        pending.extend_from_slice(self.area(area));
+                    }
+                }
+            }
+        }
+        cells.len() as u64
+    }
+
+    /// Reports whether `found` holds for any cell `formula` waits for, directly or through areas.
+    pub(super) fn any_dependency(
+        &self,
+        formula: CellId,
+        mut found: impl FnMut(CellId) -> bool,
+    ) -> bool {
+        let Some(nodes) = self.formulas.get(&formula) else {
+            return false;
+        };
+        let mut areas = HashSet::new();
+        let mut pending = nodes.clone();
+        while let Some(node) = pending.pop() {
+            match node {
+                DependencyNode::Cell(cell) => {
+                    if found(cell) {
+                        return true;
+                    }
+                }
+                DependencyNode::Area(area) => {
+                    if areas.insert(area) {
+                        pending.extend_from_slice(self.area(area));
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Returns every cell `formula` waits for, directly or through areas.
+    #[cfg(test)]
+    pub(super) fn cells(&self, formula: CellId) -> Option<Vec<CellId>> {
+        let mut cells = BTreeSet::new();
+        self.any_dependency(formula, |cell| {
+            cells.insert(cell);
+            false
+        });
+        self.formulas
+            .contains_key(&formula)
+            .then(|| cells.into_iter().collect())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct Schedule {
@@ -17,75 +168,166 @@ pub(super) fn schedule(dependencies: &DependencyGraph) -> Schedule {
         .expect("non-cancellable scheduling cannot be cancelled")
 }
 
+/// Edges between the formulas and areas of a graph, numbered densely: formula `i` is the `i`th
+/// formula cell in cell order and area `a` follows every formula. Only edges to formulas in the
+/// graph and to areas are kept; other cells are never calculated, so nothing waits for them.
+struct DenseGraph {
+    formulas: Vec<CellId>,
+    /// `dependencies[dependency_starts[v]..dependency_starts[v + 1]]` are the nodes `v` waits for.
+    dependency_starts: Vec<usize>,
+    dependencies: Vec<u32>,
+    dependent_starts: Vec<usize>,
+    dependents: Vec<u32>,
+}
+
+impl DenseGraph {
+    fn build(graph: &DependencyGraph, cancelled: &impl Fn() -> bool) -> Result<Self, ()> {
+        let formulas = graph.formulas.keys().copied().collect::<Vec<_>>();
+        let formula_count = formulas.len();
+        let node_count = formula_count + graph.areas.len();
+        let index = |node: &DependencyNode| match node {
+            DependencyNode::Cell(cell) => formulas
+                .binary_search(cell)
+                .ok()
+                .map(|position| position as u32),
+            DependencyNode::Area(area) => Some((formula_count + *area as usize) as u32),
+        };
+        let mut dependency_starts = Vec::with_capacity(node_count + 1);
+        let mut dependencies = Vec::new();
+        dependency_starts.push(0);
+        for nodes in graph
+            .formulas
+            .values()
+            .map(Vec::as_slice)
+            .chain(graph.areas.iter().map(|members| &**members))
+        {
+            if cancelled() {
+                return Err(());
+            }
+            dependencies.extend(nodes.iter().filter_map(index));
+            dependency_starts.push(dependencies.len());
+        }
+        let mut dependent_starts = vec![0_usize; node_count + 1];
+        for dependency in &dependencies {
+            dependent_starts[*dependency as usize + 1] += 1;
+        }
+        for position in 0..node_count {
+            dependent_starts[position + 1] += dependent_starts[position];
+        }
+        let mut next = dependent_starts.clone();
+        let mut dependents = vec![0_u32; dependencies.len()];
+        for node in 0..node_count {
+            if cancelled() {
+                return Err(());
+            }
+            for dependency in &dependencies[dependency_starts[node]..dependency_starts[node + 1]] {
+                let slot = &mut next[*dependency as usize];
+                dependents[*slot] = node as u32;
+                *slot += 1;
+            }
+        }
+        Ok(Self {
+            formulas,
+            dependency_starts,
+            dependencies,
+            dependent_starts,
+            dependents,
+        })
+    }
+
+    fn node_count(&self) -> usize {
+        self.dependency_starts.len() - 1
+    }
+
+    fn is_formula(&self, node: u32) -> bool {
+        (node as usize) < self.formulas.len()
+    }
+
+    fn dependencies(&self, node: u32) -> &[u32] {
+        &self.dependencies
+            [self.dependency_starts[node as usize]..self.dependency_starts[node as usize + 1]]
+    }
+
+    fn dependents(&self, node: u32) -> &[u32] {
+        &self.dependents
+            [self.dependent_starts[node as usize]..self.dependent_starts[node as usize + 1]]
+    }
+}
+
+/// Orders formulas so each follows everything it waits for, choosing the first ready formula in
+/// cell order at every step.
+///
+/// An area completes as soon as its last member does, so a formula becomes ready at the same step
+/// as if it waited for every cell of its areas directly.
 pub(super) fn schedule_cancellable(
     dependencies: &DependencyGraph,
     cancelled: &impl Fn() -> bool,
 ) -> Result<Schedule, ()> {
-    let mut dependents: BTreeMap<CellId, Vec<CellId>> = BTreeMap::new();
-    let mut indegree = BTreeMap::new();
-    for (cell, cell_dependencies) in dependencies {
-        if cancelled() {
-            return Err(());
+    let graph = DenseGraph::build(dependencies, cancelled)?;
+    let mut remaining = (0..graph.node_count() as u32)
+        .map(|node| graph.dependencies(node).len())
+        .collect::<Vec<_>>();
+    let mut ready = BinaryHeap::new();
+    let mut completed_areas = Vec::new();
+    for node in 0..graph.node_count() as u32 {
+        if remaining[node as usize] == 0 {
+            if graph.is_formula(node) {
+                ready.push(Reverse(node));
+            } else {
+                completed_areas.push(node);
+            }
         }
-        let mut tracked_dependencies = 0_usize;
-        for dependency in cell_dependencies {
+    }
+    let mut order = Vec::with_capacity(graph.formulas.len());
+    let complete = |node: u32,
+                    remaining: &mut [usize],
+                    ready: &mut BinaryHeap<Reverse<u32>>,
+                    completed_areas: &mut Vec<u32>| {
+        for dependent in graph.dependents(node) {
+            let count = &mut remaining[*dependent as usize];
+            *count -= 1;
+            if *count == 0 {
+                if graph.is_formula(*dependent) {
+                    ready.push(Reverse(*dependent));
+                } else {
+                    completed_areas.push(*dependent);
+                }
+            }
+        }
+    };
+    loop {
+        while let Some(area) = completed_areas.pop() {
             if cancelled() {
                 return Err(());
             }
-            if dependencies.contains_key(dependency) {
-                tracked_dependencies += 1;
-                dependents.entry(*dependency).or_default().push(*cell);
-            }
+            complete(area, &mut remaining, &mut ready, &mut completed_areas);
         }
-        indegree.insert(*cell, tracked_dependencies);
+        let Some(Reverse(formula)) = ready.pop() else {
+            break;
+        };
+        if cancelled() {
+            return Err(());
+        }
+        order.push(graph.formulas[formula as usize]);
+        complete(formula, &mut remaining, &mut ready, &mut completed_areas);
     }
 
-    let mut ready = BTreeSet::new();
-    for (cell, degree) in &indegree {
-        if cancelled() {
-            return Err(());
-        }
-        if *degree == 0 {
-            ready.insert(*cell);
-        }
-    }
-    let mut order = Vec::with_capacity(dependencies.len());
-    while let Some(cell) = ready.pop_first() {
-        if cancelled() {
-            return Err(());
-        }
-        order.push(cell);
-        if let Some(children) = dependents.get(&cell) {
-            for child in children {
-                if cancelled() {
-                    return Err(());
-                }
-                if let Some(degree) = indegree.get_mut(child) {
-                    *degree -= 1;
-                    if *degree == 0 {
-                        ready.insert(*child);
-                    }
-                }
-            }
-        }
-    }
-
-    let mut unresolved = BTreeSet::new();
-    for (cell, degree) in &indegree {
-        if cancelled() {
-            return Err(());
-        }
-        if *degree > 0 {
-            unresolved.insert(*cell);
-        }
-    }
-    let cycle_cells = cycle_members(&unresolved, dependencies, &dependents, cancelled)?;
+    let unresolved = (0..graph.node_count() as u32)
+        .filter(|node| remaining[*node as usize] > 0)
+        .collect::<Vec<_>>();
+    let cycle_nodes = cycle_members(&graph, &unresolved, &remaining, cancelled)?;
+    let mut cycle_cells = BTreeSet::new();
     let mut blocked_cells = BTreeSet::new();
-    for cell in unresolved.difference(&cycle_cells) {
-        if cancelled() {
-            return Err(());
+    for node in unresolved {
+        if !graph.is_formula(node) {
+            continue;
         }
-        blocked_cells.insert(*cell);
+        let cell = graph.formulas[node as usize];
+        if cycle_nodes.contains(&node) {
+            cycle_cells.insert(cell);
+        } else {
+            blocked_cells.insert(cell);
+        }
     }
     Ok(Schedule {
         order,
@@ -94,85 +336,75 @@ pub(super) fn schedule_cancellable(
     })
 }
 
+/// Returns the unresolved nodes on a cycle: those in a strongly connected component of more than
+/// one node, and a formula that waits for itself.
+///
+/// No area reaches itself, since each holds only cells and areas within its own range, so a
+/// formula whose only cycle runs through areas waits for itself.
 fn cycle_members(
-    unresolved: &BTreeSet<CellId>,
-    dependencies: &DependencyGraph,
-    dependents: &BTreeMap<CellId, Vec<CellId>>,
+    graph: &DenseGraph,
+    unresolved: &[u32],
+    remaining: &[usize],
     cancelled: &impl Fn() -> bool,
-) -> Result<BTreeSet<CellId>, ()> {
-    let mut visited = BTreeSet::new();
+) -> Result<HashSet<u32>, ()> {
+    let is_unresolved = |node: u32| remaining[node as usize] > 0;
+    let mut visited = vec![false; graph.node_count()];
     let mut finished = Vec::with_capacity(unresolved.len());
     for start in unresolved {
         if cancelled() {
             return Err(());
         }
-        if visited.contains(start) {
+        if visited[*start as usize] {
             continue;
         }
         let mut pending = vec![(*start, false)];
-        while let Some((cell, expanded)) = pending.pop() {
+        while let Some((node, expanded)) = pending.pop() {
             if cancelled() {
                 return Err(());
             }
             if expanded {
-                finished.push(cell);
+                finished.push(node);
                 continue;
             }
-            if !visited.insert(cell) {
+            if std::mem::replace(&mut visited[node as usize], true) {
                 continue;
             }
-            pending.push((cell, true));
-            if let Some(next) = dependencies.get(&cell) {
-                for item in next.iter().rev() {
-                    if cancelled() {
-                        return Err(());
-                    }
-                    if unresolved.contains(item) {
-                        pending.push((*item, false));
-                    }
+            pending.push((node, true));
+            for next in graph.dependencies(node).iter().rev() {
+                if is_unresolved(*next) && !visited[*next as usize] {
+                    pending.push((*next, false));
                 }
             }
         }
     }
 
-    let mut assigned = BTreeSet::new();
-    let mut result = BTreeSet::new();
+    let mut assigned = vec![false; graph.node_count()];
+    let mut result = HashSet::new();
     for start in finished.into_iter().rev() {
         if cancelled() {
             return Err(());
         }
-        if !assigned.insert(start) {
+        if std::mem::replace(&mut assigned[start as usize], true) {
             continue;
         }
-        let mut component = Vec::new();
+        let mut component = vec![start];
         let mut pending = vec![start];
-        while let Some(cell) = pending.pop() {
+        while let Some(node) = pending.pop() {
             if cancelled() {
                 return Err(());
             }
-            component.push(cell);
-            if let Some(next) = dependents.get(&cell) {
-                for dependent in next {
-                    if cancelled() {
-                        return Err(());
-                    }
-                    if unresolved.contains(dependent) && assigned.insert(*dependent) {
-                        pending.push(*dependent);
-                    }
+            for dependent in graph.dependents(node) {
+                if is_unresolved(*dependent)
+                    && !std::mem::replace(&mut assigned[*dependent as usize], true)
+                {
+                    component.push(*dependent);
+                    pending.push(*dependent);
                 }
             }
         }
-        let is_cycle = component.len() > 1
-            || dependencies
-                .get(&start)
-                .is_some_and(|items| items.contains(&start));
+        let is_cycle = component.len() > 1 || graph.dependencies(start).contains(&start);
         if is_cycle {
-            for cell in component {
-                if cancelled() {
-                    return Err(());
-                }
-                result.insert(cell);
-            }
+            result.extend(component);
         }
     }
     Ok(result)
@@ -182,13 +414,21 @@ fn cycle_members(
 mod tests {
     use super::*;
 
+    fn cells_graph(edges: impl IntoIterator<Item = (CellId, Vec<CellId>)>) -> DependencyGraph {
+        let mut graph = DependencyGraph::default();
+        for (cell, dependencies) in edges {
+            graph.insert_cells(cell, dependencies);
+        }
+        graph
+    }
+
     #[test]
     fn distinguishes_cycle_members_from_downstream_cells() {
         let a = (0, 1, 1);
         let b = (0, 1, 2);
         let downstream = (0, 1, 3);
         let independent = (0, 1, 4);
-        let dependencies = BTreeMap::from([
+        let dependencies = cells_graph([
             (a, vec![b]),
             (b, vec![a]),
             (downstream, vec![a]),
@@ -205,12 +445,10 @@ mod tests {
     #[test]
     fn large_cycle_is_classified_without_recursive_graph_walks() {
         let cell_count = 10_000_u32;
-        let mut dependencies = BTreeMap::new();
-        for column in 1..=cell_count {
-            let current = (0, 1, column);
-            let next = (0, 1, if column == cell_count { 1 } else { column + 1 });
-            dependencies.insert(current, vec![next]);
-        }
+        let dependencies = cells_graph((1..=cell_count).map(|column| {
+            let next = if column == cell_count { 1 } else { column + 1 };
+            ((0, 1, column), vec![(0, 1, next)])
+        }));
 
         let result = schedule(&dependencies);
 
@@ -221,7 +459,7 @@ mod tests {
 
     #[test]
     fn scheduling_polls_cancellation_while_building_edges() {
-        let dependencies = BTreeMap::from([
+        let dependencies = cells_graph([
             ((0, 1, 1), vec![(0, 1, 2), (0, 1, 3)]),
             ((0, 1, 2), Vec::new()),
             ((0, 1, 3), Vec::new()),
@@ -235,5 +473,43 @@ mod tests {
 
         assert!(schedule_cancellable(&dependencies, &cancelled).is_err());
         assert_eq!(polls.get(), 3);
+    }
+
+    #[test]
+    fn areas_order_formulas_as_their_cells_would() {
+        // C1 reads an area holding A1 and B2, and A1 waits for B2: through the area, C1 still
+        // follows both, and the area alone adds no cell to the order.
+        let a1 = (0, 1, 1);
+        let b2 = (0, 2, 2);
+        let c1 = (0, 1, 3);
+        let mut graph = DependencyGraph::default();
+        let area = graph.add_area(vec![DependencyNode::Cell(a1), DependencyNode::Cell(b2)]);
+        graph.insert(c1, vec![area]);
+        graph.insert_cells(a1, vec![b2]);
+        graph.insert_cells(b2, Vec::new());
+
+        let result = schedule(&graph);
+
+        assert_eq!(result.order, vec![b2, a1, c1]);
+        assert!(result.cycle_cells.is_empty());
+        assert!(result.blocked_cells.is_empty());
+    }
+
+    #[test]
+    fn a_formula_inside_its_own_area_is_a_cycle_and_its_readers_are_blocked() {
+        let a1 = (0, 1, 1);
+        let a2 = (0, 2, 1);
+        let reader = (0, 1, 2);
+        let mut graph = DependencyGraph::default();
+        let area = graph.add_area(vec![DependencyNode::Cell(a1), DependencyNode::Cell(a2)]);
+        graph.insert(a2, vec![area]);
+        graph.insert_cells(a1, Vec::new());
+        graph.insert(reader, vec![area]);
+
+        let result = schedule(&graph);
+
+        assert_eq!(result.order, vec![a1]);
+        assert_eq!(result.cycle_cells, BTreeSet::from([a2]));
+        assert_eq!(result.blocked_cells, BTreeSet::from([reader]));
     }
 }

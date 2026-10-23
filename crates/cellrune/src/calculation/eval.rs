@@ -7,7 +7,7 @@ use super::convert::value_from_cell;
 use super::decimal::DecimalTrace;
 use super::functions::LookupIndexCache;
 use super::functions::descriptor::Volatility;
-use super::graph::{DependencyGraph, Schedule};
+use super::graph::{DependencyGraph, DependencyNode, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
 use super::pipeline::VolatileInputs;
@@ -23,6 +23,7 @@ use super::{
 use crate::{CellContent, CellValue, DefinedNameScope, FiniteNumber, WorkbookSnapshot};
 
 mod dependency;
+mod dependency_areas;
 mod expression;
 mod formula_columns;
 mod materialization;
@@ -201,12 +202,15 @@ impl CompiledWorkbook {
         self.impact_index.formulas_for_cell(changed, charge)
     }
 
-    pub(super) fn dependents(
+    /// Adds to `affected` every formula a change of the formulas in `changed` can reach.
+    pub(super) fn close_over_dependents(
         &self,
-        cell: CellId,
+        affected: &mut BTreeSet<CellId>,
+        changed: impl IntoIterator<Item = CellId>,
         charge: &mut impl FnMut() -> Result<(), ()>,
-    ) -> Result<BTreeSet<CellId>, ()> {
-        self.impact_index.dependents(cell, charge)
+    ) -> Result<(), ()> {
+        self.impact_index
+            .close_over_dependents(affected, changed, charge)
     }
 
     pub(super) fn schedule(&self) -> &Schedule {
@@ -515,7 +519,10 @@ struct DependencyImpactIndex {
     areas_by_sheet: BTreeMap<usize, AreaSpatialIndex>,
     /// The impact areas alone, which calculation order leaves out of `reverse_dependents`.
     impact_areas_by_sheet: BTreeMap<usize, AreaSpatialIndex>,
-    reverse_dependents: BTreeMap<CellId, Vec<CellId>>,
+    /// The formulas and dependency areas waiting for each formula cell.
+    reverse_dependents: BTreeMap<CellId, Vec<DependencyNode>>,
+    /// The formulas and dependency areas waiting for each dependency area, by area.
+    area_dependents: Vec<Vec<DependencyNode>>,
 }
 
 impl DependencyImpactIndex {
@@ -585,16 +592,30 @@ impl DependencyImpactIndex {
                     formula: region.anchor,
                 });
         }
-        for (formula, formula_dependencies) in dependencies {
+        index.area_dependents = vec![Vec::new(); dependencies.area_count()];
+        let waiting = dependencies
+            .formulas()
+            .map(|(formula, nodes)| (DependencyNode::Cell(formula), nodes))
+            .chain(
+                dependencies
+                    .areas()
+                    .map(|(area, members)| (DependencyNode::Area(area), members)),
+            );
+        for (dependent, nodes) in waiting {
             if cancelled() {
                 return Err(());
             }
-            for dependency in formula_dependencies {
-                index
-                    .reverse_dependents
-                    .entry(*dependency)
-                    .or_default()
-                    .push(*formula);
+            for node in nodes {
+                match node {
+                    DependencyNode::Cell(cell) => index
+                        .reverse_dependents
+                        .entry(*cell)
+                        .or_default()
+                        .push(dependent),
+                    DependencyNode::Area(area) => {
+                        index.area_dependents[*area as usize].push(dependent);
+                    }
+                }
             }
         }
         for formulas in index.exact.values_mut() {
@@ -634,27 +655,57 @@ impl DependencyImpactIndex {
         Ok(formulas)
     }
 
-    /// Returns the formulas whose results can change when the formula at `cell` changes: those
-    /// calculated after it, and those whose impact area reaches it.
-    fn dependents(
+    /// Adds to `affected` every formula whose result can change when a formula in `changed`
+    /// changes, and repeats for each formula added: the formulas calculated after it, and those
+    /// whose impact area reaches it.
+    fn close_over_dependents(
         &self,
-        cell: CellId,
+        affected: &mut BTreeSet<CellId>,
+        changed: impl IntoIterator<Item = CellId>,
         charge: &mut impl FnMut() -> Result<(), ()>,
-    ) -> Result<BTreeSet<CellId>, ()> {
-        let mut dependents = BTreeSet::new();
-        for dependent in self.reverse_dependents.get(&cell).into_iter().flatten() {
-            charge()?;
-            dependents.insert(*dependent);
+    ) -> Result<(), ()> {
+        let mut visited_areas = vec![false; self.area_dependents.len()];
+        let mut pending = changed
+            .into_iter()
+            .map(DependencyNode::Cell)
+            .collect::<Vec<_>>();
+        while let Some(node) = pending.pop() {
+            let dependents = match node {
+                DependencyNode::Cell(cell) => {
+                    if let Some(areas) = self.impact_areas_by_sheet.get(&cell.0) {
+                        let mut reached = BTreeSet::new();
+                        areas.formulas_for_cell(cell.1, cell.2, &mut reached, charge)?;
+                        for formula in reached {
+                            if affected.insert(formula) {
+                                pending.push(DependencyNode::Cell(formula));
+                            }
+                        }
+                    }
+                    self.reverse_dependents
+                        .get(&cell)
+                        .map_or(&[][..], Vec::as_slice)
+                }
+                DependencyNode::Area(area) => &self.area_dependents[area as usize],
+            };
+            for dependent in dependents {
+                charge()?;
+                let unvisited = match dependent {
+                    DependencyNode::Cell(formula) => affected.insert(*formula),
+                    DependencyNode::Area(area) => {
+                        !std::mem::replace(&mut visited_areas[*area as usize], true)
+                    }
+                };
+                if unvisited {
+                    pending.push(*dependent);
+                }
+            }
         }
-        if let Some(areas) = self.impact_areas_by_sheet.get(&cell.0) {
-            areas.formulas_for_cell(cell.1, cell.2, &mut dependents, charge)?;
-        }
-        Ok(dependents)
+        Ok(())
     }
 }
 
-fn dedup_sorted_cancellable(
-    values: &mut Vec<CellId>,
+fn dedup_sorted_cancellable<T: PartialEq>(
+    values: &mut Vec<T>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<(), ()> {
     let mut deduplicated = Vec::with_capacity(values.len());
@@ -1155,16 +1206,14 @@ impl<'workbook> Engine<'workbook> {
         cell: CellId,
         direct_unavailable: &BTreeSet<CellId>,
     ) -> bool {
-        self.dependencies.get(&cell).is_some_and(|dependencies| {
-            dependencies.iter().any(|dependency| {
-                direct_unavailable.contains(dependency)
-                    || self.cycle_cells.contains(dependency)
-                    || self.blocked_cells.contains(dependency)
-                    || matches!(
-                        self.cell_value(*dependency),
-                        Value::Error(kind) if kind.is_engine_issue()
-                    )
-            })
+        self.dependencies.any_dependency(cell, |dependency| {
+            direct_unavailable.contains(&dependency)
+                || self.cycle_cells.contains(&dependency)
+                || self.blocked_cells.contains(&dependency)
+                || matches!(
+                    self.cell_value(dependency),
+                    Value::Error(kind) if kind.is_engine_issue()
+                )
         })
     }
 

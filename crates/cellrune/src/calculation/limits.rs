@@ -58,6 +58,10 @@ impl CalculationLimits {
     }
 
     /// Returns the maximum formula dependency-edge count in one workbook calculation.
+    ///
+    /// Formulas over overlapping ranges share the areas those ranges are stored as. A formula
+    /// counts one edge per cell or area it waits for and one per member of each area it adds,
+    /// but never more than the distinct formula cells and array anchors its references cover.
     pub const fn max_dependency_edges(self) -> u64 {
         self.max_dependency_edges
     }
