@@ -1,12 +1,13 @@
 //! Equality indexes shared by conditional scans over one criteria range within a calculation pass.
 //!
 //! SUMIFS, COUNTIFS, and their siblings read their criteria ranges row by row and stop each row at
-//! its first unmatched criterion. Once calls have scanned the same ranges twice, one full read of
-//! each builds an index of the cells holding each value, and later calls whose criteria are exact
-//! values find their matching rows by intersecting those lists. An indexed call is charged the cell
-//! reads and work units its scan would have charged. Calls whose criteria an index cannot answer,
-//! or whose charges could reach a limit, keep scanning, so results and limit failures do not
-//! change. An index is dropped when a result inside its range changes.
+//! its first unmatched criterion. Once calls have scanned the same ranges twice, one read of the
+//! populated rows of each builds an index of the cells holding each value, and later calls whose
+//! criteria are exact values find their matching rows by intersecting those lists. An indexed call
+//! is charged the cell reads and work units its scan would have charged. Calls whose criteria an
+//! index cannot answer, or whose charges could reach a limit, keep scanning without an index, so
+//! results and limit failures do not change. An index is dropped when a result inside its range
+//! changes.
 
 use std::cell::RefMut;
 use std::collections::HashMap;
@@ -68,6 +69,17 @@ impl CriteriaArea {
 
     fn last_column(self) -> u32 {
         self.column + self.width.saturating_sub(1)
+    }
+
+    fn rect(self) -> Rect {
+        Rect {
+            sheet: self.sheet,
+            row_start: self.row,
+            col_start: self.column,
+            row_end: self.last_row(),
+            col_end: self.last_column(),
+            whole_rows: false,
+        }
     }
 
     fn contains(self, cell: CellId) -> bool {
@@ -182,7 +194,14 @@ pub(in crate::calculation) struct CriteriaIndex {
 
 impl CriteriaIndex {
     fn build(engine: &Engine<'_>, context: EvalContext<'_>, area: CriteriaArea) -> Option<Self> {
-        let cells = u32::try_from(area.cells()).ok()?;
+        // Every cell below the last populated row of the area's columns is blank, which no exact
+        // criterion matches, so the index reads only the rows above it.
+        let populated_rows = engine
+            .populated_row_end(&area.rect())
+            .saturating_add(1)
+            .saturating_sub(area.row)
+            .min(area.rows);
+        let cells = u32::try_from(u64::from(populated_rows) * u64::from(area.width)).ok()?;
         let mut keys = HashMap::new();
         let mut entries = Vec::with_capacity(cells as usize);
         let mut texts = Bits::new(cells);
@@ -275,7 +294,7 @@ impl CriteriaIndex {
     }
 }
 
-/// One bit per cell offset.
+/// One bit per cell offset; offsets past the bits are unset.
 #[derive(Debug)]
 struct Bits {
     words: Vec<u64>,
@@ -296,7 +315,9 @@ impl Bits {
     }
 
     fn contains(&self, offset: u32) -> bool {
-        self.words[offset as usize / 64] & (1 << (offset % 64)) != 0
+        self.words
+            .get(offset as usize / 64)
+            .is_some_and(|word| word & (1 << (offset % 64)) != 0)
     }
 }
 
@@ -341,8 +362,9 @@ impl IndexedMatches {
 
 /// Finds the cells a conditional call over `rows` by `width` cells of each criteria range matches,
 /// or returns `None` when the call must scan: during targeted calculation, whose cell reads record
-/// pending dependencies, for small ranges, for a criterion other than an exact value, and for
-/// ranges calls have not yet scanned often enough to index.
+/// pending dependencies, for small ranges, for ranges larger than the reference cells the call may
+/// still read, for a criterion other than an exact value, and for ranges calls have not yet
+/// scanned often enough to index.
 pub(super) fn indexed_matches<'criteria>(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -350,7 +372,13 @@ pub(super) fn indexed_matches<'criteria>(
     rows: u64,
     width: u64,
 ) -> Option<IndexedMatches> {
-    if engine.is_targeted() || rows.checked_mul(width)? < MIN_INDEXED_CELLS {
+    let cells = rows.checked_mul(width)?;
+    // An indexed call is charged every cell of its first criteria range, so a call whose ranges
+    // exceed the remaining budget scans and reports the limit; an index would read them for nothing.
+    if engine.is_targeted()
+        || cells < MIN_INDEXED_CELLS
+        || engine.remaining_reference_cells(context) < cells
+    {
         return None;
     }
     let criteria = criteria
@@ -363,7 +391,6 @@ pub(super) fn indexed_matches<'criteria>(
         })
         .collect::<Option<Vec<_>>>()?;
     let indexes = criteria_indexes(engine, context, criteria.iter().map(|(area, _)| *area))?;
-    let cells = rows * width;
     let mut matched = None::<Vec<u32>>;
     let mut reads = 0_u64;
     let mut work = 0_u64;
@@ -468,3 +495,7 @@ fn intersect(scanned: &[u32], matching: &[u32]) -> Vec<u32> {
     }
     both
 }
+
+#[cfg(test)]
+#[path = "criteria_index_tests.rs"]
+mod tests;
