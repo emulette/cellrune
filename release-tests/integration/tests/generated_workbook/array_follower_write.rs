@@ -192,3 +192,60 @@ fn address(text: &str) -> CellAddress {
 fn number(value: f64) -> CellValue {
     CellValue::number(value).expect("finite value")
 }
+
+#[test]
+fn a_canonical_dynamic_array_without_a_declared_range_reopens_with_its_spill() {
+    use cellrune::{EditBatch, FormulaText, SheetId, WorkbookChange};
+
+    let sheet = SheetId::new(1).expect("sheet");
+    let mut draft = WorkbookDraft::new();
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_dynamic_formula(
+                sheet,
+                CellAddress::from_a1("A1").expect("address"),
+                FormulaText::from_xlsx("SEQUENCE(3)").expect("formula"),
+                None,
+            )
+            .expect("dynamic formula"),
+            WorkbookChange::set_cell_formula(
+                sheet,
+                CellAddress::from_a1("C1").expect("address"),
+                FormulaText::from_xlsx("SUM(A1#)").expect("formula"),
+            ),
+        ]))
+        .expect("formulas");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let bytes = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("canonical save")
+        .into_bytes();
+    let worksheet =
+        super::recalculation_write_support::part_text(&bytes, "xl/worksheets/sheet1.xml");
+    assert!(
+        worksheet.contains(r#"<f t="array" ref="A1:A3">SEQUENCE(3)</f>"#),
+        "{worksheet}"
+    );
+
+    let reopened = open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("reopen");
+    let recalculated = calculate_workbook(reopened.workbook(), CalculationOptions::default());
+    let value = |address: &str| {
+        recalculated
+            .materialized_cell(CalculationCellId::new(
+                sheet,
+                CellAddress::from_a1(address).expect("address"),
+            ))
+            .map(|cell| cell.result().clone())
+    };
+    for (address, expected) in [("A1", 1.0), ("A2", 2.0), ("A3", 3.0), ("C1", 6.0)] {
+        assert_eq!(
+            value(address),
+            Some(CalculationCellResult::Value(
+                CellValue::number(expected).expect("number")
+            )),
+            "{address}"
+        );
+    }
+    let again = WorkbookDraft::from_document(&reopened);
+    write_xlsx_draft_bytes(&again, &recalculated, RecalculationWriteOptions::default())
+        .expect("the reopened workbook saves again");
+}

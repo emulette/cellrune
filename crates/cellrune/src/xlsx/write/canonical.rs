@@ -18,8 +18,8 @@ use super::{
 use crate::presentation::canonical_default_format;
 use crate::{
     Border, CalculationSnapshot, CellAddress, CellContent, CellFormat, DateSystem,
-    DefinedNameScope, Fill, Font, MaterializedResultOrigin, NumberFormat, PatternFill, Sheet,
-    SheetVisibility, WorkbookDraft, WorkbookSnapshot, XlsxDocumentKind,
+    DefinedNameScope, Fill, Font, FormulaMetadata, MaterializedResultOrigin, NumberFormat,
+    PatternFill, Sheet, SheetVisibility, WorkbookDraft, WorkbookSnapshot, XlsxDocumentKind,
 };
 
 const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -378,6 +378,52 @@ impl StyleRegistry {
     }
 }
 
+/// Returns a dynamic-array anchor that declares no spill range with the range its calculation
+/// resolved, which the written `ref` must carry: without it, a reopened read and Excel take the
+/// spilled values for literals that block the spill.
+fn with_resolved_spill_range(
+    cell: &crate::Cell,
+    planned: Option<&super::materialization::PlannedMaterialization>,
+) -> Option<crate::Cell> {
+    let range = resolved_spill_range(cell.content(), planned)?;
+    let CellContent::Formula(formula) = cell.content() else {
+        return None;
+    };
+    let FormulaMetadata::DynamicArray {
+        always_calculate, ..
+    } = formula.metadata()
+    else {
+        return None;
+    };
+    let metadata = FormulaMetadata::DynamicArray {
+        range: Some(range),
+        always_calculate: *always_calculate,
+    };
+    Some(crate::Cell::with_content_and_number_format(
+        cell.address(),
+        CellContent::Formula(formula.clone().with_metadata(metadata)),
+        cell.number_format().clone(),
+    ))
+}
+
+/// Returns the spill range a calculation resolved for a dynamic-array anchor without a declared
+/// range.
+fn resolved_spill_range(
+    content: &CellContent,
+    planned: Option<&super::materialization::PlannedMaterialization>,
+) -> Option<crate::CellRange> {
+    let CellContent::Formula(formula) = content else {
+        return None;
+    };
+    match (formula.metadata(), planned.map(|planned| planned.origin)) {
+        (
+            FormulaMetadata::DynamicArray { range: None, .. },
+            Some(MaterializedResultOrigin::DynamicSpill { range, .. }),
+        ) => Some(range),
+        _ => None,
+    }
+}
+
 /// The default font record of a generated workbook, with the family and scheme Excel writes.
 const DEFAULT_FONT_XML: &str =
     r#"<font><sz val="11"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>"#;
@@ -392,15 +438,14 @@ pub(super) fn generated_worksheet_xml(
     super::table::validate_table_headers(sheet)?;
     let mut cells = BTreeMap::<CellAddress, String>::new();
     for cell in sheet.cells() {
-        let calculation = materialization
-            .get(&cell.address())
-            .map(|planned| &planned.action);
+        let planned = materialization.get(&cell.address()).copied();
+        let declared = with_resolved_spill_range(cell, planned);
         cells.insert(
             cell.address(),
             serialize_cell(
-                cell,
+                declared.as_ref().unwrap_or(cell),
                 style_indexes.get(&cell.address()).copied().unwrap_or(0),
-                calculation,
+                planned.map(|planned| &planned.action),
                 presentation.cell_presentation(sheet.id(), cell.address()),
             )?,
         );
@@ -965,8 +1010,11 @@ fn draft_semantics_match(
                 }
                 return false;
             };
+            let id = crate::CalculationCellId::new(expected_sheet.id(), expected_cell.address());
+            let resolved =
+                resolved_spill_range(expected_cell.content(), materialization.cells().get(&id));
             if !number_formats_match(expected_cell.number_format(), actual_cell.number_format())
-                || (!cell_content_matches(expected_cell.content(), actual_cell.content())
+                || (!cell_content_matches(expected_cell.content(), actual_cell.content(), resolved)
                     && !saved_follower())
             {
                 return false;
@@ -1058,12 +1106,33 @@ fn number_formats_match(expected: &NumberFormat, actual: &NumberFormat) -> bool 
         && (expected.id() < 164 || expected.code() == actual.code())
 }
 
-fn cell_content_matches(expected: &CellContent, actual: &CellContent) -> bool {
+/// Compares a cell's content with its reopened content; a dynamic-array anchor that declares no
+/// range is written with the range `resolved_spill` its calculation resolved.
+fn cell_content_matches(
+    expected: &CellContent,
+    actual: &CellContent,
+    resolved_spill: Option<crate::CellRange>,
+) -> bool {
     match (expected, actual) {
         (CellContent::Literal(expected), CellContent::Literal(actual)) => expected == actual,
         (CellContent::Formula(expected), CellContent::Formula(actual)) => {
+            let metadata_matches = match (expected.metadata(), resolved_spill) {
+                (
+                    FormulaMetadata::DynamicArray {
+                        always_calculate, ..
+                    },
+                    Some(range),
+                ) => {
+                    *actual.metadata()
+                        == FormulaMetadata::DynamicArray {
+                            range: Some(range),
+                            always_calculate: *always_calculate,
+                        }
+                }
+                (metadata, _) => metadata == actual.metadata(),
+            };
             expected.text() == actual.text()
-                && expected.metadata() == actual.metadata()
+                && metadata_matches
                 && expected.recalculate_always() == actual.recalculate_always()
         }
         _ => false,

@@ -264,4 +264,9 @@ impl FormulaCell {
         self.text = Some(text);
         self
     }
+
+    pub(crate) fn with_metadata(mut self, metadata: FormulaMetadata) -> Self {
+        self.metadata = metadata;
+        self
+    }
 }
