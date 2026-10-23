@@ -150,14 +150,14 @@ fn typed_values_edits_and_stable_errors_cover_the_public_boundary() {
             "Typed Values",
             "A20",
             WritableCellValueDto::Error {
-                value: "#UNKNOWN!".to_owned(),
+                value: "#NOPE!".to_owned(),
             },
         )
         .expect_err("unknown Excel error must fail");
     assert_eq!(invalid_error.kind(), InteropErrorKind::Input);
     assert_eq!(invalid_error.code(), "interop.value.excel_error_invalid");
-    assert_eq!(invalid_error.details().detail.as_deref(), Some("#UNKNOWN!"));
-    assert!(invalid_error.to_string().ends_with(": #UNKNOWN!"));
+    assert_eq!(invalid_error.details().detail.as_deref(), Some("#NOPE!"));
+    assert!(invalid_error.to_string().ends_with(": #NOPE!"));
 
     assert!(
         serde_json::from_str::<WritableCellValueDto>(r#"{"kind":"unsupported"}"#).is_err(),
