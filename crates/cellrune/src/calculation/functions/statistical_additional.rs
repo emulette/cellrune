@@ -122,7 +122,9 @@ fn shape(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], shape: Sh
     };
     let mut total = 0.0;
     for number in &numbers {
-        if let Err(kind) = poll_cancellation(context) {
+        if let Err(kind) =
+            poll_cancellation(context).and_then(|()| engine.charge_function_iterations(context, 1))
+        {
             return Value::Error(kind);
         }
         total += ((number - mean) / deviation).powi(power);

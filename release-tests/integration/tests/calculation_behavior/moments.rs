@@ -1,8 +1,9 @@
 use cellrune::{
-    CalculationCellResult, CalculationOptions, CellValue, ExcelError, calculate_workbook,
+    CalculationCellResult, CalculationIssueCode, CalculationLimits, CalculationOptions, CellValue,
+    ExcelError, calculate_workbook,
 };
 
-use super::support::{assert_number, cell_id, workbook_with_formulas};
+use super::support::{assert_issue, assert_number, cell_id, workbook_with_formulas};
 
 #[test]
 fn variance_and_paired_statistics_share_stable_moments_across_input_shapes() {
@@ -117,6 +118,31 @@ fn skewness_and_kurtosis_need_enough_varying_values_and_propagate_errors() {
             calculation.cell(cell_id(index as u32 + 1)),
             Some(&CalculationCellResult::Value(CellValue::Error(*expected))),
             "{formula}",
+        );
+    }
+}
+
+#[test]
+fn skewness_and_kurtosis_charge_both_passes_over_the_numbers() {
+    for formula in ["SKEW({1,2,4,8})", "SKEW.P({1,2,4,8})", "KURT({1,2,4,8})"] {
+        let calculate = |iterations: u64| {
+            calculate_workbook(
+                &workbook_with_formulas(&[(1, 1, formula)]),
+                CalculationOptions::default().with_limits(
+                    CalculationLimits::default()
+                        .with_max_function_iterations(iterations)
+                        .expect("valid limit"),
+                ),
+            )
+        };
+        // The mean pass and the standardizing pass each take one iteration per number.
+        assert_issue(&calculate(7), 1, CalculationIssueCode::ResourceLimitExceeded);
+        assert!(
+            matches!(
+                calculate(8).cell(cell_id(1)),
+                Some(CalculationCellResult::Value(CellValue::Number(_)))
+            ),
+            "{formula}"
         );
     }
 }
