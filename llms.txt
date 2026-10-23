@@ -88,9 +88,11 @@ For AI hosts, the separate `cellrune-mcp` binary provides local stdio MCP
 high-level workbook lifecycle, summary, range, usage, capability, batch edit, preview,
 recalculation, delta, and Save As operations—not one tool per spreadsheet
 function. Configured filesystem roots are canonicalized at startup; every
-workbook path supplied to a tool must be absolute and resolve inside one of
-those roots; paths outside every root, including UNC shares and device paths,
-return `mcp.path.outside_root` before any filesystem access. It has no remote transport. The 18 tools are `workbook_create`,
+workbook path supplied to a tool must be absolute, name a location under a root
+as configured or as canonicalized, and resolve inside that root; paths outside
+every root, including UNC shares, device paths, and other spellings of a root
+such as another symlink or junction to it or a Windows 8.3 short name, return
+`mcp.path.outside_root` before any filesystem access. It has no remote transport. The 18 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
 `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
