@@ -7,7 +7,6 @@ from ._types import (
     CalculationLimitOptions,
     CalculationTarget,
     LocaleProfile,
-    CellValue,
     TargetCalculationLimitOptions,
     TargetCalculationResult,
     CalculationDelta,
@@ -46,7 +45,7 @@ SCHEMA_VERSION: int
 
 def function_catalog() -> FunctionCatalogReport: ...
 def format_display_text(
-    value: CellValue,
+    value: WritableCellValue,
     format_code: str,
     *,
     date_system: Literal["excel_1900", "excel_1904"] = "excel_1900",

@@ -986,8 +986,10 @@ class FontInput(TypedDict, total=False):
 
 
 class PatternFillInputOptions(TypedDict, total=False):
-    foreground: ColorInput
-    background: ColorInput
+    """Fill colors; omitted or ``None`` leaves the color unset, as an edit inverse writes it."""
+
+    foreground: ColorInput | None
+    background: ColorInput | None
 
 
 class PatternFillInput(PatternFillInputOptions):
@@ -995,7 +997,9 @@ class PatternFillInput(PatternFillInputOptions):
 
 
 class BorderEdgeInputOptions(TypedDict, total=False):
-    color: ColorInput
+    """Line color; omitted or ``None`` leaves it unset, as an edit inverse writes it."""
+
+    color: ColorInput | None
 
 
 class BorderEdgeInput(BorderEdgeInputOptions):

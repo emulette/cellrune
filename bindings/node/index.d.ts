@@ -276,7 +276,8 @@ export interface CellFormatPage {
 
 export interface BorderEdgeInput {
   readonly style: BorderStyle;
-  readonly color?: ColorInput;
+  /** Omitted or `null` leaves the line color unset, as an edit inverse writes it. */
+  readonly color?: ColorInput | null;
 }
 
 /**
@@ -299,8 +300,9 @@ export interface CellFormatChange {
   };
   readonly fill?: {
     readonly pattern: FillPattern;
-    readonly foreground?: ColorInput;
-    readonly background?: ColorInput;
+    /** Omitted or `null` leaves the color unset, as an edit inverse writes it. */
+    readonly foreground?: ColorInput | null;
+    readonly background?: ColorInput | null;
   };
   readonly border?: {
     readonly left?: BorderEdgeInput;
