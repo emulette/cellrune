@@ -20,6 +20,8 @@ const MESSAGE_PAGE_BYTE_LIMIT: &str =
 const MESSAGE_PAGE_OFFSET_INVALID: &str = "page offset must be a non-negative integer";
 const MESSAGE_PAGE_LIMIT_INVALID: &str =
     "page limit must be a non-negative integer within the unsigned 32-bit range";
+const MESSAGE_PAGE_BYTE_LIMIT_INVALID: &str =
+    "page byte limit must be a non-negative integer within the unsigned 64-bit range";
 const MESSAGE_CALCULATION_REQUIRED: &str = "calculate the current workbook revision before saving";
 const MESSAGE_SESSION_CLOSED: &str = "workbook session is closed";
 const MESSAGE_SESSION_BUSY: &str = "workbook session state is unavailable";
@@ -252,6 +254,14 @@ impl InteropError {
     /// Creates the stable invalid page-limit error used by typed bindings.
     pub fn invalid_page_limit() -> Self {
         Self::input(InteropCode::PageLimitInvalid, MESSAGE_PAGE_LIMIT_INVALID)
+    }
+
+    /// Creates the stable invalid page byte-limit error used by typed bindings.
+    pub fn invalid_page_byte_limit() -> Self {
+        Self::input(
+            InteropCode::PageByteLimitInvalid,
+            MESSAGE_PAGE_BYTE_LIMIT_INVALID,
+        )
     }
 
     pub(crate) fn calculation_required() -> Self {

@@ -156,10 +156,12 @@ impl Workbook {
         omit_empty: bool,
         values_only: bool,
         compact: bool,
-        max_bytes: Option<u64>,
+        max_bytes: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let offset = page_offset_from_python(offset).map_err(|error| into_py_error(py, error))?;
         let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
+        let max_bytes =
+            page_byte_limit_from_python(max_bytes).map_err(|error| into_py_error(py, error))?;
         let options = RangeReadOptionsDto {
             omit_empty,
             values_only,
@@ -936,6 +938,21 @@ fn page_limit_from_python(value: Option<&Bound<'_, PyAny>>) -> Result<u32, Inter
     value
         .extract::<u32>()
         .map_err(|_| InteropError::invalid_page_limit())
+}
+
+fn page_byte_limit_from_python(
+    value: Option<&Bound<'_, PyAny>>,
+) -> Result<Option<u64>, InteropError> {
+    let Some(value) = value.filter(|value| !value.is_none()) else {
+        return Ok(None);
+    };
+    if !value.is_instance_of::<PyInt>() || value.is_instance_of::<PyBool>() {
+        return Err(InteropError::invalid_page_byte_limit());
+    }
+    value
+        .extract::<u64>()
+        .map(Some)
+        .map_err(|_| InteropError::invalid_page_byte_limit())
 }
 
 fn revision_from_python(value: &Bound<'_, PyAny>) -> Result<u64, InteropError> {

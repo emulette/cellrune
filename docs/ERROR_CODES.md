@@ -328,6 +328,7 @@ These codes come from `cellrune-interop`, the contract Python, Node.js, and MCP 
 | `interop.page.offset_out_of_range` | Page offset exceeds the requested range. |
 | `interop.page.offset_invalid` | Page offset must be a non-negative integer. |
 | `interop.page.limit_invalid` | Page limit must be a non-negative integer within the unsigned 32-bit range. |
+| `interop.page.byte_limit_invalid` | Page byte limit must be a non-negative integer within the unsigned 64-bit range. |
 | `interop.calculation.required` | Calculate the current workbook revision before saving. |
 | `interop.value.excel_error_invalid` | Excel error value is not recognized. |
 | `interop.change.invalid` | Workbook change failed transport validation. |

@@ -999,6 +999,13 @@ def assert_range_read_forms() -> None:
             assert error.code == "interop.page.byte_limit_exceeded"
         else:
             raise AssertionError("a page with no room for a cell was returned")
+        for invalid in (True, -1, 1.5, "700"):
+            assert_error(
+                "interop.page.byte_limit_invalid",
+                lambda invalid=invalid: workbook.read_range(
+                    "Sheet1", "A1", "C2", max_bytes=invalid
+                ),
+            )
 
 
 def assert_dependencies() -> None:

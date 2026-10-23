@@ -23,6 +23,8 @@ pub(crate) enum InteropCode {
     PageOffsetInvalid,
     /// Page limit must be a non-negative integer within the unsigned 32-bit range.
     PageLimitInvalid,
+    /// Page byte limit must be a non-negative integer within the unsigned 64-bit range.
+    PageByteLimitInvalid,
     /// Calculate the current workbook revision before saving.
     CalculationRequired,
     /// Excel error value is not recognized.
@@ -85,6 +87,7 @@ impl InteropCode {
             Self::PageOffsetOutOfRange => "interop.page.offset_out_of_range",
             Self::PageOffsetInvalid => "interop.page.offset_invalid",
             Self::PageLimitInvalid => "interop.page.limit_invalid",
+            Self::PageByteLimitInvalid => "interop.page.byte_limit_invalid",
             Self::CalculationRequired => "interop.calculation.required",
             Self::ValueExcelErrorInvalid => "interop.value.excel_error_invalid",
             Self::ChangeInvalid => "interop.change.invalid",
@@ -164,6 +167,7 @@ mod tests {
             PageOffsetOutOfRange,
             PageOffsetInvalid,
             PageLimitInvalid,
+            PageByteLimitInvalid,
             CalculationRequired,
             ValueExcelErrorInvalid,
             ChangeInvalid,
