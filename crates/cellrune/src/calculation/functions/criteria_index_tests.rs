@@ -23,7 +23,7 @@ fn counted_workbook(range: &str) -> WorkbookDraft {
             .set_cell_formula(
                 sheet,
                 CellAddress::from_indices(row, 26).expect("formula address"),
-                FormulaText::from_xlsx(&format!("COUNTIF({range},1)")).expect("formula"),
+                FormulaText::from_xlsx(format!("COUNTIF({range},1)")).expect("formula"),
             )
             .expect("formula cell");
     }
