@@ -105,6 +105,16 @@ impl WorkbookDraft {
         let mut cell_formulas_changed = false;
         let mut calculation_metadata_changed = false;
         let mut semantic_changed = false;
+        // Every ID the workbook or this batch has used stays taken, including those of sheets
+        // deleted since, so an added sheet takes the one after the highest.
+        let mut highest_sheet_id = sheets
+            .iter()
+            .map(Sheet::id)
+            .chain(non_worksheet_tabs.iter().map(|tab| tab.id()))
+            .chain(self.workbook.highest_sheet_id())
+            .map(SheetId::get)
+            .max()
+            .unwrap_or(0);
 
         for change in batch.changes() {
             match change {
@@ -350,19 +360,12 @@ impl WorkbookDraft {
                         }
                         .into());
                     }
-                    let maximum = sheets
-                        .iter()
-                        .map(Sheet::id)
-                        .chain(non_worksheet_tabs.iter().map(|tab| tab.id()))
-                        .chain(self.workbook.highest_sheet_id())
-                        .map(SheetId::get)
-                        .max()
-                        .unwrap_or(0);
-                    let next = maximum
+                    let next = highest_sheet_id
                         .checked_add(1)
                         .ok_or(ValidationError::SheetIdExhausted)?;
                     let sheet_id =
                         SheetId::new(next).map_err(|_| ValidationError::SheetIdExhausted)?;
+                    highest_sheet_id = next;
                     sheets.push(Sheet::new(sheet_id, name.clone(), SheetVisibility::Visible));
                     added_sheets.insert(sheet_id);
                     created_sheet_ids.push(sheet_id);
@@ -687,6 +690,7 @@ impl WorkbookDraft {
                 BatchExecutionError::Rewrite(FormulaRewriteError::Cancelled)
             }
         })?
+        .with_highest_sheet_id(highest_sheet_id)
         .with_semantic_revision(result_revision);
 
         self.workbook = std::sync::Arc::new(workbook);

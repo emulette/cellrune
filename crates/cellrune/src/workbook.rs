@@ -1314,12 +1314,10 @@ impl WorkbookSnapshot {
                 .into());
             }
         }
-        // A deleted sheet's ID stays taken, so the previous workbook's highest ID carries over.
         let highest_sheet_id = sheet_id_index
             .keys()
             .chain(tab_ids.iter())
             .map(|id| id.get())
-            .chain(identity_base.map(|(previous, _)| previous.highest_sheet_id))
             .max()
             .unwrap_or(0);
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
@@ -1645,6 +1643,13 @@ impl WorkbookSnapshot {
 
     pub(crate) fn analysis_cache(&self) -> &crate::calculation::WorkbookAnalysisCache {
         &self.analysis_cache
+    }
+
+    /// Records that IDs through `highest_sheet_id` are taken, by sheets an edit deleted as well as
+    /// by the current ones, so a later added sheet is never given a deleted sheet's ID.
+    pub(crate) fn with_highest_sheet_id(mut self, highest_sheet_id: u32) -> Self {
+        self.highest_sheet_id = self.highest_sheet_id.max(highest_sheet_id);
+        self
     }
 
     pub(crate) fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {

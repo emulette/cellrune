@@ -444,3 +444,24 @@ fn deleting_a_sheet_drops_what_the_draft_recorded_for_it() {
             .all(|table_id| *table_id != TableId::new(1).expect("Things"))
     );
 }
+
+#[test]
+fn a_sheet_added_after_one_the_batch_added_and_deleted_takes_a_new_id() {
+    let mut draft = probe_workbook(NonWorksheetTabs::default());
+    let sheet_name = |name: &str| SheetName::new(name).expect("sheet name");
+    let receipt = draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::add_sheet(sheet_name("Scratch")),
+            WorkbookChange::delete_sheet(id(5)),
+            WorkbookChange::add_sheet(sheet_name("Kept")),
+            WorkbookChange::set_cell_value(id(6), address("A1"), CellValue::Blank),
+        ]))
+        .expect("the batch reaches the sheet it added last");
+    assert_eq!(receipt.created_sheet_ids(), [id(5), id(6)]);
+    assert_eq!(
+        draft.workbook().sheet_by_name("Kept").map(Sheet::id),
+        Some(id(6))
+    );
+    // The ID the batch gave its deleted sheet stays taken for later edits too.
+    assert_eq!(draft.add_sheet(sheet_name("Later")), Ok(id(7)));
+}
