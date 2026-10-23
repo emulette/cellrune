@@ -509,6 +509,68 @@ class SetCalculationHintsChange(SetCalculationHintsChangeOptions):
     kind: Literal["set_calculation_hints"]
 
 
+class InsertRowsChange(TypedDict):
+    kind: Literal["insert_rows"]
+    sheet: str
+    row: int
+    count: int
+
+
+class DeleteRowsChange(TypedDict):
+    kind: Literal["delete_rows"]
+    sheet: str
+    first: int
+    last: int
+
+
+class InsertColumnsChange(TypedDict):
+    kind: Literal["insert_columns"]
+    sheet: str
+    column: int
+    count: int
+
+
+class DeleteColumnsChange(TypedDict):
+    kind: Literal["delete_columns"]
+    sheet: str
+    first: int
+    last: int
+
+
+class MoveRowsChange(TypedDict):
+    kind: Literal["move_rows"]
+    sheet: str
+    first: int
+    last: int
+    destination: int
+
+
+class MoveColumnsChange(TypedDict):
+    kind: Literal["move_columns"]
+    sheet: str
+    first: int
+    last: int
+    destination: int
+
+
+class MoveRangeChange(TypedDict):
+    kind: Literal["move_range"]
+    sheet: str
+    source: str
+    destination: str
+
+
+class CopyRangeChangeOptions(TypedDict, total=False):
+    destination_sheet: str | None
+
+
+class CopyRangeChange(CopyRangeChangeOptions):
+    kind: Literal["copy_range"]
+    sheet: str
+    source: str
+    destination: str
+
+
 WorkbookChange = (
     SetValueChange
     | SetFormulaChange
@@ -522,6 +584,14 @@ WorkbookChange = (
     | RemoveDefinedNameChange
     | SetDateSystemChange
     | SetCalculationHintsChange
+    | InsertRowsChange
+    | DeleteRowsChange
+    | InsertColumnsChange
+    | DeleteColumnsChange
+    | MoveRowsChange
+    | MoveColumnsChange
+    | MoveRangeChange
+    | CopyRangeChange
 )
 
 class RenameTableChange(TypedDict):
@@ -818,7 +888,36 @@ WorkbookChangeV2 = (
 )
 
 
-class EditReceipt(TypedDict):
+class UnrestoredContent(TypedDict):
+    kind: Literal[
+        "merged_ranges",
+        "data_validations",
+        "hyperlinks",
+        "comments",
+        "hidden_rows",
+        "auto_filter",
+        "frozen_pane",
+        "phonetics",
+        "cell_formats",
+        "formula_containers",
+        "table",
+        "preserved_content",
+        "sheet",
+    ]
+    sheet: str | None
+    table_id: int | None
+
+
+class EditInverse(TypedDict):
+    changes: list[WorkbookChangeV2]
+    unrestored: list[UnrestoredContent]
+
+
+class EditReceiptOptions(TypedDict, total=False):
+    inverse: EditInverse
+
+
+class EditReceipt(EditReceiptOptions):
     schema_version: int
     base_revision: int
     result_revision: int

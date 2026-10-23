@@ -511,6 +511,82 @@ def assert_delete_sheet() -> None:
         assert_error("interop.sheet.not_found", lambda: workbook.delete_sheet("Data"))
 
 
+def assert_grid_edits() -> None:
+    with Workbook.create() as workbook:
+        for row in range(1, 6):
+            workbook.set_number("Sheet1", f"A{row}", float(row))
+        workbook.set_formula("Sheet1", "B1", "=SUM(A1:A5)")
+        workbook.set_formula("Sheet1", "B2", "=A3*10")
+        workbook.calculate()
+
+        def formula(address: str) -> object:
+            return workbook.read_range("Sheet1", address, address, limit=1)["cells"][0][
+                "formula"
+            ]
+
+        receipt = workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [{"kind": "insert_rows", "sheet": "sheet1", "row": 2, "count": 2}],
+        )
+        assert receipt["topology_changed"]
+        assert (formula("B1"), formula("B4")) == ("=SUM(A1:A7)", "=A5*10")
+        assert receipt["inverse"] == {
+            "changes": [
+                {"kind": "delete_rows", "sheet": "Sheet1", "first": 2, "last": 3}
+            ],
+            "unrestored": [],
+        }
+        workbook.apply_changes_v2(
+            workbook.summary()["semantic_revision"], receipt["inverse"]["changes"]
+        )
+        assert (formula("B1"), formula("B2")) == ("=SUM(A1:A5)", "=A3*10")
+
+        receipt = workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [
+                {
+                    "kind": "copy_range",
+                    "sheet": "Sheet1",
+                    "source": "B2",
+                    "destination": "C2:C3",
+                },
+                {
+                    "kind": "move_columns",
+                    "sheet": "Sheet1",
+                    "first": 3,
+                    "last": 3,
+                    "destination": 5,
+                },
+            ],
+        )
+        assert formula("E3") == "=B4*10"
+        assert "inverse" in receipt
+        delta = workbook.recalculate()
+        assert delta["reason"] == "topology_changed"
+        try:
+            workbook.apply_changes(
+                workbook.summary()["semantic_revision"],
+                [
+                    {
+                        "kind": "move_range",
+                        "sheet": "Sheet1",
+                        "source": "D1",
+                        "destination": "A3",
+                    }
+                ],
+            )
+        except CellRuneError as error:
+            assert error.code == "validation.moved_range_overwrites_references"
+            assert error.kind == "validation"
+        else:
+            raise AssertionError("pasting over a cell B1 reads must be refused")
+        receipt = workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [{"kind": "set_value", "sheet": "Sheet1", "address": "D1", "value": {"kind": "blank"}}],
+        )
+        assert "inverse" not in receipt
+
+
 def assert_data_validations() -> None:
     workbook = Workbook.from_bytes(SHEET_METADATA_FIXTURE_PATH.read_bytes())
     page = workbook.data_validations("data", limit=2)
@@ -663,6 +739,7 @@ def assert_csv() -> None:
 
 def main() -> None:
     assert_delete_sheet()
+    assert_grid_edits()
     assert_csv()
     assert_annotations()
     assert_formats()

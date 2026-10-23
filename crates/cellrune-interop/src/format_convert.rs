@@ -16,17 +16,8 @@ use crate::{
 };
 
 pub(crate) fn cell_format_dto(format: &CellFormat) -> CellFormatDto {
-    let font = format.font();
     CellFormatDto {
-        font: FontDto {
-            name: font.name().map(str::to_owned),
-            size: font.size(),
-            bold: font.bold(),
-            italic: font.italic(),
-            underline: font.underline().as_str().to_owned(),
-            strike: font.strike(),
-            color: font.color().map(color_dto),
-        },
+        font: font_dto(format.font()),
         fill: match format.fill() {
             Fill::Pattern(fill) => FillDto::Pattern {
                 pattern: fill.pattern().as_str().to_owned(),
@@ -37,6 +28,42 @@ pub(crate) fn cell_format_dto(format: &CellFormat) -> CellFormatDto {
         },
         border: border_dto(&format.border()),
         alignment: alignment_dto(&format.alignment()),
+    }
+}
+
+/// Converts a cell format edit into the edit-schema-v2 operation that applies it.
+pub(crate) fn format_edit_dto(
+    sheet: String,
+    address: CellAddress,
+    edit: &CellFormatEdit,
+) -> FormatChangeV2Dto {
+    FormatChangeV2Dto::SetCellFormat {
+        sheet,
+        address: address.to_string(),
+        font: edit.font().map(|font| Box::new(font_dto(font))),
+        fill: edit.fill().map(|fill| {
+            Box::new(PatternFillDto {
+                pattern: fill.pattern().as_str().to_owned(),
+                foreground: fill.foreground().map(color_dto),
+                background: fill.background().map(color_dto),
+            })
+        }),
+        border: edit.border().map(|border| Box::new(border_dto(&border))),
+        alignment: edit
+            .alignment()
+            .map(|alignment| Box::new(alignment_dto(&alignment))),
+    }
+}
+
+fn font_dto(font: &Font) -> FontDto {
+    FontDto {
+        name: font.name().map(str::to_owned),
+        size: font.size(),
+        bold: font.bold(),
+        italic: font.italic(),
+        underline: font.underline().as_str().to_owned(),
+        strike: font.strike(),
+        color: font.color().map(color_dto),
     }
 }
 

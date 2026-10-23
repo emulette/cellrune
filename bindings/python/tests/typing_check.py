@@ -157,6 +157,18 @@ def check() -> None:
     reopened.apply_changes(reopened.summary()["semantic_revision"], removal)
     reopened.add_sheet("Other")
     reopened.delete_sheet("Other")
+    structural: list[WorkbookChange] = [
+        {"kind": "insert_rows", "sheet": "Sheet1", "row": 1, "count": 1},
+        {"kind": "delete_columns", "sheet": "Sheet1", "first": 9, "last": 9},
+        {"kind": "move_rows", "sheet": "Sheet1", "first": 20, "last": 20, "destination": 30},
+        {"kind": "copy_range", "sheet": "Sheet1", "source": "A1", "destination": "Z1:Z2"},
+    ]
+    grid_receipt = reopened.apply_changes(reopened.summary()["semantic_revision"], structural)
+    inverse = grid_receipt.get("inverse")
+    if inverse is not None:
+        for content in inverse["unrestored"]:
+            content["kind"].upper()
+        reopened.apply_changes_v2(reopened.summary()["semantic_revision"], inverse["changes"])
     reopened.close()
     write_report: WriteReport = workbook.save("typing-check.xlsx")
     write_report["output_sha256"].upper()

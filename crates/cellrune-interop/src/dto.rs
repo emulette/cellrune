@@ -360,6 +360,87 @@ pub enum WorkbookChangeDto {
         /// `excel_1900` or `excel_1904`.
         date_system: String,
     },
+    /// Inserts empty rows before `row`, moving it and every later row down; references follow
+    /// the moved cells.
+    InsertRows {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// First inserted one-based row.
+        row: u32,
+        /// Number of inserted rows, at least one.
+        count: u32,
+    },
+    /// Deletes rows `first` through `last`; references to their cells become `#REF!`.
+    DeleteRows {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// First deleted one-based row.
+        first: u32,
+        /// Last deleted one-based row.
+        last: u32,
+    },
+    /// Inserts empty columns before `column`, moving it and every later column right.
+    InsertColumns {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// First inserted one-based column.
+        column: u32,
+        /// Number of inserted columns, at least one.
+        count: u32,
+    },
+    /// Deletes columns `first` through `last`; references to their cells become `#REF!`.
+    DeleteColumns {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// First deleted one-based column.
+        first: u32,
+        /// Last deleted one-based column.
+        last: u32,
+    },
+    /// Moves rows `first` through `last` so they start at row `destination` afterwards.
+    MoveRows {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// First moved one-based row.
+        first: u32,
+        /// Last moved one-based row.
+        last: u32,
+        /// One-based row the first moved row lands on.
+        destination: u32,
+    },
+    /// Moves columns `first` through `last` so they start at column `destination` afterwards.
+    MoveColumns {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// First moved one-based column.
+        first: u32,
+        /// Last moved one-based column.
+        last: u32,
+        /// One-based column the first moved column lands on.
+        destination: u32,
+    },
+    /// Cuts the cells of `source` and pastes them so its top-left cell lands on `destination`.
+    MoveRange {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Unqualified A1 range of the cut cells.
+        source: String,
+        /// Unqualified A1 address the top-left cut cell lands on.
+        destination: String,
+    },
+    /// Copies the cells of `source` onto `destination`, repeating them over a destination that
+    /// is a whole multiple of their size; relative references move by the copy distance.
+    CopyRange {
+        /// Case-insensitive source sheet name.
+        sheet: String,
+        /// Unqualified A1 range of the copied cells.
+        source: String,
+        /// Case-insensitive destination sheet name; omitted for the source sheet.
+        #[serde(default)]
+        destination_sheet: Option<String>,
+        /// Unqualified A1 range the copy fills.
+        destination: String,
+    },
     /// Changes workbook calculation metadata.
     SetCalculationHints {
         /// Optional calculation mode.
@@ -407,6 +488,37 @@ pub struct EditReceiptDto {
     pub topology_changed: bool,
     /// Whether workbook-wide calculation interpretation changed.
     pub calculation_metadata_changed: bool,
+    /// The changes that undo a batch that inserted, deleted, or moved rows, columns, or ranges,
+    /// or copied ranges; omitted for any other batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inverse: Option<EditInverseDto>,
+}
+
+/// The changes that undo one structural batch, as far as changes can express them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditInverseDto {
+    /// Edit-schema-v2 changes that undo the batch when applied as one batch to its result.
+    pub changes: Vec<WorkbookChangeV2Dto>,
+    /// Content those changes cannot bring back.
+    pub unrestored: Vec<UnrestoredContentDto>,
+}
+
+// Inverse changes hold only validated values, whose numbers are finite, so equality is reflexive.
+impl Eq for EditInverseDto {}
+
+/// One kind of content an inverse cannot bring back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UnrestoredContentDto {
+    /// `merged_ranges`, `data_validations`, `hyperlinks`, `comments`, `hidden_rows`,
+    /// `auto_filter`, `frozen_pane`, `phonetics`, `cell_formats`, `formula_containers`, `table`,
+    /// `preserved_content`, or `sheet`.
+    pub kind: String,
+    /// Sheet the content was on, when it belongs to one.
+    pub sheet: Option<String>,
+    /// Table the content belongs to, when it does.
+    pub table_id: Option<u32>,
 }
 
 /// Table-specific operations added by edit schema v2.

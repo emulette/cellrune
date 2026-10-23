@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 
 use cellrune::{
-    CalculationHints, CalculationMode, CancellationToken, CellAddress, CellRange, DateSystem,
-    DefinedName, DefinedNameScope, EditBatch, FormulaText, NumberFormat, NumberFormatKind,
-    PreparedEditBatch, Row, SheetId, SheetName, SheetVisibility, TableColumnId, TableColumnName,
-    TableId, TableName, WorkbookChange, WorkbookSnapshot,
+    CalculationHints, CalculationMode, CancellationToken, CellAddress, CellRange, Column,
+    DateSystem, DefinedName, DefinedNameScope, EditBatch, FormulaText, NumberFormat,
+    NumberFormatKind, PreparedEditBatch, Row, SheetId, SheetName, SheetVisibility, TableColumnId,
+    TableColumnName, TableId, TableName, WorkbookChange, WorkbookSnapshot,
 };
 
 use super::WorkbookSession;
@@ -495,6 +495,81 @@ impl ChangeConverter {
                         ));
                     }
                 })
+            }
+            WorkbookChangeDto::InsertRows { sheet, row, count } => WorkbookChange::insert_rows(
+                resolve_sheet_map(sheets, &sheet)?,
+                Row::new(row)?,
+                count,
+            )?,
+            WorkbookChangeDto::DeleteRows { sheet, first, last } => WorkbookChange::delete_rows(
+                resolve_sheet_map(sheets, &sheet)?,
+                Row::new(first)?,
+                Row::new(last)?,
+            )?,
+            WorkbookChangeDto::InsertColumns {
+                sheet,
+                column,
+                count,
+            } => WorkbookChange::insert_columns(
+                resolve_sheet_map(sheets, &sheet)?,
+                Column::new(column)?,
+                count,
+            )?,
+            WorkbookChangeDto::DeleteColumns { sheet, first, last } => {
+                WorkbookChange::delete_columns(
+                    resolve_sheet_map(sheets, &sheet)?,
+                    Column::new(first)?,
+                    Column::new(last)?,
+                )?
+            }
+            WorkbookChangeDto::MoveRows {
+                sheet,
+                first,
+                last,
+                destination,
+            } => WorkbookChange::move_rows(
+                resolve_sheet_map(sheets, &sheet)?,
+                Row::new(first)?,
+                Row::new(last)?,
+                Row::new(destination)?,
+            )?,
+            WorkbookChangeDto::MoveColumns {
+                sheet,
+                first,
+                last,
+                destination,
+            } => WorkbookChange::move_columns(
+                resolve_sheet_map(sheets, &sheet)?,
+                Column::new(first)?,
+                Column::new(last)?,
+                Column::new(destination)?,
+            )?,
+            WorkbookChangeDto::MoveRange {
+                sheet,
+                source,
+                destination,
+            } => WorkbookChange::move_range(
+                resolve_sheet_map(sheets, &sheet)?,
+                parse_range(&source)?,
+                CellAddress::from_a1(&destination)?,
+            )?,
+            WorkbookChangeDto::CopyRange {
+                sheet,
+                source,
+                destination_sheet,
+                destination,
+            } => {
+                let sheet_id = resolve_sheet_map(sheets, &sheet)?;
+                let destination_sheet_id = match destination_sheet {
+                    Some(name) => resolve_sheet_map(sheets, &name)?,
+                    None => sheet_id,
+                };
+                WorkbookChange::copy_range(
+                    sheet_id,
+                    parse_range(&source)?,
+                    destination_sheet_id,
+                    parse_range(&destination)?,
+                )?
             }
             WorkbookChangeDto::SetCalculationHints {
                 mode,

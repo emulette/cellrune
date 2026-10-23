@@ -599,7 +599,11 @@ can be calculated with the supplied deterministic TODAY/NOW serial values.",
         description = "Atomically apply an ordered typed edit batch after checking \
 expected_revision. Supported changes include setting or clearing cells, formulas, number formats, \
 adding, renaming, or deleting sheets, visibility, defined names, date system, and calculation \
-hints. Deleting a sheet turns references to it and its tables into #REF!.",
+hints. Deleting a sheet turns references to it and its tables into #REF!. insert_rows, \
+delete_rows, insert_columns, delete_columns, move_rows, move_columns, move_range, and copy_range \
+move references with the cells as Excel does; their receipt carries an inverse, edit-schema-v2 \
+changes that undo the batch through workbook_apply_changes_v2, and the content they cannot \
+restore.",
         annotations(
             title = "Apply workbook changes",
             read_only_hint = false,
