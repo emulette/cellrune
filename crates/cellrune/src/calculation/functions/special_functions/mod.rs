@@ -13,6 +13,7 @@ mod double_double;
 mod incomplete_beta;
 mod incomplete_gamma;
 mod inverse;
+mod large_shape_gamma;
 mod log_binomial;
 mod log_gamma;
 mod normal;
@@ -29,6 +30,7 @@ pub(super) use incomplete_gamma::{
     regularized_gamma_p, regularized_gamma_p_from_log, regularized_gamma_q,
 };
 pub(super) use inverse::{DomainPolicy, invert_monotone_cdf};
+pub(super) use large_shape_gamma::{LARGE_SHAPE, regularized_gamma_large_shape};
 pub(super) use log_gamma::{ln_gamma, signed_gamma};
 pub(super) use normal::{
     standard_normal_density, standard_normal_inverse, standard_normal_lower, standard_normal_upper,

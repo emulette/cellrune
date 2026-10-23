@@ -54,6 +54,29 @@ fn chi_square_quantiles_invert_both_tails() {
 }
 
 #[test]
+fn chi_square_quantiles_reach_excels_largest_degrees_of_freedom() {
+    // Excel 16.114 for Mac (excel-measure H and H2), up to its 10^10 limit.
+    for (formula, expected) in [
+        ("CHISQ.INV(0.5,1E6)", 999_999.333_333_412_3),
+        ("CHISQ.INV(0.5,1E8)", 99_999_999.333_333_33),
+        ("CHISQ.INV(0.5,1E9)", 999_999_999.333_333_4),
+        ("CHISQ.INV(0.05,1E10)", 9_999_767_383.706_299),
+        ("CHISQ.INV(0.5,1E10)", 9_999_999_999.333_334),
+        ("CHISQ.INV(0.999999,1E9)", 1_000_212_593.994_487_5),
+        ("CHISQ.INV.RT(0.5,1E9)", 999_999_999.333_333_4),
+        ("CHISQ.INV.RT(0.95,1E10)", 9_999_767_383.706_299),
+        ("CHISQ.INV.RT(0.05,5E9)", 5_000_164_486.499_716),
+        ("CHISQ.INV.RT(0.05,1E8)", 100_023_262.880_047_01),
+        ("CHISQ.INV.RT(1E-10,1E9)", 1_000_284_514.125_350_8),
+        ("CHISQ.INV.RT(0.01,1E9)", 1_000_104_040.380_967_1),
+        ("CHIINV(0.5,1E9)", 999_999_999.333_333_4),
+        ("CHISQ.INV(1E-300,1E9)", 998_344_117.685_295_8),
+    ] {
+        assert_formula_number(formula, expected, 1e-14);
+    }
+}
+
+#[test]
 fn chi_square_test_sums_the_statistic_over_the_contingency_table() {
     for (formula, expected) in [
         // Microsoft's example: χ² = 16.16957 with two degrees of freedom gives 0.0003082.

@@ -377,6 +377,16 @@ bracket-width and probability-residual tolerances returns `#N/A` from `GAMMA.INV
 the error Microsoft documents for a failed inverse-distribution search. It never returns an
 unconverged number.
 
+`CHISQ.INV`, `CHISQ.INV.RT`, and `CHIINV` take the incomplete gamma of shapes from `1e4`
+(20,000 degrees of freedom) from a Gauss–Legendre quadrature of the integrand around its mean,
+on panels narrowed to its steepness, so their quantiles keep their digits up to Excel's `1e10`
+degrees of freedom; the series and continued fraction above would need about `√a` steps there.
+Excel 16.114 itself returns `#NUM!` for some quantiles near that limit, such as
+`CHISQ.INV.RT(0.05,1E10)`, `CHISQ.INV.RT(0.05,9.9E9)`, and `CHISQ.INV(0.95,1E10)`, while it
+calculates `CHISQ.INV.RT(0.05,5E9)` and `CHISQ.INV.RT(0.1,1E10)`; CellRune returns the quantile
+for all of them. `CHISQ.DIST`, `CHISQ.DIST.RT`, `GAMMA.DIST`, and `GAMMA.INV` keep the series and
+continued fraction, whose results these releases do not change.
+
 `HYPGEOM.DIST` and `HYPGEOMDIST` evaluate sample sizes through 10,000 as a falling-factorial
 product whose factors are individually moderate, so no two large `lnΓ` values are ever differenced.
 Above that sample size the kernel uses the `lnΓ` form, whose relative error grows with the

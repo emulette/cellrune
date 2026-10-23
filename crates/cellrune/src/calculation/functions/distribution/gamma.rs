@@ -4,8 +4,8 @@ use super::super::super::eval::{Engine, EvalContext};
 use super::super::super::value::{ErrorKind, Value};
 use super::super::array_common::poll_cancellation;
 use super::super::special_functions::{
-    DomainPolicy, invert_monotone_cdf, ln_gamma, regularized_gamma_p, regularized_gamma_p_from_log,
-    regularized_gamma_q, signed_gamma,
+    DomainPolicy, LARGE_SHAPE, invert_monotone_cdf, ln_gamma, regularized_gamma_large_shape,
+    regularized_gamma_p, regularized_gamma_p_from_log, regularized_gamma_q, signed_gamma,
 };
 use super::super::util::required_number;
 use super::f::nonnegative_x;
@@ -146,6 +146,8 @@ pub(super) fn chi_square_distribution_rt(
 
 /// CHISQ.INV(probability, df): the left-tail chi-square quantile, twice the gamma quantile with
 /// shape df/2. A zero probability is the origin; a probability of one is the infinite upper end.
+/// From shape 10⁴ the lower tail comes from the large-shape kernel, which keeps every digit up to
+/// Excel's 10¹⁰ degrees of freedom.
 pub(super) fn chi_square_inverse(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -162,12 +164,17 @@ pub(super) fn chi_square_inverse(
         if probability == 1.0 {
             return Err(ErrorKind::Num);
         }
+        let charge = || {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)
+        };
         invert_monotone_cdf(
             |x| {
-                regularized_gamma_p(shape, x, || {
-                    poll_cancellation(context)?;
-                    engine.charge_function_iterations(context, 1)
-                })
+                if shape >= LARGE_SHAPE {
+                    regularized_gamma_large_shape(shape, x, charge).map(|(lower, _)| lower)
+                } else {
+                    regularized_gamma_p(shape, x, charge)
+                }
             },
             probability,
             DomainPolicy::PositiveHalfLine {
@@ -206,12 +213,18 @@ pub(super) fn chi_square_inverse_rt(
         if probability == 0.0 {
             return Err(ErrorKind::Num);
         }
+        let charge = || {
+            poll_cancellation(context)?;
+            engine.charge_function_iterations(context, 1)
+        };
         invert_monotone_cdf(
             |reciprocal| {
-                regularized_gamma_q(shape, reciprocal.recip(), || {
-                    poll_cancellation(context)?;
-                    engine.charge_function_iterations(context, 1)
-                })
+                if shape >= LARGE_SHAPE {
+                    regularized_gamma_large_shape(shape, reciprocal.recip(), charge)
+                        .map(|(_, upper)| upper)
+                } else {
+                    regularized_gamma_q(shape, reciprocal.recip(), charge)
+                }
             },
             probability,
             DomainPolicy::PositiveHalfLine {

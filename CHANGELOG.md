@@ -336,7 +336,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   first-occurrence order, and `#N/A` when none repeats.
 - `CHISQ.TEST` (and `CHITEST`), `CHISQ.INV`, and `CHISQ.INV.RT` (and `CHIINV`) calculate the
   chi-square test and both quantiles with Microsoft's argument errors; the right tail is inverted
-  directly so tiny probabilities keep their precision. As in Excel, the test accepts tables whose
+  directly so tiny probabilities keep their precision, and from 20,000 degrees of freedom both
+  quantiles integrate the gamma density so they keep their digits up to the 10^10 limit
+  (`CHISQ.INV(0.5,1E9)` is 999999999.3333334, as Excel 16.114 measures). As in Excel, the test accepts tables whose
   counts match in any shape, takes the degrees of freedom from the first table's shape, drops
   pairs with text, and returns `#DIV/0!` for an expected 0 and `#NUM!` for a negative one; blanks,
   logical values, and errors in the tables report `calculation.unsupported_expression`.
