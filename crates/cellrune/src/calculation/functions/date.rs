@@ -644,6 +644,17 @@ fn workday_from_parts(
     if days == 0 {
         return Value::Number(start as f64);
     }
+    // The walk below charges one unit per day it steps. When the day it stops on is known and the
+    // budget covers every step, the same charge buys the answer without the walk.
+    if let Some(end) = workday_end(start, days, engine.date_system(), weekend, &holidays)
+        && valid_calendar_serial(end, engine.date_system())
+        && let Some(charged) = charge_calendar_days(engine, context, end.abs_diff(start))
+    {
+        return match charged {
+            Ok(()) => Value::Number(end as f64),
+            Err(kind) => Value::Error(kind),
+        };
+    }
     let mut serial = start;
     let step = if days < 0 { -1 } else { 1 };
     let mut remaining = days.unsigned_abs();
@@ -680,6 +691,16 @@ fn networkdays_from_parts(
     } else {
         (end, start, -1.0)
     };
+    // The walk below charges one unit per day; when the budget covers every day, the same charge
+    // buys the count without the walk.
+    if let Some(charged) = charge_calendar_days(engine, context, high.abs_diff(low) + 1) {
+        return match charged {
+            Ok(()) => Value::Number(
+                workdays_within(low, high, engine.date_system(), weekend, &holidays) as f64 * sign,
+            ),
+            Err(kind) => Value::Error(kind),
+        };
+    }
     let mut serial = low;
     let mut count = 0_u64;
     let mut work = 0_u64;
@@ -765,6 +786,10 @@ impl WeekendMask {
 
     fn is_all_nonworking(self) -> bool {
         self.0 == 0b111_1111
+    }
+
+    fn workdays_per_week(self) -> u64 {
+        u64::from(7 - self.0.count_ones())
     }
 }
 
@@ -866,6 +891,95 @@ fn valid_calendar_serial(serial: i64, system: DateSystem) -> bool {
     date_from_serial(serial as f64, system).is_some()
 }
 
+/// Charges `days` calendar steps at once, or returns `None` when they could exceed the remaining
+/// budget, so that a walk reports the limit at the step that reaches it.
+fn charge_calendar_days(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    days: u64,
+) -> Option<Result<(), ErrorKind>> {
+    if engine.remaining_function_iterations(context) < days {
+        return None;
+    }
+    Some(poll_cancellation(context).and_then(|()| engine.charge_function_iterations(context, days)))
+}
+
+/// Counts the days in `low..=high` that are workdays under `weekend` and not holidays.
+fn workdays_within(
+    low: i64,
+    high: i64,
+    system: DateSystem,
+    weekend: WeekendMask,
+    holidays: &BTreeSet<i64>,
+) -> u64 {
+    let days = high.abs_diff(low) + 1;
+    let first = weekday_monday_zero(low as f64, system).unwrap_or(0) as u64;
+    let mut count = days / 7 * weekend.workdays_per_week();
+    for offset in 0..days % 7 {
+        if !weekend.is_nonworking(((first + offset) % 7) as u8) {
+            count += 1;
+        }
+    }
+    let holidays_on_workdays = holidays
+        .range(low..=high)
+        .filter(|holiday| is_workday(**holiday, system, weekend, &BTreeSet::new()))
+        .count() as u64;
+    count - holidays_on_workdays
+}
+
+/// Returns the day `days` workdays from `start`, skipping weekends and holidays, as the walk in
+/// `workday_from_parts` finds it, or `None` when that day lies outside the serial range.
+fn workday_end(
+    start: i64,
+    days: i64,
+    system: DateSystem,
+    weekend: WeekendMask,
+    holidays: &BTreeSet<i64>,
+) -> Option<i64> {
+    let forward = days > 0;
+    let mut position = start;
+    let mut remaining = days.unsigned_abs();
+    while remaining > 0 {
+        let end = weekday_steps(position, remaining, forward, system, weekend)?;
+        // Holidays on weekday workdays passed on the way each cost one more workday beyond `end`.
+        let (low, high) = if forward {
+            (position.checked_add(1)?, end)
+        } else {
+            (end, position.checked_sub(1)?)
+        };
+        remaining = holidays
+            .range(low..=high)
+            .filter(|holiday| is_workday(**holiday, system, weekend, &BTreeSet::new()))
+            .count() as u64;
+        position = end;
+    }
+    Some(position)
+}
+
+/// Returns the day `count` weekday workdays after (or before) `from`, ignoring holidays.
+fn weekday_steps(
+    from: i64,
+    count: u64,
+    forward: bool,
+    system: DateSystem,
+    weekend: WeekendMask,
+) -> Option<i64> {
+    let per_week = weekend.workdays_per_week();
+    let weeks = (count - 1) / per_week;
+    let mut remaining = count - weeks * per_week;
+    let direction = if forward { 1 } else { -1 };
+    let mut serial = from.checked_add(i64::try_from(weeks.checked_mul(7)?).ok()? * direction)?;
+    let mut weekday = weekday_monday_zero(serial as f64, system).unwrap_or(0) as i64;
+    while remaining > 0 {
+        serial = serial.checked_add(direction)?;
+        weekday = (weekday + direction).rem_euclid(7);
+        if !weekend.is_nonworking(weekday as u8) {
+            remaining -= 1;
+        }
+    }
+    Some(serial)
+}
+
 fn charge_calendar_work(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -888,6 +1002,53 @@ fn previous_month(year: i32, month: u32) -> (i32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closed_form_workdays_match_a_day_by_day_walk() {
+        let mut state = 0x1234_5678_u32;
+        let mut next = |bound: u32| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state % bound
+        };
+        let system = DateSystem::Excel1900;
+        for _ in 0..400 {
+            let weekend = WeekendMask(next(127) as u8);
+            let start = i64::from(next(3_000) + 100);
+            let holidays = (0..next(12))
+                .map(|_| start + i64::from(next(80)) - 40)
+                .collect::<BTreeSet<_>>();
+            let end = start + i64::from(next(200)) - 100;
+            let (low, high) = (start.min(end), start.max(end));
+            let walked = (low..=high)
+                .filter(|serial| is_workday(*serial, system, weekend, &holidays))
+                .count() as u64;
+            assert_eq!(
+                workdays_within(low, high, system, weekend, &holidays),
+                walked
+            );
+
+            let days = i64::from(next(60)) - 30;
+            if days == 0 {
+                continue;
+            }
+            let mut serial = start;
+            let mut remaining = days.unsigned_abs();
+            while remaining > 0 {
+                serial += days.signum();
+                if is_workday(serial, system, weekend, &holidays) {
+                    remaining -= 1;
+                }
+            }
+            assert_eq!(
+                workday_end(start, days, system, weekend, &holidays),
+                Some(serial),
+                "start {start}, days {days}, weekend {:07b}",
+                weekend.0
+            );
+        }
+    }
 
     #[test]
     fn intl_weekend_codes_cover_every_excel_mapping() {
