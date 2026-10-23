@@ -811,10 +811,12 @@ pub(crate) fn calculation_options_report(
         today_serial: options.today_serial().map(FiniteNumber::get),
         now_serial: options.now_serial().map(FiniteNumber::get),
         random_seed: options.random_seed(),
-        locale_profile: LocaleProfileDto {
-            locale: locale_dto(options.locale_profile().locale()),
-            display_language: Some(locale_dto(options.locale_profile().display_language())),
-        },
+        locale_profile: (options.locale_profile() != LocaleProfile::default()).then(|| {
+            LocaleProfileDto {
+                locale: locale_dto(options.locale_profile().locale()),
+                display_language: Some(locale_dto(options.locale_profile().display_language())),
+            }
+        }),
         arithmetic_semantics: match options.arithmetic_semantics() {
             ArithmeticSemantics::ExcelNearZero => ArithmeticSemanticsDto::ExcelNearZero,
             ArithmeticSemantics::Ieee754 => ArithmeticSemanticsDto::Ieee754,

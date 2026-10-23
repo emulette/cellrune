@@ -877,9 +877,10 @@ pub struct CalculationOptionsReportDto {
     pub now_serial: Option<f64>,
     /// Seed for `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`, when supplied.
     pub random_seed: Option<u32>,
-    /// Locale conventions in effect, with the display language resolved.
-    #[serde(default)]
-    pub locale_profile: LocaleProfileDto,
+    /// Locale conventions in effect, with the display language resolved. Omitted under the
+    /// default `en-US` profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale_profile: Option<LocaleProfileDto>,
     /// Policy for cancelling addition and subtraction.
     pub arithmetic_semantics: ArithmeticSemanticsDto,
     /// Policy for iterative financial-solver convergence.

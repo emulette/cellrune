@@ -280,7 +280,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   oracle audit calculates each host profile with its locale conventions.
 - The locale profile is `CalculationOptionsDto::locale_profile`, a `LocaleProfileDto` of `"en-US"`
   or `"ko-KR"` tags with an optional `display_language`, and the transaction report's calculation
-  options record the profile in effect. Python `locale_profile=` and Node.js `localeProfile` on
+  options record a profile other than the default `en-US` one, so reports under the default are
+  unchanged. Python `locale_profile=` and Node.js `localeProfile` on
   calculate, recalculate, targeted calculation, and previews, and MCP `locale_profile` on
   `workbook_recalculate`, `workbook_calculate_targets` options, and `workbook_preview_changes`
   carry it. An unknown tag or key from any Python call or from Node.js `calculate` and

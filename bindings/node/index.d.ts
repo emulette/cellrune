@@ -1182,7 +1182,8 @@ export interface TransactionCalculationOptions {
   readonly todaySerial: number | null;
   readonly nowSerial: number | null;
   readonly randomSeed: number | null;
-  readonly localeProfile: { readonly locale: LocaleTag; readonly displayLanguage: LocaleTag };
+  /** Absent under the default `en-US` profile. */
+  readonly localeProfile?: { readonly locale: LocaleTag; readonly displayLanguage: LocaleTag };
   readonly arithmeticSemantics: "excel_near_zero" | "ieee_754";
   readonly financialSolverSemantics:
     | "excel_iteration_budget"

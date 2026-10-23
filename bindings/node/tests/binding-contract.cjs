@@ -339,6 +339,12 @@ async function assertLocaleProfile() {
     displayLanguage: "en-US",
   });
   workbook.discardPreview(preview.previewId);
+  const defaultPreview = await workbook.previewChanges(
+    workbook.summary().semanticRevision,
+    [{ kind: "setValue", sheet: "Sheet1", address: "B1", value: { kind: "number", value: 1 } }],
+  );
+  assert.equal("localeProfile" in defaultPreview.report.calculationOptions, false);
+  workbook.discardPreview(defaultPreview.previewId);
 
   for (const invalid of ["ko-KR", null, [], { locale: 1 }, { locale: "ko-KR", region: "KR" }, {}]) {
     await assert.rejects(workbook.calculate({ localeProfile: invalid }), (error) => {

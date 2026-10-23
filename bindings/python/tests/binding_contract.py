@@ -185,6 +185,19 @@ def assert_random_seed() -> None:
     )
     assert preview["report"]["calculation_options"]["random_seed"] == 7
     workbook.discard_preview(preview["preview_id"])
+    default_preview = workbook.preview_changes(
+        workbook.summary()["semantic_revision"],
+        [
+            {
+                "kind": "set_value",
+                "sheet": "Sheet1",
+                "address": "B1",
+                "value": {"kind": "number", "value": 1.0},
+            }
+        ],
+    )
+    assert "locale_profile" not in default_preview["report"]["calculation_options"]
+    workbook.discard_preview(default_preview["preview_id"])
     for invalid in (-1, 1.5, 2**32, True, "7"):
         assert_error(
             "interop.value.number_invalid",

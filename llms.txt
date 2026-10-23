@@ -1661,7 +1661,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   is an optional `LocaleProfileDto { locale, display_language }` of `LocaleDto`
   tags `"en-US"` or `"ko-KR"` (an omitted display language follows `locale`),
   and the transaction report's `calculation_options.locale_profile` records
-  the profile in effect with the display language resolved. Python
+  the profile in effect with the display language resolved, omitted under the
+  default `en-US` profile. Python
   `locale_profile={"locale": "ko-KR", "display_language": "en-US"}` and
   Node.js `localeProfile: { locale: "ko-KR", displayLanguage: "en-US" }` work
   on `calculate`, `recalculate`, targeted calculation, and previews, and MCP

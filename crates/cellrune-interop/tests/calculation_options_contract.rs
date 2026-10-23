@@ -388,9 +388,35 @@ fn locale_profile_crosses_the_transport_boundary() {
         .expect("Korean preview with English labels");
     assert_eq!(
         preview.report.calculation_options.locale_profile,
-        LocaleProfileDto {
+        Some(LocaleProfileDto {
             locale: LocaleDto::KoKr,
             display_language: Some(LocaleDto::EnUs),
-        }
+        })
+    );
+    session
+        .discard_preview(preview.preview_id)
+        .expect("discard the Korean preview");
+
+    let default_preview = session
+        .preview_changes(
+            session.summary().semantic_revision,
+            cellrune_interop::EditBatchV2Dto {
+                changes: vec![cellrune_interop::WorkbookChangeV2Dto::V1(
+                    cellrune_interop::WorkbookChangeDto::SetValue {
+                        sheet: "Sheet1".to_owned(),
+                        address: "B1".to_owned(),
+                        value: cellrune_interop::WritableCellValueDto::Number { value: 1.0 },
+                    },
+                )],
+            },
+            cellrune_interop::RecalculationModeDto::Auto,
+            CalculationOptionsDto::default(),
+        )
+        .expect("default preview");
+    let report = serde_json::to_value(&default_preview.report).expect("report serializes");
+    assert!(
+        report["calculation_options"]
+            .get("locale_profile")
+            .is_none()
     );
 }

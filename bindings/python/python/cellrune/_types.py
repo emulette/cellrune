@@ -1272,11 +1272,14 @@ class CalculationLimits(TypedDict):
     max_lambda_invocations: int
 
 
-class TransactionCalculationOptions(TypedDict):
+class TransactionCalculationOptionsLocale(TypedDict, total=False):
+    locale_profile: TransactionLocaleProfile
+
+
+class TransactionCalculationOptions(TransactionCalculationOptionsLocale):
     today_serial: float | None
     now_serial: float | None
     random_seed: int | None
-    locale_profile: TransactionLocaleProfile
     arithmetic_semantics: Literal["excel_near_zero", "ieee_754"]
     financial_solver_semantics: Literal[
         "excel_iteration_budget", "extended_search"
