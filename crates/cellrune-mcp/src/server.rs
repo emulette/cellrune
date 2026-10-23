@@ -320,7 +320,7 @@ mod tests {
             ("workbook_function_usage", true, false, true, false),
             ("workbook_hyperlinks", true, false, true, false),
             ("workbook_open", false, true, false, false),
-            ("workbook_open_csv", false, false, false, false),
+            ("workbook_open_csv", false, true, false, false),
             ("workbook_preview_changes", false, false, false, false),
             ("workbook_preview_changes_page", true, false, true, false),
             ("workbook_read_formats", true, false, true, false),
