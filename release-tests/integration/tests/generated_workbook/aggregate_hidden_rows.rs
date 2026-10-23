@@ -1,6 +1,6 @@
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationOptions,
-    CellAddress, CellValue, ExcelError, OpenOptions, calculate_workbook, open_xlsx_document_bytes,
+    CalculationCellId, CalculationCellResult, CalculationOptions, CellAddress, CellValue,
+    ExcelError, OpenOptions, calculate_workbook, open_xlsx_document_bytes,
 };
 
 use crate::support::generated_xlsx::generated_hidden_rows_workbook;
@@ -9,7 +9,6 @@ use crate::support::generated_xlsx::generated_hidden_rows_workbook;
 enum Expected {
     Number(f64),
     Error(ExcelError),
-    Unsupported,
 }
 
 #[test]
@@ -31,9 +30,12 @@ fn aggregate_skips_hidden_rows_errors_and_nested_totals_by_option() {
         // A calculated array keeps its hidden rows and nested totals.
         ("_xlfn.AGGREGATE(14,3,A1:A6*1,1)", Expected::Number(60.0)),
         ("_xlfn.AGGREGATE(12,1,A1:A3)", Expected::Number(20.0)),
+        // Excel 16.114 keeps the rows a filter hides under options 0, 2, 4, and 6 and skips them
+        // under the odd options (excel-measure RESULTS.md, section C).
         ("_xlfn.AGGREGATE(4,1,C11:C14)", Expected::Number(7.0)),
-        // Whether option 4 keeps the rows a filter hides has not been measured.
-        ("_xlfn.AGGREGATE(4,4,C11:C14)", Expected::Unsupported),
+        ("_xlfn.AGGREGATE(4,4,C11:C14)", Expected::Number(50.0)),
+        ("_xlfn.AGGREGATE(9,0,C11:C14)", Expected::Number(65.0)),
+        ("_xlfn.AGGREGATE(9,7,C11:C14)", Expected::Number(15.0)),
         (
             "_xlfn.AGGREGATE(9,6,{1,2,3})",
             Expected::Error(ExcelError::Value),
@@ -84,13 +86,6 @@ fn aggregate_skips_hidden_rows_errors_and_nested_totals_by_option() {
                 Some(CalculationCellResult::Value(CellValue::Error(actual))),
             ) => {
                 assert_eq!(actual, expected, "{formula}");
-            }
-            (Expected::Unsupported, Some(CalculationCellResult::Unavailable(issue))) => {
-                assert_eq!(
-                    issue.code(),
-                    CalculationIssueCode::UnsupportedExpression,
-                    "{formula}"
-                );
             }
             (_, actual) => panic!("{formula}: expected {expected:?}, got {actual:?}"),
         }

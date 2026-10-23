@@ -1086,11 +1086,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   array is `#VALUE!`); 14 to 19 take one reference or calculated array and a
   required `k`, and a calculated array keeps its hidden rows and nested
   totals. 3-D references and a function or option outside 1-19 or 0-7 are
-  `#VALUE!`. An option that keeps hidden rows (0, 2, 4, 6) over a hidden row
-  inside a sheet or table autoFilter with a filter condition is
-  `calculation.unsupported_expression`, because whether Excel then keeps the
-  rows the filter hides has not been measured. Authored formulas are stored
-  as `_xlfn.AGGREGATE`.
+  `#VALUE!`. As measured in Excel 16.114, rows a filter hides count like rows
+  hidden by hand: options 0, 2, 4, and 6 keep them and the odd options skip
+  them, unlike `SUBTOTAL` 1 to 11. Authored formulas are stored as
+  `_xlfn.AGGREGATE`.
 - The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
   `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
   `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,

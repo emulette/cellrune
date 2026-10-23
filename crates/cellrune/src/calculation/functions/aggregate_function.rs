@@ -3,12 +3,12 @@
 //! Microsoft documents the nineteen functions and the eight options: 0 to 3 skip cells holding
 //! `SUBTOTAL` or `AGGREGATE`, odd options skip hidden rows, and 2, 3, 6, and 7 skip error values.
 //! Functions 1 to 13 take references, and 14 to 19 take one array and `k`; hidden rows and nested
-//! totals are skipped only inside references, never inside a calculated array.
-
-use std::cell::Cell;
+//! totals are skipped only inside references, never inside a calculated array. Excel 16.114 draws
+//! no line between rows a filter hides and rows hidden by hand: the even options keep both and the
+//! odd options skip both (excel-measure RESULTS.md, section C), unlike `SUBTOTAL` 1 to 11.
 
 use super::super::ast::Expr;
-use super::super::eval::{Engine, EvalContext, RowVisibility};
+use super::super::eval::{Engine, EvalContext};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::aggregate::{contains_subtotal_call, subtotal_operation};
@@ -52,20 +52,11 @@ fn evaluate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Res
         return Err(Value::Error(ErrorKind::Value));
     };
 
-    let kept_filtered_row = Cell::new(false);
     let include = |cell| {
-        if skip_nested_totals && engine.parsed_expr(cell).is_some_and(contains_subtotal_call) {
-            return false;
-        }
-        match engine.row_visibility(cell) {
-            RowVisibility::Shown => true,
-            _ if skip_hidden_rows => false,
-            RowVisibility::Hidden => true,
-            RowVisibility::HiddenInFilter => {
-                kept_filtered_row.set(true);
-                true
-            }
-        }
+        let nested_total =
+            skip_nested_totals && engine.parsed_expr(cell).is_some_and(contains_subtotal_call);
+        let hidden_row = skip_hidden_rows && engine.is_row_hidden(cell);
+        !nested_total && !hidden_row
     };
     let traces = if matches!(function, 1 | 9) {
         DecimalTraces::Collect
@@ -91,11 +82,6 @@ fn evaluate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Res
             )
             .map_err(Value::Error)?,
         );
-    }
-    // Whether an option that keeps hidden rows also keeps the rows a filter hides has not been
-    // measured.
-    if kept_filtered_row.get() {
-        return Err(Value::Error(ErrorKind::Unsupported));
     }
     if skip_errors {
         values.retain(|item| !matches!(item.value, Value::Error(kind) if !kind.is_engine_issue()));

@@ -1078,17 +1078,6 @@ pub struct Engine<'workbook> {
     reference_cells: u64,
 }
 
-/// How a worksheet shows the row of a referenced cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RowVisibility {
-    Shown,
-    /// Hidden outside every auto-filter that declares a filter condition.
-    Hidden,
-    /// Hidden inside an auto-filter that declares a filter condition; Excel stores the rows such a
-    /// filter hides as hidden rows.
-    HiddenInFilter,
-}
-
 impl<'workbook> Engine<'workbook> {
     pub(super) const fn calculation_options(&self) -> CalculationOptions {
         self.options
@@ -1291,37 +1280,14 @@ impl<'workbook> Engine<'workbook> {
         self.asts.get(&cell).map(|parsed| parsed.root())
     }
 
-    /// Whether the worksheet hides the row of `cell`, and whether that row lies inside a sheet or
-    /// table auto-filter that declares a filter condition, which may have hidden it.
-    pub(super) fn row_visibility(&self, cell: CellId) -> RowVisibility {
-        let Some(sheet) = self.workbook.sheets().get(cell.0) else {
-            return RowVisibility::Shown;
-        };
-        let Ok(row) = crate::Row::new(cell.1) else {
-            return RowVisibility::Shown;
-        };
-        if !sheet.is_row_hidden(row) {
-            return RowVisibility::Shown;
-        }
-        let spans_row =
-            |range: crate::CellRange| range.start().row() <= row && row <= range.end().row();
-        let sheet_filter = sheet.auto_filter().is_some_and(|filter| {
-            !filter.filtered_column_ids().is_empty() && spans_row(filter.range())
-        });
-        let table_filter = sheet.tables().iter().any(|table| {
-            table.auto_filter().is_some_and(|filter| {
-                filter
-                    .filter_columns()
-                    .iter()
-                    .any(|column| column.criteria().is_some())
-                    && spans_row(filter.range())
-            })
-        });
-        if sheet_filter || table_filter {
-            RowVisibility::HiddenInFilter
-        } else {
-            RowVisibility::Hidden
-        }
+    /// Whether the worksheet hides the row of `cell`, by hand or with a filter; Excel stores the
+    /// rows a filter hides as hidden rows.
+    pub(super) fn is_row_hidden(&self, cell: CellId) -> bool {
+        self.workbook
+            .sheets()
+            .get(cell.0)
+            .zip(crate::Row::new(cell.1).ok())
+            .is_some_and(|(sheet, row)| sheet.is_row_hidden(row))
     }
 
     pub(super) fn cell_has_formula(&self, cell: CellId) -> bool {
