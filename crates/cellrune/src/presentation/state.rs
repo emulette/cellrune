@@ -561,9 +561,11 @@ impl DocumentPresentation {
         Ok(true)
     }
 
-    /// Drops the presentation of a deleted sheet.
+    /// Drops the presentation of a deleted sheet: its panes and phonetics, its cell formats, and
+    /// its column widths and row heights.
     pub(crate) fn remove_sheet(&mut self, sheet_id: SheetId) {
         self.sheets.remove(&sheet_id);
+        self.formats.remove(&sheet_id);
     }
 
     pub(crate) fn semantics_match(&self, other: &Self) -> bool {

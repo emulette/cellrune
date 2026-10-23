@@ -452,6 +452,28 @@ fn deleting_a_sheet_that_controls_shapes_or_consolidations_link_is_refused() {
 }
 
 #[test]
+fn deleting_a_sheet_rewrites_the_validation_formulas_the_model_holds_as_it_saves_them() {
+    let source = generated_sheet_deletion_fixture();
+    let draft = delete(&source, &["S2"]);
+    let s1 = draft.workbook().sheet_by_name("S1").expect("S1");
+    let validations = s1
+        .data_validations()
+        .iter()
+        .map(|validation| validation.formula1())
+        .collect::<Vec<_>>();
+    // The worksheet rule and its x14 extension rule both read `'S2'!$A$1:$A$3`.
+    assert_eq!(validations, [Some("#REF!"), Some("#REF!")]);
+    // Excel keeps an internal hyperlink's location when its sheet is deleted.
+    assert_eq!(s1.hyperlinks()[0].location(), Some("'S2'!A1"));
+
+    let output = write(&draft).expect("output without S2");
+    let reopened = open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen");
+    let saved = reopened.workbook().sheet_by_name("S1").expect("S1");
+    assert_eq!(saved.data_validations(), s1.data_validations());
+    assert_eq!(saved.hyperlinks(), s1.hyperlinks());
+}
+
+#[test]
 fn edit_only_write_clears_the_results_a_deleted_sheet_changes() {
     let source = generated_sheet_deletion_fixture();
     let draft = delete(&source, &["S2"]);

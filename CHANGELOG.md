@@ -18,9 +18,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   `#REF!` (`SUM('S2'!A1:A3)` becomes `SUM(#REF!)`), a deleted end of a 3-D reference moves to the
   nearest remaining worksheet, passing over chartsheets (`'S2:S3'!A1` becomes `'S3'!A1`), and
   `INDIRECT` text is untouched. A qualified use of a name scoped to the deleted sheet becomes
-  `#REF!` where Excel writes `[0]!Name`. Deleting the last visible sheet fails with
-  `validation.last_visible_sheet`. The receipt reports a topology change, so a session
-  recalculates fully.
+  `#REF!` where Excel writes `[0]!Name`. Data validation formulas on other sheets that name it
+  become `#REF!` in the model, as in the saved part, and the sheet's data validations, hyperlinks,
+  comments, cell formats, column widths, and row heights leave the draft. Deleting the last
+  visible sheet fails with `validation.last_visible_sheet`. The receipt reports a topology change,
+  so a session recalculates fully.
 - Saving a document draft removes a deleted sheet's entry and every package part only it reached,
   a pivot cache once all of its pivot tables went, and their content-type overrides, renumbers
   `localSheetId`, and moves `workbookView` `activeTab` and `firstSheet` past the deleted tab; a

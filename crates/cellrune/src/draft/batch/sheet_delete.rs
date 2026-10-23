@@ -1,8 +1,9 @@
 use super::BatchExecutionError;
 use super::formula_edit::{
-    WorkbookFormulaEdit, WorkbookFormulaRename, rewrite_workbook_formulas, table_formula_locations,
+    WorkbookFormulaEdit, WorkbookFormulaRename, rewrite_sheet_metadata_formulas,
+    rewrite_workbook_formulas, table_formula_locations,
 };
-use crate::calculation::formula_rewrite::SheetChanges;
+use crate::calculation::formula_rewrite::{FormulaRewriteRequest, SheetChanges};
 use crate::workbook::NonWorksheetTabs;
 use crate::{
     DefinedName, DefinedNameScope, Sheet, SheetId, SheetName, SheetVisibility, ValidationError,
@@ -10,7 +11,8 @@ use crate::{
 
 /// Removes one sheet with the names scoped to it, moves the later tabs that are not worksheets
 /// forward, and rewrites references to the sheet and its tables in the remaining formulas, names,
-/// and table formulas. Returns the removed sheet.
+/// table formulas, and data validation formulas. Returns the removed sheet, which takes its data
+/// validations, hyperlinks, and comments with it.
 pub(super) fn delete_sheet(
     sheets: &mut Vec<Sheet>,
     defined_names: &mut Vec<DefinedName>,
@@ -57,6 +59,19 @@ pub(super) fn delete_sheet(
         ..
     } = edit;
     let locations = table_formula_locations(sheets, budget)?;
+    let changes = SheetChanges {
+        renames: &[],
+        deleted: &[removed.name().as_str()],
+        tabs: &tab_names,
+        non_worksheets: &non_worksheets,
+        deleted_tables: &deleted_tables,
+    };
+    rewrite_sheet_metadata_formulas(
+        sheets,
+        &FormulaRewriteRequest::Sheets(changes),
+        false,
+        &mut *budget,
+    )?;
     rewrite_workbook_formulas(
         sheets,
         defined_names,
@@ -66,13 +81,7 @@ pub(super) fn delete_sheet(
             table_formula_locations: &locations,
             budget,
         },
-        WorkbookFormulaRename::SheetDeletion(SheetChanges {
-            renames: &[],
-            deleted: &[removed.name().as_str()],
-            tabs: &tab_names,
-            non_worksheets: &non_worksheets,
-            deleted_tables: &deleted_tables,
-        }),
+        WorkbookFormulaRename::SheetDeletion(changes),
     )?;
     Ok(removed)
 }

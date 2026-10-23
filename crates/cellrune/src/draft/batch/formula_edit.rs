@@ -297,6 +297,7 @@ pub(super) fn rename_sheet(
             old_name: old_name.as_str(),
             new_name: name.as_str(),
         },
+        true,
         &mut *edit.budget,
     )?;
     rewrite_workbook_formulas(
@@ -312,11 +313,13 @@ pub(super) fn rename_sheet(
     Ok(true)
 }
 
-/// Rewrites a renamed sheet's qualifiers in the data validation formulas and internal hyperlink
-/// locations the workbook model carries, as the writer rewrites them in the saved worksheet part.
-fn rewrite_sheet_metadata_formulas(
+/// Rewrites sheet references in the data validation formulas and, with `hyperlinks`, the internal
+/// hyperlink locations the workbook model carries, as the writer rewrites them in the saved
+/// worksheet part. A deletion leaves hyperlink locations as they are, as Excel does.
+pub(super) fn rewrite_sheet_metadata_formulas(
     sheets: &mut [Sheet],
     request: &FormulaRewriteRequest<'_>,
+    hyperlinks: bool,
     budget: &mut FormulaRewriteBudget<'_>,
 ) -> Result<(), BatchExecutionError> {
     for sheet in sheets.iter_mut() {
@@ -345,6 +348,9 @@ fn rewrite_sheet_metadata_formulas(
         for (index, slot, rewritten) in rewrites {
             *sheet.data_validations_mut()[index].formulas_mut()[slot] =
                 Some(rewritten.into_boxed_str());
+        }
+        if !hyperlinks {
+            continue;
         }
         let mut locations = Vec::new();
         for (index, hyperlink) in sheet.hyperlinks().iter().enumerate() {

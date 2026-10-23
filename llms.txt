@@ -766,8 +766,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   other tabs that are not worksheets as Excel does, and an end left alone
   collapses (`'S2:S3'!A1` becomes `'S3'!A1`), while a
   deleted middle sheet leaves the text as it is. `INDIRECT` text and
-  external references are untouched. Later tabs move forward, the draft
-  drops what it recorded for the sheet, and the receipt reports a topology
+  external references are untouched. Data validation formulas on other
+  sheets that name the deleted sheet become `#REF!` in the model, as in the
+  saved part, while hyperlink locations stay. Later tabs move forward, the
+  draft drops what it recorded for the sheet (cells, tables, data
+  validations, hyperlinks, comments, panes, cell formats, column widths,
+  and row heights), and the receipt reports a topology
   change, so a session rebuilds and recalculates fully. Deleting the last
   visible sheet fails with `ValidationError::LastVisibleSheet`
   (`validation.last_visible_sheet`), an unknown sheet with `UnknownSheetId`.

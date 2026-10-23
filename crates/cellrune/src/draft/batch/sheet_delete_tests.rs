@@ -469,3 +469,28 @@ fn a_sheet_added_after_one_the_batch_added_and_deleted_takes_a_new_id() {
     // The ID the batch gave its deleted sheet stays taken for later edits too.
     assert_eq!(draft.add_sheet(sheet_name("Later")), Ok(id(7)));
 }
+
+#[test]
+fn deleting_a_sheet_drops_its_cell_formats_column_widths_and_row_heights() {
+    let mut draft = probe_workbook(NonWorksheetTabs::default());
+    let column = crate::Column::new(2).expect("column");
+    let row = crate::Row::new(3).expect("row");
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_format(
+                id(2),
+                address("A1"),
+                crate::CellFormatEdit::new().with_font(crate::Font::new().with_bold(true)),
+            ),
+            WorkbookChange::set_column_width(id(2), column, column, Some(20.0)),
+            WorkbookChange::set_row_height(id(2), row, Some(30.0)),
+            WorkbookChange::set_column_width(id(1), column, column, Some(12.0)),
+        ]))
+        .expect("formats");
+    draft.delete_sheet(id(2)).expect("delete S2");
+    let presentation = draft.presentation();
+    assert!(presentation.edited_cell_formats(id(2)).next().is_none());
+    assert!(presentation.column_widths(id(2)).is_empty());
+    assert_eq!(presentation.row_heights(id(2)).count(), 0);
+    assert_eq!(presentation.column_width(id(1), column), Some(12.0));
+}
