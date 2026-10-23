@@ -123,6 +123,26 @@ impl SheetName {
     pub(crate) fn lookup_key(&self) -> &str {
         &self.lookup_key
     }
+
+    /// Returns the name Excel gives a copy of this sheet: this name and ` (2)`, or the next number
+    /// for which `is_taken` is false, with the name shortened to keep the copy within 31 UTF-16
+    /// code units.
+    pub fn copy_name(&self, is_taken: impl Fn(&str) -> bool) -> Self {
+        let mut number = 2_u32;
+        loop {
+            let suffix = format!(" ({number})");
+            let mut base = self.original.to_string();
+            while base.encode_utf16().count() + suffix.encode_utf16().count() > 31 {
+                base.pop();
+            }
+            if let Ok(candidate) = Self::new(format!("{base}{suffix}"))
+                && !is_taken(candidate.as_str())
+            {
+                return candidate;
+            }
+            number += 1;
+        }
+    }
 }
 
 /// Sheet visibility as represented by `SpreadsheetML`.
@@ -751,6 +771,12 @@ impl Sheet {
         self.name = name;
     }
 
+    /// Gives a copied sheet its own ID.
+    pub(crate) fn set_id(&mut self, id: SheetId) {
+        self.semantic_fingerprint = OnceLock::new();
+        self.id = id;
+    }
+
     pub(crate) fn set_visibility(&mut self, visibility: SheetVisibility) {
         self.semantic_fingerprint = OnceLock::new();
         self.visibility = visibility;
@@ -1315,12 +1341,10 @@ impl WorkbookSnapshot {
                 .into());
             }
         }
-        // A deleted sheet's ID stays taken, so the previous workbook's highest ID carries over.
         let highest_sheet_id = sheet_id_index
             .keys()
             .chain(tab_ids.iter())
             .map(|id| id.get())
-            .chain(identity_base.map(|(previous, _)| previous.highest_sheet_id))
             .max()
             .unwrap_or(0);
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
@@ -1536,10 +1560,19 @@ impl WorkbookSnapshot {
         self.non_worksheet_tabs.iter().map(NonWorksheetTab::id)
     }
 
-    /// Returns the highest sheet ID the workbook has used, counting tabs that are not worksheets
-    /// and deleted sheets, or `None` for a workbook without tabs.
+    /// Returns the name of each tab that is not a worksheet, such as a chartsheet, in tab order.
     ///
-    /// A deleted sheet's ID is never reused: an added sheet receives an ID above this one.
+    /// Such names stay taken: an added, renamed, or copied sheet cannot use one.
+    pub fn non_worksheet_tab_names(&self) -> impl ExactSizeIterator<Item = &SheetName> {
+        self.non_worksheet_tabs.iter().map(NonWorksheetTab::name)
+    }
+
+    /// Returns the highest sheet ID the workbook has used, counting tabs that are not worksheets
+    /// and the sheets deleted in this draft or session, or `None` for a workbook without tabs.
+    ///
+    /// Within a draft or session a deleted sheet's ID is never reused: an added sheet receives an
+    /// ID above this one. A saved file does not record deleted IDs, so opening it computes this
+    /// from the tabs it declares, and a sheet added after reopening can take a deleted sheet's ID.
     pub fn highest_sheet_id(&self) -> Option<SheetId> {
         NonZeroU32::new(self.highest_sheet_id).map(SheetId)
     }
@@ -1547,6 +1580,16 @@ impl WorkbookSnapshot {
     /// Returns the number of workbook tabs, counting tabs that are not worksheets.
     pub(crate) fn tab_count(&self) -> usize {
         self.sheets.len() + self.non_worksheet_tabs.len()
+    }
+
+    /// Returns each tab's ID and visibility in tab order, tabs that are not worksheets included.
+    pub(crate) fn tab_order(&self) -> Vec<(SheetId, SheetVisibility)> {
+        self.non_worksheet_tabs.in_tab_order(
+            self.sheets
+                .iter()
+                .map(|sheet| (sheet.id(), sheet.visibility())),
+            |tab| (tab.id(), tab.visibility()),
+        )
     }
 
     /// Returns the zero-based tab position of the worksheet at `worksheet_index`.
@@ -1646,6 +1689,13 @@ impl WorkbookSnapshot {
 
     pub(crate) fn analysis_cache(&self) -> &crate::calculation::WorkbookAnalysisCache {
         &self.analysis_cache
+    }
+
+    /// Records that IDs through `highest_sheet_id` are taken, by sheets an edit deleted as well as
+    /// by the current ones, so a later added sheet is never given a deleted sheet's ID.
+    pub(crate) fn with_highest_sheet_id(mut self, highest_sheet_id: u32) -> Self {
+        self.highest_sheet_id = self.highest_sheet_id.max(highest_sheet_id);
+        self
     }
 
     pub(crate) fn with_semantic_revision(mut self, semantic_revision: u64) -> Self {

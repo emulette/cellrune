@@ -521,6 +521,112 @@ def assert_delete_sheet() -> None:
         assert_error("interop.sheet.not_found", lambda: workbook.delete_sheet("Data"))
 
 
+def assert_validation_error(code: str, operation: Callable[[], object]) -> None:
+    try:
+        operation()
+    except CellRuneError as error:
+        assert error.code == code
+        assert error.kind == "validation"
+    else:
+        raise AssertionError(f"{code} was not raised")
+
+
+def assert_sheet_structure_changes() -> None:
+    with Workbook.create() as workbook:
+        workbook.add_sheet("Data")
+        workbook.set_number("Data", "A1", 2.0)
+        workbook.set_formula("Data", "B1", "=Data!A1*10")
+        workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [
+                {
+                    "kind": "set_defined_name",
+                    "name": "Rate",
+                    "formula": "=Data!$A$1",
+                    "hidden": False,
+                },
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "A1", "formula": "=Rate*2"},
+            ],
+        )
+
+        receipt = workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [
+                {"kind": "copy_sheet", "sheet": "data", "position": 1},
+                {
+                    "kind": "set_value",
+                    "sheet": "Data (2)",
+                    "address": "A1",
+                    "value": {"kind": "number", "value": 7.0},
+                },
+                {"kind": "move_sheet", "sheet": "Data", "position": 0},
+                {"kind": "rename_defined_name", "name": "rate", "new_name": "Price"},
+                {"kind": "set_sheet_auto_filter", "sheet": "Sheet1", "range": "A1:C9"},
+            ],
+        )
+        assert receipt["created_sheet_ids"] == [3]
+        assert receipt["topology_changed"]
+        summary = workbook.summary()
+        assert [(sheet["id"], sheet["name"]) for sheet in summary["sheets"]] == [
+            (2, "Data"),
+            (1, "Sheet1"),
+            (3, "Data (2)"),
+        ]
+        assert summary["sheets"][1]["auto_filter"] == "A1:C9"
+        copied = workbook.read_range("Data (2)", "A1", "B1")["cells"]
+        assert copied[0]["source_value"] == {"kind": "number", "value": 7.0}
+        assert copied[1]["formula"] == "='Data (2)'!A1*10"
+        sheet1 = workbook.read_range("Sheet1", "A1", "A1")["cells"][0]
+        assert sheet1["formula"] == "=Price*2"
+
+        workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [{"kind": "set_sheet_auto_filter", "sheet": "Sheet1"}],
+        )
+        assert workbook.summary()["sheets"][1]["auto_filter"] is None
+        revision = workbook.summary()["semantic_revision"]
+        assert_validation_error(
+            "validation.sheet_position_out_of_range",
+            lambda: workbook.apply_changes(
+                revision, [{"kind": "move_sheet", "sheet": "Data", "position": 3}]
+            ),
+        )
+        assert_validation_error(
+            "validation.unknown_defined_name",
+            lambda: workbook.apply_changes(
+                revision,
+                [{"kind": "rename_defined_name", "name": "Rate", "new_name": "Other"}],
+            ),
+        )
+
+        for address, text in [("F1", "Item"), ("G1", "Amount"), ("F2", "Pen"), ("F3", "Ink")]:
+            workbook.set_text("Sheet1", address, text)
+        workbook.set_number("Sheet1", "G2", 2.0)
+        workbook.set_number("Sheet1", "G3", 3.0)
+        assert_validation_error(
+            "validation.table_range_invalid",
+            lambda: workbook.apply_changes_v2(
+                workbook.summary()["semantic_revision"],
+                [{"kind": "create_table", "sheet": "Sheet1", "range": "F1:G1"}],
+            ),
+        )
+        created = workbook.apply_changes_v2(
+            workbook.summary()["semantic_revision"],
+            [
+                {"kind": "create_table", "sheet": "sheet1", "range": "F1:G2"},
+                {"kind": "set_table_range", "table_id": 1, "range": "F1:G3"},
+            ],
+        )
+        assert created["changed_table_ids"] == [1]
+        table = workbook.summary()["sheets"][1]["tables"][0]
+        assert (table["id"], table["display_name"], table["range"]) == (1, "Table1", "F1:G3")
+        workbook.apply_changes_v2(
+            workbook.summary()["semantic_revision"],
+            [{"kind": "convert_table_to_range", "table_id": 1}],
+        )
+        assert workbook.summary()["sheets"][1]["tables"] == []
+
+
 def assert_data_validations() -> None:
     workbook = Workbook.from_bytes(SHEET_METADATA_FIXTURE_PATH.read_bytes())
     page = workbook.data_validations("data", limit=2)
@@ -673,6 +779,7 @@ def assert_csv() -> None:
 
 
 def main() -> None:
+    assert_sheet_structure_changes()
     assert_delete_sheet()
     assert_csv()
     assert_annotations()

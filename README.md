@@ -295,12 +295,15 @@ target, collision, rewrite error, resource limit, or cancellation rolls the whol
 `WorkbookChange::delete_sheet` and `WorkbookDraft::delete_sheet` delete a sheet with the names
 scoped to it and its tables. References to them in the remaining formulas, defined names, and table
 formulas become `#REF!` as Excel saves them, a deleted end of a 3-D reference moves to the nearest
-remaining sheet, and `INDIRECT` text is left as it is. Deleting the last visible sheet fails with
-`validation.last_visible_sheet`, and a deleted sheet's ID is never reused. Saving into the source
+remaining worksheet, and `INDIRECT` text is left as it is. Deleting the last visible sheet fails with
+`validation.last_visible_sheet`. A sheet added later in the same draft or session never takes a
+deleted sheet's ID; a saved file does not record deleted IDs, so after reopening, an added sheet can
+take one. Saving into the source
 package removes the parts only the deleted sheet reached and rewrites references in conditional
 formats, data validations, and chart series to `#REF!`; a remaining pivot cache or pivot chart that
-reads the deleted sheet, or a slicer or timeline cache while it holds a pivot table or table, fails
-with `xlsx.write.unsupported_preservation`. See
+reads the deleted sheet, a form control, VML control, linked shape, or data consolidation that names
+it, or a slicer or timeline cache while it holds a pivot table or table, fails with
+`xlsx.write.unsupported_preservation`. See
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for the complete rules.
 
 Use `analyze_defined_name`, `analyze_defined_name_with_options`, or
@@ -382,6 +385,7 @@ reaches every surface:
 | Save edits without calculating | yes | yes | yes | yes |
 | Cell number formats, hidden rows, sheet autoFilter ranges and filtered columns, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
+| Sheet move and copy, defined-name rename, sheet autoFilter set and removal, table creation, range change, and conversion to a range | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
 | Data validation rules, hyperlinks, and comments (read-only) | yes | yes | yes | yes |
 | Cell formats, column widths, and row heights (read and edit) | yes | yes | yes | yes |

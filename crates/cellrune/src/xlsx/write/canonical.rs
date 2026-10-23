@@ -29,6 +29,8 @@ const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
 const STYLES_PART: &str = "xl/styles.xml";
 const METADATA_PART: &str = "xl/metadata.xml";
 const DETAIL_CALCULATION_REVISION: &str = "calculation does not belong to the current draft";
+const DETAIL_FILTER_COLUMNS: &str =
+    "canonical sheet auto-filter serialization cannot write filter column criteria";
 const DETAIL_STYLE_CONFLICT: &str =
     "one custom number-format ID is associated with multiple format codes";
 const DETAIL_OUTPUT_BYTES: &str = "max_output_archive_bytes";
@@ -544,6 +546,20 @@ pub(super) fn generated_worksheet_xml(
         xml.push_str("</row>");
     }
     xml.push_str("</sheetData>");
+    if let Some(filter) = sheet.auto_filter() {
+        // A canonical filter carries no criteria to write for its filter columns.
+        if !filter.filter_column_ids().is_empty() {
+            return Err(
+                XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
+                    .with_detail(DETAIL_FILTER_COLUMNS),
+            );
+        }
+        xml.push_str("<autoFilter ref=\"");
+        xml.push_str(&filter.range().start().to_string());
+        xml.push(':');
+        xml.push_str(&filter.range().end().to_string());
+        xml.push_str("\"/>");
+    }
     super::table::push_table_parts(&mut xml, sheet);
     xml.push_str("</worksheet>");
     Ok(xml)

@@ -1138,6 +1138,83 @@ fn sheet_deletion_is_a_stdio_change_that_names_its_removed_results() {
 }
 
 #[test]
+fn sheet_copies_moves_and_table_creation_are_stdio_changes() {
+    let root = TestDirectory::new("sheet-structure");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let listed = mcp.request("tools/list", json!({}));
+    let input_schema = |name: &str| {
+        listed["result"]["tools"]
+            .as_array()
+            .expect("tool list must be an array")
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .expect("apply changes tool")["inputSchema"]
+            .to_string()
+    };
+    assert!(input_schema("workbook_apply_changes").contains("copy_sheet"));
+    assert!(input_schema("workbook_apply_changes_v2").contains("create_table"));
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "set_value", "sheet": "Sheet1", "address": "A1", "value": {"kind": "text", "value": "Item"}},
+                {"kind": "set_value", "sheet": "Sheet1", "address": "B1", "value": {"kind": "text", "value": "Amount"}},
+                {"kind": "set_value", "sheet": "Sheet1", "address": "B2", "value": {"kind": "number", "value": 2}},
+                {"kind": "copy_sheet", "sheet": "Sheet1", "position": 1},
+                {"kind": "set_value", "sheet": "Sheet1 (2)", "address": "B2", "value": {"kind": "number", "value": 5}},
+                {"kind": "move_sheet", "sheet": "sheet1 (2)", "position": 0}
+            ]
+        }),
+    ));
+    assert_eq!(receipt["created_sheet_ids"], json!([2]));
+    let error = failed_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{"kind": "move_sheet", "sheet": "Sheet1", "position": 2}]
+        }),
+    ));
+    assert_eq!(error["code"], "validation.sheet_position_out_of_range");
+
+    let error = failed_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{"kind": "create_table", "sheet": "Sheet1 (2)", "range": "A1:B1"}]
+        }),
+    ));
+    assert_eq!(error["code"], "validation.table_range_invalid");
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{"kind": "create_table", "sheet": "Sheet1 (2)", "range": "A1:B2", "name": "Prices"}]
+        }),
+    ));
+    assert_eq!(receipt["changed_table_ids"], json!([1]));
+    let summary =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    let sheets = &summary["summary"]["sheets"];
+    assert_eq!(sheets[0]["name"], "Sheet1 (2)");
+    assert_eq!(sheets[1]["name"], "Sheet1");
+    assert_eq!(sheets[0]["tables"][0]["display_name"], "Prices");
+    assert_eq!(sheets[0]["tables"][0]["range"], "A1:B2");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
 fn stdio_numbers_reach_the_workbook_exactly() {
     // Both have 17 significant digits; a JSON parser without correct rounding reads them one
     // ULP away.

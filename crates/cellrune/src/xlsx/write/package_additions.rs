@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
@@ -203,7 +204,7 @@ pub(crate) fn append_relationships(
 pub(crate) fn append_content_type_overrides(
     bytes: &[u8],
     source: &PartPath,
-    additions: &BTreeMap<PartPath, &'static str>,
+    additions: &BTreeMap<PartPath, Cow<'static, str>>,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     if additions.is_empty() {
@@ -266,7 +267,7 @@ pub(crate) fn append_content_type_overrides(
                         );
                         let mut generated = BytesStart::new(name);
                         generated.push_attribute(("PartName", part_name.as_str()));
-                        generated.push_attribute(("ContentType", *content_type));
+                        generated.push_attribute(("ContentType", content_type.as_ref()));
                         write_event(&mut writer, Event::Empty(generated), source)?;
                     }
                 }

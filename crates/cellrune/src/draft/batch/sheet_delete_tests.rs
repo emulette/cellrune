@@ -346,7 +346,12 @@ fn deleting_each_end_of_a_3d_reference_moves_it_toward_the_other_end() {
 #[test]
 fn deleting_a_worksheet_moves_later_non_worksheet_tabs_and_3d_ends_cross_them() {
     // Tab order: S1, S2, Chart, S3, S4.
-    let chart = NonWorksheetTab::new(2, id(9), SheetName::new("Chart").expect("chart name"));
+    let chart = NonWorksheetTab::new(
+        2,
+        id(9),
+        SheetName::new("Chart").expect("chart name"),
+        SheetVisibility::Visible,
+    );
     let mut draft = probe_workbook(NonWorksheetTabs::new(vec![chart]));
     draft.delete_sheet(id(1)).expect("delete S1");
     let workbook = draft.workbook();
@@ -358,13 +363,12 @@ fn deleting_a_worksheet_moves_later_non_worksheet_tabs_and_3d_ends_cross_them() 
         2,
         id(9),
         SheetName::new("Chart").expect("chart name"),
+        SheetVisibility::Visible,
     )]));
     draft.delete_sheet(id(2)).expect("delete S2");
-    // `'S2:S3'!A1` keeps the chartsheet between them as its first tab, as tab order dictates.
-    assert_eq!(
-        formula_text(draft.workbook(), "S1", "B4"),
-        "SUM('Chart:S3'!A1)"
-    );
+    // Excel 16.114 moves the deleted start of `'S2:S3'!A1` past the chartsheet between them to
+    // the nearest worksheet, and the span collapses.
+    assert_eq!(formula_text(draft.workbook(), "S1", "B4"), "SUM('S3'!A1)");
     // A deleted ID is never reused, even when it was the highest.
     let added = draft
         .add_sheet(SheetName::new("Added").expect("sheet name"))
@@ -443,4 +447,50 @@ fn deleting_a_sheet_drops_what_the_draft_recorded_for_it() {
             .iter()
             .all(|table_id| *table_id != TableId::new(1).expect("Things"))
     );
+}
+
+#[test]
+fn a_sheet_added_after_one_the_batch_added_and_deleted_takes_a_new_id() {
+    let mut draft = probe_workbook(NonWorksheetTabs::default());
+    let sheet_name = |name: &str| SheetName::new(name).expect("sheet name");
+    let receipt = draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::add_sheet(sheet_name("Scratch")),
+            WorkbookChange::delete_sheet(id(5)),
+            WorkbookChange::add_sheet(sheet_name("Kept")),
+            WorkbookChange::set_cell_value(id(6), address("A1"), CellValue::Blank),
+        ]))
+        .expect("the batch reaches the sheet it added last");
+    assert_eq!(receipt.created_sheet_ids(), [id(5), id(6)]);
+    assert_eq!(
+        draft.workbook().sheet_by_name("Kept").map(Sheet::id),
+        Some(id(6))
+    );
+    // The ID the batch gave its deleted sheet stays taken for later edits too.
+    assert_eq!(draft.add_sheet(sheet_name("Later")), Ok(id(7)));
+}
+
+#[test]
+fn deleting_a_sheet_drops_its_cell_formats_column_widths_and_row_heights() {
+    let mut draft = probe_workbook(NonWorksheetTabs::default());
+    let column = crate::Column::new(2).expect("column");
+    let row = crate::Row::new(3).expect("row");
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_format(
+                id(2),
+                address("A1"),
+                crate::CellFormatEdit::new().with_font(crate::Font::new().with_bold(true)),
+            ),
+            WorkbookChange::set_column_width(id(2), column, column, Some(20.0)),
+            WorkbookChange::set_row_height(id(2), row, Some(30.0)),
+            WorkbookChange::set_column_width(id(1), column, column, Some(12.0)),
+        ]))
+        .expect("formats");
+    draft.delete_sheet(id(2)).expect("delete S2");
+    let presentation = draft.presentation();
+    assert!(presentation.edited_cell_formats(id(2)).next().is_none());
+    assert!(presentation.column_widths(id(2)).is_empty());
+    assert_eq!(presentation.row_heights(id(2)).count(), 0);
+    assert_eq!(presentation.column_width(id(1), column), Some(12.0));
 }

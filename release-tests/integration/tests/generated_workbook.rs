@@ -6,6 +6,7 @@ mod generated_workbook {
     mod compatibility_relaxation;
     mod contract;
     mod data_validation_read;
+    mod defined_name_rename_write;
     mod defined_name_write;
     mod draft_edits_write;
     mod draft_write;
@@ -15,8 +16,14 @@ mod generated_workbook {
     mod recalculation_write;
     mod recalculation_write_support;
     mod round_trip_document;
+    mod sheet_auto_filter_write;
+    mod sheet_copy_write;
     mod sheet_deletion_write;
+    mod sheet_move_write;
     mod sheet_rename_write;
     mod style_record_write;
+    mod table_conversion_write;
+    mod table_creation_write;
+    mod table_range_write;
 }
 mod support;

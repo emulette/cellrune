@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// The hidden sheet-scoped name Excel keeps equal to the sheet-level auto-filter range.
-const FILTER_DATABASE_NAME: &str = "_xlnm._FilterDatabase";
+pub(super) const FILTER_DATABASE_NAME: &str = "_xlnm._FilterDatabase";
 
 /// Widens one table by columns and reports whether its range changed.
 ///
@@ -257,7 +257,7 @@ fn widened_columns(
     Ok(columns)
 }
 
-fn absolute_a1(address: CellAddress) -> String {
+pub(super) fn absolute_a1(address: CellAddress) -> String {
     let text = address.to_string();
     let row_start = text
         .find(|character: char| character.is_ascii_digit())

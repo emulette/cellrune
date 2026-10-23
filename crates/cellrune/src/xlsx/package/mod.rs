@@ -15,8 +15,10 @@ use zip::read::ZipArchive;
 
 pub(super) use self::path::PartPath;
 pub use self::summary::PackageSummary;
-use self::xml::ContentTypes;
-pub(in crate::xlsx) use self::xml::{Relationship, RelationshipTarget, parse_relationships};
+pub(in crate::xlsx) use self::xml::{
+    ContentTypes, Relationship, RelationshipTarget, parse_content_types,
+    scan_internal_relationships,
+};
 use super::error::detail;
 use super::{ReadLimits, ReadOptions, XlsxErrorCode, XlsxReadError};
 
@@ -42,6 +44,9 @@ const CONTENT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
 const CONTENT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CONTENT_CHART_EX: &str = "application/vnd.ms-office.chartex+xml";
+const CONTENT_CONTROL_PROPERTIES: &str = "application/vnd.ms-excel.controlproperties+xml";
+const CONTENT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+const CONTENT_VML_DRAWING: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const CONTENT_PIVOT_CACHE_DEFINITION: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml";
 
@@ -283,6 +288,16 @@ impl<R: Read + Seek> OpenedPackage<R> {
     /// Returns the chart parts, whose series formulas name worksheets outside the workbook model.
     pub(super) fn chart_parts(&self) -> Vec<PartPath> {
         self.parts_with_content_type(&[CONTENT_CHART, CONTENT_CHART_EX])
+    }
+
+    /// Returns the form control, drawing, and VML drawing parts, whose cell links, list ranges,
+    /// and linked shape text can name worksheets.
+    pub(super) fn link_parts(&self) -> Vec<PartPath> {
+        self.parts_with_content_type(&[
+            CONTENT_CONTROL_PROPERTIES,
+            CONTENT_DRAWING,
+            CONTENT_VML_DRAWING,
+        ])
     }
 
     /// Returns the pivot cache definition parts, whose worksheet sources name worksheets.

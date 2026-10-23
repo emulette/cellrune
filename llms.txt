@@ -198,6 +198,18 @@ deleted sheet by name. A delta, including one read later through
 `changes_since`/`changesSince` or a committed preview's, names a deleted
 sheet's removed results by the name the sheet had.
 
+Edit schema v1 also takes `move_sheet` and `copy_sheet` (`sheet`, zero-based
+tab `position`), `set_sheet_auto_filter` (`sheet`, A1 `range`, `null` removes
+the filter), and `rename_defined_name` (`name`, optional `scope_sheet`,
+`new_name`); v2 takes `create_table` (`sheet`, A1 `range` with its header row,
+optional `name`), `set_table_range` (`table_id`, A1 `range`), and
+`convert_table_to_range` (`table_id`). Node spells them `moveSheet`,
+`copySheet`, `setSheetAutoFilter`, `renameDefinedName` (`scopeSheet`,
+`newName`), `createTable`, `setTableRange`, and `convertTableToRange`
+(`tableId`). A copy is named `Name (2)` or the next free number, reports its
+ID in `created_sheet_ids`, and later changes of the batch reach it by that
+name.
+
 ## Naming conventions
 
 These patterns are consistent across the entire public API. When a function
@@ -339,8 +351,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   `.calculation_hints()`, `.source()`, `.provenance()`, and
   `.non_worksheet_tab_ids()` (chartsheet, dialogsheet, and macrosheet IDs,
   which added sheets never reuse), and `.highest_sheet_id() -> Option<SheetId>`
-  (the highest ID the workbook has used, deleted sheets included; an added
-  sheet receives the next one, so a deleted sheet's ID is never reused).
+  (the highest ID the workbook has used, including sheets deleted in the
+  same draft or session; an added sheet receives the next one, so within a
+  draft or session a deleted sheet's ID is never reused. Opening a file
+  computes it from the tabs the file declares, so after a save and reopen
+  a deleted sheet's ID can be given to an added sheet).
 - `Sheet`: `.id()`, `.name() -> &SheetName`, `.visibility()`,
   `.cell(CellAddress) -> Option<&Cell>`, `.cell_by_a1(&str)`,
   `.cells()` (row-major order), `.len()`, `.is_empty()`, `.used_range()`,
@@ -583,6 +598,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `.set_annotated_text(...)`, `.set_phonetics(...)`, `.clear_phonetics(...)`,
   `.set_frozen_pane(...)`, `.clear_frozen_pane(...)`.
 - `.add_sheet(...)`, `.rename_sheet(...)`, `.delete_sheet(SheetId)`,
+  `.move_sheet(SheetId, position)`, `.copy_sheet(SheetId, position)`,
   `.set_sheet_visibility(...)`.
 - `.set_defined_name(...)`, `.remove_defined_name(...)`,
   `.set_date_system(...)`, `.set_calculation_hints(...)`.
@@ -643,16 +659,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   removed parts lose their content-type overrides, and `docProps/app.xml`
   keeps its bytes. Sheet-scoped names get renumbered `localSheetId`s, and
   `workbookView` `activeTab` and `firstSheet` count down by the deleted tabs
-  before them, a deleted active tab handing activity to the tab now at its
-  place (the last tab when it was last); `tabSelected` is left as it was.
+  before them. A deleted first tab hands its role to the tab now at its
+  place; a deleted active tab hands activity to the nearest visible tab
+  after it, else the nearest visible tab before it, as Excel does, and an
+  `activeTab` of 0 is omitted; `tabSelected` is left as it was.
   Conditional formats, data validations, x14 formulas, and chart series that
   name a deleted sheet become `#REF!`; a sparkline whose data names one loses
   its data source and keeps its location, and an internal hyperlink keeps its
   location, as Excel saves them. A remaining pivot cache whose source is a
   deleted sheet or a table on one, a remaining pivot chart of a pivot table
-  on one, and any slicer or timeline cache while a deleted sheet holds a
-  pivot table or table fail with `UnsupportedPreservation`, the detail naming
-  the parts.
+  on one, a form control (`fmlaLink`, `fmlaRange`, `fmlaTxbx`, `fmlaGroup`),
+  VML control (`x:FmlaLink`, `x:FmlaRange`), linked shape (`textlink`), or
+  data consolidation (`dataRef sheet`) that names a deleted sheet, and any
+  slicer or timeline cache while a deleted sheet holds a pivot table or
+  table fail with `UnsupportedPreservation`, the detail naming the parts.
 - Dynamic formulas can be authored in canonical drafts. Existing
   document-backed dynamic formulas can be recalculated and cache-rewritten,
   but adding or replacing one through a document draft fails with
@@ -734,14 +754,20 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `WorkbookChange` is the non-exhaustive typed mutation union. Construct
   changes with `set_cell_value`, `set_cell_formula`,
   `set_cell_dynamic_formula`, `clear_cell`, `set_cell_number_format`,
-  `add_sheet`, `rename_sheet`, `delete_sheet`, `set_sheet_visibility`,
-  `set_defined_name`,
-  `remove_defined_name`, `set_date_system`, `set_calculation_hints`,
+  `add_sheet`, `rename_sheet`, `delete_sheet`,
+  `move_sheet(SheetId, position)`, `copy_sheet(SheetId, position)`,
+  `set_sheet_visibility`, `set_defined_name`,
+  `remove_defined_name`, `rename_defined_name(scope, name, new_name)`,
+  `set_date_system`, `set_calculation_hints`,
   `rename_table(TableId, TableName)`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
   `resize_table_rows(TableId, first_data_row, last_data_row)`,
-  `widen_table_columns(TableId, CellRange)`, and
-  `widen_sheet_auto_filter(SheetId, CellRange)`. A widening keeps the row
+  `create_table(SheetId, CellRange, Option<TableName>)`,
+  `set_table_range(TableId, CellRange)`,
+  `convert_table_to_range(TableId)`,
+  `widen_table_columns(TableId, CellRange)`,
+  `widen_sheet_auto_filter(SheetId, CellRange)`, and
+  `set_sheet_auto_filter(SheetId, Option<CellRange>)`. A widening keeps the row
   span, contains the old range, keeps filter and sort state, shifts filter
   column IDs when it grows leftward, names new table columns from their text
   header cells, and moves `_xlnm._FilterDatabase` with a sheet filter.
@@ -779,14 +805,117 @@ than guessing a name from a different XLSX crate (`calamine`,
   reference with such an operand become `#REF!` (`SUM('S2'!A1:A3)` becomes
   `SUM(#REF!)`, and `'S2'!Name` becomes `#REF!` where Excel writes
   `[0]!Name`); a deleted end of a 3-D reference moves to the nearest
-  remaining tab toward the other end, tabs that are not worksheets included,
-  and an end left alone collapses (`'S2:S3'!A1` becomes `'S3'!A1`), while a
+  remaining worksheet toward the other end, passing over chartsheets and
+  other tabs that are not worksheets as Excel does, and an end left alone
+  collapses (`'S2:S3'!A1` becomes `'S3'!A1`), while a
   deleted middle sheet leaves the text as it is. `INDIRECT` text and
-  external references are untouched. Later tabs move forward, the draft
-  drops what it recorded for the sheet, and the receipt reports a topology
+  external references are untouched. Data validation formulas on other
+  sheets that name the deleted sheet become `#REF!` in the model, as in the
+  saved part, while hyperlink locations stay. Later tabs move forward, the
+  draft drops what it recorded for the sheet (cells, tables, data
+  validations, hyperlinks, comments, panes, cell formats, column widths,
+  and row heights), and the receipt reports a topology
   change, so a session rebuilds and recalculates fully. Deleting the last
   visible sheet fails with `ValidationError::LastVisibleSheet`
   (`validation.last_visible_sheet`), an unknown sheet with `UnknownSheetId`.
+- `move_sheet(SheetId, position)` moves a tab, a worksheet or a chartsheet,
+  to zero-based `position` of the tab order counted after the move. The tab
+  keeps its sheet ID and scoped names, which take its new `localSheetId`,
+  and stays the active sheet if it was. A 3-D reference's tabs follow tab
+  order, so it gains or loses the tabs moved across its ends and keeps its
+  text, unless the move puts its ends out of order: the moved end then
+  becomes its neighbour inside the old span, the start the next worksheet
+  and the end the previous one, and ends that meet collapse, as Excel saves
+  them (with tabs S1 to S6, moving S2 after S5 turns `'S2:S5'!A1` into
+  `'S3:S5'!A1` and `'S2:S3'!A1` into `'S3'!A1`). Names follow the same rule;
+  other references keep their text. A position past the last tab fails
+  with `validation.sheet_position_out_of_range`, an unknown tab with
+  `UnknownSheetId`; a move to the tab's own position is a no-op. The
+  receipt reports a topology change. Saving into the source package writes
+  the `<sheet>` entries in the new order, renumbers `localSheetId`, points
+  `workbookView` `activeTab` and `firstSheet` at the same tabs, replays the
+  draft's deletions and moves on 3-D references in preserved parts, and an
+  edit-only save clears the results of 3-D references and sheet functions.
+- `copy_sheet(SheetId, position)` copies a worksheet within its workbook to
+  zero-based `position` as the next sheet ID, named `Name (2)` or the next
+  free number. In the copy, single-sheet references to the source name the
+  copy; other sheets' and 3-D references keep their text. Its tables take
+  new IDs and Excel's numbered names (the name followed by the workbook's
+  table count plus two plus the table's index among the copied ones, or the
+  next free number), with the structured references inside the copy
+  following them. The source's scoped names are copied, and a workbook name
+  that reads the source becomes a scoped name of the copy. Saving into the
+  source package duplicates the parts the worksheet reaches, with chart
+  series naming the copy; a pivot table, form control, threaded comment,
+  slicer, timeline, query table, or ActiveX control fails with
+  `xlsx.write.unsupported_preservation`.
+- `rename_defined_name(DefinedNameScope, name, new_name)` renames a defined
+  name and rewrites the uses that resolve to it, as Excel does, in cell
+  formulas, defined names, table formulas, and data validations, and on
+  save in preserved conditional formats, data validations, x14 formulas,
+  and chart series (`[0]!Name` included). A use resolves to a sheet's own
+  name on that sheet or qualified with it (`'S2'!Rate`), else to the
+  workbook name, so a workbook rename leaves uses of a sheet's own name as
+  they are and a sheet rename rewrites only that sheet's and its qualified
+  uses; a LAMBDA name is renamed where it is called, `INDIRECT` text and
+  other workbooks' names stay. An unknown name fails with
+  `validation.unknown_defined_name`, a collision in the same scope with
+  `DuplicateDefinedName`, and a new name the other scope already uses,
+  which would take over uses, with `validation.defined_name_rename_shadowed`.
+  The receipt reports a topology change.
+- `set_sheet_auto_filter(SheetId, Option<CellRange>)` creates, changes, or,
+  with `None`, removes a sheet-level autoFilter with the hidden sheet-scoped
+  `_xlnm._FilterDatabase` name Excel keeps equal to its range: a new filter
+  gains the name (`Sheet1!$A$1:$C$9`), a changed one moves it, and a removed
+  one takes it away. A changed filter keeps the criteria of the filter
+  columns whose worksheet columns it still covers, renumbered from its first
+  column; rows a filter hid stay hidden. A filter over a table fails with
+  `validation.sheet_auto_filter_overlaps_table`. Saving writes the
+  worksheet `<autoFilter>` where CT_Worksheet places it, a canonical
+  workbook included.
+- `create_table(SheetId, CellRange, Option<TableName>)` creates a table whose
+  first row is its header, as Format as Table does: each text header cell
+  names its column, and a blank one is named `Column` and its position,
+  which the cell then holds; a number, logical, error, or formula header
+  fails with `validation.table_header_requires_text`. The table gets the next
+  free table ID, a filter over its range, the `TableStyleMedium2` style with
+  row stripes, and the name, or by default `Table` and the number after the
+  workbook's table count, the next free one when taken (Excel names a table
+  made beside one other `Table2`). A range without a row below the header
+  fails with `validation.table_range_invalid`, one over a table with
+  `OverlappingTables`, over the sheet filter with
+  `validation.sheet_auto_filter_overlaps_table`, and over a merged range or
+  legacy array with `validation.table_range_overlap`. Saving into the source
+  package writes a new table part with its relationship, `<tablePart>`
+  entry, and content-type override.
+- `set_table_range(TableId, CellRange)` changes a table's range in one edit:
+  the header row stays, columns grow or shrink at either side, and data
+  rows grow or shrink above the totals row, as `resize_table_rows` does. A
+  new column is named by the text in its header cell; a removed column's
+  cells keep their content, and a structured reference that names it, alone
+  or as an end of a column range (`T[c]`, `T[[a]:[c]]`, `T[[#Totals],[c]]`),
+  becomes `#REF!`, as Excel 16.114 saves it. A range that moves the header
+  row, keeps none of the table's columns, or leaves no data row fails with
+  `validation.table_range_invalid`; removing a column of a table whose
+  filter has criteria or sort state, or of a query or XML table, fails with
+  `validation.unsupported_table_authoring_metadata`. `widen_table_columns` and
+  `resize_table_rows` keep their behavior. Saving rewrites the table part
+  and drops removed `<tableColumn>` elements.
+- `convert_table_to_range(TableId)` converts a table to a plain range, as
+  Excel's Convert to Range does: the table and its filter leave the sheet,
+  its cells keep their values and formulas, and every structured reference
+  to it in cell formulas, defined names, and table formulas becomes the
+  sheet-qualified absolute reference to the cells it names, as Excel 16.114
+  saves it: `Things[val]` becomes `'S2'!$D$2:$D$4`,
+  `Things[[#Data],[val]:[dbl]]` `'S2'!$D$2:$E$4`, `Things[[#Totals],[val]]`
+  `'S2'!$D$5`, `[#All]` and `[#Headers]` their areas, a bare `Things` its data
+  body, and a this-row reference such as `[@val]`, calculated columns
+  included, `'S2'!$D2` with its row relative. A missing column or an empty
+  part becomes `#REF!`. Saving into the source package removes the table
+  part, its relationship, `<tablePart>` entry, and content-type override; a
+  table part with relationships of its own, such as a query table, fails
+  with `UnsupportedPreservation`. An unknown table fails with
+  `UnknownTableId`.
 - `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
   draft plus persistent parsed formulas, dependency state, results, dirty
   roots, and bounded delta history.

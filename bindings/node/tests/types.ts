@@ -188,6 +188,26 @@ async function check(): Promise<void> {
   reopened.applyChanges(reopened.summary().semanticRevision, removal);
   reopened.addSheet("Other");
   reopened.deleteSheet("Other");
+  const structure: readonly WorkbookChange[] = [
+    { kind: "copySheet", sheet: "Sheet1", position: 1 },
+    { kind: "moveSheet", sheet: "Sheet1 (2)", position: 0 },
+    { kind: "setSheetAutoFilter", sheet: "Sheet1", range: "A1:B2" },
+    { kind: "setSheetAutoFilter", sheet: "Sheet1", range: null },
+    { kind: "renameDefinedName", name: "Typed", scopeSheet: "Sheet1", newName: "Renamed" },
+  ];
+  reopened
+    .applyChanges(reopened.summary().semanticRevision, structure)
+    .createdSheetIds.map((sheetId) => sheetId.toFixed(0));
+  const tables: readonly WorkbookChangeV2[] = [
+    { kind: "createTable", sheet: "Sheet1", range: "D1:E3", name: "Scores" },
+    { kind: "createTable", sheet: "Sheet1", range: "G1:H3" },
+    { kind: "setTableRange", tableId: 1, range: "D1:E4" },
+    { kind: "convertTableToRange", tableId: 1 },
+  ];
+  reopened.applyChangesV2(reopened.summary().semanticRevision, tables);
+  // @ts-expect-error A table range change names the table by its ID.
+  const unnamed: WorkbookChangeV2 = { kind: "setTableRange", table: "Scores", range: "D1:E4" };
+  void unnamed;
   reopened.close();
   reopened.closed.valueOf();
 }

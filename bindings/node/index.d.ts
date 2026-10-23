@@ -659,9 +659,30 @@ export type WorkbookChange =
     }
   | { readonly kind: "deleteSheet"; readonly sheet: string }
   | {
+      /** Moves a sheet to a zero-based tab position, counted after the move. */
+      readonly kind: "moveSheet";
+      readonly sheet: string;
+      readonly position: number;
+    }
+  | {
+      /**
+       * Copies a sheet to a zero-based tab position as `Name (2)` or the next free number,
+       * which later changes in the batch can name.
+       */
+      readonly kind: "copySheet";
+      readonly sheet: string;
+      readonly position: number;
+    }
+  | {
       readonly kind: "setSheetVisibility";
       readonly sheet: string;
       readonly visibility: SheetVisibility;
+    }
+  | {
+      /** Creates or changes the sheet-level autoFilter; an omitted or `null` range removes it. */
+      readonly kind: "setSheetAutoFilter";
+      readonly sheet: string;
+      readonly range?: string | null;
     }
   | {
       readonly kind: "setDefinedName";
@@ -674,6 +695,12 @@ export type WorkbookChange =
       readonly kind: "removeDefinedName";
       readonly name: string;
       readonly scopeSheet?: string | null;
+    }
+  | {
+      readonly kind: "renameDefinedName";
+      readonly name: string;
+      readonly scopeSheet?: string | null;
+      readonly newName: string;
     }
   | {
       readonly kind: "setDateSystem";
@@ -711,6 +738,23 @@ export type WorkbookChangeV2 =
       readonly firstDataRow: number;
       readonly lastDataRow: number;
     }
+  | {
+      /**
+       * Creates a table whose header is the range's first row, named `name` or `Table` and the
+       * next number; the receipt's `changedTableIds` holds its ID.
+       */
+      readonly kind: "createTable";
+      readonly sheet: string;
+      readonly range: string;
+      readonly name?: string | null;
+    }
+  | {
+      /** Grows or shrinks a table by rows and columns; its header row stays. */
+      readonly kind: "setTableRange";
+      readonly tableId: number;
+      readonly range: string;
+    }
+  | { readonly kind: "convertTableToRange"; readonly tableId: number }
   | CellFormatChange
   | {
       readonly kind: "setColumnWidth";

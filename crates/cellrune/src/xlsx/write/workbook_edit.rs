@@ -7,7 +7,7 @@ use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
 
 use super::serialization::escape_text;
-use super::sheet_deletion::patch_workbook_view;
+use super::sheet_deletion::{TabPlacement, patch_workbook_view};
 use super::workbook_patch::{
     HostRecalculation, follows_calculation_properties, patch_calculation_properties_with_hints,
 };
@@ -22,7 +22,6 @@ use crate::{
 };
 
 const DETAIL_SHEET_COUNT: &str = "workbook sheet metadata does not match the source document";
-const DETAIL_SHEET_ORDER: &str = "draft changed the stable order of existing sheets";
 const DETAIL_MISSING_WORKBOOK: &str = "workbook root was not found";
 const DETAIL_MISSING_SHEETS: &str = "workbook sheets container was not found";
 const DETAIL_RELATIONSHIP_ATTRIBUTE: &str = "workbook sheet relationship attribute was not found";
@@ -122,14 +121,13 @@ pub(crate) fn patch_workbook_semantics(
         ensure_book_view,
     } = options;
     enforce_bytes(bytes.len(), limits, source)?;
-    validate_existing_sheet_order(original, draft, source)?;
-    // Tab positions of deleted worksheets, which later tabs, `workbookView`, and every
-    // sheet-scoped name's `localSheetId` move past.
-    let deleted_positions = original
-        .sheets()
-        .iter()
-        .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
-        .filter_map(|sheet| original.sheet_tab_position(sheet.id()))
+    // Deleted and moved tabs move `workbookView` and every sheet-scoped name's `localSheetId`.
+    let placement = TabPlacement::between(original, draft);
+    let tabs_moved = placement.moved();
+    let source_tabs = original
+        .tab_order()
+        .into_iter()
+        .map(|(id, _)| id)
         .collect::<Vec<_>>();
     let names_changed = original.defined_names() != draft.defined_names()
         || draft
@@ -152,27 +150,23 @@ pub(crate) fn patch_workbook_semantics(
     let mut book_views_depth = None;
     let mut inserted_defined_names = !names_changed;
     let mut source_defined_names = None::<SourceDefinedNames>;
-    let mut deleted_sheet_depth = None::<u64>;
+    let mut source_sheets = SourceSheets::default();
     loop {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
-        // A deleted worksheet's `<sheet>` element is dropped with its content.
-        if let Some(skip) = deleted_sheet_depth {
-            match event {
+        // A `<sheet>` element's content is captured with it.
+        if source_sheets.capturing() {
+            match &event {
                 Event::Start(_) => depth = depth.saturating_add(1),
-                Event::End(_) => {
-                    if depth == skip {
-                        deleted_sheet_depth = None;
-                    }
-                    depth = depth.saturating_sub(1);
-                }
+                Event::End(_) => depth = depth.saturating_sub(1),
                 _ => {}
             }
+            source_sheets.capture(event.into_owned(), depth);
             buffer.clear();
             continue;
         }
         let book_view = |element: &BytesStart<'_>, depth: u64| {
-            !deleted_positions.is_empty()
+            tabs_moved
                 && book_views_depth.is_some_and(|parent| depth == parent + 1)
                 && element.local_name().as_ref() == "workbookView"
         };
@@ -202,12 +196,7 @@ pub(crate) fn patch_workbook_semantics(
                     book_views_depth = Some(depth);
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if book_view(&element, depth) {
-                    let patched = patch_workbook_view(
-                        &element,
-                        &deleted_positions,
-                        draft.tab_count(),
-                        source,
-                    )?;
+                    let patched = patch_workbook_view(&element, &placement, source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "sheets"
@@ -234,26 +223,21 @@ pub(crate) fn patch_workbook_semantics(
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
                     && element.local_name().as_ref() == "sheet"
-                    && is_non_worksheet_tab(original, &mut existing_tab_position)
                 {
-                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
-                } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
-                    && element.local_name().as_ref() == "sheet"
-                {
-                    let (patched, relationship) = patch_existing_sheet(
+                    let (id, patched) = source_sheet(
                         &element,
                         &xml,
-                        original,
-                        draft,
-                        existing_sheet_index,
+                        SourceSheetContext {
+                            original,
+                            draft,
+                            source_tabs: &source_tabs,
+                            tab_position: &mut existing_tab_position,
+                            sheet_index: &mut existing_sheet_index,
+                            relationship: &mut relationship_attribute,
+                        },
                         source,
                     )?;
-                    relationship_attribute.get_or_insert(relationship);
-                    existing_sheet_index = existing_sheet_index.saturating_add(1);
-                    match patched {
-                        Some(patched) => write_event(&mut writer, Event::Start(patched), source)?,
-                        None => deleted_sheet_depth = Some(depth),
-                    }
+                    source_sheets.push_sheet(id, patched.map(Event::Start), Some(depth));
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "definedNames"
                     && names_changed
@@ -312,32 +296,23 @@ pub(crate) fn patch_workbook_semantics(
                     return Err(invalid_generated(source, DETAIL_MISSING_SHEETS));
                 } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
                     && element.local_name().as_ref() == "sheet"
-                    && is_non_worksheet_tab(original, &mut existing_tab_position)
                 {
-                    write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
-                } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
-                    && element.local_name().as_ref() == "sheet"
-                {
-                    let (patched, relationship) = patch_existing_sheet(
+                    let (id, patched) = source_sheet(
                         &element,
                         &xml,
-                        original,
-                        draft,
-                        existing_sheet_index,
+                        SourceSheetContext {
+                            original,
+                            draft,
+                            source_tabs: &source_tabs,
+                            tab_position: &mut existing_tab_position,
+                            sheet_index: &mut existing_sheet_index,
+                            relationship: &mut relationship_attribute,
+                        },
                         source,
                     )?;
-                    relationship_attribute.get_or_insert(relationship);
-                    existing_sheet_index = existing_sheet_index.saturating_add(1);
-                    if let Some(patched) = patched {
-                        write_event(&mut writer, Event::Empty(patched), source)?;
-                    }
+                    source_sheets.push_sheet(id, patched.map(Event::Empty), None);
                 } else if book_view(&element, depth + 1) {
-                    let patched = patch_workbook_view(
-                        &element,
-                        &deleted_positions,
-                        draft.tab_count(),
-                        source,
-                    )?;
+                    let patched = patch_workbook_view(&element, &placement, source)?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
                     && element.local_name().as_ref() == "definedNames"
@@ -389,24 +364,26 @@ pub(crate) fn patch_workbook_semantics(
                     let relationship = relationship_attribute
                         .as_ref()
                         .ok_or_else(|| invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE))?;
-                    for sheet in draft
-                        .sheets()
-                        .iter()
-                        .filter(|sheet| original.sheet_by_id(sheet.id()).is_none())
-                    {
-                        let relationship_id =
-                            added_relationships.get(&sheet.id()).ok_or_else(|| {
-                                invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE)
-                            })?;
-                        write_added_sheet(
-                            &mut writer,
-                            sheets_name.as_deref().unwrap_or("sheets"),
-                            relationship,
-                            sheet,
-                            relationship_id,
-                            source,
-                        )?;
-                    }
+                    let sheets_element = sheets_name.as_deref().unwrap_or("sheets");
+                    std::mem::take(&mut source_sheets).write_in_order(
+                        &mut writer,
+                        draft,
+                        source,
+                        |writer, sheet| {
+                            let relationship_id =
+                                added_relationships.get(&sheet.id()).ok_or_else(|| {
+                                    invalid_generated(source, DETAIL_RELATIONSHIP_ATTRIBUTE)
+                                })?;
+                            write_added_sheet(
+                                writer,
+                                sheets_element,
+                                relationship,
+                                sheet,
+                                relationship_id,
+                                source,
+                            )
+                        },
+                    )?;
                 }
                 if workbook_depth == Some(depth)
                     && element.local_name().as_ref() == "workbook"
@@ -431,6 +408,8 @@ pub(crate) fn patch_workbook_semantics(
             other => {
                 if let Some(names) = &mut source_defined_names {
                     names.capture(other);
+                } else if sheets_depth.is_some_and(|parent| depth == parent) {
+                    source_sheets.push_between(other.into_owned());
                 } else {
                     write_event(&mut writer, other.into_owned(), source)?;
                 }
@@ -471,36 +450,162 @@ fn write_book_views(
     write_event(writer, Event::End(BytesEnd::new(views_name)), source)
 }
 
-/// Advances past one source `<sheet>` element and reports whether it is a chartsheet,
-/// dialogsheet, or macrosheet tab, which is copied through unchanged.
-fn is_non_worksheet_tab(original: &WorkbookSnapshot, tab_position: &mut usize) -> bool {
-    let position = *tab_position;
-    *tab_position += 1;
-    original.non_worksheet_tabs().contains_position(position)
+/// The source `<sheets>` entries and the text between them, captured so the draft's tab order
+/// decides where each entry is written.
+#[derive(Debug, Default)]
+struct SourceSheets {
+    items: Vec<SheetsItem>,
+    /// The depth of the `<sheet>` start tag whose content is being captured.
+    capturing: Option<u64>,
 }
 
-fn validate_existing_sheet_order(
-    original: &WorkbookSnapshot,
-    draft: &WorkbookSnapshot,
-    source: &PartPath,
-) -> Result<(), XlsxWriteError> {
-    let existing = draft
-        .sheets()
-        .iter()
-        .filter(|sheet| original.sheet_by_id(sheet.id()).is_some())
-        .map(Sheet::id)
-        .collect::<Vec<_>>();
-    let original_ids = original
-        .sheets()
-        .iter()
-        .map(Sheet::id)
-        .filter(|id| draft.sheet_by_id(*id).is_some())
-        .collect::<Vec<_>>();
-    if existing == original_ids {
-        Ok(())
-    } else {
-        Err(invalid_generated(source, DETAIL_SHEET_ORDER))
+#[derive(Debug)]
+enum SheetsItem {
+    Between(Event<'static>),
+    /// One source tab's entry, with no events for a deleted worksheet.
+    Sheet {
+        id: SheetId,
+        events: Vec<Event<'static>>,
+    },
+}
+
+impl SourceSheets {
+    const fn capturing(&self) -> bool {
+        self.capturing.is_some()
     }
+
+    /// Records a tab's start tag, or none for a deleted worksheet, whose content `depth` marks
+    /// as following until its end tag.
+    fn push_sheet(&mut self, id: SheetId, start: Option<Event<'static>>, depth: Option<u64>) {
+        self.capturing = depth;
+        self.items.push(SheetsItem::Sheet {
+            id,
+            events: start.into_iter().collect(),
+        });
+    }
+
+    fn push_between(&mut self, event: Event<'static>) {
+        self.items.push(SheetsItem::Between(event));
+    }
+
+    /// Captures one event inside a `<sheet>` element, `depth` being the depth after it.
+    fn capture(&mut self, event: Event<'static>, depth: u64) {
+        let closes = matches!(event, Event::End(_)) && self.capturing == Some(depth + 1);
+        if let Some(SheetsItem::Sheet { events, .. }) = self.items.last_mut()
+            && !events.is_empty()
+        {
+            events.push(event);
+        }
+        if closes {
+            self.capturing = None;
+        }
+    }
+
+    /// Writes every draft tab's entry in the draft's tab order: a kept source entry as captured,
+    /// and a sheet the draft added or copied through `added`. The text before the first source
+    /// entry and after the last one stays around the entries.
+    fn write_in_order(
+        self,
+        writer: &mut Writer<Cursor<Vec<u8>>>,
+        draft: &WorkbookSnapshot,
+        source: &PartPath,
+        mut added: impl FnMut(&mut Writer<Cursor<Vec<u8>>>, &Sheet) -> Result<(), XlsxWriteError>,
+    ) -> Result<(), XlsxWriteError> {
+        let first_entry = self
+            .items
+            .iter()
+            .position(|item| matches!(item, SheetsItem::Sheet { .. }))
+            .unwrap_or(self.items.len());
+        let last_entry = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, SheetsItem::Sheet { .. }))
+            .map_or(self.items.len(), |index| index + 1);
+        let mut entries = BTreeMap::new();
+        let mut prefix = Vec::new();
+        let mut suffix = Vec::new();
+        for (index, item) in self.items.into_iter().enumerate() {
+            match item {
+                SheetsItem::Sheet { id, events } => {
+                    if !events.is_empty() {
+                        entries.insert(id, events);
+                    }
+                }
+                SheetsItem::Between(event) if index < first_entry => prefix.push(event),
+                SheetsItem::Between(event) if index >= last_entry => suffix.push(event),
+                SheetsItem::Between(_) => {}
+            }
+        }
+        for event in prefix {
+            write_event(writer, event, source)?;
+        }
+        for (id, _) in draft.tab_order() {
+            match entries.remove(&id) {
+                Some(events) => {
+                    for event in events {
+                        write_event(writer, event, source)?;
+                    }
+                }
+                None => {
+                    let sheet = draft
+                        .sheet_by_id(id)
+                        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
+                    added(writer, sheet)?;
+                }
+            }
+        }
+        for event in suffix {
+            write_event(writer, event, source)?;
+        }
+        Ok(())
+    }
+}
+
+/// What reading one source `<sheet>` element advances.
+struct SourceSheetContext<'a> {
+    original: &'a WorkbookSnapshot,
+    draft: &'a WorkbookSnapshot,
+    source_tabs: &'a [SheetId],
+    tab_position: &'a mut usize,
+    sheet_index: &'a mut usize,
+    relationship: &'a mut Option<RelationshipAttribute>,
+}
+
+/// Reads the source `<sheet>` element at the next tab position and returns its tab's ID with the
+/// start tag to write: a chartsheet, dialogsheet, or macrosheet as it is, a worksheet patched from
+/// the draft, and `None` for a deleted worksheet. A worksheet's relationship attribute is read
+/// either way, so a workbook whose source worksheets were all deleted still declares the sheets
+/// it added.
+fn source_sheet(
+    element: &BytesStart<'_>,
+    reader: &NsReader<&[u8]>,
+    context: SourceSheetContext<'_>,
+    source: &PartPath,
+) -> Result<(SheetId, Option<BytesStart<'static>>), XlsxWriteError> {
+    let position = *context.tab_position;
+    *context.tab_position += 1;
+    let id = *context
+        .source_tabs
+        .get(position)
+        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
+    if context
+        .original
+        .non_worksheet_tabs()
+        .contains_position(position)
+    {
+        return Ok((id, Some(element.to_owned())));
+    }
+    let source_sheet = context
+        .original
+        .sheets()
+        .get(*context.sheet_index)
+        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
+    *context.sheet_index += 1;
+    let sheet = context.draft.sheet_by_id(source_sheet.id());
+    let (patched, relationship) =
+        patch_sheet(element, reader, sheet.unwrap_or(source_sheet), source)?;
+    context.relationship.get_or_insert(relationship);
+    Ok((source_sheet.id(), sheet.map(|_| patched)))
 }
 
 fn patch_date_system(
@@ -535,29 +640,8 @@ fn write_workbook_properties(
     write_event(writer, Event::Empty(properties), source)
 }
 
-/// Patches the `<sheet>` element of the existing worksheet at `index` from the draft, or returns
-/// `None` for a deleted worksheet. Its relationship attribute is read either way, so a workbook
-/// whose source worksheets were all deleted still declares the sheets it added.
-fn patch_existing_sheet(
-    element: &BytesStart<'_>,
-    reader: &NsReader<&[u8]>,
-    original: &WorkbookSnapshot,
-    draft: &WorkbookSnapshot,
-    index: usize,
-    source: &PartPath,
-) -> Result<(Option<BytesStart<'static>>, RelationshipAttribute), XlsxWriteError> {
-    let source_sheet = original
-        .sheets()
-        .get(index)
-        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
-    let sheet = draft.sheet_by_id(source_sheet.id());
-    let (patched, relationship) =
-        patch_sheet(element, reader, sheet.unwrap_or(source_sheet), source)?;
-    Ok((sheet.map(|_| patched), relationship))
-}
-
-/// Returns the draft tab position of a retained sheet-scoped name's sheet when a deleted sheet
-/// moved it, so its `localSheetId` is renumbered.
+/// Returns the draft tab position of a retained sheet-scoped name's sheet when a deletion or move
+/// changed it, so its `localSheetId` is renumbered.
 fn moved_local_sheet_id(
     original: &WorkbookSnapshot,
     draft: &WorkbookSnapshot,

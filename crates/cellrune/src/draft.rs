@@ -1,3 +1,4 @@
+use crate::calculation::sheet_changes::TabStep;
 use crate::{
     CalculationCellId, CellAddress, DocumentPresentation, SheetId, TableId, ValidationError,
     WorkbookSnapshot, XlsxDocument,
@@ -6,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod batch;
+pub(crate) use batch::DefinedNameRename;
 mod format;
 mod metadata;
 mod presentation;
@@ -124,6 +126,15 @@ pub struct WorkbookDraft {
     added_sheets: BTreeSet<SheetId>,
     changed_table_ids: BTreeSet<TableId>,
     workbook_changed: bool,
+    /// The sheet deletions and moves in the order they were made, which the writer replays on the
+    /// 3-D references of the parts it preserves.
+    tab_steps: Vec<TabStep>,
+    /// The defined-name renames in the order they were made, which the writer replays on the
+    /// formulas of the parts it preserves.
+    name_renames: Vec<DefinedNameRename>,
+    /// Each copy of a sheet the source package holds, with the source sheet whose part the writer
+    /// duplicates for it; copies of other sheets are added sheets.
+    copied_sheets: BTreeMap<SheetId, SheetId>,
 }
 
 impl WorkbookDraft {
@@ -139,6 +150,9 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
+            tab_steps: Vec::new(),
+            name_renames: Vec::new(),
+            copied_sheets: BTreeMap::new(),
         }
     }
 
@@ -154,6 +168,9 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: false,
+            tab_steps: Vec::new(),
+            name_renames: Vec::new(),
+            copied_sheets: BTreeMap::new(),
         }
     }
 
@@ -179,6 +196,18 @@ impl WorkbookDraft {
     /// Returns the monotonic presentation-only revision.
     pub const fn presentation_revision(&self) -> u64 {
         self.presentation.revision()
+    }
+
+    pub(crate) fn tab_steps(&self) -> &[TabStep] {
+        &self.tab_steps
+    }
+
+    pub(crate) fn name_renames(&self) -> &[DefinedNameRename] {
+        &self.name_renames
+    }
+
+    pub(crate) const fn copied_sheets(&self) -> &BTreeMap<SheetId, SheetId> {
+        &self.copied_sheets
     }
 
     /// Returns whether the draft preserves an existing XLSX or XLSM package.
@@ -214,6 +243,9 @@ impl WorkbookDraft {
             added_sheets: clone_set_cancellable(&self.added_sheets, cancelled)?,
             changed_table_ids: clone_set_cancellable(&self.changed_table_ids, cancelled)?,
             workbook_changed: self.workbook_changed,
+            tab_steps: self.tab_steps.clone(),
+            name_renames: self.name_renames.clone(),
+            copied_sheets: self.copied_sheets.clone(),
         })
     }
 
@@ -229,6 +261,9 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
+            tab_steps: Vec::new(),
+            name_renames: Vec::new(),
+            copied_sheets: BTreeMap::new(),
         }
     }
 }

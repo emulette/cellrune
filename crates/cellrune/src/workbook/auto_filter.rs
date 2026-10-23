@@ -48,6 +48,27 @@ impl SheetAutoFilter {
         &self.filtered_column_ids
     }
 
+    /// Returns this filter over any `range`: each filter column of a worksheet column the range
+    /// still holds keeps its settings, renumbered from the new first column, and the others leave.
+    pub(crate) fn respanned(&self, range: CellRange) -> Self {
+        let old_first = self.range.start().column().get();
+        let new_first = range.start().column().get();
+        let new_last = range.end().column().get();
+        let kept = |column_ids: &[u32]| {
+            column_ids
+                .iter()
+                .map(|column_id| old_first + column_id)
+                .filter(|column| (new_first..=new_last).contains(column))
+                .map(|column| column - new_first)
+                .collect()
+        };
+        Self {
+            range,
+            filter_column_ids: kept(&self.filter_column_ids),
+            filtered_column_ids: kept(&self.filtered_column_ids),
+        }
+    }
+
     /// Returns this filter over `range`, which keeps its rows and contains its columns, with each
     /// filter column renumbered from the new first column.
     pub(crate) fn widened(&self, range: CellRange) -> Self {

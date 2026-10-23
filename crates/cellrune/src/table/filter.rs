@@ -1275,6 +1275,21 @@ impl TableAutoFilter {
         }
     }
 
+    /// Spans a filter without filter columns or sort over `first_column..=last_column`, which lie
+    /// inside its current columns.
+    pub(crate) fn narrowed(&self, first_column: crate::Column, last_column: crate::Column) -> Self {
+        debug_assert!(self.filter_columns.is_empty() && self.sort_state.is_none());
+        Self {
+            range: CellRange::from_ordered(
+                crate::CellAddress::new(self.range.start().row(), first_column),
+                crate::CellAddress::new(self.range.end().row(), last_column),
+            ),
+            range_is_explicit: self.range_is_explicit,
+            filter_columns: Vec::new(),
+            sort_state: None,
+        }
+    }
+
     pub(crate) fn resized_from_empty(&self, range: CellRange) -> Self {
         debug_assert!(self.sort_state.is_none());
         Self {

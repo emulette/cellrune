@@ -1,13 +1,22 @@
+mod auto_filter_edit;
 mod change;
 mod executor;
 mod formula_edit;
+mod name_rename;
 mod receipt;
+mod sheet_copy;
 mod sheet_delete;
+mod sheet_move;
 mod staged;
+mod tab_order;
+mod table_convert;
+mod table_create;
 mod table_edit;
+mod table_range;
 mod widen_edit;
 
 pub use change::{EditBatch, WorkbookChange};
+pub(crate) use name_rename::DefinedNameRename;
 pub use receipt::EditReceipt;
 
 use crate::ValidationError;

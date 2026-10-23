@@ -17,65 +17,54 @@ const DETAIL_AUTO_FILTER_STRUCTURE: &str =
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
-/// The worksheet-level `<autoFilter>` being rewritten.
-struct FilterPatch<'a> {
-    filter: &'a SheetAutoFilter,
-    saw_filter: bool,
-    open_depth: Option<u64>,
-    next_column: usize,
+/// Worksheet elements that follow `<autoFilter>` in CT_Worksheet order, before one of which a new
+/// filter is inserted.
+const AFTER_AUTO_FILTER: &[&str] = &[
+    "sortState",
+    "dataConsolidate",
+    "customSheetViews",
+    "mergeCells",
+    "phoneticPr",
+    "conditionalFormatting",
+    "dataValidations",
+    "hyperlinks",
+    "printOptions",
+    "pageMargins",
+    "pageSetup",
+    "headerFooter",
+    "rowBreaks",
+    "colBreaks",
+    "customProperties",
+    "cellWatches",
+    "ignoredErrors",
+    "smartTags",
+    "drawing",
+    "legacyDrawing",
+    "legacyDrawingHF",
+    "drawingHF",
+    "picture",
+    "oleObjects",
+    "controls",
+    "webPublishItems",
+    "tableParts",
+    "extLst",
+];
+
+/// What happens to one worksheet element as the filter is rewritten.
+enum FilterAction {
+    Keep(BytesStart<'static>),
+    Drop,
 }
 
-impl FilterPatch<'_> {
-    /// Rewrites the filter reference or the next `<filterColumn>` identifier and passes every
-    /// other element through.
-    fn patch(
-        &mut self,
-        xml: &NsReader<&[u8]>,
-        element: BytesStart<'_>,
-        depth: u64,
-        has_children: bool,
-        source: &PartPath,
-    ) -> Result<BytesStart<'static>, XlsxWriteError> {
-        let local = element.local_name();
-        if depth == 2
-            && local.as_ref() == "autoFilter"
-            && is_spreadsheet_element(xml, element.name())
-        {
-            if std::mem::replace(&mut self.saw_filter, true) {
-                return Err(invalid_structure(source));
-            }
-            if has_children {
-                self.open_depth = Some(depth);
-            }
-            return patch_attributes(
-                &element,
-                source,
-                &[("ref", Some(range_text(self.filter.range())))],
-            );
-        }
-        if self.open_depth.is_some_and(|parent| depth == parent + 1)
-            && local.as_ref() == "filterColumn"
-            && is_spreadsheet_element(xml, element.name())
-        {
-            let column_id = self
-                .filter
-                .filter_column_ids()
-                .get(self.next_column)
-                .ok_or_else(|| invalid_structure(source))?;
-            self.next_column += 1;
-            return replace_changed_attribute(element, source, "colId", column_id.to_string());
-        }
-        Ok(element.into_owned())
-    }
-}
-
-/// Rewrites the worksheet-level `<autoFilter>` reference and the `colId` of each of its
-/// `<filterColumn>` children in declaration order. Filter criteria, sort state, and every other
-/// worksheet element pass through unchanged.
-pub(crate) fn patch_sheet_auto_filter(
+/// Rewrites the worksheet-level `<autoFilter>` from `original` to `draft`: a changed filter gets
+/// its new reference, and each `<filterColumn>` keeps its settings under the `colId` of the same
+/// worksheet column, or leaves with its column; a removed filter leaves with its content, and a
+/// new one is written where CT_Worksheet places it. Every other worksheet element passes through.
+pub(crate) fn rewrite_sheet_auto_filter(
     source_bytes: &[u8],
     source: &PartPath,
-    filter: &SheetAutoFilter,
+    original: Option<&SheetAutoFilter>,
+    draft: Option<&SheetAutoFilter>,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     enforce_bytes(source_bytes.len(), limits, source)?;
@@ -87,32 +76,83 @@ pub(crate) fn patch_sheet_auto_filter(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
     let mut depth = 0_u64;
-    let mut patch = FilterPatch {
-        filter,
-        saw_filter: false,
-        open_depth: None,
-        next_column: 0,
-    };
-
+    let mut root_name = String::new();
+    let mut saw_filter = false;
+    let mut inserted = original.is_some() || draft.is_none();
+    // The depth of an element being dropped with its content.
+    let mut skip_depth = None::<u64>;
     loop {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        if let Some(skip) = skip_depth {
+            match event {
+                Event::Start(_) => depth = depth.saturating_add(1),
+                Event::End(_) => {
+                    if depth == skip {
+                        skip_depth = None;
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            buffer.clear();
+            continue;
+        }
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
                 enforce_depth(depth, limits, source)?;
-                let element = patch.patch(&xml, element, depth, true, source)?;
-                write_event(&mut writer, Event::Start(element), source)?;
+                if depth == 1 {
+                    root_name = element.name().as_ref().to_owned();
+                }
+                if !inserted
+                    && depth == 2
+                    && AFTER_AUTO_FILTER.contains(&element.local_name().as_ref())
+                {
+                    write_new_filter(&mut writer, &root_name, draft, source)?;
+                    inserted = true;
+                }
+                match filter_action(
+                    &xml,
+                    element,
+                    depth,
+                    original,
+                    draft,
+                    &mut saw_filter,
+                    source,
+                )? {
+                    FilterAction::Keep(element) => {
+                        write_event(&mut writer, Event::Start(element), source)?;
+                    }
+                    FilterAction::Drop => skip_depth = Some(depth),
+                }
             }
             Event::Empty(element) => {
                 let element_depth = depth.saturating_add(1);
                 enforce_depth(element_depth, limits, source)?;
-                let element = patch.patch(&xml, element, element_depth, false, source)?;
-                write_event(&mut writer, Event::Empty(element), source)?;
+                if !inserted
+                    && element_depth == 2
+                    && AFTER_AUTO_FILTER.contains(&element.local_name().as_ref())
+                {
+                    write_new_filter(&mut writer, &root_name, draft, source)?;
+                    inserted = true;
+                }
+                if let FilterAction::Keep(element) = filter_action(
+                    &xml,
+                    element,
+                    element_depth,
+                    original,
+                    draft,
+                    &mut saw_filter,
+                    source,
+                )? {
+                    write_event(&mut writer, Event::Empty(element), source)?;
+                }
             }
             Event::End(element) => {
-                if patch.open_depth == Some(depth) {
-                    patch.open_depth = None;
+                if !inserted && depth == 1 {
+                    write_new_filter(&mut writer, &root_name, draft, source)?;
+                    inserted = true;
                 }
                 write_event(&mut writer, Event::End(element.into_owned()), source)?;
                 depth = depth.saturating_sub(1);
@@ -122,12 +162,85 @@ pub(crate) fn patch_sheet_auto_filter(
         }
         buffer.clear();
     }
-    if !patch.saw_filter || patch.next_column != filter.filter_column_ids().len() {
+    if original.is_some() != saw_filter || !inserted {
         return Err(invalid_structure(source));
     }
     let output = writer.into_inner().into_inner();
     enforce_bytes(output.len(), limits, source)?;
     Ok(output)
+}
+
+/// Decides what happens to the worksheet-level `<autoFilter>` and its `<filterColumn>` children;
+/// every other element is kept as it is.
+fn filter_action(
+    xml: &NsReader<&[u8]>,
+    element: BytesStart<'_>,
+    depth: u64,
+    original: Option<&SheetAutoFilter>,
+    draft: Option<&SheetAutoFilter>,
+    saw_filter: &mut bool,
+    source: &PartPath,
+) -> Result<FilterAction, XlsxWriteError> {
+    let local = element.local_name();
+    if depth == 2 && local.as_ref() == "autoFilter" && is_spreadsheet_element(xml, element.name()) {
+        if std::mem::replace(saw_filter, true) {
+            return Err(invalid_structure(source));
+        }
+        return Ok(match draft {
+            None => FilterAction::Drop,
+            Some(filter) => FilterAction::Keep(patch_attributes(
+                &element,
+                source,
+                &[("ref", Some(range_text(filter.range())))],
+            )?),
+        });
+    }
+    if depth == 3
+        && *saw_filter
+        && local.as_ref() == "filterColumn"
+        && is_spreadsheet_element(xml, element.name())
+    {
+        let (Some(original), Some(draft)) = (original, draft) else {
+            return Err(invalid_structure(source));
+        };
+        let column_id = element
+            .try_get_attribute("colId")
+            .map_err(|error| invalid_xml(source, error))?
+            .and_then(|attribute| attribute.value.parse::<u32>().ok())
+            .ok_or_else(|| invalid_structure(source))?;
+        let column = original.range().start().column().get() + column_id;
+        let range = draft.range();
+        if column < range.start().column().get() || column > range.end().column().get() {
+            return Ok(FilterAction::Drop);
+        }
+        return Ok(FilterAction::Keep(replace_changed_attribute(
+            element,
+            source,
+            "colId",
+            (column - range.start().column().get()).to_string(),
+        )?));
+    }
+    Ok(FilterAction::Keep(element.into_owned()))
+}
+
+/// Writes a new `<autoFilter>` named like the worksheet root's children.
+fn write_new_filter(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    root_name: &str,
+    filter: Option<&SheetAutoFilter>,
+    source: &PartPath,
+) -> Result<(), XlsxWriteError> {
+    let Some(filter) = filter else {
+        return Ok(());
+    };
+    let prefix = root_name
+        .rfind(':')
+        .map_or("", |index| &root_name[..=index]);
+    let name = format!("{prefix}autoFilter");
+    let mut element = BytesStart::new(name.as_str());
+    let range = range_text(filter.range());
+    element.push_attribute(("ref", range.as_str()));
+    write_event(writer, Event::Empty(element), source)
 }
 
 fn write_event(

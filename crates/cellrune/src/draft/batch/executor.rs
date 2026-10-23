@@ -5,15 +5,22 @@ use super::super::{
     WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
 };
+use super::auto_filter_edit::set_sheet_auto_filter;
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
+use super::name_rename::rename_defined_name;
+use super::sheet_copy::{SheetCopy, copy_sheet};
 use super::sheet_delete::delete_sheet;
+use super::sheet_move::move_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
+use super::table_convert::convert_table_to_range;
+use super::table_create::create_table;
 use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
     resize_table_rows, table_header_column, table_header_edit_error, table_locations,
 };
+use super::table_range::set_table_range;
 use super::widen_edit::{align_filter_database_name, widen_sheet_auto_filter, widen_table_columns};
 use super::{
     BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
@@ -95,6 +102,9 @@ impl WorkbookDraft {
         let mut previous_changed_table_ids = clone_set(&self.changed_table_ids, rewrite_budget)?;
         let mut changed_table_ids = BTreeSet::new();
         let mut workbook_changed = self.workbook_changed;
+        let mut tab_steps = clone_slice(&self.tab_steps, rewrite_budget)?;
+        let mut name_renames = clone_slice(&self.name_renames, rewrite_budget)?;
+        let mut copied_sheets = self.copied_sheets.clone();
         let mut changed_cells = BTreeSet::new();
         let mut calculation_changed_cells = BTreeSet::new();
         let mut touched_sheets = BTreeSet::new();
@@ -105,6 +115,16 @@ impl WorkbookDraft {
         let mut cell_formulas_changed = false;
         let mut calculation_metadata_changed = false;
         let mut semantic_changed = false;
+        // Every ID the workbook or this batch has used stays taken, including those of sheets
+        // deleted since, so an added sheet takes the one after the highest.
+        let mut highest_sheet_id = sheets
+            .iter()
+            .map(Sheet::id)
+            .chain(non_worksheet_tabs.iter().map(|tab| tab.id()))
+            .chain(self.workbook.highest_sheet_id())
+            .map(SheetId::get)
+            .max()
+            .unwrap_or(0);
 
         for change in batch.changes() {
             match change {
@@ -350,19 +370,12 @@ impl WorkbookDraft {
                         }
                         .into());
                     }
-                    let maximum = sheets
-                        .iter()
-                        .map(Sheet::id)
-                        .chain(non_worksheet_tabs.iter().map(|tab| tab.id()))
-                        .chain(self.workbook.highest_sheet_id())
-                        .map(SheetId::get)
-                        .max()
-                        .unwrap_or(0);
-                    let next = maximum
+                    let next = highest_sheet_id
                         .checked_add(1)
                         .ok_or(ValidationError::SheetIdExhausted)?;
                     let sheet_id =
                         SheetId::new(next).map_err(|_| ValidationError::SheetIdExhausted)?;
+                    highest_sheet_id = next;
                     sheets.push(Sheet::new(sheet_id, name.clone(), SheetVisibility::Visible));
                     added_sheets.insert(sheet_id);
                     created_sheet_ids.push(sheet_id);
@@ -395,7 +408,7 @@ impl WorkbookDraft {
                     }
                 }
                 WorkbookChange::DeleteSheet { sheet_id } => {
-                    let removed = delete_sheet(
+                    let (removed, step) = delete_sheet(
                         &mut sheets,
                         &mut defined_names,
                         &mut non_worksheet_tabs,
@@ -412,6 +425,7 @@ impl WorkbookDraft {
                         },
                         *sheet_id,
                     )?;
+                    tab_steps.push(step);
                     // Nothing the draft recorded for the sheet outlives it: its cells, tables, and
                     // presentation are gone, and the writer drops its package parts.
                     let elsewhere = |cell: &CalculationCellId| cell.sheet_id() != *sheet_id;
@@ -423,10 +437,87 @@ impl WorkbookDraft {
                     presentation_sheet_mutations.remove(sheet_id);
                     touched_sheets.remove(sheet_id);
                     added_sheets.remove(sheet_id);
+                    copied_sheets.remove(sheet_id);
                     for table in removed.tables() {
                         changed_table_ids.remove(&table.id());
                         previous_changed_table_ids.remove(&table.id());
                     }
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::CopySheet { sheet_id, position } => {
+                    let next = highest_sheet_id
+                        .checked_add(1)
+                        .ok_or(ValidationError::SheetIdExhausted)?;
+                    let copy_id =
+                        SheetId::new(next).map_err(|_| ValidationError::SheetIdExhausted)?;
+                    let copied_tables = copy_sheet(
+                        &mut sheets,
+                        &mut defined_names,
+                        &mut non_worksheet_tabs,
+                        source,
+                        rewrite_budget,
+                        SheetCopy {
+                            sheet_id: *sheet_id,
+                            position: *position,
+                            copy_id,
+                        },
+                    )?;
+                    highest_sheet_id = next;
+                    presentation.copy_sheet(*sheet_id, copy_id);
+                    // The writer duplicates the source part of a sheet the document holds, which a
+                    // copy of a copy reaches through its own source.
+                    let origin =
+                        if source.is_some_and(|source| source.sheet_by_id(*sheet_id).is_some()) {
+                            Some(*sheet_id)
+                        } else {
+                            copied_sheets.get(sheet_id).copied()
+                        };
+                    match origin {
+                        Some(origin) => {
+                            copied_sheets.insert(copy_id, origin);
+                        }
+                        None => {
+                            added_sheets.insert(copy_id);
+                        }
+                    }
+                    created_sheet_ids.push(copy_id);
+                    changed_table_ids.extend(copied_tables.into_iter().map(|(_, copied)| copied));
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::MoveSheet { sheet_id, position } => {
+                    let Some(step) = move_sheet(
+                        &mut sheets,
+                        &mut defined_names,
+                        &mut non_worksheet_tabs,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *sheet_id,
+                        *position,
+                    )?
+                    else {
+                        continue;
+                    };
+                    tab_steps.push(step);
+                    // Table locations name sheets by their index, which the move changed.
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
@@ -481,6 +572,36 @@ impl WorkbookDraft {
                         candidate.scope() != *scope || candidate.lookup_key() != lookup.as_str()
                     });
                     if defined_names.len() != previous_len {
+                        workbook_changed = true;
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
+                WorkbookChange::RenameDefinedName {
+                    scope,
+                    name,
+                    new_name,
+                } => {
+                    if let Some(rename) = rename_defined_name(
+                        &mut sheets,
+                        &mut defined_names,
+                        &non_worksheet_tabs,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *scope,
+                        name,
+                        new_name,
+                    )? {
+                        name_renames.push(rename);
                         workbook_changed = true;
                         topology_changed = true;
                         semantic_changed = true;
@@ -592,6 +713,91 @@ impl WorkbookDraft {
                         semantic_changed = true;
                     }
                 }
+                WorkbookChange::CreateTable {
+                    sheet_id,
+                    range,
+                    name,
+                } => {
+                    create_table(
+                        &mut sheets,
+                        &defined_names,
+                        TableEditState {
+                            mutations: &mut cell_mutations,
+                            changed_cells: &mut changed_cells,
+                            calculation_changed_cells: &mut calculation_changed_cells,
+                            touched_sheets: &mut touched_sheets,
+                            changed_table_ids: &mut changed_table_ids,
+                            presentation: &presentation,
+                            source,
+                        },
+                        *sheet_id,
+                        *range,
+                        name.as_ref(),
+                    )?;
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::ConvertTableToRange { table_id } => {
+                    convert_table_to_range(
+                        &mut sheets,
+                        &mut defined_names,
+                        TableFormulaEdit {
+                            state: TableEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                                changed_table_ids: &mut changed_table_ids,
+                                presentation: &presentation,
+                                source,
+                            },
+                            locations: &table_locations,
+                            formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *table_id,
+                    )?;
+                    previous_changed_table_ids.remove(table_id);
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::SetTableRange { table_id, range } => {
+                    if set_table_range(
+                        &mut sheets,
+                        &mut defined_names,
+                        TableResizeEdit {
+                            state: TableEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                                changed_table_ids: &mut changed_table_ids,
+                                presentation: &presentation,
+                                source,
+                            },
+                            locations: &table_locations,
+                            rewrite_budget,
+                            materialization_budget,
+                        },
+                        &table_formula_locations,
+                        *table_id,
+                        *range,
+                    )? {
+                        table_formula_locations =
+                            super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                        workbook_changed = true;
+                        topology_changed = true;
+                        semantic_changed = true;
+                    }
+                }
                 WorkbookChange::WidenTableColumns { table_id, range } => {
                     if widen_table_columns(&mut sheets, &table_locations, *table_id, *range)? {
                         changed_table_ids.insert(*table_id);
@@ -608,6 +814,18 @@ impl WorkbookDraft {
                             workbook_changed = true;
                             topology_changed = true;
                         }
+                    }
+                }
+                WorkbookChange::SetSheetAutoFilter { sheet_id, range } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let edit = set_sheet_auto_filter(sheet, &mut defined_names, *range)?;
+                    if edit.filter_changed {
+                        touched_sheets.insert(*sheet_id);
+                        semantic_changed = true;
+                    }
+                    if edit.names_changed {
+                        workbook_changed = true;
+                        topology_changed = true;
                     }
                 }
                 WorkbookChange::SetCellFormat {
@@ -687,6 +905,7 @@ impl WorkbookDraft {
                 BatchExecutionError::Rewrite(FormulaRewriteError::Cancelled)
             }
         })?
+        .with_highest_sheet_id(highest_sheet_id)
         .with_semantic_revision(result_revision);
 
         self.workbook = std::sync::Arc::new(workbook);
@@ -700,6 +919,9 @@ impl WorkbookDraft {
             .copied()
             .collect();
         self.workbook_changed = workbook_changed;
+        self.tab_steps = tab_steps;
+        self.name_renames = name_renames;
+        self.copied_sheets = copied_sheets;
 
         Ok(EditReceipt {
             base_revision,

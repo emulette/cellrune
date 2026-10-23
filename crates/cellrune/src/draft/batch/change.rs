@@ -71,6 +71,32 @@ pub enum WorkbookChange {
         /// Target sheet.
         sheet_id: SheetId,
     },
+    /// Moves a tab to another position of the tab order, which counts chartsheets and other tabs
+    /// that are not worksheets.
+    ///
+    /// The tab keeps its ID, its scoped names follow it, and the active sheet stays the same sheet.
+    /// A 3-D reference's tabs follow tab order, so it gains or loses the tabs moved across its
+    /// ends and keeps its text, unless the move puts its ends out of order: the moved end then
+    /// becomes its neighbour inside the old span, as Excel does.
+    MoveSheet {
+        /// Target tab.
+        sheet_id: SheetId,
+        /// Zero-based tab position the tab takes, counted after the move.
+        position: usize,
+    },
+    /// Copies a worksheet to a tab position, as Excel's Move or Copy does within a workbook.
+    ///
+    /// The copy takes the next sheet ID and the name `Name (2)`, or the next free number. In its
+    /// formulas, a reference to the source sheet names the copy, while other sheets' and 3-D
+    /// references keep their text. Its tables take new IDs and names, its source's scoped names
+    /// are copied to it, and each workbook name that reads the source sheet becomes a name of the
+    /// copy too.
+    CopySheet {
+        /// Source worksheet.
+        sheet_id: SheetId,
+        /// Zero-based tab position the copy takes, counted after the copy.
+        position: usize,
+    },
     /// Changes sheet visibility while retaining at least one visible sheet.
     SetSheetVisibility {
         /// Target sheet.
@@ -89,6 +115,20 @@ pub enum WorkbookChange {
         scope: DefinedNameScope,
         /// Name to remove.
         name: Box<str>,
+    },
+    /// Renames a defined name and rewrites the references that resolve to it in cell formulas,
+    /// defined names, table formulas, and data validation formulas.
+    ///
+    /// A use resolves to a sheet's own name on that sheet or qualified with it, else to the
+    /// workbook name, so only those uses are rewritten; `INDIRECT` text and other workbooks'
+    /// names keep their text.
+    RenameDefinedName {
+        /// Workbook or sheet scope of the renamed name.
+        scope: DefinedNameScope,
+        /// Current name, matched case-insensitively.
+        name: Box<str>,
+        /// New name.
+        new_name: Box<str>,
     },
     /// Changes the workbook date system.
     SetDateSystem {
@@ -125,6 +165,43 @@ pub enum WorkbookChange {
         /// Last one-based data-body row.
         last_data_row: Row,
     },
+    /// Creates a table over a range whose first row is its header, as Excel's Format as Table
+    /// does.
+    ///
+    /// Each text header cell names its column, and a blank one is named `Column` and its position,
+    /// which the cell then holds. The table gets the next free table ID, a filter over its range,
+    /// Excel's default style, and `name`, or by default `Table` and the number after the
+    /// workbook's table count.
+    CreateTable {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Table range, header row included.
+        range: CellRange,
+        /// Display name, or `None` for the default.
+        name: Option<TableName>,
+    },
+    /// Converts a table to a plain range, as Excel's Convert to Range does.
+    ///
+    /// The table leaves its sheet with its filter, its cells keep their values and formulas, and
+    /// every structured reference to it becomes the sheet-qualified absolute reference to the
+    /// cells it names (`Things[val]` becomes `'S2'!$D$2:$D$4`), a this-row reference keeping its
+    /// row relative (`[@val]` becomes `'S2'!$D2`).
+    ConvertTableToRange {
+        /// Target table.
+        table_id: TableId,
+    },
+    /// Changes a table's range: its header row stays, its columns grow or shrink at either side,
+    /// and its data rows grow or shrink above its totals row.
+    ///
+    /// A new column is named by the text in its header cell. A removed column's cells keep their
+    /// content, and a structured reference that names it, alone or as an end of a column range,
+    /// becomes `#REF!`, as Excel does.
+    SetTableRange {
+        /// Target table.
+        table_id: TableId,
+        /// New full table range, header and totals rows included.
+        range: CellRange,
+    },
     /// Widens one table by columns, naming each new column from the text in its header cell.
     WidenTableColumns {
         /// Target table.
@@ -139,6 +216,17 @@ pub enum WorkbookChange {
         sheet_id: SheetId,
         /// New filter range, which keeps the current rows and contains the current range.
         range: CellRange,
+    },
+    /// Creates, changes, or, with `None`, removes the sheet-level auto-filter, keeping the hidden
+    /// `_xlnm._FilterDatabase` name Excel keeps equal to its range.
+    ///
+    /// A changed filter keeps the settings of the filter columns whose worksheet columns it still
+    /// covers; rows a filter hid stay hidden.
+    SetSheetAutoFilter {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Filtered range, including its header row, or `None` to remove the filter.
+        range: Option<CellRange>,
     },
     /// Sets font, fill, border, or alignment properties of the format one cell displays with,
     /// merged into its current format as [`CellFormatEdit`] describes.
@@ -254,6 +342,16 @@ impl WorkbookChange {
         Self::DeleteSheet { sheet_id }
     }
 
+    /// Constructs a tab move to zero-based `position` of the tab order.
+    pub const fn move_sheet(sheet_id: SheetId, position: usize) -> Self {
+        Self::MoveSheet { sheet_id, position }
+    }
+
+    /// Constructs a worksheet copy to zero-based `position` of the tab order.
+    pub const fn copy_sheet(sheet_id: SheetId, position: usize) -> Self {
+        Self::CopySheet { sheet_id, position }
+    }
+
     /// Constructs a sheet-visibility change.
     pub const fn set_sheet_visibility(sheet_id: SheetId, visibility: SheetVisibility) -> Self {
         Self::SetSheetVisibility {
@@ -272,6 +370,19 @@ impl WorkbookChange {
         Self::RemoveDefinedName {
             scope,
             name: name.into(),
+        }
+    }
+
+    /// Constructs a defined-name rename in `scope`.
+    pub fn rename_defined_name(
+        scope: DefinedNameScope,
+        name: impl Into<Box<str>>,
+        new_name: impl Into<Box<str>>,
+    ) -> Self {
+        Self::RenameDefinedName {
+            scope,
+            name: name.into(),
+            new_name: new_name.into(),
         }
     }
 
@@ -330,6 +441,29 @@ impl WorkbookChange {
         })
     }
 
+    /// Constructs a table creation over `range`, named `name` or by default.
+    pub const fn create_table(
+        sheet_id: SheetId,
+        range: CellRange,
+        name: Option<TableName>,
+    ) -> Self {
+        Self::CreateTable {
+            sheet_id,
+            range,
+            name,
+        }
+    }
+
+    /// Constructs a conversion of a table to a plain range.
+    pub const fn convert_table_to_range(table_id: TableId) -> Self {
+        Self::ConvertTableToRange { table_id }
+    }
+
+    /// Constructs a table range change.
+    pub const fn set_table_range(table_id: TableId, range: CellRange) -> Self {
+        Self::SetTableRange { table_id, range }
+    }
+
     /// Constructs a stable-ID table column widening.
     pub const fn widen_table_columns(table_id: TableId, range: CellRange) -> Self {
         Self::WidenTableColumns { table_id, range }
@@ -338,6 +472,11 @@ impl WorkbookChange {
     /// Constructs a sheet-level auto-filter column widening.
     pub const fn widen_sheet_auto_filter(sheet_id: SheetId, range: CellRange) -> Self {
         Self::WidenSheetAutoFilter { sheet_id, range }
+    }
+
+    /// Constructs a sheet-level auto-filter creation, change, or, with `None`, removal.
+    pub const fn set_sheet_auto_filter(sheet_id: SheetId, range: Option<CellRange>) -> Self {
+        Self::SetSheetAutoFilter { sheet_id, range }
     }
 
     /// Constructs a cell format change.

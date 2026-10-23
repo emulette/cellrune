@@ -18,13 +18,18 @@ const RELATIONSHIPS_NAMESPACE: &str =
     "http://schemas.openxmlformats.org/package/2006/relationships";
 
 #[derive(Debug)]
-pub(super) struct ContentTypes {
+pub(in crate::xlsx) struct ContentTypes {
     defaults: BTreeMap<Box<str>, Box<str>>,
     overrides: BTreeMap<PartPath, Box<str>>,
 }
 
 impl ContentTypes {
-    pub(super) fn content_type<'a>(&'a self, part: &PartPath) -> Option<&'a str> {
+    /// Reports whether `part` has an `<Override>` of its own rather than a type by extension.
+    pub(in crate::xlsx) fn overrides(&self, part: &PartPath) -> bool {
+        self.overrides.contains_key(part)
+    }
+
+    pub(in crate::xlsx) fn content_type<'a>(&'a self, part: &PartPath) -> Option<&'a str> {
         self.overrides.get(part).map_or_else(
             || {
                 part.extension().and_then(|extension| {
@@ -51,7 +56,7 @@ pub(in crate::xlsx) struct Relationship {
     pub(in crate::xlsx) target: RelationshipTarget,
 }
 
-pub(super) fn parse_content_types(
+pub(in crate::xlsx) fn parse_content_types(
     bytes: &[u8],
     source: &PartPath,
     limits: ReadLimits,
@@ -224,6 +229,93 @@ pub(in crate::xlsx) fn parse_relationships(
         ));
     }
     Ok(relationships.into_values().collect())
+}
+
+/// One relationship to a part of the same package.
+#[derive(Debug)]
+pub(in crate::xlsx) struct InternalRelationship {
+    pub(in crate::xlsx) id: Box<str>,
+    pub(in crate::xlsx) kind: Box<str>,
+    pub(in crate::xlsx) target: PartPath,
+}
+
+/// Reads the relationships of a part that point into the package, accepting what a producer
+/// writes in parts the reader does not otherwise open, such as drawing, chart, and VML
+/// relationships.
+///
+/// A relationship without an ID, a type, or a target that resolves to a part path, such as
+/// `Target="#Sheet1!A1"` or a `mailto:` link written without `TargetMode="External"`, cannot refer
+/// to a part and is skipped, and a repeated ID is kept as another relationship. Only XML that
+/// cannot be read fails.
+pub(in crate::xlsx) fn scan_internal_relationships(
+    bytes: &[u8],
+    relationship_part: &PartPath,
+    source_part: Option<&PartPath>,
+    limits: ReadLimits,
+) -> Result<Vec<InternalRelationship>, XlsxReadError> {
+    let mut reader = Reader::from_reader(bytes);
+    configure(&mut reader);
+    let mut buffer = Vec::new();
+    let mut depth = 0_u64;
+    let mut relationships = Vec::new();
+    loop {
+        let event = reader.read_event_into(&mut buffer).map_err(|error| {
+            xml_error(relationship_part, XlsxErrorCode::InvalidXml).with_cause(error)
+        })?;
+        let (element, element_depth) = match event {
+            Event::Start(element) => {
+                depth = checked_depth(depth, limits, relationship_part)?;
+                (element, depth)
+            }
+            Event::Empty(element) => {
+                let element_depth = checked_depth(depth, limits, relationship_part)?;
+                (element, element_depth)
+            }
+            Event::End(_) => {
+                depth = depth.checked_sub(1).ok_or_else(|| {
+                    xml_error(relationship_part, XlsxErrorCode::InvalidXml)
+                        .with_detail(detail::UNEXPECTED_CLOSING_ELEMENT)
+                })?;
+                buffer.clear();
+                continue;
+            }
+            Event::DocType(_) => {
+                return Err(xml_error(
+                    relationship_part,
+                    XlsxErrorCode::ForbiddenXmlConstruct,
+                ));
+            }
+            Event::Eof => break,
+            _ => {
+                buffer.clear();
+                continue;
+            }
+        };
+        let attributes = read_attributes(&element, limits, relationship_part)?;
+        if element_depth == 2 && element.local_name().as_ref() == ELEMENT_RELATIONSHIP {
+            let internal = attributes
+                .get("TargetMode")
+                .is_none_or(|mode| mode.as_ref() == "Internal");
+            if let (true, Some(id), Some(kind), Some(target)) = (
+                internal,
+                attributes.get("Id"),
+                attributes.get("Type"),
+                attributes.get("Target"),
+            ) && let Ok(target) = PartPath::resolve_relationship(source_part, target)
+            {
+                relationships.push(InternalRelationship {
+                    id: id.clone(),
+                    kind: kind.clone(),
+                    target,
+                });
+            }
+        }
+        buffer.clear();
+    }
+    if depth != 0 {
+        return Err(xml_error(relationship_part, XlsxErrorCode::InvalidXml));
+    }
+    Ok(relationships)
 }
 
 fn configure(reader: &mut Reader<&[u8]>) {

@@ -1,15 +1,19 @@
 use super::ast::{
-    Expr, Reference, SheetPrefix, StructuredColumns, StructuredReference,
+    Expr, ExternalReferenceTarget, Reference, SheetPrefix, StructuredColumns, StructuredReference,
     structured_column_needs_grouping, structured_simple_column_needs_grouping,
 };
 use super::error::ParseErrorCode;
+use super::functions::function_evaluator;
 use super::lexer::{Token, lex_spanned};
 use super::parser::parse_formula_with_limits;
+pub(crate) use super::sheet_changes::SheetChanges;
+use super::sheet_changes::{SheetOutcome, SpanOutcome};
 use super::structured_reference::parse_structured_reference;
 use super::syntax::{
     NodeSpanTree, ParsedFormula, SourceComponent, SourceComponentKind, SourceEdit, SourceEditError,
     SourceSpan, apply_source_edits,
 };
+use super::table_conversion::TableArea;
 use super::{CalculationLimitKind, CalculationLimits};
 use crate::case_insensitive_eq;
 
@@ -19,7 +23,8 @@ pub(crate) enum FormulaRewriteRequest<'a> {
         old_name: &'a str,
         new_name: &'a str,
     },
-    /// Renames and deletes several sheets at once, so each reference is rewritten exactly once.
+    /// Renames, deletes, moves, or copies sheets at once, so each reference is rewritten exactly
+    /// once.
     Sheets(SheetChanges<'a>),
     Table {
         old_name: &'a str,
@@ -31,105 +36,122 @@ pub(crate) enum FormulaRewriteRequest<'a> {
         new_name: &'a str,
         owner_is_target_table: bool,
     },
+    /// Renames one defined name, rewriting only the references that resolve to it.
+    DefinedName(NameRename<'a>),
+    /// Removes columns from one table, so a structured reference that names one of them, alone or
+    /// as an end of a column range, becomes `#REF!`.
+    TableColumnsRemoved {
+        table_name: &'a str,
+        removed: &'a [&'a str],
+        owner_is_target_table: bool,
+    },
+    /// Converts one table to a range, so its structured references become A1 references.
+    TableToRange {
+        area: &'a TableArea<'a>,
+        /// Whether the formula belongs to the converted table, where an unqualified structured
+        /// reference names it.
+        owner_is_target_table: bool,
+        /// The formula's row when it is on the table's sheet.
+        this_row: Option<u32>,
+    },
 }
 
-/// Sheets renamed and deleted together, every name as the formulas spell it before the change.
+/// A defined name renamed in one scope, with what decides which references resolve to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SheetChanges<'a> {
-    /// `(old, new)` names of renamed sheets.
-    pub(crate) renames: &'a [(&'a str, &'a str)],
-    /// Names of deleted sheets.
-    pub(crate) deleted: &'a [&'a str],
-    /// Every tab name in tab order, deleted tabs and tabs that are not worksheets included. A 3-D
-    /// reference whose end sheet is deleted moves that end along this order.
-    pub(crate) tabs: &'a [&'a str],
-    /// Display names of the tables on deleted sheets.
-    pub(crate) deleted_tables: &'a [&'a str],
+pub(crate) struct NameRename<'a> {
+    pub(crate) old_name: &'a str,
+    pub(crate) new_name: &'a str,
+    /// The sheet the name is scoped to, as formulas spell it; `None` for workbook scope.
+    pub(crate) scope_sheet: Option<&'a str>,
+    /// Sheets with a name of their own spelled `old_name`, which a reference on such a sheet or
+    /// qualified with it resolves to instead of a workbook name.
+    pub(crate) shadowing_sheets: &'a [&'a str],
+    /// The sheet the rewritten formula belongs to; `None` for a workbook name's definition or a
+    /// chart.
+    pub(crate) owner_sheet: Option<&'a str>,
 }
 
-impl SheetChanges<'_> {
-    fn renamed(&self, name: &str) -> Option<&str> {
-        self.renames
+impl NameRename<'_> {
+    fn shadowed(&self, sheet: &str) -> bool {
+        self.shadowing_sheets
             .iter()
-            .find(|(old_name, _)| case_insensitive_eq(name, old_name))
-            .map(|(_, new_name)| *new_name)
+            .any(|shadowing| case_insensitive_eq(sheet, shadowing))
     }
 
-    fn is_deleted(&self, name: &str) -> bool {
-        self.deleted
-            .iter()
-            .any(|deleted| case_insensitive_eq(name, deleted))
-    }
-
-    fn is_deleted_table(&self, name: &str) -> bool {
-        self.deleted_tables
-            .iter()
-            .any(|table| case_insensitive_eq(name, table))
-    }
-
-    fn tab_position(&self, name: &str) -> Option<usize> {
-        self.tabs
-            .iter()
-            .position(|tab| case_insensitive_eq(name, tab))
-    }
-
-    /// Resolves the sheets a reference from `start` through `end` keeps: each deleted end moves to
-    /// the nearest remaining tab toward the other end. `None` means no tab remains, or a deleted
-    /// end's span cannot be placed in the tab order, and the reference becomes `#REF!`.
-    fn remaining_span<'name>(
-        &'name self,
-        start: &'name str,
-        end: &'name str,
-    ) -> Option<(&'name str, &'name str)> {
-        if !self.is_deleted(start) && !self.is_deleted(end) {
-            return Some((start, end));
+    /// Reports whether an unqualified use of `old_name` resolves to the renamed name: a sheet's
+    /// own name wins over a workbook name on that sheet.
+    fn resolves_unqualified(&self) -> bool {
+        match self.scope_sheet {
+            None => self.owner_sheet.is_none_or(|owner| !self.shadowed(owner)),
+            Some(scope) => self
+                .owner_sheet
+                .is_some_and(|owner| case_insensitive_eq(owner, scope)),
         }
-        let first = self.tab_position(start)?;
-        let last = self.tab_position(end)?;
-        let nearest_remaining = |from: usize, to: usize| {
-            let mut position = from;
-            loop {
-                if !self.is_deleted(self.tabs[position]) {
-                    return Some(self.tabs[position]);
-                }
-                if position == to {
-                    return None;
-                }
-                position = if from < to {
-                    position + 1
-                } else {
-                    position - 1
-                };
-            }
-        };
-        Some((
-            nearest_remaining(first, last)?,
-            nearest_remaining(last, first)?,
-        ))
+    }
+
+    /// Reports whether `sheet!old_name` resolves to the renamed name: the sheet's own name, else
+    /// the workbook name.
+    fn resolves_qualified(&self, sheet: &str) -> bool {
+        match self.scope_sheet {
+            None => !self.shadowed(sheet),
+            Some(scope) => case_insensitive_eq(sheet, scope),
+        }
     }
 }
 
 impl FormulaRewriteRequest<'_> {
-    fn renamed_sheet(&self, name: &str) -> Option<&str> {
+    /// Resolves a single-sheet qualifier.
+    fn single_sheet(&self, name: &str) -> SheetOutcome<'_> {
+        match self {
+            Self::Sheet { old_name, new_name } if case_insensitive_eq(name, old_name) => {
+                SheetOutcome::Renamed(new_name)
+            }
+            Self::Sheets(changes) => changes.single(name),
+            Self::Sheet { .. }
+            | Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::DefinedName(_)
+            | Self::TableColumnsRemoved { .. }
+            | Self::TableToRange { .. } => SheetOutcome::Unchanged,
+        }
+    }
+
+    /// Resolves the qualifier of a 3-D reference.
+    fn sheet_span(&self, start: &str, end: &str) -> SpanOutcome<'_> {
         match self {
             Self::Sheet { old_name, new_name } => {
-                case_insensitive_eq(name, old_name).then_some(*new_name)
+                let start = case_insensitive_eq(start, old_name).then_some(*new_name);
+                let end = case_insensitive_eq(end, old_name).then_some(*new_name);
+                if start.is_none() && end.is_none() {
+                    SpanOutcome::Unchanged
+                } else {
+                    SpanOutcome::Ends { start, end }
+                }
             }
-            Self::Sheets(changes) => changes.renamed(name),
-            Self::Table { .. } | Self::TableColumn { .. } => None,
+            Self::Sheets(changes) => changes.span(start, end),
+            Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::DefinedName(_)
+            | Self::TableColumnsRemoved { .. }
+            | Self::TableToRange { .. } => SpanOutcome::Unchanged,
         }
     }
 
     const fn sheet_changes(&self) -> Option<&SheetChanges<'_>> {
         match self {
             Self::Sheets(changes) => Some(changes),
-            Self::Sheet { .. } | Self::Table { .. } | Self::TableColumn { .. } => None,
+            Self::Sheet { .. }
+            | Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::DefinedName(_)
+            | Self::TableColumnsRemoved { .. }
+            | Self::TableToRange { .. } => None,
         }
     }
 
     /// Reports whether a deletion turns `expr`, read through parentheses, into `#REF!` as a whole:
-    /// a reference or qualified name on a deleted sheet, a 3-D reference no tab of which remains,
-    /// or a structured reference to a table on a deleted sheet.
+    /// a reference or qualified name on a deleted sheet, a 3-D reference no worksheet of which
+    /// remains, or a structured reference to a table on a deleted sheet.
     fn deletes_reference(&self, mut expr: &Expr) -> bool {
         let Some(changes) = self.sheet_changes() else {
             return false;
@@ -142,12 +164,10 @@ impl FormulaRewriteRequest<'_> {
                 sheet: Some(prefix),
                 ..
             })
-            | Expr::QualifiedName { sheet: prefix, .. } => changes
-                .remaining_span(
-                    &prefix.name,
-                    prefix.end_name.as_deref().unwrap_or(&prefix.name),
-                )
-                .is_none(),
+            | Expr::QualifiedName { sheet: prefix, .. } => match prefix.end_name.as_deref() {
+                None => changes.single(&prefix.name) == SheetOutcome::Deleted,
+                Some(end) => changes.span(&prefix.name, end) == SpanOutcome::Deleted,
+            },
             Expr::StructuredRef(reference) => reference
                 .table
                 .as_deref()
@@ -380,6 +400,77 @@ pub(crate) fn rewrite_formula(
             edits.push(SourceEdit::new(source_node.span(), DELETED_REFERENCE));
             continue;
         }
+        if let FormulaRewriteRequest::DefinedName(rename) = request {
+            plan_name_edit(source, expr, source_node, rename, &mut edits, budget)?;
+        }
+        if let (
+            FormulaRewriteRequest::TableColumnsRemoved {
+                table_name,
+                removed,
+                owner_is_target_table,
+            },
+            Expr::StructuredRef(reference),
+        ) = (request, expr)
+        {
+            let targets_table = reference
+                .table
+                .as_deref()
+                .map_or(*owner_is_target_table, |table| {
+                    case_insensitive_eq(table, table_name)
+                });
+            let removed_column = |name: &str| {
+                removed
+                    .iter()
+                    .any(|removed| case_insensitive_eq(name, removed))
+            };
+            let names_removed = match &reference.columns {
+                Some(StructuredColumns::Single(column)) => removed_column(column),
+                Some(StructuredColumns::Range { start, end }) => {
+                    removed_column(start) || removed_column(end)
+                }
+                None => false,
+            };
+            if targets_table && names_removed {
+                budget.charge_edit()?;
+                edits.push(SourceEdit::new(source_node.span(), DELETED_REFERENCE));
+                continue;
+            }
+        }
+        if let FormulaRewriteRequest::TableToRange {
+            area,
+            owner_is_target_table,
+            this_row,
+        } = request
+        {
+            // A bare table name means its data body, as `Things[]` does.
+            let bare = StructuredReference {
+                table: Some(area.display_name.into()),
+                items: Vec::new(),
+                columns: None,
+            };
+            let converted = match expr {
+                Expr::StructuredRef(reference)
+                    if reference
+                        .table
+                        .as_deref()
+                        .map_or(*owner_is_target_table, |table| {
+                            case_insensitive_eq(table, area.display_name)
+                        }) =>
+                {
+                    Some(reference)
+                }
+                Expr::Name(name) if case_insensitive_eq(name, area.display_name) => Some(&bare),
+                _ => None,
+            };
+            if let Some(reference) = converted {
+                budget.charge_edit()?;
+                edits.push(SourceEdit::new(
+                    source_node.span(),
+                    area.a1_text(reference, *this_row),
+                ));
+                continue;
+            }
+        }
         match expr {
             Expr::Ref(reference) => {
                 if let Some(prefix) = &reference.sheet {
@@ -441,7 +532,11 @@ pub(crate) fn rewrite_formula(
                         )?;
                     }
                 }
-                FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {}
+                FormulaRewriteRequest::Sheet { .. }
+                | FormulaRewriteRequest::Sheets(_)
+                | FormulaRewriteRequest::DefinedName(_)
+                | FormulaRewriteRequest::TableColumnsRemoved { .. }
+                | FormulaRewriteRequest::TableToRange { .. } => {}
             },
             Expr::ExternalReference(_) => continue,
             _ => {}
@@ -547,6 +642,72 @@ fn replaced_by_deletion(expr: &Expr, request: &FormulaRewriteRequest<'_>) -> boo
     }
 }
 
+/// Plans the edit of a name that resolves to the renamed name: an unqualified or sheet-qualified
+/// name, the name of a LAMBDA called like a function, or a `[0]!Name` reference, the form charts
+/// use for this workbook's names.
+fn plan_name_edit(
+    source: &str,
+    expr: &Expr,
+    source_node: &NodeSpanTree,
+    rename: &NameRename<'_>,
+    edits: &mut Vec<SourceEdit>,
+    budget: &mut FormulaRewriteBudget<'_>,
+) -> Result<(), FormulaRewriteError> {
+    let resolves = match expr {
+        Expr::Name(name) => {
+            case_insensitive_eq(name, rename.old_name) && rename.resolves_unqualified()
+        }
+        Expr::QualifiedName { sheet, name } => {
+            sheet.end_name.is_none()
+                && case_insensitive_eq(name, rename.old_name)
+                && rename.resolves_qualified(&sheet.name)
+        }
+        Expr::ExternalReference(reference) => {
+            reference.workbook.as_ref() == "[0]"
+                && reference.sheet_end.is_none()
+                && matches!(
+                    &reference.target,
+                    ExternalReferenceTarget::DefinedName(name)
+                        if case_insensitive_eq(name, rename.old_name)
+                )
+                && reference.sheet.as_deref().map_or_else(
+                    || rename.scope_sheet.is_none(),
+                    |sheet| rename.resolves_qualified(sheet),
+                )
+        }
+        Expr::Call { name, .. } => {
+            // A built-in function keeps its name; only a name defined as a LAMBDA is renamed.
+            if case_insensitive_eq(name, rename.old_name)
+                && function_evaluator(name).is_none()
+                && rename.resolves_unqualified()
+            {
+                let start = source_node.span().start;
+                let end = start + name.len();
+                if source
+                    .get(start..end)
+                    .is_some_and(|spelled| case_insensitive_eq(spelled, name))
+                {
+                    budget.charge_edit()?;
+                    edits.push(SourceEdit::new(
+                        SourceSpan::new(start, end),
+                        rename.new_name,
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        _ => false,
+    };
+    if resolves
+        && let Some(component) =
+            component(source_node.components(), SourceComponentKind::DefinedName)
+    {
+        budget.charge_edit()?;
+        edits.push(SourceEdit::new(component.span(), rename.new_name));
+    }
+    Ok(())
+}
+
 fn plan_sheet_prefix_edits(
     source: &str,
     prefix: &SheetPrefix,
@@ -559,7 +720,7 @@ fn plan_sheet_prefix_edits(
         return Ok(());
     };
     let Some(end_name) = prefix.end_name.as_deref() else {
-        if let Some(new_name) = request.renamed_sheet(&prefix.name) {
+        if let SheetOutcome::Renamed(new_name) = request.single_sheet(&prefix.name) {
             budget.charge_edit()?;
             edits.push(SourceEdit::new(
                 qualifier.span(),
@@ -571,39 +732,6 @@ fn plan_sheet_prefix_edits(
     let Some(range_end) = component(components, SourceComponentKind::SheetRangeEnd) else {
         return Ok(());
     };
-    // A deleted end of a 3-D reference moves to the nearest remaining tab, spelled with its new
-    // name when that tab was renamed as well.
-    let deleted = |name: &str| {
-        request
-            .sheet_changes()
-            .is_some_and(|changes| changes.is_deleted(name))
-    };
-    let (start, end) = request
-        .sheet_changes()
-        .and_then(|changes| changes.remaining_span(&prefix.name, end_name))
-        .unwrap_or((&prefix.name, end_name));
-    let collapsed = (deleted(&prefix.name) || deleted(end_name)) && case_insensitive_eq(start, end);
-    if !collapsed {
-        for (component, original, remaining) in [
-            (qualifier, prefix.name.as_str(), start),
-            (range_end, end_name, end),
-        ] {
-            let new_name = if deleted(original) {
-                Some(request.renamed_sheet(remaining).unwrap_or(remaining))
-            } else {
-                request.renamed_sheet(original)
-            };
-            if let Some(new_name) = new_name {
-                budget.charge_edit()?;
-                edits.push(SourceEdit::new(
-                    component.span(),
-                    replacement_sheet_name(source, component.span(), new_name),
-                ));
-            }
-        }
-        return Ok(());
-    }
-    // `'S2:S3'!A1` keeps one sheet once `S2` is deleted and becomes `'S3'!A1`.
     let bytes = source.as_bytes();
     let opening = qualifier
         .span()
@@ -612,22 +740,66 @@ fn plan_sheet_prefix_edits(
         .filter(|offset| bytes.get(*offset) == Some(&b'\''));
     let closing =
         (bytes.get(range_end.span().end) == Some(&b'\'')).then_some(range_end.span().end + 1);
-    let name = request.renamed_sheet(start).unwrap_or(start);
-    let escaped = name.replace('\'', "''");
-    let quoted = opening.is_some() || closing.is_some() || sheet_name_needs_quotes(name);
-    budget.charge_edit()?;
-    edits.push(SourceEdit::new(
-        SourceSpan::new(
-            opening.unwrap_or(qualifier.span().start),
-            closing.unwrap_or(range_end.span().end),
-        ),
-        if quoted {
-            format!("'{escaped}'")
-        } else {
-            escaped
-        },
-    ));
-    Ok(())
+    // The whole prefix, with the quotes around either end.
+    let prefix_span = SourceSpan::new(
+        opening.unwrap_or(qualifier.span().start),
+        closing.unwrap_or(range_end.span().end),
+    );
+    match request.sheet_span(&prefix.name, end_name) {
+        // A deleted span is replaced as a whole by `replaced_by_deletion`.
+        SpanOutcome::Unchanged | SpanOutcome::Deleted => Ok(()),
+        SpanOutcome::Ends {
+            start: new_start,
+            end: new_end,
+        } => {
+            let final_start = new_start.unwrap_or(&prefix.name);
+            let final_end = new_end.unwrap_or(end_name);
+            // MS-XLSX quotes a sheet range as one token, so `My Data:S3` is written
+            // `'My Data:S3'` rather than `'My Data':S3`.
+            let wholly_quoted = opening.is_some()
+                && closing.is_some()
+                && source.get(qualifier.span().end..range_end.span().start) == Some(":");
+            if !wholly_quoted
+                && (sheet_name_needs_quotes(final_start) || sheet_name_needs_quotes(final_end))
+            {
+                budget.charge_edit()?;
+                edits.push(SourceEdit::new(
+                    prefix_span,
+                    format!(
+                        "'{}:{}'",
+                        final_start.replace('\'', "''"),
+                        final_end.replace('\'', "''")
+                    ),
+                ));
+                return Ok(());
+            }
+            for (component, new_name) in [(qualifier, new_start), (range_end, new_end)] {
+                if let Some(new_name) = new_name {
+                    budget.charge_edit()?;
+                    edits.push(SourceEdit::new(
+                        component.span(),
+                        replacement_sheet_name(source, component.span(), new_name),
+                    ));
+                }
+            }
+            Ok(())
+        }
+        // `'S2:S3'!A1` keeps one sheet once `S2` is deleted and becomes `'S3'!A1`.
+        SpanOutcome::Collapsed(name) => {
+            let escaped = name.replace('\'', "''");
+            let quoted = opening.is_some() || closing.is_some() || sheet_name_needs_quotes(name);
+            budget.charge_edit()?;
+            edits.push(SourceEdit::new(
+                prefix_span,
+                if quoted {
+                    format!("'{escaped}'")
+                } else {
+                    escaped
+                },
+            ));
+            Ok(())
+        }
+    }
 }
 
 fn replacement_sheet_name(source: &str, span: SourceSpan, new_name: &str) -> String {
@@ -645,7 +817,10 @@ fn replacement_sheet_name(source: &str, span: SourceSpan, new_name: &str) -> Str
     }
 }
 
-fn sheet_name_needs_quotes(name: &str) -> bool {
+/// Reports whether a sheet name needs quotes in a reference: when it is not a plain identifier, or
+/// when it reads as a cell reference, such as `S2` or `R1C1`. Excel reads an unquoted `S2:S3!A1`
+/// as a range from cell `S2`, so it writes such names quoted.
+pub(crate) fn sheet_name_needs_quotes(name: &str) -> bool {
     name.is_empty()
         || !name
             .chars()
@@ -655,6 +830,31 @@ fn sheet_name_needs_quotes(name: &str) -> bool {
             .chars()
             .skip(1)
             .any(|character| !(character.is_alphanumeric() || matches!(character, '_' | '.')))
+        || reads_as_a1_cell(name)
+        || reads_as_r1c1_reference(name)
+}
+
+/// `A1` through `XFD1048576`, letters in either case.
+fn reads_as_a1_cell(name: &str) -> bool {
+    let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
+    let digits = &name[letters..];
+    (1..=3).contains(&letters)
+        && !digits.is_empty()
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+        && crate::CellAddress::from_a1(name).is_ok()
+}
+
+/// `R`, `C`, `RC`, and their numbered forms such as `R1C1`, `R2`, or `C3`, in either case.
+fn reads_as_r1c1_reference(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    let digits = |text: &str| text.bytes().all(|byte| byte.is_ascii_digit());
+    match upper.strip_prefix('R') {
+        Some(rest) => match rest.split_once('C') {
+            Some((row, column)) => digits(row) && digits(column),
+            None => digits(rest),
+        },
+        None => upper.strip_prefix('C').is_some_and(digits),
+    }
 }
 
 fn plan_column_edits(
@@ -830,12 +1030,51 @@ fn formula_may_reference_target(
                 },
                 _ => false,
             }),
+        FormulaRewriteRequest::TableColumnsRemoved {
+            table_name,
+            owner_is_target_table,
+            ..
+        } => lexed
+            .tokens
+            .iter()
+            .enumerate()
+            .any(|(index, token)| match &token.token {
+                Token::StructuredRef(raw) => {
+                    raw_structured_targets_table(raw, table_name, *owner_is_target_table)
+                        && !structured_token_is_external(&lexed.tokens, index)
+                }
+                _ => false,
+            }),
+        FormulaRewriteRequest::TableToRange {
+            area,
+            owner_is_target_table,
+            ..
+        } => lexed
+            .tokens
+            .iter()
+            .enumerate()
+            .any(|(index, token)| match &token.token {
+                Token::StructuredRef(raw) => {
+                    raw_structured_targets_table(raw, area.display_name, *owner_is_target_table)
+                        && !structured_token_is_external(&lexed.tokens, index)
+                }
+                Token::Ident(name) => case_insensitive_eq(name, area.display_name),
+                _ => false,
+            }),
+        FormulaRewriteRequest::DefinedName(rename) => lexed.tokens.iter().any(|token| {
+            matches!(&token.token, Token::Ident(name) if case_insensitive_eq(name, rename.old_name))
+        }),
         FormulaRewriteRequest::Sheet { .. } | FormulaRewriteRequest::Sheets(_) => {
-            let targeted = |name: &str| {
-                request.renamed_sheet(name).is_some()
-                    || request
-                        .sheet_changes()
-                        .is_some_and(|changes| changes.is_deleted(name))
+            let targeted = |name: &str| match request {
+                FormulaRewriteRequest::Sheet { old_name, .. } => {
+                    case_insensitive_eq(name, old_name)
+                }
+                FormulaRewriteRequest::Sheets(changes) => changes.targets(name),
+                FormulaRewriteRequest::Table { .. }
+                | FormulaRewriteRequest::TableColumn { .. }
+                | FormulaRewriteRequest::DefinedName(_)
+                | FormulaRewriteRequest::TableColumnsRemoved { .. }
+                | FormulaRewriteRequest::TableToRange { .. } => false,
             };
             let deleted_table = |raw: &str| {
                 request.sheet_changes().is_some_and(|changes| {
@@ -952,8 +1191,12 @@ fn structured_reference_has_column(reference: &StructuredReference, target: &str
 mod tests {
     use super::{
         FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimitKind, FormulaRewriteLimits,
-        FormulaRewriteRequest, SheetChanges, raw_structured_targets_table, rewrite_formula,
+        FormulaRewriteRequest, NameRename, SheetChanges, raw_structured_targets_table,
+        rewrite_formula,
     };
+    use crate::SheetId;
+    use crate::calculation::sheet_changes::{TabEntry, TabStep};
+    use crate::calculation::table_conversion::TableArea;
 
     fn rewrite(source: &str, request: FormulaRewriteRequest<'_>) -> Option<String> {
         let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &|| false);
@@ -1049,7 +1292,7 @@ mod tests {
         };
         assert_eq!(
             rewrite("SUM( Old!A1 , 'Old'!Tax , Old:End!B2 )", request),
-            Some("SUM( 'New Sheet'!A1 , 'New Sheet'!Tax , 'New Sheet':End!B2 )".to_owned())
+            Some("SUM( 'New Sheet'!A1 , 'New Sheet'!Tax , 'New Sheet:End'!B2 )".to_owned())
         );
     }
 
@@ -1059,12 +1302,7 @@ mod tests {
         assert_eq!(
             rewrite(
                 "Old!A1+'new'!B2+Old:New!C3",
-                FormulaRewriteRequest::Sheets(SheetChanges {
-                    renames: &renames,
-                    deleted: &[],
-                    tabs: &[],
-                    deleted_tables: &[],
-                })
+                Changes::new(&["Old", "New"], &[], &renames, &[]).request(&[])
             ),
             Some("New!A1+'Old'!B2+New:Old!C3".to_owned())
         );
@@ -1072,13 +1310,76 @@ mod tests {
 
     const TABS: &[&str] = &["S1", "S2", "S3", "S4"];
 
-    fn deletion<'a>(deleted: &'a [&'a str]) -> FormulaRewriteRequest<'a> {
-        FormulaRewriteRequest::Sheets(SheetChanges {
-            renames: &[],
-            deleted,
-            tabs: TABS,
-            deleted_tables: &["Things"],
-        })
+    /// Sheet changes over `tabs`, in tab order with IDs from 1, where a name in `charts` is a
+    /// chartsheet: `renames` give new names, and the `deleted` sheets are deleted in turn.
+    struct Changes {
+        before: Vec<(&'static str, SheetId)>,
+        after: Vec<(SheetId, &'static str)>,
+        steps: Vec<TabStep>,
+    }
+
+    impl Changes {
+        fn new(
+            tabs: &[&'static str],
+            charts: &[&str],
+            renames: &[(&'static str, &'static str)],
+            deleted: &[&str],
+        ) -> Self {
+            let before = tabs
+                .iter()
+                .zip(1..)
+                .map(|(name, id)| (*name, SheetId::new(id).expect("sheet ID")))
+                .collect::<Vec<_>>();
+            let mut order = before
+                .iter()
+                .map(|(name, id)| TabEntry {
+                    id: *id,
+                    worksheet: !charts.contains(name),
+                })
+                .collect::<Vec<_>>();
+            let mut steps = Vec::new();
+            for name in deleted {
+                let (_, id) = before
+                    .iter()
+                    .find(|(tab, _)| tab == name)
+                    .expect("deleted tab");
+                steps.push(TabStep::Delete {
+                    tabs: order.clone().into(),
+                    deleted: *id,
+                });
+                order.retain(|tab| tab.id != *id);
+            }
+            let after = before
+                .iter()
+                .filter(|(name, _)| !deleted.contains(name))
+                .map(|(name, id)| {
+                    let renamed = renames
+                        .iter()
+                        .find(|(old, _)| old == name)
+                        .map_or(*name, |(_, new)| *new);
+                    (*id, renamed)
+                })
+                .collect();
+            Self {
+                before,
+                after,
+                steps,
+            }
+        }
+
+        fn request<'a>(&'a self, deleted_tables: &'a [&'a str]) -> FormulaRewriteRequest<'a> {
+            FormulaRewriteRequest::Sheets(SheetChanges {
+                before: &self.before,
+                after: &self.after,
+                steps: &self.steps,
+                retarget: None,
+                deleted_tables,
+            })
+        }
+    }
+
+    fn deletion(deleted: &[&str]) -> Changes {
+        Changes::new(TABS, &[], &[], deleted)
     }
 
     #[test]
@@ -1104,7 +1405,7 @@ mod tests {
             ("'S2'!Lambda(1)", "#REF!"),
         ] {
             assert_eq!(
-                rewrite(source, deletion(&["S2"])),
+                rewrite(source, deletion(&["S2"]).request(&["Things"])),
                 Some(rewritten.to_owned()),
                 "{source}"
             );
@@ -1117,7 +1418,11 @@ mod tests {
             "SUM('S1:S3'!A1)",
             "S22!A1",
         ] {
-            assert_eq!(rewrite(unchanged, deletion(&["S2"])), None, "{unchanged}");
+            assert_eq!(
+                rewrite(unchanged, deletion(&["S2"]).request(&["Things"])),
+                None,
+                "{unchanged}"
+            );
         }
     }
 
@@ -1126,20 +1431,20 @@ mod tests {
         for (deleted, source, rewritten) in [
             (&["S2"][..], "SUM('S2:S4'!A1)", "SUM('S3:S4'!A1)"),
             (&["S2"], "SUM('S2:S3'!A1)", "SUM('S3'!A1)"),
-            (&["S2"], "SUM(S1:S2!A1)", "SUM(S1!A1)"),
-            (&["S2"], "SUM(S4:S2!A1)", "SUM(S4:S3!A1)"),
+            (&["S2"], "SUM(S1:S2!A1)", "SUM('S1'!A1)"),
+            (&["S2"], "SUM(S4:S2!A1)", "SUM('S4:S3'!A1)"),
             (&["S2"], "SUM('S2:S2'!A1)", "SUM(#REF!)"),
             (&["S2"], "SUM(S2:Missing!A1)", "SUM(#REF!)"),
             (&["S3"], "SUM('S1:S3'!A1)", "SUM('S1:S2'!A1)"),
-            (&["S3"], "SUM(S1:'S3'!A1)", "SUM(S1:'S2'!A1)"),
+            (&["S3"], "SUM(S1:'S3'!A1)", "SUM('S1:S2'!A1)"),
             (&["S4"], "SUM('S2:S4'!A1)", "SUM('S2:S3'!A1)"),
             (&["S1"], "SUM('S1:S3'!A1)", "SUM('S2:S3'!A1)"),
-            (&["S2", "S3"], "SUM(S2:S4!A1)", "SUM(S4!A1)"),
+            (&["S2", "S3"], "SUM(S2:S4!A1)", "SUM('S4'!A1)"),
             (&["S2", "S3"], "SUM('S2:S3'!A1)", "SUM(#REF!)"),
-            (&["S2", "S4"], "SUM(S1:S4!A1)", "SUM(S1:S3!A1)"),
+            (&["S2", "S4"], "SUM(S1:S4!A1)", "SUM('S1:S3'!A1)"),
         ] {
             assert_eq!(
-                rewrite(source, deletion(deleted)),
+                rewrite(source, deletion(deleted).request(&["Things"])),
                 Some(rewritten.to_owned()),
                 "{deleted:?} {source}"
             );
@@ -1148,38 +1453,252 @@ mod tests {
 
     #[test]
     fn sheet_changes_rename_and_delete_in_one_rewrite() {
-        let changes = |deleted, tabs| {
-            FormulaRewriteRequest::Sheets(SheetChanges {
-                renames: &[("S3", "New Name"), ("S1", "S2")],
-                deleted,
-                tabs,
-                deleted_tables: &[],
-            })
-        };
+        let changes = Changes::new(TABS, &[], &[("S3", "New Name"), ("S1", "S2")], &["S2"]);
         for (source, rewritten) in [
             ("SUM('S2:S3'!A1)", "SUM('New Name'!A1)"),
-            ("SUM(S2:S4!A1)", "SUM('New Name':S4!A1)"),
-            ("S2!A1+S1!A1+S3!A1", "#REF!+S2!A1+'New Name'!A1"),
+            ("SUM(S2:S4!A1)", "SUM('New Name:S4'!A1)"),
+            ("SUM('S2:S4'!A1)", "SUM('New Name:S4'!A1)"),
+            ("SUM(S1:S4!A1)", "SUM('S2:S4'!A1)"),
+            ("S2!A1+S1!A1+S3!A1", "#REF!+'S2'!A1+'New Name'!A1"),
         ] {
             assert_eq!(
-                rewrite(source, changes(&["S2"], TABS)),
+                rewrite(source, changes.request(&[])),
                 Some(rewritten.to_owned()),
                 "{source}"
             );
         }
-        // A chartsheet keeps its place in the tab order a 3-D end moves along.
+    }
+
+    #[test]
+    fn a_3d_prefix_whose_end_needs_quotes_is_quoted_as_a_whole() {
+        // MS-XLSX quotes a sheet range as one token, `'My Data:S4'!A1`, never per end.
+        let tabs = &["S1", "S2", "My Data", "S4"];
+        for (source, rewritten) in [
+            ("SUM(S2:S4!A1)", "SUM('My Data:S4'!A1)"),
+            ("SUM('S2:S4'!A1)", "SUM('My Data:S4'!A1)"),
+            ("SUM(S1:S2!A1)", "SUM('S1'!A1)"),
+            ("SUM(S1:'S2'!A1)", "SUM('S1'!A1)"),
+            ("SUM(S4:S2!A1)", "SUM('S4:My Data'!A1)"),
+        ] {
+            assert_eq!(
+                rewrite(source, Changes::new(tabs, &[], &[], &["S2"]).request(&[])),
+                Some(rewritten.to_owned()),
+                "{source}"
+            );
+        }
         assert_eq!(
             rewrite(
-                "SUM(S1:S3!A1)",
-                FormulaRewriteRequest::Sheets(SheetChanges {
-                    renames: &[],
-                    deleted: &["S1"],
-                    tabs: &["S1", "Chart1", "S3"],
-                    deleted_tables: &[],
-                })
+                "SUM(S1:'S2'!A1)",
+                FormulaRewriteRequest::Sheet {
+                    old_name: "S1",
+                    new_name: "First Sheet",
+                }
             ),
-            Some("SUM(Chart1:S3!A1)".to_owned())
+            Some("SUM('First Sheet:S2'!A1)".to_owned())
         );
+        assert_eq!(
+            rewrite(
+                "SUM('S1:S2'!A1)",
+                FormulaRewriteRequest::Sheet {
+                    old_name: "S1",
+                    new_name: "O'Hara",
+                }
+            ),
+            Some("SUM('O''Hara:S2'!A1)".to_owned())
+        );
+    }
+
+    #[test]
+    fn sheet_names_that_read_as_cell_references_are_quoted() {
+        // Excel 16.114 reads an unquoted `S2:S3!A1` as a range from cell `S2`.
+        for (new_name, rewritten) in [
+            ("S2", "'S2'!A1+SUM('S2:End'!A1)"),
+            ("xfd1048576", "'xfd1048576'!A1+SUM('xfd1048576:End'!A1)"),
+            ("R1C1", "'R1C1'!A1+SUM('R1C1:End'!A1)"),
+            ("rc", "'rc'!A1+SUM('rc:End'!A1)"),
+            ("C3", "'C3'!A1+SUM('C3:End'!A1)"),
+            ("XFE1", "XFE1!A1+SUM(XFE1:End!A1)"),
+            ("Rates", "Rates!A1+SUM(Rates:End!A1)"),
+        ] {
+            assert_eq!(
+                rewrite(
+                    "Data!A1+SUM(Data:End!A1)",
+                    FormulaRewriteRequest::Sheet {
+                        old_name: "Data",
+                        new_name,
+                    }
+                ),
+                Some(rewritten.to_owned()),
+                "{new_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_renamed_name_rewrites_only_the_references_that_resolve_to_it() {
+        let workbook_rename = |owner_sheet| {
+            FormulaRewriteRequest::DefinedName(NameRename {
+                old_name: "Rate",
+                new_name: "Tax",
+                scope_sheet: None,
+                shadowing_sheets: &["S2"],
+                owner_sheet,
+            })
+        };
+        // `S2` has its own `Rate`, which `'S2'!Rate` and an unqualified `Rate` on `S2` mean.
+        assert_eq!(
+            rewrite(
+                "rate*2+S1!Rate+'S2'!Rate+S3!Rate+[0]!Rate+INDIRECT(\"Rate\")+Rates+[Book.xlsx]S1!Rate",
+                workbook_rename(Some("S1"))
+            ),
+            Some(
+                "Tax*2+S1!Tax+'S2'!Rate+S3!Tax+[0]!Tax+INDIRECT(\"Rate\")+Rates+[Book.xlsx]S1!Rate"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            rewrite("Rate+S1!Rate", workbook_rename(Some("S2"))),
+            Some("Rate+S1!Tax".to_owned())
+        );
+        assert_eq!(
+            rewrite("Rate*2", workbook_rename(None)),
+            Some("Tax*2".to_owned())
+        );
+        let sheet_rename = |owner_sheet| {
+            FormulaRewriteRequest::DefinedName(NameRename {
+                old_name: "Rate",
+                new_name: "Local",
+                scope_sheet: Some("S2"),
+                shadowing_sheets: &[],
+                owner_sheet,
+            })
+        };
+        assert_eq!(
+            rewrite("Rate+'S2'!Rate+S1!Rate", sheet_rename(Some("S2"))),
+            Some("Local+'S2'!Local+S1!Rate".to_owned())
+        );
+        assert_eq!(
+            rewrite("Rate+s2!Rate", sheet_rename(Some("S1"))),
+            Some("Rate+s2!Local".to_owned())
+        );
+        // A name defined as a LAMBDA is renamed where it is called; a built-in keeps its name.
+        let lambda = FormulaRewriteRequest::DefinedName(NameRename {
+            old_name: "Double",
+            new_name: "Twice",
+            scope_sheet: None,
+            shadowing_sheets: &[],
+            owner_sheet: Some("S1"),
+        });
+        assert_eq!(
+            rewrite("Double(2)+SUM(Double(1))", lambda),
+            Some("Twice(2)+SUM(Twice(1))".to_owned())
+        );
+        let builtin = FormulaRewriteRequest::DefinedName(NameRename {
+            old_name: "SUM",
+            new_name: "Total",
+            scope_sheet: None,
+            shadowing_sheets: &[],
+            owner_sheet: Some("S1"),
+        });
+        assert_eq!(rewrite("SUM(1)", builtin), None);
+    }
+
+    #[test]
+    fn a_reference_that_names_a_removed_table_column_becomes_a_ref_error() {
+        // Excel 16.114 turns `T[c]` and `T[[a]:[c]]`, whose end is the removed `c`, into `#REF!`.
+        let request = |owner_is_target_table| FormulaRewriteRequest::TableColumnsRemoved {
+            table_name: "T",
+            removed: &["c"],
+            owner_is_target_table,
+        };
+        assert_eq!(
+            rewrite(
+                "SUM(T[c])+SUM(T[[a]:[c]])+SUM(T[[a]:[b]])+SUM(T)+Other[c]+T[[#Totals],[C]]",
+                request(false)
+            ),
+            Some("SUM(#REF!)+SUM(#REF!)+SUM(T[[a]:[b]])+SUM(T)+Other[c]+#REF!".to_owned())
+        );
+        assert_eq!(
+            rewrite("[@c]*2+[@a]", request(true)),
+            Some("#REF!*2+[@a]".to_owned())
+        );
+        assert_eq!(rewrite("[@c]*2", request(false)), None);
+    }
+
+    #[test]
+    fn converting_a_table_to_a_range_writes_its_references_as_excel_saves_them() {
+        // Excel 16.114: `Things` at C1:E5 on `S2`, columns key, val, and dbl, a totals row.
+        let area = TableArea {
+            display_name: "Things",
+            sheet_name: "S2",
+            range: crate::CellRange::new(
+                crate::CellAddress::from_a1("C1").expect("C1"),
+                crate::CellAddress::from_a1("E5").expect("E5"),
+            )
+            .expect("range"),
+            header_rows: 1,
+            totals_rows: 1,
+            columns: &["key", "val", "dbl"],
+        };
+        let request = |owner_is_target_table, this_row| FormulaRewriteRequest::TableToRange {
+            area: &area,
+            owner_is_target_table,
+            this_row,
+        };
+        for (source, rewritten) in [
+            ("SUM(Things[val])", "SUM('S2'!$D$2:$D$4)"),
+            ("SUM(Things[[#Data],[val]:[dbl]])", "SUM('S2'!$D$2:$E$4)"),
+            ("Things[[#Totals],[val]]", "'S2'!$D$5"),
+            ("ROWS(Things[#All])", "ROWS('S2'!$C$1:$E$5)"),
+            ("COUNTA(things[#Headers])", "COUNTA('S2'!$C$1:$E$1)"),
+            ("SUM(Things)", "SUM('S2'!$C$2:$E$4)"),
+            ("Other[val]+Things[missing]", "Other[val]+#REF!"),
+            ("Things[@val]", "'S2'!$D3"),
+        ] {
+            assert_eq!(
+                rewrite(source, request(false, Some(3))),
+                Some(rewritten.to_owned()),
+                "{source}"
+            );
+        }
+        // A this-row reference keeps its row relative, and names the table inside it.
+        assert_eq!(
+            rewrite("[@val]*2+Things[@[val]:[dbl]]", request(true, Some(3))),
+            Some("'S2'!$D3*2+'S2'!$D3:$E3".to_owned())
+        );
+        assert_eq!(rewrite("[@val]*2", request(false, Some(3))), None);
+        assert_eq!(
+            rewrite("Things[@val]", request(false, None)),
+            Some("#REF!".to_owned())
+        );
+    }
+
+    #[test]
+    fn deleted_3d_ends_skip_tabs_that_are_not_worksheets() {
+        // Excel 16.114 with tabs S1, S2, a chartsheet, S3: deleting S2 turns `'S2:S3'!A1` into
+        // `'S3'!A1`, since a 3-D end moves to the nearest worksheet.
+        for (deleted, source, rewritten) in [
+            ("S2", "SUM('S2:S3'!A1)", "SUM('S3'!A1)"),
+            ("S2", "SUM(S2:S4!A1)", "SUM('S3:S4'!A1)"),
+            ("S3", "SUM(S1:S3!A1)", "SUM('S1:S2'!A1)"),
+            ("S3", "SUM(Chart1:S3!A1)", "SUM(#REF!)"),
+            ("S4", "SUM(Chart1:S4!A1)", "SUM('Chart1:S3'!A1)"),
+        ] {
+            assert_eq!(
+                rewrite(
+                    source,
+                    Changes::new(
+                        &["S1", "S2", "Chart1", "S3", "S4"],
+                        &["Chart1"],
+                        &[],
+                        &[deleted]
+                    )
+                    .request(&[])
+                ),
+                Some(rewritten.to_owned()),
+                "{deleted} {source}"
+            );
+        }
     }
 
     #[test]
@@ -1188,7 +1707,7 @@ mod tests {
             let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &|| false);
             assert!(
                 matches!(
-                    rewrite_formula(source, &deletion(&["S2"]), &mut budget),
+                    rewrite_formula(source, &deletion(&["S2"]).request(&["Things"]), &mut budget),
                     Err(FormulaRewriteError::Parse { .. })
                 ),
                 "{source}"
@@ -1197,7 +1716,8 @@ mod tests {
         for source in ["'S3'!A1+", "Other[val]+", "[Book.xlsx]S2!A1+"] {
             let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &|| false);
             assert_eq!(
-                rewrite_formula(source, &deletion(&["S2"]), &mut budget).expect(source),
+                rewrite_formula(source, &deletion(&["S2"]).request(&["Things"]), &mut budget)
+                    .expect(source),
                 None,
                 "{source}"
             );

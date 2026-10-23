@@ -16,22 +16,77 @@ inventories, and measurements belong in the linked documentation rather than in 
   the names scoped to it and its tables, and rewrite the remaining cell formulas, defined names,
   and table formulas as Excel saves them: a reference to the sheet or to one of its tables becomes
   `#REF!` (`SUM('S2'!A1:A3)` becomes `SUM(#REF!)`), a deleted end of a 3-D reference moves to the
-  nearest remaining tab (`'S2:S3'!A1` becomes `'S3'!A1`), and `INDIRECT` text is untouched. A
-  qualified use of a name scoped to the deleted sheet becomes `#REF!` where Excel writes
-  `[0]!Name`. Deleting the last visible sheet fails with `validation.last_visible_sheet`. The
-  receipt reports a topology change, so a session recalculates fully.
+  nearest remaining worksheet, passing over chartsheets (`'S2:S3'!A1` becomes `'S3'!A1`), and
+  `INDIRECT` text is untouched. A qualified use of a name scoped to the deleted sheet becomes
+  `#REF!` where Excel writes `[0]!Name`. Data validation formulas on other sheets that name it
+  become `#REF!` in the model, as in the saved part, and the sheet's data validations, hyperlinks,
+  comments, cell formats, column widths, and row heights leave the draft. Deleting the last
+  visible sheet fails with `validation.last_visible_sheet`. The receipt reports a topology change,
+  so a session recalculates fully.
 - Saving a document draft removes a deleted sheet's entry and every package part only it reached,
   a pivot cache once all of its pivot tables went, and their content-type overrides, renumbers
-  `localSheetId`, and moves `workbookView` `activeTab` and `firstSheet` past the deleted tab.
-  Conditional formats, data validations, and chart series that name the sheet become `#REF!`, a
-  sparkline reading it loses its data source, and internal hyperlinks keep their location, as in
-  Excel. A remaining pivot cache or pivot chart that reads the deleted sheet, or a slicer or
-  timeline cache while it holds a pivot table or table, fails with
-  `xlsx.write.unsupported_preservation` and a detail naming the parts. Saving edits without
-  calculating also clears the results of formulas that read the sheet list or a 3-D range across
-  the deleted sheet.
+  `localSheetId`, and moves `workbookView` `activeTab` and `firstSheet` past the deleted tab; a
+  deleted active sheet hands activity to the nearest visible sheet after it, else before it, as
+  Excel does. Relationship targets that cannot be parts, such as cell links in drawing
+  relationships, and relationships to parts the package lacks are ignored. Conditional formats,
+  data validations, and chart series that name the sheet become `#REF!`, a sparkline reading it
+  loses its data source, and internal hyperlinks keep their location, as in Excel. A remaining
+  pivot cache or pivot chart that reads the deleted sheet, a form control (`fmlaLink`,
+  `fmlaRange`), VML control (`x:FmlaLink`, `x:FmlaRange`), linked shape (`textlink`), or data
+  consolidation (`dataRef`) that names it, or a slicer or timeline cache while it holds a pivot
+  table or table, fails with `xlsx.write.unsupported_preservation` and a detail naming the parts.
+  Saving edits without calculating also clears the results of formulas that read the sheet list or
+  a 3-D range across the deleted sheet.
 - `WorkbookSnapshot::highest_sheet_id()` returns the highest sheet ID a workbook has used,
-  deleted sheets included; added sheets take the next ID, so a deleted sheet's ID is never reused.
+  including sheets deleted in the same draft or session; added sheets take the next ID, so within
+  a draft or session a deleted sheet's ID is never reused, even by a later change of the batch
+  that deleted it. A saved file does not record deleted IDs, so after reopening it an added sheet
+  can take one.
+- `WorkbookChange::move_sheet(SheetId, position)` and `WorkbookDraft::move_sheet` move a
+  worksheet or chartsheet to another tab position. Sheet IDs and scoped names stay with their
+  sheets and the active sheet stays the same sheet. A 3-D reference keeps its text and follows tab
+  order, unless the move reverses its ends: the moved end then becomes its neighbour inside the old
+  span, as Excel 16.114 saves it (`'S2:S5'!A1` becomes `'S3:S5'!A1` when `S2` moves after `S5`).
+  Saving into the source package reorders the `<sheet>` entries, renumbers `localSheetId`, and
+  keeps `activeTab` and `firstSheet` on their sheets. A position past the last tab fails with the
+  new `validation.sheet_position_out_of_range`.
+- `WorkbookChange::rename_defined_name(scope, name, new_name)` renames a defined name and rewrites
+  the uses that resolve to it, by Excel's scope rules, in cell formulas, defined names, table
+  formulas, and data validations, and on save in preserved conditional formats, data validations,
+  x14 formulas, and chart series. Removing a name and adding it under a new one left those uses as
+  `#NAME?`. A rename fails with the new `validation.unknown_defined_name` for a missing name and
+  `validation.defined_name_rename_shadowed` when the other scope already uses the new name.
+- `WorkbookChange::create_table(SheetId, CellRange, Option<TableName>)` creates a table whose first
+  row is its header, naming blank headers `Column1`, `Column2`, and so on, with Excel's default
+  name `Table` and the number after the workbook's table count. Saving into the source package adds
+  the table part. A range without a data row fails with the new `validation.table_range_invalid`,
+  and one over a merged range or legacy array with the new `validation.table_range_overlap`.
+- `WorkbookChange::set_table_range(TableId, CellRange)` grows or shrinks a table by rows and columns
+  in one edit. A structured reference that names a removed column, alone or as an end of a column
+  range, becomes `#REF!`, as Excel 16.114 saves it.
+- `WorkbookChange::convert_table_to_range(TableId)` converts a table to a plain range. Its cells
+  keep their values and formulas, and every structured reference to it becomes a sheet-qualified
+  absolute reference, as Excel 16.114 saves it (`Things[val]` becomes `'S2'!$D$2:$D$4`, `[@val]`
+  becomes `'S2'!$D2`). Saving into the source package removes the table part and its entries.
+- `WorkbookChange::set_sheet_auto_filter(SheetId, Option<CellRange>)` creates, changes, or removes a
+  sheet-level autoFilter together with its hidden `_xlnm._FilterDatabase` name, keeping the
+  criteria of the columns a changed filter still covers. The canonical writer now writes a sheet's
+  `<autoFilter>`.
+- `WorkbookChange::copy_sheet(SheetId, position)` and `WorkbookDraft::copy_sheet` copy a worksheet
+  within its workbook to a tab position as the next sheet ID, named `Name (2)` or the next free
+  number, as Excel 16.114 saves it. In the copy, single-sheet references to the source name the
+  copy while other sheets' and 3-D references keep their text; its tables take new IDs and Excel's
+  numbered names (`Things` becomes `Things4` beside three tables), with the structured references
+  inside the copy following them; the source's scoped names are copied to the copy, and a workbook
+  name that reads the source becomes a name of the copy too. Saving into the source package
+  duplicates the parts the worksheet reaches, with chart series naming the copy, and fails with
+  `xlsx.write.unsupported_preservation` naming the part for a pivot table, form control, threaded
+  comment, slicer, timeline, query table, or ActiveX control.
+- Edit schema v1 accepts `move_sheet`, `copy_sheet`, `set_sheet_auto_filter`, and
+  `rename_defined_name`, and v2 accepts `create_table`, `set_table_range`, and
+  `convert_table_to_range`, so interop, Python, Node.js, and the MCP `workbook_apply_changes` tools
+  expose the sheet, name, and table edits. A copy reports its ID in `created_sheet_ids`, and the
+  tables `create_table` and `copy_sheet` create are in `changed_table_ids`.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and
@@ -301,6 +356,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   issue evaluates to, as in a full calculation, instead of reporting `BlockedByUpstream`: after an
   edit of `A1`, `B1+A1` with `B1` holding `NB*3` and no name `NB` is `#NAME?` again. The pass
   evaluates such a formula too when it reads its result.
+- A sheet rename that gives an end of a 3-D reference a name that needs quotes writes the range as
+  one quoted token, `'New Name:End'!A1`, as MS-XLSX requires, instead of `'New Name':End!A1`.
+- A rename or deletion that writes a sheet name reading as a cell reference, such as `S2` or
+  `R1C1`, quotes it (`'S2'!A1`, `'S2:S4'!A1`), as Excel writes it. Excel reads an unquoted
+  `S2:S3!A1` as a range starting at cell `S2`.
 
 ## [0.1.26] - 2026-10-23
 

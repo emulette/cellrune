@@ -466,10 +466,31 @@ class DeleteSheetChange(TypedDict):
     sheet: str
 
 
+class MoveSheetChange(TypedDict):
+    kind: Literal["move_sheet"]
+    sheet: str
+    position: int
+
+
+class CopySheetChange(TypedDict):
+    kind: Literal["copy_sheet"]
+    sheet: str
+    position: int
+
+
 class SetSheetVisibilityChange(TypedDict):
     kind: Literal["set_sheet_visibility"]
     sheet: str
     visibility: Literal["visible", "hidden", "very_hidden"]
+
+
+class SetSheetAutoFilterChangeOptions(TypedDict, total=False):
+    range: str | None
+
+
+class SetSheetAutoFilterChange(SetSheetAutoFilterChangeOptions):
+    kind: Literal["set_sheet_auto_filter"]
+    sheet: str
 
 
 class SetDefinedNameChangeOptions(TypedDict, total=False):
@@ -490,6 +511,16 @@ class RemoveDefinedNameChangeOptions(TypedDict, total=False):
 class RemoveDefinedNameChange(RemoveDefinedNameChangeOptions):
     kind: Literal["remove_defined_name"]
     name: str
+
+
+class RenameDefinedNameChangeOptions(TypedDict, total=False):
+    scope_sheet: str | None
+
+
+class RenameDefinedNameChange(RenameDefinedNameChangeOptions):
+    kind: Literal["rename_defined_name"]
+    name: str
+    new_name: str
 
 
 class SetDateSystemChange(TypedDict):
@@ -517,9 +548,13 @@ WorkbookChange = (
     | AddSheetChange
     | RenameSheetChange
     | DeleteSheetChange
+    | MoveSheetChange
+    | CopySheetChange
     | SetSheetVisibilityChange
+    | SetSheetAutoFilterChange
     | SetDefinedNameChange
     | RemoveDefinedNameChange
+    | RenameDefinedNameChange
     | SetDateSystemChange
     | SetCalculationHintsChange
 )
@@ -542,6 +577,27 @@ class ResizeTableRowsChange(TypedDict):
     table_id: int
     first_data_row: int
     last_data_row: int
+
+
+class CreateTableChangeOptions(TypedDict, total=False):
+    name: str | None
+
+
+class CreateTableChange(CreateTableChangeOptions):
+    kind: Literal["create_table"]
+    sheet: str
+    range: str
+
+
+class SetTableRangeChange(TypedDict):
+    kind: Literal["set_table_range"]
+    table_id: int
+    range: str
+
+
+class ConvertTableToRangeChange(TypedDict):
+    kind: Literal["convert_table_to_range"]
+    table_id: int
 
 
 FontUnderlineName = Literal[
@@ -818,6 +874,9 @@ WorkbookChangeV2 = (
     | RenameTableChange
     | RenameTableColumnChange
     | ResizeTableRowsChange
+    | CreateTableChange
+    | SetTableRangeChange
+    | ConvertTableToRangeChange
     | SetCellFormatChange
     | SetColumnWidthChange
     | SetRowHeightChange

@@ -118,6 +118,14 @@ const MESSAGE_FORMULA_REWRITE_PARSE_FAILED: &str =
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
+const MESSAGE_TABLE_RANGE_OVERLAP: &str =
+    "a table range overlaps a merged range or legacy array formula";
+const MESSAGE_TABLE_RANGE_INVALID: &str = "a table range must keep its header row, overlap the table's columns, and hold a row below the header";
+const MESSAGE_DEFINED_NAME_RENAME_SHADOWED: &str =
+    "a defined name in the other scope already uses the new name";
+const MESSAGE_UNKNOWN_DEFINED_NAME: &str =
+    "no defined name has the supplied name in the supplied scope";
+const MESSAGE_SHEET_POSITION_OUT_OF_RANGE: &str = "sheet position is outside the tab order";
 
 /// Stable machine-readable code for a format-neutral validation failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -289,6 +297,16 @@ pub enum ValidationErrorCode {
     ColumnWideningOverlap,
     /// A target-related formula could not be parsed for typed rewriting.
     FormulaRewriteParseFailed,
+    /// A table range overlaps a merged range or legacy array formula.
+    TableRangeOverlap,
+    /// A table range has no row below its header, or a new range moves the header row or keeps none of the table's columns.
+    TableRangeInvalid,
+    /// A defined-name rename would let a name in the other scope take over references.
+    DefinedNameRenameShadowed,
+    /// A defined-name edit names no defined name in the supplied scope.
+    UnknownDefinedName,
+    /// A sheet move or copy names a tab position past the end of the tab order.
+    SheetPositionOutOfRange,
 }
 
 impl ValidationErrorCode {
@@ -388,6 +406,11 @@ impl ValidationErrorCode {
             Self::ColumnWideningRangeInvalid => "validation.column_widening_range_invalid",
             Self::ColumnWideningOverlap => "validation.column_widening_overlap",
             Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
+            Self::TableRangeOverlap => "validation.table_range_overlap",
+            Self::TableRangeInvalid => "validation.table_range_invalid",
+            Self::DefinedNameRenameShadowed => "validation.defined_name_rename_shadowed",
+            Self::UnknownDefinedName => "validation.unknown_defined_name",
+            Self::SheetPositionOutOfRange => "validation.sheet_position_out_of_range",
         }
     }
 }
@@ -783,6 +806,34 @@ pub enum ValidationError {
         /// Stable workbook owner context for the rejected formula, when available.
         owner: Option<String>,
     },
+    /// A table range overlaps a merged range or legacy array formula.
+    TableRangeOverlap {
+        /// Sheet holding the overlapped range.
+        sheet_id: u32,
+        /// One-based top row of the overlapped range.
+        row: u32,
+        /// One-based left column of the overlapped range.
+        column: u32,
+    },
+    /// A table range has no row below its header, or a new range moves the header row or keeps none of the table's columns.
+    TableRangeInvalid,
+    /// A defined-name rename would let a name in the other scope take over references.
+    DefinedNameRenameShadowed {
+        /// Rejected new name.
+        name: String,
+    },
+    /// A defined-name edit names no defined name in the supplied scope.
+    UnknownDefinedName {
+        /// Missing defined name.
+        name: String,
+    },
+    /// A sheet move or copy names a tab position past the end of the tab order.
+    SheetPositionOutOfRange {
+        /// Rejected zero-based tab position.
+        position: usize,
+        /// Number of positions the tab order offers.
+        tab_count: usize,
+    },
 }
 
 impl ValidationError {
@@ -910,6 +961,13 @@ impl ValidationError {
             Self::FormulaRewriteParseFailed { .. } => {
                 ValidationErrorCode::FormulaRewriteParseFailed
             }
+            Self::TableRangeOverlap { .. } => ValidationErrorCode::TableRangeOverlap,
+            Self::TableRangeInvalid => ValidationErrorCode::TableRangeInvalid,
+            Self::DefinedNameRenameShadowed { .. } => {
+                ValidationErrorCode::DefinedNameRenameShadowed
+            }
+            Self::UnknownDefinedName { .. } => ValidationErrorCode::UnknownDefinedName,
+            Self::SheetPositionOutOfRange { .. } => ValidationErrorCode::SheetPositionOutOfRange,
         }
     }
 }
@@ -1227,6 +1285,28 @@ impl fmt::Display for ValidationError {
                 }
                 Ok(())
             }
+            Self::TableRangeOverlap {
+                sheet_id,
+                row,
+                column,
+            } => write!(
+                formatter,
+                "{MESSAGE_TABLE_RANGE_OVERLAP}: sheet {sheet_id}, row {row}, column {column}"
+            ),
+            Self::TableRangeInvalid => formatter.write_str(MESSAGE_TABLE_RANGE_INVALID),
+            Self::DefinedNameRenameShadowed { name } => {
+                write!(formatter, "{MESSAGE_DEFINED_NAME_RENAME_SHADOWED}: {name}")
+            }
+            Self::UnknownDefinedName { name } => {
+                write!(formatter, "{MESSAGE_UNKNOWN_DEFINED_NAME}: {name}")
+            }
+            Self::SheetPositionOutOfRange {
+                position,
+                tab_count,
+            } => write!(
+                formatter,
+                "{MESSAGE_SHEET_POSITION_OUT_OF_RANGE}: position {position} of {tab_count}"
+            ),
         }
     }
 }
@@ -1567,6 +1647,26 @@ mod tests {
             (
                 ValidationErrorCode::FormulaRewriteParseFailed,
                 "validation.formula_rewrite_parse_failed",
+            ),
+            (
+                ValidationErrorCode::TableRangeOverlap,
+                "validation.table_range_overlap",
+            ),
+            (
+                ValidationErrorCode::TableRangeInvalid,
+                "validation.table_range_invalid",
+            ),
+            (
+                ValidationErrorCode::DefinedNameRenameShadowed,
+                "validation.defined_name_rename_shadowed",
+            ),
+            (
+                ValidationErrorCode::UnknownDefinedName,
+                "validation.unknown_defined_name",
+            ),
+            (
+                ValidationErrorCode::SheetPositionOutOfRange,
+                "validation.sheet_position_out_of_range",
             ),
         ];
         let mut seen_codes = BTreeSet::new();

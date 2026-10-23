@@ -30,7 +30,7 @@ pub(super) struct TableEditState<'a> {
 }
 
 impl TableEditState<'_> {
-    fn mark_cell(&mut self, sheet_id: SheetId, address: CellAddress) {
+    pub(super) fn mark_cell(&mut self, sheet_id: SheetId, address: CellAddress) {
         mark_upsert(self.mutations, sheet_id, address, false);
         self.mark_changed(sheet_id, address);
     }
@@ -426,7 +426,7 @@ fn validate_rename_header(
     }
 }
 
-fn upsert_literal_text(sheet: &mut Sheet, address: CellAddress, value: &str) {
+pub(super) fn upsert_literal_text(sheet: &mut Sheet, address: CellAddress, value: &str) {
     let number_format = sheet.cell(address).map_or_else(
         || sheet.new_cell_number_format(address),
         |cell| cell.number_format().clone(),

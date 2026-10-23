@@ -15,14 +15,18 @@ use super::serialization::{escape_attribute, escape_text};
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits, FormulaRewriteRequest,
-    SheetChanges, rewrite_formula,
+    NameRename, SheetChanges, rewrite_formula,
 };
+use crate::calculation::sheet_changes::{SheetOutcome, TabStep};
+use crate::draft::DefinedNameRename;
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, SPREADSHEETML_STRICT,
     SPREADSHEETML_TRANSITIONAL, namespace_reader, read_event,
 };
-use crate::{WorkbookSnapshot, XlsxDocument, case_insensitive_eq};
+use crate::{
+    DefinedNameScope, SheetId, WorkbookDraft, WorkbookSnapshot, XlsxDocument, case_insensitive_eq,
+};
 
 const SPREADSHEETML: &[&str] = &[SPREADSHEETML_TRANSITIONAL, SPREADSHEETML_STRICT];
 const RELATIONSHIPS: &[&str] = &[
@@ -47,6 +51,11 @@ const DETAIL_DELETED_PIVOT_SOURCE: &str =
     "a preserved pivot cache reads a deleted sheet or a table on one";
 const DETAIL_DELETED_PIVOT_CHART: &str =
     "a preserved pivot chart reads a pivot table on a deleted sheet";
+const DETAIL_DELETED_LINK: &str = "a preserved form control, VML control, linked shape, or data consolidation names a deleted sheet";
+/// Holds the `x:FmlaLink` and `x:FmlaRange` of legacy VML controls.
+const VML_EXCEL: &[&str] = &["urn:schemas-microsoft-com:office:excel"];
+/// The VML control elements whose text is a formula.
+const VML_FORMULAS: &[&str] = &["FmlaLink", "FmlaRange", "FmlaTxbx", "FmlaGroup"];
 const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
@@ -93,39 +102,198 @@ struct SheetReferenceRequests<'a> {
     combined: FormulaRewriteRequest<'a>,
     renames_only: FormulaRewriteRequest<'a>,
     deletions_only: FormulaRewriteRequest<'a>,
+    /// Defined-name renames in order, each formula's own sheet still to be filled in.
+    name_renames: Vec<NameRename<'a>>,
+}
+
+/// The names, steps, and tables the requests borrow: every source tab by its source name, and the
+/// draft's names, with the deleted tabs kept under their source names for the rename-only half and
+/// every tab under its source name for the deletion-only half.
+struct SheetReferenceNames<'a> {
+    before: Vec<(&'a str, SheetId)>,
+    after: Vec<(SheetId, &'a str)>,
+    after_with_deleted: Vec<(SheetId, &'a str)>,
+    kept_names: Vec<(SheetId, &'a str)>,
+    deletions: Vec<TabStep>,
+    /// Each defined-name rename with its scope and shadowing sheets by their source names; a
+    /// rename scoped to a sheet the source lacks cannot reach a preserved formula.
+    name_renames: Vec<NamedRename<'a>>,
+}
+
+type NamedRename<'a> = (&'a DefinedNameRename, Option<&'a str>, Vec<&'a str>);
+
+impl<'a> SheetReferenceNames<'a> {
+    fn new(
+        original: &'a WorkbookSnapshot,
+        draft: &'a WorkbookSnapshot,
+        steps: &[TabStep],
+        name_renames: &'a [DefinedNameRename],
+    ) -> Self {
+        let before = original.non_worksheet_tabs().in_tab_order(
+            original
+                .sheets()
+                .iter()
+                .map(|sheet| (sheet.name().as_str(), sheet.id())),
+            |tab| (tab.name().as_str(), tab.id()),
+        );
+        let after = draft.non_worksheet_tabs().in_tab_order(
+            draft
+                .sheets()
+                .iter()
+                .map(|sheet| (sheet.id(), sheet.name().as_str())),
+            |tab| (tab.id(), tab.name().as_str()),
+        );
+        let deleted = |id: SheetId| !after.iter().any(|(kept, _)| *kept == id);
+        let after_with_deleted = after
+            .iter()
+            .copied()
+            .chain(
+                before
+                    .iter()
+                    .filter(|(_, id)| deleted(*id))
+                    .map(|(name, id)| (*id, *name)),
+            )
+            .collect();
+        let kept_names = before
+            .iter()
+            .filter(|(_, id)| !deleted(*id))
+            .map(|(name, id)| (*id, *name))
+            .collect();
+        let source_name = |id: SheetId| {
+            before
+                .iter()
+                .find(|(_, before)| *before == id)
+                .map(|(name, _)| *name)
+        };
+        let name_renames = name_renames
+            .iter()
+            .filter_map(|rename| {
+                let scope = match rename.scope {
+                    DefinedNameScope::Workbook => None,
+                    DefinedNameScope::Sheet(sheet_id) => Some(source_name(sheet_id)?),
+                };
+                let shadowing = rename
+                    .shadowing_sheets
+                    .iter()
+                    .filter_map(|sheet_id| source_name(*sheet_id))
+                    .collect();
+                Some((rename, scope, shadowing))
+            })
+            .collect();
+        Self {
+            after_with_deleted,
+            kept_names,
+            name_renames,
+            deletions: steps
+                .iter()
+                .filter(|step| matches!(step, TabStep::Delete { .. }))
+                .cloned()
+                .collect(),
+            before,
+            after,
+        }
+    }
 }
 
 impl<'a> SheetReferenceRequests<'a> {
-    fn new(changes: SheetChanges<'a>) -> Self {
+    fn new(
+        names: &'a SheetReferenceNames<'a>,
+        steps: &'a [TabStep],
+        deleted_tables: &'a [&'a str],
+    ) -> Self {
+        let changes = SheetChanges {
+            before: &names.before,
+            after: &names.after,
+            steps,
+            retarget: None,
+            deleted_tables,
+        };
         Self {
             changes,
             combined: FormulaRewriteRequest::Sheets(changes),
             renames_only: FormulaRewriteRequest::Sheets(SheetChanges {
-                deleted: &[],
+                after: &names.after_with_deleted,
+                steps: &[],
                 deleted_tables: &[],
                 ..changes
             }),
             deletions_only: FormulaRewriteRequest::Sheets(SheetChanges {
-                renames: &[],
+                after: &names.kept_names,
+                steps: &names.deletions,
                 ..changes
             }),
+            name_renames: names
+                .name_renames
+                .iter()
+                .map(|(rename, scope_sheet, shadowing)| NameRename {
+                    old_name: &rename.old_name,
+                    new_name: &rename.new_name,
+                    scope_sheet: *scope_sheet,
+                    shadowing_sheets: shadowing,
+                    owner_sheet: None,
+                })
+                .collect(),
         }
     }
 
+    /// Rewrites a preserved formula of `owner`'s part, `None` for a chart: the defined-name
+    /// renames in order, then the sheet changes at once. Every name the formula spells is a source
+    /// name until the sheet changes.
+    fn rewrite_formula(
+        &self,
+        formula: &str,
+        owner: Option<&str>,
+        budget: &mut FormulaRewriteBudget<'_>,
+        source: &PartPath,
+    ) -> Result<Option<String>, XlsxWriteError> {
+        let mut renamed = None::<String>;
+        for rename in &self.name_renames {
+            let request = FormulaRewriteRequest::DefinedName(NameRename {
+                owner_sheet: owner,
+                ..*rename
+            });
+            let current = renamed.as_deref().unwrap_or(formula);
+            if let Some(rewritten) = rewrite(current, &request, budget, source)? {
+                renamed = Some(rewritten);
+            }
+        }
+        let current = renamed.as_deref().unwrap_or(formula);
+        Ok(rewrite(current, &self.combined, budget, source)?.or(renamed))
+    }
+
+    /// Returns the draft name of a source tab the draft renamed.
     fn renamed(&self, name: &str) -> Option<&'a str> {
-        self.changes
-            .renames
-            .iter()
-            .find(|(old_name, _)| case_insensitive_eq(name, old_name))
-            .map(|(_, new_name)| *new_name)
+        match self.changes.single(name) {
+            SheetOutcome::Renamed(new_name) => Some(new_name),
+            SheetOutcome::Unchanged | SheetOutcome::Deleted => None,
+        }
     }
 
     fn deleted(&self, name: &str) -> bool {
-        self.changes
-            .deleted
-            .iter()
-            .any(|deleted| case_insensitive_eq(name, deleted))
+        self.changes.single(name) == SheetOutcome::Deleted
     }
+
+    fn has_deletions(&self) -> bool {
+        self.changes
+            .before
+            .iter()
+            .any(|(_, id)| !self.changes.after.iter().any(|(kept, _)| kept == id))
+    }
+}
+
+/// A copied sheet's new worksheet and chart parts, whose references to its source sheet name the
+/// copy.
+pub(crate) struct CopyReferences {
+    pub(crate) copy: SheetId,
+    pub(crate) origin: SheetId,
+    pub(crate) worksheet: PartPath,
+    pub(crate) charts: Vec<PartPath>,
+}
+
+/// The copies a save writes and the new parts that hold them.
+pub(crate) struct CopiedParts<'a> {
+    pub(crate) copies: &'a [CopyReferences],
+    pub(crate) parts: &'a mut BTreeMap<PartPath, Vec<u8>>,
 }
 
 /// Rewrites references to renamed and deleted sheets in the worksheet, chart, and pivot cache
@@ -138,47 +306,42 @@ impl<'a> SheetReferenceRequests<'a> {
 /// that reads a deleted sheet is refused, since its source cannot be rewritten.
 pub(crate) fn rewrite_sheet_references(
     document: &XlsxDocument,
-    draft: &WorkbookSnapshot,
+    draft_edits: &WorkbookDraft,
     source_reader: &mut PackageReader<'_>,
     replacements: &mut BTreeMap<PartPath, Vec<u8>>,
+    copied: CopiedParts<'_>,
     removed_parts: &BTreeSet<PartPath>,
     limits: WriteLimits,
 ) -> Result<(), XlsxWriteError> {
     let original = document.workbook();
-    let renames = original
-        .sheets()
-        .iter()
-        .filter_map(|sheet| {
-            let name = draft.sheet_by_id(sheet.id())?.name();
-            (name != sheet.name()).then(|| (sheet.name().as_str(), name.as_str()))
-        })
-        .collect::<Vec<_>>();
+    let draft = draft_edits.workbook();
+    let steps = draft_edits.tab_steps();
+    let name_renames = draft_edits.name_renames();
+    let renamed = original.sheets().iter().any(|sheet| {
+        draft
+            .sheet_by_id(sheet.id())
+            .is_some_and(|kept| kept.name() != sheet.name())
+    });
     let deleted_sheets = original
         .sheets()
         .iter()
         .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
         .collect::<Vec<_>>();
-    if renames.is_empty() && deleted_sheets.is_empty() {
+    if !renamed
+        && deleted_sheets.is_empty()
+        && steps.is_empty()
+        && name_renames.is_empty()
+        && copied.copies.is_empty()
+    {
         return Ok(());
     }
-    let deleted = deleted_sheets
-        .iter()
-        .map(|sheet| sheet.name().as_str())
-        .collect::<Vec<_>>();
     let deleted_tables = deleted_sheets
         .iter()
         .flat_map(|sheet| sheet.tables())
         .map(|table| table.display_name().as_str())
         .collect::<Vec<_>>();
-    let tabs = original
-        .non_worksheet_tabs()
-        .tab_names(original.sheets().iter().map(|sheet| sheet.name().as_str()));
-    let requests = SheetReferenceRequests::new(SheetChanges {
-        renames: &renames,
-        deleted: &deleted,
-        tabs: &tabs,
-        deleted_tables: &deleted_tables,
-    });
+    let names = SheetReferenceNames::new(original, draft, steps, name_renames);
+    let requests = SheetReferenceRequests::new(&names, steps, &deleted_tables);
     let mut parts = Vec::new();
     for sheet in draft
         .sheets()
@@ -189,48 +352,220 @@ pub(crate) fn rewrite_sheet_references(
             XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
                 .with_detail(DETAIL_MISSING_SHEET_PART)
         })?;
-        parts.push((part, ReferencePart::Worksheet));
+        let owner = original
+            .sheet_by_id(sheet.id())
+            .map(|sheet| sheet.name().as_str());
+        parts.push((part, ReferencePart::Worksheet, owner));
     }
     parts.extend(
         document
             .chart_part_paths()
             .iter()
-            .map(|part| (part, ReferencePart::Chart)),
+            .map(|part| (part, ReferencePart::Chart, None)),
     );
     parts.extend(
         document
             .pivot_cache_part_paths()
             .iter()
-            .map(|part| (part, ReferencePart::PivotCache)),
+            .map(|part| (part, ReferencePart::PivotCache, None)),
     );
-    for (part, kind) in parts {
+    // Parts that link a deleted sheet in a way no rewrite reaches, refused together.
+    let mut deleted_links = Vec::new();
+    for (part, kind, owner) in parts {
         if removed_parts.contains(part) {
             continue;
         }
+        let mut links_deleted = false;
+        let target = PatchTarget {
+            source: part,
+            part: kind,
+            owner,
+        };
         let patched = match replacements.get(part) {
-            Some(bytes) => patch_sheet_references(bytes, part, kind, &requests, limits)?,
+            Some(bytes) => {
+                patch_sheet_references(bytes, target, &requests, &mut links_deleted, limits)?
+            }
             None => patch_sheet_references(
                 &source_reader.read_part(part)?,
-                part,
-                kind,
+                target,
                 &requests,
+                &mut links_deleted,
                 limits,
             )?,
         };
+        if links_deleted {
+            deleted_links.push(part);
+        }
         if let Some(bytes) = patched {
             replacements.insert(part.clone(), bytes);
         }
     }
+    // A copy's parts read its source sheet by name; those references name the copy.
+    for copy in copied.copies {
+        let mut copy_requests = SheetReferenceRequests::new(&names, steps, &deleted_tables);
+        let retarget = SheetChanges {
+            retarget: Some((copy.origin, copy.copy)),
+            ..copy_requests.changes
+        };
+        copy_requests.changes = retarget;
+        copy_requests.combined = FormulaRewriteRequest::Sheets(retarget);
+        let owner = original
+            .sheet_by_id(copy.origin)
+            .map(|sheet| sheet.name().as_str());
+        let parts = std::iter::once((&copy.worksheet, ReferencePart::Worksheet, owner)).chain(
+            copy.charts
+                .iter()
+                .map(|chart| (chart, ReferencePart::Chart, None)),
+        );
+        for (part, kind, owner) in parts {
+            let Some(bytes) = copied.parts.get(part) else {
+                continue;
+            };
+            let target = PatchTarget {
+                source: part,
+                part: kind,
+                owner,
+            };
+            if let Some(patched) =
+                patch_sheet_references(bytes, target, &copy_requests, &mut false, limits)?
+            {
+                copied.parts.insert(part.clone(), patched);
+            }
+        }
+    }
+    if !deleted_sheets.is_empty() {
+        for part in document.link_part_paths() {
+            if !removed_parts.contains(part)
+                && links_deleted_sheet(&source_reader.read_part(part)?, part, &requests, limits)?
+            {
+                deleted_links.push(part);
+            }
+        }
+    }
+    if let Some(first) = deleted_links.first() {
+        let parts = deleted_links
+            .iter()
+            .map(|part| part.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(
+            XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
+                .with_detail(format!("{DETAIL_DELETED_LINK}: {parts}"))
+                .at_source(first.source_id()),
+        );
+    }
     Ok(())
+}
+
+/// Reports whether a form control's `fmla*` attributes, a linked shape's `textlink`, or a VML
+/// control's `x:Fmla*` text names a deleted sheet. Excel would turn such a link into `#REF!`, but
+/// these parts carry formulas outside the grammar the rewrite edits in place, so the deletion is
+/// refused rather than leaving the link stale.
+fn links_deleted_sheet(
+    bytes: &[u8],
+    source: &PartPath,
+    requests: &SheetReferenceRequests<'_>,
+    limits: WriteLimits,
+) -> Result<bool, XlsxWriteError> {
+    let never_cancelled = || false;
+    let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
+    let mut names_deleted = |formula: &str| {
+        Ok::<_, XlsxWriteError>(
+            rewrite_formula(formula, &requests.deletions_only, &mut budget)
+                .map_or(true, |rewritten| rewritten.is_some()),
+        )
+    };
+    let mut xml = namespace_reader(bytes, limits.max_xml_depth());
+    // VML is HTML-like and may leave elements such as `<br>` unclosed.
+    xml.config_mut().check_end_names = false;
+    xml.config_mut().allow_unmatched_ends = true;
+    xml.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut formula = None::<String>;
+    loop {
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        match event {
+            Event::Start(element) | Event::Empty(element) => {
+                let local_name = element.local_name();
+                let attributes = match local_name.as_ref() {
+                    "formControlPr" => Some(true),
+                    "sp" => Some(false),
+                    _ => None,
+                };
+                if let Some(control) = attributes {
+                    for attribute in element.attributes().with_checks(true) {
+                        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+                        let key = attribute.key.local_name();
+                        let linked = if control {
+                            key.as_ref().starts_with("fmla")
+                        } else {
+                            key.as_ref() == "textlink"
+                        };
+                        if linked
+                            && names_deleted(
+                                &attribute
+                                    .normalized_value(XmlVersion::Implicit1_0)
+                                    .map_err(|error| invalid_xml(source, error))?,
+                            )?
+                        {
+                            return Ok(true);
+                        }
+                    }
+                }
+                if VML_FORMULAS.contains(&local_name.as_ref())
+                    && in_namespace(&xml, element.name(), VML_EXCEL)
+                {
+                    formula = Some(String::new());
+                }
+            }
+            Event::Text(content) => {
+                if let Some(formula) = &mut formula {
+                    formula.push_str(&content.xml_content(XmlVersion::Implicit1_0));
+                }
+            }
+            Event::GeneralRef(reference) => {
+                if let Some(formula) = &mut formula {
+                    formula.push_str(&decode_reference(&reference, source)?);
+                }
+            }
+            Event::End(_) => {
+                if let Some(text) = formula.take()
+                    && names_deleted(text.trim())?
+                {
+                    return Ok(true);
+                }
+            }
+            Event::Eof => return Ok(false),
+            _ => {}
+        }
+        buffer.clear();
+    }
+}
+
+/// Rewrites one part's references and returns the part when it changed. `links_deleted` is set
+/// when a worksheet's data consolidation reads a deleted sheet, which no rewrite reaches.
+/// One preserved part to rewrite: its path, its kind, and the source name of the sheet whose
+/// formulas it holds, `None` for a chart or pivot cache.
+#[derive(Clone, Copy)]
+struct PatchTarget<'a> {
+    source: &'a PartPath,
+    part: ReferencePart,
+    owner: Option<&'a str>,
 }
 
 fn patch_sheet_references(
     bytes: &[u8],
-    source: &PartPath,
-    part: ReferencePart,
+    target: PatchTarget<'_>,
     requests: &SheetReferenceRequests<'_>,
+    links_deleted: &mut bool,
     limits: WriteLimits,
 ) -> Result<Option<Vec<u8>>, XlsxWriteError> {
+    let PatchTarget {
+        source,
+        part,
+        owner,
+    } = target;
     let never_cancelled = || false;
     let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
     let mut xml = configured_reader(bytes, limits);
@@ -265,7 +600,7 @@ fn patch_sheet_references(
                 Event::End(element) if depth == text.depth => {
                     let text = held.take().expect("held text");
                     let outcome =
-                        write_held_text(&mut writer, text, requests, &mut budget, source)?;
+                        write_held_text(&mut writer, text, requests, owner, &mut budget, source)?;
                     changed |= outcome != HeldOutcome::Unchanged;
                     if outcome != HeldOutcome::Removed {
                         write_event(&mut writer, Event::End(element), source)?;
@@ -314,7 +649,9 @@ fn patch_sheet_references(
                 {
                     sparkline_groups_depth = Some(depth);
                 }
-                let patched = patch_attribute(&xml, &element, part, requests, &mut budget, source)?;
+                *links_deleted |=
+                    consolidates_deleted_sheet(&xml, &element, part, requests, source)?;
+                let patched = patch_attribute(&xml, &element, target, requests, &mut budget)?;
                 changed |= patched.is_some();
                 let element = patched.unwrap_or_else(|| element.into_owned());
                 let start = if kind == Some(HeldTextKind::SparklineFormula) {
@@ -336,7 +673,9 @@ fn patch_sheet_references(
             }
             Event::Empty(element) => {
                 enforce_depth(depth.saturating_add(1), limits, source)?;
-                let patched = patch_attribute(&xml, &element, part, requests, &mut budget, source)?;
+                *links_deleted |=
+                    consolidates_deleted_sheet(&xml, &element, part, requests, source)?;
+                let patched = patch_attribute(&xml, &element, target, requests, &mut budget)?;
                 changed |= patched.is_some();
                 write_event(
                     &mut writer,
@@ -413,6 +752,47 @@ fn held_text_kind(
     formula.then_some(HeldTextKind::Formula)
 }
 
+/// Reports whether a worksheet's `<dataRef>` consolidates a range of a deleted sheet of this
+/// workbook, which has no rewritten form.
+fn consolidates_deleted_sheet(
+    xml: &NsReader<&[u8]>,
+    element: &BytesStart<'_>,
+    part: ReferencePart,
+    requests: &SheetReferenceRequests<'_>,
+    source: &PartPath,
+) -> Result<bool, XlsxWriteError> {
+    if part != ReferencePart::Worksheet
+        || !requests.has_deletions()
+        || element.local_name().as_ref() != "dataRef"
+        || !in_namespace(xml, element.name(), SPREADSHEETML)
+    {
+        return Ok(false);
+    }
+    let mut sheet = None;
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        let (namespace, local_name) = xml.resolver().resolve_attribute(attribute.key);
+        match (namespace, local_name.as_ref()) {
+            // A relationship ID points the consolidation into another workbook.
+            (ResolveResult::Bound(namespace), "id")
+                if RELATIONSHIPS.contains(&namespace.as_ref()) =>
+            {
+                return Ok(false);
+            }
+            (ResolveResult::Unbound, "sheet") => {
+                sheet = Some(
+                    attribute
+                        .normalized_value(XmlVersion::Implicit1_0)
+                        .map_err(|error| invalid_xml(source, error))?
+                        .into_owned(),
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(sheet.is_some_and(|sheet| requests.deleted(&sheet)))
+}
+
 /// Rewrites the one attribute that can name a sheet: an internal hyperlink location, a
 /// conditional-format threshold, or a pivot cache source sheet. Returns `None` when the start
 /// tag is unchanged.
@@ -422,11 +802,15 @@ fn held_text_kind(
 fn patch_attribute(
     xml: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
-    part: ReferencePart,
+    target: PatchTarget<'_>,
     requests: &SheetReferenceRequests<'_>,
     budget: &mut FormulaRewriteBudget<'_>,
-    source: &PartPath,
 ) -> Result<Option<BytesStart<'static>>, XlsxWriteError> {
+    let PatchTarget {
+        source,
+        part,
+        owner,
+    } = target;
     let local_name = element.local_name();
     let target = match (part, local_name.as_ref()) {
         (ReferencePart::Worksheet, "hyperlink") => "location",
@@ -484,7 +868,7 @@ fn patch_attribute(
     let replacement = match part {
         ReferencePart::PivotCache => requests.renamed(&value).map(str::to_owned),
         _ if target == "location" => rewrite(&value, &requests.renames_only, budget, source)?,
-        _ => rewrite(&value, &requests.combined, budget, source)?,
+        _ => requests.rewrite_formula(&value, owner, budget, source)?,
     };
     let Some(replacement) = replacement else {
         return Ok(None);
@@ -511,6 +895,7 @@ fn write_held_text(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     held: HeldText,
     requests: &SheetReferenceRequests<'_>,
+    owner: Option<&str>,
     budget: &mut FormulaRewriteBudget<'_>,
     source: &PartPath,
 ) -> Result<HeldOutcome, XlsxWriteError> {
@@ -521,7 +906,7 @@ fn write_held_text(
             return Ok(HeldOutcome::Removed);
         }
         HeldTextKind::Formula | HeldTextKind::SparklineFormula => {
-            rewrite(&held.text, &requests.combined, budget, source)?
+            requests.rewrite_formula(&held.text, owner, budget, source)?
         }
         HeldTextKind::PivotSourceName => {
             if pivot_source_names_sheet(&held.text, |sheet| requests.deleted(sheet)) {
@@ -684,53 +1069,109 @@ fn resource_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{ReferencePart, SheetReferenceRequests, patch_sheet_references};
-    use crate::calculation::formula_rewrite::SheetChanges;
+    use super::{
+        PatchTarget, ReferencePart, SheetReferenceNames, SheetReferenceRequests,
+        patch_sheet_references,
+    };
+    use crate::calculation::sheet_changes::{TabEntry, TabStep};
     use crate::xlsx::package::PartPath;
-    use crate::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
+    use crate::{SheetId, WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 
-    const RENAMES: &[(&str, &str)] = &[("Data", "New Data")];
-
-    fn rename_requests() -> SheetReferenceRequests<'static> {
-        SheetReferenceRequests::new(SheetChanges {
-            renames: RENAMES,
-            deleted: &[],
-            tabs: &[],
-            deleted_tables: &[],
-        })
+    /// Runs `patch` with requests over the tabs `Data`, `Other`, and `Summary`, renamed per
+    /// `renames`, with `Data` and its table `Things` deleted when `delete_data` is set.
+    fn with_requests<T>(
+        renames: &[(&str, &'static str)],
+        delete_data: bool,
+        patch: impl FnOnce(&SheetReferenceRequests<'_>) -> T,
+    ) -> T {
+        let id = |value| SheetId::new(value).expect("sheet ID");
+        let before = vec![("Data", id(1)), ("Other", id(2)), ("Summary", id(3))];
+        let after = before
+            .iter()
+            .filter(|(name, _)| !(delete_data && *name == "Data"))
+            .map(|(name, id)| {
+                let renamed = renames
+                    .iter()
+                    .find(|(old, _)| old == name)
+                    .map_or(*name, |(_, new)| *new);
+                (*id, renamed)
+            })
+            .collect::<Vec<_>>();
+        let tabs = before
+            .iter()
+            .map(|(_, id)| TabEntry {
+                id: *id,
+                worksheet: true,
+            })
+            .collect::<std::sync::Arc<[_]>>();
+        let steps = if delete_data {
+            vec![TabStep::Delete {
+                tabs,
+                deleted: id(1),
+            }]
+        } else {
+            Vec::new()
+        };
+        let deleted = |id: &SheetId| !after.iter().any(|(kept, _)| kept == id);
+        let names = SheetReferenceNames {
+            after_with_deleted: after
+                .iter()
+                .copied()
+                .chain(
+                    before
+                        .iter()
+                        .filter(|(_, id)| deleted(id))
+                        .map(|(name, id)| (*id, *name)),
+                )
+                .collect(),
+            kept_names: before
+                .iter()
+                .filter(|(_, id)| !deleted(id))
+                .map(|(name, id)| (*id, *name))
+                .collect(),
+            deletions: steps.clone(),
+            name_renames: Vec::new(),
+            before,
+            after,
+        };
+        let tables: &[&str] = if delete_data { &["Things"] } else { &[] };
+        patch(&SheetReferenceRequests::new(&names, &steps, tables))
     }
 
-    fn deletion_requests() -> SheetReferenceRequests<'static> {
-        SheetReferenceRequests::new(SheetChanges {
-            renames: &[("Other", "Renamed")],
-            deleted: &["Data"],
-            tabs: &["Data", "Other", "Summary"],
-            deleted_tables: &["Things"],
-        })
+    fn target(source: &PartPath, part: ReferencePart) -> PatchTarget<'_> {
+        PatchTarget {
+            source,
+            part,
+            owner: None,
+        }
     }
 
     fn patch(part: ReferencePart, xml: &str) -> Option<String> {
         let source = PartPath::from_archive_name(b"xl/part.xml").expect("part");
-        patch_sheet_references(
-            xml.as_bytes(),
-            &source,
-            part,
-            &rename_requests(),
-            WriteLimits::default(),
-        )
+        with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                xml.as_bytes(),
+                target(&source, part),
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect("patch")
         .map(|bytes| String::from_utf8(bytes).expect("UTF-8"))
     }
 
     fn patch_deletion(part: ReferencePart, xml: &str) -> Result<Option<String>, XlsxWriteError> {
         let source = PartPath::from_archive_name(b"xl/part.xml").expect("part");
-        patch_sheet_references(
-            xml.as_bytes(),
-            &source,
-            part,
-            &deletion_requests(),
-            WriteLimits::default(),
-        )
+        with_requests(&[("Other", "Renamed")], true, |requests| {
+            patch_sheet_references(
+                xml.as_bytes(),
+                target(&source, part),
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .map(|bytes| bytes.map(|bytes| String::from_utf8(bytes).expect("UTF-8")))
     }
 
@@ -844,13 +1285,15 @@ mod tests {
         let mut utf16 = vec![0xFF, 0xFE];
         utf16.extend(chart.encode_utf16().flat_map(u16::to_le_bytes));
         let source = PartPath::from_archive_name(b"xl/charts/chart1.xml").expect("part");
-        let error = patch_sheet_references(
-            &utf16,
-            &source,
-            ReferencePart::Chart,
-            &rename_requests(),
-            WriteLimits::default(),
-        )
+        let error = with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                &utf16,
+                target(&source, ReferencePart::Chart),
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect_err("a chart that cannot be read cannot be rewritten");
         assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
     }
@@ -874,13 +1317,15 @@ mod tests {
         );
 
         let source = PartPath::from_archive_name(b"xl/charts/chart1.xml").expect("part");
-        let error = patch_sheet_references(
-            chart(&declarations("a", 256), "").as_bytes(),
-            &source,
-            ReferencePart::Chart,
-            &rename_requests(),
-            WriteLimits::default(),
-        )
+        let error = with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                chart(&declarations("a", 256), "").as_bytes(),
+                target(&source, ReferencePart::Chart),
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect_err("257 declarations on one element");
         assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
         assert_eq!(error.detail(), None);
@@ -894,13 +1339,15 @@ mod tests {
                 r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>{formula}</formula></cfRule></conditionalFormatting></worksheet>"#
             )
         };
-        let error = patch_sheet_references(
-            worksheet("Data!A1<!-- note -->&gt;0").as_bytes(),
-            &source,
-            ReferencePart::Worksheet,
-            &rename_requests(),
-            WriteLimits::default(),
-        )
+        let error = with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                worksheet("Data!A1<!-- note -->&gt;0").as_bytes(),
+                target(&source, ReferencePart::Worksheet),
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect_err("a rewrite would drop the comment");
         assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
         assert_eq!(

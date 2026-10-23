@@ -600,9 +600,11 @@ can be calculated with the supplied deterministic TODAY/NOW serial values.",
         input_schema = crate::schema::mcp_schema::<ApplyChangesArgs>(),
         output_schema = crate::schema::mcp_schema::<EditReceiptDto>(),
         description = "Atomically apply an ordered typed edit batch after checking \
-expected_revision. Supported changes include setting or clearing cells, formulas, number formats, \
-adding, renaming, or deleting sheets, visibility, defined names, date system, and calculation \
-hints. Deleting a sheet turns references to it and its tables into #REF!.",
+expected_revision. Supported changes include setting or clearing cells, formulas, and number \
+formats; adding, renaming, deleting, moving, or copying sheets; sheet visibility and autoFilters; \
+setting, removing, or renaming defined names; and the date system and calculation hints. Deleting \
+a sheet turns references to it and its tables into #REF!. A copy is named like 'Data (2)', and \
+later changes in the batch can use that name.",
         annotations(
             title = "Apply workbook changes",
             read_only_hint = false,
@@ -632,9 +634,12 @@ hints. Deleting a sheet turns references to it and its tables into #REF!.",
         input_schema = crate::schema::mcp_schema::<ApplyChangesV2Args>(),
         output_schema = crate::schema::mcp_schema::<EditReceiptV2Dto>(),
         description = "Atomically apply an ordered edit-schema-v2 batch after checking \
-expected_revision. It accepts every unchanged v1 operation plus stable-ID table rename, table \
-column rename, and table data-row resize operations, and the presentation-only set_cell_format, \
-set_column_width, and set_row_height operations, which keep the semantic revision.",
+expected_revision. It accepts every unchanged v1 operation plus table operations: create_table \
+over a range whose first row is its header, and by stable ID rename_table, rename_table_column, \
+resize_table_rows, set_table_range to grow or shrink a table by rows and columns, and \
+convert_table_to_range; and the presentation-only set_cell_format, set_column_width, and \
+set_row_height operations, which keep the semantic revision. changed_table_ids includes the tables \
+create_table and copy_sheet create.",
         annotations(
             title = "Apply workbook changes v2",
             read_only_hint = false,

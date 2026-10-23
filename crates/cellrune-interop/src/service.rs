@@ -41,8 +41,8 @@ pub struct WorkbookSession {
     next_calculation_id: u64,
     published_preview: Option<preview::PublishedPreview>,
     next_preview_id: u64,
-    /// Names of the sheets installed edits deleted. A sheet ID is never reused, so a delta that
-    /// reports a deleted sheet's cells, such as its removed results, still names the sheet.
+    /// Names of the sheets installed edits deleted. A session never reuses a sheet ID, so a delta
+    /// that reports a deleted sheet's cells, such as its removed results, still names the sheet.
     deleted_sheet_names: BTreeMap<SheetId, String>,
 }
 

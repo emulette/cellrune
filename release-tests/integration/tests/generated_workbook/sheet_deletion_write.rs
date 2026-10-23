@@ -302,6 +302,178 @@ fn deleting_a_sheet_a_preserved_pivot_cache_or_chart_reads_is_refused_with_the_p
 }
 
 #[test]
+fn deleting_a_sheet_skips_relationship_targets_that_cannot_be_parts() {
+    let hyperlink = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+    // Producers write cell and mail links in drawing, chart, and VML relationships without
+    // `TargetMode="External"`, empty targets, and repeated IDs; none of them names a part.
+    let unusual = format!(
+        r##"<Relationship Id="rId3" Type="{hyperlink}" Target="#S3!A1"/><Relationship Id="rId4" Type="{hyperlink}" Target="mailto:someone@example.com"/><Relationship Id="rId5" Type="{hyperlink}" Target=""/><Relationship Id="rId5" Type="{hyperlink}" Target="#'S4'!A1"/></Relationships>"##
+    );
+    let source = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "</Relationships>",
+        &unusual,
+    );
+    let output = write(&delete(&source, &["S2"])).expect("deletion despite unusual targets");
+    let parts = support::archive_parts(&output);
+    assert!(!parts.contains_key("xl/worksheets/sheet2.xml"));
+    assert_eq!(
+        support::archive_parts(&source)["xl/drawings/_rels/drawing1.xml.rels"],
+        parts["xl/drawings/_rels/drawing1.xml.rels"]
+    );
+
+    let unreadable = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "</Relationships>",
+        "<Relationship></Relationships>",
+    );
+    let error = write(&delete(&unreadable, &["S2"])).expect_err("unreadable relationships");
+    assert_eq!(error.code(), XlsxWriteErrorCode::InvalidPackagePlan);
+    assert_eq!(
+        error.source_id().map(|source| source.as_str()),
+        Some("xl/drawings/_rels/drawing1.xml.rels")
+    );
+}
+
+#[test]
+fn deleting_a_sheet_with_a_dangling_relationship_removes_only_parts_the_package_holds() {
+    let source = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        "</Relationships>",
+        r#"<Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings" Target="../printerSettings/printerSettings1.bin"/></Relationships>"#,
+    );
+    let output = write(&delete(&source, &["S2"])).expect("deletion with a dangling relationship");
+    let parts = support::archive_parts(&output);
+    assert!(!parts.contains_key("xl/worksheets/sheet2.xml"));
+    assert!(!parts.contains_key("xl/worksheets/_rels/sheet2.xml.rels"));
+}
+
+#[test]
+fn deleting_the_active_sheet_activates_the_nearest_visible_sheet() {
+    // `S1` is active and `S2`, now at its place, is hidden, so `S3` must become active, as
+    // Excel 16.114 activates the nearest visible sheet after a deleted active one.
+    let source = support::replace_part_text(
+        &support::replace_part_text(
+            &generated_sheet_deletion_fixture(),
+            WORKBOOK_PART,
+            r#"firstSheet="1" activeTab="2""#,
+            "",
+        ),
+        WORKBOOK_PART,
+        r#"<sheet name="S2" sheetId="2" r:id="rId2"/>"#,
+        r#"<sheet name="S2" sheetId="2" state="hidden" r:id="rId2"/>"#,
+    );
+    let output = write(&delete(&source, &["S1"])).expect("output without S1");
+    let workbook = support::part_text(&output, WORKBOOK_PART);
+    assert!(
+        workbook.contains(r#"<workbookView xWindow="0" yWindow="0" activeTab="1"/>"#),
+        "{workbook}"
+    );
+}
+
+/// The fixture with a form control, a VML drop-down, a linked text box, and a data
+/// consolidation on `S1`, each naming `sheet`.
+fn linked_controls_fixture(sheet: &str) -> Vec<u8> {
+    let source = generated_sheet_deletion_fixture();
+    let mut replacements = BTreeMap::new();
+    let mut replace = |part: &str, from: &str, to: String| {
+        let text = replacements
+            .remove(part)
+            .unwrap_or_else(|| support::part_text(&source, part));
+        assert!(text.contains(from), "{part}: {from}");
+        replacements.insert(part.to_owned(), text.replacen(from, &to, 1));
+    };
+    replace(
+        "[Content_Types].xml",
+        "</Types>",
+        r#"<Override PartName="/xl/ctrlProps/ctrlProp1.xml" ContentType="application/vnd.ms-excel.controlproperties+xml"/></Types>"#.to_owned(),
+    );
+    replace(
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "</Relationships>",
+        r#"<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp" Target="../ctrlProps/ctrlProp1.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing2.vml"/></Relationships>"#.to_owned(),
+    );
+    replace(
+        S1_PART,
+        "</sheetData>",
+        format!(
+            r#"</sheetData><dataConsolidate><dataRefs count="1"><dataRef ref="A1:A3" sheet="{sheet}"/></dataRefs></dataConsolidate>"#
+        ),
+    );
+    replace(
+        S1_PART,
+        r#"<drawing r:id="rId1"/>"#,
+        r#"<drawing r:id="rId1"/><legacyDrawing r:id="rId4"/>"#.to_owned(),
+    );
+    replace(
+        "xl/drawings/drawing1.xml",
+        "</xdr:wsDr>",
+        format!(
+            r#"<xdr:oneCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>20</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="9525" cy="9525"/><xdr:sp macro="" textlink="'{sheet}'!$A$1"><xdr:nvSpPr><xdr:cNvPr id="4" name="TextBox 3"/><xdr:cNvSpPr txBox="1"/></xdr:nvSpPr><xdr:spPr/></xdr:sp><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>"#
+        ),
+    );
+    let control = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="CheckBox" fmlaLink="'{sheet}'!$A$1" lockText="1"/>"#
+    );
+    let vml = format!(
+        r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1025" type="#_x0000_t201"><x:ClientData ObjectType="Drop"><x:FmlaRange>{sheet}!$A$1:$A$3</x:FmlaRange><x:Sel>0</x:Sel></x:ClientData></v:shape></xml>"##
+    );
+    support::rewrite_archive(
+        &source,
+        &replacements,
+        &[
+            ("xl/ctrlProps/ctrlProp1.xml", control.as_bytes()),
+            ("xl/drawings/vmlDrawing2.vml", vml.as_bytes()),
+        ],
+    )
+}
+
+#[test]
+fn deleting_a_sheet_that_controls_shapes_or_consolidations_link_is_refused() {
+    let Err(error) = write(&delete(&linked_controls_fixture("S2"), &["S2"])) else {
+        panic!("links to S2 cannot be rewritten");
+    };
+    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    assert_eq!(
+        error.detail(),
+        Some(
+            "a preserved form control, VML control, linked shape, or data consolidation names a deleted sheet: xl/worksheets/sheet1.xml, xl/ctrlProps/ctrlProp1.xml, xl/drawings/drawing1.xml, xl/drawings/vmlDrawing2.vml"
+        )
+    );
+    let output = write(&delete(&linked_controls_fixture("S3"), &["S2"]))
+        .expect("links to a remaining sheet stay");
+    let parts = support::archive_parts(&output);
+    assert!(parts.contains_key("xl/ctrlProps/ctrlProp1.xml"));
+    // The parts only the deleted sheet reached go as before.
+    assert!(!parts.contains_key("xl/drawings/vmlDrawing1.vml"));
+}
+
+#[test]
+fn deleting_a_sheet_rewrites_the_validation_formulas_the_model_holds_as_it_saves_them() {
+    let source = generated_sheet_deletion_fixture();
+    let draft = delete(&source, &["S2"]);
+    let s1 = draft.workbook().sheet_by_name("S1").expect("S1");
+    let validations = s1
+        .data_validations()
+        .iter()
+        .map(|validation| validation.formula1())
+        .collect::<Vec<_>>();
+    // The worksheet rule and its x14 extension rule both read `'S2'!$A$1:$A$3`.
+    assert_eq!(validations, [Some("#REF!"), Some("#REF!")]);
+    // Excel keeps an internal hyperlink's location when its sheet is deleted.
+    assert_eq!(s1.hyperlinks()[0].location(), Some("'S2'!A1"));
+
+    let output = write(&draft).expect("output without S2");
+    let reopened = open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen");
+    let saved = reopened.workbook().sheet_by_name("S1").expect("S1");
+    assert_eq!(saved.data_validations(), s1.data_validations());
+    assert_eq!(saved.hyperlinks(), s1.hyperlinks());
+}
+
+#[test]
 fn edit_only_write_clears_the_results_a_deleted_sheet_changes() {
     let source = generated_sheet_deletion_fixture();
     let draft = delete(&source, &["S2"]);

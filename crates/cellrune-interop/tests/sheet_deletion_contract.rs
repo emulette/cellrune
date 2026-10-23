@@ -145,6 +145,45 @@ fn a_batch_cannot_reach_a_sheet_it_deleted_and_the_last_visible_sheet_stays() {
 }
 
 #[test]
+fn a_sheet_added_after_one_the_batch_added_and_deleted_takes_a_new_id() {
+    let mut session = session();
+    let revision = session.summary().semantic_revision;
+    let receipt = session
+        .apply_changes(
+            revision,
+            EditBatchDto {
+                changes: vec![
+                    WorkbookChangeDto::AddSheet {
+                        name: "Scratch".to_owned(),
+                    },
+                    WorkbookChangeDto::DeleteSheet {
+                        sheet: "Scratch".to_owned(),
+                    },
+                    WorkbookChangeDto::AddSheet {
+                        name: "Kept".to_owned(),
+                    },
+                    WorkbookChangeDto::SetValue {
+                        sheet: "Kept".to_owned(),
+                        address: "A1".to_owned(),
+                        value: WritableCellValueDto::Number { value: 7.0 },
+                    },
+                ],
+            },
+        )
+        .expect("the batch reaches the sheet it added last");
+    assert_eq!(receipt.created_sheet_ids, [4, 5]);
+    let kept = session
+        .summary()
+        .sheets
+        .iter()
+        .find(|sheet| sheet.name == "Kept")
+        .map(|sheet| sheet.id);
+    assert_eq!(kept, Some(5));
+    let added = session.add_sheet("Later").expect("Later");
+    assert_eq!(added, 6);
+}
+
+#[test]
 fn targeted_calculation_and_previews_follow_a_deleted_sheet() {
     let mut session = session();
     session.delete_sheet("Data").expect("delete Data");
