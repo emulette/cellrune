@@ -647,6 +647,23 @@ async function assertGridEdits() {
   );
   assert.deepEqual([formula("B1"), formula("B2")], ["=SUM(A1:A5)", "=A3*10"]);
 
+  // A previewed batch carries the same inverse in its report and in the committed receipt.
+  const preview = await workbook.previewChanges(workbook.summary().semanticRevision, [
+    { kind: "insertRows", sheet: "Sheet1", row: 2, count: 1 },
+  ]);
+  const previewInverse = {
+    changes: [{ kind: "deleteRows", sheet: "Sheet1", first: 2, last: 2 }],
+    unrestored: [],
+  };
+  assert.deepEqual(preview.report.editReceipt.inverse, previewInverse);
+  const committed = workbook.commitPreview(preview.previewId);
+  assert.deepEqual(committed.edit.inverse, previewInverse);
+  workbook.applyChangesV2(
+    workbook.summary().semanticRevision,
+    committed.edit.inverse.changes,
+  );
+  assert.deepEqual([formula("B1"), formula("B2")], ["=SUM(A1:A5)", "=A3*10"]);
+
   const copied = workbook.applyChanges(workbook.summary().semanticRevision, [
     { kind: "copyRange", sheet: "Sheet1", source: "B2", destination: "C2:C3" },
     {

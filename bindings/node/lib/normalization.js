@@ -729,6 +729,7 @@ function normalizeTransactionEditReceipt(receipt) {
     createdSheetIds: receipt.created_sheet_ids,
     topologyChanged: receipt.topology_changed,
     calculationMetadataChanged: receipt.calculation_metadata_changed,
+    ...(receipt.inverse == null ? {} : { inverse: normalizeEditInverse(receipt.inverse) }),
   };
 }
 
