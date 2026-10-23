@@ -12,6 +12,116 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Added
 
+- `WorkbookChange::delete_sheet(SheetId)` and `WorkbookDraft::delete_sheet` delete a sheet with
+  the names scoped to it and its tables, and rewrite the remaining cell formulas, defined names,
+  and table formulas as Excel saves them: a reference to the sheet or to one of its tables becomes
+  `#REF!` (`SUM('S2'!A1:A3)` becomes `SUM(#REF!)`), a deleted end of a 3-D reference moves to the
+  nearest remaining tab (`'S2:S3'!A1` becomes `'S3'!A1`), and `INDIRECT` text is untouched. A
+  qualified use of a name scoped to the deleted sheet becomes `#REF!` where Excel writes
+  `[0]!Name`. Deleting the last visible sheet fails with `validation.last_visible_sheet`. The
+  receipt reports a topology change, so a session recalculates fully.
+- Saving a document draft removes a deleted sheet's entry and every package part only it reached,
+  a pivot cache once all of its pivot tables went, and their content-type overrides, renumbers
+  `localSheetId`, and moves `workbookView` `activeTab` and `firstSheet` past the deleted tab.
+  Conditional formats, data validations, and chart series that name the sheet become `#REF!`, a
+  sparkline reading it loses its data source, and internal hyperlinks keep their location, as in
+  Excel. A remaining pivot cache or pivot chart that reads the deleted sheet, or a slicer or
+  timeline cache while it holds a pivot table or table, fails with
+  `xlsx.write.unsupported_preservation` and a detail naming the parts. Saving edits without
+  calculating also clears the results of formulas that read the sheet list or a 3-D range across
+  the deleted sheet.
+- `WorkbookSnapshot::highest_sheet_id()` returns the highest sheet ID a workbook has used,
+  deleted sheets included; added sheets take the next ID, so a deleted sheet's ID is never reused.
+- Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
+  Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
+  `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and
+  Node.js `deleteSheet` methods. Deltas name a deleted sheet's removed results by the name it had.
+- `SKEW`, `SKEW.P`, and `KURT` calculate the sample skewness, population skewness, and sample
+  kurtosis Microsoft documents, collecting numbers as `STDEV.S` does. Fewer than three numbers
+  (four for `KURT`) or a zero standard deviation returns `#DIV/0!`.
+- `FREQUENCY` and `MODE.MULT` spill one column. `FREQUENCY` counts numbers at or below each
+  ascending bin and above the last, ignoring text and blanks; unordered or mixed bins and logical
+  values or errors in either argument report `calculation.unsupported_expression`. `MODE.MULT`
+  returns every most frequent number in first-occurrence order, and `#N/A` when none repeats.
+- `CHISQ.TEST` (and `CHITEST`), `CHISQ.INV`, and `CHISQ.INV.RT` (and `CHIINV`) calculate the
+  chi-square test and both quantiles with Microsoft's argument errors; the right tail is inverted
+  directly so tiny probabilities keep their precision. Tables whose counts match but shapes differ,
+  non-numeric cells, and non-positive expected values report `calculation.unsupported_expression`.
+- `CUMIPMT` and `CUMPRINC` total the interest or principal of end-of-period level payments, and
+  `VDB` totals declining-balance depreciation with the switch to straight line, over whole periods
+  with Microsoft's argument errors. Fractional periods, beginning-of-period payments, and a `VDB`
+  end period after the life report `calculation.unsupported_expression`.
+- `AMORLINC` and `AMORDEGRC` calculate French accounting depreciation with the prorated first
+  period, Microsoft's `AMORDEGRC` coefficients and whole-number rounding, and `#NUM!` for a salvage
+  above cost or an `AMORDEGRC` life Microsoft rejects. Undocumented argument errors, the
+  accelerated `AMORDEGRC` periods at the end of the life, and other undocumented edges report
+  `calculation.unsupported_expression`.
+- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, and `IMCSCH` return
+  complex text like the other complex functions, `#VALUE!` for a logical inumber, and
+  `calculation.unsupported_expression` at the pole zero or where a bounded result's intermediate
+  overflows.
+- `ENCODEURL` percent-encodes text as RFC 3986 encodes a URI component, keeping ASCII letters,
+  digits, `-`, `.`, `_`, and `~` and encoding every other UTF-8 byte.
+- `CELL` returns the `"address"`, `"contents"`, `"row"`, `"col"`, and `"type"` information Microsoft
+  defines by the workbook alone; formatting, width, protection, and file-name info types, an
+  omitted reference, and the active-cell cases report `calculation.unsupported_expression`.
+- `BAHTTEXT` reads positive amounts with whole satang as Thai baht text; zero, negative, and
+  sub-baht amounts, more than two decimal places, and a final one after a zero tens digit (101),
+  where Thai usage varies, report `calculation.unsupported_expression`.
+- `Sheet::data_validations()` reads every worksheet data validation rule as a read-only model:
+  `DataValidation` exposes its ranges, `DataValidationType` (any value, whole, decimal, list, date,
+  time, text length, custom), `DataValidationOperator`, `formula1`/`formula2` as stored,
+  `allow_blank`, `in_cell_dropdown` (the inverse of OOXML `showDropDown`), the input and error
+  message flags and texts, and `DataValidationErrorStyle`. Rules come from `<dataValidations>` and
+  from the Excel 2010 `x14:dataValidations` extension, which Excel uses for lists that name another
+  sheet. A rule with a malformed range list, a repeated formula, or an unknown token is left
+  unmodeled and its XML is preserved as before. A sheet rename rewrites the rules' formulas as the
+  saved part rewrites them, and rules are not part of the semantic fingerprint.
+- The rules are paged by `WorkbookSession::data_validations` in interop, Python
+  `Workbook.data_validations`, Node.js `Workbook.dataValidations`, and the MCP tool
+  `workbook_data_validations`, each taking a sheet name, `offset`, and `limit`.
+- A minimal cell formatting model: `WorkbookDraft::cell_format(sheet_id, address)` returns the
+  `CellFormat` (`Font`, `Fill`, `Border`, `Alignment`, with `Color` as an ARGB, theme, indexed, or
+  automatic color and a tint) a cell displays with, resolved as Excel does from the cell's own
+  style, else a blank cell's, its row's, or its column's. `DocumentPresentation::column_widths`,
+  `column_width`, `row_heights`, and `row_height` read explicit widths and heights. Package-backed
+  documents capture them on open; a gradient fill reads as `Fill::Gradient` and its stops stay in
+  the source record.
+- `WorkbookChange::set_cell_format` (a `CellFormatEdit` that replaces any of the four components),
+  `set_column_width`, and `set_row_height` are presentation changes: they advance the presentation
+  revision, keep the semantic revision and any calculation current, and validate their values
+  with the new `validation.font_name_invalid` and `validation.format_value_out_of_range` codes.
+  The document writer adds only the font, fill, border, and `cellXfs` records an edit needs,
+  keeping every unedited record, attribute, and component of the source style; it splits `<col>`
+  spans, writes rows that gain a height, and keeps an edited cell's format when its content is
+  cleared. The canonical writer writes the same model, and both verify the reopened output. A
+  session rejects a batch prepared before another presentation-only batch was installed with
+  `session.revision_mismatch`, so neither batch's edits are lost.
+- `Sheet::hyperlinks()` and `Sheet::comments()` read worksheet hyperlinks (`Hyperlink`: range,
+  external target from the worksheet relationship, in-workbook location, display text, screen
+  tip) and legacy cell comments (`Comment`: address, author, plain text without phonetic runs) as
+  read-only metadata. These parts were not read before, so a hyperlink with a malformed `ref`, a
+  relationship part that does not parse, or a comments part that does not read leaves only that
+  metadata out and never fails the read. A sheet rename rewrites internal hyperlink locations as
+  the saved part does. Interop `WorkbookSession::hyperlinks`/`comments`, Python
+  `Workbook.hyperlinks`/`comments`, Node.js `Workbook.hyperlinks`/`comments`, and the MCP tools
+  `workbook_hyperlinks` and `workbook_comments` page through them.
+- RFC 4180 CSV import and export of one sheet: `read_csv(bytes, &CsvReadOptions)` returns a
+  one-sheet `WorkbookDraft`, and `write_csv(workbook, calculation, sheet_id, CsvWriteOptions)`
+  writes UTF-8 with CRLF records from A1 through the last used cell, formulas as their calculated
+  values. Reading never creates a formula: unquoted decimal numbers, `TRUE`/`FALSE`, and Excel error
+  spellings become numbers, logicals, and errors, quoted fields and everything else text, and
+  writing quotes text that would read back as anything else, so a write and a read keep every
+  value at its address. Failures carry the new `csv.*` codes. Interop
+  `WorkbookSession::open_csv_bytes`/`save_csv_bytes`, Python `Workbook.from_csv`/`to_csv`,
+  Node.js `Workbook.fromCsv`/`toCsv`, and the MCP tools `workbook_open_csv` and
+  `workbook_export_csv` expose them.
+- Interop `WorkbookSession::read_formats` returns a row-major `CellFormatPageDto` with the
+  range's column widths and the page's row heights, and edit schema v2 accepts `set_cell_format`,
+  `set_column_width`, and `set_row_height`. Python `Workbook.read_formats`, Node.js
+  `Workbook.readFormats`, the MCP tool `workbook_read_formats`, and every surface's
+  `apply_changes_v2` expose them.
+
 ### Changed
 
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
@@ -55,6 +165,28 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- Node.js `previewChangesPage` continues from the `nextCursor` it returned instead of failing with
+  `interop.preview.cursor_invalid`.
+- MCP rejects a workbook path that contains a `..` component with `mcp.path.invalid`. An input
+  such as `/outside/dir/../../root/book.xlsx` was matched to its root after folding `..` but opened
+  as spelled, so whether `/outside/dir` existed changed the result, and Save As already refused
+  such destinations with a misleading detail or `mcp.path.outside_root`.
+- A dynamic reference whose position comes from another dynamic reference, such as an `OFFSET`
+  row read through a second `OFFSET`, calculates instead of reporting
+  `UnsupportedExpression`: a full calculation repeats while a pass reads a formula before
+  calculating it, ordering each pass by the references the previous pass resolved, for at most
+  eight passes.
+- Packages that failed to read now open: a `cellXfs` `xf` without the optional `numFmtId` reads as
+  General; a cell without the optional `r` takes the column after the previous cell of its row and
+  a row without `r` the row after the previous one; a cell holding `#FIELD!`, `#BLOCKED!`,
+  `#CONNECT!`, `#BUSY!`, `#UNKNOWN!`, or `#PYTHON!` reads as the new `ExcelError` variant, which a
+  formula reading it reports as an unsupported capability instead of a guessed value; and a
+  shared formula whose relative reference shifts past the last row or column wraps around the
+  grid, as Excel's copy does.
+- A document open no longer fails on a sheet view or pane it cannot model, such as one without
+  `workbookViewId`, with a fractional or negative split, or whose `activePane` or `topLeftCell`
+  disagrees with its split; the pane stays preserved but unmodeled with an `xlsx.pane.invalid`
+  presentation diagnostic, as a snapshot read already ignored it.
 
 ## [0.1.26] - 2026-10-23
 
