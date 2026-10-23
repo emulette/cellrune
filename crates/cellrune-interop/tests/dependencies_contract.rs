@@ -133,3 +133,29 @@ fn precedents_and_dependents_need_the_current_calculation() {
         .expect_err("the edit left the calculation behind");
     assert_eq!(error.code(), "interop.calculation.required");
 }
+
+#[test]
+fn a_spill_anchor_is_not_its_own_dependent_unless_it_reads_itself() {
+    let mut session = WorkbookSession::create();
+    session
+        .set_formula("Sheet1", "G1", "=SEQUENCE(3)", Some("G1:G3"))
+        .expect("spill");
+    session
+        .set_formula("Sheet1", "H1", "=H1+1", None)
+        .expect("cycle");
+    session
+        .calculate(CalculationOptionsDto::default())
+        .expect("calculate");
+    let dependents = |address: &str| {
+        session
+            .dependents(&request(address, 0, 0))
+            .expect("dependents")
+            .entries
+            .into_iter()
+            .map(|entry| entry.cell.address)
+            .collect::<Vec<_>>()
+    };
+    assert!(dependents("G1").is_empty());
+    assert_eq!(dependents("G2"), ["G1"]);
+    assert_eq!(dependents("H1"), ["H1"]);
+}

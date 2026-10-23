@@ -179,13 +179,26 @@ impl WorkbookCalculationSession {
         let compiled = self.current_compiled()?;
         let workbook = self.workbook();
         let dynamic = compiled.value_dependent_formulas();
-        let formulas = internal_cell(workbook, cell)
+        let mut formulas = internal_cell(workbook, cell)
             .map(|internal| {
                 compiled
                     .direct_affected_formulas(internal, &mut || Ok(()))
                     .expect("uncharged dependent lookup cannot be cancelled")
             })
             .unwrap_or_default();
+        // An array formula's region holds its own anchor, which reads that cell only when one of
+        // its references does.
+        if let Some(internal) = internal_cell(workbook, cell)
+            && formulas.contains(&internal)
+            && !self.precedents(cell).is_some_and(|precedents| {
+                precedents.precedents().iter().any(|precedent| {
+                    precedent.sheet_id() == cell.sheet_id()
+                        && precedent.range().contains(cell.address())
+                })
+            })
+        {
+            formulas.retain(|formula| *formula != internal);
+        }
         let listed_dynamic = formulas
             .iter()
             .filter(|formula| dynamic.contains(formula))
