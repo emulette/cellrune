@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{SheetId, SheetName};
+use super::{SheetId, SheetName, SheetVisibility};
 
 /// A workbook tab that is not a worksheet: a chartsheet, dialogsheet, or macrosheet.
 ///
@@ -11,12 +11,23 @@ pub(crate) struct NonWorksheetTab {
     position: usize,
     id: SheetId,
     name: SheetName,
+    visibility: SheetVisibility,
 }
 
 impl NonWorksheetTab {
     /// Creates a tab at its zero-based position in the complete `<sheets>` list.
-    pub(crate) const fn new(position: usize, id: SheetId, name: SheetName) -> Self {
-        Self { position, id, name }
+    pub(crate) const fn new(
+        position: usize,
+        id: SheetId,
+        name: SheetName,
+        visibility: SheetVisibility,
+    ) -> Self {
+        Self {
+            position,
+            id,
+            name,
+            visibility,
+        }
     }
 
     pub(crate) const fn position(&self) -> usize {
@@ -29,6 +40,10 @@ impl NonWorksheetTab {
 
     pub(crate) const fn name(&self) -> &SheetName {
         &self.name
+    }
+
+    pub(crate) const fn visibility(&self) -> SheetVisibility {
+        self.visibility
     }
 }
 
@@ -75,21 +90,31 @@ impl NonWorksheetTabs {
         &'a self,
         worksheets: impl IntoIterator<Item = &'a str>,
     ) -> Vec<&'a str> {
+        self.in_tab_order(worksheets, |tab| tab.name.as_str())
+    }
+
+    /// Merges one item per worksheet, in worksheet order, with one per tab that is not a worksheet
+    /// into tab order.
+    pub(crate) fn in_tab_order<'a, T>(
+        &'a self,
+        worksheets: impl IntoIterator<Item = T>,
+        tab_item: impl Fn(&'a NonWorksheetTab) -> T,
+    ) -> Vec<T> {
         let mut worksheets = worksheets.into_iter();
         let mut tabs = self.0.iter().peekable();
-        let mut names = Vec::new();
+        let mut items = Vec::new();
         loop {
-            let name = match tabs.next_if(|tab| tab.position <= names.len()) {
-                Some(tab) => tab.name.as_str(),
+            let item = match tabs.next_if(|tab| tab.position <= items.len()) {
+                Some(tab) => tab_item(tab),
                 None => match worksheets.next() {
-                    Some(name) => name,
+                    Some(item) => item,
                     None => match tabs.next() {
-                        Some(tab) => tab.name.as_str(),
-                        None => return names,
+                        Some(tab) => tab_item(tab),
+                        None => return items,
                     },
                 },
             };
-            names.push(name);
+            items.push(item);
         }
     }
 
@@ -131,13 +156,14 @@ impl NonWorksheetTabs {
 #[cfg(test)]
 mod tests {
     use super::{NonWorksheetTab, NonWorksheetTabs};
-    use crate::{SheetId, SheetName};
+    use crate::{SheetId, SheetName, SheetVisibility};
 
     fn tab(position: usize, id: u32) -> NonWorksheetTab {
         NonWorksheetTab::new(
             position,
             SheetId::new(id).expect("sheet id"),
             SheetName::new(format!("Chart{id}")).expect("sheet name"),
+            SheetVisibility::Visible,
         )
     }
 

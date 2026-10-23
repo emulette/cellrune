@@ -7,7 +7,7 @@ use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
 
 use super::serialization::escape_text;
-use super::sheet_deletion::patch_workbook_view;
+use super::sheet_deletion::{TabPlacement, patch_workbook_view};
 use super::workbook_patch::{
     HostRecalculation, follows_calculation_properties, patch_calculation_properties_with_hints,
 };
@@ -123,14 +123,10 @@ pub(crate) fn patch_workbook_semantics(
     } = options;
     enforce_bytes(bytes.len(), limits, source)?;
     validate_existing_sheet_order(original, draft, source)?;
-    // Tab positions of deleted worksheets, which later tabs, `workbookView`, and every
-    // sheet-scoped name's `localSheetId` move past.
-    let deleted_positions = original
-        .sheets()
-        .iter()
-        .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
-        .filter_map(|sheet| original.sheet_tab_position(sheet.id()))
-        .collect::<Vec<_>>();
+    // Deleted worksheets move later tabs, `workbookView`, and every sheet-scoped name's
+    // `localSheetId` forward.
+    let placement = TabPlacement::between(original, draft);
+    let tabs_deleted = placement.deleted().next().is_some();
     let names_changed = original.defined_names() != draft.defined_names()
         || draft
             .defined_names()
@@ -172,7 +168,7 @@ pub(crate) fn patch_workbook_semantics(
             continue;
         }
         let book_view = |element: &BytesStart<'_>, depth: u64| {
-            !deleted_positions.is_empty()
+            tabs_deleted
                 && book_views_depth.is_some_and(|parent| depth == parent + 1)
                 && element.local_name().as_ref() == "workbookView"
         };
@@ -202,12 +198,7 @@ pub(crate) fn patch_workbook_semantics(
                     book_views_depth = Some(depth);
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
                 } else if book_view(&element, depth) {
-                    let patched = patch_workbook_view(
-                        &element,
-                        &deleted_positions,
-                        draft.tab_count(),
-                        source,
-                    )?;
+                    let patched = patch_workbook_view(&element, &placement, source)?;
                     write_event(&mut writer, Event::Start(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "sheets"
@@ -332,12 +323,7 @@ pub(crate) fn patch_workbook_semantics(
                         write_event(&mut writer, Event::Empty(patched), source)?;
                     }
                 } else if book_view(&element, depth + 1) {
-                    let patched = patch_workbook_view(
-                        &element,
-                        &deleted_positions,
-                        draft.tab_count(),
-                        source,
-                    )?;
+                    let patched = patch_workbook_view(&element, &placement, source)?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
                     && element.local_name().as_ref() == "definedNames"

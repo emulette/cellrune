@@ -193,7 +193,12 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 ),
                 &workbook_part,
             )?);
-            non_worksheet_tabs.push(NonWorksheetTab::new(position, metadata.id, metadata.name));
+            non_worksheet_tabs.push(NonWorksheetTab::new(
+                position,
+                metadata.id,
+                metadata.name,
+                metadata.visibility,
+            ));
             continue;
         };
         worksheet_parts.insert(metadata.id, worksheet_part.clone());

@@ -623,8 +623,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   removed parts lose their content-type overrides, and `docProps/app.xml`
   keeps its bytes. Sheet-scoped names get renumbered `localSheetId`s, and
   `workbookView` `activeTab` and `firstSheet` count down by the deleted tabs
-  before them, a deleted active tab handing activity to the tab now at its
-  place (the last tab when it was last); `tabSelected` is left as it was.
+  before them. A deleted first tab hands its role to the tab now at its
+  place; a deleted active tab hands activity to the nearest visible tab
+  after it, else the nearest visible tab before it, as Excel does, and an
+  `activeTab` of 0 is omitted; `tabSelected` is left as it was.
   Conditional formats, data validations, x14 formulas, and chart series that
   name a deleted sheet become `#REF!`; a sparkline whose data names one loses
   its data source and keeps its location, and an internal hyperlink keeps its

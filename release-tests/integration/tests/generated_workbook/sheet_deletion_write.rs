@@ -352,6 +352,29 @@ fn deleting_a_sheet_with_a_dangling_relationship_removes_only_parts_the_package_
 }
 
 #[test]
+fn deleting_the_active_sheet_activates_the_nearest_visible_sheet() {
+    // `S1` is active and `S2`, now at its place, is hidden, so `S3` must become active, as
+    // Excel 16.114 activates the nearest visible sheet after a deleted active one.
+    let source = support::replace_part_text(
+        &support::replace_part_text(
+            &generated_sheet_deletion_fixture(),
+            WORKBOOK_PART,
+            r#"firstSheet="1" activeTab="2""#,
+            "",
+        ),
+        WORKBOOK_PART,
+        r#"<sheet name="S2" sheetId="2" r:id="rId2"/>"#,
+        r#"<sheet name="S2" sheetId="2" state="hidden" r:id="rId2"/>"#,
+    );
+    let output = write(&delete(&source, &["S1"])).expect("output without S1");
+    let workbook = support::part_text(&output, WORKBOOK_PART);
+    assert!(
+        workbook.contains(r#"<workbookView xWindow="0" yWindow="0" activeTab="1"/>"#),
+        "{workbook}"
+    );
+}
+
+#[test]
 fn edit_only_write_clears_the_results_a_deleted_sheet_changes() {
     let source = generated_sheet_deletion_fixture();
     let draft = delete(&source, &["S2"]);

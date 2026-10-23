@@ -1546,6 +1546,16 @@ impl WorkbookSnapshot {
         self.sheets.len() + self.non_worksheet_tabs.len()
     }
 
+    /// Returns each tab's ID and visibility in tab order, tabs that are not worksheets included.
+    pub(crate) fn tab_order(&self) -> Vec<(SheetId, SheetVisibility)> {
+        self.non_worksheet_tabs.in_tab_order(
+            self.sheets
+                .iter()
+                .map(|sheet| (sheet.id(), sheet.visibility())),
+            |tab| (tab.id(), tab.visibility()),
+        )
+    }
+
     /// Returns the zero-based tab position of the worksheet at `worksheet_index`.
     pub(crate) fn worksheet_tab_position(&self, worksheet_index: usize) -> usize {
         self.non_worksheet_tabs.worksheet_position(worksheet_index)

@@ -346,7 +346,12 @@ fn deleting_each_end_of_a_3d_reference_moves_it_toward_the_other_end() {
 #[test]
 fn deleting_a_worksheet_moves_later_non_worksheet_tabs_and_3d_ends_cross_them() {
     // Tab order: S1, S2, Chart, S3, S4.
-    let chart = NonWorksheetTab::new(2, id(9), SheetName::new("Chart").expect("chart name"));
+    let chart = NonWorksheetTab::new(
+        2,
+        id(9),
+        SheetName::new("Chart").expect("chart name"),
+        SheetVisibility::Visible,
+    );
     let mut draft = probe_workbook(NonWorksheetTabs::new(vec![chart]));
     draft.delete_sheet(id(1)).expect("delete S1");
     let workbook = draft.workbook();
@@ -358,6 +363,7 @@ fn deleting_a_worksheet_moves_later_non_worksheet_tabs_and_3d_ends_cross_them() 
         2,
         id(9),
         SheetName::new("Chart").expect("chart name"),
+        SheetVisibility::Visible,
     )]));
     draft.delete_sheet(id(2)).expect("delete S2");
     // Excel 16.114 moves the deleted start of `'S2:S3'!A1` past the chartsheet between them to

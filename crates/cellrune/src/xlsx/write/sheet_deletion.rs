@@ -16,7 +16,7 @@ use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, namespace_reader,
     read_event,
 };
-use crate::{WorkbookSnapshot, XlsxDocument};
+use crate::{SheetVisibility, WorkbookSnapshot, XlsxDocument};
 
 const ROOT_RELATIONSHIPS_PART: &[u8] = b"_rels/.rels";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
@@ -222,17 +222,95 @@ fn package_referrers(
     Ok(referrers)
 }
 
-/// Returns `<workbookView>` with `activeTab` and `firstSheet` moved past the deleted tabs: each
-/// counts down by the deleted tabs before it, so a deleted active or first tab hands its role to
-/// the tab now at its place, the last tab when it was last. `firstSheet` 0 is omitted as Excel
-/// saves it.
+/// Where the source tabs land in the draft's tab order, and which draft tabs are visible.
+#[derive(Debug)]
+pub(super) struct TabPlacement {
+    /// The draft position of each source tab, by source position; `None` for a deleted tab.
+    positions: Vec<Option<usize>>,
+    /// Whether each draft tab, by draft position, is visible.
+    visible: Vec<bool>,
+}
+
+impl TabPlacement {
+    pub(super) fn between(original: &WorkbookSnapshot, draft: &WorkbookSnapshot) -> Self {
+        Self {
+            positions: original
+                .tab_order()
+                .into_iter()
+                .map(|(id, _)| draft.sheet_tab_position(id))
+                .collect(),
+            visible: draft
+                .tab_order()
+                .into_iter()
+                .map(|(_, visibility)| visibility == SheetVisibility::Visible)
+                .collect(),
+        }
+    }
+
+    /// Returns the source positions of the deleted tabs.
+    pub(super) fn deleted(&self) -> impl Iterator<Item = usize> + '_ {
+        self.positions
+            .iter()
+            .enumerate()
+            .filter_map(|(position, placed)| placed.is_none().then_some(position))
+    }
+
+    /// Returns the draft position a deleted source tab hands its place to: that of the first kept
+    /// tab after it, or one past the last tab.
+    fn successor(&self, source: usize) -> usize {
+        self.positions[..source.min(self.positions.len())]
+            .iter()
+            .filter(|placed| placed.is_some())
+            .count()
+    }
+
+    /// Returns the draft position of the tab that shows first in the tab bar: the same tab, or,
+    /// for a deleted one, the tab now at its place.
+    fn first(&self, source: usize) -> usize {
+        match self.positions.get(source).copied().flatten() {
+            Some(position) => position,
+            None => self.successor(source),
+        }
+        .min(self.visible.len().saturating_sub(1))
+    }
+
+    /// Returns the draft position of the active tab: the same tab, or, for a deleted one, the
+    /// nearest visible tab after its place and else the nearest visible tab before it, as Excel
+    /// 16.114 activates once the active sheet is deleted.
+    fn active(&self, source: usize) -> usize {
+        if let Some(position) = self.positions.get(source).copied().flatten() {
+            return position;
+        }
+        let place = self.successor(source);
+        self.visible
+            .iter()
+            .enumerate()
+            .skip(place)
+            .find(|(_, visible)| **visible)
+            .or_else(|| {
+                self.visible
+                    .iter()
+                    .enumerate()
+                    .take(place)
+                    .rev()
+                    .find(|(_, visible)| **visible)
+            })
+            .map_or(place, |(position, _)| position)
+            .min(self.visible.len().saturating_sub(1))
+    }
+}
+
+/// Returns `<workbookView>` with `activeTab` and `firstSheet` naming their tabs' draft positions.
+/// A deleted first tab hands its role to the tab now at its place; a deleted active tab to the
+/// nearest visible tab after it, else before it. A position that changes to 0 is omitted as Excel
+/// saves it, and an omitted `activeTab`, which means the first tab, is written when that tab moved.
 pub(super) fn patch_workbook_view(
     element: &BytesStart<'_>,
-    deleted_positions: &[usize],
-    tab_count: usize,
+    placement: &TabPlacement,
     source: &PartPath,
 ) -> Result<BytesStart<'static>, XlsxWriteError> {
     let mut patched = BytesStart::new(element.name().as_ref().to_owned());
+    let mut saw_active = false;
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
         let key = attribute.key.as_ref();
@@ -248,17 +326,25 @@ pub(super) fn patch_workbook_view(
             patched.push_attribute(attribute);
             continue;
         };
-        let moved = (position
-            - deleted_positions
-                .iter()
-                .filter(|deleted| **deleted < position)
-                .count())
-        .min(tab_count.saturating_sub(1));
-        if key == "firstSheet" && moved == 0 {
-            continue;
+        let moved = if key == "activeTab" {
+            saw_active = true;
+            placement.active(position)
+        } else {
+            placement.first(position)
+        };
+        if moved == position {
+            patched.push_attribute(attribute);
+        } else if moved != 0 {
+            let value = moved.to_string();
+            patched.push_attribute((key, value.as_str()));
         }
-        let value = moved.to_string();
-        patched.push_attribute((key, value.as_str()));
+    }
+    if !saw_active {
+        let active = placement.active(0);
+        if active != 0 {
+            let value = active.to_string();
+            patched.push_attribute(("activeTab", value.as_str()));
+        }
     }
     Ok(patched.into_owned())
 }
@@ -445,7 +531,7 @@ mod tests {
     use quick_xml::events::Event;
     use quick_xml::reader::Reader;
 
-    use super::{patch_workbook_view, remove_pivot_cache_entries};
+    use super::{TabPlacement, patch_workbook_view, remove_pivot_cache_entries};
     use crate::WriteLimits;
     use crate::xlsx::package::PartPath;
 
@@ -453,12 +539,25 @@ mod tests {
         PartPath::from_archive_name(b"xl/workbook.xml").expect("part")
     }
 
-    fn view(xml: &str, deleted: &[usize], tab_count: usize) -> String {
+    /// Patches a view for source tabs of which `deleted` are deleted; `hidden` names source tabs
+    /// that are hidden.
+    fn view(xml: &str, tab_count: usize, deleted: &[usize], hidden: &[usize]) -> String {
         let mut reader = Reader::from_str(xml);
         let Event::Empty(element) = reader.read_event().expect("event") else {
             panic!("an empty workbookView");
         };
-        let patched = patch_workbook_view(&element, deleted, tab_count, &part()).expect("view");
+        let mut positions = Vec::new();
+        let mut visible = Vec::new();
+        for source in 0..tab_count {
+            if deleted.contains(&source) {
+                positions.push(None);
+            } else {
+                positions.push(Some(visible.len()));
+                visible.push(!hidden.contains(&source));
+            }
+        }
+        let placement = TabPlacement { positions, visible };
+        let patched = patch_workbook_view(&element, &placement, &part()).expect("view");
         let mut writer = quick_xml::Writer::new(Vec::new());
         writer
             .write_event(Event::Empty(patched))
@@ -471,33 +570,58 @@ mod tests {
         // The Excel probe: four tabs, `firstSheet="1" activeTab="2"`.
         let source = r#"<workbookView xWindow="0" firstSheet="1" activeTab="2"/>"#;
         assert_eq!(
-            view(source, &[0], 3),
+            view(source, 4, &[0], &[]),
             r#"<workbookView xWindow="0" activeTab="1"/>"#
         );
         assert_eq!(
-            view(source, &[1], 3),
+            view(source, 4, &[1], &[]),
             r#"<workbookView xWindow="0" firstSheet="1" activeTab="1"/>"#
         );
         assert_eq!(
-            view(source, &[2], 3),
+            view(source, 4, &[2], &[]),
             r#"<workbookView xWindow="0" firstSheet="1" activeTab="2"/>"#
         );
         assert_eq!(
-            view(source, &[3], 3),
+            view(source, 4, &[3], &[]),
             r#"<workbookView xWindow="0" firstSheet="1" activeTab="2"/>"#
         );
         // A deleted last active tab hands activity to the new last tab.
         assert_eq!(
-            view(r#"<workbookView activeTab="3"/>"#, &[3], 3),
+            view(r#"<workbookView activeTab="3"/>"#, 4, &[3], &[]),
             r#"<workbookView activeTab="2"/>"#
         );
         assert_eq!(
             view(
                 r#"<workbookView activeTab="3" firstSheet="2"/>"#,
+                4,
                 &[0, 1],
-                2
+                &[]
             ),
             r#"<workbookView activeTab="1"/>"#
+        );
+    }
+
+    #[test]
+    fn a_deleted_active_tab_hands_activity_to_the_nearest_visible_tab() {
+        // Excel 16.114: tabs Act (active), Hid (hidden), Vis; deleting Act activates Vis.
+        assert_eq!(
+            view(r#"<workbookView xWindow="0"/>"#, 3, &[0], &[1]),
+            r#"<workbookView xWindow="0" activeTab="1"/>"#
+        );
+        // Vis, Hid, Act (active and last): Vis becomes active and `activeTab` is omitted.
+        assert_eq!(
+            view(r#"<workbookView activeTab="2"/>"#, 3, &[2], &[1]),
+            r#"<workbookView/>"#
+        );
+        // Vis0, Act, H1, H2 (both hidden), Vis: the visible tab after Act wins.
+        assert_eq!(
+            view(r#"<workbookView activeTab="1"/>"#, 5, &[1], &[2, 3]),
+            r#"<workbookView activeTab="3"/>"#
+        );
+        // An unchanged position keeps its source spelling.
+        assert_eq!(
+            view(r#"<workbookView activeTab="0"/>"#, 3, &[2], &[]),
+            r#"<workbookView activeTab="0"/>"#
         );
     }
 
