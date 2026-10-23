@@ -106,7 +106,7 @@ fn complex_trigonometry_stays_accurate_next_to_real_poles() {
         let (real_text, imaginary_text) = text
             .trim_end_matches('i')
             .rsplit_once(['+', '-'])
-            .map(|(head, tail)| (head, &text[head.len()..text.len() - 1]))
+            .map(|(head, _)| (head, &text[head.len()..text.len() - 1]))
             .expect("a complex number with both parts");
         let parts = [
             (real_text.parse::<f64>().expect("real part"), real),
