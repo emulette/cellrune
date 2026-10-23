@@ -531,6 +531,11 @@ impl WorkbookDraft {
                     match origin {
                         Some(origin) => {
                             copied_sheets.insert(copy_id, origin);
+                            // The copy duplicates its origin's part as the package holds it, so
+                            // it replays the structural edits its source had before the copy.
+                            if let Some(history) = grid_histories.get(sheet_id).cloned() {
+                                grid_histories.insert(copy_id, history);
+                            }
                             // A copied table duplicates the source table its own source does.
                             for (source_table, copied) in &tables {
                                 let duplicated = if source_workbook.is_some_and(|source| {

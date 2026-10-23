@@ -84,7 +84,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   inside the copy following them; the source's scoped names are copied to the copy, and a workbook
   name that reads the source becomes a name of the copy too. Saving into the source package
   duplicates the parts the worksheet reaches, with chart series naming the copy and table parts
-  following later changes to the copied tables' ranges, and fails with
+  following later changes to the copied tables' ranges; the copy's part replays the row, column,
+  and range edits of the copy and those its source had before the copy, and the source's part
+  only its own. It fails with
   `xlsx.write.unsupported_preservation` naming the part for a pivot table, form control, threaded
   comment, slicer, timeline, query table, or ActiveX control, and naming the copy's worksheet when
   a table was created or converted to a range on the copy, or on its source before the copy. The

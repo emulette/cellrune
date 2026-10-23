@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::auto_filter_patch::rewrite_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
-use super::grid_parts::replay_grid_edits;
+use super::grid_parts::{CopyReplay, replay_copy_parts, replay_copy_worksheet, replay_grid_edits};
 use super::layout_patch::{LayoutChanges, patch_sheet_layout};
 use super::materialization::{MaterializationAction, MaterializationPlan};
 use super::package::{PackageReader, PackageWritePlan};
@@ -17,6 +17,7 @@ use super::serialization::validate_phonetic_limits;
 use super::sheet_copy_parts::{CopySource, duplicate_sheet_parts, highest_vml_block};
 use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
 use super::sheet_positions::with_explicit_positions;
+use super::sheet_reference_patch::patch_grid_references;
 use super::sheet_reference_patch::rewrite_sheet_references;
 use super::sheet_reference_patch::{CopiedParts, CopyReferences};
 use super::styles_patch::{StyleRequest, plan_document_styles};
@@ -38,7 +39,9 @@ use super::{
     RecalculatedWorkbook, RecalculationWriteOptions, WriteLimits, WriteProvenance, WriteReport,
     XlsxWriteError, XlsxWriteErrorCode,
 };
+use crate::calculation::grid_rewrite::GridChange;
 use crate::draft::DraftCellMutation;
+use crate::grid::GridEdit;
 use crate::grid::GridHistory;
 use crate::xlsx::package::{PartPath, parse_content_types};
 use crate::{
@@ -58,8 +61,6 @@ const REL_STYLES: &str =
 const DETAIL_CALCULATION_IDENTITY: &str = "calculation does not belong to the current draft";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_MISSING_TABLE_PART: &str = "source table part mapping was not found";
-const DETAIL_COPY_GRID_EDITS: &str =
-    "a sheet copy cannot save structural row, column, or range edits of the copy or its source";
 const DETAIL_COPY_TABLES_CHANGED: &str = "a sheet copy cannot save a table created or converted to a range on the copy or on its source before the copy";
 const DETAIL_EDITED_CELL_COUNT: &str = "max_edited_cells";
 const DETAIL_EDITED_SHEET_COUNT: &str = "max_edited_sheets";
@@ -246,21 +247,6 @@ pub(super) fn write_document_package(
     let mut source_reader = source.reader()?;
     let deletion = plan_sheet_deletion(document, draft.workbook(), &mut source_reader)?;
     let table_removal = plan_table_removal(document, draft.workbook(), &mut source_reader)?;
-    // A copy duplicates its source's part as the source package holds it, so the structural edits
-    // of the copy or its source cannot be replayed on it.
-    if let Some(copy) = draft.copied_sheets().iter().find_map(|(copy, origin)| {
-        let histories = draft.grid_histories();
-        (histories.contains_key(copy) || histories.contains_key(origin)).then_some(*copy)
-    }) {
-        let name = draft
-            .workbook()
-            .sheet_by_id(copy)
-            .map_or("", |sheet| sheet.name().as_str());
-        return Err(
-            XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
-                .with_detail(format!("{DETAIL_COPY_GRID_EDITS}: {name}")),
-        );
-    }
     let mut replacements = BTreeMap::<PartPath, Vec<u8>>::new();
     replay_grid_edits(
         draft,
@@ -390,16 +376,27 @@ pub(super) fn write_document_package(
             .worksheet_part_path(origin)
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
-        // A copy is refused when its source has structural edits, so either part's replacement
-        // holds only references other sheets' edits moved.
-        let bytes = match replacements.get(&part) {
-            Some(bytes) => bytes.clone(),
-            None => source_reader.read_part(&part)?,
+        // A copy duplicates its origin's part as the source package holds it and replays its own
+        // structural edits, the ones its source had before the copy included, and the references
+        // other sheets' edits move.
+        let copied = copy_parts.contains_key(&sheet_id);
+        let bytes = if copied {
+            copy_worksheet_bytes(
+                draft,
+                document,
+                (sheet_id, origin, &part),
+                &mut source_reader,
+                limits,
+            )?
+        } else {
+            match replacements.get(&part) {
+                Some(bytes) => bytes.clone(),
+                None => source_reader.read_part(&part)?,
+            }
         };
         let bytes = with_explicit_positions(&bytes, &part, limits)?.unwrap_or(bytes);
         // A copy writes every cell over its source's part, so every source style is read, and it
         // does not take its source's tab selection.
-        let copied = copy_parts.contains_key(&sheet_id);
         let bytes = if copied {
             without_tab_selection(&bytes, &part, limits)?.unwrap_or(bytes)
         } else {
@@ -447,9 +444,14 @@ pub(super) fn write_document_package(
                 source_sheet
                     .filter(|_| copied)
                     .into_iter()
-                    .flat_map(|sheet| sheet.cells().map(crate::Cell::address)),
+                    .flat_map(|sheet| sheet.cells().map(crate::Cell::address))
+                    .filter_map(|address| source_cells.current_address(sheet_id, address)),
             )
-            .filter(|address| source_cells.cell(origin, *address).is_some())
+            .filter(|address| {
+                source_cells
+                    .cell_through(origin, sheet_id, *address)
+                    .is_some()
+            })
             .collect::<BTreeSet<_>>();
         let styles = read_cell_style_indices(&bytes, &part, &targets, limits)?;
         sheet_sources.insert(
@@ -606,10 +608,12 @@ pub(super) fn write_document_package(
         let copied = copy_parts.contains_key(&sheet_id);
         let origin_sheet = document.workbook().sheet_by_id(sheet_source.origin);
         // A copy's part starts as its source's, so each cell of either is an edit.
+        let source_cells = draft.source_cells();
         let copy_addresses = if copied {
             origin_sheet
                 .into_iter()
                 .flat_map(|sheet| sheet.cells().map(crate::Cell::address))
+                .filter_map(|address| source_cells.current_address(sheet_id, address))
                 .chain(draft_sheet.cells().map(crate::Cell::address))
                 .collect::<Vec<_>>()
         } else {
@@ -660,7 +664,8 @@ pub(super) fn write_document_package(
                         .cell(address)
                         .cloned()
                         .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
-                    let original_cell = draft.source_cells().cell(sheet_source.origin, address);
+                    let original_cell =
+                        source_cells.cell_through(sheet_source.origin, sheet_id, address);
                     let content_changed = original_cell.map(crate::Cell::content)
                         != Some(cell.content())
                         || draft.presentation_cell_mutations().contains(&id)
@@ -786,7 +791,7 @@ pub(super) fn write_document_package(
             if tables.len() != origin_tables.len() {
                 return Err(copy_tables_changed(copy_part));
             }
-            let duplicated = duplicate_sheet_parts(
+            let mut duplicated = duplicate_sheet_parts(
                 &mut source_reader,
                 &CopySource {
                     origin: &origin_part,
@@ -799,6 +804,42 @@ pub(super) fn write_document_package(
                 &mut next_vml_block,
                 limits,
             )?;
+            let origin_name = document
+                .workbook()
+                .sheet_by_id(origin)
+                .map_or("", |sheet| sheet.name().as_str());
+            if let Some(history) = draft.grid_histories().get(copy_id) {
+                replay_copy_parts(
+                    history,
+                    CopyReplay {
+                        origin_name,
+                        duplicates: &mut duplicated.parts,
+                        kinds: &duplicated.kinds,
+                        charts: &duplicated.charts,
+                    },
+                    limits,
+                )?;
+            }
+            // The duplicated charts also name other sheets, whose edits move those references.
+            for (other_name, edit) in other_sheet_edits(draft, document, origin) {
+                for chart in &duplicated.charts {
+                    if let Some(bytes) = duplicated.parts.get_mut(chart)
+                        && let Some(patched) = patch_grid_references(
+                            bytes,
+                            chart,
+                            None,
+                            GridChange {
+                                sheet: other_name,
+                                host_is_sheet: false,
+                                edit,
+                            },
+                            limits,
+                        )?
+                    {
+                        *bytes = patched;
+                    }
+                }
+            }
             additions.extend(duplicated.parts);
             new_content_types.extend(duplicated.content_types);
             copy_references.push(CopyReferences {
@@ -1348,4 +1389,67 @@ fn copy_tables_changed(copy: &PartPath) -> XlsxWriteError {
     XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
         .with_detail(format!("{DETAIL_COPY_TABLES_CHANGED}: {}", copy.as_str()))
         .at_source(copy.source_id())
+}
+
+/// Returns a copied sheet's worksheet bytes: its origin's part as the source package holds it,
+/// with the copy's structural edits replayed and the references other source sheets' edits move.
+fn copy_worksheet_bytes(
+    draft: &WorkbookDraft,
+    document: &XlsxDocument,
+    (copy_id, origin, part): (SheetId, SheetId, &PartPath),
+    source_reader: &mut PackageReader<'_>,
+    limits: WriteLimits,
+) -> Result<Vec<u8>, XlsxWriteError> {
+    let mut bytes = source_reader.read_part(part)?;
+    let origin_name = document
+        .workbook()
+        .sheet_by_id(origin)
+        .map_or("", |sheet| sheet.name().as_str());
+    if let Some(history) = draft.grid_histories().get(&copy_id) {
+        let used_range = draft
+            .workbook()
+            .sheet_by_id(copy_id)
+            .and_then(Sheet::used_range);
+        bytes = replay_copy_worksheet(history, bytes, part, origin_name, used_range, limits)?;
+    }
+    for (other_name, edit) in other_sheet_edits(draft, document, origin) {
+        if let Some(patched) = patch_grid_references(
+            &bytes,
+            part,
+            Some(origin_name),
+            GridChange {
+                sheet: other_name,
+                host_is_sheet: false,
+                edit,
+            },
+            limits,
+        )? {
+            bytes = patched;
+        }
+    }
+    Ok(bytes)
+}
+
+/// Returns the structural edits of every source sheet but `origin`, with the name the source
+/// package gives the sheet, in each sheet's order.
+fn other_sheet_edits<'a>(
+    draft: &'a WorkbookDraft,
+    document: &'a XlsxDocument,
+    origin: SheetId,
+) -> Vec<(&'a str, GridEdit)> {
+    draft
+        .grid_histories()
+        .iter()
+        .filter(|(sheet_id, _)| **sheet_id != origin)
+        .filter_map(|(sheet_id, history)| {
+            let sheet = document.workbook().sheet_by_id(*sheet_id)?;
+            Some(
+                history
+                    .edits()
+                    .iter()
+                    .map(move |edit| (sheet.name().as_str(), *edit)),
+            )
+        })
+        .flatten()
+        .collect()
 }

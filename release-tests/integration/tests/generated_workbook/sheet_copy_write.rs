@@ -269,3 +269,93 @@ fn a_table_created_or_converted_on_a_copy_is_refused_with_the_copy() {
         );
     }
 }
+
+#[test]
+fn row_edits_of_a_copy_or_its_source_replay_on_the_parts_each_one_holds() {
+    use cellrune::{EditBatch, Row, WorkbookChange};
+
+    let insert =
+        |sheet| WorkbookChange::insert_rows(sheet, Row::new(1).expect("row"), 2).expect("insert");
+    // Rows inserted in S2 before the copy reach both; after it, only the sheet they were
+    // inserted in. The chart reads A1:A3 of S2.
+    for (before_copy, after_copy_in_copy, after_copy_in_source, source_chart, copy_chart) in [
+        (false, true, false, "$A$1:$A$3", "$A$3:$A$5"),
+        (true, false, false, "$A$3:$A$5", "$A$3:$A$5"),
+        (false, false, true, "$A$3:$A$5", "$A$1:$A$3"),
+    ] {
+        // The fixture's first pivot cache reads S2, whose rows the edits move; it reads S3 here.
+        let source = support::replace_part_text(
+            &fixture(),
+            "xl/pivotCache/pivotCacheDefinition1.xml",
+            r#"<worksheetSource ref="F1:G3" sheet="S2"/>"#,
+            r#"<worksheetSource ref="D1:D2" sheet="S3"/>"#,
+        );
+        let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+        let mut draft = WorkbookDraft::from_document(&document);
+        let s2 = draft.workbook().sheet_by_name("S2").expect("S2").id();
+        if before_copy {
+            draft
+                .apply_changes(EditBatch::new([insert(s2)]))
+                .expect("insert");
+        }
+        let copy = draft.copy_sheet(s2, 2).expect("copy");
+        if after_copy_in_copy {
+            draft
+                .apply_changes(EditBatch::new([insert(copy)]))
+                .expect("insert");
+        }
+        if after_copy_in_source {
+            draft
+                .apply_changes(EditBatch::new([insert(s2)]))
+                .expect("insert");
+        }
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let output =
+            write_xlsx_draft_bytes(&draft, &calculation, invalidating()).unwrap_or_else(|error| {
+                panic!("{before_copy} {after_copy_in_copy} {after_copy_in_source}: {error:?}")
+            });
+        let parts = support::archive_parts(output.bytes());
+        let text = |part: &str| String::from_utf8(parts[part].clone()).expect("UTF-8");
+        let source = text("xl/charts/chart2.xml");
+        assert!(
+            source.contains(&format!("<c:f>'S2'!{source_chart}</c:f>"))
+                || source.contains(&format!("<c:f>S2!{source_chart}</c:f>")),
+            "{source}"
+        );
+        let copied = text(&format!("xl/charts/cellrune-{}-chart2.xml", copy.get()));
+        assert!(
+            copied.contains(&format!("<c:f>'S2 (2)'!{copy_chart}</c:f>")),
+            "{copied}"
+        );
+        let reopened =
+            open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+        for sheet in [s2, copy] {
+            let written = reopened.workbook().sheet_by_id(sheet).expect("sheet");
+            let staged = draft.workbook().sheet_by_id(sheet).expect("sheet");
+            assert_eq!(
+                written
+                    .cells()
+                    .map(|cell| (cell.address(), format!("{:?}", cell.content())))
+                    .collect::<Vec<_>>(),
+                staged
+                    .cells()
+                    .map(|cell| (cell.address(), format!("{:?}", cell.content())))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                written
+                    .comments()
+                    .iter()
+                    .map(cellrune::Comment::address)
+                    .collect::<Vec<_>>(),
+                staged
+                    .comments()
+                    .iter()
+                    .map(cellrune::Comment::address)
+                    .collect::<Vec<_>>()
+            );
+        }
+        let fresh = calculate_workbook(reopened.workbook(), CalculationOptions::default());
+        assert_eq!(results(&fresh), results(&calculation));
+    }
+}

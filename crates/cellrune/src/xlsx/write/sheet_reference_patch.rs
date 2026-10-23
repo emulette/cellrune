@@ -735,6 +735,35 @@ pub(super) struct PartAccess<'r, 'p> {
 /// of the cells it names does. Excel would rewrite such a link, but these parts carry formulas
 /// outside the grammar the rewrite edits in place, so the edit is refused rather than leaving
 /// the link stale.
+/// Rewrites the references a structural edit of `change.sheet` moves in one worksheet part of
+/// another sheet, whose unqualified references are `owner`'s, or in one chart part when `owner` is
+/// `None`. Returns `None` when nothing changes.
+pub(super) fn patch_grid_references(
+    bytes: &[u8],
+    source: &PartPath,
+    owner: Option<&str>,
+    change: GridChange<'_>,
+    limits: WriteLimits,
+) -> Result<Option<Vec<u8>>, XlsxWriteError> {
+    let requests = ReferenceRequests::Grid {
+        request: FormulaRewriteRequest::Grid(GridChange {
+            host_is_sheet: false,
+            ..change
+        }),
+        change,
+    };
+    let target = PatchTarget {
+        source,
+        part: if owner.is_some() {
+            ReferencePart::Worksheet
+        } else {
+            ReferencePart::Chart
+        },
+        owner,
+    };
+    patch_sheet_references(bytes, target, &requests, &mut false, limits)
+}
+
 pub(super) fn links_rewritten_cells(
     bytes: &[u8],
     source: &PartPath,

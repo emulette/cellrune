@@ -183,11 +183,38 @@ impl<'a> SourceCells<'a> {
 
     /// Returns the source cell that now sits at `address`.
     pub(crate) fn cell(&self, sheet_id: SheetId, address: CellAddress) -> Option<&'a Cell> {
-        let sheet = self.workbook?.sheet_by_id(sheet_id)?;
+        self.cell_through(sheet_id, sheet_id, address)
+    }
+
+    /// Returns the cell of source sheet `origin` that now sits at `address` of `sheet_id`, which is
+    /// `origin` itself or a copy of it, moved by `sheet_id`'s structural edits.
+    pub(crate) fn cell_through(
+        &self,
+        origin: SheetId,
+        sheet_id: SheetId,
+        address: CellAddress,
+    ) -> Option<&'a Cell> {
+        let sheet = self.workbook?.sheet_by_id(origin)?;
         match self.histories.get(&sheet_id) {
             Some(history) => sheet.cell(history.to_source(address)?),
             None => sheet.cell(address),
         }
+    }
+
+    /// Returns where `sheet_id`'s structural edits moved a cell of its source part at `address`,
+    /// or `None` when they deleted it.
+    pub(crate) fn current_address(
+        &self,
+        sheet_id: SheetId,
+        address: CellAddress,
+    ) -> Option<CellAddress> {
+        let Some(history) = self.histories.get(&sheet_id) else {
+            return Some(address);
+        };
+        history
+            .edits()
+            .iter()
+            .try_fold(address, |address, edit| edit.map_address(address))
     }
 }
 

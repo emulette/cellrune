@@ -8,14 +8,15 @@ use super::grid_worksheet::{parse_range, patch_worksheet_grid, unrewritable};
 use super::grid_xml::{XmlDocument, XmlElement, XmlNode};
 use super::package::PackageReader;
 use super::sheet_reference_patch::{
-    DETAIL_MOVED_LINK, PartAccess, links_rewritten_cells, rewrite_grid_references,
+    DETAIL_MOVED_LINK, PartAccess, links_rewritten_cells, patch_grid_references,
+    rewrite_grid_references,
 };
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::calculation::formula_rewrite::FormulaRewriteRequest;
 use crate::calculation::grid_rewrite::GridChange;
-use crate::grid::{GridAxis, GridEdit, RangeRule};
+use crate::grid::{GridAxis, GridEdit, GridHistory, RangeRule};
 use crate::xlsx::package::{PartPath, RelationshipTarget, parse_relationships};
-use crate::{CellAddress, WorkbookDraft, XlsxDocument};
+use crate::{CellAddress, CellRange, WorkbookDraft, XlsxDocument};
 
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_UNREWRITABLE_PART: &str =
@@ -127,6 +128,74 @@ pub(super) fn replay_grid_edits(
             )?;
         }
         replacements.insert(part, bytes);
+    }
+    Ok(())
+}
+
+/// Replays a copied sheet's structural edits, the ones its source had before the copy included,
+/// on the copy's worksheet as the source package holds its origin, whose preserved references
+/// still give the copy its origin's name.
+pub(super) fn replay_copy_worksheet(
+    history: &GridHistory,
+    mut worksheet: Vec<u8>,
+    part: &PartPath,
+    origin_name: &str,
+    used_range: Option<CellRange>,
+    limits: WriteLimits,
+) -> Result<Vec<u8>, XlsxWriteError> {
+    for edit in history.edits() {
+        worksheet = patch_worksheet_grid(&worksheet, part, *edit, origin_name, used_range, limits)?;
+    }
+    Ok(worksheet)
+}
+
+/// The parts duplicated for a copied sheet, before the copy is retargeted.
+pub(super) struct CopyReplay<'a> {
+    /// The origin's name, which the duplicated parts still give the copy.
+    pub(super) origin_name: &'a str,
+    /// The duplicated parts other than the worksheet.
+    pub(super) duplicates: &'a mut BTreeMap<PartPath, Vec<u8>>,
+    /// The relationship type that reached each duplicated part, as the last segment of the type.
+    pub(super) kinds: &'a BTreeMap<PartPath, Box<str>>,
+    pub(super) charts: &'a [PartPath],
+}
+
+/// Replays a copied sheet's structural edits on its duplicated drawings, notes, and comments and
+/// on the references its duplicated charts make to it.
+pub(super) fn replay_copy_parts(
+    history: &GridHistory,
+    copy: CopyReplay<'_>,
+    limits: WriteLimits,
+) -> Result<(), XlsxWriteError> {
+    for edit in history.edits() {
+        let change = GridChange {
+            sheet: copy.origin_name,
+            host_is_sheet: true,
+            edit: *edit,
+        };
+        for (part, bytes) in copy.duplicates.iter_mut() {
+            let kind = match copy.kinds.get(part).map(AsRef::as_ref) {
+                Some("drawing") => RelatedKind::Drawing,
+                Some("vmlDrawing") => RelatedKind::LegacyDrawing,
+                Some("comments") => RelatedKind::Comments,
+                _ if copy.charts.contains(part) => {
+                    if let Some(patched) = patch_grid_references(bytes, part, None, change, limits)?
+                    {
+                        *bytes = patched;
+                    }
+                    continue;
+                }
+                _ => continue,
+            };
+            if matches!(kind, RelatedKind::Drawing | RelatedKind::LegacyDrawing)
+                && links_rewritten_cells(bytes, part, &FormulaRewriteRequest::Grid(change), limits)?
+            {
+                return Err(unrewritable(part, DETAIL_MOVED_LINK, part.as_str()));
+            }
+            if let Some(patched) = patch_related_part(bytes, part, kind, *edit, limits)? {
+                *bytes = patched;
+            }
+        }
     }
     Ok(())
 }

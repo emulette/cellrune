@@ -41,6 +41,8 @@ pub(super) struct SheetCopyParts {
     pub(super) content_types: BTreeMap<PartPath, Cow<'static, str>>,
     /// The duplicated chart parts, whose series still name the source sheet.
     pub(super) charts: Vec<PartPath>,
+    /// The relationship type that reached each duplicated part, as the last segment of the type.
+    pub(super) kinds: BTreeMap<PartPath, Box<str>>,
 }
 
 /// What a copy duplicates from: its source sheet's parts and the copy's model.
@@ -151,6 +153,7 @@ pub(super) fn duplicate_sheet_parts(
         if copy.chart_parts.contains(original) {
             output.charts.push(duplicate.clone());
         }
+        output.kinds.insert(duplicate.clone(), kind.into());
         if copy.content_types.overrides(original)
             && let Some(content_type) = copy.content_types.content_type(original)
         {
