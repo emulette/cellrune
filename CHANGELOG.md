@@ -10,6 +10,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Fixed
+
+- Node.js `previewChangesPage` continues from the `nextCursor` it returned instead of failing with
+  `interop.preview.cursor_invalid`.
+
 ## [0.1.26] - 2026-10-23
 
 ### Added

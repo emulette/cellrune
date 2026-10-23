@@ -186,10 +186,7 @@ impl NativeWorkbook {
     ) -> napi::Result<String> {
         let preview_id = parse_u64(&preview_id)?;
         let cursor = cursor_json
-            .map(|value| {
-                serde_json::from_str::<PreviewCursorDto>(&value)
-                    .map_err(|_| napi_error(InteropError::preview_cursor_invalid()))
-            })
+            .map(|value| preview_cursor(&value))
             .transpose()?;
         let page = self
             .lock()?
@@ -378,6 +375,25 @@ impl NativeWorkbook {
             options: EditWriteOptionsDto { replace_existing },
         })
     }
+}
+
+/// Preview cursor as the JavaScript wrapper sends it. The preview id travels as a decimal string,
+/// as Node preview JSON emits it, because a JavaScript number cannot hold every `u64`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreviewCursorInput {
+    preview_id: String,
+    token: String,
+}
+
+fn preview_cursor(value: &str) -> napi::Result<PreviewCursorDto> {
+    let invalid = || napi_error(InteropError::preview_cursor_invalid());
+    let input = serde_json::from_str::<PreviewCursorInput>(value).map_err(|_| invalid())?;
+    let preview_id = input.preview_id.parse::<u64>().map_err(|_| invalid())?;
+    Ok(PreviewCursorDto {
+        preview_id,
+        token: input.token,
+    })
 }
 
 #[derive(Debug, Deserialize)]

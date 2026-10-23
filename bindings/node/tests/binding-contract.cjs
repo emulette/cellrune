@@ -729,6 +729,12 @@ async function assertPreviewContract() {
       address: "A2",
       formula: "=A1+1",
     },
+    {
+      kind: "setFormula",
+      sheet: "Sheet1",
+      address: "A3",
+      formula: "=A1*2",
+    },
   ]);
   const preview = await workbook.previewChanges(initial.resultRevision, [
     {
@@ -746,7 +752,14 @@ async function assertPreviewContract() {
     limit: 1,
   });
   assert.equal(page.previewId, preview.previewId);
-  assert.ok(page.items.length > 0);
+  assert.equal(page.items.length, 1);
+  assert.notEqual(page.nextCursor, null);
+  const rest = workbook.previewChangesPage(preview.previewId, {
+    section: "preview_results",
+    cursor: page.nextCursor,
+  });
+  assert.equal(rest.nextCursor, null);
+  assert.equal(page.items.length + rest.items.length, rest.totalCount);
   const receipt = workbook.commitPreview(preview.previewId);
   assert.equal(receipt.edit.resultRevision, preview.report.resultRevision);
   assert.throws(
