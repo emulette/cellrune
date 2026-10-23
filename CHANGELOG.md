@@ -436,6 +436,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- Saving compresses the parts it writes new and every part of a workbook it writes from scratch
+  with deflate, as Excel does, instead of storing them uncompressed; a source part the save keeps
+  or replaces keeps its own compression.
 - Reading a literal cell outside every array area no longer looks it up among formula results,
   kept results, and issue sets first, so formulas over large literal ranges calculate faster with
   the same results.

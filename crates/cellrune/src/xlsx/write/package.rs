@@ -426,7 +426,7 @@ impl PackageWritePlan {
                         .start_file(
                             part.as_str(),
                             SimpleFileOptions::default()
-                                .compression_method(CompressionMethod::Stored),
+                                .compression_method(CompressionMethod::Deflated),
                         )
                         .map_err(|error| zip_write_error(error).at_source(source.clone()))?;
                     writer.write_all(bytes).map_err(|error| {

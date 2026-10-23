@@ -844,7 +844,7 @@ fn write_archive(
 ) -> Result<Vec<u8>, XlsxWriteError> {
     let output = Cursor::new(Vec::new());
     let mut writer = ZipWriter::new(output);
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for (name, bytes) in parts {
         writer.start_file(name, options).map_err(zip_error)?;
         writer.write_all(bytes).map_err(io_error)?;
