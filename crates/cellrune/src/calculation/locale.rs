@@ -15,7 +15,9 @@ pub enum Locale {
 /// The locale conventions a calculation follows.
 ///
 /// `locale` stands for Excel's regional format: the `DOLLAR` currency symbol and the decimals it
-/// shows when the formula omits them, and the month, weekday, and `AM`/`PM` names of `TEXT`.
+/// shows when the formula omits them, the month, weekday, and `AM`/`PM` names of `TEXT`, and the
+/// double-byte character rules of `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
+/// `REPLACEB`, `ASC`, and `DBCS`.
 /// `display_language` stands for the language of the labels Excel generates, such as the
 /// `GROUPBY` and `PIVOTBY` total row; it follows `locale` unless set. Both built-in locales use
 /// `.` as the decimal separator and `,` as the thousands separator.

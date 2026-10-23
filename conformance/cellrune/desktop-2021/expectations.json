@@ -1312,18 +1312,16 @@
     "excel_rich_error": false
   },
   "function:asc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "ABC123",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (ASC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:asc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": " ",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (ASC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:asin": {
     "classification": "match",
@@ -2994,18 +2992,16 @@
     "excel_rich_error": false
   },
   "function:dbcs": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "ＣｅｌｌＲｕｎｅ　Ｏｒａｃｌｅ　２０２６",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DBCS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:dbcs:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "　",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (DBCS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:dcount": {
     "classification": "match",
@@ -3866,25 +3862,22 @@
     "excel_rich_error": false
   },
   "function:findb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FINDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:findb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "9",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FINDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:findb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FINDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:finv": {
     "classification": "match",
@@ -5184,25 +5177,22 @@
     "excel_rich_error": false
   },
   "function:leftb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "Cell",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (LEFTB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:leftb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "Ce",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (LEFTB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:leftb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (LEFTB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:len": {
     "classification": "match",
@@ -5217,18 +5207,16 @@
     "excel_rich_error": false
   },
   "function:lenb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "15",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (LENB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:lenb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (LENB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:let": {
     "classification": "match",
@@ -5578,25 +5566,22 @@
     "excel_rich_error": false
   },
   "function:midb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "Rune",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MIDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:midb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "ellR",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MIDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:midb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (MIDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:min": {
     "classification": "match",
@@ -6963,25 +6948,22 @@
     "excel_rich_error": false
   },
   "function:replaceb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "CellOracle",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (REPLACEB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:replaceb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "COracleune",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (REPLACEB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:replaceb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (REPLACEB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:rept": {
     "classification": "match",
@@ -7020,25 +7002,22 @@
     "excel_rich_error": false
   },
   "function:rightb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "Oracle",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (RIGHTB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:rightb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "le",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (RIGHTB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:rightb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (RIGHTB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:roman": {
     "classification": "match",
@@ -7204,25 +7183,22 @@
     "excel_rich_error": false
   },
   "function:searchb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (SEARCHB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:searchb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "9",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (SEARCHB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:searchb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (SEARCHB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sec": {
     "classification": "match",

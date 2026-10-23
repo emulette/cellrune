@@ -33,7 +33,7 @@ FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 def assert_catalog_contract() -> None:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 486
+    assert len(catalog["entries"]) == 495
     entries = {entry["name"]: entry for entry in catalog["entries"]}
     assert all(
         name in entries
@@ -76,6 +76,8 @@ def assert_catalog_contract() -> None:
             "CELL",
             "AMORDEGRC", "AMORLINC",
             "BAHTTEXT",
+            "ASC", "DBCS", "FINDB", "LEFTB", "LENB", "MIDB", "REPLACEB", "RIGHTB",
+            "SEARCHB",
         )
     )
     assert all(

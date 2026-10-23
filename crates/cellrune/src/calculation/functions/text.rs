@@ -35,6 +35,15 @@ pub(super) fn call(
         TextFunction::Rept => rept(engine, context, args),
         TextFunction::Concat => concat(engine, context, args),
         TextFunction::TextJoin => textjoin(engine, context, args),
+        TextFunction::LenB
+        | TextFunction::LeftB
+        | TextFunction::RightB
+        | TextFunction::MidB
+        | TextFunction::FindB
+        | TextFunction::SearchB
+        | TextFunction::ReplaceB
+        | TextFunction::Asc
+        | TextFunction::Dbcs => super::text_double_byte::call(engine, context, function, args),
     }
 }
 
@@ -130,17 +139,33 @@ fn find(
         },
         None => 0,
     };
-    let (source, origins) = comparison_form(&haystack, case_sensitive);
-    let (target, _) = comparison_form(&needle, case_sensitive);
+    match find_from(engine, context, &needle, &haystack, start, case_sensitive) {
+        Ok(index) => Value::Number((index + 1) as f64),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// Returns the zero-based character index where `needle` first occurs in `haystack` at or after
+/// the character index `start`, as `FIND` (case-sensitive) or `SEARCH` (with wildcards) does.
+pub(super) fn find_from(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    needle: &str,
+    haystack: &str,
+    start: usize,
+    case_sensitive: bool,
+) -> Result<usize, ErrorKind> {
+    let (source, origins) = comparison_form(haystack, case_sensitive);
+    let (target, _) = comparison_form(needle, case_sensitive);
     let source_length = haystack.chars().count();
     if start > source_length {
-        return Value::Error(ErrorKind::Value);
+        return Err(ErrorKind::Value);
     }
     if target.is_empty() {
-        return Value::Number((start + 1) as f64);
+        return Ok(start);
     }
     if !case_sensitive && needle.contains(['?', '*', '~']) {
-        return search_wildcard(engine, context, &needle, &haystack, start);
+        return search_wildcard(engine, context, needle, haystack, start);
     }
     // `start` indexes the original text, and case folding may have changed the
     // character count before it, so translate it into the folded sequence.
@@ -148,9 +173,8 @@ fn find(
     source[folded_start..]
         .windows(target.len())
         .position(|window| window == target)
-        .map_or(Value::Error(ErrorKind::Value), |offset| {
-            Value::Number((origins[folded_start + offset] + 1) as f64)
-        })
+        .map(|offset| origins[folded_start + offset])
+        .ok_or(ErrorKind::Value)
 }
 
 /// SEARCH with `?`, `*`, or `~`: returns the first position from `start` where the pattern
@@ -161,21 +185,16 @@ fn search_wildcard(
     needle: &str,
     haystack: &str,
     start: usize,
-) -> Value {
+) -> Result<usize, ErrorKind> {
     let mut criteria_runtime = CriteriaRuntime::new(engine, context);
-    let mut pattern = match criteria_runtime.compile_wildcard(needle) {
-        Ok(pattern) => pattern,
-        Err(kind) => return Value::Error(kind),
-    };
+    let mut pattern = criteria_runtime.compile_wildcard(needle)?;
     pattern.push_any_sequence();
     for (position, (byte, _)) in haystack.char_indices().enumerate().skip(start) {
-        match criteria_runtime.wildcard_matches(&pattern, &haystack[byte..]) {
-            Ok(true) => return Value::Number((position + 1) as f64),
-            Ok(false) => {}
-            Err(kind) => return Value::Error(kind),
+        if criteria_runtime.wildcard_matches(&pattern, &haystack[byte..])? {
+            return Ok(position);
         }
     }
-    Value::Error(ErrorKind::Value)
+    Err(ErrorKind::Value)
 }
 
 /// Returns the characters to compare and, for each of them, the index of the
@@ -345,6 +364,18 @@ fn replace(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Valu
         Ok(text) => text,
         Err(kind) => return Value::Error(kind),
     };
+    replace_characters(engine, text, start, count, &replacement)
+}
+
+/// Replaces `count` characters of `text` from the zero-based character index `start`, as
+/// `REPLACE` does; a start past the end of the text is `#VALUE!`.
+pub(super) fn replace_characters(
+    engine: &Engine<'_>,
+    text: String,
+    start: usize,
+    count: usize,
+    replacement: &str,
+) -> Value {
     let char_count = text.chars().count();
     if start > char_count {
         return Value::Error(ErrorKind::Value);
@@ -369,7 +400,7 @@ fn replace(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Valu
         return Value::Error(kind);
     }
     let mut result = text;
-    result.replace_range(byte_start..byte_end, &replacement);
+    result.replace_range(byte_start..byte_end, replacement);
     Value::Text(result)
 }
 

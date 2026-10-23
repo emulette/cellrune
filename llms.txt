@@ -735,9 +735,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 485 official
+  `.is_official()`. The 0.1.27 catalog contains 494 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 486 accepted entries. The descriptor registry
+  dummy-function marker, for 495 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
@@ -896,6 +896,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   `DOLLAR` shows `$#,##0.00` with the absolute value and wraps a negative
   number in parentheses. A `FIXED` result of 2^53 or more rounded units is
   `calculation.unsupported_expression`.
+- The nine names `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
+  `REPLACEB`, `ASC`, and `DBCS`, added in 0.1.27, follow the locale profile's
+  double-byte rules. Under `Locale::EnUs` every character counts one byte, so
+  the byte functions return what `LEN`, `LEFT`, `RIGHT`, `MID`, `FIND`,
+  `SEARCH`, and `REPLACE` return, with the same argument coercion and
+  `#VALUE!` boundaries. Under `Locale::KoKr` (code page 949) ASCII counts one
+  byte and Hangul syllables, Hangul compatibility jamo, full-width ASCII forms
+  (U+FF01 through U+FF5E), and the ideographic space count two; positions are
+  one-based bytes, `FINDB`/`SEARCHB` return byte positions, and `SEARCHB`
+  keeps `SEARCH` wildcards. `ASC` maps full-width ASCII forms to ASCII and the
+  ideographic space to a space, leaving ASCII and Hangul syllables; `DBCS`
+  maps printable ASCII to full-width forms and the space to the ideographic
+  space, leaving double-byte characters. Other characters, a byte position or
+  count that would split a double-byte character, and `ASC` and `DBCS` under
+  `Locale::EnUs` are `calculation.unsupported_expression`. `JIS`, the Japanese
+  name of `DBCS`, is not in the catalog.
 - The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
   `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
   `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,
@@ -1096,7 +1112,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   negative amounts are parenthesized in both), and the names `TEXT` shows:
   English for `EnUs`, while Korean month, weekday, and `AM`/`PM` names are
   `calculation.unsupported_expression` until measured (a `[$-409]` section
-  still shows English names). The display language decides the `GROUPBY` and
+  still shows English names), and the double-byte rules of `LENB`, `LEFTB`,
+  `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`, `REPLACEB`, `ASC`, and `DBCS`. The
+  display language decides the `GROUPBY` and
   `PIVOTBY` total label: `Total` or `합계`, and `Grand Total` over several
   levels in English, which is unsupported in Korean. Changing the profile is
   a calculation-options change, so a session recalculates fully.

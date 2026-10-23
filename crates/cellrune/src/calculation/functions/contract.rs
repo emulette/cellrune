@@ -1332,12 +1332,12 @@ impl InformationFunction {
 impl TextFunction {
     const fn call_contract(self) -> CallContract {
         match self {
-            Self::Left | Self::Right => {
+            Self::Left | Self::Right | Self::LeftB | Self::RightB => {
                 CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                     .with_defaults(LEFT_RIGHT_DEFAULTS)
             }
-            Self::Mid => CallContract::uniform(Arity::exact(3), SCALAR),
-            Self::Find | Self::Search => {
+            Self::Mid | Self::MidB => CallContract::uniform(Arity::exact(3), SCALAR),
+            Self::Find | Self::Search | Self::FindB | Self::SearchB => {
                 CallContract::positional(Arity::range(2, 3), &[SCALAR, SCALAR, SCALAR])
                     .with_defaults(FIND_SEARCH_DEFAULTS)
             }
@@ -1345,11 +1345,15 @@ impl TextFunction {
                 CallContract::positional(Arity::range(3, 4), &[SCALAR, SCALAR, SCALAR, SCALAR])
                     .with_defaults(SUBSTITUTE_DEFAULTS)
             }
-            Self::Len | Self::Trim | Self::Upper | Self::Proper => {
-                CallContract::uniform(Arity::exact(1), SCALAR)
-            }
+            Self::Len
+            | Self::Trim
+            | Self::Upper
+            | Self::Proper
+            | Self::LenB
+            | Self::Asc
+            | Self::Dbcs => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::Exact | Self::Rept => CallContract::uniform(Arity::exact(2), SCALAR),
-            Self::Replace => CallContract::uniform(Arity::exact(4), SCALAR),
+            Self::Replace | Self::ReplaceB => CallContract::uniform(Arity::exact(4), SCALAR),
             Self::Concat => CallContract::uniform(Arity::range(1, MAX_CONCAT_ARGUMENTS), ARRAY),
             Self::TextJoin => CallContract::repeating(
                 Arity::range(3, MAX_TEXT_JOIN_ARGUMENTS),

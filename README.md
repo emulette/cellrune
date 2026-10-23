@@ -108,8 +108,8 @@ Volatile functions require deterministic inputs through `CalculationOptions`:
 call's position in its formula, so wherever full calculation produces a value the other
 calculation modes produce the same one; the generator is not cryptographically secure. Use
 `with_locale_profile` to select the built-in English (United States) or Korean (Korea)
-conventions that `DOLLAR`, the names `TEXT` shows, and the `GROUPBY` and `PIVOTBY` total labels
-follow; CellRune never reads the host locale. Use
+conventions that `DOLLAR`, the names `TEXT` shows, the double-byte text functions, and the
+`GROUPBY` and `PIVOTBY` total labels follow; CellRune never reads the host locale. Use
 `with_arithmetic_semantics` and `with_financial_solver_semantics` to opt into the raw IEEE-754 and
 extended-search behavior shipped through 0.1.2; the defaults select Excel-compatible cancellation
 and Microsoft's function-specific solver budgets. Use
@@ -147,9 +147,11 @@ the complex trigonometric functions `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`,
 depends only on the workbook; the exact list is in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
-CellRune 0.1.27 adds `FIXED` and formats `TEXT` with Excel number-format codes: sections and
-conditions, dates and times in both date systems, elapsed time, scientific notation, fractions, and
-thousands scaling. A construct whose Excel output has not been established, such as a `*` fill, stays an explicit
+CellRune 0.1.27 adds `FIXED`, the byte-counting text functions `LENB`, `LEFTB`, `RIGHTB`, `MIDB`,
+`FINDB`, `SEARCHB`, and `REPLACEB`, and `ASC` and `DBCS`, and formats `TEXT` with Excel
+number-format codes: sections and conditions, dates and times in both date systems, elapsed time,
+scientific notation, fractions, and thousands scaling.
+A construct whose Excel output has not been established, such as a `*` fill, stays an explicit
 `Unavailable` result rather than a guess; the details are in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 

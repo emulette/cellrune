@@ -551,9 +551,9 @@ impl CalculationOptions {
         self.random_seed
     }
 
-    /// Selects the locale conventions of `DOLLAR`, the names `TEXT` shows, and the `GROUPBY` and
-    /// `PIVOTBY` total labels. The default is English (United States); CellRune never reads the
-    /// host locale.
+    /// Selects the locale conventions of `DOLLAR`, the names `TEXT` shows, the double-byte text
+    /// functions, and the `GROUPBY` and `PIVOTBY` total labels. The default is English (United
+    /// States); CellRune never reads the host locale.
     pub const fn with_locale_profile(mut self, locale_profile: LocaleProfile) -> Self {
         self.locale_profile = locale_profile;
         self

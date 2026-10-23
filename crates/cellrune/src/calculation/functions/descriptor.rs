@@ -816,6 +816,15 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Upper, "UPPER", Text),
     function!(BahtText, "BAHTTEXT", TextAdditional)
         .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(Asc, "ASC", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(Dbcs, "DBCS", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(FindB, "FINDB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(LeftB, "LEFTB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(LenB, "LENB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(MidB, "MIDB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ReplaceB, "REPLACEB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(RightB, "RIGHTB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(SearchB, "SEARCHB", Text).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Char, "CHAR", TextAdditional),
     function!(Code, "CODE", TextAdditional).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(NumberValue, "NUMBERVALUE", TextAdditional)

@@ -75,6 +75,7 @@ mod sum_of_squares;
 mod text;
 mod text_additional;
 mod text_common;
+mod text_double_byte;
 mod text_split;
 mod trigonometry;
 mod url_encoding;
@@ -1003,10 +1004,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 486);
+        assert_eq!(catalog.len(), 495);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            485
+            494
         );
         assert!(
             catalog
@@ -1165,7 +1166,23 @@ mod tests {
                 "{name}",
             );
         }
-        for name in ["FIXED", "KURT", "RAND", "RANDBETWEEN", "SKEW", "SKEW.P"] {
+        for name in [
+            "ASC",
+            "DBCS",
+            "FINDB",
+            "FIXED",
+            "KURT",
+            "LEFTB",
+            "LENB",
+            "MIDB",
+            "RAND",
+            "RANDBETWEEN",
+            "REPLACEB",
+            "RIGHTB",
+            "SEARCHB",
+            "SKEW",
+            "SKEW.P",
+        ] {
             assert!(
                 catalog
                     .iter()
