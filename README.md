@@ -409,6 +409,12 @@ The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separat
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
 table-row resize plus `changed_table_ids`/`changedTableIds` receipts.
 
+Node.js `calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an optional
+`signal` (`AbortSignal`). Aborting it cancels that call's calculation through the session's
+cooperative cancellation, so the Promise rejects with `session.cancelled`, or
+`calculation.target.cancelled` for `calculateTargets`, and nothing is installed or published; an
+already aborted signal cancels the call before it calculates.
+
 In the current bindings, Python exposes synchronous
 `preview_changes`, `preview_changes_page`, `commit_preview`, and `discard_preview`; the long
 native preview operation releases the GIL. Node.js exposes Promise-backed `previewChanges`, then

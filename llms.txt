@@ -130,7 +130,14 @@ native preview operation releases the GIL. Python returns snake-case DTO fields
 and ordinary integer IDs. Node uses Promise-backed
 `await workbook.previewChanges(expectedRevision, changes, options)`, followed
 by synchronous `previewChangesPage`, `commitPreview`, and `discardPreview`.
-Node returns camel-case DTO fields and `bigint` IDs/cursors. A failed or
+Node returns camel-case DTO fields and `bigint` IDs/cursors. Node
+`calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an
+optional `signal: AbortSignal`; aborting it cancels that call's token, which
+`WorkbookSession::prepare_recalculation_cancellable(mode, options, token)` (and
+the targeted and preview preparations) observe cooperatively, so the Promise
+rejects with `session.cancelled`, or `calculation.target.cancelled` for
+targeted calculation, without installing or publishing anything; an already
+aborted signal fails before calculating. A failed or
 cancelled replacement preserves a previous published preview; pre-commit
 cancellation or resource failure is retryable, while stale and successful
 commits consume the preview.

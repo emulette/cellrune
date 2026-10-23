@@ -778,6 +778,7 @@ function __napiStampBindingTarget(exportsObject, target) {
 // linked import resolves to `undefined`.
 module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __napiLoadedBindingTarget)
 module.exports = nativeBinding
+module.exports.NativeCancellation = nativeBinding.NativeCancellation
 module.exports.NativeWorkbook = nativeBinding.NativeWorkbook
 module.exports.createWorkbook = nativeBinding.createWorkbook
 module.exports.formatDisplayText = nativeBinding.formatDisplayText

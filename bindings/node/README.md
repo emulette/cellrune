@@ -154,6 +154,9 @@ limit. `readValues(sheet, start, end)` reads a rectangle as rows of typed values
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
 README.
+`calculate`, `recalculate`, `calculateTargets`, and `previewChanges` accept an `AbortSignal` as
+`signal`; aborting it cancels the calculation cooperatively and rejects with `session.cancelled`
+(`calculation.target.cancelled` for `calculateTargets`).
 `close()` is idempotent. Once it returns, the binding-owned native session has
 been released. An active calculation is cooperatively cancelled, a published preview is discarded,
 and later operations fail with `interop.session.closed`.

@@ -18,7 +18,20 @@ pub fn calculate_targets(
     session: &SharedWorkbookSession,
     request: &cellrune_interop::TargetCalculationRequestDto,
 ) -> Result<cellrune_interop::TargetCalculationResultDto, InteropError> {
-    let operation = session.cancellable_operation()?;
+    calculate_targets_cancellable(session, request, CancellationToken::new())
+}
+
+/// Executes a partial request like [`calculate_targets`] that `cancellation` also cancels.
+///
+/// # Errors
+/// Returns the errors of [`calculate_targets`]; cancellation fails with
+/// `calculation.target.cancelled`.
+pub fn calculate_targets_cancellable(
+    session: &SharedWorkbookSession,
+    request: &cellrune_interop::TargetCalculationRequestDto,
+    cancellation: CancellationToken,
+) -> Result<cellrune_interop::TargetCalculationResultDto, InteropError> {
+    let operation = session.cancellable_operation_with(cancellation)?;
     let prepared = session
         .lock()?
         .prepare_target_calculation(request, operation.token().clone())?;
@@ -82,8 +95,20 @@ impl SharedWorkbookSession {
     ///
     /// Returns the stable closed or poisoned interop error.
     pub fn cancellable_operation(&self) -> Result<CancellableOperation<'_>, InteropError> {
+        self.cancellable_operation_with(CancellationToken::new())
+    }
+
+    /// Registers `cancellation`, which the caller can also cancel, until the operation ends.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stable closed or poisoned interop error.
+    pub fn cancellable_operation_with(
+        &self,
+        cancellation: CancellationToken,
+    ) -> Result<CancellableOperation<'_>, InteropError> {
         self.require_open()?;
-        let cancellation = Arc::new(CancellationToken::new());
+        let cancellation = Arc::new(cancellation);
         let mut operations = self
             .cancellable_operations
             .lock()

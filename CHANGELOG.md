@@ -38,6 +38,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   grouped by worksheet row, and `max_bytes` returns the longest prefix that fits, failing with the
   new `interop.page.byte_limit_exceeded` code when not even one position does. Offset and limit
   still count positions of the range, and a read without them returns the same page as before.
+- Node.js `calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an optional
+  `signal` (`AbortSignal`) that cancels that call cooperatively; the Promise rejects with the
+  existing `session.cancelled`, or `calculation.target.cancelled` for targeted calculation, and an
+  already aborted signal cancels before calculating. Interop
+  `WorkbookSession::prepare_recalculation_cancellable` takes the caller's token.
 
 ### Changed
 

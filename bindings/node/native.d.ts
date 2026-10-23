@@ -9,8 +9,15 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+/** Cancels the one calculation it is passed to, through the session's cooperative cancellation. */
+export declare class NativeCancellation {
+  constructor()
+  /** Requests cancellation of the calculation this handle was passed to. */
+  cancel(): void
+}
+
 export declare class NativeWorkbook {
-  calculateTargets(requestJson: string): Promise<string>
+  calculateTargets(requestJson: string, cancellation?: NativeCancellation | undefined | null): Promise<string>
   get closed(): boolean
   close(): void
   summary(): NativeWorkbookSummary
@@ -26,9 +33,9 @@ export declare class NativeWorkbook {
   scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
   functionUsage(): NativeFunctionUsageReport
-  calculate(options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationReport>
-  recalculate(mode: string, options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationDelta>
-  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string, limitsJson?: string | undefined | null): Promise<string>
+  calculate(options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null, cancellation?: NativeCancellation | undefined | null): Promise<NativeCalculationReport>
+  recalculate(mode: string, options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null, cancellation?: NativeCancellation | undefined | null): Promise<NativeCalculationDelta>
+  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string, limitsJson?: string | undefined | null, cancellation?: NativeCancellation | undefined | null): Promise<string>
   previewChangesPage(previewId: string, section: string, cursorJson: string | undefined | null, limit: number): string
   commitPreview(previewId: string): string
   discardPreview(previewId: string): void

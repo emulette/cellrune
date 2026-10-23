@@ -667,6 +667,68 @@ async function assertRangeReadForms() {
   workbook.close();
 }
 
+async function assertAbortSignal() {
+  const workbook = Workbook.create();
+  const changes = [
+    { kind: "setValue", sheet: "Sheet1", address: "A1", value: { kind: "number", value: 1 } },
+  ];
+  for (let row = 2; row <= 25_000; row += 1) {
+    changes.push({
+      kind: "setFormula",
+      sheet: "Sheet1",
+      address: `A${row}`,
+      formula: `=A${row - 1}+1`,
+    });
+  }
+  workbook.applyChanges(0n, changes);
+  const cancelled = (code) => (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, code);
+    return true;
+  };
+
+  // A signal aborted before the call cancels the calculation before it runs.
+  const aborted = AbortSignal.abort();
+  await assert.rejects(workbook.calculate({ signal: aborted }), cancelled("session.cancelled"));
+  await assert.rejects(
+    workbook.recalculate({ mode: "full", signal: aborted }),
+    cancelled("session.cancelled"),
+  );
+  await assert.rejects(
+    workbook.calculateTargets([{ sheet: "Sheet1", start: "A25000" }], { signal: aborted }),
+    cancelled("calculation.target.cancelled"),
+  );
+  await assert.rejects(
+    workbook.previewChanges(workbook.summary().semanticRevision, changes.slice(0, 1), {
+      signal: aborted,
+    }),
+    cancelled("session.cancelled"),
+  );
+  assert.equal(workbook.calculationActive(), false);
+
+  // Aborting a running calculation cancels it cooperatively and installs nothing.
+  const controller = new AbortController();
+  const running = workbook.calculate({ signal: controller.signal });
+  controller.abort();
+  await assert.rejects(running, cancelled("session.cancelled"));
+  assert.equal(workbook.readRange("Sheet1", "A2", "A2").cells[0].calculated, null);
+
+  // Without an abort the same call completes, and a later abort changes nothing.
+  const finished = new AbortController();
+  const report = await workbook.calculate({ signal: finished.signal });
+  finished.abort();
+  assert.equal(report.unavailableCount, 0);
+  assert.deepEqual(workbook.readRange("Sheet1", "A3", "A3").cells[0].calculated, {
+    kind: "value",
+    value: { kind: "number", value: 3 },
+  });
+  await assert.rejects(
+    workbook.calculate({ signal: "abort" }),
+    (error) => error.code === "interop.input.invalid",
+  );
+  workbook.close();
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -833,6 +895,7 @@ async function main() {
   await assertSurfaceAuthoring();
   await assertRangeValues();
   await assertRangeReadForms();
+  await assertAbortSignal();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

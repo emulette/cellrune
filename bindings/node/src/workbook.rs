@@ -11,6 +11,8 @@ use cellrune_interop::{
 };
 use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
+
+use crate::cancellation::NativeCancellation;
 use serde::Deserialize;
 
 use crate::conversion::{
@@ -36,6 +38,7 @@ impl NativeWorkbook {
     pub fn calculate_targets(
         &self,
         request_json: String,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<crate::targeted::TargetCalculationTask>> {
         let request =
             serde_json::from_str::<cellrune_interop::TargetCalculationRequestDto>(&request_json)
@@ -45,6 +48,7 @@ impl NativeWorkbook {
         Ok(AsyncTask::new(crate::targeted::TargetCalculationTask {
             session: Arc::clone(&self.session),
             request,
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -258,10 +262,12 @@ impl NativeWorkbook {
         &self,
         options: Option<NativeCalculationOptions>,
         limits_json: Option<String>,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<CalculateTask>> {
         Ok(AsyncTask::new(CalculateTask {
             session: Arc::clone(&self.session),
             options: calculation_options(options, limits_json.as_deref())?,
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -271,11 +277,13 @@ impl NativeWorkbook {
         mode: String,
         options: Option<NativeCalculationOptions>,
         limits_json: Option<String>,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<RecalculateTask>> {
         Ok(AsyncTask::new(RecalculateTask {
             session: Arc::clone(&self.session),
             mode: recalculation_mode(&mode)?,
             options: calculation_options(options, limits_json.as_deref())?,
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -286,6 +294,7 @@ impl NativeWorkbook {
         batch_json: String,
         options_json: String,
         limits_json: Option<String>,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<PreviewTask>> {
         let expected_revision = parse_u64(&expected_revision)?;
         let batch = serde_json::from_str::<EditBatchV2Dto>(&batch_json)
@@ -300,6 +309,7 @@ impl NativeWorkbook {
             batch,
             mode: options.mode,
             options: options.calculation_options(calculation_limits),
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 

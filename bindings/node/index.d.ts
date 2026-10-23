@@ -648,6 +648,12 @@ export interface CalculationOptions {
     | "excel_iteration_budget"
     | "extended_search";
   readonly calculationLimits?: CalculationLimitOptions;
+  /**
+   * Cancels the calculation cooperatively when aborted: the Promise rejects with the
+   * calculation's cancellation error, `session.cancelled` or, for `calculateTargets`,
+   * `calculation.target.cancelled`. An already aborted signal cancels before calculating.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface CalculationReport {

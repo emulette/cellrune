@@ -186,6 +186,11 @@ async function check(): Promise<void> {
   compactPage.rows?.[0]?.length.toFixed(0);
   // @ts-expect-error Range forms are booleans.
   reopened.readRange("Sheet1", "A1", "B2", { compact: 1 });
+  const abort = new AbortController();
+  void reopened.calculate({ signal: abort.signal });
+  void reopened.calculateTargets([{ sheet: "Sheet1", start: "A1" }], { signal: abort.signal });
+  // @ts-expect-error A signal is an AbortSignal.
+  void reopened.recalculate({ signal: true });
   const grid: RangeValue[][] = reopened.readValues("Sheet1", "A1", "B2");
   for (const value of grid.flat()) {
     if (value.kind === "unavailable") {
