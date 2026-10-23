@@ -12,8 +12,8 @@ use super::criteria_runtime::CriteriaRuntime;
 use super::descriptor::DynamicReferenceKind;
 use super::lookup_common::VectorView;
 use super::lookup_index::{
-    LookupArea, SearchDirection, indexed_lookup_offset, indexed_xlookup_offset,
-    record_linear_search,
+    LookupArea, SearchDirection, indexed_approximate_lookup_offset, indexed_lookup_offset,
+    indexed_xlookup_offset, record_linear_search,
 };
 use super::util::{required_number, required_text};
 use super::xmatch::{MatchMode, SearchMode, find_match, parse_match_mode, parse_search_mode};
@@ -549,15 +549,40 @@ fn find_lookup_offset(
     if !approximate {
         return find_exact_lookup_offset(engine, context, lookup, rect, horizontal, length);
     }
-    // Approximate searches pass over error cells as well, as Excel does.
-    for offset in 0..length as u32 {
-        let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
-        if !matches!(value, Value::Error(_)) && compare(&value, lookup)? == Ordering::Equal {
-            return Ok(offset);
+    // Approximate searches pass over error cells as well, as Excel does. The first pass finds an
+    // equal cell, which an exact index answers when the lookup is not wildcard text.
+    let area = LookupArea::new(rect, length, horizontal);
+    match area.and_then(|area| indexed_lookup_offset(engine, context, area, lookup)) {
+        Some(Err(ErrorKind::NA)) => {}
+        Some(found) => return found,
+        None => {
+            let found = (|| {
+                for offset in 0..length as u32 {
+                    let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+                    if !matches!(value, Value::Error(_))
+                        && compare(&value, lookup)? == Ordering::Equal
+                    {
+                        return Ok(offset);
+                    }
+                }
+                Err(ErrorKind::NA)
+            })();
+            if let Some(area) = area {
+                record_linear_search(engine, area, SearchDirection::Forward, &found);
+            }
+            if !matches!(found, Err(ErrorKind::NA)) {
+                return found;
+            }
         }
     }
 
+    if let Some(area) = area
+        && let Some(found) = indexed_approximate_lookup_offset(engine, context, area, lookup)
+    {
+        return found;
+    }
     let mut candidate = None;
+    let mut stop = None;
     for offset in 0..length as u32 {
         let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
         if matches!(value, Value::Error(_)) {
@@ -566,8 +591,15 @@ fn find_lookup_offset(
         match compare(&value, lookup)? {
             Ordering::Equal => unreachable!("exact matches returned in the first pass"),
             Ordering::Less => candidate = Some(offset),
-            Ordering::Greater => break,
+            Ordering::Greater => {
+                stop = Some(offset);
+                break;
+            }
         }
+    }
+    if let Some(area) = area {
+        let reads = stop.ok_or(ErrorKind::NA);
+        record_linear_search(engine, area, SearchDirection::Forward, &reads);
     }
     candidate.ok_or(ErrorKind::NA)
 }

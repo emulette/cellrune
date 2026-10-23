@@ -436,6 +436,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- Repeated approximate `VLOOKUP`, `HLOOKUP`, and `MATCH` searches of one range use the index exact
+  searches share, which answers where the linear search stops and what it returns, with the same
+  results and the same cell reads and work charged.
 - Saving compresses the parts it writes new and every part of a workbook it writes from scratch
   with deflate, as Excel does, instead of storing them uncompressed; a source part the save keeps
   or replaces keeps its own compression.

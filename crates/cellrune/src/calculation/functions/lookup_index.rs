@@ -5,9 +5,13 @@
 //! each later search with the offset the linear search would stop at. Each indexed search is
 //! charged exactly the cell reads and work units the linear search would have charged, so results
 //! and limit failures do not change. An index is dropped when a result inside its range changes.
+//!
+//! An approximate VLOOKUP or HLOOKUP search first looks for an equal cell and then reads on to the
+//! first cell greater than the lookup value. The same index answers the first pass, and the
+//! running maximum of the cells it records on first use answers the second.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::{CellId, Rect};
@@ -190,6 +194,154 @@ pub(in crate::calculation) struct ExactLookupIndex {
     texts_before: Vec<u32>,
     nonempty_texts_before: Vec<u32>,
     blanks_before: Vec<u32>,
+    /// Built on the first approximate search of the range; `None` when it cannot answer one.
+    approximate: OnceLock<Option<ApproximateIndex>>,
+}
+
+/// A cell as `coerce::compare` orders it against a lookup value of the same type: numbers, then
+/// text compared case-insensitively, then logical values.
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+enum OrderKey {
+    Number(f64),
+    Text(Box<str>),
+    Logical(bool),
+}
+
+impl OrderKey {
+    fn of(value: &Value) -> Option<Self> {
+        match value {
+            Value::Number(number) => Some(Self::Number(*number + 0.0)),
+            Value::Text(text) => Some(Self::Text(lowercase(text))),
+            Value::Logical(logical) => Some(Self::Logical(*logical)),
+            Value::Blank | Value::Error(_) => None,
+        }
+    }
+
+    /// What a blank cell compares as against a lookup value of this key's type.
+    fn blank_substitute(&self) -> Self {
+        match self {
+            Self::Number(_) => Self::Number(0.0),
+            Self::Text(_) => Self::Text(Box::from("")),
+            Self::Logical(_) => Self::Logical(false),
+        }
+    }
+
+    const fn class(&self) -> usize {
+        match self {
+            Self::Number(_) => 0,
+            Self::Text(_) => 1,
+            Self::Logical(_) => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum OrderedCell {
+    Error,
+    Blank,
+    Value(OrderKey),
+}
+
+/// The cells of a range in `coerce::compare` order and, for each lookup type, the offsets where
+/// the running maximum and the running minimum of the cells that are not errors change, with blank
+/// cells taking that type's empty value.
+#[derive(Debug)]
+struct ApproximateIndex {
+    cells: Vec<OrderedCell>,
+    maxima: [Vec<u32>; 3],
+    minima: [Vec<u32>; 3],
+    /// For each offset, the last offset at or before it that is not an error, plus one.
+    last_value_through: Vec<u32>,
+}
+
+impl ApproximateIndex {
+    fn build(engine: &Engine<'_>, context: EvalContext<'_>, area: LookupArea) -> Option<Self> {
+        let probes = [
+            OrderKey::Number(0.0),
+            OrderKey::Text(Box::from("")),
+            OrderKey::Logical(false),
+        ];
+        let mut index = Self {
+            cells: Vec::with_capacity(area.length as usize),
+            maxima: [Vec::new(), Vec::new(), Vec::new()],
+            minima: [Vec::new(), Vec::new(), Vec::new()],
+            last_value_through: Vec::with_capacity(area.length as usize),
+        };
+        let mut last_value = 0;
+        for offset in 0..area.length {
+            if offset % CANCELLATION_POLL_INTERVAL == 0 && context.is_cancelled() {
+                return None;
+            }
+            let value = engine.cell_value(area.cell(offset));
+            let cell = match &value {
+                Value::Error(_) => OrderedCell::Error,
+                Value::Blank => OrderedCell::Blank,
+                Value::Number(number) if number.is_nan() => return None,
+                _ => OrderedCell::Value(OrderKey::of(&value)?),
+            };
+            if !matches!(cell, OrderedCell::Error) {
+                last_value = offset + 1;
+            }
+            index.last_value_through.push(last_value);
+            index.cells.push(cell);
+            for probe in &probes {
+                let Some(key) = index.key(offset, probe) else {
+                    continue;
+                };
+                let class = probe.class();
+                let last_key =
+                    |records: &[u32]| records.last().and_then(|last| index.key(*last, probe));
+                let new_maximum =
+                    last_key(&index.maxima[class]).is_none_or(|maximum| key > maximum);
+                let new_minimum =
+                    last_key(&index.minima[class]).is_none_or(|minimum| key < minimum);
+                if new_maximum {
+                    index.maxima[class].push(offset);
+                }
+                if new_minimum {
+                    index.minima[class].push(offset);
+                }
+            }
+        }
+        Some(index)
+    }
+
+    /// The key of the cell at `offset` against a lookup value of `lookup`'s type, or `None` for an
+    /// error cell.
+    fn key(&self, offset: u32, lookup: &OrderKey) -> Option<OrderKey> {
+        match &self.cells[offset as usize] {
+            OrderedCell::Error => None,
+            OrderedCell::Blank => Some(lookup.blank_substitute()),
+            OrderedCell::Value(key) => Some(key.clone()),
+        }
+    }
+
+    /// The first offset greater than `lookup`, or less than it when `descending`.
+    fn first_beyond(&self, lookup: &OrderKey, descending: bool) -> Option<u32> {
+        let records = if descending {
+            &self.minima[lookup.class()]
+        } else {
+            &self.maxima[lookup.class()]
+        };
+        let position = records.partition_point(|offset| {
+            self.key(*offset, lookup).is_some_and(|key| {
+                if descending {
+                    key >= *lookup
+                } else {
+                    key <= *lookup
+                }
+            })
+        });
+        records.get(position).copied()
+    }
+
+    /// The last offset before `end` that is not an error.
+    fn last_value_before(&self, end: u32) -> Option<u32> {
+        end.checked_sub(1)
+            .map(|last| self.last_value_through[last as usize])
+            .filter(|through| *through > 0)
+            .map(|through| through - 1)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -248,6 +400,7 @@ impl ExactLookupIndex {
             texts_before: Vec::with_capacity(length + 1),
             nonempty_texts_before: Vec::with_capacity(length + 1),
             blanks_before: Vec::with_capacity(length + 1),
+            approximate: OnceLock::new(),
         };
         let (mut texts, mut nonempty_texts, mut blanks) = (0_u32, 0_u32, 0_u32);
         for offset in 0..area.length {
@@ -390,6 +543,71 @@ pub(super) fn indexed_match_offset(
     };
     charge_indexed_search(engine, context, area, reads, work, full_work)
         .map(|charged| charged.and_then(|()| found.ok_or(ErrorKind::NA)))
+}
+
+/// The offset where the second pass of an approximate VLOOKUP or HLOOKUP search stops, after a
+/// first pass found no cell equal to `lookup`: the last cell before the first greater one that is
+/// not an error, or `#N/A`. `None` when the caller must scan.
+pub(super) fn indexed_approximate_lookup_offset(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    area: LookupArea,
+    lookup: &Value,
+) -> Option<Result<u32, ErrorKind>> {
+    let target = OrderKey::of(lookup)?;
+    let index = exact_lookup_index(engine, context, area)?;
+    let approximate = index
+        .approximate
+        .get_or_init(|| ApproximateIndex::build(engine, context, area))
+        .as_ref()?;
+    let greater = approximate.first_beyond(&target, false);
+    // The linear pass reads through the first greater cell, and every cell before it that is not
+    // an error is less than `lookup`.
+    let reads = greater.map_or(area.length, |offset| offset + 1);
+    let found = approximate.last_value_before(greater.unwrap_or(area.length));
+    charge_indexed_search(engine, context, area, reads, 0, 0)
+        .map(|charged| charged.and_then(|()| found.ok_or(ErrorKind::NA)))
+}
+
+/// The offset of an approximate MATCH, which reads until an equal cell or the first cell past
+/// `lookup` (greater for match type 1, less when `descending` for -1) and returns the last cell
+/// before it that is not an error, or `None` when the caller must scan.
+pub(super) fn indexed_approximate_match_offset(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    area: LookupArea,
+    lookup: &Value,
+    descending: bool,
+) -> Option<Result<u32, ErrorKind>> {
+    let target = OrderKey::of(lookup)?;
+    let index = exact_lookup_index(engine, context, area)?;
+    let equal = index.compare_equal(lookup)?.map(|span| span.first);
+    let approximate = index
+        .approximate
+        .get_or_init(|| ApproximateIndex::build(engine, context, area))
+        .as_ref()?;
+    let beyond = approximate.first_beyond(&target, descending);
+    let (found, reads) = match (equal, beyond) {
+        (Some(equal), beyond) if beyond.is_none_or(|beyond| equal < beyond) => {
+            (Some(equal), equal + 1)
+        }
+        (_, Some(beyond)) => (approximate.last_value_before(beyond), beyond + 1),
+        (_, None) => (approximate.last_value_before(area.length), area.length),
+    };
+    // Comparing a text lookup with a text or blank cell costs one work unit.
+    let comparisons = |end| match lookup {
+        Value::Text(_) => index.texts_in(0, end) + index.blanks_in(0, end),
+        _ => 0,
+    };
+    charge_indexed_search(
+        engine,
+        context,
+        area,
+        reads,
+        comparisons(reads),
+        comparisons(area.length),
+    )
+    .map(|charged| charged.and_then(|()| found.ok_or(ErrorKind::NA)))
 }
 
 /// The offset of an exact XLOOKUP search from either end, or `None` when the caller must scan.

@@ -15,6 +15,10 @@ const SHARED_COPIES: usize = 4;
 /// text holding wildcard syntax, and a blank reference.
 const LOOKUPS: &[&str] = &[
     "7",
+    "50.5",
+    "-100",
+    "\"item60\"",
+    "\"zzz\"",
     "0",
     "-3.5",
     "999",
@@ -61,6 +65,13 @@ fn lookup_formulas() -> Vec<String> {
         ));
         formulas.push(format!("HLOOKUP({lookup},Data!$A$1:$DP$2,2,FALSE)"));
         formulas.push(format!("MATCH({lookup},INDIRECT(\"A1:A{last}\"),0)"));
+        // Approximate searches over the same unsorted data.
+        formulas.push(format!("VLOOKUP({lookup},$A$1:$B${last},2,TRUE)"));
+        formulas.push(format!("VLOOKUP({lookup},$A$1:$B${last},2)"));
+        formulas.push(format!("HLOOKUP({lookup},Data!$A$1:$DP$2,2,TRUE)"));
+        formulas.push(format!("MATCH({lookup},$A$1:$A${last},1)"));
+        formulas.push(format!("MATCH({lookup},$A$1:$A${last})"));
+        formulas.push(format!("MATCH({lookup},$A$1:$A${last},-1)"));
     }
     formulas
 }
@@ -149,7 +160,7 @@ fn assert_indexed_matches_linear(options: CalculationOptions) {
 }
 
 #[test]
-fn indexed_exact_lookups_return_and_charge_what_linear_searches_do() {
+fn indexed_lookups_return_and_charge_what_linear_searches_do() {
     let shared = workbook(&shared_formulas());
     let engine = Engine::evaluate(shared.workbook(), CalculationOptions::default());
     let cache = engine.lookup_index_cache().borrow();
@@ -200,6 +211,7 @@ fn a_result_written_inside_an_indexed_range_drops_the_index() {
         texts_before: vec![0; 41],
         nonempty_texts_before: vec![0; 41],
         blanks_before: vec![0; 41],
+        approximate: std::sync::OnceLock::new(),
     });
     cache.insert(area, std::sync::Arc::clone(&index));
     cache.invalidate_cell((0, 41, 1));
@@ -225,6 +237,7 @@ fn empty_index(length: u32) -> std::sync::Arc<super::ExactLookupIndex> {
         texts_before: prefix.clone(),
         nonempty_texts_before: prefix.clone(),
         blanks_before: prefix,
+        approximate: std::sync::OnceLock::new(),
     })
 }
 

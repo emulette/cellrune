@@ -12,7 +12,8 @@ use super::criteria_index::indexed_matches;
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
 use super::lookup_index::{
-    LookupArea, SearchDirection, indexed_match_offset, record_linear_search,
+    LookupArea, SearchDirection, indexed_approximate_match_offset, indexed_match_offset,
+    record_linear_search,
 };
 use super::util::ExcelSum;
 
@@ -666,7 +667,18 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             Err(kind) => Value::Error(kind),
         };
     }
+    let area = LookupArea::new(rect, length, !vertical);
+    if let Some(found) = area.and_then(|area| {
+        indexed_approximate_match_offset(engine, context, area, &lookup, match_type == -1.0)
+    }) {
+        return match found {
+            Ok(offset) => Value::Number(f64::from(offset + 1)),
+            Err(kind) => Value::Error(kind),
+        };
+    }
     let mut approximate = None;
+    let mut equal = None;
+    let mut stop = None;
     for offset in 0..length {
         let value = match engine.read_reference_cell(context, cell(offset)) {
             Ok(value) => value,
@@ -681,7 +693,9 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             Err(kind) => return Value::Error(kind),
         };
         if ordering == std::cmp::Ordering::Equal {
-            return Value::Number((offset + 1) as f64);
+            stop = Some(Ok(offset as u32));
+            equal = Some(offset);
+            break;
         }
         if (match_type == 1.0 && ordering == std::cmp::Ordering::Less)
             || (match_type == -1.0 && ordering == std::cmp::Ordering::Greater)
@@ -690,10 +704,17 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         } else if (match_type == 1.0 && ordering == std::cmp::Ordering::Greater)
             || (match_type == -1.0 && ordering == std::cmp::Ordering::Less)
         {
+            stop = Some(Ok(offset as u32));
             break;
         }
     }
-    approximate.map_or(Value::Error(ErrorKind::NA), |offset| {
-        Value::Number((offset + 1) as f64)
-    })
+    if let Some(area) = area {
+        let reads = stop.unwrap_or(Err(ErrorKind::NA));
+        record_linear_search(engine, area, SearchDirection::Forward, &reads);
+    }
+    equal
+        .or(approximate)
+        .map_or(Value::Error(ErrorKind::NA), |offset| {
+            Value::Number((offset + 1) as f64)
+        })
 }
