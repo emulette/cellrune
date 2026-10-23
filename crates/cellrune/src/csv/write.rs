@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use super::{CsvError, CsvErrorCode, unquoted_literal, validate_delimiter};
@@ -43,26 +44,40 @@ impl CsvWriteOptions {
 /// Writes one sheet as RFC 4180 CSV: UTF-8 without a byte-order mark, CRLF after every record.
 ///
 /// Formula cells and spilled array cells write their value from `calculation`, which must belong
-/// to `workbook`. Values follow the rule documented on the [`crate::csv`] module, so reading the
-/// output with [`crate::csv::read_csv`] yields the same literal values at the same addresses.
+/// to `workbook`; a sheet that holds no formula needs no calculation and accepts `None`. Values
+/// follow the rule documented on the [`crate::csv`] module, so reading the output with
+/// [`crate::csv::read_csv`] yields the same literal values at the same addresses.
 ///
 /// # Errors
 ///
 /// Returns [`CsvErrorCode::UnknownSheet`], [`CsvErrorCode::StaleCalculation`], or
-/// [`CsvErrorCode::UnavailableResult`] naming the first formula without a value.
+/// [`CsvErrorCode::UnavailableResult`] naming the first formula without a value, which is the
+/// first formula of the sheet when `calculation` is `None`.
 pub fn write_csv(
     workbook: &WorkbookSnapshot,
-    calculation: &CalculationSnapshot,
+    calculation: Option<&CalculationSnapshot>,
     sheet_id: SheetId,
     options: CsvWriteOptions,
 ) -> Result<Vec<u8>, CsvError> {
     let sheet = workbook
         .sheet_by_id(sheet_id)
         .ok_or_else(|| CsvError::new(CsvErrorCode::UnknownSheet))?;
+    let Some(calculation) = calculation else {
+        if let Some(address) = sheet.formula_addresses().first() {
+            return Err(
+                CsvError::new(CsvErrorCode::UnavailableResult).with_detail(address.to_string())
+            );
+        }
+        let values = sheet.cells().filter_map(|cell| match cell.content() {
+            CellContent::Literal(value) => Some((cell.address(), value.clone())),
+            CellContent::Formula(_) => None,
+        });
+        return Ok(render(values.collect(), options));
+    };
     if !calculation.matches_workbook(workbook) {
         return Err(CsvError::new(CsvErrorCode::StaleCalculation));
     }
-    let mut values = std::collections::BTreeMap::<CellAddress, CellValue>::new();
+    let mut values = BTreeMap::<CellAddress, CellValue>::new();
     for cell in sheet.cells() {
         if let CellContent::Literal(value) = cell.content() {
             values.insert(cell.address(), value.clone());
@@ -93,11 +108,17 @@ pub fn write_csv(
             CsvError::new(CsvErrorCode::UnavailableResult).with_detail(cell.address().to_string())
         );
     }
+    Ok(render(values, options))
+}
+
+/// Renders every row from 1 through the last used one with every column from A through the last
+/// used one.
+fn render(values: BTreeMap<CellAddress, CellValue>, options: CsvWriteOptions) -> Vec<u8> {
     let (Some(last_row), Some(last_column)) = (
         values.keys().map(|address| address.row().get()).max(),
         values.keys().map(|address| address.column().get()).max(),
     ) else {
-        return Ok(Vec::new());
+        return Vec::new();
     };
     let delimiter = char::from(options.delimiter);
     let mut output = String::new();
@@ -115,7 +136,7 @@ pub fn write_csv(
         }
         output.push_str("\r\n");
     }
-    Ok(output.into_bytes())
+    output.into_bytes()
 }
 
 fn push_value(output: &mut String, value: &CellValue, delimiter: char) {

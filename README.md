@@ -505,7 +505,8 @@ set it and may store placeholder results, so read such saved results only after 
 `limit`; each rule carries its ranges, OOXML type, operator, and error-style tokens, its formulas as
 stored, and its flags and messages. `hyperlinks` and `comments` page the same way through a sheet's
 hyperlinks and cell comments. `from_csv`/`fromCsv` open RFC 4180 UTF-8 CSV as a one-sheet
-workbook and `to_csv`/`toCsv` export one sheet of the current calculated revision. Reading never
+workbook and `to_csv`/`toCsv` export one sheet, formulas as their values in the current calculated
+revision; a sheet without formulas needs no calculation. Reading never
 creates a formula: unquoted decimal numbers, `TRUE`/`FALSE` in any case, and Excel error spellings
 become numbers, logicals, and errors, quoted fields and everything else become text, and dates are
 not parsed. Writing quotes text that would read back as anything else, so a write and a read keep

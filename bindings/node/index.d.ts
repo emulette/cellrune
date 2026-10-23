@@ -1042,7 +1042,10 @@ export class Workbook {
     bytes: Buffer | Uint8Array,
     options?: { readonly sheetName?: string; readonly delimiter?: string },
   ): Workbook;
-  /** Exports one sheet of the current calculated revision as CSV. */
+  /**
+   * Exports one sheet as CSV, formulas as their values in the current calculated revision; a sheet
+   * without formulas needs no calculation.
+   */
   toCsv(sheet: string, options?: { readonly delimiter?: string }): Buffer;
   get closed(): boolean;
   close(): void;

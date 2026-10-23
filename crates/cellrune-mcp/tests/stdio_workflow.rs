@@ -1838,11 +1838,11 @@ fn csv_files_open_and_calculated_sheets_export_over_stdio() {
     ));
     let session_id = opened["session_id"].as_str().expect("session").to_owned();
     assert_eq!(opened["summary"]["sheets"][0]["name"], "Import");
-    let error = failed_tool(mcp.call_tool(
+    let uncalculated = successful_tool(mcp.call_tool(
         "workbook_export_csv",
         json!({"session_id": session_id, "sheet": "Import"}),
     ));
-    assert_eq!(error["code"], "interop.calculation.required");
+    assert_eq!(uncalculated["csv"], "item,amount\r\nWidget,2.5\r\n");
     successful_tool(mcp.call_tool("workbook_recalculate", json!({"session_id": session_id})));
     let exported = successful_tool(mcp.call_tool(
         "workbook_export_csv",

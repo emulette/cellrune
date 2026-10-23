@@ -151,7 +151,7 @@ fn accepts_only_delimiters_that_never_split_an_unquoted_value() {
     for delimiter in [',', ';', '\t', '|', ' '] {
         let bytes = write_csv(
             draft.workbook(),
-            &calculation,
+            Some(&calculation),
             sheet,
             CsvWriteOptions::new()
                 .with_delimiter(delimiter)
@@ -208,7 +208,7 @@ fn writes_calculated_values_that_read_back_unchanged() {
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
     let bytes = write_csv(
         draft.workbook(),
-        &calculation,
+        Some(&calculation),
         sheet,
         CsvWriteOptions::default(),
     )
@@ -232,9 +232,14 @@ fn writes_calculated_values_that_read_back_unchanged() {
         .apply_changes(EditBatch::new([set("D4", CellValue::Logical(false))]))
         .expect("edit");
     assert_eq!(
-        write_csv(draft.workbook(), &stale, sheet, CsvWriteOptions::default())
-            .expect_err("stale")
-            .code(),
+        write_csv(
+            draft.workbook(),
+            Some(&stale),
+            sheet,
+            CsvWriteOptions::default()
+        )
+        .expect_err("stale")
+        .code(),
         CsvErrorCode::StaleCalculation
     );
     draft
@@ -247,7 +252,7 @@ fn writes_calculated_values_that_read_back_unchanged() {
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
     let error = write_csv(
         draft.workbook(),
-        &calculation,
+        Some(&calculation),
         sheet,
         CsvWriteOptions::default(),
     )
@@ -257,7 +262,7 @@ fn writes_calculated_values_that_read_back_unchanged() {
     assert_eq!(
         write_csv(
             draft.workbook(),
-            &calculation,
+            Some(&calculation),
             SheetId::new(9).expect("sheet"),
             CsvWriteOptions::default()
         )
@@ -283,7 +288,7 @@ fn text_that_starts_with_a_byte_order_mark_keeps_it() {
     let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
     let bytes = write_csv(
         draft.workbook(),
-        &calculation,
+        Some(&calculation),
         sheet,
         CsvWriteOptions::default(),
     )
@@ -323,4 +328,31 @@ fn rejects_a_field_longer_than_a_cell_holds() {
             }
         }
     }
+}
+
+#[test]
+fn a_sheet_without_formulas_needs_no_calculation() {
+    let sheet = SheetId::new(1).expect("sheet");
+    let mut draft = WorkbookDraft::new();
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
+            sheet,
+            CellAddress::from_a1("B2").expect("a1"),
+            CellValue::number(2.5).expect("number"),
+        )]))
+        .expect("value");
+    let bytes =
+        write_csv(draft.workbook(), None, sheet, CsvWriteOptions::default()).expect("write");
+    assert_eq!(String::from_utf8(bytes).expect("utf8"), ",\r\n,2.5\r\n");
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_formula(
+            sheet,
+            CellAddress::from_a1("C3").expect("a1"),
+            FormulaText::from_user_input("=B2*2").expect("formula"),
+        )]))
+        .expect("formula");
+    let error = write_csv(draft.workbook(), None, sheet, CsvWriteOptions::default())
+        .expect_err("a formula needs a calculation");
+    assert_eq!(error.code(), CsvErrorCode::UnavailableResult);
+    assert_eq!(error.detail(), Some("C3"));
 }

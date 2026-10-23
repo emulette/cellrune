@@ -51,15 +51,24 @@ fn csv_opens_as_a_workbook_and_exports_its_calculated_values() {
     );
 
     assert_eq!(
+        String::from_utf8(
+            session
+                .save_csv_bytes(&write_request("Import", None))
+                .expect("a sheet without formulas needs no calculation")
+        )
+        .expect("utf8"),
+        "name,amount\r\nWidget; large,2.5\r\n"
+    );
+    session
+        .set_formula("Import", "C2", "=B2*2", None)
+        .expect("formula");
+    assert_eq!(
         session
             .save_csv_bytes(&write_request("Import", None))
             .expect_err("calculation required")
             .code(),
         "interop.calculation.required"
     );
-    session
-        .set_formula("Import", "C2", "=B2*2", None)
-        .expect("formula");
     session
         .set_value(
             "Import",

@@ -654,13 +654,14 @@ def assert_csv() -> None:
     page = workbook.read_range("Import", "A2", "B2")
     assert page["cells"][0]["source_value"] == {"kind": "text", "value": "Widget; large"}
     assert page["cells"][1]["source_value"] == {"kind": "number", "value": 2.5}
+    assert workbook.to_csv("Import") == b"item,amount\r\nWidget; large,2.5\r\n"
+    workbook.set_formula("Import", "C2", "=B2*2")
     try:
         workbook.to_csv("Import")
     except CellRuneError as error:
         assert (error.code, error.kind) == ("interop.calculation.required", "state")
     else:
-        raise AssertionError("an uncalculated workbook was exported")
-    workbook.set_formula("Import", "C2", "=B2*2")
+        raise AssertionError("an uncalculated formula was exported")
     workbook.calculate()
     assert workbook.to_csv("Import") == b"item,amount,\r\nWidget; large,2.5,5\r\n"
     try:

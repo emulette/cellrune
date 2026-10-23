@@ -329,9 +329,9 @@ instructions.",
         name = "workbook_export_csv",
         input_schema = crate::schema::mcp_schema::<ExportCsvArgs>(),
         output_schema = crate::schema::mcp_schema::<CsvExported>(),
-        description = "Return one sheet of the session's current calculated revision as RFC 4180 \
-CSV text, written from A1 through the last used cell with formulas as their calculated values. \
-Recalculate first; the whole text must fit the server response limit.",
+        description = "Return one sheet as RFC 4180 CSV text, written from A1 through the last used \
+cell with formulas as their values in the session's current calculated revision. Recalculate \
+first when the sheet holds a formula; the whole text must fit the server response limit.",
         annotations(
             title = "Export sheet as CSV",
             read_only_hint = true,

@@ -28,16 +28,15 @@ impl WorkbookSession {
         Ok(Self::from_engine(WorkbookCalculationSession::new(draft)))
     }
 
-    /// Exports one sheet of the current calculated revision as CSV bytes.
+    /// Exports one sheet as CSV bytes, formulas as their values in the current calculated
+    /// revision. A sheet that holds no formula needs no calculation.
     ///
     /// # Errors
     ///
-    /// Returns `interop.calculation.required` without a current calculation,
-    /// `interop.sheet.not_found` for an unknown sheet, or a typed `csv.*` error.
+    /// Returns `interop.calculation.required` for a sheet with a formula and no current
+    /// calculation, `interop.sheet.not_found` for an unknown sheet, or a typed `csv.*` error.
     pub fn save_csv_bytes(&self, request: &CsvWriteRequestDto) -> Result<Vec<u8>, InteropError> {
-        let calculation = self
-            .current_calculation()
-            .ok_or_else(InteropError::calculation_required)?;
+        let calculation = self.current_calculation();
         let workbook = self.engine.workbook();
         let sheet = workbook
             .sheet_by_name(&request.sheet)
@@ -46,7 +45,14 @@ impl WorkbookSession {
         if let Some(delimiter) = &request.delimiter {
             options = options.with_delimiter(delimiter_char(delimiter)?)?;
         }
-        Ok(write_csv(workbook, calculation, sheet.id(), options)?)
+        write_csv(workbook, calculation, sheet.id(), options).map_err(|error| {
+            // Without a calculation, the only formula without a value is one never calculated.
+            if calculation.is_none() && error.code() == CsvErrorCode::UnavailableResult {
+                InteropError::calculation_required()
+            } else {
+                error.into()
+            }
+        })
     }
 }
 

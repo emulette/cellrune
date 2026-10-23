@@ -478,11 +478,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   it matches `[+-]?(d+[.d*]|.d+)([eE][+-]?d+)?`, a logical for `TRUE`/`FALSE`
   in any case, an error for an exact Excel error spelling, and text otherwise;
   no field is a formula and no date is parsed.
-- `write_csv(&WorkbookSnapshot, &CalculationSnapshot, SheetId,
+- `write_csv(&WorkbookSnapshot, Option<&CalculationSnapshot>, SheetId,
   CsvWriteOptions) -> Result<Vec<u8>, CsvError>` writes A1 through the last
   used cell, CRLF after every record, numbers as their shortest round-trip
   decimal, formulas and spilled cells as their calculated values, and quotes
-  text that would read back as anything else.
+  text that would read back as anything else. A sheet without formulas needs
+  no calculation (`None`); with `None`, a formula fails with
+  `csv.write.unavailable_result` naming it.
 - `CsvError::code() -> CsvErrorCode`: `csv.invalid_delimiter`,
   `csv.read.invalid_utf8`, `csv.read.unterminated_quote`,
   `csv.read.invalid_quote`, `csv.read.too_many_rows`,
@@ -493,7 +495,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `csv.write.stale_calculation`, `csv.write.unavailable_result`; `.detail()`
   names the line or cell.
 - Interop `WorkbookSession::open_csv_bytes(&[u8], &CsvReadOptionsDto)` and
-  `save_csv_bytes(&CsvWriteRequestDto)` (requires a current calculation);
+  `save_csv_bytes(&CsvWriteRequestDto)` (a sheet with a formula requires a
+  current calculation, else `interop.calculation.required`);
   Python `Workbook.from_csv(data, sheet_name=, delimiter=)`/`to_csv(sheet,
   delimiter=)`; Node.js `Workbook.fromCsv(bytes, { sheetName, delimiter })`
   (synchronous)/`toCsv(sheet, { delimiter })` returning a `Buffer`; MCP
