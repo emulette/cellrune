@@ -2,7 +2,7 @@ use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_number};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
-use super::super::textfmt::format_number;
+use super::super::textfmt::{FormatContext, format_number};
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
 use super::util::{required_number, required_text};
@@ -110,7 +110,10 @@ fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
         format.push('.');
         format.push_str(&"0".repeat(visible_decimals));
     }
-    let formatted = match format_number(rounded.abs(), &format) {
+    let context = FormatContext {
+        date_system: engine.date_system(),
+    };
+    let formatted = match format_number(rounded.abs(), &format, context) {
         Ok(formatted) => formatted,
         Err(kind) => return Value::Error(kind),
     };

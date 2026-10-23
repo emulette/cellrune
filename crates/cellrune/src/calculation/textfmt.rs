@@ -1,200 +1,177 @@
-use super::value::ErrorKind;
+//! Excel number-format codes: the engine behind `TEXT`, `DOLLAR`, and `FIXED`.
+//!
+//! A code has up to four `;`-separated sections for positive numbers, negative numbers, zero,
+//! and text. Each section is a number layout (digit placeholders, scientific notation, or a
+//! fraction), a date and time layout, `General`, a text layout around `@`, or plain literal text.
+//! Constructs whose Excel output has not been established produce [`ErrorKind::Unsupported`]
+//! rather than a guess.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Section {
-    Prefix,
-    IntegerDigits,
-    FractionDigits,
-    Suffix,
+mod datetime;
+mod lexer;
+mod number;
+#[cfg(test)]
+mod tests;
+
+use lexer::{RawSection, Token};
+
+use super::value::{ErrorKind, number_to_general_text};
+use crate::DateSystem;
+
+/// The workbook facts a format code reads besides the value.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FormatContext {
+    pub(crate) date_system: DateSystem,
 }
 
-#[derive(Debug, Default)]
-struct NumberFormat {
-    prefix: String,
-    integer_zeros: u32,
-    integer_placeholders: u32,
-    grouping: bool,
-    fraction_zeros: u32,
-    fraction_placeholders: u32,
-    percent_count: u32,
-    suffix: String,
+/// Formats a number with `format`, as `TEXT` does.
+pub(crate) fn format_number(
+    value: f64,
+    format: &str,
+    context: FormatContext,
+) -> Result<String, ErrorKind> {
+    let sections = lexer::lex(format)?;
+    let chosen = choose_number_section(&sections, value)?;
+    render_number_section(&chosen.section.tokens, chosen, context)
 }
 
-const UNSUPPORTED_FORMAT_LETTERS: &str = "dmyhsegDMYHSEG?*_[]";
-
-fn compile_format(format: &str) -> Result<NumberFormat, ErrorKind> {
-    if format == "@" {
-        return Err(ErrorKind::Unsupported);
-    }
-    let mut compiled = NumberFormat::default();
-    let mut section = Section::Prefix;
-    let mut characters = format.chars().peekable();
-    while let Some(character) = characters.next() {
-        match character {
-            ';' | '@' => return Err(ErrorKind::Unsupported),
-            '"' => {
-                let mut literal = String::new();
-                loop {
-                    match characters.next() {
-                        Some('"') => break,
-                        Some(inner) => literal.push(inner),
-                        None => return Err(ErrorKind::Unsupported),
-                    }
-                }
-                match section {
-                    Section::Prefix => compiled.prefix.push_str(&literal),
-                    _ => {
-                        section = Section::Suffix;
-                        compiled.suffix.push_str(&literal);
-                    }
-                }
-            }
-            '\\' => {
-                let Some(escaped) = characters.next() else {
-                    return Err(ErrorKind::Unsupported);
-                };
-                match section {
-                    Section::Prefix => compiled.prefix.push(escaped),
-                    _ => {
-                        section = Section::Suffix;
-                        compiled.suffix.push(escaped);
-                    }
-                }
-            }
-            '0' | '#' => {
-                let is_zero = character == '0';
-                match section {
-                    Section::Prefix => {
-                        section = Section::IntegerDigits;
-                        compiled.integer_placeholders += 1;
-                        if is_zero {
-                            compiled.integer_zeros += 1;
-                        }
-                    }
-                    Section::IntegerDigits => {
-                        compiled.integer_placeholders += 1;
-                        if is_zero {
-                            compiled.integer_zeros += 1;
-                        }
-                    }
-                    Section::FractionDigits => {
-                        compiled.fraction_placeholders += 1;
-                        if is_zero {
-                            compiled.fraction_zeros += 1;
-                        }
-                    }
-                    Section::Suffix => return Err(ErrorKind::Unsupported),
-                }
-            }
-            '.' => match section {
-                Section::IntegerDigits => section = Section::FractionDigits,
-                Section::Prefix => {
-                    section = Section::FractionDigits;
-                }
-                _ => return Err(ErrorKind::Unsupported),
-            },
-            ',' => {
-                if section == Section::IntegerDigits
-                    && matches!(characters.peek(), Some('0') | Some('#'))
-                {
-                    compiled.grouping = true;
-                } else {
-                    return Err(ErrorKind::Unsupported);
-                }
-            }
-            '%' => {
-                compiled.percent_count += 1;
-                match section {
-                    Section::Prefix => compiled.prefix.push('%'),
-                    _ => {
-                        section = Section::Suffix;
-                        compiled.suffix.push('%');
-                    }
-                }
-            }
-            _ if UNSUPPORTED_FORMAT_LETTERS.contains(character) => {
-                return Err(ErrorKind::Unsupported);
-            }
-            _ => match section {
-                Section::Prefix => compiled.prefix.push(character),
-                _ => {
-                    section = Section::Suffix;
-                    compiled.suffix.push(character);
-                }
-            },
-        }
-    }
-    if compiled.integer_placeholders == 0 && compiled.fraction_placeholders == 0 {
-        return Err(ErrorKind::Unsupported);
-    }
-    Ok(compiled)
+/// The section a number selected and the value that section renders.
+#[derive(Debug, Clone, Copy)]
+struct ChosenSection<'a> {
+    section: &'a RawSection,
+    value: f64,
+    /// Whether a negative value shows its own minus sign: true only when one section formats
+    /// every number.
+    signed: bool,
+    locale_id: Option<u32>,
 }
 
-pub fn format_number(value: f64, format: &str) -> Result<String, ErrorKind> {
-    let compiled = compile_format(format)?;
-    let mut scaled = value;
-    for _ in 0..compiled.percent_count {
-        scaled *= 100.0;
-    }
-    if !scaled.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-    let negative = scaled < 0.0;
-    let magnitude = scaled.abs();
-    let factor = 10_f64.powi(compiled.fraction_placeholders as i32);
-    let scaled_units = (magnitude * factor).round();
-    if scaled_units >= 9.007_199_254_740_992e15 {
-        return Err(ErrorKind::Num);
-    }
-    let units = scaled_units as u64;
-    let unit_text = units.to_string();
-    let fraction_len = compiled.fraction_placeholders as usize;
-    let padded = if unit_text.len() <= fraction_len {
-        format!(
-            "{}{}",
-            "0".repeat(fraction_len + 1 - unit_text.len()),
-            unit_text
-        )
-    } else {
-        unit_text
+fn choose_number_section(
+    sections: &[RawSection],
+    value: f64,
+) -> Result<ChosenSection<'_>, ErrorKind> {
+    // A fourth section formats text only.
+    let numeric = &sections[..sections.len().min(3)];
+    let chosen = |index: usize, value: f64, signed: bool| ChosenSection {
+        section: &numeric[index],
+        value,
+        signed,
+        locale_id: numeric[index].locale_id,
     };
-    let split = padded.len() - fraction_len;
-    let mut integer_part = padded[..split].to_owned();
-    let mut fraction_part = padded[split..].to_owned();
-    while integer_part.len() < compiled.integer_zeros as usize {
-        integer_part.insert(0, '0');
+    if numeric.iter().all(|section| section.condition.is_none()) {
+        return Ok(match numeric.len() {
+            1 => chosen(0, value, true),
+            2 if value < 0.0 => chosen(1, -value, false),
+            2 => chosen(0, value, false),
+            _ if value > 0.0 => chosen(0, value, false),
+            _ if value < 0.0 => chosen(1, -value, false),
+            _ => chosen(2, value, false),
+        });
     }
-    if integer_part == "0" && compiled.integer_zeros == 0 && compiled.fraction_placeholders > 0 {
-        integer_part.clear();
+    // How a conditional section shows a negative number has not been measured.
+    if value < 0.0
+        || numeric[0].condition.is_none()
+        || numeric
+            .get(2)
+            .is_some_and(|section| section.condition.is_some())
+    {
+        return Err(ErrorKind::Unsupported);
     }
-    let optional_fraction = (compiled.fraction_placeholders - compiled.fraction_zeros) as usize;
-    for _ in 0..optional_fraction {
-        if fraction_part.ends_with('0') {
-            fraction_part.pop();
-        } else {
-            break;
+    let first = numeric[0].condition.expect("checked above");
+    if first.holds(value) {
+        return Ok(chosen(0, value, false));
+    }
+    match (numeric.get(1), numeric.len()) {
+        (Some(second), _)
+            if second
+                .condition
+                .is_none_or(|condition| condition.holds(value)) =>
+        {
+            Ok(chosen(1, value, false))
         }
+        (Some(_), 3) => Ok(chosen(2, value, false)),
+        _ => Err(ErrorKind::Unsupported),
     }
-    if compiled.grouping {
-        let mut grouped = String::new();
-        for (index, digit) in integer_part.chars().enumerate() {
-            if index > 0 && (integer_part.len() - index) % 3 == 0 {
-                grouped.push(',');
-            }
-            grouped.push(digit);
+}
+
+fn render_number_section(
+    tokens: &[Token],
+    chosen: ChosenSection<'_>,
+    context: FormatContext,
+) -> Result<String, ErrorKind> {
+    if tokens.is_empty() {
+        return Ok(String::new());
+    }
+    if tokens.iter().any(|token| matches!(token, Token::TextValue)) {
+        return Err(ErrorKind::Unsupported);
+    }
+    if datetime::is_date_section(tokens) {
+        if chosen.value < 0.0 {
+            return Err(ErrorKind::Unsupported);
         }
-        integer_part = grouped;
+        return datetime::render(tokens, chosen.value, chosen.locale_id, context);
+    }
+    if tokens.iter().any(|token| matches!(token, Token::General)) {
+        return render_general(tokens, chosen);
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(token, Token::Placeholder(_)))
+    {
+        return number::render(tokens, chosen.value, chosen.signed);
+    }
+    render_literal_section(tokens, chosen)
+}
+
+/// Renders a section of literal text, such as `" "` or `"n/a"`.
+fn render_literal_section(
+    tokens: &[Token],
+    chosen: ChosenSection<'_>,
+) -> Result<String, ErrorKind> {
+    // Whether a lone literal section shows a minus sign has not been measured.
+    if chosen.signed && chosen.value < 0.0 {
+        return Err(ErrorKind::Unsupported);
     }
     let mut output = String::new();
-    if negative && (units > 0 || compiled.integer_zeros > 0) {
+    for token in tokens {
+        output.push_str(&literal_text(token)?);
+    }
+    Ok(output)
+}
+
+fn render_general(tokens: &[Token], chosen: ChosenSection<'_>) -> Result<String, ErrorKind> {
+    let mut output = String::new();
+    if chosen.signed && chosen.value < 0.0 {
         output.push('-');
     }
-    output.push_str(&compiled.prefix);
-    output.push_str(&integer_part);
-    if !fraction_part.is_empty() {
-        output.push('.');
-        output.push_str(&fraction_part);
+    let mut seen_general = false;
+    for token in tokens {
+        match token {
+            Token::General if !seen_general => {
+                seen_general = true;
+                output.push_str(&number_to_general_text(chosen.value.abs()));
+            }
+            _ => output.push_str(&literal_text(token)?),
+        }
     }
-    output.push_str(&compiled.suffix);
     Ok(output)
+}
+
+/// Returns the text a token shows in a section without digit placeholders.
+fn literal_text(token: &Token) -> Result<String, ErrorKind> {
+    match token {
+        Token::Literal(text) => Ok(text.clone()),
+        Token::Letters { letter, text, .. } if !is_reserved_letter(*letter) => Ok(text.clone()),
+        Token::Skip => Ok(" ".to_owned()),
+        Token::Comma => Ok(",".to_owned()),
+        Token::DecimalPoint => Ok(".".to_owned()),
+        Token::Slash => Ok("/".to_owned()),
+        _ => Err(ErrorKind::Unsupported),
+    }
+}
+
+/// Letters that are never literal text outside a digit layout: the date and time codes, the `e`
+/// year, and the codes other locales and calendars read (`aaa` weekdays, `b` Buddhist years, and
+/// `g` eras), whose output has not been measured.
+const fn is_reserved_letter(letter: char) -> bool {
+    matches!(letter, 'd' | 'm' | 'y' | 'h' | 's' | 'e' | 'g' | 'b' | 'a')
 }

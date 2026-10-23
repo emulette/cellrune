@@ -6,7 +6,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
-use super::super::textfmt::format_number;
+use super::super::textfmt::{FormatContext, format_number};
 use super::super::value::{ErrorKind, Value};
 use super::criteria_index::indexed_matches;
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
@@ -308,7 +308,10 @@ fn kernel_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         Ok(format) => format,
         Err(kind) => return Value::Error(kind),
     };
-    match format_number(number, &format) {
+    let context = FormatContext {
+        date_system: engine.date_system(),
+    };
+    match format_number(number, &format, context) {
         Ok(text) => engine.bounded_text(text),
         Err(kind) => Value::Error(kind),
     }

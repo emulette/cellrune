@@ -265,11 +265,10 @@
     "excel_rich_error": false
   },
   "curated:arithmetic:c019": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "z1900ro",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "curated:arithmetic:c020": {
     "classification": "match",
@@ -867,11 +866,10 @@
     "excel_rich_error": false
   },
   "curated:textdate:c007": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1900-02-29",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "curated:textdate:c008": {
     "classification": "match",
@@ -928,11 +926,10 @@
     "note": "CellRune produces a different scalar for this oracle case; retain until the underlying calculation semantics are corrected."
   },
   "curated:textdate:c016": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "★ K001 2020-01-01",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "curated:unsupported:c001": {
     "classification": "match",
@@ -1708,7 +1705,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1719,7 +1716,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1736,7 +1733,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1747,7 +1744,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1764,7 +1761,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1775,7 +1772,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1792,7 +1789,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -1803,7 +1800,7 @@
     "excel_rich_error": false,
     "comparator": {
       "mode": "abs_rel",
-      "abs": 2e-7,
+      "abs": 2e-07,
       "rel": 5e-13
     }
   },
@@ -8466,18 +8463,16 @@
     "excel_rich_error": false
   },
   "function:text": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2026-07-27",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "function:text:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": " ",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_expression for this oracle case."
+    "excel_rich_error": false
   },
   "function:textafter": {
     "classification": "match",

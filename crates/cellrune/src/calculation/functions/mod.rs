@@ -82,6 +82,7 @@ mod util;
 mod xmatch;
 
 pub(crate) use calendar::{calendar_date_exists, serial_from_calendar_date};
+pub(in crate::calculation) use calendar::{date_from_serial, weekday_monday_zero};
 pub(super) use dynamic::{
     helper_array_with_trace, helper_scalar_with_trace, invoke_callable, lambda_scope_value,
     let_reference, let_scope_value, map_scalar_with_trace, reduce_scope_value, with_let_scope,

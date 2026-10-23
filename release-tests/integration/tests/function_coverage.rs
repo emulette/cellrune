@@ -631,6 +631,33 @@ fn corpus_driven_functions_reject_invalid_boundaries() {
     }
 }
 
+#[test]
+fn text_formats_sections_dates_times_fractions_and_exponents() {
+    let cases = [
+        text("TEXT(DATE(2026,7,27),\"yyyy-mm-dd\")", "2026-07-27"),
+        text("TEXT(DATE(2026,7,27),\"dddd\")", "Monday"),
+        text("TEXT(60,\"yyyy-mm-dd\")", "1900-02-29"),
+        text("TEXT(TIME(13,29,0),\"H:MM AM/PM\")", "1:29 PM"),
+        text("TEXT(TIME(1,2,0),\"[h]:mm\")", "1:02"),
+        text("TEXT(0*-1,\"0.00;-0.00;zero\")", "z1900ro"),
+        text(
+            "TEXT(1234567898,\"[<=9999999]###-####;(###) ###-####\")",
+            "(123) 456-7898",
+        ),
+        text("TEXT(4.34,\"# ?/?\")", "4 1/3"),
+        text("TEXT(12200000,\"0.00E+00\")", "1.22E+07"),
+        text("TEXT(12200000,\"#,###.0,\")", "12,200.0"),
+        text("TEXT(1234.5,\"General\")", "1234.5"),
+        text("TEXT(1.5,\"[Red]0.00\")", "1.50"),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
 const fn number(formula: &'static str, value: f64, tolerance: f64) -> FormulaCase {
     FormulaCase {
         formula,

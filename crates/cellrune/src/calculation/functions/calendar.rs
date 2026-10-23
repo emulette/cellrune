@@ -5,13 +5,13 @@ const EXCEL_1900_POST_LEAP_OFFSET: i64 = 25_569;
 const EXCEL_1904_OFFSET: i64 = 24_107;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct Date {
-    pub(super) year: i32,
-    pub(super) month: u32,
-    pub(super) day: u32,
+pub(in crate::calculation) struct Date {
+    pub(in crate::calculation) year: i32,
+    pub(in crate::calculation) month: u32,
+    pub(in crate::calculation) day: u32,
 }
 
-pub(super) fn date_from_serial(serial: f64, system: DateSystem) -> Option<Date> {
+pub(in crate::calculation) fn date_from_serial(serial: f64, system: DateSystem) -> Option<Date> {
     if system == DateSystem::Excel1900 && serial.is_finite() && (0.0..1.0).contains(&serial) {
         return Some(Date {
             year: 1900,
@@ -30,7 +30,7 @@ pub(super) fn date_from_serial(serial: f64, system: DateSystem) -> Option<Date> 
     Some(civil_from_days(days))
 }
 
-pub(super) fn weekday_monday_zero(serial: f64, system: DateSystem) -> Option<i32> {
+pub(in crate::calculation) fn weekday_monday_zero(serial: f64, system: DateSystem) -> Option<i32> {
     if !serial.is_finite() || serial < 0.0 {
         return None;
     }

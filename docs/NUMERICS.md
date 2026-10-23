@@ -411,14 +411,14 @@ documented example.
 
 ### Measured agreement
 
-The 0.1.22 engine audit of the frozen 0.1.8 workbooks records:
+The current engine audit of the frozen 0.1.8 workbooks records:
 
 | Workbook | Selected results | Match | Divergent | Not implemented | Host unsupported | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 250 | 16 | 0 | 0 | 0 |
-| CellRune formula oracle — Excel Online | 1,496 | 1,383 | 12 | 101 | 0 | 0 |
-| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,364 | 8 | 101 | 23 | 0 |
+| CellRune formula oracle — Excel Online | 1,496 | 1,388 | 12 | 96 | 0 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,368 | 9 | 96 | 23 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
