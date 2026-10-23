@@ -9,6 +9,7 @@ use super::super::runtime::Rect;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
+use super::criteria_index::indexed_matches;
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::moments::{NumericMoments, PairedMoments, VarianceKind};
 use super::special_functions::{
@@ -821,6 +822,39 @@ fn scan_conditional_extreme(
     minimum: bool,
     runtime: &mut CriteriaRuntime<'_, '_, '_>,
 ) -> Value {
+    let fold = |result: Option<f64>, number: f64| {
+        Some(result.map_or(number, |current| {
+            if minimum {
+                current.min(number)
+            } else {
+                current.max(number)
+            }
+        }))
+    };
+    if let Some(matches) = indexed_matches(
+        engine,
+        context,
+        criteria.iter().map(|(range, criterion)| (range, criterion)),
+        iter_rows,
+        value_range.width(),
+    ) && let Some(charged) = matches.charge(engine, context, matches.offsets.len() as u64)
+    {
+        if let Err(kind) = charged {
+            return Value::Error(kind);
+        }
+        let width = value_range.width() as u32;
+        let mut result: Option<f64> = None;
+        for offset in &matches.offsets {
+            if let Value::Number(number) = engine.cell_value((
+                value_range.sheet,
+                value_range.row_start + offset / width,
+                value_range.col_start + offset % width,
+            )) {
+                result = fold(result, number);
+            }
+        }
+        return Value::Number(result.unwrap_or(0.0));
+    }
     let mut result: Option<f64> = None;
     for row in 0..iter_rows as u32 {
         for column in 0..value_range.width() as u32 {
@@ -857,13 +891,7 @@ fn scan_conditional_extreme(
                 Err(kind) => return Value::Error(kind),
             };
             if let Value::Number(number) = value {
-                result = Some(result.map_or(number, |current| {
-                    if minimum {
-                        current.min(number)
-                    } else {
-                        current.max(number)
-                    }
-                }));
+                result = fold(result, number);
             }
         }
     }

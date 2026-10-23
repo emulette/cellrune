@@ -6,6 +6,7 @@ use super::super::runtime::Rect;
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
+use super::criteria_index::{IndexedMatches, indexed_matches};
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::kernel::AggregateFunction;
 use super::moments::VarianceKind;
@@ -414,6 +415,20 @@ fn scan_conditional_aggregate(
     operation: ConditionalAggregate,
     runtime: &mut CriteriaRuntime<'_, '_, '_>,
 ) -> Value {
+    if let Some(matches) = indexed_matches(
+        engine,
+        context,
+        parsed
+            .criteria
+            .iter()
+            .map(|(range, criterion)| (range, criterion)),
+        iter_rows,
+        parsed.value_range.width(),
+    ) && let Some(value) =
+        indexed_conditional_aggregate(engine, context, parsed, operation, &matches)
+    {
+        return value;
+    }
     let mut total = ExcelSum::new(engine);
     let mut count = 0_u64;
     for row_offset in 0..iter_rows as u32 {
@@ -459,6 +474,54 @@ fn scan_conditional_aggregate(
             }
         }
     }
+    conditional_result(operation, &total, count)
+}
+
+/// Aggregates the value cells of indexed matches as the scan does, or returns `None` when only the
+/// scan reports the outcome: a matched value cell holding an error ends the scan at its row, and
+/// the scan's charges could reach a limit.
+fn indexed_conditional_aggregate(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    parsed: &ConditionalArguments,
+    operation: ConditionalAggregate,
+    matches: &IndexedMatches,
+) -> Option<Value> {
+    let range = parsed.value_range;
+    let width = range.width() as u32;
+    let cells = matches
+        .offsets
+        .iter()
+        .map(|offset| {
+            let cell = (
+                range.sheet,
+                range.row_start + offset / width,
+                range.col_start + offset % width,
+            );
+            (cell, engine.cell_value(cell))
+        })
+        .collect::<Vec<_>>();
+    if cells
+        .iter()
+        .any(|(_, value)| matches!(value, Value::Error(_)))
+    {
+        return None;
+    }
+    if let Err(kind) = matches.charge(engine, context, cells.len() as u64)? {
+        return Some(Value::Error(kind));
+    }
+    let mut total = ExcelSum::new(engine);
+    let mut count = 0_u64;
+    for (cell, value) in cells {
+        if let Value::Number(number) = value {
+            total.add_with_trace(number, engine.numeric_decimal_trace(cell));
+            count += 1;
+        }
+    }
+    Some(conditional_result(operation, &total, count))
+}
+
+fn conditional_result(operation: ConditionalAggregate, total: &ExcelSum, count: u64) -> Value {
     match operation {
         ConditionalAggregate::SumIf | ConditionalAggregate::SumIfs => finite_number(total.total()),
         ConditionalAggregate::AverageIf | ConditionalAggregate::AverageIfs if count == 0 => {

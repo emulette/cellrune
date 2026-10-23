@@ -201,10 +201,41 @@ impl CompiledCriteria {
         }
     }
 
+    /// The one value this criterion matches cells equal to, or `None` for a comparison, an
+    /// inequality, a wildcard pattern, a blank, or an error.
+    ///
+    /// A number matches number cells equal to it and text cells whose trimmed text parses as it.
+    /// A text matches nonempty text cells whose case-folded characters equal it. A logical matches
+    /// the equal logical.
+    pub(in crate::calculation) fn exact_value(&self) -> Option<ExactCriterion> {
+        if self.op != CriteriaOp::Eq {
+            return None;
+        }
+        match &self.rhs {
+            CompiledCriteriaRhs::Number(number) => Some(ExactCriterion::Number(*number)),
+            CompiledCriteriaRhs::EqualityText(pattern) => {
+                pattern.literal().map(ExactCriterion::Text)
+            }
+            CompiledCriteriaRhs::Logical(logical) => Some(ExactCriterion::Logical(*logical)),
+            CompiledCriteriaRhs::OrderedText(_)
+            | CompiledCriteriaRhs::Blank
+            | CompiledCriteriaRhs::Error(_) => None,
+        }
+    }
+
     pub fn matches_blank(&self) -> bool {
         self.matches_with_work(&Value::Blank, |_| Ok(()))
             .expect("blank matching does not consume wildcard steps")
     }
+}
+
+/// The value an exact-equality criterion matches; see [`CompiledCriteria::exact_value`].
+#[derive(Debug, Clone, PartialEq)]
+pub(in crate::calculation) enum ExactCriterion {
+    Number(f64),
+    /// The case-folded characters a text cell must hold.
+    Text(String),
+    Logical(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,6 +276,17 @@ impl CompiledWildcardPattern {
             self.tokens.push(PatternToken::AnySequence);
         }
         self.has_wildcard = true;
+    }
+
+    /// The case-folded characters a text must equal, for a pattern without wildcards.
+    fn literal(&self) -> Option<String> {
+        self.tokens
+            .iter()
+            .map(|token| match token {
+                PatternToken::Literal(character) => Some(*character),
+                PatternToken::AnyOne | PatternToken::AnySequence => None,
+            })
+            .collect()
     }
 
     pub fn matches_with_work(

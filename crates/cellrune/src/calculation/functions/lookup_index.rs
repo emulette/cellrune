@@ -12,6 +12,7 @@ use std::sync::Arc;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::{CellId, Rect};
 use super::super::value::{ErrorKind, Value};
+use super::criteria_index::CriteriaIndexCache;
 use crate::CalculationLimitKind;
 
 /// Ranges shorter than this are scanned linearly; an index would not pay for itself.
@@ -87,22 +88,32 @@ impl LookupArea {
     }
 }
 
-/// Indexes built during one calculation, most recently used last.
+/// Indexes built during one calculation, most recently used last, with the criteria indexes
+/// conditional scans share.
 #[derive(Debug, Default)]
 pub(in crate::calculation) struct LookupIndexCache {
     /// Cells linear exact searches read in each range since it was last indexed or changed.
     scanned: HashMap<LookupArea, u64>,
     indexes: Vec<(LookupArea, Arc<ExactLookupIndex>)>,
+    criteria: CriteriaIndexCache,
 }
 
 impl LookupIndexCache {
     pub(in crate::calculation) fn clear(&mut self) {
         self.scanned.clear();
         self.indexes.clear();
+        self.criteria.clear();
+    }
+
+    pub(super) fn criteria_mut(&mut self) -> &mut CriteriaIndexCache {
+        &mut self.criteria
     }
 
     /// Drops indexes whose range holds `cell`, whose result is about to change.
     pub(in crate::calculation) fn invalidate_cell(&mut self, cell: CellId) {
+        if !self.criteria.is_empty() {
+            self.criteria.invalidate_cell(cell);
+        }
         if self.indexes.is_empty() {
             return;
         }
@@ -118,6 +129,7 @@ impl LookupIndexCache {
 
     /// Drops indexes whose range meets `rect`, whose cells are about to read a different owner.
     pub(in crate::calculation) fn invalidate_rect(&mut self, rect: &Rect) {
+        self.criteria.invalidate_rect(rect);
         let scanned = &mut self.scanned;
         self.indexes.retain(|(area, _)| {
             let keep = !area.intersects(rect);
@@ -181,7 +193,7 @@ pub(in crate::calculation) struct ExactLookupIndex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum EqualityKey {
+pub(super) enum EqualityKey {
     Number(u64),
     Text(Box<str>),
     Logical(bool),
@@ -497,12 +509,12 @@ fn union(left: Option<Span>, right: Option<Span>) -> Option<Span> {
 }
 
 /// The key under which `coerce::compare` finds two numbers equal: zero and negative zero share one.
-fn number_key(number: f64) -> Option<u64> {
+pub(super) fn number_key(number: f64) -> Option<u64> {
     (!number.is_nan()).then(|| (number + 0.0).to_bits())
 }
 
 /// The character sequence `coerce::compare_text_case_insensitive` compares.
-fn lowercase(text: &str) -> Box<str> {
+pub(super) fn lowercase(text: &str) -> Box<str> {
     text.chars().flat_map(char::to_lowercase).collect()
 }
 

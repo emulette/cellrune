@@ -8,6 +8,7 @@ use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
+use super::criteria_index::indexed_matches;
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
 use super::lookup_index::{
@@ -380,6 +381,16 @@ fn scan_matches(
     matcher: &mut CriteriaRuntime<'_, '_, '_>,
 ) -> Result<u64, ErrorKind> {
     let width = rects[0].width();
+    if let Some(matches) = indexed_matches(
+        engine,
+        context,
+        rects.iter().zip(criteria),
+        iter_rows,
+        width,
+    ) && let Some(charged) = matches.charge(engine, context, 0)
+    {
+        return charged.map(|()| matches.offsets.len() as u64);
+    }
     let mut count = 0_u64;
     for relative_row in 0..iter_rows {
         for relative_col in 0..width {

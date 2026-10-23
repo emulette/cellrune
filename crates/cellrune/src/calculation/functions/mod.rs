@@ -25,6 +25,7 @@ mod combinatorics;
 mod complex;
 mod contract;
 mod convert;
+mod criteria_index;
 mod criteria_runtime;
 mod database;
 mod database_criteria;
