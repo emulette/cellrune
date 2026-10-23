@@ -290,7 +290,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   fail as invalid payloads.
 - `format_display_text` returns the text a cell shows for a value, a number-format code, a date
   system, and a locale profile, with the `TEXT` engine for numbers and the code's text section for
-  text; codes it cannot render, including a `*` fill, which needs the column width, and a
+  text. Unlike `TEXT`, which keeps the 0.1.26 results of the codes it already formatted, it shows
+  what Excel shows for those codes too: nothing for `0` in `#` and the decimal point of `1` in
+  `0.#`; codes it cannot render, including a `*` fill, which needs the column width, and a
   `General` number longer than 11 characters, report `display_format.unsupported`. Interop
   `format_display_text`, Python `format_display_text`, Node.js `formatDisplayText`, and the MCP
   `format_display_text` tool expose it, and a request a binding cannot read reports

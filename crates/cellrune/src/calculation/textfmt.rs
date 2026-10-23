@@ -29,6 +29,10 @@ pub(crate) struct FormatContext {
     /// the character across its column, whose width is not an input, so the display text of a
     /// code with a fill is unsupported.
     pub(crate) drops_fill: bool,
+    /// Whether the codes `TEXT` formatted in 0.1.26 keep that release's rules where Excel differs
+    /// (see `legacy`), as the formula functions do so that their values stay the same. The display
+    /// text of a cell follows Excel.
+    pub(crate) keeps_earlier_subset: bool,
 }
 
 /// Formats a number with `format`, as `TEXT` does.
@@ -39,7 +43,7 @@ pub(crate) fn format_number(
 ) -> Result<String, ErrorKind> {
     let sections = lexer::lex(format)?;
     let chosen = choose_number_section(&sections, value)?;
-    let earlier_subset = legacy::accepts(format);
+    let earlier_subset = context.keeps_earlier_subset && legacy::accepts(format);
     render_number_section(&chosen.section.tokens, chosen, context, earlier_subset).map_err(|kind| {
         // Only the 0.1.26 subset reported a number past the engine's digits as `#NUM!`; Excel
         // still shows such a number, so other codes report it as unsupported, as `FIXED` does.

@@ -6,6 +6,7 @@ const CONTEXT: FormatContext = FormatContext {
     date_system: DateSystem::Excel1900,
     locale: Locale::EnUs,
     drops_fill: true,
+    keeps_earlier_subset: true,
 };
 
 fn text(value: f64, format: &str) -> Result<String, ErrorKind> {

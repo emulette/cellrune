@@ -1613,7 +1613,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   a calculation-options change, so a session recalculates fully.
 - `format_display_text(&CellValue, format_code: &str, DateSystem, LocaleProfile)
   -> Result<String, DisplayFormatError>` returns the text a cell shows. Numbers
-  go through the `TEXT` engine with the profile's names; text goes through the
+  go through the `TEXT` engine with the profile's names, without the 0.1.26
+  `TEXT` rules Excel does not share (`0` in `#` shows nothing, `1` in `0.#`
+  shows `1.`); text goes through the
   code's text section (the fourth section, or a lone section holding `@`) and
   is otherwise unchanged; logical and error values show `TRUE`, `FALSE`, or the
   error; a blank shows nothing. `General` follows `TEXT`, so a number longer

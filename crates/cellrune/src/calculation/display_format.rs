@@ -38,7 +38,8 @@ impl Error for DisplayFormatError {}
 /// Returns the text a cell holding `value` shows with the number-format code `format_code`.
 ///
 /// Numbers follow the same engine as `TEXT`, in the given date system and with the names of the
-/// profile's regional format. Text goes through the code's text section: the fourth section, or a
+/// profile's regional format, without the 0.1.26 `TEXT` rules Excel does not share: `#` shows
+/// nothing for zero and a code with a decimal point shows it (`1` in `0.#` is `1.`). Text goes through the code's text section: the fourth section, or a
 /// lone section holding `@`; a code without one shows the text unchanged. Logical and error values
 /// show `TRUE`, `FALSE`, or the error, and a blank shows nothing. `General` shows a number of up to
 /// 11 characters as `TEXT` does; a longer one, which Excel rounds or writes in scientific notation,
@@ -58,6 +59,7 @@ pub fn format_display_text(
         date_system,
         locale: locale_profile.locale(),
         drops_fill: false,
+        keeps_earlier_subset: false,
     };
     let formatted = match value {
         CellValue::Blank => return Ok(String::new()),
@@ -120,6 +122,23 @@ mod tests {
             display(number(1e16), "0"),
             Err(DisplayFormatError::Unsupported)
         );
+    }
+
+    #[test]
+    fn digit_codes_show_what_excel_shows_rather_than_the_earlier_text_rules() {
+        for (value, format, shown) in [
+            (0.0, "#", ""),
+            (0.0, "#,###", ""),
+            (1.0, "0.#", "1."),
+            (1234.0, "#,###.##", "1,234."),
+            (1234.5, "#,##0.00", "1,234.50"),
+        ] {
+            assert_eq!(
+                display(number(value), format).as_deref(),
+                Ok(shown),
+                "{value} {format}"
+            );
+        }
     }
 
     #[test]

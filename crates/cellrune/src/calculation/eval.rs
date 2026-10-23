@@ -1407,6 +1407,7 @@ impl<'workbook> Engine<'workbook> {
             date_system: self.date_system(),
             locale: self.options.locale_profile().locale(),
             drops_fill: true,
+            keeps_earlier_subset: true,
         }
     }
 
