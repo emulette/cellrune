@@ -86,6 +86,7 @@ pub fn read_xlsx<R: Read + Seek>(
         WorkbookSourceKind::Reader,
         None,
         PresentationCapture::None,
+        &BTreeSet::new(),
     )
     .map(|result| result.workbook)
 }
@@ -108,6 +109,7 @@ pub fn read_xlsx_path(
         WorkbookSourceKind::Path,
         None,
         PresentationCapture::None,
+        &BTreeSet::new(),
     )
     .map(|result| result.workbook)
 }
@@ -127,16 +129,23 @@ pub fn read_xlsx_bytes(
         WorkbookSourceKind::Bytes,
         None,
         PresentationCapture::None,
+        &BTreeSet::new(),
     )
     .map(|result| result.workbook)
 }
 
+/// The worksheet an unread worksheet part reads as.
+const UNREAD_WORKSHEET: &str = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+
+/// Reads a workbook; each worksheet part in `unread_worksheets` reads as an empty worksheet, as
+/// output verification does for the parts a save copied unchanged.
 pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
     reader: R,
     options: ReadOptions,
     source_kind: WorkbookSourceKind,
     input_hash: Option<InputHash>,
     capture: PresentationCapture,
+    unread_worksheets: &BTreeSet<PartPath>,
 ) -> Result<ReadWorkbook, XlsxReadError> {
     let mut package = open_package(reader, options)?;
     let limits = package.limits();
@@ -211,7 +220,11 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         };
         worksheet_parts.insert(metadata.id, worksheet_part.clone());
         used_relationships.insert(metadata.relationship_id);
-        let worksheet_bytes = package.read_part(&worksheet_part)?;
+        let worksheet_bytes = if unread_worksheets.contains(&worksheet_part) {
+            UNREAD_WORKSHEET.as_bytes().to_vec()
+        } else {
+            package.read_part(&worksheet_part)?
+        };
         let mut sheet_builder = SheetBuilder::new(metadata.id, metadata.name, metadata.visibility);
         let mut table_relationship_ids = Vec::new();
         let mut hyperlinks = Vec::new();

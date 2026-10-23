@@ -19,7 +19,8 @@ use crate::presentation::canonical_default_format;
 use crate::{
     Border, CalculationSnapshot, CellAddress, CellContent, CellFormat, DateSystem,
     DefinedNameScope, Fill, Font, FormulaMetadata, MaterializedResultOrigin, NumberFormat,
-    PatternFill, Row, Sheet, SheetVisibility, WorkbookDraft, WorkbookSnapshot, XlsxDocumentKind,
+    PatternFill, Row, Sheet, SheetId, SheetVisibility, WorkbookDraft, WorkbookSnapshot,
+    XlsxDocumentKind,
 };
 
 const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -141,6 +142,7 @@ pub(crate) fn write_canonical_draft(
             materialization: &materialization,
             kind: crate::XlsxDocumentKind::Xlsx,
             host_recalculation: HostRecalculation::requested(request_host_recalculation),
+            unchanged_sheets: &BTreeMap::new(),
         },
         &bytes,
         crate::ReadLimits::default(),
@@ -874,6 +876,9 @@ pub(super) struct ExpectedDraftOutput<'a> {
     pub(super) materialization: &'a MaterializationPlan,
     pub(super) kind: crate::XlsxDocumentKind,
     pub(super) host_recalculation: HostRecalculation,
+    /// Sheets the draft left as its source holds them and whose parts the save copied unchanged,
+    /// with those worksheet parts: verification reads them only for their names and visibility.
+    pub(super) unchanged_sheets: &'a BTreeMap<SheetId, crate::xlsx::package::PartPath>,
 }
 
 pub(super) fn verify_draft_output(
@@ -889,6 +894,7 @@ pub(super) fn verify_draft_output(
         materialization,
         kind: expected_kind,
         host_recalculation,
+        unchanged_sheets,
     } = *expected;
     enforce_limit(
         DETAIL_VERIFICATION_BYTES,
@@ -900,9 +906,12 @@ pub(super) fn verify_draft_output(
         .map_err(|error| {
             XlsxWriteError::new(XlsxWriteErrorCode::OutputVerificationFailed).with_cause(error)
         })?;
-    let reopened = crate::open_xlsx_document_bytes(
+    let unread = unchanged_sheets.values().cloned().collect();
+    let skipped = unchanged_sheets.keys().copied().collect();
+    let reopened = crate::xlsx::document::open_xlsx_document_for_verification(
         bytes,
         crate::OpenOptions::new(crate::ReadOptions::new(read_limits)),
+        &unread,
     )
     .map_err(|error| {
         XlsxWriteError::new(XlsxWriteErrorCode::OutputVerificationFailed).with_cause(error)
@@ -914,8 +923,9 @@ pub(super) fn verify_draft_output(
             source,
             materialization,
             host_recalculation,
+            &skipped,
         )
-        || !expected_presentation.semantics_match(reopened.presentation())
+        || !expected_presentation.semantics_match_except(reopened.presentation(), &skipped)
         || !edited_formats_match(expected_workbook, expected_presentation, &reopened)
     {
         return Err(
@@ -1005,6 +1015,7 @@ fn draft_semantics_match(
     source: Option<crate::draft::SourceCells<'_>>,
     materialization: &MaterializationPlan,
     host_recalculation: HostRecalculation,
+    skipped: &std::collections::BTreeSet<SheetId>,
 ) -> bool {
     if expected.date_system() != actual.date_system()
         || !calculation_hints_match(
@@ -1023,7 +1034,13 @@ fn draft_semantics_match(
         };
         if expected_sheet.name() != actual_sheet.name()
             || expected_sheet.visibility() != actual_sheet.visibility()
-            || !tables_semantically_match(expected_sheet.tables(), actual_sheet.tables())
+        {
+            return false;
+        }
+        if skipped.contains(&expected_sheet.id()) {
+            continue;
+        }
+        if !tables_semantically_match(expected_sheet.tables(), actual_sheet.tables())
             || expected_sheet.auto_filter() != actual_sheet.auto_filter()
             || expected_sheet.hidden_rows() != actual_sheet.hidden_rows()
         {

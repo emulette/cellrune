@@ -912,7 +912,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &expected,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_date = snapshot(
@@ -926,7 +927,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_date,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_hints = snapshot(
@@ -940,7 +942,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_hints,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_names = snapshot(
@@ -962,7 +965,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_names,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_count = snapshot(
@@ -979,7 +983,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_count,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_id = snapshot(
@@ -1002,7 +1007,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_id,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_name = snapshot(
@@ -1025,7 +1031,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_name,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_visibility = snapshot(
@@ -1048,7 +1055,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_visibility,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let missing_cell = snapshot(
@@ -1062,7 +1070,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &missing_cell,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_format = snapshot(
@@ -1085,7 +1094,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_format,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let changed_content = snapshot(
@@ -1108,7 +1118,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &changed_content,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let extra_cell = snapshot(
@@ -1142,7 +1153,8 @@ fn semantic_verification_rejects_each_independent_workbook_difference() {
         &extra_cell,
         None,
         &plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 }
 
@@ -1207,7 +1219,8 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
         &actual,
         None,
         &legacy_plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 
     let mut direct_cells = BTreeMap::new();
@@ -1243,7 +1256,8 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
         &actual,
         None,
         &direct_plan,
-        HostRecalculation::Clear
+        HostRecalculation::Clear,
+        &std::collections::BTreeSet::new()
     ));
 }
 
@@ -1315,6 +1329,7 @@ fn follower_verification_rejects_a_stale_wrong_or_missing_result_after_an_edit()
                 materialization: &plan,
                 kind: XlsxDocumentKind::Xlsx,
                 host_recalculation: HostRecalculation::Clear,
+                unchanged_sheets: &std::collections::BTreeMap::new(),
             },
             &doubled_inputs_package("5", b2),
             crate::ReadLimits::default(),
@@ -1378,7 +1393,8 @@ fn incomplete_materialization_alone_requires_host_recalculation_flags() {
         &actual,
         None,
         &plan,
-        HostRecalculation::Full
+        HostRecalculation::Full,
+        &std::collections::BTreeSet::new()
     ));
 }
 

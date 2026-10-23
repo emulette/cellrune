@@ -436,6 +436,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- Saving a document draft verifies the sheets it rewrote by reopening them in full, and the
+  sheets the draft left alone and the save copied unchanged, while the shared strings, styles, and
+  cell metadata stay as they were, by their names and visibility only, so a save of one edited
+  sheet no longer reparses the whole workbook.
 - Repeated approximate `VLOOKUP`, `HLOOKUP`, and `MATCH` searches of one range use the index exact
   searches share, which answers where the linear search stops and what it returns, with the same
   results and the same cell reads and work charged.

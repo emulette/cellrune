@@ -680,8 +680,18 @@ impl DocumentPresentation {
         self.formats.remove(&sheet_id);
     }
 
-    pub(crate) fn semantics_match(&self, other: &Self) -> bool {
-        self.sheets == other.sheets && self.layout_matches(other)
+    /// Whether the presentations match outside the sheets in `skipped`.
+    pub(crate) fn semantics_match_except(
+        &self,
+        other: &Self,
+        skipped: &std::collections::BTreeSet<SheetId>,
+    ) -> bool {
+        let kept = |(sheet_id, _): &(&SheetId, &SheetPresentation)| !skipped.contains(*sheet_id);
+        self.sheets
+            .iter()
+            .filter(kept)
+            .eq(other.sheets.iter().filter(kept))
+            && self.layout_matches_except(other, skipped)
     }
 
     pub(crate) fn retain_nonempty_sheets(&mut self) {

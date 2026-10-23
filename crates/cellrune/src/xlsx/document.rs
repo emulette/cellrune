@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -216,7 +216,7 @@ pub fn open_xlsx_document_vec(
     options: OpenOptions,
 ) -> Result<XlsxDocument, XlsxReadError> {
     ensure_archive_length(bytes.len() as u64, options.read_options())?;
-    open_retained(bytes, options, WorkbookSourceKind::Bytes)
+    open_retained(bytes, options, WorkbookSourceKind::Bytes, &BTreeSet::new())
 }
 
 /// Opens a bounded package-backed workbook from a filesystem path without retaining the host path.
@@ -240,7 +240,18 @@ fn open_with_source<R: Read + Seek>(
     source_kind: WorkbookSourceKind,
 ) -> Result<XlsxDocument, XlsxReadError> {
     let bytes = read_bounded_archive(reader, options.read_options())?;
-    open_retained(bytes, options, source_kind)
+    open_retained(bytes, options, source_kind, &BTreeSet::new())
+}
+
+/// Opens `bytes` for output verification, reading each worksheet part in `unread_worksheets` as an
+/// empty worksheet.
+pub(crate) fn open_xlsx_document_for_verification(
+    bytes: &[u8],
+    options: OpenOptions,
+    unread_worksheets: &BTreeSet<PartPath>,
+) -> Result<XlsxDocument, XlsxReadError> {
+    let bytes = read_bounded_archive(Cursor::new(bytes), options.read_options())?;
+    open_retained(bytes, options, WorkbookSourceKind::Bytes, unread_worksheets)
 }
 
 /// Opens the document over `bytes`, keeping that allocation as the retained archive.
@@ -248,6 +259,7 @@ fn open_retained(
     bytes: Vec<u8>,
     options: OpenOptions,
     source_kind: WorkbookSourceKind,
+    unread_worksheets: &BTreeSet<PartPath>,
 ) -> Result<XlsxDocument, XlsxReadError> {
     let input_hash = InputHash::for_bytes(&bytes);
     let bytes = Arc::new(bytes);
@@ -257,6 +269,7 @@ fn open_retained(
         source_kind,
         Some(input_hash),
         PresentationCapture::Document,
+        unread_worksheets,
     )?;
     let kind = match read.package_kind {
         WorkbookPackageKind::Xlsx => XlsxDocumentKind::Xlsx,

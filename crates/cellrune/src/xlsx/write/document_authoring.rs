@@ -1183,6 +1183,7 @@ pub(super) fn write_document_package(
     removals.extend(optional_removals);
 
     drop(source_reader);
+    let unchanged_sheets = unchanged_sheets(document, draft, materialization, &replacements);
     let changed_parts = replacements
         .keys()
         .chain(additions.keys())
@@ -1205,6 +1206,7 @@ pub(super) fn write_document_package(
             materialization,
             kind: document.kind(),
             host_recalculation: plan.host_recalculation.unwrap_or(HostRecalculation::Clear),
+            unchanged_sheets: &unchanged_sheets,
         },
         &bytes,
         document.read_options().limits(),
@@ -1215,6 +1217,81 @@ pub(super) fn write_document_package(
         changed_parts,
         removed_parts,
     })
+}
+
+/// The sheets output verification can read for their names and visibility alone, with their
+/// worksheet parts: sheets of the source that the draft did not edit, copy, or recalculate into,
+/// whose worksheet, relationship, and table parts the save copied unchanged, while the parts every
+/// sheet's cells read (shared strings, styles, and cell metadata) and the date system are
+/// unchanged too.
+fn unchanged_sheets(
+    document: &XlsxDocument,
+    draft: &WorkbookDraft,
+    materialization: &MaterializationPlan,
+    replacements: &BTreeMap<PartPath, Vec<u8>>,
+) -> BTreeMap<SheetId, PartPath> {
+    let summary = document.package_summary();
+    let shared_parts_changed = [
+        summary.shared_strings_part(),
+        summary.styles_part(),
+        summary.metadata_part(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|part| {
+        replacements
+            .keys()
+            .any(|replaced| replaced.source_id() == *part)
+    });
+    if shared_parts_changed || draft.workbook().date_system() != document.workbook().date_system() {
+        return BTreeMap::new();
+    }
+    let mut edited = BTreeSet::new();
+    edited.extend(draft.cell_mutations().keys().map(|id| id.sheet_id()));
+    edited.extend(
+        draft
+            .presentation_cell_mutations()
+            .iter()
+            .map(|id| id.sheet_id()),
+    );
+    edited.extend(draft.presentation_sheet_mutations().iter().copied());
+    edited.extend(draft.grid_histories().keys().copied());
+    edited.extend(materialization.cells().keys().map(|id| id.sheet_id()));
+    let mut unchanged = BTreeMap::new();
+    for sheet in draft.workbook().sheets() {
+        let sheet_id = sheet.id();
+        let Some(source) = document.workbook().sheet_by_id(sheet_id) else {
+            continue;
+        };
+        if edited.contains(&sheet_id)
+            || draft.added_sheets().contains(&sheet_id)
+            || draft.copied_sheets().contains_key(&sheet_id)
+            || sheet
+                .tables()
+                .iter()
+                .any(|table| draft.changed_table_ids().contains(&table.id()))
+            || source.tables().len() != sheet.tables().len()
+        {
+            continue;
+        }
+        let Some(part) = document.worksheet_part_path(sheet_id) else {
+            continue;
+        };
+        let relationships = part.relationship_part().ok();
+        let tables_replaced = source.tables().iter().any(|table| {
+            document
+                .table_part_path(table.id())
+                .is_none_or(|table_part| replacements.contains_key(table_part))
+        });
+        if replacements.contains_key(part)
+            || relationships.is_some_and(|relationships| replacements.contains_key(&relationships))
+            || tables_replaced
+        {
+            continue;
+        }
+        unchanged.insert(sheet_id, part.clone());
+    }
+    unchanged
 }
 
 /// Returns the cells stored as ISO 8601 dates (`t="d"`) that the draft still holds as literals once
@@ -1509,3 +1586,7 @@ fn other_sheet_edits<'a>(
         .flatten()
         .collect()
 }
+
+#[cfg(test)]
+#[path = "document_authoring_tests.rs"]
+mod tests;

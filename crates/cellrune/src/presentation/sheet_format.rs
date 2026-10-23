@@ -411,11 +411,18 @@ impl DocumentPresentation {
     }
 
     /// Returns whether column widths and row heights match `other` on every sheet.
-    pub(crate) fn layout_matches(&self, other: &Self) -> bool {
+    pub(crate) fn layout_matches_except(
+        &self,
+        other: &Self,
+        skipped: &std::collections::BTreeSet<SheetId>,
+    ) -> bool {
         let sheets = self.formats.keys().chain(other.formats.keys());
-        sheets.into_iter().all(|sheet_id| {
-            self.column_widths(*sheet_id) == other.column_widths(*sheet_id)
-                && self.row_heights(*sheet_id).eq(other.row_heights(*sheet_id))
-        })
+        sheets
+            .into_iter()
+            .filter(|sheet_id| !skipped.contains(sheet_id))
+            .all(|sheet_id| {
+                self.column_widths(*sheet_id) == other.column_widths(*sheet_id)
+                    && self.row_heights(*sheet_id).eq(other.row_heights(*sheet_id))
+            })
     }
 }
