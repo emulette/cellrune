@@ -239,6 +239,24 @@ pub(super) fn table_topologies(
     Ok(topologies)
 }
 
+/// The dependency graph of every formula, the areas built for it, and the formulas left out
+/// because the graph reached `max_dependency_edges`.
+pub(super) struct CollectedDependencies {
+    pub(super) graph: DependencyGraph,
+    pub(super) areas: AreaNodes,
+    pub(super) limited: BTreeSet<super::CellId>,
+}
+
+impl CollectedDependencies {
+    fn limited_only(limited: BTreeSet<super::CellId>) -> Self {
+        Self {
+            graph: DependencyGraph::default(),
+            areas: AreaNodes::default(),
+            limited,
+        }
+    }
+}
+
 #[derive(Default)]
 struct VisitedDefinitions {
     values: BTreeSet<DefinedLambdaId>,
@@ -415,14 +433,14 @@ impl Engine<'_> {
     pub(super) fn dependencies_cancellable(
         &self,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<(DependencyGraph, BTreeSet<super::CellId>), ()> {
+    ) -> Result<CollectedDependencies, ()> {
         self.collect_dependencies(true, cancelled)
     }
 
     pub(super) fn dependency_limit_cells_for_analysis(&self) -> BTreeSet<super::CellId> {
         self.collect_dependencies(false, &|| false)
             .expect("non-cancellable dependency collection cannot be cancelled")
-            .1
+            .limited
     }
 
     pub(super) fn has_unresolved_dynamic_dependencies(
@@ -627,7 +645,9 @@ impl Engine<'_> {
         })
     }
 
-    pub(super) fn has_unstable_incremental_dependencies(
+    /// Reports whether the workbook holds a dynamic array formula without a declared spill range,
+    /// whose spill area is known only after it is evaluated.
+    pub(super) fn has_undeclared_dynamic_arrays(
         &self,
         cancelled: &impl Fn() -> bool,
     ) -> Result<bool, ()> {
@@ -648,26 +668,32 @@ impl Engine<'_> {
                 }
             }
         }
-        for (cell, parsed) in self.asts.iter() {
-            if cancelled() {
-                return Err(());
-            }
-            let budget = EvaluationBudget::default();
-            let found = self.expr_contains_dynamic_reference_function(
-                true,
-                EvalContext::for_cancellable(*cell, &budget, cancelled),
-                parsed.root(),
-                &mut VisitedDefinitions::default(),
-                &mut Vec::new(),
-            );
-            if cancelled() {
-                return Err(());
-            }
-            if found {
-                return Ok(true);
-            }
-        }
         Ok(false)
+    }
+
+    /// Reports whether a formula's references depend on values in a way incremental calculation
+    /// cannot follow: a dynamic reference, or a range whose moving end can reach a formula or an
+    /// array result.
+    pub(super) fn formula_is_incrementally_unstable(
+        &self,
+        cell: super::CellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<bool, ()> {
+        let Some(parsed) = self.asts.get(&cell) else {
+            return Ok(false);
+        };
+        let budget = EvaluationBudget::default();
+        let found = self.expr_contains_dynamic_reference_function(
+            true,
+            EvalContext::for_cancellable(cell, &budget, cancelled),
+            parsed.root(),
+            &mut VisitedDefinitions::default(),
+            &mut Vec::new(),
+        );
+        if cancelled() {
+            return Err(());
+        }
+        Ok(found)
     }
 
     #[cfg(test)]
@@ -689,27 +715,38 @@ impl Engine<'_> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<BTreeMap<super::CellId, Vec<DependencyTarget>>, ()> {
         let mut result = BTreeMap::new();
-        for (cell, parsed) in self.asts.iter() {
+        for cell in self.asts.keys() {
             if cancelled() {
                 return Err(());
             }
-            let mut targets = Vec::new();
+            result.insert(*cell, self.formula_dependency_targets(*cell, cancelled)?);
+        }
+        Ok(result)
+    }
+
+    /// Returns the dependency targets of the formula at `cell`, in target order.
+    pub(super) fn formula_dependency_targets(
+        &self,
+        cell: super::CellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<DependencyTarget>, ()> {
+        let mut targets = Vec::new();
+        if let Some(parsed) = self.asts.get(&cell) {
             let budget = EvaluationBudget::default();
             self.collect_dependency_targets(
-                EvalContext::for_cancellable(*cell, &budget, cancelled),
+                EvalContext::for_cancellable(cell, &budget, cancelled),
                 parsed.root(),
                 &mut VisitedDefinitions::default(),
                 &mut Vec::new(),
                 &mut targets,
             );
-            if cancelled() {
-                return Err(());
-            }
-            targets.sort_by(compare_targets);
-            targets.dedup();
-            result.insert(*cell, targets);
         }
-        Ok(result)
+        if cancelled() {
+            return Err(());
+        }
+        targets.sort_by(compare_targets);
+        targets.dedup();
+        Ok(targets)
     }
 
     pub(super) fn target_dependencies(
@@ -961,7 +998,7 @@ impl Engine<'_> {
         &self,
         retain_graph: bool,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<(DependencyGraph, BTreeSet<super::CellId>), ()> {
+    ) -> Result<CollectedDependencies, ()> {
         let mut graph = DependencyGraph::default();
         let mut areas = AreaNodes::default();
         if cancelled() {
@@ -990,37 +1027,7 @@ impl Engine<'_> {
                 return Err(());
             }
             let area_edges = graph.area_edges();
-            let mut nodes = Vec::new();
-            for target in targets {
-                match target {
-                    DependencyTarget::Cell(cell) | DependencyTarget::SpillAnchor(cell) => {
-                        self.push_cell_dependency(cell, &mut nodes, cancelled)?;
-                    }
-                    DependencyTarget::TableIdentity(_)
-                    | DependencyTarget::FormulaContent(_)
-                    | DependencyTarget::ImpactArea(_) => {}
-                    DependencyTarget::Area(span) => {
-                        for rect in span.rects() {
-                            if cancelled() {
-                                return Err(());
-                            }
-                            if rect.is_single_cell() {
-                                self.push_cell_dependency(
-                                    (rect.sheet, rect.row_start, rect.col_start),
-                                    &mut nodes,
-                                    cancelled,
-                                )?;
-                            } else if let Some(node) =
-                                areas.range(self, &mut graph, &rect, cancelled)?
-                            {
-                                nodes.push(node);
-                            }
-                        }
-                    }
-                }
-            }
-            nodes.sort_unstable();
-            nodes.dedup();
+            let nodes = self.dependency_nodes(&targets, &mut graph, &mut areas, cancelled)?;
             let added = nodes.len() as u64 + (graph.area_edges() - area_edges);
             let edges = if graph.area_edges() == area_edges
                 && nodes
@@ -1045,20 +1052,69 @@ impl Engine<'_> {
                         limited.insert(*cell);
                     }
                     if !retain_graph {
-                        return Ok((DependencyGraph::default(), limited));
+                        return Ok(CollectedDependencies::limited_only(limited));
                     }
                     for cell in &limited {
                         graph.insert(*cell, Vec::new());
                     }
-                    return Ok((graph, limited));
+                    return Ok(CollectedDependencies {
+                        graph,
+                        areas,
+                        limited,
+                    });
                 }
             }
             graph.insert(*cell, nodes);
         }
         if !retain_graph {
-            return Ok((DependencyGraph::default(), BTreeSet::new()));
+            return Ok(CollectedDependencies::limited_only(BTreeSet::new()));
         }
-        Ok((graph, BTreeSet::new()))
+        Ok(CollectedDependencies {
+            graph,
+            areas,
+            limited: BTreeSet::new(),
+        })
+    }
+
+    /// Returns the nodes a formula with `targets` waits for, building the areas its multi-cell
+    /// ranges need.
+    pub(super) fn dependency_nodes(
+        &self,
+        targets: &[DependencyTarget],
+        graph: &mut DependencyGraph,
+        areas: &mut AreaNodes,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<DependencyNode>, ()> {
+        let mut nodes = Vec::new();
+        for target in targets {
+            match target {
+                DependencyTarget::Cell(cell) | DependencyTarget::SpillAnchor(cell) => {
+                    self.push_cell_dependency(*cell, &mut nodes, cancelled)?;
+                }
+                DependencyTarget::TableIdentity(_)
+                | DependencyTarget::FormulaContent(_)
+                | DependencyTarget::ImpactArea(_) => {}
+                DependencyTarget::Area(span) => {
+                    for rect in span.rects() {
+                        if cancelled() {
+                            return Err(());
+                        }
+                        if rect.is_single_cell() {
+                            self.push_cell_dependency(
+                                (rect.sheet, rect.row_start, rect.col_start),
+                                &mut nodes,
+                                cancelled,
+                            )?;
+                        } else if let Some(node) = areas.range(self, graph, &rect, cancelled)? {
+                            nodes.push(node);
+                        }
+                    }
+                }
+            }
+        }
+        nodes.sort_unstable();
+        nodes.dedup();
+        Ok(nodes)
     }
 
     /// Adds the formula at `cell` and the array formula covering it, if any, to `nodes`.

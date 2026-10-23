@@ -64,6 +64,7 @@ impl WorkbookDraft {
                 created_sheet_ids: Vec::new(),
                 changed_table_ids: Vec::new(),
                 topology_changed: false,
+                cell_formulas_changed_topology_only: false,
                 calculation_metadata_changed: false,
             });
         }
@@ -98,6 +99,9 @@ impl WorkbookDraft {
         let mut touched_sheets = BTreeSet::new();
         let mut created_sheet_ids = Vec::new();
         let mut topology_changed = false;
+        // Topology changes from cells gaining, losing, or replacing a formula, which a session can
+        // apply locally; every other change sets `topology_changed`.
+        let mut cell_formulas_changed = false;
         let mut calculation_metadata_changed = false;
         let mut semantic_changed = false;
 
@@ -201,7 +205,7 @@ impl WorkbookDraft {
                         touched_sheets.insert(*sheet_id);
                         semantic_changed = true;
                     }
-                    topology_changed |= previous_was_formula;
+                    cell_formulas_changed |= previous_was_formula;
                 }
                 WorkbookChange::SetCellFormula {
                     sheet_id,
@@ -237,7 +241,7 @@ impl WorkbookDraft {
                         *address,
                         formula,
                     )? {
-                        topology_changed = true;
+                        cell_formulas_changed = true;
                         semantic_changed = true;
                     }
                 }
@@ -279,7 +283,7 @@ impl WorkbookDraft {
                         *address,
                         formula,
                     )? {
-                        topology_changed = true;
+                        cell_formulas_changed = true;
                         semantic_changed = true;
                     }
                 }
@@ -310,7 +314,7 @@ impl WorkbookDraft {
                         touched_sheets.insert(*sheet_id);
                         semantic_changed = true;
                     }
-                    topology_changed |= previous_was_formula;
+                    cell_formulas_changed |= previous_was_formula;
                 }
                 WorkbookChange::SetCellNumberFormat {
                     sheet_id,
@@ -669,7 +673,8 @@ impl WorkbookDraft {
             calculation_changed_cells: calculation_changed_cells.into_iter().collect(),
             created_sheet_ids,
             changed_table_ids: changed_table_ids.into_iter().collect(),
-            topology_changed,
+            topology_changed: topology_changed || cell_formulas_changed,
+            cell_formulas_changed_topology_only: !topology_changed,
             calculation_metadata_changed,
         })
     }

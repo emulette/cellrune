@@ -860,6 +860,8 @@ pub struct CalculationSnapshot {
 
 pub(crate) struct IncrementalCalculationPatch<'a> {
     dirty: &'a BTreeSet<CalculationCellId>,
+    /// Dirty cells that no longer hold a formula, whose results the patch drops.
+    removed_formulas: BTreeSet<CalculationCellId>,
     cell_results: BTreeMap<CalculationCellId, CalculationCellResult>,
     materialized_results: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
     decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
@@ -870,6 +872,7 @@ pub(crate) struct IncrementalCalculationPatch<'a> {
 impl<'a> IncrementalCalculationPatch<'a> {
     pub(crate) const fn new(
         dirty: &'a BTreeSet<CalculationCellId>,
+        removed_formulas: BTreeSet<CalculationCellId>,
         cell_results: BTreeMap<CalculationCellId, CalculationCellResult>,
         materialized_results: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
         decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
@@ -878,6 +881,7 @@ impl<'a> IncrementalCalculationPatch<'a> {
     ) -> Self {
         Self {
             dirty,
+            removed_formulas,
             cell_results,
             materialized_results,
             decimal_traces,
@@ -977,6 +981,7 @@ impl CalculationSnapshot {
     ) -> Result<Self, ()> {
         let IncrementalCalculationPatch {
             dirty,
+            removed_formulas,
             cell_results,
             materialized_results,
             decimal_traces,
@@ -992,7 +997,7 @@ impl CalculationSnapshot {
         let mut numeric_decimal_traces = Arc::clone(&self.numeric_decimal_traces);
 
         calculation_store_mut_cancellable(&mut cells, cancelled)?.apply_patch_cancellable(
-            &BTreeSet::new(),
+            &removed_formulas,
             cell_results,
             cancelled,
         )?;

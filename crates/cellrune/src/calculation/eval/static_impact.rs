@@ -80,12 +80,12 @@ pub(crate) fn affected_formulas(
 
     let engine = Engine::parsed_cancellable(draft, CalculationOptions::default(), cancelled)?;
     let targets = engine.dependency_targets_cancellable(cancelled)?;
-    let (dependencies, limited) = engine.dependencies_cancellable(cancelled)?;
-    if !limited.is_empty() {
+    let collected = engine.dependencies_cancellable(cancelled)?;
+    if !collected.limited.is_empty() {
         return all_formulas(draft, cancelled);
     }
     let index =
-        DependencyImpactIndex::build(&targets, &dependencies, &engine.array_regions, cancelled)?;
+        DependencyImpactIndex::build(&targets, &collected.graph, &engine.array_regions, cancelled)?;
 
     let changed_table_names = edits
         .changed_tables

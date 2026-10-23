@@ -200,7 +200,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `Auto` evaluates a proven dirty subset and falls back to the same full-workbook calculation
-semantics when formula, name, sheet, option, dynamic-reference, or spill topology is uncertain.
+semantics when name, sheet, option, dynamic-reference, or spill topology is uncertain; an edited
+cell formula is parsed and wired into the dependency graph on its own.
 Forced incremental mode fails closed instead of guessing. Sessions use optimistic semantic
 revisions for atomic edits, retain bounded result-delta history, and reject stale calculations.
 A batch whose accepted operations make no semantic change keeps the current revision, topology,

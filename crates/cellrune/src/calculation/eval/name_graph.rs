@@ -49,6 +49,29 @@ impl Engine<'_> {
         Ok(())
     }
 
+    /// Classifies the name graph of the formula at `cell` alone.
+    pub(super) fn classify_name_graph(
+        &mut self,
+        cell: CellId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), ()> {
+        std::sync::Arc::make_mut(&mut self.name_cycle_cells).remove(&cell);
+        std::sync::Arc::make_mut(&mut self.name_limit_cells).remove(&cell);
+        let Some(parsed) = self.asts.get(&cell).cloned() else {
+            return Ok(());
+        };
+        match self.inspect_name_graph(cell.0, parsed.root(), cancelled)? {
+            NameGraphStatus::Supported => {}
+            NameGraphStatus::Cycle => {
+                std::sync::Arc::make_mut(&mut self.name_cycle_cells).insert(cell);
+            }
+            NameGraphStatus::LimitExceeded => {
+                std::sync::Arc::make_mut(&mut self.name_limit_cells).insert(cell);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn prepare_target_names(
         &mut self,
         cell: CellId,

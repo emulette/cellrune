@@ -155,13 +155,38 @@ fn blocks(band: Band, first: u32, last: u32) -> Vec<Block> {
 }
 
 /// The nodes built so far for ranges and blocks, so later ranges reuse them.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct AreaNodes {
     ranges: HashMap<(usize, u32, u32, u32, u32), Option<DependencyNode>>,
     blocks: HashMap<Block, Option<DependencyNode>>,
 }
 
 impl AreaNodes {
+    /// Forgets every range and block covering `cell`, whose formula appeared or disappeared, so
+    /// later ranges build them again.
+    pub(super) fn forget(&mut self, cell: CellId) {
+        let (sheet, row, column) = cell;
+        self.ranges
+            .retain(|(range_sheet, row_start, col_start, row_end, col_end), _| {
+                *range_sheet != sheet
+                    || !(*row_start..=*row_end).contains(&row)
+                    || !(*col_start..=*col_end).contains(&column)
+            });
+        self.blocks.retain(|block, _| {
+            !super::dependency::rects_intersect(
+                &block.band.rect(block.first(), block.last()),
+                &Rect {
+                    sheet,
+                    row_start: row,
+                    col_start: column,
+                    row_end: row,
+                    col_end: column,
+                    whole_rows: false,
+                },
+            )
+        });
+    }
+
     /// Returns the node a formula reading the multi-cell `rect` waits for, or `None` when no
     /// formula cell or array result lies in it.
     ///

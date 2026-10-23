@@ -11,6 +11,8 @@ pub struct EditReceipt {
     pub(super) created_sheet_ids: Vec<SheetId>,
     pub(super) changed_table_ids: Vec<TableId>,
     pub(super) topology_changed: bool,
+    /// Whether every topology change came from a cell gaining, losing, or replacing a formula.
+    pub(super) cell_formulas_changed_topology_only: bool,
     pub(super) calculation_metadata_changed: bool,
 }
 
@@ -42,6 +44,7 @@ impl EditReceipt {
             created_sheet_ids: clone_copy_slice(&self.created_sheet_ids, cancelled)?,
             changed_table_ids: clone_copy_slice(&self.changed_table_ids, cancelled)?,
             topology_changed: self.topology_changed,
+            cell_formulas_changed_topology_only: self.cell_formulas_changed_topology_only,
             calculation_metadata_changed: self.calculation_metadata_changed,
         })
     }
@@ -84,6 +87,12 @@ impl EditReceipt {
     /// Returns whether formula, name, or sheet topology must be recompiled.
     pub const fn topology_changed(&self) -> bool {
         self.topology_changed
+    }
+
+    /// Returns whether the topology changed only because cells gained, lost, or replaced a
+    /// formula, which a calculation session can apply to its compiled state locally.
+    pub(crate) const fn cell_formulas_changed_topology_only(&self) -> bool {
+        self.topology_changed && self.cell_formulas_changed_topology_only
     }
 
     /// Returns whether workbook-wide calculation interpretation changed.

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use super::dependency_areas::AreaNodes;
 use super::{
     CompiledWorkbook, Engine, EvalContext, EvaluationBudget, VolatileFormulas,
     collect_column_extents, collect_workbook_layout, public_to_internal,
@@ -49,6 +50,7 @@ impl<'workbook> Engine<'workbook> {
             asts: Arc::new(BTreeMap::new()),
             defined_name_asts: Arc::new(Vec::new()),
             dependencies: Arc::new(DependencyGraph::default()),
+            dependency_areas: Arc::new(AreaNodes::default()),
             results: BTreeMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
@@ -97,23 +99,20 @@ impl<'workbook> Engine<'workbook> {
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
         let mut engine = Self::parsed_cancellable(workbook, options, cancelled)?;
-        let (dependencies, dependency_limit_cells) = engine.dependencies_cancellable(cancelled)?;
-        engine.dependency_limit_cells = Arc::new(dependency_limit_cells);
-        let dependencies = if engine.has_unresolved_dynamic_dependencies(cancelled)? {
-            if !engine.evaluate_schedule_subset(&dependencies, None, cancelled) {
+        let mut collected = engine.dependencies_cancellable(cancelled)?;
+        engine.dependency_limit_cells = Arc::new(collected.limited);
+        if engine.has_unresolved_dynamic_dependencies(cancelled)? {
+            if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
                 return Err(());
             }
-            let (resolved_dependencies, dependency_limit_cells) =
-                engine.dependencies_cancellable(cancelled)?;
-            engine.dependency_limit_cells = Arc::new(dependency_limit_cells);
-            resolved_dependencies
-        } else {
-            dependencies
-        };
-        if !engine.evaluate_schedule_subset(&dependencies, None, cancelled) {
+            collected = engine.dependencies_cancellable(cancelled)?;
+            engine.dependency_limit_cells = Arc::new(collected.limited);
+        }
+        if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
             return Err(());
         }
-        engine.dependencies = Arc::new(dependencies);
+        engine.dependencies = Arc::new(collected.graph);
+        engine.dependency_areas = Arc::new(collected.areas);
         Ok(engine)
     }
 
@@ -123,7 +122,13 @@ impl<'workbook> Engine<'workbook> {
     ) -> Result<CompiledWorkbook, ()> {
         let dependency_targets = self.dependency_targets_cancellable(cancelled)?;
         let table_topologies = super::dependency::table_topologies(&dependency_targets, cancelled)?;
-        let incremental_safe = !self.has_unstable_incremental_dependencies(cancelled)?;
+        let undeclared_dynamic_arrays = self.has_undeclared_dynamic_arrays(cancelled)?;
+        let mut unstable_formulas = BTreeSet::new();
+        for cell in self.asts.keys() {
+            if self.formula_is_incrementally_unstable(*cell, cancelled)? {
+                unstable_formulas.insert(*cell);
+            }
+        }
         let volatile_formulas = self.volatile_formulas(cancelled)?;
         let schedule = schedule_cancellable(&self.dependencies, cancelled)?;
         let topological_rank = schedule
@@ -142,6 +147,8 @@ impl<'workbook> Engine<'workbook> {
             asts: Arc::clone(&self.asts),
             defined_name_asts: Arc::clone(&self.defined_name_asts),
             dependencies: Arc::clone(&self.dependencies),
+            dependency_areas: Arc::clone(&self.dependency_areas),
+            dependency_targets: Arc::new(dependency_targets),
             static_array_regions: Arc::new(
                 self.array_regions
                     .iter()
@@ -160,7 +167,8 @@ impl<'workbook> Engine<'workbook> {
             schedule,
             topological_rank,
             limits: self.options.limits(),
-            incremental_safe,
+            undeclared_dynamic_arrays,
+            unstable_formulas: Arc::new(unstable_formulas),
             volatile_formulas: Arc::new(volatile_formulas),
         })
     }
@@ -185,6 +193,25 @@ impl<'workbook> Engine<'workbook> {
         dirty: Option<&BTreeSet<CalculationCellId>>,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Self, ()> {
+        let mut engine =
+            Self::from_compiled(workbook, options, compiled, previous, dirty, cancelled)?;
+        let dirty = engine.dirty.clone();
+        if !engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled) {
+            return Err(());
+        }
+        Ok(engine)
+    }
+
+    /// An engine over `workbook` sharing `compiled`'s formulas and dependency state, which reads
+    /// the results of `previous` for formula cells outside `dirty`.
+    pub(super) fn from_compiled(
+        workbook: &'workbook WorkbookSnapshot,
+        options: CalculationOptions,
+        compiled: &CompiledWorkbook,
+        previous: Option<&'workbook CalculationSnapshot>,
+        dirty: Option<&BTreeSet<CalculationCellId>>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self, ()> {
         let array_regions = compiled.static_array_regions.as_ref().clone();
         let column_extents = collect_column_extents(workbook, cancelled)?;
         let table_topologies = super::dependency::workbook_table_topologies(workbook, cancelled)?;
@@ -197,6 +224,7 @@ impl<'workbook> Engine<'workbook> {
             asts: Arc::clone(&compiled.asts),
             defined_name_asts: Arc::clone(&compiled.defined_name_asts),
             dependencies: Arc::clone(&compiled.dependencies),
+            dependency_areas: Arc::clone(&compiled.dependency_areas),
             results: BTreeMap::new(),
             numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
@@ -231,11 +259,7 @@ impl<'workbook> Engine<'workbook> {
             }
             None => None,
         };
-        engine.previous = previous;
-        engine.dirty = internal_dirty.clone();
-        if !engine.evaluate_compiled_schedule(compiled, internal_dirty.as_ref(), cancelled) {
-            return Err(());
-        }
+        engine.dirty = internal_dirty;
         Ok(engine)
     }
 

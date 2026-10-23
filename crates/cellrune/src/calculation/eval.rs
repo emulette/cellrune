@@ -29,14 +29,17 @@ mod formula_columns;
 mod materialization;
 mod name_graph;
 mod orchestration;
+mod recompile;
 mod reference;
 pub(in crate::calculation) mod static_impact;
 mod targeted;
 
 pub(super) use dependency::DependencyTarget;
 use dependency::{TableTopologyRevision, table_dependency_by_id_cancellable};
+use dependency_areas::AreaNodes;
 use formula_columns::FormulaColumns;
 use materialization::ArrayRegion;
+pub(super) use recompile::RecompiledWorkbook;
 use reference::{ColumnExtents, cell_at};
 
 pub(super) fn clone_set_cancellable<T>(
@@ -107,6 +110,10 @@ pub(super) struct CompiledWorkbook {
     asts: Arc<BTreeMap<CellId, Arc<ParsedFormula>>>,
     defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
     dependencies: Arc<DependencyGraph>,
+    /// The areas `dependencies` holds, by the ranges and blocks they cover.
+    dependency_areas: Arc<AreaNodes>,
+    /// Every formula's dependency targets, with the values of the calculation that compiled them.
+    dependency_targets: Arc<BTreeMap<CellId, Vec<DependencyTarget>>>,
     static_array_regions: Arc<Vec<ArrayRegion>>,
     table_topologies: BTreeMap<crate::TableId, TableTopologyRevision>,
     parse_failures: Arc<BTreeMap<CellId, ParseError>>,
@@ -119,13 +126,16 @@ pub(super) struct CompiledWorkbook {
     schedule: Schedule,
     topological_rank: BTreeMap<CellId, usize>,
     limits: CalculationLimits,
-    incremental_safe: bool,
+    /// Whether a dynamic array formula declares no spill range.
+    undeclared_dynamic_arrays: bool,
+    /// Formulas whose references depend on values in a way incremental calculation cannot follow.
+    unstable_formulas: Arc<BTreeSet<CellId>>,
     volatile_formulas: Arc<VolatileFormulas>,
 }
 
 /// Formula cells that call a function reading each volatile calculation input, directly or
 /// through defined names and LAMBDA bodies.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct VolatileFormulas {
     today: Vec<CellId>,
     now: Vec<CellId>,
@@ -133,6 +143,13 @@ pub(super) struct VolatileFormulas {
 }
 
 impl VolatileFormulas {
+    /// Drops `cells`, whose formulas changed or were removed.
+    fn forget(&mut self, cells: &BTreeSet<CellId>) {
+        for list in [&mut self.today, &mut self.now, &mut self.random] {
+            list.retain(|cell| !cells.contains(cell));
+        }
+    }
+
     fn record(&mut self, cell: CellId, read: VolatileInputs) {
         for (volatility, cells) in [
             (Volatility::Today, &mut self.today),
@@ -178,8 +195,8 @@ impl CompiledWorkbook {
         self.limits
     }
 
-    pub(super) const fn incremental_safe(&self) -> bool {
-        self.incremental_safe
+    pub(super) fn incremental_safe(&self) -> bool {
+        !self.undeclared_dynamic_arrays && self.unstable_formulas.is_empty()
     }
 
     pub(super) fn formula_count(&self) -> usize {
@@ -1034,6 +1051,7 @@ pub struct Engine<'workbook> {
     asts: Arc<BTreeMap<CellId, Arc<ParsedFormula>>>,
     defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
     dependencies: Arc<DependencyGraph>,
+    dependency_areas: Arc<AreaNodes>,
     results: BTreeMap<CellId, Value>,
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,

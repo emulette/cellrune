@@ -54,6 +54,16 @@ inventories, and measurements belong in the linked documentation rather than in 
   cells than it allows. A call whose ranges exceed the limit and that a calculation-engine issue
   stops still reports `max_array_cells`. A two-condition `SUMIFS` over 340,000 rows now
   calculates.
+- After edits that only add, replace, or remove cell formulas, `Auto` recalculation parses just
+  the edited formulas, updates the dependency graph in place, and evaluates them and their
+  dependents, reporting `Incremental` with `DirtySubset`, or `Full` with `DirtySetCoversWorkbook`
+  when they are every formula, instead of `TopologyChanged`; the delta's `parsed_formula_count`
+  counts the edited formulas. A workbook that already holds references incremental calculation
+  cannot follow reports `DynamicTopology`, as after a value edit. An edit that adds such a
+  reference, touches a cell that is or was part of an array formula, or lets the dependency graph
+  reach `max_dependency_edges` still compiles the workbook again and reports `TopologyChanged`.
+  Forced `Incremental` and `Full` recalculation and transactions behave as before, and results are
+  unchanged.
 
 ### Fixed
 

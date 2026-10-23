@@ -141,6 +141,10 @@ impl PreparedWorkbookTransaction {
                     self.cancellation.is_cancelled()
                 })
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
+                formula_edits: clone_set_cancellable(&self.captured_formula_edits, &|| {
+                    self.cancellation.is_cancelled()
+                })
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
                 calculation_changes_pending: self.captured_changes_pending,
                 requires_full_rebuild: self.captured_requires_full_rebuild,
                 limits: self.limits,
@@ -152,10 +156,10 @@ impl PreparedWorkbookTransaction {
                 self.options,
                 self.cancellation.clone(),
             )?;
-            let execution_mode = prepared.execution_mode();
-            let decision_reason = prepared.decision_reason();
             let dirty_count = prepared.dirty_cells().len();
             let execution = prepared.execute()?;
+            let execution_mode = execution.execution_mode;
+            let decision_reason = execution.reason;
             ensure_evaluated_resource_limits(
                 &execution.calculation,
                 &execution.evaluated_cells,
@@ -216,6 +220,7 @@ impl PreparedWorkbookTransaction {
             calculation: Some(Arc::clone(&base_calculation)),
             calculation_options: Some(self.options),
             dirty: candidate_dirty,
+            formula_edits: BTreeSet::new(),
             calculation_changes_pending: !self.edit_receipt.calculation_changed_cells().is_empty(),
             requires_full_rebuild: topology_or_metadata_changed,
             limits: self.limits,

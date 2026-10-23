@@ -45,6 +45,7 @@ pub struct PreparedWorkbookTransaction {
     captured_calculation: Option<Arc<CalculationSnapshot>>,
     captured_options: Option<CalculationOptions>,
     captured_dirty: BTreeSet<CalculationCellId>,
+    captured_formula_edits: BTreeSet<CalculationCellId>,
     captured_changes_pending: bool,
     captured_requires_full_rebuild: bool,
 }
@@ -222,6 +223,9 @@ impl WorkbookCalculationSession {
         }
         let captured_dirty = clone_set_cancellable(&self.dirty, &|| cancellation.is_cancelled())
             .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+        let captured_formula_edits =
+            clone_set_cancellable(&self.formula_edits, &|| cancellation.is_cancelled())
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
         let base_fingerprint = fingerprint_cancellable(base_draft.workbook(), &cancellation)
             .map_err(ApplyChangesError::from)?;
         Ok(PreparedWorkbookTransaction {
@@ -239,6 +243,7 @@ impl WorkbookCalculationSession {
             captured_calculation: self.calculation.as_ref().map(Arc::clone),
             captured_options: self.calculation_options,
             captured_dirty,
+            captured_formula_edits,
             captured_changes_pending: self.calculation_changes_pending,
             captured_requires_full_rebuild: self.requires_full_rebuild,
         })
@@ -369,6 +374,7 @@ impl WorkbookCalculationSession {
         self.calculation = Some(payload.candidate_calculation);
         self.calculation_options = Some(completed.report.options);
         self.dirty.clear();
+        self.formula_edits.clear();
         self.calculation_changes_pending = false;
         self.requires_full_rebuild = false;
         self.next_cursor = next_cursor;

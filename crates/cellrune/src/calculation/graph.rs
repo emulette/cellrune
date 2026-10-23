@@ -35,6 +35,20 @@ impl DependencyGraph {
         self.formulas.insert(formula, nodes);
     }
 
+    /// Forgets a cell that is no longer a calculated formula.
+    pub(super) fn remove(&mut self, formula: CellId) {
+        self.formulas.remove(&formula);
+    }
+
+    /// Returns every edge: one per node each formula waits for and one per area member.
+    pub(super) fn edge_count(&self) -> u64 {
+        self.formulas
+            .values()
+            .map(|nodes| nodes.len() as u64)
+            .sum::<u64>()
+            + self.area_edges
+    }
+
     /// Records a formula that waits only for other cells.
     pub(super) fn insert_cells(&mut self, formula: CellId, cells: Vec<CellId>) {
         self.insert(

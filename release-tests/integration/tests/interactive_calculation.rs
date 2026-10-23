@@ -1615,7 +1615,7 @@ fn formula_metadata_dependencies_dirty_without_scheduling_source_values() {
 }
 
 #[test]
-fn topology_changes_fall_back_to_full_and_forced_incremental_fails_closed() {
+fn formula_edits_recalculate_incrementally_and_forced_incremental_fails_closed() {
     let mut session = chain_session();
     session
         .recalculate(
@@ -1644,19 +1644,128 @@ fn topology_changes_fall_back_to_full_and_forced_incremental_fails_closed() {
         .expect_err("forced incremental must reject topology change");
     assert_eq!(error.code(), SessionErrorCode::IncrementalUnsafe);
 
+    // Auto updates the compiled formulas for the edited cell and evaluates it and its dependents.
     let delta = session
         .recalculate(
             RecalculationMode::Auto,
             CalculationOptions::default(),
             CancellationToken::new(),
         )
-        .expect("auto falls back to full");
-    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
-    assert_eq!(delta.reason(), CalculationDecisionReason::TopologyChanged);
+        .expect("auto applies the formula edit");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DirtySubset);
+    assert_eq!(delta.parsed_formula_count(), 1);
     assert_calculations_equal(
         session.calculation().expect("installed result"),
         &calculate_workbook(session.workbook(), CalculationOptions::default()),
     );
+}
+
+#[test]
+fn formula_edits_evaluate_only_the_edited_formulas_and_their_dependents() {
+    // B holds formulas over A, C running totals over B, and G1 sums F, which starts as values.
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut initial = Vec::new();
+    for row in 1..=20 {
+        initial.push(WorkbookChange::set_cell_value(
+            sheet_id,
+            CellAddress::from_indices(row, 1).expect("valid input"),
+            number(f64::from(row)),
+        ));
+        initial.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 2).expect("valid formula"),
+            formula(&format!("A{row}*2")),
+        ));
+        initial.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 3).expect("valid total"),
+            formula(&format!("SUM($B$1:B{row})")),
+        ));
+        initial.push(WorkbookChange::set_cell_value(
+            sheet_id,
+            CellAddress::from_indices(row, 6).expect("valid value"),
+            number(1.0),
+        ));
+    }
+    initial.push(WorkbookChange::set_cell_formula(
+        sheet_id,
+        address("G1"),
+        formula("SUM(F1:F20)"),
+    ));
+    session
+        .apply_changes(0, EditBatch::new(initial))
+        .expect("generated workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    let b7 = CalculationCellId::new(sheet_id, address("B7"));
+    for (change, evaluated, removed) in [
+        // A replaced formula, and the 16 running totals from its row.
+        (
+            WorkbookChange::set_cell_formula(sheet_id, address("B5"), formula("A5*3")),
+            17,
+            None,
+        ),
+        // A new formula nothing reads.
+        (
+            WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("SUM(B1:B20)")),
+            1,
+            None,
+        ),
+        // A formula inside a range G1 reads, which now waits for it.
+        (
+            WorkbookChange::set_cell_formula(sheet_id, address("F5"), formula("C20/10")),
+            2,
+            None,
+        ),
+        // A formula replaced by a value: its result goes, and the totals from its row, E1, and
+        // through C20 F5 and G1 recalculate.
+        (
+            WorkbookChange::set_cell_value(sheet_id, address("B7"), number(70.0)),
+            17,
+            Some(b7),
+        ),
+        // A cleared formula inside G1's range.
+        (WorkbookChange::clear_cell(sheet_id, address("F5")), 1, None),
+    ] {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([change]),
+            )
+            .expect("formula edit");
+        let delta = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("formula edit calculation");
+        assert_eq!(
+            (delta.mode(), delta.reason()),
+            (
+                CalculationExecutionMode::Incremental,
+                CalculationDecisionReason::DirtySubset,
+            )
+        );
+        assert_eq!(delta.evaluated_count(), evaluated);
+        let calculation = session.calculation().expect("installed result");
+        if let Some(removed) = removed {
+            assert!(delta.removed_materialized_cells().contains(&removed));
+            assert_eq!(calculation.cell(removed), None);
+        }
+        assert_calculations_equal(
+            calculation,
+            &calculate_workbook(session.workbook(), CalculationOptions::default()),
+        );
+    }
 }
 
 #[test]
@@ -2648,19 +2757,34 @@ fn defined_name_and_cycle_topology_rebuilds_match_the_full_oracle() {
         )
         .expect("initial calculation");
 
-    for changes in [
-        vec![WorkbookChange::set_defined_name(defined_name(
-            "Factor", "A1*3",
-        ))],
-        vec![
-            WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("C1+1")),
-            WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("B1+1")),
-        ],
-        vec![WorkbookChange::set_cell_formula(
-            sheet_id,
-            address("B1"),
-            formula("Factor+1"),
-        )],
+    // A name change compiles the workbook again. Formula edits, even ones that close or open a
+    // cycle, leave the compiled state to the recalculation, which evaluates both formulas in full
+    // because together they are every formula in the workbook.
+    for (changes, mode, reason) in [
+        (
+            vec![WorkbookChange::set_defined_name(defined_name(
+                "Factor", "A1*3",
+            ))],
+            CalculationExecutionMode::Full,
+            CalculationDecisionReason::TopologyChanged,
+        ),
+        (
+            vec![
+                WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("C1+1")),
+                WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("B1+1")),
+            ],
+            CalculationExecutionMode::Full,
+            CalculationDecisionReason::DirtySetCoversWorkbook,
+        ),
+        (
+            vec![WorkbookChange::set_cell_formula(
+                sheet_id,
+                address("B1"),
+                formula("Factor+1"),
+            )],
+            CalculationExecutionMode::Full,
+            CalculationDecisionReason::DirtySetCoversWorkbook,
+        ),
     ] {
         session
             .apply_changes(
@@ -2674,9 +2798,8 @@ fn defined_name_and_cycle_topology_rebuilds_match_the_full_oracle() {
                 CalculationOptions::default(),
                 CancellationToken::new(),
             )
-            .expect("topology full calculation");
-        assert_eq!(delta.mode(), CalculationExecutionMode::Full);
-        assert_eq!(delta.reason(), CalculationDecisionReason::TopologyChanged);
+            .expect("topology calculation");
+        assert_eq!((delta.mode(), delta.reason()), (mode, reason));
         assert_calculations_equal(
             session.calculation().expect("installed topology result"),
             &calculate_workbook(session.workbook(), CalculationOptions::default()),

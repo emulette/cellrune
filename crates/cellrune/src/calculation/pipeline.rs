@@ -303,6 +303,7 @@ fn snapshot_from_incremental_engine_cancellable(
     cancelled: &impl Fn() -> bool,
 ) -> Result<CalculationSnapshot, ()> {
     let mut cells = BTreeMap::new();
+    let mut removed_formulas = BTreeSet::new();
     for public_id in dirty {
         if cancelled() {
             return Err(());
@@ -310,6 +311,10 @@ fn snapshot_from_incremental_engine_cancellable(
         let Some(internal_id) = public_to_internal(workbook, *public_id) else {
             continue;
         };
+        if !engine.cell_has_formula(internal_id) {
+            removed_formulas.insert(*public_id);
+            continue;
+        }
         let result = if engine.cycle_cells.contains(&internal_id) {
             CalculationCellResult::Unavailable(CalculationIssue::new(
                 CalculationIssueCode::CircularReference,
@@ -360,6 +365,7 @@ fn snapshot_from_incremental_engine_cancellable(
     previous.apply_incremental_patch_cancellable(
         super::IncrementalCalculationPatch::new(
             dirty,
+            removed_formulas,
             cells,
             materialized,
             traces,

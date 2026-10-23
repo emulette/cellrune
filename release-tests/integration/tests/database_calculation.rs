@@ -111,7 +111,7 @@ fn database_formula_criteria_match_full_calculation_after_incremental_edits() {
             CancellationToken::new(),
         )
         .expect("criteria incremental calculation");
-    assert_eq!(criteria_delta.mode(), CalculationExecutionMode::Full);
+    assert_eq!(criteria_delta.mode(), CalculationExecutionMode::Incremental);
     assert_number(session.calculation(), sheet, "H1", 25.0);
     assert_matches_full(&session, sheet, &["H1", "H2"]);
 
