@@ -335,12 +335,11 @@ pub(super) fn lex_spanned(input: &str, max_tokens: u64) -> Result<LexedFormula, 
                     "#REF!",
                     "#N/A",
                 ];
-                let rest = &input[byte_at(&offsets, input.len(), index)..];
-                let upper = rest.to_ascii_uppercase();
-                if let Some(literal) = ERROR_LITERALS
-                    .iter()
-                    .find(|literal| upper.starts_with(**literal))
-                {
+                let rest = input[byte_at(&offsets, input.len(), index)..].as_bytes();
+                if let Some(literal) = ERROR_LITERALS.iter().find(|literal| {
+                    rest.get(..literal.len())
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(literal.as_bytes()))
+                }) {
                     let kind = ErrorKind::parse(literal).expect("known error literal");
                     index += literal.chars().count();
                     push_token!(Token::ErrorLit(kind), start, index);
