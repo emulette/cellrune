@@ -49,15 +49,6 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
         ("IMCOT(\"0.00001\")", "99999.9999966667"),
         ("IMCOT(\"1E-9\")", "1000000000"),
         ("IMCOT(\"3.14159\")", "-376847.997569741"),
-        // Nearly real arguments, rounded from 40-digit references.
-        (
-            "IMTAN(\"1.5707963+0.000001i\")",
-            "26775.6725495693+999282.548623373i",
-        ),
-        (
-            "IMCOT(\"0.00001+0.0000001i\")",
-            "99990.0009965667-999.900010032333i",
-        ),
         // Excel 16.114 for Mac collapses a part that underflows past an overflowing cosh.
         ("IMTAN(\"1+400i\")", "i"),
         ("IMSECH(\"1000\")", "0"),
@@ -86,6 +77,50 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
             ))),
             "{formula}"
         );
+    }
+}
+
+/// Nearly real arguments, where `cos 2a ± cosh 2b` cancels, compared with 40-digit references.
+/// The platform's `sin`/`cosh` may differ in the last bit, so the parts are compared to within a
+/// few units in the 15th significant digit rather than as text.
+#[test]
+fn complex_trigonometry_stays_accurate_next_to_real_poles() {
+    for (formula, real, imaginary) in [
+        (
+            "IMTAN(\"1.5707963+0.000001i\")",
+            26_775.672_549_569_3,
+            999_282.548_623_373,
+        ),
+        (
+            "IMCOT(\"0.00001+0.0000001i\")",
+            99_990.000_996_566_68,
+            -999.900_010_032_333_4,
+        ),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula)]);
+        let result = calculate_workbook(&workbook, CalculationOptions::default());
+        let Some(CalculationCellResult::Value(CellValue::Text(text))) = result.cell(cell_id(1))
+        else {
+            panic!("{formula} must return text");
+        };
+        let (real_text, imaginary_text) = text
+            .trim_end_matches('i')
+            .rsplit_once(['+', '-'])
+            .map(|(head, tail)| (head, &text[head.len()..text.len() - 1]))
+            .expect("a complex number with both parts");
+        let parts = [
+            (real_text.parse::<f64>().expect("real part"), real),
+            (
+                imaginary_text.parse::<f64>().expect("imaginary part"),
+                imaginary,
+            ),
+        ];
+        for (actual, expected) in parts {
+            assert!(
+                ((actual - expected) / expected).abs() < 1e-14,
+                "{formula}: {actual} against {expected}"
+            );
+        }
     }
 }
 
