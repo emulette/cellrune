@@ -30,12 +30,12 @@ impl CsvReadOptions {
         Self::default()
     }
 
-    /// Returns these options with another field delimiter, such as `;` or a tab.
+    /// Returns these options with another field delimiter: `;`, a tab, `|`, or a space.
     ///
     /// # Errors
     ///
-    /// Returns [`CsvErrorCode::InvalidDelimiter`] unless the delimiter is one ASCII character
-    /// other than a quote or a line break.
+    /// Returns [`CsvErrorCode::InvalidDelimiter`] unless the delimiter is a comma, semicolon,
+    /// tab, vertical bar, or space.
     pub fn with_delimiter(self, delimiter: char) -> Result<Self, CsvError> {
         Ok(Self {
             delimiter: validate_delimiter(delimiter)?,

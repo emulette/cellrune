@@ -25,9 +25,16 @@ pub use error::{CsvError, CsvErrorCode};
 pub use read::{CsvReadOptions, read_csv};
 pub use write::{CsvWriteOptions, write_csv};
 
-/// Validates a field delimiter: one ASCII character other than a quote or a line break.
+/// The accepted field delimiters: comma, semicolon, tab, vertical bar, and space.
+///
+/// None of them occurs in a number, logical, or error spelling the writer leaves unquoted, so a
+/// write and a read with the same delimiter keep every value. A delimiter such as `.`, `-`, `E`, a
+/// digit, or `#` would split such a value instead.
+const DELIMITERS: [char; 5] = [',', ';', '\t', '|', ' '];
+
+/// Validates a field delimiter against [`DELIMITERS`].
 fn validate_delimiter(delimiter: char) -> Result<u8, CsvError> {
-    if !delimiter.is_ascii() || matches!(delimiter, '"' | '\r' | '\n') {
+    if !DELIMITERS.contains(&delimiter) {
         return Err(CsvError::new(CsvErrorCode::InvalidDelimiter));
     }
     Ok(delimiter as u8)

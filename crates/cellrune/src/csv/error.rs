@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 const MESSAGE_INVALID_DELIMITER: &str =
-    "CSV delimiter must be one ASCII character other than a quote or a line break";
+    "CSV delimiter must be a comma, semicolon, tab, vertical bar, or space";
 const MESSAGE_INVALID_UTF8: &str = "CSV input is not UTF-8";
 const MESSAGE_UNTERMINATED_QUOTE: &str = "CSV quoted field is not closed before the input ends";
 const MESSAGE_INVALID_QUOTE: &str = "CSV quoted field is followed by text before its delimiter";
@@ -18,7 +18,7 @@ const MESSAGE_UNAVAILABLE_RESULT: &str = "a formula in the exported sheet has no
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum CsvErrorCode {
-    /// The delimiter is not one ASCII character other than a quote or a line break.
+    /// The delimiter is not a comma, semicolon, tab, vertical bar, or space.
     InvalidDelimiter,
     /// The input is not UTF-8.
     InvalidUtf8,

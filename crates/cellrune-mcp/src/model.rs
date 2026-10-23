@@ -28,7 +28,7 @@ pub(crate) struct OpenCsvArgs {
     /// Name of the sheet the input is read into; omitted selects `Sheet1`.
     #[serde(default)]
     pub(crate) sheet_name: Option<String>,
-    /// One ASCII field delimiter other than a quote or line break; omitted selects `,`.
+    /// Field delimiter: `,`, `;`, a tab, `|`, or a space; omitted selects `,`.
     #[serde(default)]
     pub(crate) delimiter: Option<String>,
 }
@@ -41,7 +41,7 @@ pub(crate) struct ExportCsvArgs {
     pub(crate) session_id: String,
     /// Case-insensitive sheet name.
     pub(crate) sheet: String,
-    /// One ASCII field delimiter other than a quote or line break; omitted selects `,`.
+    /// Field delimiter: `,`, `;`, a tab, `|`, or a space; omitted selects `,`.
     #[serde(default)]
     pub(crate) delimiter: Option<String>,
 }

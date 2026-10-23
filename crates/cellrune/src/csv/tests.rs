@@ -101,6 +101,87 @@ fn rejects_malformed_input_with_stable_codes() {
 }
 
 #[test]
+fn accepts_only_delimiters_that_never_split_an_unquoted_value() {
+    // Each of these occurs in a number, logical, or error the writer leaves unquoted.
+    for delimiter in ['.', '-', '+', 'E', 'e', 'T', '1', '#', '/', '!', '?', '_', 'x'] {
+        assert_eq!(
+            CsvReadOptions::new()
+                .with_delimiter(delimiter)
+                .expect_err("read delimiter")
+                .code(),
+            CsvErrorCode::InvalidDelimiter,
+            "{delimiter:?}"
+        );
+        assert_eq!(
+            CsvWriteOptions::new()
+                .with_delimiter(delimiter)
+                .expect_err("write delimiter")
+                .code(),
+            CsvErrorCode::InvalidDelimiter,
+            "{delimiter:?}"
+        );
+    }
+    let sheet = SheetId::new(1).expect("sheet");
+    let values = [
+        CellValue::number(3.5).expect("number"),
+        CellValue::number(-1.0).expect("number"),
+        CellValue::number(1e-7).expect("number"),
+        CellValue::Logical(true),
+        CellValue::Error(ExcelError::DivisionByZero),
+        CellValue::Error(ExcelError::Name),
+        CellValue::Error(ExcelError::GettingData),
+        CellValue::Text("a,b;c\td|e f".to_owned()),
+    ];
+    let mut draft = WorkbookDraft::new();
+    draft
+        .apply_changes(EditBatch::new(values.iter().enumerate().map(
+            |(index, value)| {
+                let column = u32::try_from(index + 1).expect("column");
+                WorkbookChange::set_cell_value(
+                    sheet,
+                    CellAddress::from_indices(1, column).expect("address"),
+                    value.clone(),
+                )
+            },
+        )))
+        .expect("values");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for delimiter in [',', ';', '\t', '|', ' '] {
+        let bytes = write_csv(
+            draft.workbook(),
+            &calculation,
+            sheet,
+            CsvWriteOptions::new()
+                .with_delimiter(delimiter)
+                .expect("write delimiter"),
+        )
+        .expect("write");
+        let reread = read_csv(
+            &bytes,
+            &CsvReadOptions::new()
+                .with_delimiter(delimiter)
+                .expect("read delimiter"),
+        )
+        .expect("reread");
+        assert_eq!(
+            reread.workbook().sheets()[0].cells().count(),
+            values.len(),
+            "{delimiter:?}"
+        );
+        for (index, value) in values.iter().enumerate() {
+            let address = CellAddress::from_indices(1, u32::try_from(index + 1).expect("column"))
+                .expect("address")
+                .to_string();
+            assert_eq!(
+                literal(&reread, &address).as_ref(),
+                Some(value),
+                "{delimiter:?} {address}"
+            );
+        }
+    }
+}
+
+#[test]
 fn writes_calculated_values_that_read_back_unchanged() {
     let mut draft = WorkbookDraft::new();
     let sheet = SheetId::new(1).expect("sheet");

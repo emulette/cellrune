@@ -470,7 +470,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `read_csv(&[u8], &CsvReadOptions) -> Result<WorkbookDraft, CsvError>`
   reads RFC 4180 UTF-8 (optional BOM; CRLF, LF, or CR records; `""` escapes)
   into a one-sheet draft. `CsvReadOptions::new()`, `.with_delimiter(char)`
-  (one ASCII character other than a quote or line break),
+  (`,`, `;`, a tab, `|`, or a space; any other fails with
+  `csv.invalid_delimiter`),
   `.with_sheet_name(SheetName)` (default `Sheet1`), `.with_max_cells(u64)`
   (default `ReadLimits::max_cells_per_sheet`). Value rule: an empty unquoted
   field is no cell; a quoted field is text; an unquoted field is a number when

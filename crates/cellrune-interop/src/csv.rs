@@ -10,7 +10,7 @@ pub struct CsvReadOptionsDto {
     /// Name of the sheet the input is read into; omitted selects `Sheet1`.
     #[serde(default)]
     pub sheet_name: Option<String>,
-    /// One ASCII field delimiter other than a quote or line break; omitted selects `,`.
+    /// Field delimiter: `,`, `;`, a tab, `|`, or a space; omitted selects `,`.
     #[serde(default)]
     pub delimiter: Option<String>,
 }
@@ -21,7 +21,7 @@ pub struct CsvReadOptionsDto {
 pub struct CsvWriteRequestDto {
     /// Case-insensitive sheet name.
     pub sheet: String,
-    /// One ASCII field delimiter other than a quote or line break; omitted selects `,`.
+    /// Field delimiter: `,`, `;`, a tab, `|`, or a space; omitted selects `,`.
     #[serde(default)]
     pub delimiter: Option<String>,
 }
