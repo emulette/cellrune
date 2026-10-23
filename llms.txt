@@ -868,9 +868,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 495 official
+  `.is_official()`. The 0.1.26 catalog contains 457 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 496 accepted entries. The descriptor registry
+  dummy-function marker, for 458 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
