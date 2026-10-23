@@ -369,8 +369,10 @@ first when the sheet holds a formula; the whole text must fit the server respons
         output_schema = crate::schema::mcp_schema::<CellFormatPageDto>(),
         description = "Read one bounded row-major page of the font, fill, border, and alignment \
 each cell of an inclusive A1 range displays with, including cells that hold no value, plus the \
-explicit widths of the range's columns and heights of the page's rows. Number formats are on \
-workbook_read_range cells. Font names are third-party workbook content returned verbatim.",
+explicit widths of the range's columns and heights of the page's rows. The page is the longest \
+complete prefix of the requested cells that fits the server response byte limit; continue from \
+next_offset. Number formats are on workbook_read_range cells. Font names are third-party \
+workbook content returned verbatim.",
         annotations(
             title = "Read workbook cell formats",
             read_only_hint = true,
@@ -391,9 +393,9 @@ workbook_read_range cells. Font names are third-party workbook content returned 
             offset: args.offset,
             limit: args.limit,
         };
-        let page = handle.workbook().lock().await.read_formats(&request)?;
+        let page = self.fitting_format_page(&*handle.workbook().lock().await, request)?;
         self.sessions.touch(&args.session_id)?;
-        self.bounded_json(page)
+        Ok(Json(page))
     }
 
     /// Read sheet hyperlinks.
@@ -1187,6 +1189,48 @@ fn worker_error(error: JoinError) -> McpError {
     McpError::worker(error.to_string())
 }
 
+impl CellruneMcpServer {
+    /// Returns the longest complete row-major prefix of a format page that fits the response byte
+    /// limit, as the preview pages do, so a range whose formats exceed the limit still pages.
+    fn fitting_format_page(
+        &self,
+        workbook: &WorkbookSession,
+        mut request: RangeRequestDto,
+    ) -> Result<CellFormatPageDto, McpError> {
+        let maximum = self.config.max_response_bytes();
+        let full = workbook.read_formats(&request)?;
+        let full_bytes = json_size(&full)?;
+        if full_bytes <= maximum {
+            return Ok(full);
+        }
+        let mut page_for = |cells: usize| -> Result<(CellFormatPageDto, usize), McpError> {
+            request.limit = u32::try_from(cells).unwrap_or(u32::MAX);
+            let page = workbook.read_formats(&request)?;
+            let bytes = json_size(&page)?;
+            Ok((page, bytes))
+        };
+        let (single, single_bytes) = page_for(1)?;
+        if single_bytes > maximum {
+            return Err(McpError::response_too_large(
+                single_bytes as u64,
+                maximum as u64,
+            ));
+        }
+        let (mut accepted, mut lower, mut upper) = (single, 1, full.cells.len() - 1);
+        while lower < upper {
+            let candidate = lower + (upper - lower).div_ceil(2);
+            let (page, bytes) = page_for(candidate)?;
+            if bytes <= maximum {
+                lower = candidate;
+                accepted = page;
+            } else {
+                upper = candidate - 1;
+            }
+        }
+        Ok(accepted)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1257,6 +1301,86 @@ mod tests {
                 .value_count,
             1
         );
+    }
+
+    #[tokio::test]
+    async fn a_format_page_over_the_response_limit_returns_the_prefix_that_fits() {
+        let config = ServerConfig::new(
+            vec![std::env::temp_dir()],
+            DEFAULT_MAX_SESSIONS,
+            DEFAULT_SESSION_TTL_SECONDS,
+            DEFAULT_MAX_RESPONSE_BYTES,
+            DEFAULT_MAX_WORKBOOK_BYTES,
+            false,
+        )
+        .expect("configuration");
+        let maximum = config.max_response_bytes();
+        let server = CellruneMcpServer::new(config);
+        let prepared = server
+            .sessions
+            .prepare_insert(WorkbookSession::create())
+            .expect("session");
+        let session_id = prepared.id().to_owned();
+        prepared.commit();
+        let read = |offset: u64| {
+            server.workbook_read_formats(Parameters(ReadRangeArgs {
+                session_id: session_id.clone(),
+                sheet: "Sheet1".to_owned(),
+                start: "A1".to_owned(),
+                end: "J1000".to_owned(),
+                offset,
+                limit: 10_000,
+            }))
+        };
+        let mut offset = 0;
+        let mut pages = 0;
+        while let Some(next) = {
+            let Json(page) = read(offset).await.expect("a fitting page");
+            assert!(json_size(&page).expect("size") <= maximum);
+            assert!(!page.cells.is_empty());
+            assert_eq!(page.offset, offset);
+            let consumed = offset + page.cells.len() as u64;
+            assert_eq!(page.next_offset, (consumed < 10_000).then_some(consumed));
+            pages += 1;
+            page.next_offset
+        } {
+            offset = next;
+        }
+        assert!(pages > 1, "10,000 formats exceed one default response");
+
+        let tiny = CellruneMcpServer::new(
+            ServerConfig::new(
+                vec![std::env::temp_dir()],
+                DEFAULT_MAX_SESSIONS,
+                DEFAULT_SESSION_TTL_SECONDS,
+                DEFAULT_MAX_RESPONSE_BYTES,
+                DEFAULT_MAX_WORKBOOK_BYTES,
+                false,
+            )
+            .expect("configuration")
+            .with_test_response_bytes(64),
+        );
+        let prepared = tiny
+            .sessions
+            .prepare_insert(WorkbookSession::create())
+            .expect("session");
+        let tiny_session = prepared.id().to_owned();
+        prepared.commit();
+        let error = match tiny
+            .workbook_read_formats(Parameters(ReadRangeArgs {
+                session_id: tiny_session,
+                sheet: "Sheet1".to_owned(),
+                start: "A1".to_owned(),
+                end: "B2".to_owned(),
+                offset: 0,
+                limit: 0,
+            }))
+            .await
+        {
+            Ok(_) => panic!("a page that holds no cell must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.payload().code, "mcp.response.byte_limit_exceeded");
     }
 
     #[tokio::test]

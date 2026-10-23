@@ -172,7 +172,9 @@ offset=, limit=)` and Node.js `readFormats(sheet, start, end, { offset, limit
 MCP `workbook_read_formats`) return each cell's `font`, `fill` (tagged
 `pattern` or `gradient`), `border`, and `alignment`, with colors tagged
 `argb`/`theme`/`indexed`/`automatic` plus `tint`, the range's
-`column_widths`, and the page's `row_heights`. Edit schema v2 adds
+`column_widths`, and the page's `row_heights`; MCP returns the longest
+complete prefix of the requested cells that fits its response byte limit,
+continuing at `next_offset`. Edit schema v2 adds
 `set_cell_format` (`sheet`, `address`, optional `font`, `fill` pattern,
 `border`, `alignment`), `set_column_width` (`first`, `last`, `width` or
 null), and `set_row_height` (`row`, `height` or null); Node uses the
