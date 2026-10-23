@@ -820,6 +820,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Clean, "CLEAN", TextAdditional),
     function!(Concatenate, "CONCATENATE", TextAdditional),
     function!(Dollar, "DOLLAR", TextAdditional),
+    function!(EncodeUrl, "ENCODEURL", TextAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(TextAfter, "TEXTAFTER", TextAdditional),
     function!(TextBefore, "TEXTBEFORE", TextAdditional),
     function!(UniChar, "UNICHAR", TextAdditional),
@@ -1800,6 +1802,16 @@ mod tests {
         assert!((5..=7).all(|arity| vdb.call_contract().arity().accepts(arity)));
         assert!(!vdb.call_contract().arity().accepts(4));
         assert!(!vdb.call_contract().arity().accepts(8));
+
+        let encode_url = descriptor("ENCODEURL").expect("ENCODEURL descriptor");
+        assert_eq!(encode_url.minimum_version(), CompatibilityVersion::V0_1_27);
+        assert!(matches!(
+            encode_url.evaluator(),
+            Evaluator::TextAdditional(_)
+        ));
+        assert!(encode_url.call_contract().arity().accepts(1));
+        assert!(!encode_url.call_contract().arity().accepts(2));
+        assert!(!encode_url.catalog_returns_array());
 
         for name in [
             "IMCOS", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSIN", "IMSINH", "IMTAN",

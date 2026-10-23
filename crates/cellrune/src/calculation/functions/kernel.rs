@@ -285,6 +285,7 @@ function_enum!(TextAdditionalFunction {
     Clean,
     Concatenate,
     Dollar,
+    EncodeUrl,
     TextAfter,
     TextBefore,
     UniChar,

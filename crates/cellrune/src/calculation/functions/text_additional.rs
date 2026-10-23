@@ -22,6 +22,7 @@ pub(super) fn call(
         TextAdditionalFunction::Clean => clean(engine, context, args),
         TextAdditionalFunction::Concatenate => concatenate(engine, context, args),
         TextAdditionalFunction::Dollar => dollar(engine, context, args),
+        TextAdditionalFunction::EncodeUrl => super::url_encoding::encode_url(engine, context, args),
         TextAdditionalFunction::UniChar => unichar(engine, context, args),
         TextAdditionalFunction::Unicode => unicode(engine, context, args),
         TextAdditionalFunction::TextBefore => text_boundary(engine, context, args, false),

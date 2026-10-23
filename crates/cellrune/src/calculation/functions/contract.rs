@@ -1357,9 +1357,13 @@ const NUMBER_VALUE_DEFAULTS: &[ArgumentDefault] = &[
 impl TextAdditionalFunction {
     const fn call_contract(self) -> CallContract {
         match self {
-            Self::Char | Self::Code | Self::Clean | Self::UniChar | Self::Unicode | Self::Value => {
-                CallContract::uniform(Arity::exact(1), SCALAR)
-            }
+            Self::Char
+            | Self::Code
+            | Self::Clean
+            | Self::EncodeUrl
+            | Self::UniChar
+            | Self::Unicode
+            | Self::Value => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::NumberValue => CallContract::uniform(Arity::range(1, 3), SCALAR)
                 .with_defaults(NUMBER_VALUE_DEFAULTS),
             Self::Concatenate => CallContract::uniform(Arity::range(1, 255), ARRAY),

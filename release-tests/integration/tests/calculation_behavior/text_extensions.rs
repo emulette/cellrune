@@ -134,6 +134,35 @@ fn numbervalue_text_scans_observe_the_function_work_limit() {
     assert_issue(&result, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
 
+#[test]
+fn encodeurl_percent_encodes_everything_but_the_unreserved_characters() {
+    for (formula, expected) in [
+        // Microsoft's example.
+        (
+            "ENCODEURL(\"http://contoso.sharepoint.com/Finance/Profit and Loss Statement.xlsx\")",
+            "http%3A%2F%2Fcontoso.sharepoint.com%2FFinance%2FProfit%20and%20Loss%20Statement.xlsx",
+        ),
+        // RFC 3986 keeps letters, digits, and -._~ and encodes each other UTF-8 byte in uppercase.
+        ("_xlfn.ENCODEURL(\"aZ09-._~\")", "aZ09-._~"),
+        ("ENCODEURL(\"a+b=c&d?e#f%\")", "a%2Bb%3Dc%26d%3Fe%23f%25"),
+        ("ENCODEURL(\"é 한\")", "%C3%A9%20%ED%95%9C"),
+        ("ENCODEURL(12.5)", "12.5"),
+        ("ENCODEURL(TRUE)", "TRUE"),
+        ("ENCODEURL(\"\")", ""),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula)]);
+        assert!(scan_formula_capabilities(&workbook).is_supported());
+        assert_eq!(
+            calculate_workbook(&workbook, CalculationOptions::default()).cell(cell_id(1)),
+            Some(&CalculationCellResult::Value(CellValue::Text(
+                expected.to_owned()
+            ))),
+            "{formula}"
+        );
+    }
+    assert_error("ENCODEURL(#N/A)", ExcelError::NotAvailable);
+}
+
 fn assert_error(formula: &str, expected: ExcelError) {
     let result = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, formula)]),
