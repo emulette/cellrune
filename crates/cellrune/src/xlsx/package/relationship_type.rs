@@ -33,6 +33,16 @@ const EXTERNAL_LINK_STRICT: &str =
 const TABLE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 const TABLE_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/table";
 const VBA_PROJECT: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
+const PIVOT_TABLE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
+const PIVOT_TABLE_STRICT: &str =
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/pivotTable";
+const PIVOT_CACHE_DEFINITION: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition";
+const PIVOT_CACHE_DEFINITION_STRICT: &str =
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/pivotCacheDefinition";
+const SLICER_CACHE: &str = "http://schemas.microsoft.com/office/2007/relationships/slicerCache";
+const TIMELINE_CACHE: &str = "http://schemas.microsoft.com/office/2011/relationships/timelineCache";
 const CALC_CHAIN: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain";
 const CALC_CHAIN_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/calcChain";
@@ -74,8 +84,25 @@ pub(super) fn is_external_link(value: &str) -> bool {
     matches!(value, EXTERNAL_LINK | EXTERNAL_LINK_STRICT)
 }
 
-pub(super) fn is_table(value: &str) -> bool {
+pub(crate) fn is_table(value: &str) -> bool {
     matches!(value, TABLE | TABLE_STRICT)
+}
+
+pub(crate) fn is_pivot_table(value: &str) -> bool {
+    matches!(value, PIVOT_TABLE | PIVOT_TABLE_STRICT)
+}
+
+pub(crate) fn is_pivot_cache_definition(value: &str) -> bool {
+    matches!(
+        value,
+        PIVOT_CACHE_DEFINITION | PIVOT_CACHE_DEFINITION_STRICT
+    )
+}
+
+/// Returns whether a workbook relationship targets a slicer or timeline cache, which selects
+/// pivot tables and tables by name.
+pub(crate) fn is_slicer_or_timeline_cache(value: &str) -> bool {
+    matches!(value, SLICER_CACHE | TIMELINE_CACHE)
 }
 
 pub(super) fn is_vba_project(value: &str) -> bool {

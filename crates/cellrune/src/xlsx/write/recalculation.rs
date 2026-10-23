@@ -138,7 +138,13 @@ pub fn write_recalculated_xlsx_bytes(
         let content_types = source_reader.read_part(&content_types_part)?;
         replacements.insert(
             content_types_part.clone(),
-            remove_content_type_overrides(&content_types, &content_types_part, &removals, limits)?,
+            remove_content_type_overrides(
+                &content_types,
+                &content_types_part,
+                &removals,
+                &BTreeSet::new(),
+                limits,
+            )?,
         );
     }
 

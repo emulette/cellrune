@@ -7,6 +7,7 @@ use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
 
 use super::serialization::escape_text;
+use super::sheet_deletion::patch_workbook_view;
 use super::workbook_patch::{
     HostRecalculation, follows_calculation_properties, patch_calculation_properties_with_hints,
 };
@@ -122,7 +123,19 @@ pub(crate) fn patch_workbook_semantics(
     } = options;
     enforce_bytes(bytes.len(), limits, source)?;
     validate_existing_sheet_order(original, draft, source)?;
-    let names_changed = original.defined_names() != draft.defined_names();
+    // Tab positions of deleted worksheets, which later tabs, `workbookView`, and every
+    // sheet-scoped name's `localSheetId` move past.
+    let deleted_positions = original
+        .sheets()
+        .iter()
+        .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
+        .filter_map(|sheet| original.sheet_tab_position(sheet.id()))
+        .collect::<Vec<_>>();
+    let names_changed = original.defined_names() != draft.defined_names()
+        || draft
+            .defined_names()
+            .iter()
+            .any(|name| moved_local_sheet_id(original, draft, name).is_some());
     let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();
@@ -136,11 +149,33 @@ pub(crate) fn patch_workbook_semantics(
     let mut existing_tab_position = 0_usize;
     let mut saw_workbook_properties = false;
     let mut saw_book_views = false;
+    let mut book_views_depth = None;
     let mut inserted_defined_names = !names_changed;
     let mut source_defined_names = None::<SourceDefinedNames>;
+    let mut deleted_sheet_depth = None::<u64>;
     loop {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        // A deleted worksheet's `<sheet>` element is dropped with its content.
+        if let Some(skip) = deleted_sheet_depth {
+            match event {
+                Event::Start(_) => depth = depth.saturating_add(1),
+                Event::End(_) => {
+                    if depth == skip {
+                        deleted_sheet_depth = None;
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            buffer.clear();
+            continue;
+        }
+        let book_view = |element: &BytesStart<'_>, depth: u64| {
+            !deleted_positions.is_empty()
+                && book_views_depth.is_some_and(|parent| depth == parent + 1)
+                && element.local_name().as_ref() == "workbookView"
+        };
         match event {
             Event::Start(element) => {
                 depth = depth.saturating_add(1);
@@ -164,7 +199,16 @@ pub(crate) fn patch_workbook_semantics(
                     && element.local_name().as_ref() == "bookViews"
                 {
                     saw_book_views = true;
+                    book_views_depth = Some(depth);
                     write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                } else if book_view(&element, depth) {
+                    let patched = patch_workbook_view(
+                        &element,
+                        &deleted_positions,
+                        draft.tab_count(),
+                        source,
+                    )?;
+                    write_event(&mut writer, Event::Start(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "sheets"
                 {
@@ -196,15 +240,20 @@ pub(crate) fn patch_workbook_semantics(
                 } else if sheets_depth.is_some_and(|parent| depth == parent + 1)
                     && element.local_name().as_ref() == "sheet"
                 {
-                    let sheet = original
-                        .sheets()
-                        .get(existing_sheet_index)
-                        .and_then(|source_sheet| draft.sheet_by_id(source_sheet.id()))
-                        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
-                    let (patched, relationship) = patch_sheet(&element, &xml, sheet, source)?;
+                    let (patched, relationship) = patch_existing_sheet(
+                        &element,
+                        &xml,
+                        original,
+                        draft,
+                        existing_sheet_index,
+                        source,
+                    )?;
                     relationship_attribute.get_or_insert(relationship);
                     existing_sheet_index = existing_sheet_index.saturating_add(1);
-                    write_event(&mut writer, Event::Start(patched), source)?;
+                    match patched {
+                        Some(patched) => write_event(&mut writer, Event::Start(patched), source)?,
+                        None => deleted_sheet_depth = Some(depth),
+                    }
                 } else if workbook_depth.is_some_and(|root| depth == root + 1)
                     && element.local_name().as_ref() == "definedNames"
                     && names_changed
@@ -269,14 +318,26 @@ pub(crate) fn patch_workbook_semantics(
                 } else if sheets_depth.is_some_and(|parent| depth + 1 == parent + 1)
                     && element.local_name().as_ref() == "sheet"
                 {
-                    let sheet = original
-                        .sheets()
-                        .get(existing_sheet_index)
-                        .and_then(|source_sheet| draft.sheet_by_id(source_sheet.id()))
-                        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
-                    let (patched, relationship) = patch_sheet(&element, &xml, sheet, source)?;
+                    let (patched, relationship) = patch_existing_sheet(
+                        &element,
+                        &xml,
+                        original,
+                        draft,
+                        existing_sheet_index,
+                        source,
+                    )?;
                     relationship_attribute.get_or_insert(relationship);
                     existing_sheet_index = existing_sheet_index.saturating_add(1);
+                    if let Some(patched) = patched {
+                        write_event(&mut writer, Event::Empty(patched), source)?;
+                    }
+                } else if book_view(&element, depth + 1) {
+                    let patched = patch_workbook_view(
+                        &element,
+                        &deleted_positions,
+                        draft.tab_count(),
+                        source,
+                    )?;
                     write_event(&mut writer, Event::Empty(patched), source)?;
                 } else if workbook_depth.is_some_and(|root| depth + 1 == root + 1)
                     && element.local_name().as_ref() == "definedNames"
@@ -317,6 +378,9 @@ pub(crate) fn patch_workbook_semantics(
                     depth = depth.saturating_sub(1);
                     buffer.clear();
                     continue;
+                }
+                if book_views_depth == Some(depth) {
+                    book_views_depth = None;
                 }
                 if sheets_depth == Some(depth) && element.local_name().as_ref() == "sheets" {
                     if existing_sheet_index != original.sheets().len() {
@@ -426,7 +490,12 @@ fn validate_existing_sheet_order(
         .filter(|sheet| original.sheet_by_id(sheet.id()).is_some())
         .map(Sheet::id)
         .collect::<Vec<_>>();
-    let original_ids = original.sheets().iter().map(Sheet::id).collect::<Vec<_>>();
+    let original_ids = original
+        .sheets()
+        .iter()
+        .map(Sheet::id)
+        .filter(|id| draft.sheet_by_id(*id).is_some())
+        .collect::<Vec<_>>();
     if existing == original_ids {
         Ok(())
     } else {
@@ -464,6 +533,62 @@ fn write_workbook_properties(
         properties.push_attribute(("date1904", "1"));
     }
     write_event(writer, Event::Empty(properties), source)
+}
+
+/// Patches the `<sheet>` element of the existing worksheet at `index` from the draft, or returns
+/// `None` for a deleted worksheet. Its relationship attribute is read either way, so a workbook
+/// whose source worksheets were all deleted still declares the sheets it added.
+fn patch_existing_sheet(
+    element: &BytesStart<'_>,
+    reader: &NsReader<&[u8]>,
+    original: &WorkbookSnapshot,
+    draft: &WorkbookSnapshot,
+    index: usize,
+    source: &PartPath,
+) -> Result<(Option<BytesStart<'static>>, RelationshipAttribute), XlsxWriteError> {
+    let source_sheet = original
+        .sheets()
+        .get(index)
+        .ok_or_else(|| invalid_generated(source, DETAIL_SHEET_COUNT))?;
+    let sheet = draft.sheet_by_id(source_sheet.id());
+    let (patched, relationship) =
+        patch_sheet(element, reader, sheet.unwrap_or(source_sheet), source)?;
+    Ok((sheet.map(|_| patched), relationship))
+}
+
+/// Returns the draft tab position of a retained sheet-scoped name's sheet when a deleted sheet
+/// moved it, so its `localSheetId` is renumbered.
+fn moved_local_sheet_id(
+    original: &WorkbookSnapshot,
+    draft: &WorkbookSnapshot,
+    name: &DefinedName,
+) -> Option<usize> {
+    let DefinedNameScope::Sheet(sheet_id) = name.scope() else {
+        return None;
+    };
+    let position = draft.sheet_tab_position(sheet_id)?;
+    original
+        .sheet_tab_position(sheet_id)
+        .is_some_and(|source| source != position)
+        .then_some(position)
+}
+
+fn patch_local_sheet_id(
+    element: &BytesStart<'_>,
+    position: usize,
+    source: &PartPath,
+) -> Result<BytesStart<'static>, XlsxWriteError> {
+    let mut patched = BytesStart::new(element.name().as_ref().to_owned());
+    let position = position.to_string();
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        if attribute.key.as_ref() == "localSheetId" {
+            patched.push_attribute(("localSheetId", position.as_str()));
+        } else {
+            patched.push_attribute(attribute);
+        }
+    }
+    Ok(patched.into_owned())
 }
 
 fn patch_sheet(
@@ -614,20 +739,28 @@ fn write_source_defined_names(
         let retained = original
             .defined_name(defined_name.scope(), defined_name.name())
             .and_then(|(index, source_name)| Some((source_name, names.elements.get(index)?)));
+        let moved = moved_local_sheet_id(original, draft, defined_name);
         match retained {
             Some((source_name, element)) if source_name == defined_name => {
+                let start = match moved {
+                    Some(position) => patch_local_sheet_id(&element.start, position, source)?,
+                    None => element.start.borrow(),
+                };
                 if element.content.is_empty() {
-                    write_event(writer, Event::Empty(element.start.borrow()), source)?;
+                    write_event(writer, Event::Empty(start), source)?;
                 } else {
-                    write_event(writer, Event::Start(element.start.borrow()), source)?;
+                    write_event(writer, Event::Start(start), source)?;
                     for event in &element.content {
                         write_event(writer, event.borrow(), source)?;
                     }
                 }
             }
             Some((source_name, element)) => {
-                let patched =
+                let mut patched =
                     patch_defined_name(&element.start, source_name, defined_name, source)?;
+                if let Some(position) = moved {
+                    patched = patch_local_sheet_id(&patched, position, source)?;
+                }
                 write_defined_name(writer, patched, defined_name, source)?;
             }
             None => {

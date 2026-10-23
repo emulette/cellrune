@@ -39,16 +39,16 @@ impl ContentTypes {
 }
 
 #[derive(Debug)]
-pub(super) enum RelationshipTarget {
+pub(in crate::xlsx) enum RelationshipTarget {
     Internal(PartPath),
     External(Box<str>),
 }
 
 #[derive(Debug)]
-pub(super) struct Relationship {
-    pub(super) id: Box<str>,
-    pub(super) kind: Box<str>,
-    pub(super) target: RelationshipTarget,
+pub(in crate::xlsx) struct Relationship {
+    pub(in crate::xlsx) id: Box<str>,
+    pub(in crate::xlsx) kind: Box<str>,
+    pub(in crate::xlsx) target: RelationshipTarget,
 }
 
 pub(super) fn parse_content_types(
@@ -137,7 +137,7 @@ pub(super) fn parse_content_types(
     })
 }
 
-pub(super) fn parse_relationships(
+pub(in crate::xlsx) fn parse_relationships(
     bytes: &[u8],
     relationship_part: &PartPath,
     source_part: Option<&PartPath>,

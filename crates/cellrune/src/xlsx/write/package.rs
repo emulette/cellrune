@@ -104,6 +104,15 @@ pub(in crate::xlsx) struct PackageReader<'package> {
 }
 
 impl PackageReader<'_> {
+    /// Returns every part of the source package in name order.
+    pub(in crate::xlsx) fn parts(&self) -> impl Iterator<Item = &PartPath> {
+        self.parts.keys()
+    }
+
+    pub(in crate::xlsx) fn contains(&self, part: &PartPath) -> bool {
+        self.parts.contains_key(part)
+    }
+
     pub(in crate::xlsx) fn read_part(
         &mut self,
         part: &PartPath,

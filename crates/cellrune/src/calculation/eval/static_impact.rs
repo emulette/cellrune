@@ -50,8 +50,8 @@ pub(crate) fn affected_formulas(
         return all_formulas(draft, cancelled);
     }
     let changed_names = changed_defined_names(source, draft);
-    // Old and new names of added and renamed sheets: a reference to one of them may resolve
-    // differently now, and the sheet list itself changed.
+    // Old and new names of added, renamed, and deleted sheets: a reference to one of them may
+    // resolve differently now, and the sheet list itself changed.
     let changed_sheet_names = draft
         .sheets()
         .iter()
@@ -60,6 +60,13 @@ pub(crate) fn affected_formulas(
             Some(original) => vec![original.name().as_str(), sheet.name().as_str()],
             None => vec![sheet.name().as_str()],
         })
+        .chain(
+            source
+                .sheets()
+                .iter()
+                .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
+                .map(|sheet| sheet.name().as_str()),
+        )
         .map(case_insensitive_key)
         .collect::<BTreeSet<_>>();
     let sheets_changed = !changed_sheet_names.is_empty();

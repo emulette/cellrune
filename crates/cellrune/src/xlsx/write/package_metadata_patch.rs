@@ -27,6 +27,48 @@ pub(crate) fn remove_calculation_chain_relationship(
     workbook_part: &PartPath,
     limits: WriteLimits,
 ) -> Result<CalculationChainPatch, XlsxWriteError> {
+    let mut removed_parts = BTreeSet::new();
+    let relationship_bytes = filter_relationships(bytes, relationship_part, limits, |element| {
+        let Some(target) = calc_chain_target(element, relationship_part)? else {
+            return Ok(false);
+        };
+        let part = PartPath::resolve_relationship(Some(workbook_part), &target)
+            .map_err(|error| invalid_xml(relationship_part, error))?;
+        if !removed_parts.insert(part) {
+            return Err(invalid_generated(
+                relationship_part,
+                DETAIL_DUPLICATE_CALC_CHAIN_RELATIONSHIP,
+            ));
+        }
+        Ok(true)
+    })?;
+    Ok(CalculationChainPatch {
+        relationship_bytes,
+        removed_parts,
+    })
+}
+
+/// Removes the relationships whose `Id` is in `ids`.
+pub(crate) fn remove_relationships(
+    bytes: &[u8],
+    relationship_part: &PartPath,
+    ids: &BTreeSet<String>,
+    limits: WriteLimits,
+) -> Result<Vec<u8>, XlsxWriteError> {
+    let filtered = filter_relationships(bytes, relationship_part, limits, |element| {
+        Ok(ids.contains(&required_attribute(element, "Id", relationship_part)?))
+    })?;
+    Ok(filtered.unwrap_or_else(|| bytes.to_vec()))
+}
+
+/// Copies a relationship part without the top-level relationships `remove` selects, returning
+/// `None` when it selects none.
+fn filter_relationships(
+    bytes: &[u8],
+    relationship_part: &PartPath,
+    limits: WriteLimits,
+    mut remove: impl FnMut(&quick_xml::events::BytesStart<'_>) -> Result<bool, XlsxWriteError>,
+) -> Result<Option<Vec<u8>>, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, relationship_part)?;
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().check_end_names = true;
@@ -38,7 +80,7 @@ pub(crate) fn remove_calculation_chain_relationship(
     let mut depth = 0_u64;
     let mut root_depth = None;
     let mut skip_depth = None;
-    let mut removed_parts = BTreeSet::new();
+    let mut removed_any = false;
     let mut relationship_count = 0_u64;
 
     loop {
@@ -65,15 +107,8 @@ pub(crate) fn remove_calculation_chain_relationship(
                 {
                     relationship_count = relationship_count.saturating_add(1);
                     enforce_relationship_count(relationship_count, limits, relationship_part)?;
-                    if let Some(target) = calc_chain_target(&element, relationship_part)? {
-                        let part = PartPath::resolve_relationship(Some(workbook_part), &target)
-                            .map_err(|error| invalid_xml(relationship_part, error))?;
-                        if !removed_parts.insert(part) {
-                            return Err(invalid_generated(
-                                relationship_part,
-                                DETAIL_DUPLICATE_CALC_CHAIN_RELATIONSHIP,
-                            ));
-                        }
+                    if remove(&element)? {
+                        removed_any = true;
                         skip_depth = Some(depth);
                     } else {
                         write_event(
@@ -101,15 +136,8 @@ pub(crate) fn remove_calculation_chain_relationship(
                 {
                     relationship_count = relationship_count.saturating_add(1);
                     enforce_relationship_count(relationship_count, limits, relationship_part)?;
-                    if let Some(target) = calc_chain_target(&element, relationship_part)? {
-                        let part = PartPath::resolve_relationship(Some(workbook_part), &target)
-                            .map_err(|error| invalid_xml(relationship_part, error))?;
-                        if !removed_parts.insert(part) {
-                            return Err(invalid_generated(
-                                relationship_part,
-                                DETAIL_DUPLICATE_CALC_CHAIN_RELATIONSHIP,
-                            ));
-                        }
+                    if remove(&element)? {
+                        removed_any = true;
                     } else {
                         write_event(
                             &mut writer,
@@ -146,24 +174,21 @@ pub(crate) fn remove_calculation_chain_relationship(
         }
         buffer.clear();
     }
-    if removed_parts.is_empty() {
-        return Ok(CalculationChainPatch {
-            relationship_bytes: None,
-            removed_parts,
-        });
+    if !removed_any {
+        return Ok(None);
     }
     let output = writer.into_inner().into_inner();
     enforce_bytes(output.len(), limits, relationship_part)?;
-    Ok(CalculationChainPatch {
-        relationship_bytes: Some(output),
-        removed_parts,
-    })
+    Ok(Some(output))
 }
 
+/// Removes the content-type overrides of `removals`, each of which must have one, and of
+/// `optional_removals`, which may be typed by extension instead.
 pub(crate) fn remove_content_type_overrides(
     bytes: &[u8],
     content_types_part: &PartPath,
     removals: &BTreeSet<PartPath>,
+    optional_removals: &BTreeSet<PartPath>,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, content_types_part)?;
@@ -209,12 +234,11 @@ pub(crate) fn remove_content_type_overrides(
                     let part_name = required_attribute(&element, "PartName", content_types_part)?;
                     let part = PartPath::from_content_type_override(&part_name)
                         .map_err(|error| invalid_xml(content_types_part, error))?;
-                    if removals.contains(&part) {
+                    let removed = optional_removals.contains(&part) || removals.contains(&part);
+                    if removed {
                         found.insert(part);
-                        true
-                    } else {
-                        false
                     }
+                    removed
                 } else {
                     false
                 };

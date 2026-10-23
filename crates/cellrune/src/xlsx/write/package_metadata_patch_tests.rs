@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use super::{remove_calculation_chain_relationship, remove_content_type_overrides};
+use super::{
+    remove_calculation_chain_relationship, remove_content_type_overrides, remove_relationships,
+};
 use crate::xlsx::package::PartPath;
 use crate::{WriteLimits, XlsxWriteErrorCode};
 
@@ -76,9 +78,14 @@ fn content_type_count_accepts_the_exact_limit_and_rejects_one_less() {
     let exact = WriteLimits::default()
         .with_max_content_types(2)
         .expect("positive exact limit");
-    let output =
-        remove_content_type_overrides(content_types, &content_types_part, &removals, exact)
-            .expect("exact declaration count is valid");
+    let output = remove_content_type_overrides(
+        content_types,
+        &content_types_part,
+        &removals,
+        &BTreeSet::new(),
+        exact,
+    )
+    .expect("exact declaration count is valid");
     assert!(
         !String::from_utf8(output)
             .expect("UTF-8 XML")
@@ -88,7 +95,46 @@ fn content_type_count_accepts_the_exact_limit_and_rejects_one_less() {
     let below = WriteLimits::default()
         .with_max_content_types(1)
         .expect("positive lower limit");
-    let error = remove_content_type_overrides(content_types, &content_types_part, &removals, below)
-        .expect_err("declarations exceed lower limit");
+    let error = remove_content_type_overrides(
+        content_types,
+        &content_types_part,
+        &removals,
+        &BTreeSet::new(),
+        below,
+    )
+    .expect_err("declarations exceed lower limit");
     assert_eq!(error.code(), XlsxWriteErrorCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn relationships_are_removed_by_id_and_untyped_removals_are_optional() {
+    let relationships = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="worksheet" Target="worksheets/sheet2.xml"><extension/></Relationship></Relationships>"#;
+    let output = remove_relationships(
+        relationships,
+        &part(b"xl/_rels/workbook.xml.rels"),
+        &BTreeSet::from(["rId2".to_owned()]),
+        WriteLimits::default(),
+    )
+    .expect("relationships");
+    assert_eq!(
+        String::from_utf8(output).expect("UTF-8"),
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#
+    );
+
+    let content_types = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="rels"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="worksheet"/></Types>"#;
+    let output = remove_content_type_overrides(
+        content_types,
+        &part(b"[Content_Types].xml"),
+        &BTreeSet::new(),
+        &BTreeSet::from([
+            part(b"xl/worksheets/sheet2.xml"),
+            part(b"xl/worksheets/_rels/sheet2.xml.rels"),
+        ]),
+        WriteLimits::default(),
+    )
+    .expect("an extension-typed removal needs no override");
+    assert_eq!(
+        String::from_utf8(output).expect("UTF-8"),
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="rels"/></Types>"#
+    );
 }

@@ -56,7 +56,8 @@ fn affected_formulas_cover_every_formula_whose_syntax_reaches_an_edit() {
         for _ in 0..=next(3) {
             let (sheet_id, target) = targets[next(targets.len())];
             let target = address(target);
-            let change = match next(9) {
+            let change = match next(10) {
+                9 => WorkbookChange::delete_sheet([other, third][next(2)]),
                 0 => WorkbookChange::clear_cell(sheet_id, target),
                 1 => WorkbookChange::set_cell_formula(sheet_id, target, formula("A8+1")),
                 2 => WorkbookChange::set_defined_name(name(
@@ -197,6 +198,13 @@ fn reached_formulas(
             Some(original) => vec![key(original.name().as_str()), key(sheet.name().as_str())],
             None => vec![key(sheet.name().as_str())],
         })
+        .chain(
+            source
+                .sheets()
+                .iter()
+                .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
+                .map(|sheet| key(sheet.name().as_str())),
+        )
         .collect::<BTreeSet<_>>();
     let anything_changed =
         !changed_cells.is_empty() || !changed_names.is_empty() || !changed_sheets.is_empty();

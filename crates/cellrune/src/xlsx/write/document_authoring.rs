@@ -8,11 +8,12 @@ use super::package_additions::{
     NewRelationship, RelationshipIdAllocator, append_content_type_overrides, append_relationships,
 };
 use super::package_metadata_patch::{
-    remove_calculation_chain_relationship, remove_content_type_overrides,
+    remove_calculation_chain_relationship, remove_content_type_overrides, remove_relationships,
 };
 use super::phonetic_preservation::ensure_phonetic_edit_preservation;
 use super::serialization::validate_phonetic_limits;
-use super::sheet_reference_patch::rewrite_renamed_sheet_references;
+use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
+use super::sheet_reference_patch::rewrite_sheet_references;
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table_patch::patch_table_xml;
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
@@ -173,6 +174,7 @@ pub(super) fn write_document_package(
     let auto_filter_sheets = changed_auto_filter_sheets(draft, document);
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
+    let deletion = plan_sheet_deletion(document, draft.workbook(), &mut source_reader)?;
     let date_typed_literals =
         date_typed_literals_to_rewrite(draft, document, &mut source_reader, limits)?;
     let shared_strings_source = document
@@ -477,11 +479,12 @@ pub(super) fn write_document_package(
         }
         replacements.insert(sheet_source.part, bytes);
     }
-    rewrite_renamed_sheet_references(
+    rewrite_sheet_references(
         document,
         draft.workbook(),
         &mut source_reader,
         &mut replacements,
+        &deletion.removed_parts,
         limits,
     )?;
 
@@ -519,45 +522,65 @@ pub(super) fn write_document_package(
         || !draft.presentation_sheet_mutations().is_empty()
     {
         let workbook_bytes = source_reader.read_part(workbook_part)?;
-        replacements.insert(
-            workbook_part.clone(),
-            patch_workbook_semantics(
-                &workbook_bytes,
+        let mut patched = patch_workbook_semantics(
+            &workbook_bytes,
+            workbook_part,
+            document.workbook(),
+            draft.workbook(),
+            &added_relationship_ids,
+            WorkbookPatchOptions {
+                host_recalculation: plan.host_recalculation,
+                ensure_book_view: draft
+                    .workbook()
+                    .sheets()
+                    .iter()
+                    .any(|sheet| draft.presentation().frozen_pane(sheet.id()).is_some()),
+            },
+            limits,
+        )?;
+        if !deletion.pivot_cache_relationship_ids.is_empty() {
+            patched = remove_pivot_cache_entries(
+                &patched,
                 workbook_part,
-                document.workbook(),
-                draft.workbook(),
-                &added_relationship_ids,
-                WorkbookPatchOptions {
-                    host_recalculation: plan.host_recalculation,
-                    ensure_book_view: draft
-                        .workbook()
-                        .sheets()
-                        .iter()
-                        .any(|sheet| draft.presentation().frozen_pane(sheet.id()).is_some()),
-                },
+                &deletion.pivot_cache_relationship_ids,
                 limits,
-            )?,
-        );
+            )?;
+        }
+        replacements.insert(workbook_part.clone(), patched);
     }
 
-    let (removals, relationship_without_chain) = if plan.keep_calculation_chain {
+    let without_deleted = (!deletion.workbook_relationship_ids.is_empty())
+        .then(|| {
+            remove_relationships(
+                &relationship_bytes,
+                &relationship_part,
+                &deletion.workbook_relationship_ids,
+                limits,
+            )
+        })
+        .transpose()?;
+    let relationships = without_deleted.as_deref().unwrap_or(&relationship_bytes);
+    let (chain_removals, relationship_without_chain) = if plan.keep_calculation_chain {
         (BTreeSet::new(), None)
     } else {
         let chain = remove_calculation_chain_relationship(
-            &relationship_bytes,
+            relationships,
             &relationship_part,
             workbook_part,
             limits,
         )?;
         (chain.removed_parts, chain.relationship_bytes)
     };
-    if relationship_without_chain.is_some() || !new_relationships.is_empty() {
+    if without_deleted.is_some()
+        || relationship_without_chain.is_some()
+        || !new_relationships.is_empty()
+    {
         replacements.insert(
             relationship_part.clone(),
             append_relationships(
                 relationship_without_chain
                     .as_deref()
-                    .unwrap_or(&relationship_bytes),
+                    .unwrap_or(relationships),
                 &relationship_part,
                 &new_relationships,
                 limits,
@@ -565,25 +588,36 @@ pub(super) fn write_document_package(
         );
     }
 
-    if !removals.is_empty() || !new_content_types.is_empty() {
+    if !chain_removals.is_empty()
+        || !deletion.removed_parts.is_empty()
+        || !new_content_types.is_empty()
+    {
         let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
             .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
         let content_types = source_reader.read_part(&content_types_part)?;
-        let without_chain = if removals.is_empty() {
+        let without_removed = if chain_removals.is_empty() && deletion.removed_parts.is_empty() {
             content_types
         } else {
-            remove_content_type_overrides(&content_types, &content_types_part, &removals, limits)?
+            remove_content_type_overrides(
+                &content_types,
+                &content_types_part,
+                &chain_removals,
+                &deletion.removed_parts,
+                limits,
+            )?
         };
         replacements.insert(
             content_types_part.clone(),
             append_content_type_overrides(
-                &without_chain,
+                &without_removed,
                 &content_types_part,
                 &new_content_types,
                 limits,
             )?,
         );
     }
+    let mut removals = chain_removals;
+    removals.extend(deletion.removed_parts);
 
     drop(source_reader);
     let changed_parts = replacements
