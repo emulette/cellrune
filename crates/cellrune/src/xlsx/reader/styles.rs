@@ -210,11 +210,12 @@ fn process_element(
                 .with_detail(detail::DUPLICATE_NUMBER_FORMAT));
         }
     } else if local_name == FORMAT_RECORD && parent == Some(CELL_FORMATS) {
-        state.cell_format_ids.push(required_u32(
-            attributes.unqualified("numFmtId"),
-            "numFmtId",
-            budget,
-        )?);
+        // `numFmtId` is optional on `xf`; an absent one selects General.
+        let number_format_id = match attributes.unqualified("numFmtId") {
+            None => 0,
+            Some(value) => required_u32(Some(value), "numFmtId", budget)?,
+        };
+        state.cell_format_ids.push(number_format_id);
     }
     Ok(())
 }

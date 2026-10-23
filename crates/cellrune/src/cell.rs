@@ -147,6 +147,18 @@ pub enum ExcelError {
     Spill,
     /// `#CALC!`
     Calculation,
+    /// `#FIELD!`
+    Field,
+    /// `#BLOCKED!`
+    Blocked,
+    /// `#CONNECT!`
+    Connect,
+    /// `#BUSY!`
+    Busy,
+    /// `#UNKNOWN!`
+    Unknown,
+    /// `#PYTHON!`
+    Python,
 }
 
 impl ExcelError {
@@ -163,7 +175,37 @@ impl ExcelError {
             Self::GettingData => "#GETTING_DATA",
             Self::Spill => "#SPILL!",
             Self::Calculation => "#CALC!",
+            Self::Field => "#FIELD!",
+            Self::Blocked => "#BLOCKED!",
+            Self::Connect => "#CONNECT!",
+            Self::Busy => "#BUSY!",
+            Self::Unknown => "#UNKNOWN!",
+            Self::Python => "#PYTHON!",
         }
+    }
+
+    /// Returns the error spelled exactly `value`.
+    pub(crate) fn from_spelling(value: &str) -> Option<Self> {
+        [
+            Self::Null,
+            Self::DivisionByZero,
+            Self::Value,
+            Self::Reference,
+            Self::Name,
+            Self::Number,
+            Self::NotAvailable,
+            Self::GettingData,
+            Self::Spill,
+            Self::Calculation,
+            Self::Field,
+            Self::Blocked,
+            Self::Connect,
+            Self::Busy,
+            Self::Unknown,
+            Self::Python,
+        ]
+        .into_iter()
+        .find(|error| error.as_str() == value)
     }
 }
 

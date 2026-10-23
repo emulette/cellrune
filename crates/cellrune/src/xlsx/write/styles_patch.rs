@@ -678,7 +678,18 @@ fn template_number_format(template: &XfTemplate, source: &PartPath) -> Result<u3
         Some(Event::Start(element) | Event::Empty(element)) => element,
         _ => return Err(invalid_generated(source, DETAIL_BASE_STYLE)),
     };
-    required_u32_attribute(element, "numFmtId", source)
+    // `numFmtId` is optional on `xf`; an absent one selects General.
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        if attribute.key.as_ref() == "numFmtId" {
+            return attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|error| invalid_xml(source, error))?
+                .parse::<u32>()
+                .map_err(|error| invalid_xml(source, error));
+        }
+    }
+    Ok(0)
 }
 
 fn insert_custom_format(

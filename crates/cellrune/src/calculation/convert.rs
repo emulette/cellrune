@@ -22,7 +22,15 @@ fn error_from_cell(error: ExcelError) -> ErrorKind {
         ExcelError::NotAvailable => ErrorKind::NA,
         ExcelError::Spill => ErrorKind::Spill,
         ExcelError::Calculation => ErrorKind::Calc,
-        ExcelError::GettingData => ErrorKind::Unsupported,
+        // CellRune does not model how these errors behave in a formula, so a formula that reads
+        // one reports an unsupported capability instead of guessing a value.
+        ExcelError::GettingData
+        | ExcelError::Field
+        | ExcelError::Blocked
+        | ExcelError::Connect
+        | ExcelError::Busy
+        | ExcelError::Unknown
+        | ExcelError::Python => ErrorKind::Unsupported,
     }
 }
 

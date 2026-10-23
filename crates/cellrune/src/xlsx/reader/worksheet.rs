@@ -76,6 +76,34 @@ struct WorksheetParseState {
     auto_filter: SheetAutoFilterCollector,
     data_validations: DataValidationCollector,
     hyperlinks: HyperlinkCollector,
+    /// The last row a `<row>` or cell named, from which a row without the optional `r` follows.
+    last_row: u32,
+    /// The row of the open `<row>`: its `r`, else the row after `last_row`.
+    implied_row: u32,
+    /// The column of the open row's previous cell, from which a cell without `r` follows.
+    last_column: u32,
+}
+
+impl WorksheetParseState {
+    /// Starts a row whose `r`, when present, is `row_number`.
+    fn begin_row(&mut self, row_number: Option<u32>) {
+        self.implied_row = row_number.unwrap_or_else(|| self.last_row.saturating_add(1));
+        self.last_row = self.last_row.max(self.implied_row);
+        self.last_column = 0;
+    }
+
+    /// Returns the row number and the implied address of the next cell of the open row.
+    fn cell_position(&self) -> (Option<u32>, Option<CellAddress>) {
+        (
+            self.row_number,
+            CellAddress::from_indices(self.implied_row, self.last_column.saturating_add(1)).ok(),
+        )
+    }
+
+    fn record_cell(&mut self, address: CellAddress) {
+        self.last_column = address.column().get();
+        self.last_row = self.last_row.max(address.row().get());
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -336,6 +364,11 @@ pub(super) fn parse(
                         process_row_style(&attributes, capture, resources.styles, sheet);
                         process_row_hidden(&attributes, sheet);
                         process_row_height(&attributes, capture, sheet_id, presentation);
+                        state.begin_row(
+                            attributes
+                                .unqualified("r")
+                                .and_then(|value| value.parse::<u32>().ok()),
+                        );
                     } else if local_name == CELL
                         && state.row_depth.is_some_and(|row| depth == row + 1)
                     {
@@ -348,11 +381,12 @@ pub(super) fn parse(
                         let builder = CellBuilder::begin(
                             attributes,
                             depth,
-                            state.row_number,
+                            state.cell_position(),
                             capture,
                             resources.styles.font_count(),
                             &budget,
                         )?;
+                        state.record_cell(builder.address());
                         builder.finish(CellFinishContext {
                             resources,
                             shared_formulas: &mut state.shared_formulas,
@@ -618,6 +652,7 @@ fn process_start(
         {
             return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
         }
+        state.begin_row(state.row_number);
         if capture == PresentationCapture::Document
             && let Some(value) = attributes.unqualified("ph")
         {
@@ -642,21 +677,74 @@ fn process_start(
         if state.current_cell.is_some() {
             return Err(budget.error(XlsxErrorCode::InvalidWorksheet));
         }
-        state.current_cell = Some(CellBuilder::begin(
+        let builder = CellBuilder::begin(
             attributes,
             depth,
-            state.row_number,
+            state.cell_position(),
             capture,
             font_count,
             budget,
-        )?);
+        )?;
+        state.record_cell(builder.address());
+        state.current_cell = Some(builder);
     } else if let Some(cell) = &mut state.current_cell {
         cell.process_start(local_name, depth, attributes, budget)?;
     }
     Ok(())
 }
 
+/// Reads a `<sheetView>`. A view a document open cannot model is preserved with a diagnostic
+/// instead of failing the open, as a snapshot read already ignores it.
 fn process_sheet_view(
+    attributes: &XmlAttributes,
+    capture: PresentationCapture,
+    sheet_id: SheetId,
+    presentation: &mut DocumentPresentation,
+    budget: &XmlBudget,
+    state: &mut WorksheetParseState,
+) -> Result<(), XlsxReadError> {
+    match model_sheet_view(attributes, capture, sheet_id, presentation, budget, state) {
+        Err(error) if error.code() == XlsxErrorCode::InvalidFrozenPane => {
+            state.default_view_active = false;
+            push_invalid_pane_diagnostic(presentation, sheet_id, budget)
+        }
+        result => result,
+    }
+}
+
+/// Reads the default view's `<pane>`. A pane a document open cannot model is preserved with a
+/// diagnostic instead of failing the open, as a snapshot read already ignores it.
+fn process_pane(
+    attributes: &XmlAttributes,
+    capture: PresentationCapture,
+    sheet_id: SheetId,
+    presentation: &mut DocumentPresentation,
+    budget: &XmlBudget,
+    state: &mut WorksheetParseState,
+) -> Result<(), XlsxReadError> {
+    match model_pane(attributes, capture, sheet_id, presentation, budget, state) {
+        Err(error) if error.code() == XlsxErrorCode::InvalidFrozenPane => {
+            push_invalid_pane_diagnostic(presentation, sheet_id, budget)
+        }
+        result => result,
+    }
+}
+
+fn push_invalid_pane_diagnostic(
+    presentation: &mut DocumentPresentation,
+    sheet_id: SheetId,
+    budget: &XmlBudget,
+) -> Result<(), XlsxReadError> {
+    push_presentation_diagnostic(
+        presentation,
+        sheet_id,
+        budget,
+        super::super::error::compatibility::INVALID_PANE_CODE,
+        super::super::error::compatibility::INVALID_PANE_MESSAGE,
+    )
+}
+
+fn model_sheet_view(
     attributes: &XmlAttributes,
     capture: PresentationCapture,
     sheet_id: SheetId,
@@ -919,7 +1007,7 @@ fn source_style<'styles>(
         .map(|number_format| (index, number_format))
 }
 
-fn process_pane(
+fn model_pane(
     attributes: &XmlAttributes,
     capture: PresentationCapture,
     sheet_id: SheetId,

@@ -3,6 +3,7 @@ mod generated_workbook {
     mod annotation_read;
     mod array_follower_write;
     mod column_widening_write;
+    mod compatibility_relaxation;
     mod contract;
     mod data_validation_read;
     mod defined_name_write;

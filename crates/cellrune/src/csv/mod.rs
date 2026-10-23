@@ -49,21 +49,7 @@ fn unquoted_literal(field: &str) -> Option<crate::CellValue> {
     if field.eq_ignore_ascii_case("FALSE") {
         return Some(CellValue::Logical(false));
     }
-    [
-        ExcelError::Null,
-        ExcelError::DivisionByZero,
-        ExcelError::Value,
-        ExcelError::Reference,
-        ExcelError::Name,
-        ExcelError::Number,
-        ExcelError::NotAvailable,
-        ExcelError::GettingData,
-        ExcelError::Spill,
-        ExcelError::Calculation,
-    ]
-    .into_iter()
-    .find(|error| error.as_str() == field)
-    .map(CellValue::Error)
+    ExcelError::from_spelling(field).map(CellValue::Error)
 }
 
 /// Matches `[+-]? (digits [. digits?] | . digits) ([eE] [+-]? digits)?`.

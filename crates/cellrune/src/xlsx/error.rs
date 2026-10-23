@@ -58,6 +58,9 @@ pub(crate) mod compatibility {
     pub(crate) const PHONETIC_OVERLAP_CODE: &str = "xlsx.phonetic.overlap";
     pub(crate) const PHONETIC_OVERLAP_MESSAGE: &str =
         "phonetic runs overlap or are not in ascending order; source order was preserved";
+    pub(crate) const INVALID_PANE_CODE: &str = "xlsx.pane.invalid";
+    pub(crate) const INVALID_PANE_MESSAGE: &str =
+        "worksheet view or pane is malformed; it is preserved but not exposed as a frozen pane";
     pub(crate) const PRESERVED_PANE_CODE: &str = "xlsx.pane.preserved";
     pub(crate) const PRESERVED_PANE_MESSAGE: &str =
         "worksheet pane state is preserved but not exposed as a frozen pane";

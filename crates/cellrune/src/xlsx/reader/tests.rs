@@ -928,24 +928,33 @@ fn document_mode_accepts_explicit_zero_frozen_pane_splits() {
             (rows, columns)
         );
     }
-    let error = open_xlsx_document_bytes(
-        &build_archive(
-            &with_pane(r#"<pane xSplit="0" ySplit="0" state="frozen"/>"#),
-            SHARED_STRINGS,
-        ),
-        OpenOptions::default(),
-    )
-    .expect_err("a frozen pane needs a row or column");
-    assert_eq!(error.code(), XlsxErrorCode::InvalidFrozenPane);
-    let error = open_xlsx_document_bytes(
-        &build_archive(
-            &with_pane(r#"<pane xSplit="-1" ySplit="1" topLeftCell="A2" state="frozen"/>"#),
-            SHARED_STRINGS,
-        ),
-        OpenOptions::default(),
-    )
-    .expect_err("negative split");
-    assert_eq!(error.code(), XlsxErrorCode::InvalidFrozenPane);
+    for malformed in [
+        r#"<pane xSplit="0" ySplit="0" state="frozen"/>"#,
+        r#"<pane xSplit="-1" ySplit="1" topLeftCell="A2" state="frozen"/>"#,
+    ] {
+        let document = open_xlsx_document_bytes(
+            &build_archive(&with_pane(malformed), SHARED_STRINGS),
+            OpenOptions::default(),
+        )
+        .expect("a malformed pane opens unmodeled");
+        assert_unmodeled_pane(&document);
+    }
+}
+
+fn assert_unmodeled_pane(document: &crate::XlsxDocument) {
+    assert_eq!(
+        document
+            .presentation()
+            .frozen_pane(SheetId::new(1).expect("sheet")),
+        None
+    );
+    assert!(
+        document
+            .presentation()
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == "xlsx.pane.invalid")
+    );
 }
 
 #[test]
@@ -989,9 +998,9 @@ fn document_mode_captures_frozen_panes_while_snapshot_mode_ignores_them() {
     let malformed_archive = build_archive(&malformed, SHARED_STRINGS);
     read_xlsx_bytes(&malformed_archive, ReadOptions::default())
         .expect("snapshot ignores presentation-only inconsistency");
-    let error = open_xlsx_document_bytes(&malformed_archive, OpenOptions::default())
-        .expect_err("document validates panes");
-    assert_eq!(error.code(), XlsxErrorCode::InvalidFrozenPane);
+    let document = open_xlsx_document_bytes(&malformed_archive, OpenOptions::default())
+        .expect("a document open leaves an inconsistent pane unmodeled");
+    assert_unmodeled_pane(&document);
 }
 
 #[test]

@@ -55,19 +55,6 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
-- A dynamic reference whose position comes from another dynamic reference, such as an `OFFSET`
-  row read through a second `OFFSET`, calculates instead of reporting
-  `UnsupportedExpression`: a full calculation repeats while a pass reads a formula before
-  calculating it, ordering each pass by the references the previous pass resolved, for at most
-  eight passes.
-
-
-- Node.js `previewChangesPage` continues from the `nextCursor` it returned instead of failing with
-  `interop.preview.cursor_invalid`.
-- MCP rejects a workbook path that contains a `..` component with `mcp.path.invalid`. An input
-  such as `/outside/dir/../../root/book.xlsx` was matched to its root after folding `..` but opened
-  as spelled, so whether `/outside/dir` existed changed the result, and Save As already refused
-  such destinations with a misleading detail or `mcp.path.outside_root`.
 
 ## [0.1.26] - 2026-10-23
 

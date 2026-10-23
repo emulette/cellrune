@@ -56,25 +56,32 @@ pub(super) struct CellFinishContext<'resource, 'state> {
 }
 
 impl CellBuilder {
+    /// `implied` is the address a cell without the optional `r` takes: the position after the
+    /// previous cell of its row.
     pub(super) fn begin(
         attributes: XmlAttributes,
         depth: u64,
-        row_number: Option<u32>,
+        (row_number, implied): (Option<u32>, Option<CellAddress>),
         capture: PresentationCapture,
         font_count: u32,
         budget: &XmlBudget,
     ) -> Result<Self, XlsxReadError> {
-        let reference = attributes.unqualified("r").ok_or_else(|| {
-            budget
-                .error(XlsxErrorCode::InvalidCellReference)
-                .with_detail(format!("{} r", detail::MISSING_ATTRIBUTE))
-        })?;
-        let address = parse_cell_reference(reference, budget)?;
-        if row_number.is_some_and(|row| address.row().get() != row) {
-            return Err(budget
-                .error(XlsxErrorCode::InvalidCellReference)
-                .with_detail(reference.to_owned()));
-        }
+        let address = match attributes.unqualified("r") {
+            Some(reference) => {
+                let address = parse_cell_reference(reference, budget)?;
+                if row_number.is_some_and(|row| address.row().get() != row) {
+                    return Err(budget
+                        .error(XlsxErrorCode::InvalidCellReference)
+                        .with_detail(reference.to_owned()));
+                }
+                address
+            }
+            None => implied.ok_or_else(|| {
+                budget
+                    .error(XlsxErrorCode::InvalidCellReference)
+                    .with_detail(format!("{} r", detail::MISSING_ATTRIBUTE))
+            })?,
+        };
         let style_index = optional_usize(
             attributes.unqualified("s"),
             XlsxErrorCode::InvalidStyleIndex,
@@ -121,6 +128,10 @@ impl CellBuilder {
 
     pub(super) const fn depth(&self) -> u64 {
         self.depth
+    }
+
+    pub(super) const fn address(&self) -> CellAddress {
+        self.address
     }
 
     pub(super) fn process_start(

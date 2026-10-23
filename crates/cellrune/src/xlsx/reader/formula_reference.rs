@@ -3,7 +3,6 @@ use crate::{CellAddress, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FormulaShiftError {
     MalformedQuotedSection,
-    ReferenceOutOfBounds,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -344,15 +343,14 @@ fn write_axis(
     Ok(())
 }
 
+/// Shifts a relative coordinate, wrapping past the grid edge as Excel does when it copies a
+/// formula: column XFD plus one is column A.
 fn shifted(value: u32, delta: i64, absolute: bool, maximum: u32) -> Result<u32, FormulaShiftError> {
     if absolute {
         return Ok(value);
     }
-    let shifted = i64::from(value) + delta;
-    if !(1..=i64::from(maximum)).contains(&shifted) {
-        return Err(FormulaShiftError::ReferenceOutOfBounds);
-    }
-    u32::try_from(shifted).map_err(|_| FormulaShiftError::ReferenceOutOfBounds)
+    let wrapped = (i64::from(value) - 1 + delta).rem_euclid(i64::from(maximum)) + 1;
+    Ok(u32::try_from(wrapped).expect("a wrapped coordinate is within the grid"))
 }
 
 fn column_label(mut column: u32) -> String {
@@ -368,7 +366,7 @@ fn column_label(mut column: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{FormulaShiftError, shift_formula};
+    use super::shift_formula;
     use crate::CellAddress;
 
     #[test]
@@ -389,12 +387,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_relative_references_shifted_outside_excel_bounds() {
+    fn wraps_relative_references_shifted_past_the_grid_edge() {
         let anchor = CellAddress::from_indices(2, 2).expect("anchor");
         let follower = CellAddress::from_indices(1, 1).expect("follower");
         assert_eq!(
-            shift_formula("A1", anchor, follower),
-            Err(FormulaShiftError::ReferenceOutOfBounds)
+            shift_formula("A1", anchor, follower).expect("wrapped reference"),
+            "XFD1048576"
+        );
+        let first = CellAddress::from_indices(1, 1).expect("first");
+        let second = CellAddress::from_indices(1, 2).expect("second");
+        assert_eq!(
+            shift_formula("XFD1+SUM(XFD:XFD)", first, second).expect("wrapped reference"),
+            "A1+SUM(A:A)"
         );
         assert_eq!(
             shift_formula("$A$1", anchor, follower).expect("absolute reference"),

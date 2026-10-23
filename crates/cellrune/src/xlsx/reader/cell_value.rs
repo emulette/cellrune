@@ -283,21 +283,11 @@ fn fixed_digits(value: &str, width: usize) -> Option<u32> {
 }
 
 fn parse_error(value: &str, budget: &XmlBudget) -> Result<ExcelError, XlsxReadError> {
-    match value {
-        "#NULL!" => Ok(ExcelError::Null),
-        "#DIV/0!" => Ok(ExcelError::DivisionByZero),
-        "#VALUE!" => Ok(ExcelError::Value),
-        "#REF!" => Ok(ExcelError::Reference),
-        "#NAME?" => Ok(ExcelError::Name),
-        "#NUM!" => Ok(ExcelError::Number),
-        "#N/A" => Ok(ExcelError::NotAvailable),
-        "#GETTING_DATA" => Ok(ExcelError::GettingData),
-        "#SPILL!" => Ok(ExcelError::Spill),
-        "#CALC!" => Ok(ExcelError::Calculation),
-        _ => Err(budget
+    ExcelError::from_spelling(value).ok_or_else(|| {
+        budget
             .error(XlsxErrorCode::InvalidCellValue)
-            .with_detail(value.to_owned())),
-    }
+            .with_detail(value.to_owned())
+    })
 }
 
 fn invalid_reference(value: &str, budget: &XmlBudget) -> XlsxReadError {
