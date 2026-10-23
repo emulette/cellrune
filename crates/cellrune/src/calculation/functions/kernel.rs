@@ -490,6 +490,8 @@ function_enum!(FinancialFunction {
 });
 
 function_enum!(FinancialAdditionalFunction {
+    CumIpmt,
+    CumPrinc,
     DollarDe,
     DollarFr,
     Effect,
@@ -499,6 +501,7 @@ function_enum!(FinancialAdditionalFunction {
     Nominal,
     PDuration,
     Rri,
+    Vdb,
 });
 
 function_enum!(FixedIncomeFunction {

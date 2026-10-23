@@ -734,15 +734,16 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 467 official
+  `.is_official()`. The 0.1.27 catalog contains 470 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 468 accepted entries. The descriptor registry
+  dummy-function marker, for 471 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
 - The official names added in 0.1.27 are `SKEW`, `SKEW.P`, `KURT`,
   `FREQUENCY`, `MODE.MULT`, `CHISQ.TEST`, `CHITEST`, `CHISQ.INV`,
-  `CHISQ.INV.RT`, and `CHIINV`. `CHITEST` and `CHIINV` are legacy aliases of
+  `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, and `VDB`. `CHITEST` and
+  `CHIINV` are legacy aliases of
   `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
   `.returns_array()`; the others return scalars.
 - `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
@@ -775,6 +776,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   the length of a single row or column. Ranges with different numbers of values
   or a single value return `#N/A`. Equal counts in different shapes, values
   that are not numbers, and expected values that are not positive report
+  `calculation.unsupported_expression`.
+- `CUMIPMT` and `CUMPRINC(rate, nper, pv, start_period, end_period, type)`
+  total the interest or principal of the level payments from `start_period`
+  through `end_period` as negative amounts. A rate, `nper`, or `pv` that is
+  not positive, a start or end period below 1, a start after the end, an end
+  after `nper`, or a type other than 0 or 1 returns `#NUM!`. Fractional periods
+  and beginning-of-period payments (type 1) report
+  `calculation.unsupported_expression`.
+- `VDB(cost, salvage, life, start_period, end_period, [factor], [no_switch])`
+  totals the declining-balance depreciation (factor 2 when absent) of the
+  periods after `start_period` through `end_period`, never below salvage, and
+  unless `no_switch` is TRUE spreads the remaining depreciable amount evenly
+  over the remaining life from the first period in which that exceeds the
+  declining balance. Salvage above cost depreciates nothing. A negative cost,
+  salvage, or start, a life or factor that is not positive, or an end before the
+  start returns `#NUM!`; fractional periods and an end after the life report
   `calculation.unsupported_expression`.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in

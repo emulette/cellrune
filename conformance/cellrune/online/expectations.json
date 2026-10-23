@@ -2993,46 +2993,40 @@
     "excel_rich_error": false
   },
   "function:cumipmt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-917.99101493065655",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CUMIPMT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:cumipmt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CUMIPMT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:cumipmt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CUMIPMT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:cumprinc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-3611.1050596319687",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CUMPRINC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:cumprinc:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#NUM!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CUMPRINC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:cumprinc:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (CUMPRINC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:date": {
     "classification": "match",
@@ -8996,25 +8990,22 @@
     "excel_rich_error": false
   },
   "function:vdb": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2400",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:vdb:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:vdb:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (VDB) for this oracle case."
+    "excel_rich_error": false
   },
   "function:vlookup": {
     "classification": "match",

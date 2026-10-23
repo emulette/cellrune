@@ -1,7 +1,9 @@
 use super::super::ast::Expr;
+use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
-use super::financial::{financial_value, scalar_arguments};
+use super::array_common::poll_cancellation;
+use super::financial::{financial_value, payment, scalar_arguments};
 use super::kernel::FinancialAdditionalFunction;
 use super::util::{collect_argument_values, required_number};
 
@@ -21,7 +23,122 @@ pub(super) fn call(
         FinancialAdditionalFunction::IsPmt => ispmt(engine, context, args),
         FinancialAdditionalFunction::FvSchedule => fvschedule(engine, context, args),
         FinancialAdditionalFunction::Mirr => mirr(engine, context, args),
+        FinancialAdditionalFunction::CumIpmt => {
+            cumulative_payment(engine, context, args, PaymentPart::Interest)
+        }
+        FinancialAdditionalFunction::CumPrinc => {
+            cumulative_payment(engine, context, args, PaymentPart::Principal)
+        }
+        FinancialAdditionalFunction::Vdb => vdb(engine, context, args),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PaymentPart {
+    Interest,
+    Principal,
+}
+
+/// CUMIPMT and CUMPRINC(rate, nper, pv, start_period, end_period, type) total the interest or the
+/// principal of the level payments from `start_period` through `end_period`. With end-of-period
+/// payments the balance after k payments is pv·q^k + pmt·(q^k − 1)/rate with q = 1 + rate, so the
+/// principal is the change in that balance and the interest is the rest of the payments.
+///
+/// Microsoft documents the argument errors but not how fractional periods or beginning-of-period
+/// payments split interest from principal, so those calls are unsupported rather than guessed.
+fn cumulative_payment(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    part: PaymentPart,
+) -> Value {
+    let values = match scalar_arguments(engine, context, args, 6) {
+        Ok(values) => values,
+        Err(kind) => return Value::Error(kind),
+    };
+    let [rate, periods, present, start, end, payment_type] = values[..] else {
+        return Value::Error(ErrorKind::Value);
+    };
+    if rate <= 0.0
+        || periods <= 0.0
+        || present <= 0.0
+        || start < 1.0
+        || end < 1.0
+        || start > end
+        || end > periods
+        || (payment_type != 0.0 && payment_type != 1.0)
+    {
+        return Value::Error(ErrorKind::Num);
+    }
+    if start.fract() != 0.0 || end.fract() != 0.0 || payment_type == 1.0 {
+        return Value::Error(ErrorKind::Unsupported);
+    }
+    let level_payment = payment(rate, periods, present, 0.0, 0.0);
+    let balance = |paid: f64| {
+        let power = (1.0 + rate).powf(paid);
+        present * power + level_payment * (power - 1.0) / rate
+    };
+    let principal = balance(end) - balance(start - 1.0);
+    financial_value(match part {
+        PaymentPart::Principal => principal,
+        PaymentPart::Interest => (end - start + 1.0) * level_payment - principal,
+    })
+}
+
+/// VDB(cost, salvage, life, start_period, end_period, [factor], [no_switch]) totals the
+/// declining-balance depreciation of the periods after `start_period` through `end_period`. Each
+/// period depreciates the book value by factor/life without going below salvage, and unless
+/// `no_switch` is TRUE the remaining depreciable amount is spread evenly over the remaining life
+/// from the first period in which that straight line exceeds the declining balance.
+///
+/// Microsoft documents positive arguments and whole-period examples; fractional periods and an
+/// end period beyond the life are unsupported rather than guessed.
+fn vdb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    let [numbers @ .., no_switch] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let values = match scalar_arguments(engine, context, numbers, 6) {
+        Ok(values) => values,
+        Err(kind) => return Value::Error(kind),
+    };
+    let [cost, salvage, life, start, end, factor] = values[..] else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let no_switch = match to_logical(&engine.eval_scalar(context, no_switch)) {
+        Ok(value) => value,
+        Err(kind) => return Value::Error(kind),
+    };
+    if cost < 0.0 || salvage < 0.0 || life <= 0.0 || start < 0.0 || end < start || factor <= 0.0 {
+        return Value::Error(ErrorKind::Num);
+    }
+    if start.fract() != 0.0 || end.fract() != 0.0 || end > life {
+        return Value::Error(ErrorKind::Unsupported);
+    }
+    if let Err(kind) = engine.charge_function_iterations(context, end as u64) {
+        return Value::Error(kind);
+    }
+    let rate = factor / life;
+    let mut book = cost;
+    let mut straight_line = None;
+    let mut total = 0.0;
+    for period in 1..=end as u64 {
+        if let Err(kind) = poll_cancellation(context) {
+            return Value::Error(kind);
+        }
+        let declining = (book * rate).min(book - salvage).max(0.0);
+        if !no_switch && straight_line.is_none() {
+            let even = (book - salvage) / (life - (period - 1) as f64);
+            if even > declining {
+                straight_line = Some(even);
+            }
+        }
+        let depreciation = straight_line.unwrap_or(declining);
+        if period as f64 > start {
+            total += depreciation;
+        }
+        book -= depreciation;
+    }
+    financial_value(total)
 }
 
 fn dollar_fraction(

@@ -1859,6 +1859,15 @@ const FIXED_INCOME_ACCRINTM_DEFAULTS: &[ArgumentDefault] = &[
     ),
 ];
 
+const VDB_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(5, DefaultTrigger::Absent, ArgumentDefaultValue::Number(2.0)),
+    ArgumentDefault::new(
+        6,
+        DefaultTrigger::Absent,
+        ArgumentDefaultValue::Logical(false),
+    ),
+];
+
 impl FinancialAdditionalFunction {
     const fn call_contract(self) -> CallContract {
         match self {
@@ -1869,6 +1878,12 @@ impl FinancialAdditionalFunction {
             Self::Rri | Self::PDuration => CallContract::uniform(Arity::exact(3), SCALAR),
             Self::Mirr => CallContract::positional(Arity::exact(3), &[ARRAY, SCALAR, SCALAR]),
             Self::IsPmt => CallContract::uniform(Arity::exact(4), SCALAR),
+            Self::CumIpmt | Self::CumPrinc => CallContract::uniform(Arity::exact(6), SCALAR),
+            Self::Vdb => CallContract::positional(
+                Arity::range(5, 7),
+                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, SCALAR],
+            )
+            .with_defaults(VDB_DEFAULTS),
         }
     }
 }

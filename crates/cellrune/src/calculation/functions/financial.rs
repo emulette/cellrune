@@ -511,7 +511,13 @@ fn ddb(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     financial_value((book * rate).min(book - salvage).max(0.0))
 }
 
-fn payment(rate: f64, periods: f64, present: f64, future: f64, payment_type: f64) -> f64 {
+pub(super) fn payment(
+    rate: f64,
+    periods: f64,
+    present: f64,
+    future: f64,
+    payment_type: f64,
+) -> f64 {
     if rate == 0.0 {
         -(present + future) / periods
     } else {

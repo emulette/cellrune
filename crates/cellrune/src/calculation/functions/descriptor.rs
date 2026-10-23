@@ -1163,6 +1163,11 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Nominal, "NOMINAL", FinancialAdditional),
     function!(PDuration, "PDURATION", FinancialAdditional),
     function!(Rri, "RRI", FinancialAdditional),
+    function!(CumIpmt, "CUMIPMT", FinancialAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(CumPrinc, "CUMPRINC", FinancialAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(Vdb, "VDB", FinancialAdditional).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Accrint, "ACCRINT", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(Accrintm, "ACCRINTM", FixedIncome)
         .with_minimum_version(CompatibilityVersion::V0_1_15),
@@ -1762,6 +1767,30 @@ mod tests {
             assert!(!descriptor.call_contract().arity().accepts(3), "{name}");
             assert!(!descriptor.catalog_returns_array(), "{name}");
         }
+
+        for name in ["CUMIPMT", "CUMPRINC", "VDB"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_27,
+                "{name}",
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::FinancialAdditional(_)),
+                "{name}"
+            );
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
+        for name in ["CUMIPMT", "CUMPRINC"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert!(descriptor.call_contract().arity().accepts(6), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(5), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(7), "{name}");
+        }
+        let vdb = descriptor("VDB").expect("VDB descriptor");
+        assert!((5..=7).all(|arity| vdb.call_contract().arity().accepts(arity)));
+        assert!(!vdb.call_contract().arity().accepts(4));
+        assert!(!vdb.call_contract().arity().accepts(8));
     }
 
     #[test]

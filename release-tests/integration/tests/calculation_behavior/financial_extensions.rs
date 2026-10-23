@@ -100,6 +100,129 @@ fn xnpv_discounting_respects_work_limits() {
     assert_issue(&result, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
 
+#[test]
+fn cumulative_payments_split_level_payments_into_interest_and_principal() {
+    for (formula, expected, tolerance) in [
+        // Microsoft's examples publish -11135.23213, -937.5, -934.1071234, and -68.27827118.
+        ("CUMIPMT(0.09/12,360,125000,13,24,0)", -11_135.232_13, 1e-5),
+        ("CUMIPMT(0.09/12,360,125000,1,1,0)", -937.5, 1e-9),
+        ("CUMPRINC(0.09/12,360,125000,13,24,0)", -934.107_123_4, 1e-6),
+        ("CUMPRINC(0.09/12,360,125000,1,1,0)", -68.278_271_18, 1e-7),
+        // The Oracle records -917.99101493065655 and -3611.1050596319687.
+        (
+            "CUMIPMT(0.05/12,60,20000,1,12,0)",
+            -917.991_014_930_656_6,
+            1e-9,
+        ),
+        (
+            "CUMPRINC(0.05/12,60,20000,1,12,0)",
+            -3_611.105_059_631_968_7,
+            1e-9,
+        ),
+        // The whole loan repays the principal.
+        ("CUMPRINC(0.1,3,1000,1,3,0)", -1_000.0, 1e-9),
+        (
+            "CUMIPMT(\"0.1\",3,1000,1,3,0)",
+            -206.344_410_876_131_86,
+            1e-9,
+        ),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula)]);
+        assert!(scan_formula_capabilities(&workbook).is_supported());
+        assert_number(
+            &calculate_workbook(&workbook, CalculationOptions::default()),
+            1,
+            expected,
+            tolerance,
+        );
+    }
+    for formula in [
+        "CUMIPMT(0,12,1000,1,2,0)",
+        "CUMIPMT(0.1,0,1000,1,1,0)",
+        "CUMIPMT(0.1,12,-1000,1,2,0)",
+        "CUMIPMT(0.1,12,1000,0,2,0)",
+        "CUMIPMT(0.1,12,1000,3,2,0)",
+        "CUMIPMT(0.1,2,1000,1,12,0)",
+        "CUMPRINC(0.1,12,1000,1,2,2)",
+        "CUMPRINC(0.1,12,1000,1,2,0.5)",
+    ] {
+        assert_error(formula, ExcelError::Number);
+    }
+    assert_error("CUMPRINC(0.1,\"x\",1000,1,2,0)", ExcelError::Value);
+    for formula in [
+        "CUMIPMT(0.1,12,1000,1,2,1)",
+        "CUMPRINC(0.1,12,1000,1.5,2,0)",
+        "CUMPRINC(0.1,12,1000,1,2.5,0)",
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+}
+
+#[test]
+fn vdb_switches_to_straight_line_when_it_exceeds_the_declining_balance() {
+    for (formula, expected) in [
+        // Microsoft's examples publish $1.32, $40.00, $480.00, $396.31, and $311.81.
+        ("VDB(2400,300,3650,0,1)", 1.315_068_493_150_684_9),
+        ("VDB(2400,300,120,0,1)", 40.0),
+        ("VDB(2400,300,10,0,1)", 480.0),
+        ("VDB(2400,300,120,6,18)", 396.306_053_264_751_9),
+        ("VDB(2400,300,120,6,18,1.5)", 311.808_936_658_233_1),
+        // The Oracle records 2400 and, for salvage above cost, 0.
+        ("VDB(10000,1000,5,1,2,2,FALSE)", 2_400.0),
+        ("VDB(\"2\",1000,5,1,2,2,FALSE)", 0.0),
+        // Double declining balance leaves 2160 after three years; spreading it over the last two
+        // years (1080 each) beats the 864 the declining balance would take in year four.
+        ("VDB(10000,0,5,3,4)", 1_080.0),
+        ("VDB(10000,0,5,3,5)", 2_160.0),
+        ("VDB(10000,0,5,3,4,2,TRUE)", 864.0),
+        ("VDB(10000,0,5,3,5,2,TRUE)", 1_382.4),
+        // With a salvage of 1000 the straight line never overtakes the declining balance.
+        ("VDB(10000,1000,5,3,5)", 1_160.0),
+        ("VDB(2400,300,10,0,10)", 2_100.0),
+        ("VDB(2400,300,10,4,4)", 0.0),
+    ] {
+        let workbook = workbook_with_formulas(&[(1, 1, formula)]);
+        assert!(scan_formula_capabilities(&workbook).is_supported());
+        assert_number(
+            &calculate_workbook(&workbook, CalculationOptions::default()),
+            1,
+            expected,
+            1e-9,
+        );
+    }
+    for formula in [
+        "VDB(-1,0,5,0,1)",
+        "VDB(100,-1,5,0,1)",
+        "VDB(100,0,0,0,1)",
+        "VDB(100,0,5,-1,1)",
+        "VDB(100,0,5,2,1)",
+        "VDB(100,0,5,0,1,0)",
+    ] {
+        assert_error(formula, ExcelError::Number);
+    }
+    assert_error("VDB(100,0,5,0,1,2,\"maybe\")", ExcelError::Value);
+    for formula in ["VDB(2400,300,10,0,0.875,1.5)", "VDB(100,0,5,0,6)"] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+    let result = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "VDB(100,0,1000,0,1000)")]),
+        CalculationOptions::default().with_limits(
+            CalculationLimits::default()
+                .with_max_function_iterations(999)
+                .unwrap(),
+        ),
+    );
+    assert_issue(&result, 1, CalculationIssueCode::ResourceLimitExceeded);
+}
+
 fn assert_error(formula: &str, expected: ExcelError) {
     let result = calculate_workbook(
         &workbook_with_formulas(&[(1, 1, formula)]),
