@@ -65,6 +65,12 @@ pub enum WorkbookChange {
         /// New unique sheet name.
         name: SheetName,
     },
+    /// Deletes a sheet, the names scoped to it, and its tables, turning references to them in the
+    /// remaining formulas and names into `#REF!` while retaining at least one visible sheet.
+    DeleteSheet {
+        /// Target sheet.
+        sheet_id: SheetId,
+    },
     /// Changes sheet visibility while retaining at least one visible sheet.
     SetSheetVisibility {
         /// Target sheet.
@@ -208,6 +214,11 @@ impl WorkbookChange {
     /// Constructs a sheet rename.
     pub const fn rename_sheet(sheet_id: SheetId, name: SheetName) -> Self {
         Self::RenameSheet { sheet_id, name }
+    }
+
+    /// Constructs a sheet deletion.
+    pub const fn delete_sheet(sheet_id: SheetId) -> Self {
+        Self::DeleteSheet { sheet_id }
     }
 
     /// Constructs a sheet-visibility change.

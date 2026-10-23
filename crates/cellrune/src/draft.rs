@@ -86,6 +86,19 @@ impl DraftCellMutationStore {
         self.iter().map(|(id, _)| id)
     }
 
+    /// Drops every mutation recorded for one sheet.
+    pub(crate) fn remove_sheet(&mut self, sheet_id: SheetId) {
+        let chunks = self
+            .chunks
+            .range((sheet_id, 0)..=(sheet_id, u32::MAX))
+            .map(|(key, chunk)| (*key, chunk.len()))
+            .collect::<Vec<_>>();
+        for (key, len) in chunks {
+            self.chunks.remove(&key);
+            self.len -= len;
+        }
+    }
+
     pub(crate) fn sheet_keys(&self, sheet_id: SheetId) -> impl Iterator<Item = &CalculationCellId> {
         self.chunks
             .range((sheet_id, 0)..=(sheet_id, u32::MAX))

@@ -7,6 +7,7 @@ use super::super::{
 use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
+use super::sheet_delete::delete_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
 use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
@@ -69,8 +70,9 @@ impl WorkbookDraft {
 
         rewrite_budget.check_cancelled()?;
         let mut sheets = clone_sheets(self.workbook.sheets(), rewrite_budget)?;
-        let table_locations = table_locations(&sheets)?;
-        let table_formula_locations = table_formula_locations(&sheets, rewrite_budget)?;
+        let mut non_worksheet_tabs = self.workbook.non_worksheet_tabs().clone();
+        let mut table_locations = table_locations(&sheets)?;
+        let mut table_formula_locations = table_formula_locations(&sheets, rewrite_budget)?;
         let mut defined_names = clone_slice(self.workbook.defined_names(), rewrite_budget)?;
         let mut date_system = self.workbook.date_system();
         let mut calculation_hints = self.workbook.calculation_hints();
@@ -85,8 +87,10 @@ impl WorkbookDraft {
             .map_err(|()| FormulaRewriteError::Cancelled)?;
         let mut presentation_cell_mutations =
             clone_set(&self.presentation_cell_mutations, rewrite_budget)?;
+        let mut presentation_sheet_mutations =
+            clone_set(&self.presentation_sheet_mutations, rewrite_budget)?;
         let mut added_sheets = clone_set(&self.added_sheets, rewrite_budget)?;
-        let previous_changed_table_ids = clone_set(&self.changed_table_ids, rewrite_budget)?;
+        let mut previous_changed_table_ids = clone_set(&self.changed_table_ids, rewrite_budget)?;
         let mut changed_table_ids = BTreeSet::new();
         let mut workbook_changed = self.workbook_changed;
         let mut changed_cells = BTreeSet::new();
@@ -344,12 +348,8 @@ impl WorkbookDraft {
                     let maximum = sheets
                         .iter()
                         .map(Sheet::id)
-                        .chain(
-                            self.workbook
-                                .non_worksheet_tabs()
-                                .iter()
-                                .map(|tab| tab.id()),
-                        )
+                        .chain(non_worksheet_tabs.iter().map(|tab| tab.id()))
+                        .chain(self.workbook.highest_sheet_id())
                         .map(SheetId::get)
                         .max()
                         .unwrap_or(0);
@@ -388,6 +388,46 @@ impl WorkbookDraft {
                         topology_changed = true;
                         semantic_changed = true;
                     }
+                }
+                WorkbookChange::DeleteSheet { sheet_id } => {
+                    let removed = delete_sheet(
+                        &mut sheets,
+                        &mut defined_names,
+                        &mut non_worksheet_tabs,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *sheet_id,
+                    )?;
+                    // Nothing the draft recorded for the sheet outlives it: its cells, tables, and
+                    // presentation are gone, and the writer drops its package parts.
+                    let elsewhere = |cell: &CalculationCellId| cell.sheet_id() != *sheet_id;
+                    cell_mutations.remove_sheet(*sheet_id);
+                    changed_cells.retain(elsewhere);
+                    calculation_changed_cells.retain(elsewhere);
+                    presentation_cell_mutations.retain(elsewhere);
+                    presentation.remove_sheet(*sheet_id);
+                    presentation_sheet_mutations.remove(sheet_id);
+                    touched_sheets.remove(sheet_id);
+                    added_sheets.remove(sheet_id);
+                    for table in removed.tables() {
+                        changed_table_ids.remove(&table.id());
+                        previous_changed_table_ids.remove(&table.id());
+                    }
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
                 }
                 WorkbookChange::SetSheetVisibility {
                     sheet_id,
@@ -589,7 +629,7 @@ impl WorkbookDraft {
         let workbook = WorkbookSnapshot::new_with_metadata_cancellable_from_previous(
             WorkbookSnapshotInput {
                 sheets,
-                non_worksheet_tabs: self.workbook.non_worksheet_tabs().clone(),
+                non_worksheet_tabs,
                 defined_names,
                 diagnostics,
                 date_system,
@@ -613,6 +653,7 @@ impl WorkbookDraft {
         self.cell_mutations = cell_mutations;
         self.presentation = presentation;
         self.presentation_cell_mutations = presentation_cell_mutations;
+        self.presentation_sheet_mutations = presentation_sheet_mutations;
         self.added_sheets = added_sheets;
         self.changed_table_ids = previous_changed_table_ids
             .union(&changed_table_ids)

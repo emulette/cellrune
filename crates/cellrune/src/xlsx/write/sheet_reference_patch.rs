@@ -15,7 +15,7 @@ use super::serialization::{escape_attribute, escape_text};
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits, FormulaRewriteRequest,
-    rewrite_formula,
+    SheetChanges, rewrite_formula,
 };
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{
@@ -135,7 +135,12 @@ fn patch_sheet_references(
 ) -> Result<Option<Vec<u8>>, XlsxWriteError> {
     let never_cancelled = || false;
     let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
-    let request = FormulaRewriteRequest::Sheets(renames);
+    let request = FormulaRewriteRequest::Sheets(SheetChanges {
+        renames,
+        deleted: &[],
+        tabs: &[],
+        deleted_tables: &[],
+    });
     let mut xml = configured_reader(bytes, limits);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buffer = Vec::new();

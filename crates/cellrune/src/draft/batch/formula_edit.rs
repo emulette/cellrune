@@ -4,7 +4,7 @@ use super::super::DraftCellMutationStore;
 use super::BatchExecutionError;
 use super::staged::{mark_upsert, sheet_by_id_mut};
 use crate::calculation::formula_rewrite::{
-    FormulaRewriteBudget, FormulaRewriteRequest, rewrite_formula,
+    FormulaRewriteBudget, FormulaRewriteRequest, SheetChanges, rewrite_formula,
 };
 use crate::{
     CalculationCellId, CellAddress, CellContent, DefinedName, FormulaCell, FormulaText, Sheet,
@@ -85,6 +85,7 @@ pub(super) enum WorkbookFormulaRename<'a> {
         old_name: &'a str,
         new_name: &'a str,
     },
+    SheetDeletion(SheetChanges<'a>),
     Table {
         old_name: &'a str,
         new_name: &'a str,
@@ -117,7 +118,9 @@ pub(super) fn rewrite_workbook_formulas(
             target_range,
             ..
         } => Some((target_sheet_index, target_range)),
-        WorkbookFormulaRename::Sheet { .. } | WorkbookFormulaRename::Table { .. } => None,
+        WorkbookFormulaRename::Sheet { .. }
+        | WorkbookFormulaRename::SheetDeletion(_)
+        | WorkbookFormulaRename::Table { .. } => None,
     };
     let mut changed = false;
     for (sheet_index, sheet) in sheets.iter_mut().enumerate() {
@@ -192,7 +195,9 @@ pub(super) fn rewrite_workbook_formulas(
         let current_table_id = table.id();
         let owner_is_target_table = match rename {
             WorkbookFormulaRename::TableColumn { table_id, .. } => current_table_id == table_id,
-            WorkbookFormulaRename::Sheet { .. } | WorkbookFormulaRename::Table { .. } => false,
+            WorkbookFormulaRename::Sheet { .. }
+            | WorkbookFormulaRename::SheetDeletion(_)
+            | WorkbookFormulaRename::Table { .. } => false,
         };
         let column = &mut table.columns_mut()[column_index];
         let table_id = current_table_id.get();
@@ -241,6 +246,7 @@ fn request_for<'a>(
         WorkbookFormulaRename::Sheet { old_name, new_name } => {
             FormulaRewriteRequest::Sheet { old_name, new_name }
         }
+        WorkbookFormulaRename::SheetDeletion(changes) => FormulaRewriteRequest::Sheets(*changes),
         WorkbookFormulaRename::Table { old_name, new_name } => {
             FormulaRewriteRequest::Table { old_name, new_name }
         }

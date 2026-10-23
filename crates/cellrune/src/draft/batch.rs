@@ -2,6 +2,7 @@ mod change;
 mod executor;
 mod formula_edit;
 mod receipt;
+mod sheet_delete;
 mod staged;
 mod table_edit;
 mod widen_edit;

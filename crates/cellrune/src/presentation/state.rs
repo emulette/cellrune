@@ -545,6 +545,11 @@ impl DocumentPresentation {
         Ok(true)
     }
 
+    /// Drops the presentation of a deleted sheet.
+    pub(crate) fn remove_sheet(&mut self, sheet_id: SheetId) {
+        self.sheets.remove(&sheet_id);
+    }
+
     pub(crate) fn semantics_match(&self, other: &Self) -> bool {
         self.sheets == other.sheets
     }

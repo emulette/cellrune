@@ -961,6 +961,8 @@ pub struct WorkbookSnapshot {
     sheet_id_index: BTreeMap<SheetId, usize>,
     sheet_name_index: BTreeMap<Box<str>, usize>,
     non_worksheet_tabs: NonWorksheetTabs,
+    /// The highest sheet ID this workbook has used, deleted sheets included.
+    highest_sheet_id: u32,
     table_index: TableIndex,
     defined_names: Vec<DefinedName>,
     defined_name_index: BTreeMap<DefinedNameScope, BTreeMap<Box<str>, usize>>,
@@ -1036,6 +1038,7 @@ impl WorkbookSnapshot {
             sheet_id_index: clone_map_cancellable(&self.sheet_id_index, cancelled)?,
             sheet_name_index: clone_map_cancellable(&self.sheet_name_index, cancelled)?,
             non_worksheet_tabs: self.non_worksheet_tabs.clone(),
+            highest_sheet_id: self.highest_sheet_id,
             table_index: self.table_index.clone_cancellable(cancelled)?,
             defined_names,
             defined_name_index,
@@ -1070,6 +1073,7 @@ impl WorkbookSnapshot {
             sheet_id_index,
             sheet_name_index,
             non_worksheet_tabs: NonWorksheetTabs::default(),
+            highest_sheet_id: sheet_id.get(),
             table_index: TableIndex::default(),
             defined_names: Vec::new(),
             defined_name_index: BTreeMap::new(),
@@ -1226,6 +1230,14 @@ impl WorkbookSnapshot {
                 .into());
             }
         }
+        // A deleted sheet's ID stays taken, so the previous workbook's highest ID carries over.
+        let highest_sheet_id = sheet_id_index
+            .keys()
+            .chain(tab_ids.iter())
+            .map(|id| id.get())
+            .chain(identity_base.map(|(previous, _)| previous.highest_sheet_id))
+            .max()
+            .unwrap_or(0);
         let mut defined_name_index = BTreeMap::<DefinedNameScope, BTreeMap<Box<str>, usize>>::new();
         let mut defined_name_keys = std::collections::BTreeSet::<Box<str>>::new();
         for (index, defined_name) in defined_names.iter().enumerate() {
@@ -1288,6 +1300,7 @@ impl WorkbookSnapshot {
             sheet_id_index,
             sheet_name_index,
             non_worksheet_tabs,
+            highest_sheet_id,
             table_index,
             defined_names,
             defined_name_index,
@@ -1436,6 +1449,14 @@ impl WorkbookSnapshot {
     /// worksheet and tab ID.
     pub fn non_worksheet_tab_ids(&self) -> impl ExactSizeIterator<Item = SheetId> {
         self.non_worksheet_tabs.iter().map(NonWorksheetTab::id)
+    }
+
+    /// Returns the highest sheet ID the workbook has used, counting tabs that are not worksheets
+    /// and deleted sheets, or `None` for a workbook without tabs.
+    ///
+    /// A deleted sheet's ID is never reused: an added sheet receives an ID above this one.
+    pub fn highest_sheet_id(&self) -> Option<SheetId> {
+        NonZeroU32::new(self.highest_sheet_id).map(SheetId)
     }
 
     /// Returns the number of workbook tabs, counting tabs that are not worksheets.

@@ -137,6 +137,21 @@ impl WorkbookDraft {
         Ok(())
     }
 
+    /// Deletes a sheet with the names scoped to it and its tables.
+    ///
+    /// References to the sheet or its tables in the remaining formulas and defined names become
+    /// `#REF!`, and a 3-D reference whose end sheet is deleted moves that end to the nearest
+    /// remaining sheet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::UnknownSheetId`], [`ValidationError::LastVisibleSheet`], or
+    /// [`ValidationError::SemanticRevisionExhausted`].
+    pub fn delete_sheet(&mut self, sheet_id: SheetId) -> Result<(), ValidationError> {
+        self.apply_changes(EditBatch::new([WorkbookChange::delete_sheet(sheet_id)]))?;
+        Ok(())
+    }
+
     /// Changes sheet visibility while retaining at least one visible sheet.
     ///
     /// # Errors
