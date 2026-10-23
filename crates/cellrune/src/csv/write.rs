@@ -6,6 +6,9 @@ use crate::{
     CellValue, SheetId, WorkbookSnapshot,
 };
 
+/// U+FEFF, which reading skips at the start of the input as a byte-order mark.
+const BYTE_ORDER_MARK: char = '\u{feff}';
+
 /// Options for writing one sheet as CSV.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CsvWriteOptions {
@@ -124,7 +127,9 @@ fn push_value(output: &mut String, value: &CellValue, delimiter: char) {
         CellValue::Logical(false) => output.push_str("FALSE"),
         CellValue::Error(error) => output.push_str(error.as_str()),
         CellValue::Text(text) => {
+            // A leading U+FEFF at the start of the output would read back as a byte-order mark.
             let quote = text.is_empty()
+                || text.starts_with(BYTE_ORDER_MARK)
                 || text.contains([delimiter, '"', '\r', '\n'])
                 || unquoted_literal(text).is_some();
             if quote {

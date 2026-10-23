@@ -8,7 +8,8 @@
 //! when it is `TRUE` or `FALSE` in any letter case; an error when it is exactly an Excel error such
 //! as `#N/A`; and text otherwise, with no date or locale parsing.
 //!
-//! Writing quotes a text field when it would read back as anything but the same text. Numbers use
+//! Writing quotes a text field when it would read back as anything but the same text, including
+//! text that starts with U+FEFF, which would otherwise read back as a byte-order mark. Numbers use
 //! the shortest decimal that reads back to the same value, logicals are `TRUE`/`FALSE`, errors their
 //! Excel spelling, and formulas their calculated value. Every row from row 1 through the last used
 //! row is written with every column from column A through the last used column, so cell addresses

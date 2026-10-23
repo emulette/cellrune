@@ -103,7 +103,9 @@ fn rejects_malformed_input_with_stable_codes() {
 #[test]
 fn accepts_only_delimiters_that_never_split_an_unquoted_value() {
     // Each of these occurs in a number, logical, or error the writer leaves unquoted.
-    for delimiter in ['.', '-', '+', 'E', 'e', 'T', '1', '#', '/', '!', '?', '_', 'x'] {
+    for delimiter in [
+        '.', '-', '+', 'E', 'e', 'T', '1', '#', '/', '!', '?', '_', 'x',
+    ] {
         assert_eq!(
             CsvReadOptions::new()
                 .with_delimiter(delimiter)
@@ -263,4 +265,35 @@ fn writes_calculated_values_that_read_back_unchanged() {
         .code(),
         CsvErrorCode::UnknownSheet
     );
+}
+
+#[test]
+fn text_that_starts_with_a_byte_order_mark_keeps_it() {
+    let sheet = SheetId::new(1).expect("sheet");
+    let mut draft = WorkbookDraft::new();
+    draft
+        .apply_changes(EditBatch::new(["A1", "B1"].map(|address| {
+            WorkbookChange::set_cell_value(
+                sheet,
+                CellAddress::from_a1(address).expect("a1"),
+                CellValue::Text("\u{feff}mark".to_owned()),
+            )
+        })))
+        .expect("values");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let bytes = write_csv(
+        draft.workbook(),
+        &calculation,
+        sheet,
+        CsvWriteOptions::default(),
+    )
+    .expect("write");
+    assert_eq!(
+        String::from_utf8(bytes.clone()).expect("utf8"),
+        "\"\u{feff}mark\",\"\u{feff}mark\"\r\n"
+    );
+    let reread = read_csv(&bytes, &CsvReadOptions::default()).expect("reread");
+    for address in ["A1", "B1"] {
+        assert_eq!(literal(&reread, address), text("\u{feff}mark"), "{address}");
+    }
 }
