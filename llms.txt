@@ -729,6 +729,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   `rename_table(TableId, TableName)`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
   `resize_table_rows(TableId, first_data_row, last_data_row)`,
+  `convert_table_to_range(TableId)`,
   `widen_table_columns(TableId, CellRange)`, and
   `widen_sheet_auto_filter(SheetId, CellRange)`. A widening keeps the row
   span, contains the old range, keeps filter and sort state, shifts filter
@@ -809,6 +810,21 @@ than guessing a name from a different XLSX crate (`calamine`,
   `DuplicateDefinedName`, and a new name the other scope already uses,
   which would take over uses, with `validation.defined_name_rename_shadowed`.
   The receipt reports a topology change.
+- `convert_table_to_range(TableId)` converts a table to a plain range, as
+  Excel's Convert to Range does: the table and its filter leave the sheet,
+  its cells keep their values and formulas, and every structured reference
+  to it in cell formulas, defined names, and table formulas becomes the
+  sheet-qualified absolute reference to the cells it names, as Excel 16.114
+  saves it: `Things[val]` becomes `'S2'!$D$2:$D$4`,
+  `Things[[#Data],[val]:[dbl]]` `'S2'!$D$2:$E$4`, `Things[[#Totals],[val]]`
+  `'S2'!$D$5`, `[#All]` and `[#Headers]` their areas, a bare `Things` its data
+  body, and a this-row reference such as `[@val]`, calculated columns
+  included, `'S2'!$D2` with its row relative. A missing column or an empty
+  part becomes `#REF!`. Saving into the source package removes the table
+  part, its relationship, `<tablePart>` entry, and content-type override; a
+  table part with relationships of its own, such as a query table, fails
+  with `UnsupportedPreservation`. An unknown table fails with
+  `UnknownTableId`.
 - `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
   draft plus persistent parsed formulas, dependency state, results, dirty
   roots, and bounded delta history.

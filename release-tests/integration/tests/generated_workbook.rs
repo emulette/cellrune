@@ -19,5 +19,6 @@ mod generated_workbook {
     mod sheet_deletion_write;
     mod sheet_move_write;
     mod sheet_rename_write;
+    mod table_conversion_write;
 }
 mod support;

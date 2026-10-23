@@ -43,6 +43,7 @@ mod sheet_span;
 mod stack;
 mod structured_reference;
 mod syntax;
+pub(crate) mod table_conversion;
 mod targeted;
 mod textfmt;
 mod value;

@@ -13,6 +13,7 @@ use super::syntax::{
     NodeSpanTree, ParsedFormula, SourceComponent, SourceComponentKind, SourceEdit, SourceEditError,
     SourceSpan, apply_source_edits,
 };
+use super::table_conversion::TableArea;
 use super::{CalculationLimitKind, CalculationLimits};
 use crate::case_insensitive_eq;
 
@@ -37,6 +38,15 @@ pub(crate) enum FormulaRewriteRequest<'a> {
     },
     /// Renames one defined name, rewriting only the references that resolve to it.
     DefinedName(NameRename<'a>),
+    /// Converts one table to a range, so its structured references become A1 references.
+    TableToRange {
+        area: &'a TableArea<'a>,
+        /// Whether the formula belongs to the converted table, where an unqualified structured
+        /// reference names it.
+        owner_is_target_table: bool,
+        /// The formula's row when it is on the table's sheet.
+        this_row: Option<u32>,
+    },
 }
 
 /// A defined name renamed in one scope, with what decides which references resolve to it.
@@ -93,7 +103,8 @@ impl FormulaRewriteRequest<'_> {
             Self::Sheet { .. }
             | Self::Table { .. }
             | Self::TableColumn { .. }
-            | Self::DefinedName(_) => SheetOutcome::Unchanged,
+            | Self::DefinedName(_)
+            | Self::TableToRange { .. } => SheetOutcome::Unchanged,
         }
     }
 
@@ -110,9 +121,10 @@ impl FormulaRewriteRequest<'_> {
                 }
             }
             Self::Sheets(changes) => changes.span(start, end),
-            Self::Table { .. } | Self::TableColumn { .. } | Self::DefinedName(_) => {
-                SpanOutcome::Unchanged
-            }
+            Self::Table { .. }
+            | Self::TableColumn { .. }
+            | Self::DefinedName(_)
+            | Self::TableToRange { .. } => SpanOutcome::Unchanged,
         }
     }
 
@@ -122,7 +134,8 @@ impl FormulaRewriteRequest<'_> {
             Self::Sheet { .. }
             | Self::Table { .. }
             | Self::TableColumn { .. }
-            | Self::DefinedName(_) => None,
+            | Self::DefinedName(_)
+            | Self::TableToRange { .. } => None,
         }
     }
 
@@ -375,6 +388,41 @@ pub(crate) fn rewrite_formula(
         if let FormulaRewriteRequest::DefinedName(rename) = request {
             plan_name_edit(source, expr, source_node, rename, &mut edits, budget)?;
         }
+        if let FormulaRewriteRequest::TableToRange {
+            area,
+            owner_is_target_table,
+            this_row,
+        } = request
+        {
+            // A bare table name means its data body, as `Things[]` does.
+            let bare = StructuredReference {
+                table: Some(area.display_name.into()),
+                items: Vec::new(),
+                columns: None,
+            };
+            let converted = match expr {
+                Expr::StructuredRef(reference)
+                    if reference
+                        .table
+                        .as_deref()
+                        .map_or(*owner_is_target_table, |table| {
+                            case_insensitive_eq(table, area.display_name)
+                        }) =>
+                {
+                    Some(reference)
+                }
+                Expr::Name(name) if case_insensitive_eq(name, area.display_name) => Some(&bare),
+                _ => None,
+            };
+            if let Some(reference) = converted {
+                budget.charge_edit()?;
+                edits.push(SourceEdit::new(
+                    source_node.span(),
+                    area.a1_text(reference, *this_row),
+                ));
+                continue;
+            }
+        }
         match expr {
             Expr::Ref(reference) => {
                 if let Some(prefix) = &reference.sheet {
@@ -438,7 +486,8 @@ pub(crate) fn rewrite_formula(
                 }
                 FormulaRewriteRequest::Sheet { .. }
                 | FormulaRewriteRequest::Sheets(_)
-                | FormulaRewriteRequest::DefinedName(_) => {}
+                | FormulaRewriteRequest::DefinedName(_)
+                | FormulaRewriteRequest::TableToRange { .. } => {}
             },
             Expr::ExternalReference(_) => continue,
             _ => {}
@@ -932,6 +981,22 @@ fn formula_may_reference_target(
                 },
                 _ => false,
             }),
+        FormulaRewriteRequest::TableToRange {
+            area,
+            owner_is_target_table,
+            ..
+        } => lexed
+            .tokens
+            .iter()
+            .enumerate()
+            .any(|(index, token)| match &token.token {
+                Token::StructuredRef(raw) => {
+                    raw_structured_targets_table(raw, area.display_name, *owner_is_target_table)
+                        && !structured_token_is_external(&lexed.tokens, index)
+                }
+                Token::Ident(name) => case_insensitive_eq(name, area.display_name),
+                _ => false,
+            }),
         FormulaRewriteRequest::DefinedName(rename) => lexed.tokens.iter().any(|token| {
             matches!(&token.token, Token::Ident(name) if case_insensitive_eq(name, rename.old_name))
         }),
@@ -943,7 +1008,8 @@ fn formula_may_reference_target(
                 FormulaRewriteRequest::Sheets(changes) => changes.targets(name),
                 FormulaRewriteRequest::Table { .. }
                 | FormulaRewriteRequest::TableColumn { .. }
-                | FormulaRewriteRequest::DefinedName(_) => false,
+                | FormulaRewriteRequest::DefinedName(_)
+                | FormulaRewriteRequest::TableToRange { .. } => false,
             };
             let deleted_table = |raw: &str| {
                 request.sheet_changes().is_some_and(|changes| {
@@ -1065,6 +1131,7 @@ mod tests {
     };
     use crate::SheetId;
     use crate::calculation::sheet_changes::{TabEntry, TabStep};
+    use crate::calculation::table_conversion::TableArea;
 
     fn rewrite(source: &str, request: FormulaRewriteRequest<'_>) -> Option<String> {
         let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &|| false);
@@ -1469,6 +1536,54 @@ mod tests {
             owner_sheet: Some("S1"),
         });
         assert_eq!(rewrite("SUM(1)", builtin), None);
+    }
+
+    #[test]
+    fn converting_a_table_to_a_range_writes_its_references_as_excel_saves_them() {
+        // Excel 16.114: `Things` at C1:E5 on `S2`, columns key, val, and dbl, a totals row.
+        let area = TableArea {
+            display_name: "Things",
+            sheet_name: "S2",
+            range: crate::CellRange::new(
+                crate::CellAddress::from_a1("C1").expect("C1"),
+                crate::CellAddress::from_a1("E5").expect("E5"),
+            )
+            .expect("range"),
+            header_rows: 1,
+            totals_rows: 1,
+            columns: &["key", "val", "dbl"],
+        };
+        let request = |owner_is_target_table, this_row| FormulaRewriteRequest::TableToRange {
+            area: &area,
+            owner_is_target_table,
+            this_row,
+        };
+        for (source, rewritten) in [
+            ("SUM(Things[val])", "SUM('S2'!$D$2:$D$4)"),
+            ("SUM(Things[[#Data],[val]:[dbl]])", "SUM('S2'!$D$2:$E$4)"),
+            ("Things[[#Totals],[val]]", "'S2'!$D$5"),
+            ("ROWS(Things[#All])", "ROWS('S2'!$C$1:$E$5)"),
+            ("COUNTA(things[#Headers])", "COUNTA('S2'!$C$1:$E$1)"),
+            ("SUM(Things)", "SUM('S2'!$C$2:$E$4)"),
+            ("Other[val]+Things[missing]", "Other[val]+#REF!"),
+            ("Things[@val]", "'S2'!$D3"),
+        ] {
+            assert_eq!(
+                rewrite(source, request(false, Some(3))),
+                Some(rewritten.to_owned()),
+                "{source}"
+            );
+        }
+        // A this-row reference keeps its row relative, and names the table inside it.
+        assert_eq!(
+            rewrite("[@val]*2+Things[@[val]:[dbl]]", request(true, Some(3))),
+            Some("'S2'!$D3*2+'S2'!$D3:$E3".to_owned())
+        );
+        assert_eq!(rewrite("[@val]*2", request(false, Some(3))), None);
+        assert_eq!(
+            rewrite("Things[@val]", request(false, None)),
+            Some("#REF!".to_owned())
+        );
     }
 
     #[test]

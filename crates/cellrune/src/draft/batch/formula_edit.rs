@@ -6,6 +6,7 @@ use super::staged::{mark_upsert, sheet_by_id_mut};
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteRequest, NameRename, SheetChanges, rewrite_formula,
 };
+use crate::calculation::table_conversion::TableArea;
 use crate::{
     CalculationCellId, CellAddress, CellContent, DefinedName, FormulaCell, FormulaText, Sheet,
     SheetId, SheetName, TableId, ValidationError,
@@ -101,6 +102,21 @@ pub(super) enum WorkbookFormulaRename<'a> {
         old_name: &'a str,
         new_name: &'a str,
     },
+    /// A table converted to a range, its structured references becoming A1 references.
+    TableToRange {
+        table_id: TableId,
+        target_sheet_index: usize,
+        area: &'a TableArea<'a>,
+    },
+}
+
+/// Where one rewritten formula is: its sheet, whether it belongs to the table a change targets,
+/// and its row when it is on that table's sheet.
+#[derive(Clone, Copy)]
+struct FormulaContext<'a> {
+    owner_sheet: Option<&'a str>,
+    owner_is_target_table: bool,
+    row_on_target_sheet: Option<u32>,
 }
 
 pub(super) fn rewrite_workbook_formulas(
@@ -121,6 +137,11 @@ pub(super) fn rewrite_workbook_formulas(
             target_range,
             ..
         } => Some((target_sheet_index, target_range)),
+        WorkbookFormulaRename::TableToRange {
+            target_sheet_index,
+            area,
+            ..
+        } => Some((target_sheet_index, area.range)),
         WorkbookFormulaRename::Sheet { .. }
         | WorkbookFormulaRename::SheetChanges(_)
         | WorkbookFormulaRename::Table { .. }
@@ -144,7 +165,16 @@ pub(super) fn rewrite_workbook_formulas(
             let owner_is_target_table = target_location.is_some_and(|(target_sheet, range)| {
                 target_sheet == sheet_index && range.contains(address)
             });
-            let request = request_for(&rename, owner_is_target_table, Some(owner.as_str()));
+            let on_target_sheet =
+                target_location.is_some_and(|(target_sheet, _)| target_sheet == sheet_index);
+            let request = request_for(
+                &rename,
+                FormulaContext {
+                    owner_sheet: Some(owner.as_str()),
+                    owner_is_target_table,
+                    row_on_target_sheet: on_target_sheet.then(|| address.row().get()),
+                },
+            );
             let CellContent::Formula(formula) = cell.content() else {
                 unreachable!("formula traversal returned a non-formula cell");
             };
@@ -177,7 +207,14 @@ pub(super) fn rewrite_workbook_formulas(
             crate::DefinedNameScope::Workbook => None,
             crate::DefinedNameScope::Sheet(sheet_id) => sheet_names.get(&sheet_id),
         };
-        let request = request_for(&rename, false, owner.map(SheetName::as_str));
+        let request = request_for(
+            &rename,
+            FormulaContext {
+                owner_sheet: owner.map(SheetName::as_str),
+                owner_is_target_table: false,
+                row_on_target_sheet: None,
+            },
+        );
         let owner = match defined_name.scope() {
             crate::DefinedNameScope::Workbook => {
                 format!("defined_name:scope=workbook,name={}", defined_name.name())
@@ -208,16 +245,33 @@ pub(super) fn rewrite_workbook_formulas(
         let table = &mut sheets[sheet_index].tables_mut()[table_index];
         let current_table_id = table.id();
         let owner_is_target_table = match rename {
-            WorkbookFormulaRename::TableColumn { table_id, .. } => current_table_id == table_id,
+            WorkbookFormulaRename::TableColumn { table_id, .. }
+            | WorkbookFormulaRename::TableToRange { table_id, .. } => current_table_id == table_id,
             WorkbookFormulaRename::Sheet { .. }
             | WorkbookFormulaRename::SheetChanges(_)
             | WorkbookFormulaRename::Table { .. }
             | WorkbookFormulaRename::DefinedName(_) => false,
         };
+        // A table formula reads as the formula of the table's first data row.
+        let first_data_row = table
+            .range()
+            .start()
+            .row()
+            .get()
+            .saturating_add(table.header_row_count());
+        let on_target_sheet =
+            target_location.is_some_and(|(target_sheet, _)| target_sheet == sheet_index);
         let column = &mut table.columns_mut()[column_index];
         let table_id = current_table_id.get();
         let column_id = column.column_id().get();
-        let request = request_for(&rename, owner_is_target_table, Some(owner.as_str()));
+        let request = request_for(
+            &rename,
+            FormulaContext {
+                owner_sheet: Some(owner.as_str()),
+                owner_is_target_table,
+                row_on_target_sheet: on_target_sheet.then_some(first_data_row),
+            },
+        );
         let calculated = column
             .calculated_column_formula()
             .map(|formula| {
@@ -253,12 +307,16 @@ pub(super) fn rewrite_workbook_formulas(
     Ok(changed)
 }
 
-/// Returns the rewrite request for one formula, `owner_sheet` being the sheet it belongs to.
+/// Returns the rewrite request for one formula in `context`.
 fn request_for<'a>(
     rename: &'a WorkbookFormulaRename<'a>,
-    owner_is_target_table: bool,
-    owner_sheet: Option<&'a str>,
+    context: FormulaContext<'a>,
 ) -> FormulaRewriteRequest<'a> {
+    let FormulaContext {
+        owner_sheet,
+        owner_is_target_table,
+        row_on_target_sheet,
+    } = context;
     match rename {
         WorkbookFormulaRename::DefinedName(name) => {
             FormulaRewriteRequest::DefinedName(NameRename {
@@ -266,6 +324,11 @@ fn request_for<'a>(
                 ..*name
             })
         }
+        WorkbookFormulaRename::TableToRange { area, .. } => FormulaRewriteRequest::TableToRange {
+            area,
+            owner_is_target_table,
+            this_row: row_on_target_sheet,
+        },
         WorkbookFormulaRename::Sheet { old_name, new_name } => {
             FormulaRewriteRequest::Sheet { old_name, new_name }
         }
@@ -348,7 +411,14 @@ pub(super) fn rewrite_sheet_metadata_formulas(
     for sheet in sheets.iter_mut() {
         let sheet_id = sheet.id().get();
         let owner = sheet.name().clone();
-        let request = request_for(rename, false, Some(owner.as_str()));
+        let request = request_for(
+            rename,
+            FormulaContext {
+                owner_sheet: Some(owner.as_str()),
+                owner_is_target_table: false,
+                row_on_target_sheet: None,
+            },
+        );
         let request = &request;
         let mut rewrites = Vec::new();
         for (index, validation) in sheet.data_validations().iter().enumerate() {

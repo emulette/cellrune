@@ -22,6 +22,7 @@ mod sheet_reference_patch;
 mod styles_patch;
 mod table;
 mod table_patch;
+mod table_removal;
 mod workbook_edit;
 mod workbook_patch;
 mod worksheet_edit;

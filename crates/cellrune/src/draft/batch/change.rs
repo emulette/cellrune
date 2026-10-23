@@ -152,6 +152,16 @@ pub enum WorkbookChange {
         /// Last one-based data-body row.
         last_data_row: Row,
     },
+    /// Converts a table to a plain range, as Excel's Convert to Range does.
+    ///
+    /// The table leaves its sheet with its filter, its cells keep their values and formulas, and
+    /// every structured reference to it becomes the sheet-qualified absolute reference to the
+    /// cells it names (`Things[val]` becomes `'S2'!$D$2:$D$4`), a this-row reference keeping its
+    /// row relative (`[@val]` becomes `'S2'!$D2`).
+    ConvertTableToRange {
+        /// Target table.
+        table_id: TableId,
+    },
     /// Widens one table by columns, naming each new column from the text in its header cell.
     WidenTableColumns {
         /// Target table.
@@ -372,6 +382,11 @@ impl WorkbookChange {
             first_data_row,
             last_data_row,
         })
+    }
+
+    /// Constructs a conversion of a table to a plain range.
+    pub const fn convert_table_to_range(table_id: TableId) -> Self {
+        Self::ConvertTableToRange { table_id }
     }
 
     /// Constructs a stable-ID table column widening.

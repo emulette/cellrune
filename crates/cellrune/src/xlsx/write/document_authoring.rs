@@ -17,6 +17,7 @@ use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
 use super::sheet_reference_patch::rewrite_sheet_references;
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table_patch::patch_table_xml;
+use super::table_removal::{plan_table_removal, remove_table_parts};
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
 use super::workbook_patch::HostRecalculation;
 use super::worksheet_edit::{
@@ -225,6 +226,7 @@ pub(super) fn write_document_package(
     let source = document.preserved_package();
     let mut source_reader = source.reader()?;
     let deletion = plan_sheet_deletion(document, draft.workbook(), &mut source_reader)?;
+    let table_removal = plan_table_removal(document, draft.workbook(), &mut source_reader)?;
     let date_typed_literals =
         date_typed_literals_to_rewrite(draft, document, &mut source_reader, limits)?;
     let shared_strings_source = document
@@ -611,6 +613,23 @@ pub(super) fn write_document_package(
         &deletion.removed_parts,
         limits,
     )?;
+    // A table converted to a range leaves its sheet's `<tableParts>` and relationships.
+    for (worksheet, (relationship_part, ids)) in &table_removal.worksheets {
+        let bytes = match replacements.get(worksheet) {
+            Some(bytes) => remove_table_parts(bytes, worksheet, ids, limits)?,
+            None => {
+                remove_table_parts(&source_reader.read_part(worksheet)?, worksheet, ids, limits)?
+            }
+        };
+        replacements.insert(worksheet.clone(), bytes);
+        let relationships = remove_relationships(
+            &source_reader.read_part(relationship_part)?,
+            relationship_part,
+            ids,
+            limits,
+        )?;
+        replacements.insert(relationship_part.clone(), relationships);
+    }
 
     for (sheet_id, part) in &added_parts {
         let sheet = draft
@@ -720,21 +739,21 @@ pub(super) fn write_document_package(
         );
     }
 
-    if !chain_removals.is_empty()
-        || !deletion.removed_parts.is_empty()
-        || !new_content_types.is_empty()
+    let mut optional_removals = deletion.removed_parts;
+    optional_removals.extend(table_removal.parts);
+    if !chain_removals.is_empty() || !optional_removals.is_empty() || !new_content_types.is_empty()
     {
         let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
             .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
         let content_types = source_reader.read_part(&content_types_part)?;
-        let without_removed = if chain_removals.is_empty() && deletion.removed_parts.is_empty() {
+        let without_removed = if chain_removals.is_empty() && optional_removals.is_empty() {
             content_types
         } else {
             remove_content_type_overrides(
                 &content_types,
                 &content_types_part,
                 &chain_removals,
-                &deletion.removed_parts,
+                &optional_removals,
                 limits,
             )?
         };
@@ -749,7 +768,7 @@ pub(super) fn write_document_package(
         );
     }
     let mut removals = chain_removals;
-    removals.extend(deletion.removed_parts);
+    removals.extend(optional_removals);
 
     drop(source_reader);
     let changed_parts = replacements

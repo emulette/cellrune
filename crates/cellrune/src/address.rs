@@ -211,7 +211,7 @@ impl CellRange {
     }
 }
 
-fn column_label(mut column: u32) -> String {
+pub(crate) fn column_label(mut column: u32) -> String {
     let mut reversed = Vec::with_capacity(3);
     while column > 0 {
         column -= 1;

@@ -7,6 +7,7 @@ mod sheet_delete;
 mod sheet_move;
 mod staged;
 mod tab_order;
+mod table_convert;
 mod table_edit;
 mod widen_edit;
 
