@@ -199,6 +199,79 @@ pub(crate) fn patch_frozen_pane(
     Ok(output)
 }
 
+/// Returns a copied worksheet's XML without `tabSelected` on its sheet views, or `None` when no
+/// view selects the tab. The copy is not the active tab, and Excel groups every selected tab, so
+/// the source's selection would group the copy with it.
+pub(super) fn without_tab_selection(
+    bytes: &[u8],
+    source: &PartPath,
+    limits: WriteLimits,
+) -> Result<Option<Vec<u8>>, XlsxWriteError> {
+    enforce_bytes(bytes.len(), limits, source)?;
+    let mut xml = configured_reader(bytes, limits);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let mut buffer = Vec::new();
+    let mut depth = 0_u64;
+    let mut changed = false;
+    loop {
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        let event = match event {
+            Event::Start(element) => {
+                depth = depth.saturating_add(1);
+                enforce_depth(depth, limits, source)?;
+                Event::Start(unselected_view(element, depth, &mut changed, source)?)
+            }
+            Event::Empty(element) => {
+                enforce_depth(depth.saturating_add(1), limits, source)?;
+                Event::Empty(unselected_view(
+                    element,
+                    depth.saturating_add(1),
+                    &mut changed,
+                    source,
+                )?)
+            }
+            Event::End(element) => {
+                depth = depth.saturating_sub(1);
+                Event::End(element.into_owned())
+            }
+            Event::Eof => break,
+            other => other.into_owned(),
+        };
+        write_event(&mut writer, event, source)?;
+        buffer.clear();
+    }
+    if !changed {
+        return Ok(None);
+    }
+    let output = writer.into_inner().into_inner();
+    enforce_bytes(output.len(), limits, source)?;
+    Ok(Some(output))
+}
+
+/// Returns a `<sheetView>` at `depth` 3, under `<worksheet><sheetViews>`, without `tabSelected`,
+/// and any other element as it is.
+fn unselected_view(
+    element: BytesStart<'_>,
+    depth: u64,
+    changed: &mut bool,
+    source: &PartPath,
+) -> Result<BytesStart<'static>, XlsxWriteError> {
+    if depth != 3 || element.local_name().as_ref() != "sheetView" {
+        return Ok(element.into_owned());
+    }
+    let mut output = BytesStart::new(element.name().as_ref().to_owned());
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        if attribute.key.local_name().as_ref() == "tabSelected" {
+            *changed = true;
+        } else {
+            output.push_attribute(attribute);
+        }
+    }
+    Ok(output.into_owned())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn maybe_insert_sheet_views(
     writer: &mut Writer<Cursor<Vec<u8>>>,
@@ -394,7 +467,7 @@ fn resource_error(
 
 #[cfg(test)]
 mod tests {
-    use super::patch_frozen_pane;
+    use super::{patch_frozen_pane, without_tab_selection};
     use crate::xlsx::package::PartPath;
     use crate::{FrozenPane, WriteLimits, XlsxWriteErrorCode};
 
@@ -551,5 +624,24 @@ mod tests {
             .expect_err("invalid worksheet root must fail closed");
             assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
         }
+    }
+
+    #[test]
+    fn a_copy_drops_the_tab_selection_of_its_source_views_only() {
+        let input = br#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetViews><x:sheetView tabSelected="1" workbookViewId="0"><x:selection activeCell="B2"/></x:sheetView><x:sheetView tabSelected="1" workbookViewId="1"/></x:sheetViews><x:sheetData/></x:worksheet>"#;
+        let output = without_tab_selection(input, &source(), WriteLimits::default())
+            .expect("patch")
+            .expect("changed");
+        assert_eq!(
+            String::from_utf8(output).expect("UTF-8"),
+            r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetViews><x:sheetView workbookViewId="0"><x:selection activeCell="B2"/></x:sheetView><x:sheetView workbookViewId="1"/></x:sheetViews><x:sheetData/></x:worksheet>"#
+        );
+        let unselected =
+            br#"<worksheet><sheetViews><sheetView workbookViewId="0"/></sheetViews></worksheet>"#;
+        assert!(
+            without_tab_selection(unselected, &source(), WriteLimits::default())
+                .expect("patch")
+                .is_none()
+        );
     }
 }

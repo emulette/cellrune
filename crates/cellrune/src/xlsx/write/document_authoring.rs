@@ -32,7 +32,7 @@ use super::worksheet_edit::{
     read_date_typed_cells,
 };
 use super::worksheet_patch::{WorksheetCacheAction, WorksheetCellUpdate, patch_worksheet};
-use super::worksheet_view_edit::patch_frozen_pane;
+use super::worksheet_view_edit::{patch_frozen_pane, without_tab_selection};
 use super::{
     RecalculatedWorkbook, RecalculationWriteOptions, WriteLimits, WriteProvenance, WriteReport,
     XlsxWriteError, XlsxWriteErrorCode,
@@ -56,6 +56,7 @@ const REL_STYLES: &str =
 const DETAIL_CALCULATION_IDENTITY: &str = "calculation does not belong to the current draft";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_MISSING_TABLE_PART: &str = "source table part mapping was not found";
+const DETAIL_COPY_TABLES_CHANGED: &str = "a sheet copy cannot save a table created or converted to a range on the copy or on its source before the copy";
 const DETAIL_EDITED_CELL_COUNT: &str = "max_edited_cells";
 const DETAIL_EDITED_SHEET_COUNT: &str = "max_edited_sheets";
 const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
@@ -359,12 +360,18 @@ pub(super) fn write_document_package(
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let bytes = source_reader.read_part(&part)?;
         let bytes = with_explicit_positions(&bytes, &part, limits)?.unwrap_or(bytes);
+        // A copy writes every cell over its source's part, so every source style is read, and it
+        // does not take its source's tab selection.
+        let copied = copy_parts.contains_key(&sheet_id);
+        let bytes = if copied {
+            without_tab_selection(&bytes, &part, limits)?.unwrap_or(bytes)
+        } else {
+            bytes
+        };
         // Only a valued source cell's own style is read. A cell written over a removed source
         // cell is styled as a new cell, and so is one written over a blank source cell: the
         // reader records a blank cell's style for new cells unless it names no `cellXfs` entry.
         let source_sheet = document.workbook().sheet_by_id(origin);
-        // A copy writes every cell over its source's part, so every source style is read.
-        let copied = copy_parts.contains_key(&sheet_id);
         let targets = draft
             .cell_mutations()
             .sheet_keys(sheet_id)
@@ -721,17 +728,25 @@ pub(super) fn write_document_package(
                 .sheet_by_id(origin)
                 .map(Sheet::tables)
                 .unwrap_or_default();
-            let tables = origin_tables
-                .iter()
-                .zip(copy_sheet.tables())
-                .map(|(source, copied)| {
-                    document
-                        .table_part_path(source.id())
-                        .cloned()
-                        .map(|part| (part, copied))
-                        .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))
-                })
-                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            // Each source table part is duplicated for the copied table that duplicates its
+            // table. A table created or converted on the copy, or on its source before the copy,
+            // has no such pair, and its part or entry is not written.
+            let mut tables = BTreeMap::new();
+            for copied in copy_sheet.tables() {
+                let source = draft
+                    .copied_tables()
+                    .get(&copied.id())
+                    .and_then(|source| origin_tables.iter().find(|table| table.id() == *source))
+                    .ok_or_else(|| copy_tables_changed(copy_part))?;
+                let part = document
+                    .table_part_path(source.id())
+                    .cloned()
+                    .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
+                tables.insert(part, (source, copied));
+            }
+            if tables.len() != origin_tables.len() {
+                return Err(copy_tables_changed(copy_part));
+            }
             let duplicated = duplicate_sheet_parts(
                 &mut source_reader,
                 &CopySource {
@@ -1251,4 +1266,11 @@ fn invalid_plan_with_cause(
     XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
         .at_source(source.source_id())
         .with_cause(cause)
+}
+
+/// Refuses a copy whose tables are not one copied table for each table of its source part.
+fn copy_tables_changed(copy: &PartPath) -> XlsxWriteError {
+    XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
+        .with_detail(format!("{DETAIL_COPY_TABLES_CHANGED}: {}", copy.as_str()))
+        .at_source(copy.source_id())
 }

@@ -230,6 +230,33 @@ fn a_copy_skips_the_name_a_chartsheet_holds() {
 }
 
 #[test]
+fn a_move_reaches_a_chartsheet_by_name() {
+    let mut session = chartsheet_session();
+    apply(
+        &mut session,
+        vec![WorkbookChangeDto::MoveSheet {
+            sheet: "data (2)".to_owned(),
+            position: 0,
+        }],
+    )
+    .expect("a chartsheet moves like any tab");
+
+    let (bytes, _) = session.save_edits_bytes().expect("saved move");
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("archive");
+    let mut workbook = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("xl/workbook.xml").expect("workbook part"),
+        &mut workbook,
+    )
+    .expect("workbook text");
+    let chartsheet = workbook
+        .find(r#"name="Data (2)""#)
+        .expect("chartsheet entry");
+    let worksheet = workbook.find(r#"name="Data""#).expect("worksheet entry");
+    assert!(chartsheet < worksheet, "{workbook}");
+}
+
+#[test]
 fn a_batch_renames_a_defined_name_and_sets_and_removes_a_sheet_filter() {
     let mut session = sheets_session();
     apply(

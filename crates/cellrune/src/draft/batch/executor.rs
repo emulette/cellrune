@@ -105,6 +105,7 @@ impl WorkbookDraft {
         let mut tab_steps = clone_slice(&self.tab_steps, rewrite_budget)?;
         let mut name_renames = clone_slice(&self.name_renames, rewrite_budget)?;
         let mut copied_sheets = self.copied_sheets.clone();
+        let mut copied_tables = self.copied_tables.clone();
         let mut changed_cells = BTreeSet::new();
         let mut calculation_changed_cells = BTreeSet::new();
         let mut touched_sheets = BTreeSet::new();
@@ -455,7 +456,7 @@ impl WorkbookDraft {
                         .ok_or(ValidationError::SheetIdExhausted)?;
                     let copy_id =
                         SheetId::new(next).map_err(|_| ValidationError::SheetIdExhausted)?;
-                    let copied_tables = copy_sheet(
+                    let tables = copy_sheet(
                         &mut sheets,
                         &mut defined_names,
                         &mut non_worksheet_tabs,
@@ -480,13 +481,26 @@ impl WorkbookDraft {
                     match origin {
                         Some(origin) => {
                             copied_sheets.insert(copy_id, origin);
+                            // A copied table duplicates the source table its own source does.
+                            for (source_table, copied) in &tables {
+                                let duplicated = if source.is_some_and(|source| {
+                                    source.table_by_id(*source_table).is_some()
+                                }) {
+                                    Some(*source_table)
+                                } else {
+                                    copied_tables.get(source_table).copied()
+                                };
+                                if let Some(duplicated) = duplicated {
+                                    copied_tables.insert(*copied, duplicated);
+                                }
+                            }
                         }
                         None => {
                             added_sheets.insert(copy_id);
                         }
                     }
                     created_sheet_ids.push(copy_id);
-                    changed_table_ids.extend(copied_tables.into_iter().map(|(_, copied)| copied));
+                    changed_table_ids.extend(tables.into_iter().map(|(_, copied)| copied));
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
@@ -922,6 +936,7 @@ impl WorkbookDraft {
         self.tab_steps = tab_steps;
         self.name_renames = name_renames;
         self.copied_sheets = copied_sheets;
+        self.copied_tables = copied_tables;
 
         Ok(EditReceipt {
             base_revision,

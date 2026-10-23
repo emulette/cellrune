@@ -135,6 +135,9 @@ pub struct WorkbookDraft {
     /// Each copy of a sheet the source package holds, with the source sheet whose part the writer
     /// duplicates for it; copies of other sheets are added sheets.
     copied_sheets: BTreeMap<SheetId, SheetId>,
+    /// Each table of such a copy that duplicates a table the source package holds, with that
+    /// table, whose part the writer duplicates for it.
+    copied_tables: BTreeMap<TableId, TableId>,
 }
 
 impl WorkbookDraft {
@@ -153,6 +156,7 @@ impl WorkbookDraft {
             tab_steps: Vec::new(),
             name_renames: Vec::new(),
             copied_sheets: BTreeMap::new(),
+            copied_tables: BTreeMap::new(),
         }
     }
 
@@ -171,6 +175,7 @@ impl WorkbookDraft {
             tab_steps: Vec::new(),
             name_renames: Vec::new(),
             copied_sheets: BTreeMap::new(),
+            copied_tables: BTreeMap::new(),
         }
     }
 
@@ -210,6 +215,10 @@ impl WorkbookDraft {
         &self.copied_sheets
     }
 
+    pub(crate) const fn copied_tables(&self) -> &BTreeMap<TableId, TableId> {
+        &self.copied_tables
+    }
+
     /// Returns whether the draft preserves an existing XLSX or XLSM package.
     pub const fn is_document_backed(&self) -> bool {
         self.source_document.is_some()
@@ -246,6 +255,7 @@ impl WorkbookDraft {
             tab_steps: self.tab_steps.clone(),
             name_renames: self.name_renames.clone(),
             copied_sheets: self.copied_sheets.clone(),
+            copied_tables: self.copied_tables.clone(),
         })
     }
 
@@ -264,6 +274,7 @@ impl WorkbookDraft {
             tab_steps: Vec::new(),
             name_renames: Vec::new(),
             copied_sheets: BTreeMap::new(),
+            copied_tables: BTreeMap::new(),
         }
     }
 }

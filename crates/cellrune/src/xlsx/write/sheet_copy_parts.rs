@@ -3,14 +3,14 @@
 //! duplicates, as Excel's Move or Copy writes them.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
 use quick_xml::Writer;
 use quick_xml::events::{BytesStart, Event};
 
 use super::package::PackageReader;
-use super::table_patch::patch_table_xml;
+use super::table_patch::{patch_table_xml, remove_table_columns};
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::{ContentTypes, PartPath};
 use crate::xlsx::xml::{namespace_reader, read_event};
@@ -48,8 +48,8 @@ pub(super) struct CopySource<'a> {
     pub(super) origin: &'a PartPath,
     pub(super) copy: &'a PartPath,
     pub(super) copy_id: SheetId,
-    /// The copy's table for each source table part.
-    pub(super) tables: &'a BTreeMap<PartPath, &'a Table>,
+    /// For each source table part, the source table and the copy's table that duplicates it.
+    pub(super) tables: &'a BTreeMap<PartPath, (&'a Table, &'a Table)>,
     pub(super) content_types: &'a ContentTypes,
     pub(super) chart_parts: &'a [PartPath],
 }
@@ -122,11 +122,23 @@ pub(super) fn duplicate_sheet_parts(
         let kind = kinds.get(original).map_or("", AsRef::as_ref);
         let bytes = match kind {
             "table" => {
-                let table = copy.tables.get(original).ok_or_else(|| {
+                let (source_table, table) = copy.tables.get(original).ok_or_else(|| {
                     XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
                         .with_detail(DETAIL_MISSING_TABLE)
                         .at_source(original.source_id())
                 })?;
+                // A range change of the copied table can take columns out of it.
+                let removed_columns = source_table
+                    .columns()
+                    .iter()
+                    .map(crate::TableColumn::id)
+                    .filter(|id| !table.columns().iter().any(|column| column.id() == *id))
+                    .collect::<BTreeSet<_>>();
+                let bytes = if removed_columns.is_empty() {
+                    bytes
+                } else {
+                    remove_table_columns(&bytes, original, &removed_columns, limits)?
+                };
                 patch_table_xml(&bytes, duplicate, table, limits)?
             }
             "vmlDrawing" => {
@@ -160,7 +172,7 @@ fn duplicate_name(part: &PartPath, copy: &CopySource<'_>) -> Result<PartPath, Xl
         .rsplit_once('/')
         .unwrap_or(("", part.as_str()));
     let file = match copy.tables.get(part) {
-        Some(table) => format!("cellrune-table-{}.xml", table.id().get()),
+        Some((_, table)) => format!("cellrune-table-{}.xml", table.id().get()),
         None => format!("cellrune-{}-{file}", copy.copy_id.get()),
     };
     let name = if folder.is_empty() {

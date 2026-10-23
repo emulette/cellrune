@@ -53,8 +53,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `WorkbookChange::rename_defined_name(scope, name, new_name)` renames a defined name and rewrites
   the uses that resolve to it, by Excel's scope rules, in cell formulas, defined names, table
   formulas, and data validations, and on save in preserved conditional formats, data validations,
-  x14 formulas, and chart series. Removing a name and adding it under a new one left those uses as
-  `#NAME?`. A rename fails with the new `validation.unknown_defined_name` for a missing name and
+  x14 formulas, chart series, and pivot cache sources that read a workbook name. Removing a name
+  and adding it under a new one left those uses as `#NAME?`. A rename fails with the new `validation.unknown_defined_name` for a missing name and
   `validation.defined_name_rename_shadowed` when the other scope already uses the new name.
 - `WorkbookChange::create_table(SheetId, CellRange, Option<TableName>)` creates a table whose first
   row is its header, naming blank headers `Column1`, `Column2`, and so on, with Excel's default
@@ -67,7 +67,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `WorkbookChange::convert_table_to_range(TableId)` converts a table to a plain range. Its cells
   keep their values and formulas, and every structured reference to it becomes a sheet-qualified
   absolute reference, as Excel 16.114 saves it (`Things[val]` becomes `'S2'!$D$2:$D$4`, `[@val]`
-  becomes `'S2'!$D2`). Saving into the source package removes the table part and its entries.
+  becomes `'S2'!$D2`). Saving into the source package removes the table part and its entries, and
+  fails with `xlsx.write.unsupported_preservation` naming the part when a preserved pivot cache
+  reads the table.
 - `WorkbookChange::set_sheet_auto_filter(SheetId, Option<CellRange>)` creates, changes, or removes a
   sheet-level autoFilter together with its hidden `_xlnm._FilterDatabase` name, keeping the
   criteria of the columns a changed filter still covers. The canonical writer now writes a sheet's
@@ -79,9 +81,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   numbered names (`Things` becomes `Things4` beside three tables), with the structured references
   inside the copy following them; the source's scoped names are copied to the copy, and a workbook
   name that reads the source becomes a name of the copy too. Saving into the source package
-  duplicates the parts the worksheet reaches, with chart series naming the copy, and fails with
+  duplicates the parts the worksheet reaches, with chart series naming the copy and table parts
+  following later changes to the copied tables' ranges, and fails with
   `xlsx.write.unsupported_preservation` naming the part for a pivot table, form control, threaded
-  comment, slicer, timeline, query table, or ActiveX control.
+  comment, slicer, timeline, query table, or ActiveX control, and naming the copy's worksheet when
+  a table was created or converted to a range on the copy, or on its source before the copy. The
+  copy does not take its source's tab selection.
 - Edit schema v1 accepts `move_sheet`, `copy_sheet`, `set_sheet_auto_filter`, and
   `rename_defined_name`, and v2 accepts `create_table`, `set_table_range`, and
   `convert_table_to_range`, so interop, Python, Node.js, and the MCP `workbook_apply_changes` tools

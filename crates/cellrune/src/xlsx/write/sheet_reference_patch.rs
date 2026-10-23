@@ -49,6 +49,8 @@ const DETAIL_UNREWRITABLE_REFERENCE: &str =
     "a preserved reference to a renamed or deleted sheet cannot be rewritten";
 const DETAIL_DELETED_PIVOT_SOURCE: &str =
     "a preserved pivot cache reads a deleted sheet or a table on one";
+const DETAIL_CONVERTED_PIVOT_SOURCE: &str =
+    "a preserved pivot cache reads a table converted to a range";
 const DETAIL_DELETED_PIVOT_CHART: &str =
     "a preserved pivot chart reads a pivot table on a deleted sheet";
 const DETAIL_DELETED_LINK: &str = "a preserved form control, VML control, linked shape, or data consolidation names a deleted sheet";
@@ -104,6 +106,8 @@ struct SheetReferenceRequests<'a> {
     deletions_only: FormulaRewriteRequest<'a>,
     /// Defined-name renames in order, each formula's own sheet still to be filled in.
     name_renames: Vec<NameRename<'a>>,
+    /// The display names of the tables converted to ranges on kept sheets.
+    converted_tables: &'a [&'a str],
 }
 
 /// The names, steps, and tables the requests borrow: every source tab by its source name, and the
@@ -200,6 +204,7 @@ impl<'a> SheetReferenceRequests<'a> {
         names: &'a SheetReferenceNames<'a>,
         steps: &'a [TabStep],
         deleted_tables: &'a [&'a str],
+        converted_tables: &'a [&'a str],
     ) -> Self {
         let changes = SheetChanges {
             before: &names.before,
@@ -233,7 +238,25 @@ impl<'a> SheetReferenceRequests<'a> {
                     owner_sheet: None,
                 })
                 .collect(),
+            converted_tables,
         }
+    }
+
+    /// Returns the workbook name a pivot cache source `name` reads after the workbook-scoped
+    /// defined-name renames in order, or `None` when none renames it. A pivot cache resolves its
+    /// source name in workbook scope.
+    fn renamed_pivot_source(&self, name: &str) -> Option<&'a str> {
+        let mut current = None::<&'a str>;
+        for rename in self
+            .name_renames
+            .iter()
+            .filter(|rename| rename.scope_sheet.is_none())
+        {
+            if case_insensitive_eq(current.unwrap_or(name), rename.old_name) {
+                current = Some(rename.new_name);
+            }
+        }
+        current
     }
 
     /// Rewrites a preserved formula of `owner`'s part, `None` for a chart: the defined-name
@@ -327,11 +350,27 @@ pub(crate) fn rewrite_sheet_references(
         .iter()
         .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
         .collect::<Vec<_>>();
+    // A table that left a kept sheet was converted to a range.
+    let converted_tables = original
+        .sheets()
+        .iter()
+        .filter(|sheet| draft.sheet_by_id(sheet.id()).is_some())
+        .flat_map(|sheet| sheet.tables())
+        .filter(|table| {
+            !draft
+                .sheets()
+                .iter()
+                .flat_map(|sheet| sheet.tables())
+                .any(|kept| kept.id() == table.id())
+        })
+        .map(|table| table.display_name().as_str())
+        .collect::<Vec<_>>();
     if !renamed
         && deleted_sheets.is_empty()
         && steps.is_empty()
         && name_renames.is_empty()
         && copied.copies.is_empty()
+        && converted_tables.is_empty()
     {
         return Ok(());
     }
@@ -341,7 +380,7 @@ pub(crate) fn rewrite_sheet_references(
         .map(|table| table.display_name().as_str())
         .collect::<Vec<_>>();
     let names = SheetReferenceNames::new(original, draft, steps, name_renames);
-    let requests = SheetReferenceRequests::new(&names, steps, &deleted_tables);
+    let requests = SheetReferenceRequests::new(&names, steps, &deleted_tables, &converted_tables);
     let mut parts = Vec::new();
     for sheet in draft
         .sheets()
@@ -402,7 +441,8 @@ pub(crate) fn rewrite_sheet_references(
     }
     // A copy's parts read its source sheet by name; those references name the copy.
     for copy in copied.copies {
-        let mut copy_requests = SheetReferenceRequests::new(&names, steps, &deleted_tables);
+        let mut copy_requests =
+            SheetReferenceRequests::new(&names, steps, &deleted_tables, &converted_tables);
         let retarget = SheetChanges {
             retarget: Some((copy.origin, copy.copy)),
             ..copy_requests.changes
@@ -862,28 +902,53 @@ fn patch_attribute(
     {
         return Err(reads_deleted_sheet(source, DETAIL_DELETED_PIVOT_SOURCE));
     }
-    let Some(value) = value else {
+    // A converted table no longer has the name a pivot cache reads, and Excel's rewrite to the
+    // table's former range is not modeled.
+    if part == ReferencePart::PivotCache
+        && source_name.as_deref().is_some_and(|table| {
+            requests
+                .converted_tables
+                .iter()
+                .any(|converted| case_insensitive_eq(table, converted))
+        })
+    {
+        return Err(reads_deleted_sheet(source, DETAIL_CONVERTED_PIVOT_SOURCE));
+    }
+    let renamed_source = match part {
+        ReferencePart::PivotCache => source_name
+            .as_deref()
+            .and_then(|name| requests.renamed_pivot_source(name)),
+        _ => None,
+    };
+    let replacement = match (part, value) {
+        (_, None) => None,
+        (ReferencePart::PivotCache, Some(value)) => requests.renamed(&value).map(str::to_owned),
+        (_, Some(value)) if target == "location" => {
+            rewrite(&value, &requests.renames_only, budget, source)?
+        }
+        (_, Some(value)) => requests.rewrite_formula(&value, owner, budget, source)?,
+    };
+    if replacement.is_none() && renamed_source.is_none() {
         return Ok(None);
-    };
-    let replacement = match part {
-        ReferencePart::PivotCache => requests.renamed(&value).map(str::to_owned),
-        _ if target == "location" => rewrite(&value, &requests.renames_only, budget, source)?,
-        _ => requests.rewrite_formula(&value, owner, budget, source)?,
-    };
-    let Some(replacement) = replacement else {
-        return Ok(None);
-    };
-    let escaped = escape_attribute(&replacement)?;
+    }
+    let escaped = replacement.as_deref().map(escape_attribute).transpose()?;
+    let escaped_source = renamed_source.map(escape_attribute).transpose()?;
     let mut patched = BytesStart::new(element.name().as_ref().to_owned());
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
-        if attribute.key.as_ref() == target {
-            patched.push_attribute(Attribute {
-                key: attribute.key,
-                value: Cow::Borrowed(&escaped),
-            });
+        let value = if attribute.key.as_ref() == target {
+            escaped.as_deref()
+        } else if attribute.key.as_ref() == "name" {
+            escaped_source.as_deref()
         } else {
-            patched.push_attribute(attribute);
+            None
+        };
+        match value {
+            Some(value) => patched.push_attribute(Attribute {
+                key: attribute.key,
+                value: Cow::Borrowed(value),
+            }),
+            None => patched.push_attribute(attribute),
         }
     }
     Ok(Some(patched.into_owned()))
@@ -1135,7 +1200,7 @@ mod tests {
             after,
         };
         let tables: &[&str] = if delete_data { &["Things"] } else { &[] };
-        patch(&SheetReferenceRequests::new(&names, &steps, tables))
+        patch(&SheetReferenceRequests::new(&names, &steps, tables, &[]))
     }
 
     fn target(source: &PartPath, part: ReferencePart) -> PatchTarget<'_> {

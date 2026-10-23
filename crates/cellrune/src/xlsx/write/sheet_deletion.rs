@@ -255,13 +255,15 @@ impl TabPlacement {
             .any(|(position, placed)| *placed != Some(position))
     }
 
-    /// Returns the draft position a deleted source tab hands its place to: that of the first kept
-    /// tab after it, or one past the last tab.
+    /// Returns the draft position a deleted source tab hands its place to: the draft position of
+    /// the first kept source tab after it, which a move or copy may have shifted, or one past the
+    /// last tab.
     fn successor(&self, source: usize) -> usize {
-        self.positions[..source.min(self.positions.len())]
+        self.positions
             .iter()
-            .filter(|placed| placed.is_some())
-            .count()
+            .skip(source + 1)
+            .find_map(|placed| *placed)
+            .unwrap_or(self.visible.len())
     }
 
     /// Returns the draft position of the tab that shows first in the tab bar: the same tab, or,
@@ -622,6 +624,28 @@ mod tests {
         assert_eq!(
             view(r#"<workbookView activeTab="0"/>"#, 3, &[2], &[]),
             r#"<workbookView activeTab="0"/>"#
+        );
+    }
+
+    #[test]
+    fn a_deleted_tab_hands_its_roles_to_the_next_source_tab_where_a_move_put_it() {
+        // S1–S4 with S2 active and first; S4 moved to the front, then S2 deleted: S4, S1, S3.
+        let placement = TabPlacement {
+            positions: vec![Some(1), None, Some(2), Some(0)],
+            visible: vec![true; 3],
+        };
+        let mut reader = Reader::from_str(r#"<workbookView firstSheet="1" activeTab="1"/>"#);
+        let Event::Empty(element) = reader.read_event().expect("event") else {
+            panic!("an empty workbookView");
+        };
+        let patched = patch_workbook_view(&element, &placement, &part()).expect("view");
+        let mut writer = quick_xml::Writer::new(Vec::new());
+        writer
+            .write_event(Event::Empty(patched))
+            .expect("written view");
+        assert_eq!(
+            String::from_utf8(writer.into_inner()).expect("UTF-8"),
+            r#"<workbookView firstSheet="2" activeTab="2"/>"#
         );
     }
 

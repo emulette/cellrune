@@ -1,6 +1,6 @@
 //! Typed edit conversion, staging, and guarded installation.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use cellrune::{
     CalculationHints, CalculationMode, CancellationToken, CellAddress, CellRange, DateSystem,
@@ -350,8 +350,9 @@ type SheetMap = BTreeMap<String, (SheetId, SheetName)>;
 /// operations added, renamed, copied, or deleted.
 struct ChangeConverter {
     sheets: SheetMap,
-    /// Case-insensitive names of the tabs that are not worksheets, which a copy cannot take.
-    non_worksheet_names: BTreeSet<String>,
+    /// The tabs that are not worksheets, such as chartsheets, by case-insensitive name: a move
+    /// reaches them, and a copy cannot take their names.
+    non_worksheet_tabs: BTreeMap<String, SheetId>,
     maximum_sheet_id: u32,
 }
 
@@ -368,9 +369,10 @@ impl ChangeConverter {
                     )
                 })
                 .collect(),
-            non_worksheet_names: workbook
+            non_worksheet_tabs: workbook
                 .non_worksheet_tab_names()
                 .map(|name| case_insensitive_key(name.as_str()))
+                .zip(workbook.non_worksheet_tab_ids())
                 .collect(),
             // A draft never reuses a deleted sheet's ID, so an added sheet's ID follows the
             // highest one the workbook has used.
@@ -385,7 +387,7 @@ impl ChangeConverter {
     fn convert(&mut self, change: WorkbookChangeDto) -> Result<WorkbookChange, InteropError> {
         let sheets = &mut self.sheets;
         let maximum_sheet_id = &mut self.maximum_sheet_id;
-        let non_worksheet_names = &self.non_worksheet_names;
+        let non_worksheet_tabs = &self.non_worksheet_tabs;
         Ok(match change {
             WorkbookChangeDto::SetValue {
                 sheet,
@@ -471,7 +473,11 @@ impl ChangeConverter {
                 WorkbookChange::delete_sheet(sheet_id)
             }
             WorkbookChangeDto::MoveSheet { sheet, position } => {
-                WorkbookChange::move_sheet(resolve_sheet_map(sheets, &sheet)?, position as usize)
+                let sheet_id = match non_worksheet_tabs.get(&case_insensitive_key(&sheet)) {
+                    Some(sheet_id) => *sheet_id,
+                    None => resolve_sheet_map(sheets, &sheet)?,
+                };
+                WorkbookChange::move_sheet(sheet_id, position as usize)
             }
             WorkbookChangeDto::CopySheet { sheet, position } => {
                 let (sheet_id, name) = sheets
@@ -481,7 +487,7 @@ impl ChangeConverter {
                 // The core names the copy against every tab name, as Excel does.
                 let copy_name = name.copy_name(|candidate| {
                     let key = case_insensitive_key(candidate);
-                    sheets.contains_key(&key) || non_worksheet_names.contains(&key)
+                    sheets.contains_key(&key) || non_worksheet_tabs.contains_key(&key)
                 });
                 sheets.insert(
                     case_insensitive_key(copy_name.as_str()),

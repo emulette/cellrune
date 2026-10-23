@@ -68,3 +68,46 @@ fn converting_a_table_removes_its_part_and_saves_absolute_references() {
     let fresh = calculate_workbook(reopened.workbook(), CalculationOptions::default());
     assert_eq!(results(&fresh), results(&before));
 }
+
+#[test]
+fn converting_a_table_a_preserved_pivot_cache_reads_is_refused_with_the_part() {
+    let source = support::replace_part_text(
+        &crate::support::sheet_deletion_xlsx::generated_sheet_deletion_fixture(),
+        "xl/pivotCache/pivotCacheDefinition2.xml",
+        r#"<worksheetSource ref="D1:D2" sheet="S3"/>"#,
+        r#"<worksheetSource name="Things"/>"#,
+    );
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let mut draft = WorkbookDraft::from_document(&document);
+    let things = draft
+        .workbook()
+        .sheets()
+        .iter()
+        .flat_map(|sheet| sheet.tables())
+        .find(|table| table.display_name().as_str() == "Things")
+        .expect("Things")
+        .id();
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::convert_table_to_range(
+            things,
+        )]))
+        .expect("convert Things");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let error = write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        RecalculationWriteOptions::default()
+            .with_policy(cellrune::RecalculationWritePolicy::InvalidateUnavailable),
+    )
+    .expect_err("the pivot cache reads Things");
+    assert_eq!(
+        error.code(),
+        cellrune::XlsxWriteErrorCode::UnsupportedPreservation
+    );
+    assert_eq!(
+        error.detail(),
+        Some(
+            "a preserved pivot cache reads a table converted to a range: xl/pivotCache/pivotCacheDefinition2.xml"
+        )
+    );
+}

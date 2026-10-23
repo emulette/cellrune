@@ -184,3 +184,88 @@ fn a_canonical_draft_and_an_added_sheet_save_their_copies() {
         "the copy takes position 1"
     );
 }
+
+fn range(value: &str) -> cellrune::CellRange {
+    let (start, end) = value.split_once(':').expect("range");
+    cellrune::CellRange::new(
+        CellAddress::from_a1(start).expect("start"),
+        CellAddress::from_a1(end).expect("end"),
+    )
+    .expect("range")
+}
+
+/// The table of the sheet named `sheet`.
+fn table_of(draft: &WorkbookDraft, sheet: &str) -> cellrune::TableId {
+    draft
+        .workbook()
+        .sheet_by_name(sheet)
+        .expect("sheet")
+        .tables()[0]
+        .id()
+}
+
+#[test]
+fn a_copied_table_saves_a_later_range_change_and_a_source_table_its_own() {
+    let (mut draft, _) = copied(&fixture(), "S2", 2);
+    let copied_table = table_of(&draft, "S2 (2)");
+    let source_table = table_of(&draft, "S2");
+    draft
+        .apply_changes(cellrune::EditBatch::new([
+            cellrune::WorkbookChange::set_table_range(copied_table, range("C1:C3")),
+            cellrune::WorkbookChange::set_table_range(source_table, range("C1:D4")),
+        ]))
+        .expect("resize both tables");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, invalidating()).expect("write");
+    let reopened = open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("open");
+    let saved = |sheet: &str| {
+        let table = &reopened
+            .workbook()
+            .sheet_by_name(sheet)
+            .expect("sheet")
+            .tables()[0];
+        (table.range(), table.columns().len())
+    };
+    assert_eq!(saved("S2 (2)"), (range("C1:C3"), 1));
+    assert_eq!(saved("S2"), (range("C1:D4"), 2));
+}
+
+#[test]
+fn a_table_created_or_converted_on_a_copy_is_refused_with_the_copy() {
+    let (mut created, _) = copied(&fixture(), "S2", 2);
+    let copy = created
+        .workbook()
+        .sheet_by_name("S2 (2)")
+        .expect("copy")
+        .id();
+    created
+        .apply_changes(cellrune::EditBatch::new([
+            cellrune::WorkbookChange::create_table(copy, range("J1:K3"), None),
+        ]))
+        .expect("create a table on the copy");
+    let (mut converted, _) = copied(&fixture(), "S2", 2);
+    let copied_table = table_of(&converted, "S2 (2)");
+    converted
+        .apply_changes(cellrune::EditBatch::new([
+            cellrune::WorkbookChange::convert_table_to_range(copied_table),
+        ]))
+        .expect("convert the copied table");
+    for draft in [created, converted] {
+        let copy = draft.workbook().sheet_by_name("S2 (2)").expect("copy").id();
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let Err(error) = write_xlsx_draft_bytes(&draft, &calculation, invalidating()) else {
+            panic!("the copy's tables changed");
+        };
+        assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+        assert_eq!(
+            error.detail(),
+            Some(
+                format!(
+                    "a sheet copy cannot save a table created or converted to a range on the copy or on its source before the copy: xl/worksheets/cellrune-sheet-{}.xml",
+                    copy.get()
+                )
+                .as_str()
+            )
+        );
+    }
+}

@@ -113,3 +113,39 @@ fn renaming_a_name_rewrites_its_uses_in_preserved_parts_by_scope() {
             .data_validations()
     );
 }
+
+#[test]
+fn renaming_a_workbook_name_renames_the_preserved_pivot_cache_source_that_reads_it() {
+    let source = support::replace_part_text(
+        &crate::support::sheet_deletion_xlsx::generated_sheet_deletion_fixture(),
+        "xl/pivotCache/pivotCacheDefinition2.xml",
+        r#"<worksheetSource ref="D1:D2" sheet="S3"/>"#,
+        r#"<worksheetSource name="Wb_S2"/>"#,
+    );
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(cellrune::EditBatch::new([
+            cellrune::WorkbookChange::rename_defined_name(
+                DefinedNameScope::Workbook,
+                "Wb_S2",
+                "Data2",
+            ),
+        ]))
+        .expect("rename Wb_S2");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        RecalculationWriteOptions::default()
+            .with_policy(cellrune::RecalculationWritePolicy::InvalidateUnavailable),
+    )
+    .expect("write");
+    let parts = support::archive_parts(output.bytes());
+    let cache =
+        String::from_utf8(parts["xl/pivotCache/pivotCacheDefinition2.xml"].clone()).expect("UTF-8");
+    assert!(
+        cache.contains(r#"<worksheetSource name="Data2"/>"#),
+        "{cache}"
+    );
+}
