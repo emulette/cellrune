@@ -295,12 +295,32 @@ impl CompiledWildcardPattern {
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<bool, ErrorKind> {
         charge_preprocessing(&mut on_work)?;
+        // ASCII text lowercases one byte to one character, so it is matched in place; other text
+        // is case-folded into characters first. Both take the same steps.
+        if text.is_ascii() {
+            let bytes = text.as_bytes();
+            return self.match_folded(
+                bytes.len(),
+                |index| bytes[index].to_ascii_lowercase() as char,
+                on_work,
+            );
+        }
         let characters: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
+        self.match_folded(characters.len(), |index| characters[index], on_work)
+    }
+
+    /// Matches the case-folded text of `length` characters that `character` reads by index.
+    fn match_folded(
+        &self,
+        length: usize,
+        character: impl Fn(usize) -> char,
+        mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
+    ) -> Result<bool, ErrorKind> {
         let mut token_index = 0_usize;
         let mut char_index = 0_usize;
         let mut star_token: Option<usize> = None;
         let mut star_char = 0_usize;
-        while char_index < characters.len() {
+        while char_index < length {
             // A pattern without wildcards is one case-insensitive comparison, charged with the
             // preprocessing above. Only wildcard state transitions are charged per step.
             if self.has_wildcard {
@@ -308,7 +328,7 @@ impl CompiledWildcardPattern {
             }
             let matched = match self.tokens.get(token_index) {
                 Some(PatternToken::AnyOne) => true,
-                Some(PatternToken::Literal(literal)) => *literal == characters[char_index],
+                Some(PatternToken::Literal(literal)) => *literal == character(char_index),
                 _ => false,
             };
             if matched {
@@ -412,6 +432,32 @@ mod tests {
     fn compiled_pattern(pattern: &str) -> CompiledWildcardPattern {
         CompiledWildcardPattern::compile_with_work(pattern, |_| Ok(()))
             .expect("unlimited pattern work")
+    }
+
+    #[test]
+    fn ascii_text_matches_in_the_steps_of_folded_characters() {
+        for pattern in ["a*b?c", "*", "abc", "~*x*", "?*?", "A*A*A*B"] {
+            let compiled = compiled_pattern(pattern);
+            for text in ["", "ABC", "aXbYc", "aaaaaaaaab", "*x-y", "abc~", "AbAbAbB"] {
+                let mut folded_work = 0_u64;
+                let characters: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
+                let folded = compiled.match_folded(
+                    characters.len(),
+                    |index| characters[index],
+                    |units| {
+                        folded_work += units;
+                        Ok(())
+                    },
+                );
+                let mut work = 0_u64;
+                let matched = compiled.matches_with_work(text, |units| {
+                    work += units;
+                    Ok(())
+                });
+                assert_eq!(matched, folded, "{pattern} on {text}");
+                assert_eq!(work, folded_work + 1, "{pattern} on {text}");
+            }
+        }
     }
 
     #[test]
