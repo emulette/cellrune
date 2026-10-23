@@ -6,6 +6,7 @@ use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
 use super::util::{required_number, required_text};
+use crate::Locale;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -99,6 +100,11 @@ fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], written:
         Err(kind) => return Value::Error(kind),
     };
     let output = if rounded.is_sign_negative() && rounded != 0.0 {
+        // How Excel with Korean regional settings writes a negative amount has not been
+        // established.
+        if locale != Locale::EnUs {
+            return Value::Error(ErrorKind::Unsupported);
+        }
         format!("({formatted})")
     } else {
         formatted
