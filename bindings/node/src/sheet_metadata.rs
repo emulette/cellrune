@@ -1,6 +1,9 @@
 //! Native views of read-only worksheet metadata pages.
 
-use cellrune_interop::{DataValidationDto, DataValidationPageDto};
+use cellrune_interop::{
+    CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
+    HyperlinkPageDto,
+};
 use napi_derive::napi;
 
 #[napi(object)]
@@ -58,5 +61,81 @@ fn data_validation(value: DataValidationDto) -> NativeDataValidation {
         error_message: value.error_message,
         prompt_title: value.prompt_title,
         prompt_message: value.prompt_message,
+    }
+}
+
+#[napi(object)]
+pub struct NativeHyperlinkPage {
+    pub schema_version: u32,
+    pub sheet: String,
+    pub total: f64,
+    pub offset: f64,
+    pub next_offset: Option<f64>,
+    pub entries: Vec<NativeHyperlink>,
+}
+
+#[napi(object)]
+pub struct NativeHyperlink {
+    pub range: String,
+    pub target: Option<String>,
+    pub location: Option<String>,
+    pub display: Option<String>,
+    pub tooltip: Option<String>,
+}
+
+#[napi(object)]
+pub struct NativeCommentPage {
+    pub schema_version: u32,
+    pub sheet: String,
+    pub total: f64,
+    pub offset: f64,
+    pub next_offset: Option<f64>,
+    pub entries: Vec<NativeComment>,
+}
+
+#[napi(object)]
+pub struct NativeComment {
+    pub address: String,
+    pub author: Option<String>,
+    pub text: String,
+}
+
+pub(crate) fn hyperlink_page(value: HyperlinkPageDto) -> NativeHyperlinkPage {
+    NativeHyperlinkPage {
+        schema_version: value.schema_version,
+        sheet: value.sheet,
+        total: value.total as f64,
+        offset: value.offset as f64,
+        next_offset: value.next_offset.map(|offset| offset as f64),
+        entries: value
+            .entries
+            .into_iter()
+            .map(|entry: HyperlinkDto| NativeHyperlink {
+                range: entry.range,
+                target: entry.target,
+                location: entry.location,
+                display: entry.display,
+                tooltip: entry.tooltip,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn comment_page(value: CommentPageDto) -> NativeCommentPage {
+    NativeCommentPage {
+        schema_version: value.schema_version,
+        sheet: value.sheet,
+        total: value.total as f64,
+        offset: value.offset as f64,
+        next_offset: value.next_offset.map(|offset| offset as f64),
+        entries: value
+            .entries
+            .into_iter()
+            .map(|entry: CommentDto| NativeComment {
+                address: entry.address,
+                author: entry.author,
+                text: entry.text,
+            })
+            .collect(),
     }
 }

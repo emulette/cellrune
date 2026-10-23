@@ -55,7 +55,10 @@ pub use service::{
     PreparedPreview, PreparedRecalculation, PreparedWorkbookSave, WorkbookSession,
     format_display_text, function_catalog,
 };
-pub use sheet_metadata::{DataValidationDto, DataValidationPageDto, SheetPageRequestDto};
+pub use sheet_metadata::{
+    CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
+    HyperlinkPageDto, SheetPageRequestDto,
+};
 
 /// Version of the serialized interop contract.
 pub const INTEROP_SCHEMA_VERSION: u32 = 1;

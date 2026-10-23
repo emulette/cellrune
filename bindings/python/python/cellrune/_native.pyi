@@ -15,7 +15,9 @@ from ._types import (
     CalculationReport,
     CapabilityPage,
     CellFormatPage,
+    CommentPage,
     DataValidationPage,
+    HyperlinkPage,
     DefinedNameInspection,
     EditReceipt,
     EditReceiptV2,
@@ -117,6 +119,20 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> DataValidationPage: ...
+    def hyperlinks(
+        self,
+        sheet: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> HyperlinkPage: ...
+    def comments(
+        self,
+        sheet: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> CommentPage: ...
     def scan_capabilities(
         self,
         *,

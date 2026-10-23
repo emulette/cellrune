@@ -604,8 +604,36 @@ async function assertFormats() {
   reopened.close();
 }
 
+async function assertAnnotations() {
+  const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
+  assert.deepEqual(workbook.hyperlinks("Data").entries, [
+    {
+      range: "B4",
+      target: "https://example.com/docs?a=1&b=2",
+      location: null,
+      display: "Docs",
+      tooltip: "Open the docs",
+    },
+    { range: "B5:C5", target: null, location: "Lists!A1", display: "Lists", tooltip: null },
+  ]);
+  const comments = workbook.comments("Data", { limit: 1 });
+  assert.deepEqual(comments.entries, [
+    { address: "A1", author: "Ana", text: "Ana: check & confirm" },
+  ]);
+  assert.equal(comments.nextOffset, 1);
+  assert.equal(workbook.comments("Data", { offset: 1 }).entries[0].author, "Bo");
+  assert.equal(workbook.hyperlinks("Lists").total, 0);
+  assert.throws(() => workbook.comments("Missing"), (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, "interop.sheet.not_found");
+    return true;
+  });
+  workbook.close();
+}
+
 async function main() {
   await assertDeleteSheet();
+  await assertAnnotations();
   await assertFormats();
   await assertDataValidations();
   await assertIncompleteSaveNamesCells();

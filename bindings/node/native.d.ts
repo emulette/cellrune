@@ -16,6 +16,8 @@ export declare class NativeWorkbook {
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
+  hyperlinks(sheet: string, offset: number, limit: number): NativeHyperlinkPage
+  comments(sheet: string, offset: number, limit: number): NativeCommentPage
   dataValidations(sheet: string, offset: number, limit: number): NativeDataValidationPage
   scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
@@ -153,6 +155,21 @@ export interface NativeCellValue {
   errorValue?: string
 }
 
+export interface NativeComment {
+  address: string
+  author?: string
+  text: string
+}
+
+export interface NativeCommentPage {
+  schemaVersion: number
+  sheet: string
+  total: number
+  offset: number
+  nextOffset?: number
+  entries: Array<NativeComment>
+}
+
 export interface NativeDataValidation {
   ranges: Array<string>
   validationType: string
@@ -286,6 +303,23 @@ export interface NativeFunctionUsageReport {
 export interface NativeLocaleProfile {
   locale: string
   displayLanguage?: string
+}
+
+export interface NativeHyperlink {
+  range: string
+  target?: string
+  location?: string
+  display?: string
+  tooltip?: string
+}
+
+export interface NativeHyperlinkPage {
+  schemaVersion: number
+  sheet: string
+  total: number
+  offset: number
+  nextOffset?: number
+  entries: Array<NativeHyperlink>
 }
 
 export interface NativeNumberFormat {

@@ -8,6 +8,10 @@ from ._native import (
     function_catalog,
 )
 from ._types import (
+    Comment,
+    CommentPage,
+    Hyperlink,
+    HyperlinkPage,
     Alignment,
     AlignmentInput,
     ArgbColor,
@@ -133,6 +137,10 @@ from ._types import (
 )
 
 __all__ = [
+    "Comment",
+    "CommentPage",
+    "Hyperlink",
+    "HyperlinkPage",
     "Alignment",
     "AlignmentInput",
     "ArgbColor",

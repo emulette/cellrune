@@ -291,7 +291,7 @@ pub(super) fn rename_sheet(
         }
         .into());
     }
-    rewrite_data_validation_formulas(
+    rewrite_sheet_metadata_formulas(
         sheets,
         &FormulaRewriteRequest::Sheet {
             old_name: old_name.as_str(),
@@ -312,9 +312,9 @@ pub(super) fn rename_sheet(
     Ok(true)
 }
 
-/// Rewrites a renamed sheet's qualifiers in the data validation formulas the workbook model
-/// carries, as the writer rewrites them in the saved worksheet part.
-fn rewrite_data_validation_formulas(
+/// Rewrites a renamed sheet's qualifiers in the data validation formulas and internal hyperlink
+/// locations the workbook model carries, as the writer rewrites them in the saved worksheet part.
+fn rewrite_sheet_metadata_formulas(
     sheets: &mut [Sheet],
     request: &FormulaRewriteRequest<'_>,
     budget: &mut FormulaRewriteBudget<'_>,
@@ -345,6 +345,25 @@ fn rewrite_data_validation_formulas(
         for (index, slot, rewritten) in rewrites {
             *sheet.data_validations_mut()[index].formulas_mut()[slot] =
                 Some(rewritten.into_boxed_str());
+        }
+        let mut locations = Vec::new();
+        for (index, hyperlink) in sheet.hyperlinks().iter().enumerate() {
+            budget.check_cancelled()?;
+            let Some(location) = hyperlink.location() else {
+                continue;
+            };
+            if hyperlink.is_external() {
+                continue;
+            }
+            let rewritten = rewrite_formula(location, request, budget).map_err(|error| {
+                error.with_owner(format!("hyperlink:sheet_id={sheet_id},index={index}"))
+            })?;
+            if let Some(rewritten) = rewritten {
+                locations.push((index, rewritten));
+            }
+        }
+        for (index, rewritten) in locations {
+            *sheet.hyperlinks_mut()[index].location_mut() = Some(rewritten.into_boxed_str());
         }
     }
     Ok(())

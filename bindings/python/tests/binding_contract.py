@@ -608,8 +608,38 @@ def assert_formats() -> None:
         raise AssertionError("an unknown fill pattern was accepted")
 
 
+def assert_annotations() -> None:
+    workbook = Workbook.from_bytes(SHEET_METADATA_FIXTURE_PATH.read_bytes())
+    hyperlinks = workbook.hyperlinks("Data")
+    assert hyperlinks["entries"] == [
+        {
+            "range": "B4",
+            "target": "https://example.com/docs?a=1&b=2",
+            "location": None,
+            "display": "Docs",
+            "tooltip": "Open the docs",
+        },
+        {
+            "range": "B5:C5",
+            "target": None,
+            "location": "Lists!A1",
+            "display": "Lists",
+            "tooltip": None,
+        },
+    ]
+    comments = workbook.comments("Data", limit=1)
+    assert comments["entries"] == [
+        {"address": "A1", "author": "Ana", "text": "Ana: check & confirm"}
+    ]
+    assert comments["next_offset"] == 1
+    assert workbook.comments("Data", offset=1)["entries"][0]["author"] == "Bo"
+    assert workbook.hyperlinks("Lists")["total"] == 0
+    assert_error("interop.sheet.not_found", lambda: workbook.comments("Missing"))
+
+
 def main() -> None:
     assert_delete_sheet()
+    assert_annotations()
     assert_formats()
     assert_data_validations()
     assert_incomplete_save_names_cells()

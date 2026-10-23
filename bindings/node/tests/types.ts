@@ -1,6 +1,8 @@
 import {
   type CapabilityPage,
   type CellFormatPage,
+  type CommentPage,
+  type HyperlinkPage,
   type DataValidationPage,
   type CalculationLimitOptions,
   type ReadLimitOptions,
@@ -162,6 +164,10 @@ async function check(): Promise<void> {
     { kind: "setCellFormat", sheet: "Sheet1", address: "A1", font: { bold: true } },
     { kind: "setRowHeight", sheet: "Sheet1", row: 1, height: null },
   ]);
+  const links: HyperlinkPage = reopened.hyperlinks("Sheet1");
+  links.entries[0]?.target?.toUpperCase();
+  const notes: CommentPage = reopened.comments("Sheet1", { offset: 0 });
+  notes.entries[0]?.text.toUpperCase();
   const validations: DataValidationPage = reopened.dataValidations("Sheet1", { limit: 10 });
   for (const rule of validations.entries) {
     rule.ranges[0]?.toUpperCase();

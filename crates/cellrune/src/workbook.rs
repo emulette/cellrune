@@ -5,12 +5,14 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
+mod annotations;
 mod auto_filter;
 mod data_validation;
 mod new_cell_styles;
 mod sheet_tabs;
 mod table_index;
 
+pub use annotations::{Comment, Hyperlink};
 pub use auto_filter::SheetAutoFilter;
 pub(crate) use data_validation::DataValidationRule;
 pub use data_validation::{
@@ -263,6 +265,8 @@ pub struct Sheet {
     auto_filter: Option<SheetAutoFilter>,
     hidden_rows: Arc<Vec<Row>>,
     data_validations: Arc<Vec<DataValidation>>,
+    hyperlinks: Arc<Vec<Hyperlink>>,
+    comments: Arc<Vec<Comment>>,
     new_cell_styles: Arc<NewCellStyles>,
     semantic_fingerprint: OnceLock<[u8; 32]>,
 }
@@ -290,6 +294,8 @@ impl Sheet {
             auto_filter: self.auto_filter.clone(),
             hidden_rows: Arc::clone(&self.hidden_rows),
             data_validations: Arc::clone(&self.data_validations),
+            hyperlinks: Arc::clone(&self.hyperlinks),
+            comments: Arc::clone(&self.comments),
             new_cell_styles: Arc::clone(&self.new_cell_styles),
             semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
@@ -315,6 +321,8 @@ impl Sheet {
             auto_filter: None,
             hidden_rows: Arc::new(Vec::new()),
             data_validations: Arc::new(Vec::new()),
+            hyperlinks: Arc::new(Vec::new()),
+            comments: Arc::new(Vec::new()),
             new_cell_styles: Arc::default(),
             semantic_fingerprint: OnceLock::new(),
         }
@@ -593,6 +601,32 @@ impl Sheet {
 
     pub(crate) fn data_validations_mut(&mut self) -> &mut [DataValidation] {
         Arc::make_mut(&mut self.data_validations).as_mut_slice()
+    }
+
+    /// Returns the sheet's hyperlinks in worksheet order.
+    ///
+    /// A hyperlink whose `ref` does not parse is left unmodeled; its XML is preserved either way.
+    /// Hyperlinks do not affect calculation and are not part of the semantic fingerprint.
+    pub fn hyperlinks(&self) -> &[Hyperlink] {
+        self.hyperlinks.as_slice()
+    }
+
+    pub(crate) fn hyperlinks_mut(&mut self) -> &mut [Hyperlink] {
+        Arc::make_mut(&mut self.hyperlinks).as_mut_slice()
+    }
+
+    /// Returns the sheet's cell comments (notes) in comments-part order.
+    ///
+    /// Comments come from the legacy comments part, which Excel also writes for threaded
+    /// comments. A comments part that does not read leaves the sheet without comments instead of
+    /// failing the read. Comments are not part of the semantic fingerprint.
+    pub fn comments(&self) -> &[Comment] {
+        self.comments.as_slice()
+    }
+
+    pub(crate) fn set_annotations(&mut self, hyperlinks: Vec<Hyperlink>, comments: Vec<Comment>) {
+        self.hyperlinks = Arc::new(hyperlinks);
+        self.comments = Arc::new(comments);
     }
 
     /// Returns the source styles that cells written at empty positions receive.

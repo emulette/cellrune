@@ -2,7 +2,11 @@
 
 const native = require("./native.js");
 const { normalizeCellFormatPage } = require("./lib/formats.js");
-const { normalizeDataValidationPage } = require("./lib/sheet_metadata.js");
+const {
+  normalizeCommentPage,
+  normalizeDataValidationPage,
+  normalizeHyperlinkPage,
+} = require("./lib/sheet_metadata.js");
 const { targetRequest } = require("./lib/targeted.js");
 const {
   serializeWorkbookChange,
@@ -126,6 +130,20 @@ class Workbook {
       withSyncErrors(() =>
         this.#session().readFormats(sheet, start, end, offset, limit),
       ),
+    );
+  }
+
+  hyperlinks(sheet, options = {}) {
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizeHyperlinkPage(
+      withSyncErrors(() => this.#session().hyperlinks(sheet, offset, limit)),
+    );
+  }
+
+  comments(sheet, options = {}) {
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizeCommentPage(
+      withSyncErrors(() => this.#session().comments(sheet, offset, limit)),
     );
   }
 

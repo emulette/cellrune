@@ -32,6 +32,12 @@ const EXTERNAL_LINK_STRICT: &str =
     "http://purl.oclc.org/ooxml/officeDocument/relationships/externalLink";
 const TABLE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 const TABLE_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/table";
+const HYPERLINK: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const HYPERLINK_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink";
+const COMMENTS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+const COMMENTS_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/comments";
 const VBA_PROJECT: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
 const PIVOT_TABLE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
@@ -103,6 +109,14 @@ pub(crate) fn is_pivot_cache_definition(value: &str) -> bool {
 /// pivot tables and tables by name.
 pub(crate) fn is_slicer_or_timeline_cache(value: &str) -> bool {
     matches!(value, SLICER_CACHE | TIMELINE_CACHE)
+}
+
+pub(super) fn is_hyperlink(value: &str) -> bool {
+    matches!(value, HYPERLINK | HYPERLINK_STRICT)
+}
+
+pub(super) fn is_comments(value: &str) -> bool {
+    matches!(value, COMMENTS | COMMENTS_STRICT)
 }
 
 pub(super) fn is_vba_project(value: &str) -> bool {

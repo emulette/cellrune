@@ -72,3 +72,68 @@ pub struct DataValidationDto {
     /// Input message text.
     pub prompt_message: Option<String>,
 }
+
+/// One page of a sheet's hyperlinks, in worksheet order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HyperlinkPageDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Resolved sheet name.
+    pub sheet: String,
+    /// Number of modeled hyperlinks on the sheet.
+    pub total: u64,
+    /// Offset represented by the first returned hyperlink.
+    pub offset: u64,
+    /// Offset for the next page, or `None` at the end.
+    pub next_offset: Option<u64>,
+    /// Returned hyperlinks.
+    pub entries: Vec<HyperlinkDto>,
+}
+
+/// One worksheet hyperlink.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HyperlinkDto {
+    /// Cells the hyperlink covers; a one-cell range is a single address.
+    pub range: String,
+    /// External target, such as a URL, from the worksheet relationship.
+    pub target: Option<String>,
+    /// Place the hyperlink opens: a reference or defined name in this workbook, or with a target a
+    /// place inside the target document.
+    pub location: Option<String>,
+    /// Recorded display text.
+    pub display: Option<String>,
+    /// Screen tip.
+    pub tooltip: Option<String>,
+}
+
+/// One page of a sheet's cell comments (notes), in comments-part order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentPageDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Resolved sheet name.
+    pub sheet: String,
+    /// Number of comments on the sheet.
+    pub total: u64,
+    /// Offset represented by the first returned comment.
+    pub offset: u64,
+    /// Offset for the next page, or `None` at the end.
+    pub next_offset: Option<u64>,
+    /// Returned comments.
+    pub entries: Vec<CommentDto>,
+}
+
+/// One cell comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentDto {
+    /// Unqualified A1 address of the commented cell.
+    pub address: String,
+    /// Author, when the comment names a known one.
+    pub author: Option<String>,
+    /// Plain text of every run.
+    pub text: String,
+}

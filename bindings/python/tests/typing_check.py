@@ -1,6 +1,8 @@
 from cellrune import (
     CapabilityPage,
     CellFormatPage,
+    CommentPage,
+    HyperlinkPage,
     SetCellFormatChange,
     DataValidationPage,
     CalculationLimitOptions,
@@ -134,6 +136,12 @@ def check() -> None:
         "font": {"bold": True},
     }
     reopened.apply_changes_v2(reopened.summary()["semantic_revision"], [bold])
+    links: HyperlinkPage = reopened.hyperlinks("Sheet1")
+    for link in links["entries"]:
+        link["range"].upper()
+    notes: CommentPage = reopened.comments("Sheet1", offset=0)
+    for note in notes["entries"]:
+        note["text"].upper()
     validations: DataValidationPage = reopened.data_validations("Sheet1", limit=10)
     for rule in validations["entries"]:
         rule["ranges"][0].upper()

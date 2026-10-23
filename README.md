@@ -33,8 +33,8 @@ cellrune = "0.1.26"
   columns, and validated worksheet-owned Excel
   tables, including stable table and column IDs, complete filter/sort/formula/style metadata, and
   case-insensitive lookup indexes;
-- reads every worksheet data validation rule, including Excel 2010 extension rules, as read-only
-  metadata;
+- reads every worksheet data validation rule, including Excel 2010 extension rules, and worksheet
+  hyperlinks and cell comments as read-only metadata;
 - reads and writes a minimal cell formatting model (font, fill, border, alignment) with column
   widths and row heights, patching only the style records an edit needs into existing packages;
 - resolves typed multi-area, 3-D, structured table, current-row, and spill references under
@@ -381,7 +381,7 @@ reaches every surface:
 | Cell number formats, hidden rows, sheet autoFilter ranges and filtered columns, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
-| Data validation rules (read-only) | yes | yes | yes | yes |
+| Data validation rules, hyperlinks, and comments (read-only) | yes | yes | yes | yes |
 | Cell formats, column widths, and row heights (read and edit) | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
 | Defined-name inspection | yes | yes | yes | no |
@@ -500,7 +500,8 @@ declaration: xlsxwriter and similar producers
 set it and may store placeholder results, so read such saved results only after calculating.
 `data_validations`/`dataValidations` page through a sheet's data validation rules with `offset` and
 `limit`; each rule carries its ranges, OOXML type, operator, and error-style tokens, its formulas as
-stored, and its flags and messages. `read_formats`/`readFormats` page through the font, fill,
+stored, and its flags and messages. `hyperlinks` and `comments` page the same way through a sheet's
+hyperlinks and cell comments. `read_formats`/`readFormats` page through the font, fill,
 border, and alignment of a range's cells with its column widths and the page's row heights, and
 `apply_changes_v2`/`applyChangesV2` take `set_cell_format`/`setCellFormat`,
 `set_column_width`/`setColumnWidth`, and `set_row_height`/`setRowHeight` changes, which keep the
@@ -522,8 +523,9 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 20 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
-`workbook_read_range`, `workbook_read_formats`, `workbook_data_validations`, `workbook_function_usage`, `workbook_scan_capabilities`,
+Its 22 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
+`workbook_read_range`, `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
+`workbook_comments`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`, `workbook_discard_preview`, and the

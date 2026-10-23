@@ -120,3 +120,48 @@ fn data_validation_pages_are_bounded_and_reject_unknown_sheets_and_offsets() {
         .expect("a created workbook has no rules");
     assert_eq!((empty.total, empty.entries.len()), (0, 0));
 }
+
+#[test]
+fn hyperlink_and_comment_pages_report_every_attribute() {
+    let session = WorkbookSession::open_bytes(&fixture()).expect("open");
+    assert_eq!(
+        serde_json::to_value(
+            session
+                .hyperlinks(&request("Data", 0, 0))
+                .expect("hyperlinks")
+        )
+        .expect("serialize"),
+        json!({
+            "schema_version": 1, "sheet": "Data", "total": 2, "offset": 0, "next_offset": null,
+            "entries": [
+                {
+                    "range": "B4", "target": "https://example.com/docs?a=1&b=2", "location": null,
+                    "display": "Docs", "tooltip": "Open the docs"
+                },
+                {
+                    "range": "B5:C5", "target": null, "location": "Lists!A1",
+                    "display": "Lists", "tooltip": null
+                }
+            ]
+        })
+    );
+    let comments = session.comments(&request("Data", 1, 1)).expect("comments");
+    assert_eq!(
+        serde_json::to_value(&comments).expect("serialize"),
+        json!({
+            "schema_version": 1, "sheet": "Data", "total": 2, "offset": 1, "next_offset": null,
+            "entries": [{"address": "C3", "author": "Bo", "text": "Plain note"}]
+        })
+    );
+    let first = session
+        .comments(&request("Data", 0, 1))
+        .expect("first comment");
+    assert_eq!(first.entries[0].text, "Ana: check & confirm");
+    assert_eq!(first.next_offset, Some(1));
+    for error in [
+        session.hyperlinks(&request("Missing", 0, 0)).err(),
+        session.comments(&request("Data", 3, 0)).err(),
+    ] {
+        assert!(error.is_some());
+    }
+}

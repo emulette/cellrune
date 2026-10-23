@@ -12,6 +12,7 @@ use super::PresentationCapture;
 use super::auto_filter::SheetAutoFilterCollector;
 use super::data_validation::{self, DataValidationCollector};
 use super::formula_cell::SharedFormulaTable;
+use super::hyperlink::{HyperlinkCollector, PendingHyperlink};
 use super::merge::MergedRangeCollector;
 use super::metadata::CellMetadata;
 use super::phonetic::{PhoneticReadBudget, parse_bool, parse_properties};
@@ -74,6 +75,7 @@ struct WorksheetParseState {
     saw_table_parts: bool,
     auto_filter: SheetAutoFilterCollector,
     data_validations: DataValidationCollector,
+    hyperlinks: HyperlinkCollector,
 }
 
 #[derive(Clone, Copy)]
@@ -95,6 +97,7 @@ pub(super) struct WorksheetOutput<'a> {
     pub(super) phonetic_budget: &'a mut PhoneticReadBudget,
     pub(super) diagnostics: &'a mut Vec<Diagnostic>,
     pub(super) table_relationship_ids: &'a mut Vec<Box<str>>,
+    pub(super) hyperlinks: &'a mut Vec<PendingHyperlink>,
 }
 
 struct WorksheetStartContext<'budget, 'state> {
@@ -132,6 +135,7 @@ pub(super) fn parse(
         phonetic_budget,
         diagnostics,
         table_relationship_ids,
+        hyperlinks,
     } = output;
     let sheet_id = sheet.id();
     let mut xml = reader(bytes, limits);
@@ -157,6 +161,11 @@ pub(super) fn parse(
                     state
                         .data_validations
                         .start(&local_name, namespace, depth, &attributes);
+                }
+                if is_spreadsheet {
+                    state
+                        .hyperlinks
+                        .start(&local_name, depth, false, &attributes);
                 }
                 process_start(
                     is_spreadsheet,
@@ -192,6 +201,11 @@ pub(super) fn parse(
                         .data_validations
                         .start(&local_name, namespace, depth, &attributes);
                     state.data_validations.end(depth);
+                }
+                if is_spreadsheet {
+                    state
+                        .hyperlinks
+                        .start(&local_name, depth, true, &attributes);
                 }
                 if depth == 1 {
                     require_spreadsheet_element(is_spreadsheet, &local_name, WORKSHEET, &budget)?;
@@ -382,6 +396,7 @@ pub(super) fn parse(
                 let depth = budget.end()?;
                 let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 state.data_validations.end(depth);
+                state.hyperlinks.end(depth);
                 if let Some(cell) = &mut state.current_cell {
                     cell.process_end(&local_name, depth, &budget)?;
                 }
@@ -449,6 +464,7 @@ pub(super) fn parse(
     sheet.set_merged_ranges(state.merged_ranges.finish(sheet_id, diagnostics, &budget)?);
     sheet.set_auto_filter(state.auto_filter.finish());
     sheet.set_data_validations(state.data_validations.finish());
+    *hyperlinks = state.hyperlinks.finish();
     Ok(())
 }
 

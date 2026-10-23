@@ -1,13 +1,13 @@
 //! Bounded pages of read-only worksheet metadata.
 
-use cellrune::{CellRange, DataValidation, Sheet};
+use cellrune::{CellRange, Comment, DataValidation, Hyperlink, Sheet};
 
 use super::WorkbookSession;
 use super::query::normalized_limit;
 use crate::convert::count_u64;
 use crate::{
-    DataValidationDto, DataValidationPageDto, INTEROP_SCHEMA_VERSION, InteropError,
-    SheetPageRequestDto,
+    CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
+    HyperlinkPageDto, INTEROP_SCHEMA_VERSION, InteropError, SheetPageRequestDto,
 };
 
 /// One bounded slice of a sheet's entries.
@@ -32,6 +32,45 @@ impl WorkbookSession {
     ) -> Result<DataValidationPageDto, InteropError> {
         let page = self.sheet_page(request, Sheet::data_validations, data_validation_dto)?;
         Ok(DataValidationPageDto {
+            schema_version: INTEROP_SCHEMA_VERSION,
+            sheet: page.sheet,
+            total: page.total,
+            offset: page.offset,
+            next_offset: page.next_offset,
+            entries: page.entries,
+        })
+    }
+
+    /// Reads one page of a sheet's hyperlinks in worksheet order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed input error for an unknown sheet, excessive page size, or out-of-range
+    /// offset.
+    pub fn hyperlinks(
+        &self,
+        request: &SheetPageRequestDto,
+    ) -> Result<HyperlinkPageDto, InteropError> {
+        let page = self.sheet_page(request, Sheet::hyperlinks, hyperlink_dto)?;
+        Ok(HyperlinkPageDto {
+            schema_version: INTEROP_SCHEMA_VERSION,
+            sheet: page.sheet,
+            total: page.total,
+            offset: page.offset,
+            next_offset: page.next_offset,
+            entries: page.entries,
+        })
+    }
+
+    /// Reads one page of a sheet's cell comments (notes) in comments-part order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed input error for an unknown sheet, excessive page size, or out-of-range
+    /// offset.
+    pub fn comments(&self, request: &SheetPageRequestDto) -> Result<CommentPageDto, InteropError> {
+        let page = self.sheet_page(request, Sheet::comments, comment_dto)?;
+        Ok(CommentPageDto {
             schema_version: INTEROP_SCHEMA_VERSION,
             sheet: page.sheet,
             total: page.total,
@@ -100,5 +139,23 @@ fn data_validation_dto(validation: &DataValidation) -> DataValidationDto {
         error_message: validation.error_message().map(str::to_owned),
         prompt_title: validation.prompt_title().map(str::to_owned),
         prompt_message: validation.prompt_message().map(str::to_owned),
+    }
+}
+
+fn hyperlink_dto(hyperlink: &Hyperlink) -> HyperlinkDto {
+    HyperlinkDto {
+        range: reference_text(&hyperlink.range()),
+        target: hyperlink.target().map(str::to_owned),
+        location: hyperlink.location().map(str::to_owned),
+        display: hyperlink.display().map(str::to_owned),
+        tooltip: hyperlink.tooltip().map(str::to_owned),
+    }
+}
+
+fn comment_dto(comment: &Comment) -> CommentDto {
+    CommentDto {
+        address: comment.address().to_string(),
+        author: comment.author().map(str::to_owned),
+        text: comment.text().to_owned(),
     }
 }

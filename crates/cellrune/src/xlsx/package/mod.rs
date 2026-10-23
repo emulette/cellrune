@@ -38,6 +38,8 @@ const CONTENT_SHARED_STRINGS: &str =
 const CONTENT_SHEET_METADATA: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml";
 const CONTENT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+const CONTENT_COMMENTS: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
 const CONTENT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CONTENT_CHART_EX: &str = "application/vnd.ms-office.chartex+xml";
 const CONTENT_PIVOT_CACHE_DEFINITION: &str =
@@ -190,6 +192,59 @@ impl<R: Read + Seek> OpenedPackage<R> {
             parts.insert(relationship.id.clone(), part.clone());
         }
         Ok(parts)
+    }
+
+    /// Returns whether the package holds a comments part, so that worksheets without hyperlink
+    /// relationships need their relationships read only then.
+    pub(super) fn has_comment_parts(&self) -> bool {
+        !self.parts_with_content_type(&[CONTENT_COMMENTS]).is_empty()
+    }
+
+    /// Returns a worksheet's external hyperlink targets by relationship ID and its comments part.
+    ///
+    /// These relationships were not read before hyperlinks and comments were modeled, so a
+    /// relationship part that does not read or parse yields none instead of failing the read.
+    pub(super) fn worksheet_annotation_relationships(
+        &mut self,
+        worksheet_part: &PartPath,
+    ) -> (BTreeMap<Box<str>, Box<str>>, Option<PartPath>) {
+        let mut targets = BTreeMap::new();
+        let mut comments = None;
+        let Ok(relationship_part) = worksheet_part.relationship_part() else {
+            return (targets, comments);
+        };
+        if !self.entries.contains_key(&relationship_part) {
+            return (targets, comments);
+        }
+        let Ok(bytes) = self.read_part(&relationship_part) else {
+            return (targets, comments);
+        };
+        let Ok(relationships) = xml::parse_relationships(
+            &bytes,
+            &relationship_part,
+            Some(worksheet_part),
+            self.limits,
+        ) else {
+            return (targets, comments);
+        };
+        for relationship in relationships {
+            match relationship.target {
+                RelationshipTarget::External(target)
+                    if relationship_type::is_hyperlink(&relationship.kind) =>
+                {
+                    targets.insert(relationship.id, target);
+                }
+                RelationshipTarget::Internal(part)
+                    if relationship_type::is_comments(&relationship.kind)
+                        && comments.is_none()
+                        && self.content_types.content_type(&part) == Some(CONTENT_COMMENTS) =>
+                {
+                    comments = Some(part);
+                }
+                _ => {}
+            }
+        }
+        (targets, comments)
     }
 
     /// Returns the chart parts, whose series formulas name worksheets outside the workbook model.

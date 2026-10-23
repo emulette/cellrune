@@ -160,9 +160,9 @@ pub use table::{
     TableValueFilters, TotalsRowFunction,
 };
 pub use workbook::{
-    CalculationHints, CalculationMode, DataValidation, DataValidationErrorStyle,
-    DataValidationOperator, DataValidationType, DateSystem, Sheet, SheetAutoFilter, SheetId,
-    SheetName, SheetVisibility, WorkbookFingerprint, WorkbookSnapshot, WorkbookSource,
+    CalculationHints, CalculationMode, Comment, DataValidation, DataValidationErrorStyle,
+    DataValidationOperator, DataValidationType, DateSystem, Hyperlink, Sheet, SheetAutoFilter,
+    SheetId, SheetName, SheetVisibility, WorkbookFingerprint, WorkbookSnapshot, WorkbookSource,
     WorkbookSourceKind,
 };
 pub use xlsx::{

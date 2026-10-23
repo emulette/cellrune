@@ -17,7 +17,7 @@ use crate::conversion::{
 };
 use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
-use crate::sheet_metadata::NativeDataValidationPage;
+use crate::sheet_metadata::{NativeCommentPage, NativeDataValidationPage, NativeHyperlinkPage};
 use crate::task::{
     BytesTask, CalculateTask, CapabilityTask, EditsBytesTask, PreviewTask, RecalculateTask,
     SaveEditsPathTask, SavePathTask,
@@ -102,6 +102,42 @@ impl NativeWorkbook {
         };
         let page = self.lock()?.read_formats(&request).map_err(napi_error)?;
         serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn hyperlinks(
+        &self,
+        sheet: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<NativeHyperlinkPage> {
+        let request = SheetPageRequestDto {
+            sheet,
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        };
+        self.lock()?
+            .hyperlinks(&request)
+            .map(crate::sheet_metadata::hyperlink_page)
+            .map_err(napi_error)
+    }
+
+    #[napi(catch_unwind)]
+    pub fn comments(
+        &self,
+        sheet: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<NativeCommentPage> {
+        let request = SheetPageRequestDto {
+            sheet,
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        };
+        self.lock()?
+            .comments(&request)
+            .map(crate::sheet_metadata::comment_page)
+            .map_err(napi_error)
     }
 
     #[napi(catch_unwind)]

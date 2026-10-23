@@ -163,6 +163,36 @@ impl Workbook {
         conversion::json_dict(py, &page)
     }
 
+    #[pyo3(signature = (sheet, *, offset=None, limit=None))]
+    pub fn hyperlinks<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let request =
+            sheet_page_request(sheet, offset, limit).map_err(|error| into_py_error(py, error))?;
+        let result = py.detach(move || self.lock_interop_wait()?.hyperlinks(&request));
+        let page = result.map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &page)
+    }
+
+    #[pyo3(signature = (sheet, *, offset=None, limit=None))]
+    pub fn comments<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let request =
+            sheet_page_request(sheet, offset, limit).map_err(|error| into_py_error(py, error))?;
+        let result = py.detach(move || self.lock_interop_wait()?.comments(&request));
+        let page = result.map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &page)
+    }
+
     #[pyo3(signature = (*, offset=None, limit=None, today_serial=None, now_serial=None))]
     pub fn scan_capabilities<'py>(
         &self,

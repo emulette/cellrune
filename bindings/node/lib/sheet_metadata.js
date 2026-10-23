@@ -37,6 +37,26 @@ function normalizeDataValidationPage(value) {
   return page(value, "data validation page", normalizeDataValidation);
 }
 
+function normalizeHyperlinkPage(value) {
+  return page(value, "hyperlink page", (link) => ({
+    range: link.range,
+    target: link.target ?? null,
+    location: link.location ?? null,
+    display: link.display ?? null,
+    tooltip: link.tooltip ?? null,
+  }));
+}
+
+function normalizeCommentPage(value) {
+  return page(value, "comment page", (comment) => ({
+    address: comment.address,
+    author: comment.author ?? null,
+    text: comment.text,
+  }));
+}
+
 module.exports = {
+  normalizeCommentPage,
   normalizeDataValidationPage,
+  normalizeHyperlinkPage,
 };

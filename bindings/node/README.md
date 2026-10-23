@@ -138,7 +138,8 @@ runs, so do not edit it until the returned Promise settles.
 `openPath`/`fromBytes` accept `readLimits` and `calculate`/`recalculate`/`previewChanges` accept
 `calculationLimits` to change individual default limits, and `scanCapabilities()` pages through the
 static per-formula support report. `dataValidations(sheet, { offset, limit })` pages through a
-sheet's read-only data validation rules. `readFormats(sheet, start, end, { offset, limit })` reads
+sheet's read-only data validation rules, and `hyperlinks` and `comments` through its hyperlinks and
+cell comments. `readFormats(sheet, start, end, { offset, limit })` reads
 cell fonts, fills, borders, and alignments with column widths and row heights, and
 `applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes.
 `close()` is idempotent. Once it returns, the binding-owned native session has

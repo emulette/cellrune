@@ -95,9 +95,10 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 21 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 23 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
-`workbook_read_formats`, `workbook_data_validations`, `workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
+`workbook_comments`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
@@ -160,7 +161,11 @@ xlsxwriter set while storing placeholder results. Python
 `workbook_data_validations` in MCP); each entry carries `ranges`,
 `validation_type`, `operator`, and `error_style` OOXML tokens, `formula1`,
 `formula2`, `allow_blank`, `in_cell_dropdown`, the two message flags, and the
-error and prompt titles and messages. Python `read_formats(sheet, start, end,
+error and prompt titles and messages. `hyperlinks(sheet, ...)` and
+`comments(sheet, ...)` (interop `WorkbookSession::hyperlinks`/`comments`,
+MCP `workbook_hyperlinks`/`workbook_comments`) page the same way through
+`range`, `target`, `location`, `display`, `tooltip` and `address`, `author`,
+`text` entries. Python `read_formats(sheet, start, end,
 offset=, limit=)` and Node.js `readFormats(sheet, start, end, { offset, limit
 })` (`WorkbookSession::read_formats(&RangeRequestDto) -> CellFormatPageDto`,
 MCP `workbook_read_formats`) return each cell's `font`, `fill` (tagged
@@ -360,6 +365,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   and fails with `validation.formula_rewrite_parse_failed` when a rule
   formula naming the sheet does not parse. Rules are not part of the
   semantic fingerprint.
+- `Sheet::hyperlinks() -> &[Hyperlink]` (worksheet order) and
+  `Sheet::comments() -> &[Comment]` (comments-part order) are read-only.
+  `Hyperlink`: `.range()`, `.target()` (external target from the worksheet
+  relationship; `None` for an internal or unresolved one), `.location()`,
+  `.display()`, `.tooltip()`. `Comment`: `.address()`, `.author()`,
+  `.text()` (plain text of every run, phonetic runs excluded). Comments come
+  from the legacy comments part, which Excel also writes for threaded
+  comments. A malformed hyperlink `ref`, an unreadable worksheet relationship
+  part, or an unreadable comments part leaves that metadata out without
+  failing the read. A sheet rename rewrites internal hyperlink locations;
+  an external hyperlink's location points into its target and is kept.
 - `Table`: `.id() -> TableId` (OOXML-valid non-zero, workbook-global stable ID),
   `.name() -> &TableName` (worksheet-local programmatic name),
   `.display_name() -> &TableName` (workbook-global formula/UI name),

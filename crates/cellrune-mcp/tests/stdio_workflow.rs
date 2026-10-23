@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 20);
+    assert_eq!(tools.len(), 22);
     assert!(
         tools
             .iter()
@@ -1900,6 +1900,26 @@ fn data_validations_are_a_bounded_stdio_page() {
         json!({"session_id": session_id, "sheet": "Missing"}),
     ));
     assert_eq!(error["code"], "interop.sheet.not_found");
+
+    let hyperlinks = successful_tool(mcp.call_tool(
+        "workbook_hyperlinks",
+        json!({"session_id": session_id, "sheet": "Data"}),
+    ));
+    assert_eq!(hyperlinks["total"], 2);
+    assert_eq!(
+        hyperlinks["entries"][0]["target"],
+        "https://example.com/docs?a=1&b=2"
+    );
+    assert_eq!(hyperlinks["entries"][1]["location"], "Lists!A1");
+    let comments = successful_tool(mcp.call_tool(
+        "workbook_comments",
+        json!({"session_id": session_id, "sheet": "Data", "limit": 1}),
+    ));
+    assert_eq!(
+        comments["entries"],
+        json!([{"address": "A1", "author": "Ana", "text": "Ana: check & confirm"}])
+    );
+    assert_eq!(comments["next_offset"], 1);
 
     let (status, _, _) = mcp.finish();
     assert!(status.success());

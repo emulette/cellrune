@@ -345,6 +345,38 @@ class DataValidationPage(TypedDict):
     entries: list[DataValidation]
 
 
+class Hyperlink(TypedDict):
+    range: str
+    target: str | None
+    location: str | None
+    display: str | None
+    tooltip: str | None
+
+
+class HyperlinkPage(TypedDict):
+    schema_version: int
+    sheet: str
+    total: int
+    offset: int
+    next_offset: int | None
+    entries: list[Hyperlink]
+
+
+class Comment(TypedDict):
+    address: str
+    author: str | None
+    text: str
+
+
+class CommentPage(TypedDict):
+    schema_version: int
+    sheet: str
+    total: int
+    offset: int
+    next_offset: int | None
+    entries: list[Comment]
+
+
 class WorkbookFingerprint(TypedDict):
     schema_version: int
     digest_hex: str

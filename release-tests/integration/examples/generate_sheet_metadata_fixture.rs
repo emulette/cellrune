@@ -11,6 +11,7 @@ const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/comments1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>
 </Types>"#;
 
 const ROOT_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -56,14 +57,34 @@ const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   </cellXfs>
 </styleSheet>"#;
 
+const DATA_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/docs?a=1&amp;b=2" TargetMode="External"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.xml"/>
+</Relationships>"#;
+
+const COMMENTS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors><author>Ana</author><author>Bo</author></authors>
+  <commentList>
+    <comment ref="A1" authorId="0"><text><r><rPr><b/></rPr><t>Ana:</t></r><r><t xml:space="preserve"> check &amp; confirm</t></r></text></comment>
+    <comment ref="C3" authorId="1"><text><t>Plain note</t></text></comment>
+  </commentList>
+</comments>"#;
+
 const DATA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <cols><col min="1" max="2" width="18.5" customWidth="1"/></cols>
   <sheetData><row r="1" ht="24" customHeight="1"><c r="A1" s="1" t="inlineStr"><is><t>Yes</t></is></c></row></sheetData>
   <dataValidations count="2">
     <dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="warning" error="Pick one" sqref="A1:A5 C1"><formula1>"Yes,No"</formula1></dataValidation>
     <dataValidation type="whole" operator="notBetween" showDropDown="1" promptTitle="Range" prompt="Outside 1-9" sqref="B2"><formula1>1</formula1><formula2>9</formula2></dataValidation>
   </dataValidations>
+  <hyperlinks>
+    <hyperlink ref="B4" r:id="rId1" display="Docs" tooltip="Open the docs"/>
+    <hyperlink ref="B5:C5" location="Lists!A1" display="Lists"/>
+  </hyperlinks>
   <extLst>
     <ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
       <x14:dataValidations count="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
@@ -95,6 +116,8 @@ fn main() {
         ("xl/worksheets/sheet1.xml", DATA),
         ("xl/worksheets/sheet2.xml", LISTS),
         ("xl/styles.xml", STYLES),
+        ("xl/worksheets/_rels/sheet1.xml.rels", DATA_RELATIONSHIPS),
+        ("xl/comments1.xml", COMMENTS),
     ] {
         writer.start_file(path, options).expect("fixture entry");
         writer

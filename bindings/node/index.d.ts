@@ -321,6 +321,42 @@ export interface DataValidation {
   readonly promptMessage: string | null;
 }
 
+export interface Hyperlink {
+  /** Covered cells; a one-cell range is a single address. */
+  readonly range: string;
+  /** External target from the worksheet relationship. */
+  readonly target: string | null;
+  /** Place in this workbook, or with a target a place inside the target document. */
+  readonly location: string | null;
+  readonly display: string | null;
+  readonly tooltip: string | null;
+}
+
+export interface HyperlinkPage {
+  readonly schemaVersion: number;
+  readonly sheet: string;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly Hyperlink[];
+}
+
+export interface Comment {
+  readonly address: string;
+  readonly author: string | null;
+  /** Plain text of every run. */
+  readonly text: string;
+}
+
+export interface CommentPage {
+  readonly schemaVersion: number;
+  readonly sheet: string;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly Comment[];
+}
+
 export interface DataValidationPage {
   readonly schemaVersion: number;
   readonly sheet: string;
@@ -1022,6 +1058,10 @@ export class Workbook {
     end: string,
     options?: SheetPageOptions,
   ): CellFormatPage;
+  /** Reads one bounded page of a sheet's read-only hyperlinks. */
+  hyperlinks(sheet: string, options?: SheetPageOptions): HyperlinkPage;
+  /** Reads one bounded page of a sheet's read-only cell comments (notes). */
+  comments(sheet: string, options?: SheetPageOptions): CommentPage;
   /** Reads one bounded page of a sheet's read-only data validation rules. */
   dataValidations(sheet: string, options?: SheetPageOptions): DataValidationPage;
   /** Statically reports whether each formula can be calculated, one bounded page at a time. */

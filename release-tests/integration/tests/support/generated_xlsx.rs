@@ -1014,6 +1014,83 @@ pub fn generated_format_workbook() -> Vec<u8> {
     )
 }
 
+/// Sheets `Notes` and `Plain`. `Notes` has an external hyperlink, an internal one over a range, one
+/// whose relationship does not resolve, and one with a malformed `ref`, and a comments part with
+/// a rich-text comment, a plain one by an unknown author, a phonetic run, and a malformed `ref`.
+/// `Plain` has a hyperlink whose relationship part is not well-formed XML; with `broken_comments`,
+/// the comments part is not well-formed either.
+pub fn generated_annotation_workbook(broken_comments: bool) -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/comments1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Notes" sheetId="1" r:id="rId1"/>
+    <sheet name="Plain" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>"#;
+    let notes = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
+  <hyperlinks>
+    <hyperlink ref="A1" r:id="rId1" display="Site" tooltip="Open the site"/>
+    <hyperlink ref="B2:C3" location="Plain!A1" display="Plain sheet"/>
+    <hyperlink ref="D1" r:id="rId9" location="Sheet1!A1"/>
+    <hyperlink ref="NOPE" location="Plain!A1"/>
+  </hyperlinks>
+</worksheet>"#;
+    let notes_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/a?b=1&amp;c=2" TargetMode="External"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.xml"/>
+</Relationships>"#;
+    let comments = if broken_comments {
+        r#"<?xml version="1.0" encoding="UTF-8"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><commentList>"#
+    } else {
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors><author>Ana Kim</author></authors>
+  <commentList>
+    <comment ref="A1" authorId="0"><text><r><rPr><b/></rPr><t>Ana Kim:</t></r><r><t xml:space="preserve"> check &amp; confirm</t></r><rPh sb="0" eb="1"><t>yomi</t></rPh></text></comment>
+    <comment ref="B2" authorId="7"><text><t>Plain note</t></text></comment>
+    <comment ref="ZZZ0" authorId="0"><text><t>Lost</t></text></comment>
+  </commentList>
+</comments>"#
+    };
+    let plain = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>
+</worksheet>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", notes),
+            ("xl/worksheets/_rels/sheet1.xml.rels", notes_relationships),
+            ("xl/comments1.xml", comments),
+            ("xl/worksheets/sheet2.xml", plain),
+            ("xl/worksheets/_rels/sheet2.xml.rels", "<Relationships"),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }

@@ -1,9 +1,11 @@
 mod auto_filter;
 mod cell_value;
+mod comments;
 mod data_validation;
 mod defined_name;
 mod formula_cell;
 mod formula_reference;
+mod hyperlink;
 mod merge;
 mod metadata;
 mod phonetic;
@@ -173,6 +175,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             .at_source(workbook_part.source_id()));
     }
     let mut non_worksheet_tabs = Vec::new();
+    let has_comment_parts = package.has_comment_parts();
     for (position, metadata) in workbook.sheets.into_iter().enumerate() {
         let Some(worksheet_part) = package.worksheet_part(&metadata.relationship_id).cloned()
         else {
@@ -198,6 +201,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
         let worksheet_bytes = package.read_part(&worksheet_part)?;
         let mut sheet_builder = SheetBuilder::new(metadata.id, metadata.name, metadata.visibility);
         let mut table_relationship_ids = Vec::new();
+        let mut hyperlinks = Vec::new();
         worksheet::parse(
             &worksheet_bytes,
             &worksheet_part,
@@ -220,6 +224,7 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
                 phonetic_budget: &mut phonetic_budget,
                 diagnostics: &mut diagnostics,
                 table_relationship_ids: &mut table_relationship_ids,
+                hyperlinks: &mut hyperlinks,
             },
         )?;
         let mut sheet = sheet_builder.finish();
@@ -235,6 +240,13 @@ pub(super) fn read_xlsx_with_identity<R: Read + Seek>(
             total_formula_bytes: &mut total_formula_bytes,
             diagnostics: &mut diagnostics,
         })?;
+        read_sheet_annotations(
+            &mut package,
+            &worksheet_part,
+            hyperlinks,
+            has_comment_parts,
+            &mut sheet,
+        );
         sheets.push(sheet);
     }
     presentation.set_style_formats(styles.into_cell_formats());
@@ -415,6 +427,42 @@ fn read_sheet_tables<R: Read + Seek>(
     }
     sheet.set_tables(tables);
     Ok(())
+}
+
+/// Resolves the external targets of a worksheet's hyperlinks and reads its comments part.
+///
+/// Neither was read before hyperlinks and comments were modeled, so a relationship or comments
+/// part that does not read leaves the sheet without them instead of failing the read.
+fn read_sheet_annotations<R: Read + Seek>(
+    package: &mut OpenedPackage<R>,
+    worksheet_part: &PartPath,
+    hyperlinks: Vec<hyperlink::PendingHyperlink>,
+    has_comment_parts: bool,
+    sheet: &mut Sheet,
+) {
+    let (targets, comments_part) = if has_comment_parts
+        || hyperlinks
+            .iter()
+            .any(hyperlink::PendingHyperlink::has_relationship)
+    {
+        package.worksheet_annotation_relationships(worksheet_part)
+    } else {
+        (BTreeMap::new(), None)
+    };
+    let limits = package.limits();
+    let comments = comments_part
+        .and_then(|part| {
+            let bytes = package.read_part(&part).ok()?;
+            comments::parse(&bytes, &part, limits).ok()
+        })
+        .unwrap_or_default();
+    sheet.set_annotations(
+        hyperlinks
+            .into_iter()
+            .map(|hyperlink| hyperlink.resolve(&targets))
+            .collect(),
+        comments,
+    );
 }
 
 fn read_cell_metadata<R: Read + Seek>(
