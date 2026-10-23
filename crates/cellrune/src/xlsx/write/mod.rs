@@ -19,6 +19,7 @@ mod report;
 mod serialization;
 mod sheet_deletion;
 mod sheet_reference_patch;
+mod style_records;
 mod styles_patch;
 mod table;
 mod table_patch;

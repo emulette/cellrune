@@ -12,6 +12,7 @@ use quick_xml::reader::NsReader;
 use super::canonical::StyleRegistry;
 use super::format_xml;
 use super::serialization::escape_attribute;
+use super::style_records::SourceRecords;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{namespace_reader, read_event};
@@ -75,6 +76,39 @@ struct StyleAnalysis {
     xfs: Vec<XfTemplate>,
     /// Record counts of the sections the styles part holds, by section name.
     sections: BTreeMap<&'static str, usize>,
+    /// The source font, fill, border, and xf records an edit can reuse.
+    records: SourceRecords,
+}
+
+impl StyleAnalysis {
+    fn existing(&self, section: &str) -> usize {
+        self.sections.get(section).copied().unwrap_or(0)
+    }
+
+    /// Keeps the `index`th record of a font, fill, border, or `cellXfs` section.
+    fn record(
+        &mut self,
+        section: &'static str,
+        index: usize,
+        events: Vec<Event<'static>>,
+        source: &PartPath,
+    ) -> Result<(), XlsxWriteError> {
+        if section != "cellXfs" {
+            return self.records.insert(section, index, &events, source);
+        }
+        let is_xf = matches!(
+            events.first(),
+            Some(Event::Start(element) | Event::Empty(element))
+                if element.local_name().as_ref() == "xf"
+        );
+        if is_xf {
+            // Style indexes count `xf` entries only.
+            self.records
+                .insert(section, self.xfs.len(), &events, source)?;
+            self.xfs.push(XfTemplate { events });
+        }
+        Ok(())
+    }
 }
 
 /// Font, fill, and border records appended to the styles part.
@@ -86,11 +120,36 @@ struct RecordAdditions {
 }
 
 impl RecordAdditions {
-    fn font(&mut self, font: &Font, existing: usize) -> usize {
-        existing + position_or_push(&mut self.fonts, font)
+    /// Returns the index of a source font equal to `font`, else of an added one.
+    fn font(
+        &mut self,
+        font: &Font,
+        analysis: &StyleAnalysis,
+        source: &PartPath,
+    ) -> Result<usize, XlsxWriteError> {
+        if let Some(index) = analysis
+            .records
+            .font(&format_xml::font_xml(font, "")?, source)?
+        {
+            return Ok(index);
+        }
+        Ok(analysis.existing("fonts") + position_or_push(&mut self.fonts, font))
     }
 
-    fn fill(&mut self, fill: &PatternFill, existing: usize) -> usize {
+    /// Returns the index of a source fill equal to `fill`, else of an added one.
+    fn fill(
+        &mut self,
+        fill: &PatternFill,
+        analysis: &StyleAnalysis,
+        source: &PartPath,
+    ) -> Result<usize, XlsxWriteError> {
+        if let Some(index) = analysis
+            .records
+            .fill(&format_xml::fill_xml(fill, ""), source)?
+        {
+            return Ok(index);
+        }
+        let existing = analysis.existing("fills");
         // Excel reads fill records 0 and 1 as `none` and `gray125` whatever they hold, so a source
         // with fewer than two fills first receives the missing reserved records.
         if self.fills.is_empty() {
@@ -101,11 +160,23 @@ impl RecordAdditions {
             self.fills
                 .extend(reserved.into_iter().skip(existing.min(reserved.len())));
         }
-        existing + position_or_push(&mut self.fills, fill)
+        Ok(existing + position_or_push(&mut self.fills, fill))
     }
 
-    fn border(&mut self, border: &Border, existing: usize) -> usize {
-        existing + position_or_push(&mut self.borders, border)
+    /// Returns the index of a source border equal to `border`, else of an added one.
+    fn border(
+        &mut self,
+        border: &Border,
+        analysis: &StyleAnalysis,
+        source: &PartPath,
+    ) -> Result<usize, XlsxWriteError> {
+        if let Some(index) = analysis
+            .records
+            .border(&format_xml::border_xml(border, ""), source)?
+        {
+            return Ok(index);
+        }
+        Ok(analysis.existing("borders") + position_or_push(&mut self.borders, border))
     }
 
     fn section_xml(&self, section: &str, prefix: &str) -> Result<Vec<String>, XlsxWriteError> {
@@ -201,7 +272,6 @@ fn patch_existing_styles(
 ) -> Result<DocumentStylePlan, XlsxWriteError> {
     enforce_bytes(bytes.len(), limits, source)?;
     let analysis = analyze_styles(bytes, source, limits)?;
-    let existing = |section| analysis.sections.get(section).copied().unwrap_or(0);
     let mut records = RecordAdditions::default();
     let mut additions = Vec::<XfTemplate>::new();
     let mut indexes = BTreeMap::new();
@@ -233,27 +303,28 @@ fn patch_existing_styles(
         }
         // Only the components that differ from the base style get new records, so a record's
         // attributes the model does not carry stay on every component the edit left alone.
-        let replacement = request
-            .presentation
-            .as_ref()
-            .map(|format| {
+        let replacement = match &request.presentation {
+            Some(format) => {
                 let base_format = base_formats.style_format(request.base_index);
                 XfReplacement {
                     font: (format.font() != base_format.font())
-                        .then(|| records.font(format.font(), existing("fonts"))),
+                        .then(|| records.font(format.font(), &analysis, source))
+                        .transpose()?,
                     fill: match format.fill() {
                         Fill::Pattern(fill) if format.fill() != base_format.fill() => {
-                            Some(records.fill(&fill, existing("fills")))
+                            Some(records.fill(&fill, &analysis, source)?)
                         }
                         _ => None,
                     },
                     border: (format.border() != base_format.border())
-                        .then(|| records.border(&format.border(), existing("borders"))),
+                        .then(|| records.border(&format.border(), &analysis, source))
+                        .transpose()?,
                     alignment: (format.alignment() != base_format.alignment())
                         .then_some(format.alignment()),
                 }
-            })
-            .unwrap_or_default();
+            }
+            None => XfReplacement::default(),
+        };
         if replacement.is_empty() && template_number_format(base, source)? == request.format.id() {
             indexes.insert(*id, request.base_index);
             continue;
@@ -262,13 +333,15 @@ fn patch_existing_styles(
         let style_index = if let Some(index) = added_indexes.get(&key) {
             *index
         } else {
-            let index = analysis.xfs.len().saturating_add(additions.len());
-            additions.push(patch_template(
-                base,
-                request.format.id(),
-                &replacement,
-                source,
-            )?);
+            let template = patch_template(base, request.format.id(), &replacement, source)?;
+            // An earlier session may already have added this exact xf.
+            let index = match analysis.records.xf(&template.events, source)? {
+                Some(index) => index,
+                None => {
+                    additions.push(template);
+                    analysis.xfs.len().saturating_add(additions.len() - 1)
+                }
+            };
             added_indexes.insert(key, index);
             index
         };
@@ -301,7 +374,8 @@ fn analyze_styles(
     let mut depth = 0_u64;
     let mut section = None::<&'static str>;
     let mut analysis = StyleAnalysis::default();
-    let mut capture = None::<(u64, Vec<Event<'static>>)>;
+    // The depth, section, and index of the record being captured, with its events.
+    let mut capture = None::<(u64, &'static str, usize, Vec<Event<'static>>)>;
     loop {
         let event =
             read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
@@ -310,7 +384,7 @@ fn analyze_styles(
                 let empty = matches!(event, Event::Empty(_));
                 let element_depth = depth.saturating_add(1);
                 enforce_depth(element_depth, limits, source)?;
-                if let Some((_, events)) = &mut capture {
+                if let Some((_, _, _, events)) = &mut capture {
                     events.push(event.clone().into_owned());
                 } else if element_depth == 2 {
                     section = SECTION_ORDER
@@ -326,16 +400,17 @@ fn analyze_styles(
                 } else if element_depth == 3
                     && let Some(name) = section
                 {
-                    *analysis.sections.entry(name).or_default() += 1;
+                    let count = analysis.sections.entry(name).or_default();
+                    let index = *count;
+                    *count += 1;
                     if name == "numFmts" && element.local_name().as_ref() == "numFmt" {
                         insert_custom_format(element, &mut analysis.custom_formats, source)?;
-                    } else if name == "cellXfs" && element.local_name().as_ref() == "xf" {
+                    } else if name != "numFmts" && name != "cellStyleXfs" {
+                        let events = vec![event.clone().into_owned()];
                         if empty {
-                            analysis.xfs.push(XfTemplate {
-                                events: vec![event.clone().into_owned()],
-                            });
+                            analysis.record(name, index, events, source)?;
                         } else {
-                            capture = Some((element_depth, vec![event.clone().into_owned()]));
+                            capture = Some((element_depth, name, index, events));
                         }
                     }
                 }
@@ -344,13 +419,13 @@ fn analyze_styles(
                 }
             }
             Event::End(_) => {
-                if let Some((capture_depth, events)) = &mut capture {
+                if let Some((capture_depth, _, _, events)) = &mut capture {
                     events.push(event.clone().into_owned());
                     if depth == *capture_depth {
-                        let (_, events) = capture
+                        let (_, name, index, events) = capture
                             .take()
                             .ok_or_else(|| invalid_generated(source, DETAIL_MISSING_CELL_XFS))?;
-                        analysis.xfs.push(XfTemplate { events });
+                        analysis.record(name, index, events, source)?;
                     }
                 } else if depth == 2 {
                     section = None;
@@ -359,7 +434,7 @@ fn analyze_styles(
             }
             Event::Eof => break,
             _ => {
-                if let Some((_, events)) = &mut capture {
+                if let Some((_, _, _, events)) = &mut capture {
                     events.push(event.clone().into_owned());
                 }
             }
@@ -847,7 +922,7 @@ fn write_event<'a>(
         .map_err(|error| invalid_xml(source, error))
 }
 
-fn invalid_xml(
+pub(super) fn invalid_xml(
     source: &PartPath,
     cause: impl std::error::Error + Send + Sync + 'static,
 ) -> XlsxWriteError {

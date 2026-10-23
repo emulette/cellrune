@@ -133,3 +133,84 @@ fn an_added_fill_never_takes_a_reserved_fill_index() {
         );
     }
 }
+
+/// Returns the `count` of a styles section.
+fn section_count(styles: &str, section: &str) -> usize {
+    let start = format!("<{section} count=\"");
+    let (_, rest) = styles.split_once(&start).expect("section");
+    rest.split_once('"')
+        .and_then(|(count, _)| count.parse().ok())
+        .expect("count")
+}
+
+#[test]
+fn edit_sessions_reuse_records_equal_to_the_ones_they_need() {
+    const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0000FF"/></patternFill></fill><fill>
+  <patternFill patternType="solid"><fgColor rgb="FF00FF00"/></patternFill>
+</fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>"#;
+    let red = CellFormatEdit::new().with_fill(PatternFill::solid(Color::argb(0xFFFF_0000)));
+    let mut bytes = one_sheet_package(ONE_VALUE_SHEET, Some(STYLES));
+    let mut counts = Vec::new();
+    for row in 2..=5 {
+        bytes = edit_and_save(
+            &bytes,
+            vec![WorkbookChange::set_cell_format(
+                sheet1(),
+                CellAddress::from_indices(row, 1).expect("address"),
+                red.clone(),
+            )],
+        );
+        let styles = support::part_text(&bytes, STYLES_PART);
+        counts.push((
+            section_count(&styles, "fonts"),
+            section_count(&styles, "fills"),
+            section_count(&styles, "cellXfs"),
+        ));
+    }
+    assert_eq!(
+        counts,
+        [(2, 4, 2); 4],
+        "the first session adds one fill and one xf"
+    );
+
+    // A source fill equal to the requested one is reused, whitespace and all; a fill that only a
+    // reserved index holds and a font with unmodeled attributes are not.
+    let green = PatternFill::solid(Color::argb(0xFF00_FF00));
+    let blue = PatternFill::solid(Color::argb(0xFF00_00FF));
+    let bold = cellrune::Font::new()
+        .with_name("Calibri")
+        .and_then(|font| font.with_size(11.0))
+        .expect("font")
+        .with_bold(true);
+    let output = edit_and_save(
+        &one_sheet_package(ONE_VALUE_SHEET, Some(STYLES)),
+        vec![
+            WorkbookChange::set_cell_format(
+                sheet1(),
+                address("A1"),
+                CellFormatEdit::new().with_fill(green),
+            ),
+            WorkbookChange::set_cell_format(
+                sheet1(),
+                address("B1"),
+                CellFormatEdit::new()
+                    .with_fill(blue)
+                    .with_font(bold.clone()),
+            ),
+        ],
+    );
+    let styles = support::part_text(&output, STYLES_PART);
+    assert_eq!(section_count(&styles, "fills"), 4, "{styles}");
+    assert_eq!(section_count(&styles, "fonts"), 3, "{styles}");
+    assert!(
+        styles.contains(r#"fillId="2""#) && styles.contains(r#"fillId="3""#),
+        "{styles}"
+    );
+    let reopened = WorkbookDraft::from_document(
+        &open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen"),
+    );
+    let a1 = reopened.cell_format(sheet1(), address("A1")).expect("A1");
+    let b1 = reopened.cell_format(sheet1(), address("B1")).expect("B1");
+    assert_eq!(a1.fill(), Fill::Pattern(green));
+    assert_eq!((b1.fill(), b1.font()), (Fill::Pattern(blue), &bold));
+}
