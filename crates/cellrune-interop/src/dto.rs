@@ -248,6 +248,11 @@ pub enum WorkbookChangeDto {
         /// New unique sheet name.
         new_name: String,
     },
+    /// Deletes one sheet with its scoped names and tables; references to them become `#REF!`.
+    DeleteSheet {
+        /// Case-insensitive sheet name.
+        sheet: String,
+    },
     /// Changes one sheet's visibility.
     SetSheetVisibility {
         /// Case-insensitive sheet name.

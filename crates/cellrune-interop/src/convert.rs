@@ -429,9 +429,11 @@ pub(crate) fn edit_receipt_v2(
     }
 }
 
+/// Converts one delta, naming each cell through `reference`: a delta can report cells of a sheet
+/// deleted since, which the current workbook no longer names.
 pub(crate) fn calculation_delta(
-    workbook: &WorkbookSnapshot,
     delta: &CalculationDelta,
+    reference: &impl Fn(CalculationCellId) -> CellReferenceDto,
 ) -> CalculationDeltaDto {
     CalculationDeltaDto {
         schema_version: INTEROP_SCHEMA_VERSION,
@@ -451,18 +453,18 @@ pub(crate) fn calculation_delta(
                     MaterializedResultOrigin::DirectFormula => ("direct_formula", None, None),
                     MaterializedResultOrigin::LegacyArray { anchor, range } => (
                         "legacy_array",
-                        Some(cell_reference(workbook, anchor)),
+                        Some(reference(anchor)),
                         Some(range_text(range.start(), range.end())),
                     ),
                     MaterializedResultOrigin::DynamicSpill { anchor, range } => (
                         "dynamic_spill",
-                        Some(cell_reference(workbook, anchor)),
+                        Some(reference(anchor)),
                         Some(range_text(range.start(), range.end())),
                     ),
                     _ => ("unknown", None, None),
                 };
                 CalculationDeltaCellDto {
-                    cell: cell_reference(workbook, change.cell()),
+                    cell: reference(change.cell()),
                     origin: origin.to_owned(),
                     anchor,
                     range,
@@ -473,14 +475,14 @@ pub(crate) fn calculation_delta(
         removed_materialized_cells: delta
             .removed_materialized_cells()
             .iter()
-            .map(|cell| cell_reference(workbook, *cell))
+            .map(|cell| reference(*cell))
             .collect(),
     }
 }
 
 pub(crate) fn calculation_delta_page(
-    workbook: &WorkbookSnapshot,
     page: &CalculationDeltaPage,
+    reference: &impl Fn(CalculationCellId) -> CellReferenceDto,
 ) -> CalculationDeltaPageDto {
     CalculationDeltaPageDto {
         schema_version: INTEROP_SCHEMA_VERSION,
@@ -489,7 +491,7 @@ pub(crate) fn calculation_delta_page(
         deltas: page
             .deltas()
             .iter()
-            .map(|delta| calculation_delta(workbook, delta))
+            .map(|delta| calculation_delta(delta, reference))
             .collect(),
     }
 }
@@ -599,11 +601,12 @@ pub(crate) fn transaction_page(
 pub(crate) fn transaction_receipt(
     workbook: &WorkbookSnapshot,
     receipt: &WorkbookTransactionReceipt,
+    reference: &impl Fn(CalculationCellId) -> CellReferenceDto,
 ) -> WorkbookTransactionReceiptDto {
     WorkbookTransactionReceiptDto {
         schema_version: INTEROP_SCHEMA_VERSION,
         edit: edit_receipt(workbook, receipt.edit()),
-        calculation_delta: calculation_delta(workbook, receipt.calculation_delta()),
+        calculation_delta: calculation_delta(receipt.calculation_delta(), reference),
         base_fingerprint: workbook_fingerprint(receipt.base_fingerprint()),
         result_fingerprint: workbook_fingerprint(receipt.result_fingerprint()),
     }
@@ -617,7 +620,9 @@ pub(crate) fn preview_transaction_receipt(
     WorkbookTransactionReceiptDto {
         schema_version: INTEROP_SCHEMA_VERSION,
         edit: transaction_edit_receipt(base, candidate, report.edit_receipt()),
-        calculation_delta: calculation_delta(candidate, report.install_delta()),
+        calculation_delta: calculation_delta(report.install_delta(), &|id| {
+            transaction_cell_reference(base, candidate, id)
+        }),
         base_fingerprint: workbook_fingerprint(report.base_fingerprint()),
         result_fingerprint: workbook_fingerprint(report.result_fingerprint()),
     }

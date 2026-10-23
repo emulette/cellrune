@@ -357,6 +357,7 @@ export type WorkbookChange =
       readonly sheet: string;
       readonly newName: string;
     }
+  | { readonly kind: "deleteSheet"; readonly sheet: string }
   | {
       readonly kind: "setSheetVisibility";
       readonly sheet: string;
@@ -788,6 +789,11 @@ export class Workbook {
   clearCell(sheet: string, address: string): boolean;
   addSheet(name: string): number;
   renameSheet(currentName: string, newName: string): void;
+  /**
+   * Deletes a sheet with its scoped names and tables; references to them in the remaining
+   * formulas and names become `#REF!`.
+   */
+  deleteSheet(name: string): void;
   /**
    * Reads the workbook when the save runs on a worker, so do not edit it until the Promise
    * settles: an edit made meanwhile may or may not be saved, or may fail with

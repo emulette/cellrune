@@ -324,12 +324,16 @@ impl WorkbookSession {
         cancellation: &CancellationToken,
     ) -> Result<WorkbookTransactionReceiptDto, InteropError> {
         let mut published = self.take_published(preview_id)?;
+        let previous = self.sheet_names();
         match self
             .engine
             .install_transaction_cancellable(&mut published.completed, cancellation)
         {
             Ok(receipt) => {
-                let dto = transaction_receipt(self.engine.workbook(), &receipt);
+                self.remember_deleted_sheets(previous);
+                let dto = transaction_receipt(self.engine.workbook(), &receipt, &|id| {
+                    self.result_cell_reference(id)
+                });
                 self.invalidate_preview_for_mutation();
                 Ok(dto)
             }

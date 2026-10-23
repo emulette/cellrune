@@ -142,6 +142,13 @@ async function check(): Promise<void> {
   capabilities.entries[0]?.cell.address.toUpperCase();
   edited.byteLength.toFixed(0);
   reopened.close();
+  reopened.addSheet("Scratch");
+  const removal: readonly WorkbookChange[] = [
+    { kind: "deleteSheet", sheet: "Scratch" },
+  ];
+  reopened.applyChanges(reopened.summary().semanticRevision, removal);
+  reopened.addSheet("Other");
+  reopened.deleteSheet("Other");
   reopened.close();
   reopened.closed.valueOf();
 }

@@ -563,6 +563,11 @@ impl Workbook {
         .map_err(|error| into_py_error(py, error))
     }
 
+    pub fn delete_sheet(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+        py.detach(|| self.lock_interop_wait()?.delete_sheet(name))
+            .map_err(|error| into_py_error(py, error))
+    }
+
     #[pyo3(signature = (*, invalidate_unavailable=false))]
     pub fn to_bytes<'py>(
         &self,

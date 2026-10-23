@@ -328,6 +328,11 @@ impl NativeWorkbook {
             .map_err(napi_error)
     }
 
+    #[napi(catch_unwind)]
+    pub fn delete_sheet(&self, name: String) -> napi::Result<()> {
+        self.lock()?.delete_sheet(&name).map_err(napi_error)
+    }
+
     #[napi(ts_return_type = "Promise<Buffer>", catch_unwind)]
     pub fn to_bytes(&self, invalidate_unavailable: bool) -> AsyncTask<BytesTask> {
         AsyncTask::new(BytesTask {

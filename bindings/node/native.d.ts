@@ -38,6 +38,7 @@ export declare class NativeWorkbook {
   clearCell(sheet: string, address: string): boolean
   addSheet(name: string): number
   renameSheet(currentName: string, newName: string): void
+  deleteSheet(name: string): void
   toBytes(invalidateUnavailable: boolean): Promise<Buffer>
   savePath(path: string, invalidateUnavailable: boolean, replaceExisting: boolean): Promise<NativeWriteReport>
   editsToBytes(): Promise<Buffer>

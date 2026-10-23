@@ -369,7 +369,48 @@ def assert_capability_scan() -> None:
     assert rest["next_offset"] is None
 
 
+def assert_delete_sheet() -> None:
+    with Workbook.create() as workbook:
+        workbook.add_sheet("Data")
+        workbook.set_number("Data", "A1", 2.0)
+        workbook.set_formula("Data", "B1", "=A1*10")
+        workbook.set_formula("Sheet1", "A1", "=Data!A1+1")
+        workbook.calculate()
+
+        workbook.delete_sheet("data")
+        assert [sheet["name"] for sheet in workbook.summary()["sheets"]] == ["Sheet1"]
+        cell = workbook.read_range("Sheet1", "A1", "A1", limit=1)["cells"][0]
+        assert cell["formula"] == "=#REF!+1"
+        delta = workbook.recalculate()
+        assert (delta["mode"], delta["reason"]) == ("full", "topology_changed")
+        assert delta["removed_materialized_cells"] == [
+            {"sheet_id": 2, "sheet_name": "Data", "address": "B1"}
+        ]
+        assert [change["result"] for change in delta["changed_cells"]] == [
+            {"kind": "value", "value": {"kind": "error", "value": "#REF!"}}
+        ]
+
+        receipt = workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [
+                {"kind": "add_sheet", "name": "Data"},
+                {"kind": "delete_sheet", "sheet": "Data"},
+            ],
+        )
+        assert receipt["created_sheet_ids"] == [3]
+        assert receipt["topology_changed"]
+        try:
+            workbook.delete_sheet("Sheet1")
+        except CellRuneError as error:
+            assert error.code == "validation.last_visible_sheet"
+            assert error.kind == "validation"
+        else:
+            raise AssertionError("the last visible sheet must stay")
+        assert_error("interop.sheet.not_found", lambda: workbook.delete_sheet("Data"))
+
+
 def main() -> None:
+    assert_delete_sheet()
     assert_incomplete_save_names_cells()
     assert_capability_scan()
     assert_limits()

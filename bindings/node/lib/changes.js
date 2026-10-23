@@ -68,6 +68,11 @@ function serializeWorkbookChange(change, index) {
         sheet: requiredChangeString(change.sheet, index, "sheet"),
         new_name: requiredChangeString(change.newName, index, "newName"),
       };
+    case "deleteSheet":
+      return {
+        kind: "delete_sheet",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+      };
     case "setSheetVisibility":
       return {
         kind: "set_sheet_visibility",

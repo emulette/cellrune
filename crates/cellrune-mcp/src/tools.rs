@@ -354,7 +354,8 @@ can be calculated with the supplied deterministic TODAY/NOW serial values.",
         output_schema = crate::schema::mcp_schema::<EditReceiptDto>(),
         description = "Atomically apply an ordered typed edit batch after checking \
 expected_revision. Supported changes include setting or clearing cells, formulas, number formats, \
-sheets, visibility, defined names, date system, and calculation hints.",
+adding, renaming, or deleting sheets, visibility, defined names, date system, and calculation \
+hints. Deleting a sheet turns references to it and its tables into #REF!.",
         annotations(
             title = "Apply workbook changes",
             read_only_hint = false,

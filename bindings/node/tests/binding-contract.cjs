@@ -347,7 +347,51 @@ async function assertCapabilityScan() {
   assert.equal(rest.nextOffset, null);
 }
 
+async function assertDeleteSheet() {
+  const workbook = Workbook.create();
+  workbook.addSheet("Data");
+  workbook.setNumber("Data", "A1", 2);
+  workbook.setFormula("Data", "B1", "=A1*10");
+  workbook.setFormula("Sheet1", "A1", "=Data!A1+1");
+  await workbook.calculate();
+
+  workbook.deleteSheet("data");
+  assert.deepEqual(
+    workbook.summary().sheets.map((sheet) => sheet.name),
+    ["Sheet1"],
+  );
+  assert.equal(
+    workbook.readRange("Sheet1", "A1", "A1").cells[0].formula,
+    "=#REF!+1",
+  );
+  const delta = await workbook.recalculate();
+  assert.deepEqual([delta.mode, delta.reason], ["full", "topology_changed"]);
+  assert.deepEqual(delta.removedMaterializedCells, [
+    { sheetId: 2, sheetName: "Data", address: "B1" },
+  ]);
+
+  const receipt = workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "addSheet", name: "Data" },
+    { kind: "deleteSheet", sheet: "Data" },
+  ]);
+  assert.deepEqual(receipt.createdSheetIds, [3]);
+  assert.equal(receipt.topologyChanged, true);
+  assert.throws(
+    () => workbook.deleteSheet("Sheet1"),
+    (error) =>
+      error instanceof CellRuneError &&
+      error.code === "validation.last_visible_sheet" &&
+      error.kind === "validation",
+  );
+  assert.throws(
+    () => workbook.deleteSheet("Data"),
+    (error) => error.code === "interop.sheet.not_found",
+  );
+  workbook.close();
+}
+
 async function main() {
+  await assertDeleteSheet();
   await assertIncompleteSaveNamesCells();
   await assertCapabilityScan();
   await assertLimits();

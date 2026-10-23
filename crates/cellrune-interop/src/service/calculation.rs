@@ -98,7 +98,9 @@ impl WorkbookSession {
         self.active_calculation = None;
         let delta = self.engine.install(completed.completed)?;
         self.invalidate_preview_for_mutation();
-        Ok(calculation_delta(self.engine.workbook(), &delta))
+        Ok(calculation_delta(&delta, &|id| {
+            self.result_cell_reference(id)
+        }))
     }
 
     /// Returns the exact delta that installing a completed request would commit.
@@ -113,7 +115,9 @@ impl WorkbookSession {
     ) -> Result<CalculationDeltaDto, InteropError> {
         self.require_active_recalculation(completed.request_id)?;
         let delta = self.engine.preview_install(&completed.completed)?;
-        Ok(calculation_delta(self.engine.workbook(), &delta))
+        Ok(calculation_delta(&delta, &|id| {
+            self.result_cell_reference(id)
+        }))
     }
 
     /// Calculates and installs a stateful full or incremental result delta.
@@ -186,7 +190,9 @@ impl WorkbookSession {
         limit: u32,
     ) -> Result<CalculationDeltaPageDto, InteropError> {
         let page = self.engine.changes_since(cursor, limit as usize)?;
-        Ok(calculation_delta_page(self.engine.workbook(), &page))
+        Ok(calculation_delta_page(&page, &|id| {
+            self.result_cell_reference(id)
+        }))
     }
 
     pub(super) fn require_active_recalculation(&self, request_id: u64) -> Result<(), InteropError> {

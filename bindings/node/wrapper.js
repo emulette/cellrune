@@ -430,6 +430,11 @@ class Workbook {
     withSyncErrors(() => this.#session().renameSheet(currentName, newName));
   }
 
+  deleteSheet(name) {
+    requireString(name, "name");
+    withSyncErrors(() => this.#session().deleteSheet(name));
+  }
+
   async toBytes(options = {}) {
     requireOptions(options);
     requireOptionalBoolean(

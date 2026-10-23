@@ -60,7 +60,9 @@ impl WorkbookSession {
     ) -> Result<EditReceiptDto, InteropError> {
         let PreparedChanges { prepared, receipt } = prepared;
         let semantic_identity_changed = receipt.base_revision != receipt.result_revision;
+        let previous = self.sheet_names();
         self.engine.install_changes(prepared)?;
+        self.remember_deleted_sheets(previous);
         if semantic_identity_changed {
             self.invalidate_preview_for_mutation();
         }
@@ -132,7 +134,9 @@ impl WorkbookSession {
         let PreparedChangesV2 { prepared, receipt } = prepared;
         let semantic_identity_changed =
             receipt.receipt.base_revision != receipt.receipt.result_revision;
+        let previous = self.sheet_names();
         self.engine.install_changes(prepared)?;
+        self.remember_deleted_sheets(previous);
         if semantic_identity_changed {
             self.invalidate_preview_for_mutation();
         }
@@ -265,6 +269,25 @@ impl WorkbookSession {
         )?;
         Ok(())
     }
+
+    /// Deletes a worksheet with its scoped names and tables, turning references to them in the
+    /// remaining formulas and names into `#REF!`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed input or validation error for an unknown sheet or the last visible sheet.
+    pub fn delete_sheet(&mut self, name: &str) -> Result<(), InteropError> {
+        let revision = self.engine.workbook().semantic_revision();
+        self.apply_changes(
+            revision,
+            EditBatchDto {
+                changes: vec![WorkbookChangeDto::DeleteSheet {
+                    sheet: name.to_owned(),
+                }],
+            },
+        )?;
+        Ok(())
+    }
 }
 
 /// A typed workbook edit batch staged for guarded installation.
@@ -313,14 +336,9 @@ fn convert_edit_batch(
         .iter()
         .map(|sheet| (case_insensitive_key(sheet.name().as_str()), sheet.id()))
         .collect::<BTreeMap<_, _>>();
-    let mut maximum_sheet_id = workbook
-        .sheets()
-        .iter()
-        .map(|sheet| sheet.id())
-        .chain(workbook.non_worksheet_tab_ids())
-        .map(SheetId::get)
-        .max()
-        .unwrap_or(0);
+    // The core never reuses a deleted sheet's ID, so an added sheet's ID follows the highest one
+    // the workbook has used.
+    let mut maximum_sheet_id = workbook.highest_sheet_id().map_or(0, SheetId::get);
     let mut changes = Vec::with_capacity(batch.changes.len());
     for change in batch.changes {
         if cancelled() {
@@ -408,6 +426,11 @@ fn convert_edit_batch(
                 sheets.remove(&old_key);
                 sheets.insert(new_key, sheet_id);
                 WorkbookChange::rename_sheet(sheet_id, new_name)
+            }
+            WorkbookChangeDto::DeleteSheet { sheet } => {
+                let sheet_id = resolve_sheet_map(&sheets, &sheet)?;
+                sheets.remove(&case_insensitive_key(&sheet));
+                WorkbookChange::delete_sheet(sheet_id)
             }
             WorkbookChangeDto::SetSheetVisibility { sheet, visibility } => {
                 WorkbookChange::set_sheet_visibility(

@@ -1066,6 +1066,78 @@ fn random_seed_is_a_stdio_calculation_argument() {
 }
 
 #[test]
+fn sheet_deletion_is_a_stdio_change_that_names_its_removed_results() {
+    let root = TestDirectory::new("sheet-deletion");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let listed = mcp.request("tools/list", json!({}));
+    let apply = listed["result"]["tools"]
+        .as_array()
+        .expect("tool list must be an array")
+        .iter()
+        .find(|tool| tool["name"] == "workbook_apply_changes")
+        .expect("apply changes tool")
+        .clone();
+    assert!(apply["inputSchema"].to_string().contains("delete_sheet"));
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("create must return a session ID")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "add_sheet", "name": "Data"},
+                {"kind": "set_value", "sheet": "Data", "address": "A1", "value": {"kind": "number", "value": 2}},
+                {"kind": "set_formula", "sheet": "Data", "address": "B1", "formula": "=A1*10", "dynamic_range": null},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "A1", "formula": "=Data!A1+1", "dynamic_range": null}
+            ]
+        }),
+    ));
+    successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "full"}),
+    ));
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 1,
+            "changes": [{"kind": "delete_sheet", "sheet": "Data"}]
+        }),
+    ));
+    assert_eq!(receipt["topology_changed"], true);
+    let delta = successful_tool(mcp.call_tool(
+        "workbook_recalculate",
+        json!({"session_id": session_id, "mode": "auto"}),
+    ));
+    assert_eq!(delta["reason"], "topology_changed");
+    assert_eq!(
+        delta["removed_materialized_cells"],
+        json!([{"sheet_id": 2, "sheet_name": "Data", "address": "B1"}])
+    );
+    let range = successful_tool(mcp.call_tool(
+        "workbook_read_range",
+        json!({"session_id": session_id, "sheet": "Sheet1", "start": "A1", "end": "A1"}),
+    ));
+    assert_eq!(range["cells"][0]["formula"], "=#REF!+1");
+    let error = failed_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 2,
+            "changes": [{"kind": "delete_sheet", "sheet": "Sheet1"}]
+        }),
+    ));
+    assert_eq!(error["code"], "validation.last_visible_sheet");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
 fn stdio_numbers_reach_the_workbook_exactly() {
     // Both have 17 significant digits; a JSON parser without correct rounding reads them one
     // ULP away.

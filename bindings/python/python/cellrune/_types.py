@@ -374,6 +374,11 @@ class RenameSheetChange(TypedDict):
     new_name: str
 
 
+class DeleteSheetChange(TypedDict):
+    kind: Literal["delete_sheet"]
+    sheet: str
+
+
 class SetSheetVisibilityChange(TypedDict):
     kind: Literal["set_sheet_visibility"]
     sheet: str
@@ -424,6 +429,7 @@ WorkbookChange = (
     | SetNumberFormatChange
     | AddSheetChange
     | RenameSheetChange
+    | DeleteSheetChange
     | SetSheetVisibilityChange
     | SetDefinedNameChange
     | RemoveDefinedNameChange
