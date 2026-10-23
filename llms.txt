@@ -969,10 +969,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   `i` for `IMTAN("1+400i")` and `0` for `IMSECH("1000")`; before they underflow
   (`IMTAN("1+360i")`, `IMSECH("720")`) it reports
   `calculation.unsupported_expression`.
-- `ENCODEURL(text)` percent-encodes the text as RFC 3986 encodes a URI
-  component: ASCII letters, digits, `-`, `.`, `_`, and `~` stay, and every other
-  UTF-8 byte becomes `%` and two uppercase hexadecimal digits. Authored
-  `ENCODEURL` formulas are stored without a prefix.
+- `ENCODEURL(text)` keeps ASCII letters, digits, and `.` and replaces `:`, `/`,
+  and the space with `%` and two uppercase hexadecimal digits, as Microsoft
+  documents. Text with any other character, where percent-encoding conventions
+  disagree and Excel for Windows was not measured, reports
+  `calculation.unsupported_expression`. Authored `ENCODEURL` formulas are
+  stored as `_xlfn.ENCODEURL`.
 - `BAHTTEXT(number)` reads the baht as Thai numerals (สิบ for ten, ยี่สิบ for
   twenty, เอ็ด for a one after a nonzero tens digit, หนึ่ง before the other
   place words, and ล้าน for each million), then บาท, then ถ้วน for a whole amount

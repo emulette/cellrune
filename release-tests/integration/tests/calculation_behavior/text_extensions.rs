@@ -1,7 +1,7 @@
 use super::support::{assert_issue, assert_number, cell_id, workbook_with_formulas};
 use cellrune::{
     CalculationCellResult, CalculationIssueCode, CalculationLimits, CalculationOptions, CellValue,
-    ExcelError, calculate_workbook, scan_formula_capabilities,
+    ExcelError, FormulaText, calculate_workbook, scan_formula_capabilities,
 };
 
 #[test]
@@ -135,17 +135,15 @@ fn numbervalue_text_scans_observe_the_function_work_limit() {
 }
 
 #[test]
-fn encodeurl_percent_encodes_everything_but_the_unreserved_characters() {
+fn encodeurl_percent_encodes_the_documented_characters() {
     for (formula, expected) in [
         // Microsoft's example.
         (
             "ENCODEURL(\"http://contoso.sharepoint.com/Finance/Profit and Loss Statement.xlsx\")",
             "http%3A%2F%2Fcontoso.sharepoint.com%2FFinance%2FProfit%20and%20Loss%20Statement.xlsx",
         ),
-        // RFC 3986 keeps letters, digits, and -._~ and encodes each other UTF-8 byte in uppercase.
-        ("_xlfn.ENCODEURL(\"aZ09-._~\")", "aZ09-._~"),
-        ("ENCODEURL(\"a+b=c&d?e#f%\")", "a%2Bb%3Dc%26d%3Fe%23f%25"),
-        ("ENCODEURL(\"é 한\")", "%C3%A9%20%ED%95%9C"),
+        // Microsoft documents that alphanumeric characters stay.
+        ("_xlfn.ENCODEURL(\"aZ09\")", "aZ09"),
         ("ENCODEURL(12.5)", "12.5"),
         ("ENCODEURL(TRUE)", "TRUE"),
         ("ENCODEURL(\"\")", ""),
@@ -161,6 +159,25 @@ fn encodeurl_percent_encodes_everything_but_the_unreserved_characters() {
         );
     }
     assert_error("ENCODEURL(#N/A)", ExcelError::NotAvailable);
+    // Percent-encoding conventions disagree on these, and Excel cannot be measured.
+    for formula in [
+        "ENCODEURL(\"a~b\")",
+        "ENCODEURL(\"a-b_c\")",
+        "ENCODEURL(\"a+b=c&d?e#f%\")",
+        "ENCODEURL(\"é 한\")",
+    ] {
+        let result = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_issue(&result, 1, CalculationIssueCode::UnsupportedExpression);
+    }
+}
+
+#[test]
+fn authored_encodeurl_is_stored_with_its_future_prefix() {
+    let text = FormulaText::from_user_input("=ENCODEURL(\"a b\")").expect("user formula");
+    assert_eq!(text.as_str(), "_xlfn.ENCODEURL(\"a b\")");
 }
 
 #[test]
