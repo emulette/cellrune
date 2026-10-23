@@ -34,3 +34,4 @@ _netrc
 *.p12
 *.pem
 *.pfx
+bindings/python/typing-check.xlsx
