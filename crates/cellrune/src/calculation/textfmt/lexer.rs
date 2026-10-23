@@ -252,6 +252,7 @@ fn lex_bracket(content: &str, section: &mut RawSection) -> Result<(), ErrorKind>
     if COLOR_NAMES
         .iter()
         .any(|name| content.eq_ignore_ascii_case(name))
+        || is_palette_color(content)
     {
         return Ok(());
     }
@@ -261,6 +262,16 @@ fn lex_bracket(content: &str, section: &mut RawSection) -> Result<(), ErrorKind>
     }
     section.condition = Some(condition);
     Ok(())
+}
+
+/// Whether `content` is `Color1` through `Color56`, a color of the workbook palette that Microsoft
+/// documents; Excel 16.114 ignores `[Color5]` in `TEXT` (excel-measure RESULTS.md, section B).
+fn is_palette_color(content: &str) -> bool {
+    content
+        .get(..5)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("color"))
+        .and_then(|_| content[5..].parse::<u8>().ok())
+        .is_some_and(|index| (1..=56).contains(&index) && !content[5..].starts_with(['0', '+']))
 }
 
 fn parse_condition(content: &str) -> Option<Condition> {

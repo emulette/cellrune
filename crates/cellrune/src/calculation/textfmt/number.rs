@@ -563,9 +563,20 @@ fn render_fraction(
         whole += 1.0;
         numerator = 0;
     }
-    // How Excel shows a fraction that rounds to zero, or a negative value without a whole part,
-    // has not been measured.
-    if numerator == 0 || (signed && value < 0.0 && whole == 0.0) {
+    // Excel 16.114 shows a fraction that rounds to zero as spaces as wide as the fraction after
+    // the whole part (`TEXT(1.999,"# ?/?")` is `2    `) and signs a negative number before an
+    // empty whole part (`TEXT(-0.25,"# ?/?")` is `- 1/4`; excel-measure RESULTS.md, section B).
+    // A zero fraction without a nonzero whole part or beside `#` or `0` placeholders, and a
+    // negative number without a whole part, are unmeasured.
+    let zero_fraction = numerator == 0;
+    let only_question =
+        |places: &[Placeholder]| places.iter().all(|place| *place == Placeholder::Question);
+    if (zero_fraction
+        && (whole == 0.0
+            || !only_question(&numerator_places)
+            || !only_question(&denominator_places)))
+        || (signed && value < 0.0 && integer_places.is_none())
+    {
         return Err(ErrorKind::Unsupported);
     }
     let whole_digits = if whole == 0.0 {
@@ -583,13 +594,17 @@ fn render_fraction(
         output.push_str(&padded_left(&whole_digits, integer_places));
     }
     push_literals(separator, &mut output);
-    output.push_str(&padded_left(&numerator.to_string(), &numerator_places));
-    output.push('/');
-    let denominator = denominator.to_string();
-    output.push_str(&denominator);
-    for place in denominator_places.iter().skip(denominator.len()) {
-        if *place == Placeholder::Question {
-            output.push(' ');
+    if zero_fraction {
+        output.push_str(&" ".repeat(numerator_places.len() + 1 + denominator_places.len()));
+    } else {
+        output.push_str(&padded_left(&numerator.to_string(), &numerator_places));
+        output.push('/');
+        let denominator = denominator.to_string();
+        output.push_str(&denominator);
+        for place in denominator_places.iter().skip(denominator.len()) {
+            if *place == Placeholder::Question {
+                output.push(' ');
+            }
         }
     }
     push_literals(&items[denominator_end..], &mut output);

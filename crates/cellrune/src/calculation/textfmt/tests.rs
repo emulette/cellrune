@@ -5,6 +5,7 @@ use crate::{DateSystem, Locale};
 const CONTEXT: FormatContext = FormatContext {
     date_system: DateSystem::Excel1900,
     locale: Locale::EnUs,
+    drops_fill: true,
 };
 
 fn text(value: f64, format: &str) -> Result<String, ErrorKind> {
@@ -126,7 +127,32 @@ fn conditions_choose_sections_and_colors_are_not_shown() {
     assert_text(50.0, "[Red][<=100]0;[Blue][>100]0.0", "50");
     assert_text(1.5, "[Red]0.00", "1.50");
     assert_unsupported(-5.0, "[<=100]0;0");
-    assert_unsupported(5.0, "[Color10]0");
+    assert_unsupported(5.0, "[Color57]0");
+    assert_unsupported(5.0, "[Color0]0");
+}
+
+#[test]
+fn excel_16_114_measurements_of_fills_palette_colors_fractions_and_seconds() {
+    // excel-measure RESULTS.md, section B.
+    assert_text(1.5, "*x0", "2");
+    assert_text(1.5, "0*x", "2");
+    assert_text(1.5, "_x0", " 2");
+    assert_text(1.0, "[Color5]0", "1");
+    assert_text(1.0, "[color56]0.0", "1.0");
+    assert_text(1.999, "# ?/?", "2    ");
+    assert_text(5.0, "# ???/???", "5        ");
+    assert_text(-0.25, "# ?/?", "- 1/4");
+    assert_text(-1.999, "# ?/?", "-2    ");
+    let time = |seconds: f64| (16.0 * 3_600.0 + 36.0 * 60.0 + 3.0) / 86_400.0 + seconds / 86_400.0;
+    assert_text(time(0.5), "h:mm:ss", "16:36:03");
+    assert_text(time(0.49), "h:mm:ss", "16:36:03");
+    assert_text(time(0.75), "h:mm:ss", "16:36:04");
+    assert_text(time(0.75), "h:mm:ss.0", "16:36:03.8");
+    // A zero fraction without a whole part or beside `#`, and a negative number without a whole
+    // part, are unmeasured.
+    assert_unsupported(0.001, "# ?/?");
+    assert_unsupported(1.999, "# #/#");
+    assert_unsupported(-0.25, "?/?");
 }
 
 #[test]
@@ -189,7 +215,6 @@ fn fractions_use_the_closest_denominator_their_placeholders_allow() {
     assert_text(5.3, "# ???/???", "5   3/10 ");
     assert_text(5.25, "?/?", "21/4");
     assert_text(-4.34, "# ?/?", "-4 1/3");
-    assert_unsupported(5.0, "# ?/?");
     assert_unsupported(0.3, "?/8");
     assert_unsupported(2.375, "# 0/8");
 }
@@ -285,7 +310,6 @@ fn general_leaves_numbers_excel_shortens_unsupported() {
 
 #[test]
 fn unmeasured_constructs_stay_unsupported() {
-    assert_unsupported(5.0, "*-0");
     assert_unsupported(5.0, "@");
     assert_unsupported(-5.0, "0;@;0");
     assert_unsupported(-5.0, "abc");

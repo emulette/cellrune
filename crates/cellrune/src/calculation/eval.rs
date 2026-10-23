@@ -1383,11 +1383,13 @@ impl<'workbook> Engine<'workbook> {
         self.options.locale_profile()
     }
 
-    /// The date system and regional format a number-format code reads.
+    /// The date system and regional format a number-format code reads in `TEXT`, `DOLLAR`, and
+    /// `FIXED`, which drop a `*` fill.
     pub(super) fn format_context(&self) -> super::textfmt::FormatContext {
         super::textfmt::FormatContext {
             date_system: self.date_system(),
             locale: self.options.locale_profile().locale(),
+            drops_fill: true,
         }
     }
 

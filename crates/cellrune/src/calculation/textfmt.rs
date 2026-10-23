@@ -24,6 +24,11 @@ pub(crate) struct FormatContext {
     pub(crate) date_system: DateSystem,
     /// The regional format whose month, weekday, and `AM`/`PM` names date sections show.
     pub(crate) locale: Locale,
+    /// Whether a `*` fill shows nothing, as in `TEXT`, which Excel 16.114 shows without the fill
+    /// character (`TEXT(1.5,"*x0")` is `2`; excel-measure RESULTS.md, section B). A cell repeats
+    /// the character across its column, whose width is not an input, so the display text of a
+    /// code with a fill is unsupported.
+    pub(crate) drops_fill: bool,
 }
 
 /// Formats a number with `format`, as `TEXT` does.
@@ -142,6 +147,17 @@ fn render_number_section(
     context: FormatContext,
     earlier_subset: bool,
 ) -> Result<String, ErrorKind> {
+    let without_fill;
+    let tokens = if context.drops_fill && tokens.contains(&Token::Fill) {
+        without_fill = tokens
+            .iter()
+            .filter(|token| **token != Token::Fill)
+            .cloned()
+            .collect::<Vec<_>>();
+        &without_fill
+    } else {
+        tokens
+    };
     if tokens.is_empty() {
         return Ok(String::new());
     }

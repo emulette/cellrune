@@ -117,7 +117,7 @@ pub(super) fn render(
         .unwrap_or(0);
     let ticks_per_second = 10_u64.pow(decimals as u32);
     let ticks_per_day = 86_400 * ticks_per_second;
-    let ticks = (value * ticks_per_day as f64).round();
+    let ticks = rounded_ticks(value, ticks_per_day as f64);
     if !ticks.is_finite() || ticks >= u64::MAX as f64 {
         return Err(ErrorKind::Unsupported);
     }
@@ -207,6 +207,27 @@ pub(super) fn render(
         }
     }
     Ok(output)
+}
+
+/// Rounds `value` days to whole ticks by the exact value of the double. Excel 16.114 shows
+/// `TIME(16,36,3)+0.5/86400`, whose double lies just below 16:36:03.5, as `16:36:03`, and the same
+/// time plus 0.75 s, just above, as `16:36:04` (excel-measure RESULTS.md, section B), while the
+/// product in floating point is the half exactly in the first case.
+fn rounded_ticks(value: f64, ticks_per_day: f64) -> f64 {
+    let product = value * ticks_per_day;
+    let rounded = product.round();
+    if (rounded - product).abs() != 0.5 {
+        return rounded;
+    }
+    // The fused multiply-add gives the exact rounding error of the product.
+    let error = value.mul_add(ticks_per_day, -product);
+    if error < 0.0 {
+        product.floor()
+    } else if error > 0.0 {
+        product.ceil()
+    } else {
+        rounded
+    }
 }
 
 fn padded(value: u64, width: usize) -> String {

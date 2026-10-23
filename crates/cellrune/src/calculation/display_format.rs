@@ -57,6 +57,7 @@ pub fn format_display_text(
     let context = FormatContext {
         date_system,
         locale: locale_profile.locale(),
+        drops_fill: false,
     };
     let formatted = match value {
         CellValue::Blank => return Ok(String::new()),

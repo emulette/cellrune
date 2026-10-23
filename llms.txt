@@ -995,7 +995,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   shows a minus sign, and an empty section shows nothing. `[<=100]`-style
   conditions on the first two sections select a section for a non-negative
   number, and a second section without a condition takes the rest when it is
-  the last; colors such as `[Red]` are accepted and not shown. Quoted text,
+  the last; colors such as `[Red]` and the palette colors `[Color1]` through
+  `[Color56]` are accepted and not shown. Quoted text,
   `\x`, `[$symbol-lcid]` symbols, and characters other than codes and letters
   are literal. An unquoted letter that is not a code is shown as written only
   in the one-section digit codes 0.1.26 formatted (`TEXT(5,"0 x")` is `5 x`)
@@ -1004,10 +1005,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   `z1900ro` and Mac Excel 2021 `z3333o`.
   Digit layouts use `0`, `#`, and `?` (a space when empty), `.`, `,` between
   integer placeholders for grouping, trailing `,` to divide by 1,000 each, `%`,
-  `_x` as one space, literals between placeholders (`000-00-0000` fills digits
-  from the right), `E+`/`E-` scientific notation (`##0.0E+0` keeps the
-  exponent a multiple of three), and `# ?/?`-style fractions with the closest
-  denominator of up to four digits. Digit rounding is half away from zero on
+  `_x` as one space, `*x` fills, which `TEXT` drops, literals between
+  placeholders (`000-00-0000` fills digits from the right), `E+`/`E-`
+  scientific notation (`##0.0E+0` keeps the exponent a multiple of three), and
+  `# ?/?`-style fractions with the closest denominator of up to four digits;
+  with a whole part, a fraction that rounds to zero shows spaces as wide as
+  its `?` placeholders and the slash (`TEXT(1.999,"# ?/?")` is `2    `), and a
+  negative number keeps its sign before an empty whole part
+  (`TEXT(-0.25,"# ?/?")` is `- 1/4`). Digit rounding is half away from zero on
   the double. The one-section digit codes 0.1.26 formatted keep its rules: a
   minus sign appears only when a digit or `0` placeholder is shown, an
   integer `0` is kept unless decimals follow (`TEXT(0,"#")` is `0`), the
@@ -1027,19 +1032,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   `m` through `mmmmm`, `d` through `dddd`, `h`, `hh`, minutes as
   `m`/`mm` after an hour or before a second, `s`, `ss`, `.0` to `.000`
   fractional seconds, `[h]`, `[m]`, `[s]`, `AM/PM`, and `A/P`, in the
-  workbook's date system with serial 60 as 1900-02-29, rounded to the second
-  or to the shown fraction of a second, with English month, weekday, and
+  workbook's date system with serial 60 as 1900-02-29, rounded by the exact
+  value of the double to the second or to the shown fraction of a second
+  (`TEXT(TIME(16,36,3)+0.5/86400,"h:mm:ss")` is `16:36:03`), with English month, weekday, and
   `AM`/`PM` names under the default locale profile. These stay
-  `calculation.unsupported_expression`: `*` fills, fixed fraction
-  denominators such as `# ?/8` and any other `/` beside digits that does not
+  `calculation.unsupported_expression`: fixed fraction denominators such as `# ?/8` and any other `/` beside digits that does not
   form a `?/?` fraction (`#%/#`; the 0.1.26 code `0/2` keeps showing `3/2`
   for 2.5), `@` in a number section, conditional sections for a negative
   number, a third section after a second without a condition, elapsed codes
   beside `AM/PM` or `A/P`, lowercase `am/pm`, `aaa`, `b`, and `g` codes, system
   formats such as `[$-F800]`, names under a `[$-lcid]` other than `[$-409]`
-  or under the Korean profile, negative date-time values, fractions that
-  round to a whole number, and other year, day, hour, and second code
-  lengths. A non-numeric text value is
+  or under the Korean profile, negative date-time values, a fraction that
+  rounds to zero without a nonzero whole part or beside `#` or `0`
+  placeholders, a negative fraction without a whole part, and other year,
+  day, hour, and second code lengths. A non-numeric text value is
   `#VALUE!`.
 - `FIXED(number, [decimals], [no_commas])`, added in 0.1.27, and `DOLLAR(number,
   [decimals])` read numeric text as `VALUE` does, truncate `decimals` (default
