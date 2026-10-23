@@ -87,10 +87,26 @@ impl DecimalTrace {
 
     /// Converts an already-typed or XLSX numeric value through its shortest round-trip decimal.
     pub(in crate::calculation) fn from_number(value: f64) -> Option<Self> {
-        value
-            .is_finite()
-            .then(|| value.to_string())
-            .and_then(|literal| Self::from_literal(&literal))
+        if !value.is_finite() {
+            return None;
+        }
+        // Below 2^53 an integral double is exact, and its shortest decimal is its digits.
+        if value.fract() == 0.0 && value.abs() < 9_007_199_254_740_992.0 {
+            let mut coefficient = value as i64;
+            if coefficient == 0 {
+                return Some(Self::ZERO);
+            }
+            let mut exponent = 0;
+            while coefficient % 10 == 0 {
+                coefficient /= 10;
+                exponent += 1;
+            }
+            return Some(Self {
+                coefficient: i128::from(coefficient),
+                exponent,
+            });
+        }
+        Self::from_literal(&value.to_string())
     }
 
     pub(in crate::calculation) fn add(self, right: Self) -> Option<Self> {
@@ -313,6 +329,29 @@ fn signed_gcd(left: i128, right: i128) -> Option<i128> {
 #[cfg(test)]
 mod tests {
     use super::{DecimalTrace, RationalTrace, is_excel_near_zero_cancellation};
+
+    #[test]
+    fn numbers_trace_as_their_shortest_round_trip_spelling() {
+        let integral = (-1_000..=1_000)
+            .map(f64::from)
+            .chain([
+                -0.0,
+                1e15,
+                -1e15,
+                9_007_199_254_740_991.0,
+                9_007_199_254_740_992.0,
+                1e20,
+                123_456_789_000.0,
+            ])
+            .chain((0..64).map(|shift| 2_f64.powi(shift)));
+        for value in integral.chain([0.5, -0.1, 1.25e-7, 1e-300, 12_345.678_9]) {
+            assert_eq!(
+                DecimalTrace::from_number(value),
+                DecimalTrace::from_literal(&value.to_string()),
+                "{value}",
+            );
+        }
+    }
 
     #[test]
     fn traces_distinguish_exact_cancellation_from_real_small_differences() {

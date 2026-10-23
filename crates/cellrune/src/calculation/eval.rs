@@ -1052,7 +1052,7 @@ pub struct Engine<'workbook> {
     defined_name_asts: Arc<Vec<Option<ParsedFormula>>>,
     dependencies: Arc<DependencyGraph>,
     dependency_areas: Arc<AreaNodes>,
-    results: BTreeMap<CellId, Value>,
+    results: std::collections::HashMap<CellId, Value>,
     numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
@@ -1163,7 +1163,11 @@ impl<'workbook> Engine<'workbook> {
     }
 
     pub fn cell_value(&self, cell: CellId) -> Value {
-        match self.value_source(cell) {
+        Self::source_value(self.value_source(cell))
+    }
+
+    fn source_value(source: ValueSource<'_>) -> Value {
+        match source {
             ValueSource::Calculated(value) => value.clone(),
             ValueSource::Previous(result) => value_from_calculation_result(result),
             ValueSource::Literal(value) => value_from_cell(value),
@@ -1184,7 +1188,11 @@ impl<'workbook> Engine<'workbook> {
         ) {
             return None;
         }
-        match self.value_source(cell) {
+        self.source_decimal_trace(cell, &self.value_source(cell))
+    }
+
+    fn source_decimal_trace(&self, cell: CellId, source: &ValueSource<'_>) -> Option<DecimalTrace> {
+        match source {
             ValueSource::Calculated(_) => self.numeric_decimal_traces.get(&cell).copied(),
             ValueSource::Previous(_) => self.previous_numeric_decimal_trace(cell),
             ValueSource::Literal(CellValue::Number(number)) => {
@@ -1419,6 +1427,30 @@ impl<'workbook> Engine<'workbook> {
         }
         self.charge_reference_cells(context, 1)?;
         Ok(self.cell_value(cell))
+    }
+
+    /// Reads a referenced cell with [`Self::numeric_decimal_trace`], finding its source once.
+    pub(super) fn read_reference_cell_with_trace(
+        &self,
+        context: EvalContext<'_>,
+        cell: CellId,
+    ) -> Result<(Value, Option<DecimalTrace>), ErrorKind> {
+        if context.is_cancelled() {
+            return Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations,
+            ));
+        }
+        self.charge_reference_cells(context, 1)?;
+        let source = self.value_source(cell);
+        let trace = if matches!(
+            self.arithmetic_semantics(),
+            crate::ArithmeticSemantics::ExcelNearZero
+        ) {
+            self.source_decimal_trace(cell, &source)
+        } else {
+            None
+        };
+        Ok((Self::source_value(source), trace))
     }
 
     pub(super) fn max_function_iterations(&self) -> u64 {

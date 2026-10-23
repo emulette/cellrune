@@ -573,11 +573,8 @@ impl Engine<'_> {
         rect: Rect,
     ) -> Result<ScalarEvaluation, ErrorKind> {
         let cell = (rect.sheet, rect.row_start, rect.col_start);
-        let value = self.read_reference_cell(context, cell)?;
-        let decimal_trace = match value {
-            Value::Number(_) => self.numeric_decimal_trace(cell),
-            _ => None,
-        };
+        let (value, decimal_trace) = self.read_reference_cell_with_trace(context, cell)?;
+        let decimal_trace = decimal_trace.filter(|_| matches!(value, Value::Number(_)));
         Ok(ScalarEvaluation {
             value,
             decimal_trace,
@@ -871,9 +868,10 @@ impl Engine<'_> {
     ) -> Result<ArrayEvaluation, ErrorKind> {
         if rect.is_single_cell() {
             let cell = (rect.sheet, rect.row_start, rect.col_start);
+            let (value, decimal_trace) = self.read_reference_cell_with_trace(context, cell)?;
             return Ok(ArrayEvaluation::scalar(ScalarEvaluation {
-                value: self.read_reference_cell(context, cell)?,
-                decimal_trace: self.numeric_decimal_trace(cell),
+                value,
+                decimal_trace,
             }));
         }
         let row_end = if rect.whole_rows {
@@ -899,9 +897,10 @@ impl Engine<'_> {
         if row_end >= rect.row_start {
             for row in rect.row_start..=row_end {
                 for column in rect.col_start..=rect.col_end {
-                    let cell = (rect.sheet, row, column);
-                    data.push(self.read_reference_cell(context, cell)?);
-                    decimal_traces.push(self.numeric_decimal_trace(cell));
+                    let (value, decimal_trace) =
+                        self.read_reference_cell_with_trace(context, (rect.sheet, row, column))?;
+                    data.push(value);
+                    decimal_traces.push(decimal_trace);
                 }
             }
         }

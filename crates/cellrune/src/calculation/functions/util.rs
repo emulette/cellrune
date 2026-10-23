@@ -339,12 +339,12 @@ fn collect_rect_values(
             if !(selection.include)(cell) {
                 continue;
             }
-            let value = engine.read_reference_cell(context, cell)?;
-            let decimal_trace = match &value {
-                Value::Number(_) if selection.decimal_traces == DecimalTraces::Collect => {
-                    engine.numeric_decimal_trace(cell)
-                }
-                _ => None,
+            let (value, decimal_trace) = if selection.decimal_traces == DecimalTraces::Collect {
+                let (value, trace) = engine.read_reference_cell_with_trace(context, cell)?;
+                let trace = trace.filter(|_| matches!(value, Value::Number(_)));
+                (value, trace)
+            } else {
+                (engine.read_reference_cell(context, cell)?, None)
             };
             values.push(ArgumentValue {
                 value,
