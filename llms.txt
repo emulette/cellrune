@@ -991,11 +991,15 @@ than guessing a name from a different XLSX crate (`calamine`,
   `calculation.unsupported_expression`. Authored `ENCODEURL` formulas are
   stored as `_xlfn.ENCODEURL`.
 - `BAHTTEXT(number)` reads the baht as Thai numerals (สิบ for ten, ยี่สิบ for
-  twenty, เอ็ด for a one after a nonzero tens digit, หนึ่ง before the other
-  place words, and ล้าน for each million), then บาท, then ถ้วน for a whole amount
-  or the satang and สตางค์. Text that is not a number returns `#VALUE!`. Zero,
-  negative amounts, amounts below one baht, more than two decimal places, and a
-  final one after a zero tens digit (101, 1000001) report
+  twenty, เอ็ด for a final one after any higher digit as in 101 and 1000001,
+  หนึ่ง before the other place words, and ล้าน for each million), then บาท,
+  then ถ้วน for a whole amount or the satang and สตางค์, as Excel does: zero is
+  ศูนย์บาทถ้วน, an amount below one baht has only its satang (0.5 is
+  ห้าสิบสตางค์), a negative amount is prefixed with ลบ, and the amount is
+  rounded to the nearest satang read to 15 significant digits (1.235 is 24
+  satang). Text that is not a number returns `#VALUE!`. A half satang whose
+  direction depends on the rounding rule (1.225, 2.675), a negative amount that
+  rounds to zero, and amounts of 2^53 satang or more report
   `calculation.unsupported_expression`.
 - `CELL(info_type, reference)` calculates the info types defined by the
   workbook alone, matching the info type in any ASCII case: `"address"` of the

@@ -193,6 +193,21 @@ fn bahttext_reads_baht_and_satang_as_thai_numerals() {
         ("BAHTTEXT(1000000)", "หนึ่งล้านบาทถ้วน"),
         ("BAHTTEXT(21000011.21)", "ยี่สิบเอ็ดล้านสิบเอ็ดบาทยี่สิบเอ็ดสตางค์"),
         ("BAHTTEXT(2500000)", "สองล้านห้าแสนบาทถ้วน"),
+        // Excel 16.114 for Mac: a final one after any higher digit is เอ็ด, zero and amounts below
+        // one baht, negative amounts, and rounding to the nearest satang.
+        ("BAHTTEXT(101)", "หนึ่งร้อยเอ็ดบาทถ้วน"),
+        ("BAHTTEXT(1001)", "หนึ่งพันเอ็ดบาทถ้วน"),
+        ("BAHTTEXT(1000001)", "หนึ่งล้านเอ็ดบาทถ้วน"),
+        ("BAHTTEXT(21.25)", "ยี่สิบเอ็ดบาทยี่สิบห้าสตางค์"),
+        ("BAHTTEXT(0)", "ศูนย์บาทถ้วน"),
+        ("BAHTTEXT(0.5)", "ห้าสิบสตางค์"),
+        ("BAHTTEXT(-5)", "ลบห้าบาทถ้วน"),
+        ("BAHTTEXT(1.235)", "หนึ่งบาทยี่สิบสี่สตางค์"),
+        // The same rules elsewhere.
+        ("BAHTTEXT(0.01)", "หนึ่งสตางค์"),
+        ("BAHTTEXT(-0.5)", "ลบห้าสิบสตางค์"),
+        ("BAHTTEXT(1.234)", "หนึ่งบาทยี่สิบสามสตางค์"),
+        ("BAHTTEXT(2000001.016)", "สองล้านเอ็ดบาทสองสตางค์"),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula)]);
         assert!(scan_formula_capabilities(&workbook).is_supported());
@@ -205,13 +220,13 @@ fn bahttext_reads_baht_and_satang_as_thai_numerals() {
         );
     }
     assert_error("BAHTTEXT(\"K001\")", ExcelError::Value);
+    // A half satang where rounding up and to even disagree (1.225, 1.125), where the binary value
+    // lies below the half (2.675), and a negative amount that rounds to zero.
     for formula in [
-        "BAHTTEXT(101)",
-        "BAHTTEXT(1000001)",
-        "BAHTTEXT(0)",
-        "BAHTTEXT(0.5)",
-        "BAHTTEXT(-5)",
-        "BAHTTEXT(1.234)",
+        "BAHTTEXT(1.225)",
+        "BAHTTEXT(1.125)",
+        "BAHTTEXT(2.675)",
+        "BAHTTEXT(-0.001)",
     ] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),
