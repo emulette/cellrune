@@ -436,6 +436,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- Formulas that read a range, such as `SUM`, `COUNTBLANK`, `AND`, the conditional aggregates
+  and counts, the database functions, lookups, and array operands, and the indexes exact and
+  approximate lookups and criteria share, find the range's stored cells in one ordered walk of
+  the sheet instead of one lookup per cell, with the same results and the same reads charged.
 - Saving a document draft's cell edits into a source worksheet copies the XML the edits leave
   alone straight from the source part instead of rebuilding it event by event, and reads the
   source styles of edited cells only until it has found them all, with the same output.

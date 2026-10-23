@@ -210,11 +210,14 @@ impl CriteriaIndex {
             let next = keys.len() as u32;
             *keys.entry(key).or_insert(next)
         };
+        let mut stored =
+            engine.rect_cells(&area.rect(), (area.row + populated_rows).saturating_sub(1));
         for offset in 0..cells {
             if offset % CANCELLATION_POLL_INTERVAL == 0 && context.is_cancelled() {
                 return None;
             }
-            let key = match engine.cell_value(area.cell(offset)) {
+            let cell = area.cell(offset);
+            let key = match engine.stored_cell_value(cell, stored.at(cell.1, cell.2)) {
                 Value::Blank | Value::Error(_) => continue,
                 Value::Number(number) => match number_key(number) {
                     Some(key) => EqualityKey::Number(key),

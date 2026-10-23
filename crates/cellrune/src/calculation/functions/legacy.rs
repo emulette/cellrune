@@ -191,10 +191,16 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
                     return Value::Error(kind);
                 }
             }
+            let mut stored =
+                engine.rect_cells(&rect, (rect.row_start + rows as u32).saturating_sub(1));
             for row_offset in 0..rows as u32 {
                 let row = rect.row_start + row_offset;
                 for column in rect.col_start..=rect.col_end {
-                    match engine.read_reference_cell(context, (rect.sheet, row, column)) {
+                    match engine.read_stored_reference_cell(
+                        context,
+                        (rect.sheet, row, column),
+                        stored.at(row, column),
+                    ) {
                         Err(kind) => return Value::Error(kind),
                         Ok(Value::Error(kind)) => return Value::Error(kind),
                         Ok(Value::Number(number)) => {
@@ -393,17 +399,22 @@ fn scan_matches(
         return charged.map(|()| matches.offsets.len() as u64);
     }
     let mut count = 0_u64;
+    let mut stored = rects
+        .iter()
+        .map(|rect| engine.rect_cells(rect, (rect.row_start + iter_rows as u32).saturating_sub(1)))
+        .collect::<Vec<_>>();
     for relative_row in 0..iter_rows {
         for relative_col in 0..width {
             let mut matched = true;
-            for (rect, criterion) in rects.iter().zip(criteria.iter()) {
-                let value = engine.read_reference_cell(
+            for ((rect, criterion), stored) in rects.iter().zip(criteria.iter()).zip(&mut stored) {
+                let (row, column) = (
+                    rect.row_start + relative_row as u32,
+                    rect.col_start + relative_col as u32,
+                );
+                let value = engine.read_stored_reference_cell(
                     context,
-                    (
-                        rect.sheet,
-                        rect.row_start + relative_row as u32,
-                        rect.col_start + relative_col as u32,
-                    ),
+                    (rect.sheet, row, column),
+                    stored.at(row, column),
                 )?;
                 if !matcher.matches(criterion, &value)? {
                     matched = false;
@@ -648,8 +659,14 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             Some(found) => found,
             None => {
                 let found = (|| {
+                    let mut stored = engine.rect_cells(&rect, rect.row_end);
                     for offset in 0..length {
-                        let value = engine.read_reference_cell(context, cell(offset))?;
+                        let cell = cell(offset);
+                        let value = engine.read_stored_reference_cell(
+                            context,
+                            cell,
+                            stored.at(cell.1, cell.2),
+                        )?;
                         if matcher.matches(criterion, &value)? {
                             return Ok(offset as u32);
                         }
@@ -679,11 +696,14 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     let mut approximate = None;
     let mut equal = None;
     let mut stop = None;
+    let mut stored = engine.rect_cells(&rect, rect.row_end);
     for offset in 0..length {
-        let value = match engine.read_reference_cell(context, cell(offset)) {
-            Ok(value) => value,
-            Err(kind) => return Value::Error(kind),
-        };
+        let cell = cell(offset);
+        let value =
+            match engine.read_stored_reference_cell(context, cell, stored.at(cell.1, cell.2)) {
+                Ok(value) => value,
+                Err(kind) => return Value::Error(kind),
+            };
         // Approximate matching passes over error cells, as Excel does.
         if matches!(value, Value::Error(_)) {
             continue;

@@ -915,13 +915,21 @@ fn scan_conditional_extreme(
         return Value::Number(result.unwrap_or(0.0));
     }
     let mut result: Option<f64> = None;
+    let row_end = |range: &Rect| (range.row_start + iter_rows as u32).saturating_sub(1);
+    let mut criteria_cells = criteria
+        .iter()
+        .map(|(range, _)| engine.rect_cells(range, row_end(range)))
+        .collect::<Vec<_>>();
+    let mut value_cells = engine.rect_cells(&value_range, row_end(&value_range));
     for row in 0..iter_rows as u32 {
         for column in 0..value_range.width() as u32 {
             let mut matched = true;
-            for (rect, criterion) in criteria {
-                let value = match engine.read_reference_cell(
+            for ((rect, criterion), stored) in criteria.iter().zip(&mut criteria_cells) {
+                let (row, column) = (rect.row_start + row, rect.col_start + column);
+                let value = match engine.read_stored_reference_cell(
                     context,
-                    (rect.sheet, rect.row_start + row, rect.col_start + column),
+                    (rect.sheet, row, column),
+                    stored.at(row, column),
                 ) {
                     Ok(value) => value,
                     Err(kind) => return Value::Error(kind),
@@ -938,13 +946,11 @@ fn scan_conditional_extreme(
             if !matched {
                 continue;
             }
-            let value = match engine.read_reference_cell(
+            let (row, column) = (value_range.row_start + row, value_range.col_start + column);
+            let value = match engine.read_stored_reference_cell(
                 context,
-                (
-                    value_range.sheet,
-                    value_range.row_start + row,
-                    value_range.col_start + column,
-                ),
+                (value_range.sheet, row, column),
+                value_cells.at(row, column),
             ) {
                 Ok(value) => value,
                 Err(kind) => return Value::Error(kind),

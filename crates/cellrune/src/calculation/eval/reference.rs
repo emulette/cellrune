@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::iter::Peekable;
+use std::ops::RangeInclusive;
 
 use super::{Engine, EvalContext};
 use crate::Sheet;
@@ -21,10 +23,77 @@ use crate::calculation::runtime::{Rect, RectSpan, ReferenceValue};
 use crate::calculation::scope::ScopeValue;
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
+use crate::workbook::CellsIn;
 
 pub(super) fn cell_at(sheet: &Sheet, row: u32, column: u32) -> Option<&crate::Cell> {
     let address = crate::CellAddress::from_indices(row, column).ok()?;
     sheet.cell(address)
+}
+
+/// The cell a sheet stores at a position: `None` when no sheet has the position's sheet index,
+/// and `Some(None)` when the sheet stores no cell there.
+pub(in crate::calculation) type StoredCell<'workbook> = Option<Option<&'workbook crate::Cell>>;
+
+/// The stored cells of a rectangle, found in one row-major walk for positions read in that
+/// order instead of one lookup each.
+pub(in crate::calculation) struct RectCells<'workbook> {
+    sheet: Option<&'workbook Sheet>,
+    rows: RangeInclusive<u32>,
+    columns: RangeInclusive<u32>,
+    cells: Option<Peekable<CellsIn<'workbook>>>,
+    /// The last position read from the walk and its cell.
+    last: Option<((u32, u32), Option<&'workbook crate::Cell>)>,
+}
+
+impl<'workbook> RectCells<'workbook> {
+    /// The stored cell at `row` and `column`. Positions in the rectangle come from the walk and
+    /// must not come before a position read before; others are looked up.
+    pub(in crate::calculation) fn at(&mut self, row: u32, column: u32) -> StoredCell<'workbook> {
+        let sheet = self.sheet?;
+        if !self.rows.contains(&row) || !self.columns.contains(&column) {
+            return Some(cell_at(sheet, row, column));
+        }
+        if let Some((position, cell)) = self.last {
+            if position == (row, column) {
+                return Some(cell);
+            }
+            debug_assert!(
+                position < (row, column),
+                "rectangle cells read out of order"
+            );
+        }
+        let position =
+            |cell: &&crate::Cell| (cell.address().row().get(), cell.address().column().get());
+        let cells = self.cells.get_or_insert_with(|| {
+            sheet
+                .cells_in(self.rows.clone(), self.columns.clone())
+                .peekable()
+        });
+        while cells
+            .next_if(|cell| position(cell) < (row, column))
+            .is_some()
+        {}
+        let cell = cells.next_if(|cell| position(cell) == (row, column));
+        self.last = Some(((row, column), cell));
+        Some(cell)
+    }
+}
+
+impl<'workbook> Engine<'workbook> {
+    /// The stored cells of `rect` through `row_end`.
+    pub(in crate::calculation) fn rect_cells(
+        &self,
+        rect: &Rect,
+        row_end: u32,
+    ) -> RectCells<'workbook> {
+        RectCells {
+            sheet: self.workbook.sheets().get(rect.sheet),
+            rows: rect.row_start..=row_end.min(rect.row_end),
+            columns: rect.col_start..=rect.col_end,
+            cells: None,
+            last: None,
+        }
+    }
 }
 
 /// The greatest populated row of each populated column on one sheet.

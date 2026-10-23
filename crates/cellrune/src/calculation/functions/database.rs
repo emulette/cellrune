@@ -1,6 +1,6 @@
 use super::super::ast::Expr;
 use super::super::coerce::compare_text_case_insensitive;
-use super::super::eval::{Engine, EvalContext};
+use super::super::eval::{Engine, EvalContext, RectCells};
 use super::super::formula_rebase::FormulaCriteria;
 use super::super::runtime::Rect;
 use super::super::value::{ErrorKind, Value};
@@ -52,7 +52,7 @@ pub(super) fn call(
         context,
         &mut runtime,
         function,
-        database.rect.sheet,
+        &database,
         field,
         &selected,
     )
@@ -62,6 +62,18 @@ pub(super) fn call(
 struct Database {
     rect: Rect,
     headers: Vec<String>,
+}
+
+impl Database {
+    /// The record cells of the sheet column `column`.
+    fn column(&self, column: u32) -> Rect {
+        Rect {
+            row_start: self.rect.row_start + 1,
+            col_start: column,
+            col_end: column,
+            ..self.rect
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,6 +314,8 @@ fn select_records(
     let record_count = database.rect.height() - 1;
     engine.ensure_array_cells(record_count)?;
     let mut selected = Vec::with_capacity(record_count as usize);
+    // Conditions read their fields in any order, so each field column is walked on its own.
+    let mut columns = std::collections::BTreeMap::<u32, RectCells<'_>>::new();
     for row in database.rect.row_start + 1..=database.rect.row_end {
         runtime.charge_work(1)?;
         let row_delta = row - database.rect.row_start - 1;
@@ -311,8 +325,14 @@ fn select_records(
             for condition in &criteria_row.conditions {
                 let matched = match condition {
                     CriteriaCondition::Field { column, criterion } => {
-                        let value = engine
-                            .read_reference_cell(context, (database.rect.sheet, row, *column))?;
+                        let stored = columns.entry(*column).or_insert_with(|| {
+                            engine.rect_cells(&database.column(*column), database.rect.row_end)
+                        });
+                        let value = engine.read_stored_reference_cell(
+                            context,
+                            (database.rect.sheet, row, *column),
+                            stored.at(row, *column),
+                        )?;
                         runtime.matches_database(criterion, &value)?
                     }
                     CriteriaCondition::Formula(formula) => {
@@ -341,7 +361,7 @@ fn aggregate_selected(
     context: EvalContext<'_>,
     runtime: &mut CriteriaRuntime<'_, '_, '_>,
     function: DatabaseFunction,
-    database_sheet: usize,
+    database: &Database,
     field: DatabaseField,
     selected: &SelectedRecords,
 ) -> Value {
@@ -352,7 +372,7 @@ fn aggregate_selected(
         return match selected.as_slice() {
             [] => Value::Error(ErrorKind::Value),
             [row] => engine
-                .read_reference_cell(context, (database_sheet, *row, column))
+                .read_reference_cell(context, (database.rect.sheet, *row, column))
                 .unwrap_or_else(Value::Error),
             [_, _, ..] => Value::Error(ErrorKind::Num),
         };
@@ -362,11 +382,16 @@ fn aggregate_selected(
     let mut moments = NumericMoments::new();
     let mut extreme = None::<f64>;
     let mut product = None::<f64>;
+    let mut stored = engine.rect_cells(&database.column(column), database.rect.row_end);
     for row in selected.iter() {
         if let Err(kind) = runtime.charge_work(1) {
             return Value::Error(kind);
         }
-        let value = match engine.read_reference_cell(context, (database_sheet, row, column)) {
+        let value = match engine.read_stored_reference_cell(
+            context,
+            (database.rect.sheet, row, column),
+            stored.at(row, column),
+        ) {
             Ok(value) => value,
             Err(kind) => return Value::Error(kind),
         };

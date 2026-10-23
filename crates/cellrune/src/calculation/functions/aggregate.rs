@@ -259,9 +259,14 @@ fn count_blank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         return Value::Error(kind);
     }
     let mut count = 0_u64;
+    let mut stored = engine.rect_cells(&rect, rect.row_end);
     for row in rect.row_start..=rect.row_end {
         for column in rect.col_start..=rect.col_end {
-            let value = match engine.read_reference_cell(context, (rect.sheet, row, column)) {
+            let value = match engine.read_stored_reference_cell(
+                context,
+                (rect.sheet, row, column),
+                stored.at(row, column),
+            ) {
                 Ok(value) => value,
                 Err(kind) => return Value::Error(kind),
             };
@@ -443,17 +448,22 @@ fn scan_conditional_aggregate(
     }
     let mut total = ExcelSum::new(engine);
     let mut count = 0_u64;
+    let row_end = |range: &Rect| (range.row_start + iter_rows as u32).saturating_sub(1);
+    let mut criteria_cells = parsed
+        .criteria
+        .iter()
+        .map(|(range, _)| engine.rect_cells(range, row_end(range)))
+        .collect::<Vec<_>>();
+    let mut value_cells = engine.rect_cells(&parsed.value_range, row_end(&parsed.value_range));
     for row_offset in 0..iter_rows as u32 {
         for col_offset in 0..parsed.value_range.width() as u32 {
             let mut matched = true;
-            for (range, criterion) in &parsed.criteria {
-                let value = match engine.read_reference_cell(
+            for ((range, criterion), stored) in parsed.criteria.iter().zip(&mut criteria_cells) {
+                let (row, column) = (range.row_start + row_offset, range.col_start + col_offset);
+                let value = match engine.read_stored_reference_cell(
                     context,
-                    (
-                        range.sheet,
-                        range.row_start + row_offset,
-                        range.col_start + col_offset,
-                    ),
+                    (range.sheet, row, column),
+                    stored.at(row, column),
                 ) {
                     Ok(value) => value,
                     Err(kind) => return Value::Error(kind),
@@ -470,19 +480,22 @@ fn scan_conditional_aggregate(
             if !matched {
                 continue;
             }
-            let cell = (
-                parsed.value_range.sheet,
+            let (row, column) = (
                 parsed.value_range.row_start + row_offset,
                 parsed.value_range.col_start + col_offset,
             );
-            match engine.read_reference_cell(context, cell) {
+            match engine.read_stored_reference_cell_with_trace(
+                context,
+                (parsed.value_range.sheet, row, column),
+                value_cells.at(row, column),
+            ) {
                 Err(kind) => return Value::Error(kind),
-                Ok(Value::Number(number)) => {
-                    total.add_with_trace(number, engine.numeric_decimal_trace(cell));
+                Ok((Value::Number(number), trace)) => {
+                    total.add_with_trace(number, trace);
                     count += 1;
                 }
-                Ok(Value::Error(kind)) => return Value::Error(kind),
-                Ok(Value::Blank | Value::Text(_) | Value::Logical(_)) => {}
+                Ok((Value::Error(kind), _)) => return Value::Error(kind),
+                Ok((Value::Blank | Value::Text(_) | Value::Logical(_), _)) => {}
             }
         }
     }

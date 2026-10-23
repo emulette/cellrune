@@ -192,6 +192,77 @@ impl<'a, V> RadixDfs<'a, V> {
     }
 }
 
+impl<'a, V> RadixDfs<'a, V> {
+    /// A forward walk over the keys from `key` on.
+    fn from_key(root: &'a RadixNode<V>, key: u128) -> Self {
+        let mut walk = Self {
+            frames: Vec::with_capacity(KEY_BYTES + 1),
+            reverse: false,
+        };
+        let mut node = root;
+        loop {
+            match &node.kind {
+                RadixNodeKind::Leaf(entries) => {
+                    walk.frames.push(RadixFrame {
+                        node,
+                        next_item: entries.partition_point(|entry| entry.key < key),
+                    });
+                    return walk;
+                }
+                RadixNodeKind::Branch { depth, children } => {
+                    // Every key under a branch shares the bytes before its depth.
+                    let shift = (KEY_BYTES - usize::from(*depth)) * u8::BITS as usize;
+                    let prefix = |key: u128| key.checked_shr(shift as u32).unwrap_or(0);
+                    let next_item = match prefix(key).cmp(&prefix(node.min_key)) {
+                        std::cmp::Ordering::Less => 0,
+                        std::cmp::Ordering::Greater => children.len(),
+                        std::cmp::Ordering::Equal => {
+                            let edge = key_byte(key, usize::from(*depth));
+                            let index =
+                                children.partition_point(|(candidate, _)| *candidate < edge);
+                            if children
+                                .get(index)
+                                .is_some_and(|(candidate, _)| *candidate == edge)
+                            {
+                                walk.frames.push(RadixFrame {
+                                    node,
+                                    next_item: index + 1,
+                                });
+                                node = children[index].1.as_ref();
+                                continue;
+                            }
+                            index
+                        }
+                    };
+                    walk.frames.push(RadixFrame { node, next_item });
+                    return walk;
+                }
+            }
+        }
+    }
+}
+
+/// An ascending walk over a map's entries that can jump ahead to a key.
+pub(crate) struct PersistentRadixCursor<'a, V> {
+    root: &'a RadixNode<V>,
+    walk: RadixDfs<'a, V>,
+}
+
+impl<'a, V> PersistentRadixCursor<'a, V> {
+    /// Moves to the first entry whose key is at least `key`.
+    pub(crate) fn seek(&mut self, key: u128) {
+        self.walk = RadixDfs::from_key(self.root, key);
+    }
+}
+
+impl<'a, V> Iterator for PersistentRadixCursor<'a, V> {
+    type Item = (u128, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.walk.next()
+    }
+}
+
 pub(crate) struct PersistentRadixEntries<'a, V> {
     front: RadixDfs<'a, V>,
     back: RadixDfs<'a, V>,
@@ -357,6 +428,14 @@ impl<V> PersistentRadixMap<V> {
             front: RadixDfs::new(self.root.as_ref(), false),
             back: RadixDfs::new(self.root.as_ref(), true),
             remaining: self.len,
+        }
+    }
+
+    /// Returns an ascending walk over the entries whose keys are at least `key`.
+    pub(crate) fn entries_from(&self, key: u128) -> PersistentRadixCursor<'_, V> {
+        PersistentRadixCursor {
+            root: self.root.as_ref(),
+            walk: RadixDfs::from_key(self.root.as_ref(), key),
         }
     }
 
@@ -888,6 +967,39 @@ mod tests {
         assert_eq!(entries.next_back().map(|(key, _)| key), Some(257));
         assert_eq!(entries.next(), None);
         assert_eq!(entries.next_back(), None);
+    }
+
+    #[test]
+    fn a_cursor_walks_up_from_any_key_and_jumps_ahead() {
+        // Keys spread over several bytes build branches with skipped prefix bytes.
+        let keys = (0_u128..3_000)
+            .map(|index| ((index / 7) << 72) | ((index % 7) << 9) | (index % 3))
+            .collect::<std::collections::BTreeSet<_>>();
+        let map = PersistentRadixMap::from_sorted_iter(keys.iter().map(|key| (*key, *key)));
+        let probes = keys
+            .iter()
+            .flat_map(|key| [key.saturating_sub(1), *key, key + 1])
+            .chain([0, u128::MAX]);
+        for probe in probes {
+            let expected = keys.range(probe..).take(5).copied().collect::<Vec<_>>();
+            assert_eq!(
+                map.entries_from(probe)
+                    .take(5)
+                    .map(|(key, _)| key)
+                    .collect::<Vec<_>>(),
+                expected,
+                "{probe}"
+            );
+        }
+        let mut cursor = map.entries_from(0);
+        let last = *keys.last().expect("keys");
+        cursor.seek(last);
+        assert_eq!(cursor.next().map(|(key, _)| key), Some(last));
+        assert_eq!(cursor.next(), None);
+        assert_eq!(
+            PersistentRadixMap::<u128>::default().entries_from(0).next(),
+            None
+        );
     }
 
     #[test]

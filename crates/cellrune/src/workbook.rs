@@ -3,6 +3,7 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU32;
+use std::ops::RangeInclusive;
 use std::sync::{Arc, OnceLock};
 
 mod annotations;
@@ -25,7 +26,9 @@ pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;
 use table_index::{TableColumnLocation, TableIndex, TableIndexBuildError, TableLocation};
 
-use crate::calculation::persistent_store::{PersistentRadixMap, PersistentRadixValues};
+use crate::calculation::persistent_store::{
+    PersistentRadixCursor, PersistentRadixMap, PersistentRadixValues,
+};
 use crate::{
     Cell, CellAddress, CellContent, CellRange, Column, DefinedName, DefinedNameScope, Diagnostic,
     NumberFormat, Provenance, Row, Table, TableColumn, TableColumnId, TableId, ValidationError,
@@ -218,6 +221,52 @@ impl DoubleEndedIterator for CellStoreValues<'_> {
 
 impl ExactSizeIterator for CellStoreValues<'_> {}
 
+/// The stored cells of a rectangle in row-major order.
+pub(crate) struct CellsIn<'a> {
+    cursor: PersistentRadixCursor<'a, Cell>,
+    row_end: u32,
+    columns: RangeInclusive<u32>,
+    skipped: u32,
+}
+
+/// How many stored cells outside the rectangle's columns the walk steps over before it jumps to
+/// the rectangle's next row, which costs about as much as that many steps.
+const CELLS_IN_SEEK_AFTER: u32 = 8;
+
+impl<'a> Iterator for CellsIn<'a> {
+    type Item = &'a Cell;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (_, cell) = self.cursor.next()?;
+            let row = cell.address().row().get();
+            let column = cell.address().column().get();
+            if row > self.row_end {
+                self.row_end = 0;
+                return None;
+            }
+            if self.columns.contains(&column) {
+                self.skipped = 0;
+                return Some(cell);
+            }
+            self.skipped += 1;
+            if self.skipped == CELLS_IN_SEEK_AFTER {
+                self.skipped = 0;
+                let row = if column < *self.columns.start() {
+                    row
+                } else if row < self.row_end {
+                    row + 1
+                } else {
+                    self.row_end = 0;
+                    return None;
+                };
+                self.cursor
+                    .seek(CellStore::row_key(row, *self.columns.start()));
+            }
+        }
+    }
+}
+
 impl CellStore {
     fn from_sorted(cells: BTreeMap<u128, Cell>) -> Self {
         let len = cells.len();
@@ -227,8 +276,7 @@ impl CellStore {
     }
 
     fn key(address: CellAddress) -> u128 {
-        u128::from(address.row().get() - 1) * u128::from(crate::EXCEL_MAX_COLUMNS)
-            + u128::from(address.column().get() - 1)
+        Self::row_key(address.row().get(), address.column().get())
     }
 
     fn contains_key(&self, address: &CellAddress) -> bool {
@@ -256,6 +304,21 @@ impl CellStore {
             self.len -= 1;
         }
         removed.is_some()
+    }
+
+    fn cells_in(&self, rows: RangeInclusive<u32>, columns: RangeInclusive<u32>) -> CellsIn<'_> {
+        let start = (*rows.start()).max(1);
+        let column_start = (*columns.start()).max(1);
+        CellsIn {
+            cursor: self.cells.entries_from(Self::row_key(start, column_start)),
+            row_end: *rows.end(),
+            columns: column_start..=*columns.end(),
+            skipped: 0,
+        }
+    }
+
+    fn row_key(row: u32, column: u32) -> u128 {
+        u128::from(row - 1) * u128::from(crate::EXCEL_MAX_COLUMNS) + u128::from(column - 1)
     }
 
     fn values(&self) -> CellStoreValues<'_> {
@@ -437,6 +500,15 @@ impl Sheet {
     /// Returns a [`ValidationError`] when `address` is not a valid unqualified A1 address.
     pub fn cell_by_a1(&self, address: &str) -> Result<Option<&Cell>, ValidationError> {
         Ok(self.cell(CellAddress::from_a1(address)?))
+    }
+
+    /// Iterates the sparse cells in `rows` and `columns` in row-major order.
+    pub(crate) fn cells_in(
+        &self,
+        rows: RangeInclusive<u32>,
+        columns: RangeInclusive<u32>,
+    ) -> CellsIn<'_> {
+        self.cells.cells_in(rows, columns)
     }
 
     /// Iterates sparse cells in deterministic row-major order.
@@ -1765,5 +1837,55 @@ fn case_insensitive_key(value: &str) -> Cow<'_, str> {
         }
     } else {
         Cow::Owned(value.chars().flat_map(char::to_lowercase).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        CellAddress, CellContent, CellValue, NumberFormat, Sheet, SheetId, SheetName,
+        SheetVisibility,
+    };
+
+    #[test]
+    fn cells_in_walks_the_stored_cells_of_a_rectangle_in_row_major_order() {
+        let mut sheet = Sheet::new(
+            SheetId::new(1).expect("sheet ID"),
+            SheetName::new("S").expect("sheet name"),
+            SheetVisibility::Visible,
+        );
+        for row in 1..=60 {
+            for column in (1..=30).filter(|column| (row * 7 + column) % 3 != 0) {
+                sheet.upsert_cell(
+                    CellAddress::from_indices(row, column).expect("address"),
+                    CellContent::Literal(CellValue::number(1.0).expect("number")),
+                    NumberFormat::default(),
+                );
+            }
+        }
+        // Narrow windows over the 30 columns step past more cells than the walk takes before it
+        // jumps to the next row.
+        for (rows, columns) in [
+            (1..=60, 1..=30),
+            (5..=40, 12..=12),
+            (5..=40, 2..=3),
+            (1..=1, 30..=30),
+            (59..=80, 29..=40),
+            (61..=70, 1..=30),
+            (20..=25, 31..=40),
+        ] {
+            let expected = sheet
+                .cells()
+                .map(crate::Cell::address)
+                .filter(|address| {
+                    rows.contains(&address.row().get()) && columns.contains(&address.column().get())
+                })
+                .collect::<Vec<_>>();
+            let walked = sheet
+                .cells_in(rows.clone(), columns.clone())
+                .map(crate::Cell::address)
+                .collect::<Vec<_>>();
+            assert_eq!(walked, expected, "{rows:?} {columns:?}");
+        }
     }
 }

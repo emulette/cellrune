@@ -40,6 +40,8 @@ use dependency_areas::AreaNodes;
 use formula_columns::FormulaColumns;
 use materialization::{ArrayOwners, ArrayRegion};
 pub(super) use recompile::RecompiledWorkbook;
+pub(in crate::calculation) use reference::RectCells;
+use reference::StoredCell;
 use reference::{ColumnExtents, cell_at};
 
 pub(super) fn clone_set_cancellable<T>(
@@ -1118,11 +1120,23 @@ impl<'workbook> Engine<'workbook> {
     /// from a literal that something else overrode would let a sum snap to zero on terms that
     /// never cancelled.
     fn value_source(&self, cell: CellId) -> ValueSource<'_> {
+        self.stored_value_source(cell, self.stored_cell(cell))
+    }
+
+    /// The cell's sheet's stored cell at its position.
+    fn stored_cell(&self, cell: CellId) -> StoredCell<'workbook> {
+        self.workbook
+            .sheets()
+            .get(cell.0)
+            .map(|sheet| cell_at(sheet, cell.1, cell.2))
+    }
+
+    /// [`Self::value_source`] given the cell's `stored` cell.
+    fn stored_value_source(&self, cell: CellId, stored: StoredCell<'workbook>) -> ValueSource<'_> {
         // A literal outside every array area reads as stored: only formula cells and array areas
         // have results, kept results, or the issues checked below, and an edit that turns a
         // formula into a literal leaves the cell dirty, so no kept result applies to it.
-        if let Some(sheet) = self.workbook.sheets().get(cell.0)
-            && let Some(source) = cell_at(sheet, cell.1, cell.2)
+        if let Some(Some(source)) = stored
             && let CellContent::Literal(value) = source.content()
             && self.array_owner(cell).is_none()
         {
@@ -1166,10 +1180,10 @@ impl<'workbook> Engine<'workbook> {
             }
             return ValueSource::Error(ErrorKind::Unsupported);
         }
-        let Some(sheet) = self.workbook.sheets().get(cell.0) else {
+        let Some(stored) = stored else {
             return ValueSource::Error(ErrorKind::Ref);
         };
-        let Some(source) = cell_at(sheet, cell.1, cell.2) else {
+        let Some(source) = stored else {
             return ValueSource::Blank;
         };
         match source.content() {
@@ -1205,6 +1219,11 @@ impl<'workbook> Engine<'workbook> {
 
     pub fn cell_value(&self, cell: CellId) -> Value {
         Self::source_value(self.value_source(cell))
+    }
+
+    /// [`Self::cell_value`] given the cell's `stored` cell.
+    pub(super) fn stored_cell_value(&self, cell: CellId, stored: StoredCell<'workbook>) -> Value {
+        Self::source_value(self.stored_value_source(cell, stored))
     }
 
     fn source_value(source: ValueSource<'_>) -> Value {
@@ -1559,11 +1578,38 @@ impl<'workbook> Engine<'workbook> {
         Ok(Value::Blank)
     }
 
+    /// Reads a referenced cell as [`Self::read_reference_cell`] does, given its `stored` cell.
+    pub(super) fn read_stored_reference_cell(
+        &self,
+        context: EvalContext<'_>,
+        cell: CellId,
+        stored: StoredCell<'workbook>,
+    ) -> Result<Value, ErrorKind> {
+        if context.is_cancelled() {
+            return Err(ErrorKind::ResourceLimit(
+                CalculationLimitKind::FunctionIterations,
+            ));
+        }
+        self.charge_reference_cells(context, 1)?;
+        Ok(Self::source_value(self.stored_value_source(cell, stored)))
+    }
+
     /// Reads a referenced cell with [`Self::numeric_decimal_trace`], finding its source once.
     pub(super) fn read_reference_cell_with_trace(
         &self,
         context: EvalContext<'_>,
         cell: CellId,
+    ) -> Result<(Value, Option<DecimalTrace>), ErrorKind> {
+        self.read_stored_reference_cell_with_trace(context, cell, self.stored_cell(cell))
+    }
+
+    /// Reads a referenced cell as [`Self::read_reference_cell_with_trace`] does, given its
+    /// `stored` cell.
+    pub(super) fn read_stored_reference_cell_with_trace(
+        &self,
+        context: EvalContext<'_>,
+        cell: CellId,
+        stored: StoredCell<'workbook>,
     ) -> Result<(Value, Option<DecimalTrace>), ErrorKind> {
         if context.is_cancelled() {
             return Err(ErrorKind::ResourceLimit(
@@ -1571,7 +1617,7 @@ impl<'workbook> Engine<'workbook> {
             ));
         }
         self.charge_reference_cells(context, 1)?;
-        let source = self.value_source(cell);
+        let source = self.stored_value_source(cell, stored);
         let trace = if matches!(
             self.arithmetic_semantics(),
             crate::ArithmeticSemantics::ExcelNearZero

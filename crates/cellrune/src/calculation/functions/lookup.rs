@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use super::super::ast::Expr;
 use super::super::coerce::{compare, to_logical};
-use super::super::eval::{Engine, EvalContext};
+use super::super::eval::{Engine, EvalContext, RectCells};
 use super::super::runtime::{Array, Rect};
 use super::super::value::{ErrorKind, Value};
 use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
@@ -461,15 +461,19 @@ fn xlookup_return_array(
     engine.ensure_array_cells(cells)?;
     engine.charge_function_iterations(context, cells)?;
     let mut data = Vec::with_capacity(usize::try_from(cells).map_err(|_| ErrorKind::Num)?);
+    let mut stored = engine.rect_cells(&slice, slice.row_end);
     for index in 0..cells {
         if index % 256 == 0 {
             super::array_common::poll_cancellation(context)?;
         }
-        let row = u32::try_from(index / u64::from(cols)).map_err(|_| ErrorKind::Num)?;
-        let col = u32::try_from(index % u64::from(cols)).map_err(|_| ErrorKind::Num)?;
-        data.push(engine.read_reference_cell(
+        let row =
+            slice.row_start + u32::try_from(index / u64::from(cols)).map_err(|_| ErrorKind::Num)?;
+        let col =
+            slice.col_start + u32::try_from(index % u64::from(cols)).map_err(|_| ErrorKind::Num)?;
+        data.push(engine.read_stored_reference_cell(
             context,
-            (slice.sheet, slice.row_start + row, slice.col_start + col),
+            (slice.sheet, row, col),
+            stored.at(row, col),
         )?);
     }
     Ok(Array { rows, cols, data })
@@ -557,8 +561,10 @@ fn find_lookup_offset(
         Some(found) => return found,
         None => {
             let found = (|| {
+                let mut stored = engine.rect_cells(&rect, rect.row_end);
                 for offset in 0..length as u32 {
-                    let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+                    let value =
+                        lookup_axis_value(engine, context, rect, horizontal, offset, &mut stored)?;
                     if !matches!(value, Value::Error(_))
                         && compare(&value, lookup)? == Ordering::Equal
                     {
@@ -583,8 +589,9 @@ fn find_lookup_offset(
     }
     let mut candidate = None;
     let mut stop = None;
+    let mut stored = engine.rect_cells(&rect, rect.row_end);
     for offset in 0..length as u32 {
-        let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+        let value = lookup_axis_value(engine, context, rect, horizontal, offset, &mut stored)?;
         if matches!(value, Value::Error(_)) {
             continue;
         }
@@ -628,8 +635,9 @@ fn find_exact_lookup_offset(
         _ => None,
     };
     let found = (|| {
+        let mut stored = engine.rect_cells(&rect, rect.row_end);
         for offset in 0..length as u32 {
-            let value = lookup_axis_value(engine, context, rect, horizontal, offset)?;
+            let value = lookup_axis_value(engine, context, rect, horizontal, offset, &mut stored)?;
             let matched = match (&pattern, &value) {
                 (_, Value::Error(_)) => false,
                 (Some(pattern), Value::Text(text)) => {
@@ -652,19 +660,21 @@ fn find_exact_lookup_offset(
     found
 }
 
-fn lookup_axis_value(
-    engine: &Engine<'_>,
+/// Reads the cell `offset` along the lookup axis, through `stored`, a walk over `rect`.
+fn lookup_axis_value<'workbook>(
+    engine: &Engine<'workbook>,
     context: EvalContext<'_>,
     rect: Rect,
     horizontal: bool,
     offset: u32,
+    stored: &mut RectCells<'workbook>,
 ) -> Result<Value, ErrorKind> {
     let cell = if horizontal {
         (rect.sheet, rect.row_start, rect.col_start + offset)
     } else {
         (rect.sheet, rect.row_start + offset, rect.col_start)
     };
-    engine.read_reference_cell(context, cell)
+    engine.read_stored_reference_cell(context, cell, stored.at(cell.1, cell.2))
 }
 
 fn choose(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

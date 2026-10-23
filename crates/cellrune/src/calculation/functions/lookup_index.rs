@@ -61,6 +61,17 @@ impl LookupArea {
         }
     }
 
+    fn rect(self) -> Rect {
+        Rect {
+            sheet: self.sheet,
+            row_start: self.row,
+            col_start: self.column,
+            row_end: self.last_row(),
+            col_end: self.last_column(),
+            whole_rows: false,
+        }
+    }
+
     fn last_row(self) -> u32 {
         if self.horizontal {
             self.row
@@ -268,11 +279,13 @@ impl ApproximateIndex {
             last_value_through: Vec::with_capacity(area.length as usize),
         };
         let mut last_value = 0;
+        let mut stored = engine.rect_cells(&area.rect(), area.last_row());
         for offset in 0..area.length {
             if offset % CANCELLATION_POLL_INTERVAL == 0 && context.is_cancelled() {
                 return None;
             }
-            let value = engine.cell_value(area.cell(offset));
+            let cell = area.cell(offset);
+            let value = engine.stored_cell_value(cell, stored.at(cell.1, cell.2));
             let cell = match &value {
                 Value::Error(_) => OrderedCell::Error,
                 Value::Blank => OrderedCell::Blank,
@@ -403,6 +416,7 @@ impl ExactLookupIndex {
             approximate: OnceLock::new(),
         };
         let (mut texts, mut nonempty_texts, mut blanks) = (0_u32, 0_u32, 0_u32);
+        let mut stored = engine.rect_cells(&area.rect(), area.last_row());
         for offset in 0..area.length {
             if offset % CANCELLATION_POLL_INTERVAL == 0 && context.is_cancelled() {
                 return None;
@@ -410,7 +424,8 @@ impl ExactLookupIndex {
             index.texts_before.push(texts);
             index.nonempty_texts_before.push(nonempty_texts);
             index.blanks_before.push(blanks);
-            let key = match engine.cell_value(area.cell(offset)) {
+            let cell = area.cell(offset);
+            let key = match engine.stored_cell_value(cell, stored.at(cell.1, cell.2)) {
                 Value::Blank => {
                     blanks += 1;
                     Span::extend(&mut index.blanks, offset);

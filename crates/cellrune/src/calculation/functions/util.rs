@@ -333,6 +333,10 @@ fn collect_rect_values(
         .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
     engine.ensure_array_cells(*visited_cells)?;
     let populated_row_end = engine.populated_row_end(&rect);
+    let mut stored = engine.rect_cells(
+        &rect,
+        populated_row_end.min(rect.row_start + (rows - 1) as u32),
+    );
     for row_offset in 0..rows as u32 {
         let row = rect.row_start + row_offset;
         for column in rect.col_start..=rect.col_end {
@@ -343,11 +347,18 @@ fn collect_rect_values(
             let (value, decimal_trace) = if row > populated_row_end {
                 (engine.read_blank_reference_cell(context)?, None)
             } else if selection.decimal_traces == DecimalTraces::Collect {
-                let (value, trace) = engine.read_reference_cell_with_trace(context, cell)?;
+                let (value, trace) = engine.read_stored_reference_cell_with_trace(
+                    context,
+                    cell,
+                    stored.at(row, column),
+                )?;
                 let trace = trace.filter(|_| matches!(value, Value::Number(_)));
                 (value, trace)
             } else {
-                (engine.read_reference_cell(context, cell)?, None)
+                (
+                    engine.read_stored_reference_cell(context, cell, stored.at(row, column))?,
+                    None,
+                )
             };
             values.push(ArgumentValue {
                 value,
