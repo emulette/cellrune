@@ -476,7 +476,8 @@ impl From<Alignment> for AlignmentEdit {
 pub struct CellFormatEdit {
     font: Option<FontEdit>,
     fill: Option<PatternFill>,
-    border: Option<BorderEdit>,
+    // Boxed so that a `WorkbookChange` holding an edit stays small.
+    border: Option<Box<BorderEdit>>,
     alignment: Option<AlignmentEdit>,
 }
 
@@ -510,7 +511,7 @@ impl CellFormatEdit {
     #[must_use]
     pub fn with_border(self, border: impl Into<BorderEdit>) -> Self {
         Self {
-            border: Some(border.into()),
+            border: Some(Box::new(border.into())),
             ..self
         }
     }
@@ -537,8 +538,8 @@ impl CellFormatEdit {
     }
 
     /// Returns the border lines the edit sets.
-    pub const fn border(&self) -> Option<BorderEdit> {
-        self.border
+    pub fn border(&self) -> Option<BorderEdit> {
+        self.border.as_deref().copied()
     }
 
     /// Returns the alignment properties the edit sets.
@@ -562,6 +563,7 @@ impl CellFormatEdit {
                 .map_or_else(|| format.font().clone(), |edit| edit.apply(format.font())),
             self.fill.map_or(format.fill(), Fill::Pattern),
             self.border
+                .as_deref()
                 .map_or(format.border(), |edit| edit.apply(&format.border())),
             self.alignment
                 .map_or(format.alignment(), |edit| edit.apply(&format.alignment())),

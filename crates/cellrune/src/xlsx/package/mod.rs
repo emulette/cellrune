@@ -51,6 +51,9 @@ pub(super) enum WorkbookPackageKind {
     Xlsm,
 }
 
+/// A worksheet's external hyperlink targets by relationship ID, and its comments part.
+pub(super) type AnnotationRelationships = (BTreeMap<Box<str>, Box<str>>, Option<PartPath>);
+
 /// The outcome of reading a part the workbook opens without.
 pub(super) enum OptionalPart {
     Read(Vec<u8>),
@@ -235,7 +238,7 @@ impl<R: Read + Seek> OpenedPackage<R> {
     pub(super) fn worksheet_annotation_relationships(
         &mut self,
         worksheet_part: &PartPath,
-    ) -> Option<(BTreeMap<Box<str>, Box<str>>, Option<PartPath>)> {
+    ) -> Option<AnnotationRelationships> {
         let mut targets = BTreeMap::new();
         let mut comments = None;
         let Ok(relationship_part) = worksheet_part.relationship_part() else {
