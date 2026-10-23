@@ -2770,9 +2770,10 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 #[test]
 fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
     // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
-    // totals, conditional aggregates, lookups, and cycles, in batches of one to three changes.
-    // After every batch the session's automatic recalculation must equal a fresh full one.
-    for seed in 1..=6_u64 {
+    // totals, conditional aggregates, lookups, dynamic references, spills, and cycles, in batches
+    // of one to three changes. After every batch the session's automatic recalculation must
+    // equal a fresh full one.
+    for seed in 1..=8_u64 {
         let mut random = Lcg(seed);
         let mut session = WorkbookCalculationSession::create();
         let first = SheetId::new(1).expect("constant sheet ID");
@@ -2862,7 +2863,29 @@ fn random_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
         _ => {
             let (a, b, column) = (random.cell(), random.cell(), random.column());
             let (top, bottom) = (random.below(12) + 1, random.below(12) + 13);
-            let text = match random.below(12) {
+            if random.below(15) == 0 {
+                let declared = random.below(2) == 0;
+                let range = declared.then(|| {
+                    CellRange::new(
+                        target,
+                        CellAddress::from_indices(target.row().get() + 2, target.column().get())
+                            .expect("valid spill end"),
+                    )
+                    .expect("declared range")
+                });
+                return WorkbookChange::set_cell_dynamic_formula(
+                    sheet,
+                    target,
+                    formula(&format!("SEQUENCE(3,1,{a})")),
+                    range,
+                )
+                .expect("dynamic formula");
+            }
+            let text = match random.below(16) {
+                12 => format!("OFFSET({a},{},0)", random.below(3)),
+                13 => format!("SUM(A1:INDEX(A1:A24,{}))", random.below(24) + 1),
+                14 => format!("OFFSET(A1,{b},1)"),
+                15 => format!("SUM({column}{top}#)"),
                 0 => format!("{a}+{b}"),
                 1 => format!("{a}*2-{b}"),
                 2 => format!("SUM({column}{top}:{column}{bottom})"),
