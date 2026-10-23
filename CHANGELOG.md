@@ -213,7 +213,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   cell or area it waits for and one per member of each area it adds, but never more than the
   distinct formula cells and array anchors its references cover, so a formula that calculated
   before still does; a 5,000-row running total over formulas no longer reports the limit for its
-  last thousand rows. Calculation order and every other result are unchanged.
+  last thousand rows. Calculation order is unchanged; a formula that reads one that now
+  calculates can return a different value, as described below.
 - `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `COUNTIF`, `COUNTIFS`, `MAXIFS`, and `MINIFS`
   calculate when the cells they read fit `max_array_cells`, where a row stops at its first
   unmatched criterion, instead of reporting the limit whenever their ranges together hold more
@@ -228,15 +229,26 @@ inventories, and measurements belong in the linked documentation rather than in 
   cannot follow reports `DynamicTopology`, as after a value edit. An edit that adds such a
   reference, touches a cell that is or was part of an array formula, or lets the dependency graph
   reach `max_dependency_edges` still compiles the workbook again and reports `Full` with
-  `TopologyChanged` and every formula as dirty.
-  Forced `Incremental` and `Full` recalculation and transactions behave as before, and results are
-  unchanged.
+  `TopologyChanged` and every formula as dirty. Forced `Incremental` and `Full` recalculation and
+  transactions behave as before, and results are those of a full calculation.
 - A full calculation with references known only from values, such as `OFFSET` or `INDIRECT` with
   calculated arguments or a range ending in `INDEX`, evaluates the workbook once instead of twice
   when that pass read every formula after calculating it and the resolved dependencies neither
   limit nor cycle other formulas; workbooks with a dynamic array formula without a declared spill
   range still take two passes. The function iterations and reference cells a calculation reports
   are then those of one pass.
+- A formula that reads a cell 0.1.26 reported unavailable can return a different value now that
+  the cell calculates. Such cells are an `OFFSET` or `INDIRECT` positioned through another dynamic
+  reference, a conditional aggregate whose ranges exceed `max_array_cells` while the cells it reads
+  fit, and a formula that `max_dependency_edges` left out of the dependency graph. Conditional
+  aggregates such as `COUNTIF` and `SUMIF` and lookups such as `XLOOKUP` and `MATCH` skipped the
+  unavailable cell and now read its value: with `K1` holding `OFFSET(K5,L1,0)`, which returns 2,
+  and `J1` holding `OFFSET(J5,K1,0)`, which now returns 9 instead of `UnsupportedExpression`,
+  `COUNTIF(J1:K1,">0")` returns 2 instead of 1, `SUMIF(J1:K1,">0")` 11 instead of 2,
+  `XLOOKUP(9,J1:K1,J1:K1,-1)` 9 instead of -1, and `MATCH(9,J1:K1,0)` 1 instead of `#N/A`. A cycle
+  through a formula the dependency-edge limit left out, which 0.1.26 did not detect, now reports
+  `CircularReference` for each formula in it: where the limit left out `E1` holding
+  `SUM(A1:B1)+D1`, `D1` holding `COUNTIF(E1,">0")` returned 0.
 - Minimal-write impact analysis treats an `OFFSET` whose position the edited workbook gives
   without calculating anything, such as `OFFSET(A1,1,0)` or `OFFSET(A1,C1,0)` with a value in
   `C1`, as reading the cells it resolves to, so an unrelated edit keeps its saved result.
