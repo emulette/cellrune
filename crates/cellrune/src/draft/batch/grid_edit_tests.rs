@@ -372,22 +372,48 @@ fn edits_that_split_a_legacy_array_or_push_cells_off_the_sheet_are_refused() {
         ),
         NumberFormat::default(),
     );
-    let mut draft = draft(vec![s1], Vec::new());
+    let mut array = draft(vec![s1], Vec::new());
     for change in [insert_rows(1, 2, 1), delete_rows(1, 3, 4)] {
         assert!(matches!(
-            refused(&mut draft, change),
+            refused(&mut array, change),
             ValidationError::ArrayFormulaPartEdit { .. }
         ));
     }
-    apply(&mut draft, insert_rows(1, 1, 1));
+    apply(&mut array, insert_rows(1, 1, 1));
     assert_eq!(
-        metadata(draft.workbook(), "S1", "B2"),
+        metadata(array.workbook(), "S1", "B2"),
         FormulaMetadata::Array {
             range: range("B2:B4"),
             always_calculate: false,
         }
     );
-    assert_eq!(text(draft.workbook(), "S1", "B2"), "=A2:A4*2");
+    assert_eq!(text(array.workbook(), "S1", "B2"), "=A2:A4*2");
+
+    let mut spill = sheet(1, "S1", &[]);
+    spill.upsert_cell(
+        address("A1"),
+        formula(
+            "SEQUENCE(3)",
+            FormulaMetadata::DynamicArray {
+                range: Some(range("A1:A3")),
+                always_calculate: false,
+            },
+        ),
+        NumberFormat::default(),
+    );
+    let mut spilled = draft(vec![spill], Vec::new());
+    for (source, destination) in [("A2:A3", "C2"), ("A1:A2", "E1")] {
+        let change = WorkbookChange::move_range(id(1), range(source), address(destination))
+            .expect("range move");
+        assert!(matches!(
+            refused(&mut spilled, change),
+            ValidationError::ArrayFormulaPartEdit { .. }
+        ));
+    }
+    apply(
+        &mut spilled,
+        WorkbookChange::move_range(id(1), range("A1:A3"), address("C1")).expect("range move"),
+    );
 
     let mut full = probe();
     full.apply_changes(EditBatch::new([WorkbookChange::set_cell_value(
@@ -545,6 +571,29 @@ fn data_validations_keep_their_cells_and_read_from_their_first_cell() {
     assert_eq!(
         summary(&deleted),
         owned(&[("A1:A3", "A1>0"), ("D1:D2", "D1>0")])
+    );
+
+    // Cutting part of a validation away from its first cell would make the moved cells read
+    // other cells, unless the formula reads none relative to them.
+    let mut split = build();
+    assert!(matches!(
+        refused(
+            &mut split,
+            WorkbookChange::move_range(id(1), range("A4:A5"), address("F10")).expect("move"),
+        ),
+        ValidationError::MovedRangeSplitsRule { owner: Some(_) }
+    ));
+    apply(
+        &mut split,
+        WorkbookChange::move_range(id(1), range("B2"), address("F10")).expect("move"),
+    );
+    assert_eq!(
+        summary(&split),
+        owned(&[
+            ("A1:A5", "A1>0"),
+            ("B1:B1 F10:F10", "$C$1>0"),
+            ("D3:D4", "D3>0")
+        ])
     );
 }
 
@@ -845,6 +894,28 @@ fn a_range_move_carries_references_wholly_inside_it_and_keeps_moved_formulas() {
         refused(&mut reading, cut),
         ValidationError::MovedRangeOverwritesReferences { .. }
     ));
+
+    // A formula the paste overwrites does not hold the move back, whatever it reads.
+    let mut overwritten = draft(
+        vec![sheet(
+            1,
+            "S1",
+            &[("A1", "1"), ("A2", "2"), ("M1", "5"), ("M2", "=M1+1")],
+        )],
+        Vec::new(),
+    );
+    apply(
+        &mut overwritten,
+        WorkbookChange::move_range(id(1), range("A1:A2"), address("M1")).expect("move"),
+    );
+    assert_eq!(
+        overwritten
+            .workbook()
+            .sheet_by_name("S1")
+            .and_then(|sheet| sheet.cell(address("M2")))
+            .map(crate::Cell::content),
+        Some(&CellContent::Literal(CellValue::number(2.0).expect("two")))
+    );
 
     let mut s1 = sheet(1, "S1", &[("A1", "1")]);
     s1.set_merged_ranges(vec![range("D1:D2")]);

@@ -11,7 +11,7 @@ use super::formula_rewrite::{
 };
 use super::syntax::{NodeSpanTree, SourceComponent, SourceComponentKind, SourceEdit, SourceSpan};
 use crate::case_insensitive_eq;
-use crate::grid::{GridAxis, GridEdit, RangeRule, range_contains};
+use crate::grid::{GridAxis, GridEdit, RangeRule, intersect, range_contains, subtract};
 use crate::{CellAddress, CellRange, EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 
 /// The text a reference to deleted cells becomes, as Excel saves it.
@@ -85,6 +85,27 @@ pub(crate) fn move_anchored_formulas(
             rows: i64::from(origin.row().get()) - i64::from(old_anchor.row().get()),
             columns: i64::from(origin.column().get()) - i64::from(old_anchor.column().get()),
         });
+    // One rule reads relative to its first cell, so cells cut away from it would read other
+    // cells unless the formula reads none relative to them.
+    if let GridEdit::MoveRange { source, .. } = edit {
+        let moves = ranges
+            .iter()
+            .any(|range| intersect(*range, source).is_some());
+        let stays = ranges
+            .iter()
+            .any(|range| !subtract(*range, source).is_empty());
+        if moves && stays {
+            let probe = FormulaRewriteRequest::Copy(CopyOffset {
+                rows: 1,
+                columns: 1,
+            });
+            for formula in formulas {
+                if rewrite_formula(formula, &probe, budget)?.is_some() {
+                    return Err(FormulaRewriteError::SplitRule { owner: None });
+                }
+            }
+        }
+    }
     let request = FormulaRewriteRequest::Grid(GridChange {
         host_is_sheet: true,
         ..change

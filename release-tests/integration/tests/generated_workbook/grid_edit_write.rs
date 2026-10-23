@@ -605,3 +605,140 @@ fn the_inverse_of_a_deletion_saves_the_source_cells_again() {
     }
     assert_eq!(names(&reopened), names(&document));
 }
+
+#[test]
+fn deleting_a_shared_formula_master_saves_its_followers_as_formulas_of_their_own() {
+    // `D3` is the master of the shared group `D3:D5`, whose followers' text deleting row 3 does
+    // not change.
+    let source = support::replace_part_text(
+        &generated_grid_edit_fixture(),
+        DATA,
+        r#"<f t="shared" ref="D3:D5" si="0">B2+1</f>"#,
+        r#"<f t="shared" ref="D3:D5" si="0">$B$2+1</f>"#,
+    );
+    let draft = edited(
+        &source,
+        vec![WorkbookChange::delete_rows(sheet(1), row(3), row(3)).expect("delete")],
+    );
+    let (_, reopened) = write_and_reopen(&draft);
+    assert_eq!(formula(&reopened, "Data", "D3"), "$B$2+1");
+    assert_eq!(formula(&reopened, "Data", "D4"), "$B$2+1");
+}
+
+#[test]
+fn a_row_move_that_crosses_a_drawing_anchor_shrinks_it_instead_of_inverting_it() {
+    // The chart's anchor moved below the table to zero-based rows 11 to 19; moving its last row,
+    // 20, to row 10 would put that end before the first. The anchor shrinks as a range does: its
+    // other rows move down past the inserted row.
+    let source = support::replace_part_text(
+        &support::replace_part_text(
+            &generated_grid_edit_fixture(),
+            "xl/drawings/drawing1.xml",
+            "<xdr:row>1</xdr:row>",
+            "<xdr:row>11</xdr:row>",
+        ),
+        "xl/drawings/drawing1.xml",
+        "<xdr:row>9</xdr:row>",
+        "<xdr:row>19</xdr:row>",
+    );
+    let draft = edited(
+        &source,
+        vec![WorkbookChange::move_rows(sheet(1), row(20), row(20), row(10)).expect("move")],
+    );
+    let (output, _) = write_and_reopen(&draft);
+    let drawing = parts(&output)["xl/drawings/drawing1.xml"].clone();
+    let rows = drawing
+        .match_indices("<xdr:row>")
+        .map(|(index, tag)| {
+            let start = index + tag.len();
+            let end = start + drawing[start..].find('<').expect("row end");
+            drawing[start..end].parse::<u32>().expect("row")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rows, [12, 19], "{drawing}");
+}
+
+#[test]
+fn cutting_part_of_a_relative_conditional_format_is_refused_with_the_part() {
+    let source = support::replace_part_text(
+        &generated_grid_edit_fixture(),
+        DATA,
+        r#"<conditionalFormatting sqref="B2:B5"><cfRule type="expression" dxfId="0" priority="1"><formula>B2&gt;2</formula>"#,
+        r#"<conditionalFormatting sqref="H2:H5"><cfRule type="expression" dxfId="0" priority="1"><formula>H2&gt;2</formula>"#,
+    );
+    let range = |start: &str, end: &str| {
+        cellrune::CellRange::new(
+            CellAddress::from_a1(start).expect("start"),
+            CellAddress::from_a1(end).expect("end"),
+        )
+        .expect("range")
+    };
+    let draft = edited(
+        &source,
+        vec![
+            WorkbookChange::move_range(
+                sheet(1),
+                range("H4", "H5"),
+                CellAddress::from_a1("P20").expect("destination"),
+            )
+            .expect("move"),
+        ],
+    );
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let error = write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        RecalculationWriteOptions::default()
+            .with_policy(RecalculationWritePolicy::InvalidateUnavailable),
+    )
+    .expect_err("the moved cells would read other cells");
+    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    assert_eq!(error.source_id().map(|source| source.as_str()), Some(DATA));
+}
+
+#[test]
+fn the_inverse_of_a_row_move_lists_the_preserved_content_it_cannot_restore() {
+    let mut draft = WorkbookDraft::from_document(&open(&generated_grid_edit_fixture()));
+    let receipt = draft
+        .apply_changes(EditBatch::new([WorkbookChange::move_rows(
+            sheet(1),
+            row(7),
+            row(7),
+            row(12),
+        )
+        .expect("move")]))
+        .expect("move");
+    let inverse = receipt.inverse().expect("inverse");
+    assert!(inverse.unrestored().iter().any(|content| {
+        content.kind() == cellrune::UnrestoredContentKind::PreservedContent
+            && content.sheet_id() == Some(sheet(1))
+    }));
+}
+
+#[test]
+fn a_shape_linked_to_moved_cells_is_refused_with_its_part() {
+    let shape = r#"<xdr:twoCellAnchor><xdr:from><xdr:col>16</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>18</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>3</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:sp macro="" textlink="$B$4"><xdr:nvSpPr><xdr:cNvPr id="3" name="Box"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>"#;
+    let source = support::replace_part_text(
+        &generated_grid_edit_fixture(),
+        "xl/drawings/drawing1.xml",
+        "</xdr:wsDr>",
+        shape,
+    );
+    let draft = edited(
+        &source,
+        vec![WorkbookChange::insert_rows(sheet(1), row(3), 1).expect("insertion")],
+    );
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let error = write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        RecalculationWriteOptions::default()
+            .with_policy(RecalculationWritePolicy::InvalidateUnavailable),
+    )
+    .expect_err("the shape's link would name other cells");
+    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    assert_eq!(
+        error.source_id().map(|source| source.as_str()),
+        Some("xl/drawings/drawing1.xml")
+    );
+}

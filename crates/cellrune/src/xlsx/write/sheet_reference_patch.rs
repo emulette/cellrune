@@ -57,6 +57,8 @@ const DETAIL_MOVED_PIVOT_SOURCE: &str =
     "a preserved pivot cache reads cells a structural edit moves or deletes";
 const DETAIL_DELETED_PIVOT_CHART: &str =
     "a preserved pivot chart reads a pivot table on a deleted sheet";
+pub(super) const DETAIL_MOVED_LINK: &str =
+    "a preserved form control, VML control, or linked shape names cells a structural edit moves";
 const DETAIL_DELETED_LINK: &str = "a preserved form control, VML control, linked shape, or data consolidation names a deleted sheet";
 /// Holds the `x:FmlaLink` and `x:FmlaRange` of legacy VML controls.
 const VML_EXCEL: &[&str] = &["urn:schemas-microsoft-com:office:excel"];
@@ -596,10 +598,10 @@ pub(crate) fn rewrite_sheet_references(
     if !deleted_sheets.is_empty() {
         for part in document.link_part_paths() {
             if !removed_parts.contains(part)
-                && links_deleted_sheet(
+                && links_rewritten_cells(
                     &source_reader.read_part(part)?,
                     part,
-                    &sheet_requests,
+                    &sheet_requests.deletions_only,
                     limits,
                 )?
             {
@@ -667,6 +669,34 @@ pub(super) fn rewrite_grid_references(
             .iter()
             .map(|part| (part, ReferencePart::PivotCache, None)),
     );
+    let ReferenceRequests::Grid { request, .. } = &requests else {
+        unreachable!("a grid rewrite holds a grid request");
+    };
+    // Links into the edited sheet from other sheets' drawings and controls are refused together.
+    let mut moved_links = Vec::new();
+    for part in document.link_part_paths() {
+        if !removed_parts.contains(part) {
+            let bytes = match replacements.get(part) {
+                Some(bytes) => bytes.clone(),
+                None => source_reader.read_part(part)?,
+            };
+            if links_rewritten_cells(&bytes, part, request, limits)? {
+                moved_links.push(part);
+            }
+        }
+    }
+    if let Some(first) = moved_links.first() {
+        let parts = moved_links
+            .iter()
+            .map(|part| part.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(
+            XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
+                .with_detail(format!("{DETAIL_MOVED_LINK}: {parts}"))
+                .at_source(first.source_id()),
+        );
+    }
     for (part, kind, owner) in parts {
         if removed_parts.contains(part) {
             continue;
@@ -700,21 +730,22 @@ pub(super) struct PartAccess<'r, 'p> {
     pub(super) removed_parts: &'r BTreeSet<PartPath>,
 }
 
-/// Reports whether a form control's `fmla*` attributes, a linked shape's `textlink`, or a VML
-/// control's `x:Fmla*` text names a deleted sheet. Excel would turn such a link into `#REF!`, but
-/// these parts carry formulas outside the grammar the rewrite edits in place, so the deletion is
-/// refused rather than leaving the link stale.
-fn links_deleted_sheet(
+/// Reports whether `request` rewrites a form control's `fmla*` attributes, a linked shape's
+/// `textlink`, or a VML control's `x:Fmla*` text, as a deletion of the sheet or a structural edit
+/// of the cells it names does. Excel would rewrite such a link, but these parts carry formulas
+/// outside the grammar the rewrite edits in place, so the edit is refused rather than leaving
+/// the link stale.
+pub(super) fn links_rewritten_cells(
     bytes: &[u8],
     source: &PartPath,
-    requests: &SheetReferenceRequests<'_>,
+    request: &FormulaRewriteRequest<'_>,
     limits: WriteLimits,
 ) -> Result<bool, XlsxWriteError> {
     let never_cancelled = || false;
     let mut budget = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, &never_cancelled);
     let mut names_deleted = |formula: &str| {
         Ok::<_, XlsxWriteError>(
-            rewrite_formula(formula, &requests.deletions_only, &mut budget)
+            rewrite_formula(formula, request, &mut budget)
                 .map_or(true, |rewritten| rewritten.is_some()),
         )
     };
@@ -1244,7 +1275,8 @@ fn rewrite(
     rewrite_formula(formula, request, budget).map_err(|error| match error {
         FormulaRewriteError::Parse { .. }
         | FormulaRewriteError::SourceEdit(_)
-        | FormulaRewriteError::OverwrittenReference { .. } => unrewritable(source),
+        | FormulaRewriteError::OverwrittenReference { .. }
+        | FormulaRewriteError::SplitRule { .. } => unrewritable(source),
         FormulaRewriteError::Cancelled | FormulaRewriteError::LimitExceeded { .. } => {
             unreachable!("an unbounded non-cancellable rewrite cannot exhaust rewrite control")
         }

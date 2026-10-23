@@ -7,8 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::grid_worksheet::{parse_range, patch_worksheet_grid, unrewritable};
 use super::grid_xml::{XmlDocument, XmlElement, XmlNode};
 use super::package::PackageReader;
-use super::sheet_reference_patch::{PartAccess, rewrite_grid_references};
+use super::sheet_reference_patch::{
+    DETAIL_MOVED_LINK, PartAccess, links_rewritten_cells, rewrite_grid_references,
+};
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
+use crate::calculation::formula_rewrite::FormulaRewriteRequest;
 use crate::calculation::grid_rewrite::GridChange;
 use crate::grid::{GridAxis, GridEdit, RangeRule};
 use crate::xlsx::package::{PartPath, RelationshipTarget, parse_relationships};
@@ -81,6 +84,25 @@ pub(super) fn replay_grid_edits(
                     Some(bytes) => bytes.clone(),
                     None => source_reader.read_part(related_part)?,
                 };
+                // The sheet's own linked shapes and VML controls name its cells unqualified.
+                if matches!(kind, RelatedKind::Drawing | RelatedKind::LegacyDrawing)
+                    && links_rewritten_cells(
+                        &current,
+                        related_part,
+                        &FormulaRewriteRequest::Grid(GridChange {
+                            sheet: name,
+                            host_is_sheet: true,
+                            edit: *edit,
+                        }),
+                        limits,
+                    )?
+                {
+                    return Err(unrewritable(
+                        related_part,
+                        DETAIL_MOVED_LINK,
+                        related_part.as_str(),
+                    ));
+                }
                 if let Some(patched) =
                     patch_related_part(&current, related_part, *kind, *edit, limits)?
                 {
@@ -266,7 +288,7 @@ fn move_anchors(
                     if let [Some(from), Some(to)] = corners {
                         let moved = match edit {
                             GridEdit::MoveRange { .. } => moved_with_range(edit, from, to),
-                            _ => Some((moved_corner(edit, from), moved_corner(edit, to))),
+                            _ => Some(moved_corners(edit, from, to)),
                         };
                         if let Some((from, to)) = moved {
                             set_corner(child, "from", from)?;
@@ -382,6 +404,49 @@ fn set_corner(anchor: &mut XmlElement, name: &str, corner: Corner) -> Result<(),
         }
     }
     Ok(())
+}
+
+/// Moves both corners of a resizing anchor by a line edit. Each corner follows its line, except
+/// that a move that would put the first corner after the second shrinks the anchor as it shrinks
+/// a range whose ends cross.
+fn moved_corners(edit: GridEdit, from: Corner, to: Corner) -> (Corner, Corner) {
+    let (mut moved_from, mut moved_to) = (moved_corner(edit, from), moved_corner(edit, to));
+    let (Some(axis), GridEdit::Move { .. }) = (edit.line_axis(), edit) else {
+        return (moved_from, moved_to);
+    };
+    let lines = |corner: Corner| match axis {
+        GridAxis::Rows => (corner.row, corner.row_offset),
+        GridAxis::Columns => (corner.column, corner.column_offset),
+    };
+    let ((from_line, from_offset), (to_line, to_offset)) = (lines(moved_from), lines(moved_to));
+    if (from_line, from_offset.unwrap_or(0)) <= (to_line, to_offset.unwrap_or(0)) {
+        return (moved_from, moved_to);
+    }
+    let Some((start, end)) =
+        edit.map_interval(lines(from).0 + 1, lines(to).0 + 1, RangeRule::Reference)
+    else {
+        return (moved_from, moved_to);
+    };
+    let (start, end) = (start - 1, end - 1);
+    // Ends that meet on one line keep the anchor's first corner on it.
+    let to_offset = if start == end {
+        from_offset.max(to_offset)
+    } else {
+        to_offset
+    };
+    match axis {
+        GridAxis::Rows => {
+            moved_from.row = start;
+            moved_to.row = end;
+            moved_to.row_offset = to_offset;
+        }
+        GridAxis::Columns => {
+            moved_from.column = start;
+            moved_to.column = end;
+            moved_to.column_offset = to_offset;
+        }
+    }
+    (moved_from, moved_to)
 }
 
 /// Moves one corner by a line edit: it follows its line, and a corner on a deleted line moves to

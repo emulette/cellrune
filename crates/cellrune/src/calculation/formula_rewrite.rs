@@ -244,6 +244,10 @@ pub(crate) enum FormulaRewriteError {
     OverwrittenReference {
         owner: Option<String>,
     },
+    /// A range move would move part of the cells of a rule whose formula reads relative to them.
+    SplitRule {
+        owner: Option<String>,
+    },
 }
 
 impl FormulaRewriteError {
@@ -261,6 +265,7 @@ impl FormulaRewriteError {
             Self::OverwrittenReference { owner: None } => {
                 Self::OverwrittenReference { owner: Some(owner) }
             }
+            Self::SplitRule { owner: None } => Self::SplitRule { owner: Some(owner) },
             other => other,
         }
     }

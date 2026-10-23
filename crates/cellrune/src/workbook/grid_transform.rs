@@ -195,7 +195,10 @@ impl Sheet {
             let members = followers.get(&key).map(Vec::as_slice).unwrap_or_default();
             let (group_index, anchor) = key;
             let anchor_entry = anchors.get(&key);
-            let is_touched = touched.contains(&anchor)
+            // A group whose master the edit deleted keeps followers that name it, whose own
+            // text the edit may have left as it was.
+            let is_touched = anchor_entry.is_none()
+                || touched.contains(&anchor)
                 || members.iter().any(|(address, _)| touched.contains(address));
             if !is_touched {
                 continue;

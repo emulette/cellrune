@@ -721,10 +721,14 @@ fn name_changes(
     }
 }
 
-/// Reports whether a structural edit removes or moves preserved package content of its sheet:
-/// a deletion, or a range move.
+/// Reports whether a structural edit removes or moves preserved package content of its sheet so
+/// that its inverse cannot bring it back: a deletion, a range move, or a line move, which shrinks
+/// a preserved range whose ends it crosses.
 pub(super) const fn moves_preserved_content(edit: GridEdit) -> bool {
-    matches!(edit, GridEdit::Delete { .. } | GridEdit::MoveRange { .. })
+    matches!(
+        edit,
+        GridEdit::Delete { .. } | GridEdit::Move { .. } | GridEdit::MoveRange { .. }
+    )
 }
 
 /// Reports whether a change makes the batch's receipt carry an inverse.

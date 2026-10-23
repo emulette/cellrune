@@ -109,6 +109,9 @@ impl BatchExecutionError {
             Self::Rewrite(FormulaRewriteError::OverwrittenReference { owner }) => {
                 ValidationError::MovedRangeOverwritesReferences { owner }
             }
+            Self::Rewrite(FormulaRewriteError::SplitRule { owner }) => {
+                ValidationError::MovedRangeSplitsRule { owner }
+            }
             Self::Rewrite(FormulaRewriteError::SourceEdit(_)) => {
                 ValidationError::FormulaRewriteParseFailed {
                     parse_code: "formula.rewrite.source_edit".to_owned(),

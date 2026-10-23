@@ -12,9 +12,9 @@ use crate::calculation::formula_rewrite::{
 use crate::calculation::grid_rewrite::{GridChange, move_anchored_formulas};
 use crate::grid::{GridAxis, GridEdit, GridHistory};
 use crate::{
-    CalculationCellId, CellAddress, CellContent, CellValue, Column, DataValidation, DefinedName,
-    DefinedNameScope, DocumentPresentation, FormulaMetadata, FormulaText, Sheet, SheetId, Table,
-    TableColumn, TableId, TableType, ValidationError, case_insensitive_eq,
+    CalculationCellId, CellAddress, CellContent, CellRange, CellValue, Column, DataValidation,
+    DefinedName, DefinedNameScope, DocumentPresentation, FormulaMetadata, FormulaText, Sheet,
+    SheetId, Table, TableColumn, TableId, TableType, ValidationError, case_insensitive_eq,
 };
 
 /// The staged draft state a structural edit changes.
@@ -97,6 +97,10 @@ pub(super) fn apply_grid_edit(
             let Some(text) = formula.text() else {
                 continue;
             };
+            // A formula the paste overwrites goes with its cell, whatever it reads.
+            if sheet_index == index && edit.overwrites(CellRange::from_ordered(address, address)) {
+                continue;
+            }
             let owner = format!("cell:sheet_id={},address={address}", sheet.id().get());
             let Some(text) = rewrite_formula(text.as_str(), &request, budget)
                 .map_err(|error| error.with_owner(owner))?
@@ -285,8 +289,8 @@ pub(super) fn apply_grid_edit(
 }
 
 /// Refuses an edit Excel does not make, or makes in a way not yet measured: shifting nonblank
-/// cells off the sheet, changing part of a legacy array formula or data table, moving part of a
-/// merged range, and deleting or moving a table's header row, every data row, its totals row,
+/// cells off the sheet, changing part of a legacy array formula or data table, cutting part of a
+/// spill range, moving part of a merged range, and deleting or moving a table's header row, every data row, its totals row,
 /// or some of its columns.
 fn validate_sheet(sheet: &Sheet, edit: GridEdit) -> Result<(), ValidationError> {
     let sheet_id = sheet.id().get();
@@ -311,6 +315,10 @@ fn validate_sheet(sheet: &Sheet, edit: GridEdit) -> Result<(), ValidationError> 
             FormulaMetadata::Array { range, .. } | FormulaMetadata::DataTable { range, .. } => {
                 *range
             }
+            // Excel refuses to cut part of a spill range; a line edit keeps the anchor's spill.
+            FormulaMetadata::DynamicArray {
+                range: Some(range), ..
+            } if matches!(edit, GridEdit::MoveRange { .. }) => *range,
             _ => continue,
         };
         if edit.splits(range) {
