@@ -1523,6 +1523,35 @@ pub struct FunctionCatalogReportDto {
     pub entries: Vec<FunctionCatalogEntryDto>,
 }
 
+/// Bounded request for one page of the function catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionCatalogPageRequestDto {
+    /// Zero-based entry offset.
+    #[serde(default)]
+    pub offset: u64,
+    /// Page size; zero selects the default, with a hard maximum of 10,000.
+    #[serde(default)]
+    #[schemars(range(max = 10_000))]
+    pub limit: u32,
+}
+
+/// One page of the versioned function catalog, in catalog order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionCatalogPageDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Number of accepted names in the catalog.
+    pub total: u64,
+    /// Offset represented by the first returned entry.
+    pub offset: u64,
+    /// Offset for the next page, or `None` at the end.
+    pub next_offset: Option<u64>,
+    /// Returned entries.
+    pub entries: Vec<FunctionCatalogEntryDto>,
+}
+
 /// Result of saving a session's edits into its source package without calculating.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -41,15 +41,16 @@ pub use dto::{
     DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto,
     DisplayFormatRequestDto, DisplayFormatResultDto, EditBatchDto, EditBatchV2Dto, EditReceiptDto,
     EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto, FinancialSolverSemanticsDto,
-    FunctionCatalogEntryDto, FunctionCatalogReportDto, FunctionUsageEntryDto,
-    FunctionUsageReportDto, LocaleDto, LocaleProfileDto, MaterializedResultOriginDto,
-    NumberFormatDto, PreviewChangesDto, PreviewCursorDto, ProviderIdentityDto, RangePageDto,
-    RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto,
-    SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
-    TransactionDetailItemDto, TransactionDetailSectionDto, TransactionImpactCoverageDto,
-    TransactionImpactPageDto, WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto,
-    WorkbookSummaryDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
-    WritableCellValueDto, WriteOptionsDto, WriteReportDto,
+    FunctionCatalogEntryDto, FunctionCatalogPageDto, FunctionCatalogPageRequestDto,
+    FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto, LocaleDto,
+    LocaleProfileDto, MaterializedResultOriginDto, NumberFormatDto, PreviewChangesDto,
+    PreviewCursorDto, ProviderIdentityDto, RangePageDto, RangeRequestDto, ReadLimitOptionsDto,
+    RecalculationModeDto, SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto, TableColumnDto,
+    TableSummaryDto, TransactionDetailCountsDto, TransactionDetailItemDto,
+    TransactionDetailSectionDto, TransactionImpactCoverageDto, TransactionImpactPageDto,
+    WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto, WorkbookSummaryDto,
+    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
+    WriteOptionsDto, WriteReportDto,
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind, LimitDiagnosticsDto};
 pub use format_dto::{
@@ -65,6 +66,7 @@ pub use service::{
     MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, MAX_RANGE_VALUE_CELLS, PreparedChanges,
     PreparedChangesV2, PreparedEditsSave, PreparedPreview, PreparedRecalculation,
     PreparedWorkbookSave, WorkbookSession, format_display_text, function_catalog,
+    function_catalog_page,
 };
 pub use sheet_metadata::{
     CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,

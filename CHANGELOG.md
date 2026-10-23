@@ -51,6 +51,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `WorkbookSession::precedents` and `dependents`, Python and Node.js `precedents` and
   `dependents`, and the new `workbook_precedents` and `workbook_dependents` MCP tools page through
   them and fail with `interop.calculation.required` before the current revision is calculated.
+- The sessionless `function_catalog` MCP tool pages through the calculated functions with each
+  name's canonical name and alias, array-result, and official-list flags, over the new interop
+  `function_catalog_page`.
 
 ### Changed
 

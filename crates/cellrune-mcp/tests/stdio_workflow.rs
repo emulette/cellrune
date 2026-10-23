@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 28);
+    assert_eq!(tools.len(), 29);
     assert!(
         tools
             .iter()
@@ -2133,6 +2133,61 @@ fn precedents_and_dependents_are_bounded_stdio_pages() {
     assert_eq!(dependents["entries"][0]["cell"]["address"], "B1");
     assert_eq!(dependents["entries"][1]["cell"]["address"], "C1");
     assert_eq!(dependents["unlisted_dynamic_formulas"], 0);
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn the_function_catalog_is_a_paged_sessionless_tool() {
+    let root = TestDirectory::new("function-catalog");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let catalog = function_catalog();
+    let first = successful_tool(mcp.call_tool("function_catalog", json!({"limit": 2})));
+    assert_eq!(first["total"], catalog.entries.len());
+    assert_eq!(first["next_offset"], 2);
+    assert_eq!(
+        first["entries"],
+        serde_json::to_value(&catalog.entries[..2]).expect("serialize")
+    );
+    let mut offset = 0;
+    let mut names = Vec::new();
+    loop {
+        let page = successful_tool(
+            mcp.call_tool("function_catalog", json!({"offset": offset, "limit": 200})),
+        );
+        names.extend(
+            page["entries"]
+                .as_array()
+                .expect("entries")
+                .iter()
+                .map(|entry| entry["name"].as_str().expect("name").to_owned()),
+        );
+        match page["next_offset"].as_u64() {
+            Some(next) => offset = next,
+            None => break,
+        }
+    }
+    let expected = catalog
+        .entries
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(names, expected);
+    let sum = catalog
+        .entries
+        .iter()
+        .position(|entry| entry.name == "SUM")
+        .expect("SUM is calculated");
+    let page =
+        successful_tool(mcp.call_tool("function_catalog", json!({"offset": sum, "limit": 1})));
+    assert_eq!(page["entries"][0]["official"], true);
+    assert_eq!(page["entries"][0]["returns_array"], false);
+    let error = failed_tool(mcp.call_tool(
+        "function_catalog",
+        json!({"offset": catalog.entries.len() + 1}),
+    ));
+    assert_eq!(error["code"], "interop.page.offset_out_of_range");
     let (status, _, _) = mcp.finish();
     assert!(status.success());
 }

@@ -653,7 +653,33 @@ display_format.unsupported. No workbook session is needed.",
         self.bounded_json(result)
     }
 
-    /// Scan formula support without executing formulas.
+    /// Page through the calculation function catalog.
+    #[tool(
+        name = "function_catalog",
+        input_schema = crate::schema::mcp_schema::<cellrune_interop::FunctionCatalogPageRequestDto>(),
+        output_schema = crate::schema::mcp_schema::<cellrune_interop::FunctionCatalogPageDto>(),
+        description = "Read one bounded page of the spreadsheet functions CellRune calculates, in \
+catalog order: each accepted name, its canonical kernel name, whether it is a legacy alias, \
+whether it can return a multi-cell array, and whether it is in the tracked official Excel \
+function list. No workbook session is needed. Functions remain formulas inside workbooks; they \
+are not MCP tools.",
+        annotations(
+            title = "List calculation functions",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn function_catalog(
+        &self,
+        Parameters(args): Parameters<cellrune_interop::FunctionCatalogPageRequestDto>,
+    ) -> Result<Json<cellrune_interop::FunctionCatalogPageDto>, McpError> {
+        let page = cellrune_interop::function_catalog_page(args)?;
+        self.bounded_json(page)
+    }
+
+    /// Scan formula support without executing formulas.    /// Scan formula support without executing formulas.
     #[tool(
         name = "workbook_scan_capabilities",
         input_schema = crate::schema::mcp_schema::<CapabilityArgs>(),

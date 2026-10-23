@@ -19,9 +19,10 @@ use crate::{
     DefinedNameExternalTargetKindDto, DefinedNameInspectionDto, DefinedNameInspectionRequestDto,
     DefinedNameInspectionResultDto, DefinedNameInvalidReasonDto, DefinedNameReferenceAreaDto,
     DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, FunctionCatalogEntryDto,
-    FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto,
-    INTEROP_FUNCTION_USAGE_SCHEMA_VERSION, INTEROP_SCHEMA_VERSION, InteropError, RangePageDto,
-    RangeRequestDto, SheetSummaryDto, TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
+    FunctionCatalogPageDto, FunctionCatalogPageRequestDto, FunctionCatalogReportDto,
+    FunctionUsageEntryDto, FunctionUsageReportDto, INTEROP_FUNCTION_USAGE_SCHEMA_VERSION,
+    INTEROP_SCHEMA_VERSION, InteropError, RangePageDto, RangeRequestDto, SheetSummaryDto,
+    TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
 };
 
 const UNKNOWN_RESULT_VARIANT: &str = "core_result_variant";
@@ -478,6 +479,36 @@ pub fn function_catalog() -> FunctionCatalogReportDto {
             })
             .collect(),
     }
+}
+
+/// Returns one page of the function catalog in catalog order.
+///
+/// # Errors
+///
+/// Returns a typed input error for an excessive page size or out-of-range offset.
+pub fn function_catalog_page(
+    request: FunctionCatalogPageRequestDto,
+) -> Result<FunctionCatalogPageDto, InteropError> {
+    let catalog = function_catalog();
+    let total = count_u64(catalog.entries.len());
+    if request.offset > total {
+        return Err(InteropError::page_offset());
+    }
+    let limit = normalized_limit(request.limit)?;
+    let entries = catalog
+        .entries
+        .into_iter()
+        .skip(usize::try_from(request.offset).unwrap_or(usize::MAX))
+        .take(limit as usize)
+        .collect::<Vec<_>>();
+    let consumed = request.offset + count_u64(entries.len());
+    Ok(FunctionCatalogPageDto {
+        schema_version: catalog.schema_version,
+        total,
+        offset: request.offset,
+        next_offset: (consumed < total).then_some(consumed),
+        entries,
+    })
 }
 
 /// Writes ascending hidden rows as A1 row ranges, merging consecutive rows (`2:4`).

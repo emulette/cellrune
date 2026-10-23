@@ -92,3 +92,48 @@ fn count_codec_rejects_inexact_or_out_of_range_json() {
     let schema = serde_json::to_value(schemars::schema_for!(FunctionUsageEntryDto)).unwrap();
     assert_eq!(schema["properties"]["call_count"]["type"], "string");
 }
+
+#[test]
+fn function_catalog_pages_cover_the_catalog_in_order() {
+    use cellrune_interop::{
+        FunctionCatalogPageRequestDto, function_catalog, function_catalog_page,
+    };
+    let catalog = function_catalog();
+    let total = catalog.entries.len() as u64;
+    let first = function_catalog_page(FunctionCatalogPageRequestDto::default()).expect("page");
+    assert_eq!((first.total, first.offset), (total, 0));
+    assert_eq!(first.entries.len() as u64, total.min(1_000));
+    let last = function_catalog_page(FunctionCatalogPageRequestDto {
+        offset: total - 1,
+        limit: 5,
+    })
+    .expect("last page");
+    assert_eq!(last.entries, catalog.entries[catalog.entries.len() - 1..]);
+    assert_eq!(last.next_offset, None);
+    let middle = function_catalog_page(FunctionCatalogPageRequestDto {
+        offset: 1,
+        limit: 2,
+    })
+    .expect("middle page");
+    assert_eq!(middle.entries, catalog.entries[1..3]);
+    assert_eq!(middle.next_offset, Some(3));
+    for (request, code) in [
+        (
+            FunctionCatalogPageRequestDto {
+                offset: total + 1,
+                limit: 0,
+            },
+            "interop.page.offset_out_of_range",
+        ),
+        (
+            FunctionCatalogPageRequestDto {
+                offset: 0,
+                limit: 10_001,
+            },
+            "interop.page.limit_exceeded",
+        ),
+    ] {
+        let error = function_catalog_page(request).expect_err("rejected page");
+        assert_eq!(error.code(), code);
+    }
+}

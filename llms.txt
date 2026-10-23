@@ -95,7 +95,7 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 28 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 29 tools are `workbook_create`,
 `workbook_open`, `workbook_open_csv`, `workbook_close`, `workbook_summary`,
 `workbook_export_csv`, `workbook_read_range`,
 `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
@@ -104,7 +104,11 @@ inside an allowed root and a Save As destination inside the root it names. It ha
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
-`workbook_discard_preview`, and the sessionless `format_display_text`.
+`workbook_discard_preview`, and the sessionless `format_display_text` and
+`function_catalog`. `function_catalog` takes `offset` and `limit` (at most
+10,000) and returns `cellrune_interop::function_catalog_page`'s
+`FunctionCatalogPageDto` (`total`, `next_offset`, and `entries` with `name`,
+`canonical_name`, `alias`, `returns_array`, and `official`).
 `workbook_apply_changes` and `workbook_apply_changes_v2` stage on a blocking
 worker (`WorkbookSession::prepare_changes_cancellable` and
 `prepare_changes_v2_cancellable`) and, when the MCP request is cancelled,

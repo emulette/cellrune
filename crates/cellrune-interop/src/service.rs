@@ -34,7 +34,7 @@ pub use edit::{PreparedChanges, PreparedChangesV2};
 pub use preview::{
     CompletedPreview, DEFAULT_PREVIEW_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedPreview,
 };
-pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog};
+pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog, function_catalog_page};
 pub use save::{PreparedEditsSave, PreparedWorkbookSave};
 pub use values::MAX_RANGE_VALUE_CELLS;
 

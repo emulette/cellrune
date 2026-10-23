@@ -204,6 +204,7 @@ mod tests {
             names,
             vec![
                 "format_display_text",
+                "function_catalog",
                 "workbook_apply_changes",
                 "workbook_apply_changes_v2",
                 "workbook_calculate_targets",
@@ -253,6 +254,7 @@ mod tests {
             ("workbook_phonetics", 10_000),
             ("workbook_precedents", 10_000),
             ("workbook_dependents", 10_000),
+            ("function_catalog", 10_000),
             ("workbook_scan_capabilities", 10_000),
             ("workbook_changes_since", 100),
             ("workbook_preview_changes_page", 1_000),
@@ -339,6 +341,7 @@ mod tests {
             ("workbook_save_edits_as", false, true, false, false),
             ("workbook_scan_capabilities", true, false, true, false),
             ("workbook_summary", true, false, true, false),
+            ("function_catalog", true, false, true, false),
         ];
         for (name, read_only, destructive, idempotent, open_world) in expected_annotations {
             let annotations = tools
