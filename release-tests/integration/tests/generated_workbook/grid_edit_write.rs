@@ -462,3 +462,57 @@ fn moved_rows_reorder_the_saved_rows_and_carry_their_coordinates() {
     );
     assert_contains(&parts["xl/drawings/vmlDrawing1.vml"], &["<x:Row>4</x:Row>"]);
 }
+
+#[test]
+fn a_range_move_carries_its_cells_filter_and_links_in_the_saved_package() {
+    let range = |start: &str, end: &str| {
+        cellrune::CellRange::new(
+            CellAddress::from_a1(start).expect("start"),
+            CellAddress::from_a1(end).expect("end"),
+        )
+        .expect("range")
+    };
+    let source = generated_grid_edit_fixture();
+    let draft = edited(
+        &source,
+        vec![
+            WorkbookChange::move_range(
+                sheet(1),
+                range("L1", "M4"),
+                CellAddress::from_a1("O1").expect("O1"),
+            )
+            .expect("move"),
+            WorkbookChange::move_range(
+                sheet(1),
+                range("G5", "G5"),
+                CellAddress::from_a1("J20").expect("J20"),
+            )
+            .expect("move"),
+        ],
+    );
+    let (output, reopened) = write_and_reopen(&draft);
+    assert_eq!(
+        literal(&reopened, "Data", "O2"),
+        Some(CellValue::Text("x".to_owned()))
+    );
+    assert_eq!(literal(&reopened, "Data", "L2"), None);
+    assert_eq!(
+        names(&reopened)[0],
+        (
+            "_xlnm._FilterDatabase".to_owned(),
+            "Data!$O$1:$P$4".to_owned()
+        )
+    );
+    let data = reopened.workbook().sheet_by_name("Data").expect("Data");
+    assert_eq!(data.hyperlinks()[0].range().start().to_string(), "J20");
+    let parts = parts(&output);
+    assert_contains(
+        &parts[DATA],
+        &[
+            r#"<autoFilter ref="O1:P4"><filterColumn colId="1">"#,
+            "<formula1>$O$2:$O$4</formula1>",
+            r#"<hyperlink ref="J20" location="'Data'!A1" display="top"/>"#,
+        ],
+    );
+    assert!(!parts[DATA].contains(r#"<c r="L1""#), "{}", parts[DATA]);
+}

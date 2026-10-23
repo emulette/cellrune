@@ -2771,8 +2771,8 @@ fn generated_edit_sequence_matches_a_fresh_full_oracle_after_every_revision() {
 fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
     // Each seed edits a 12-by-24 grid on two sheets with values, text, references, running
     // totals, conditional aggregates, lookups, dynamic references, spills, and cycles, in batches
-    // of one to three changes, some of which also insert, delete, or move rows or columns. After every
-    // batch the session's automatic recalculation must equal a fresh full one.
+    // of one to three changes, some of which also insert, delete, or move rows, columns, or ranges.
+    // After every batch the session's automatic recalculation must equal a fresh full one.
     for seed in 1..=8_u64 {
         let mut random = Lcg(seed);
         let mut session = WorkbookCalculationSession::create();
@@ -2811,6 +2811,20 @@ fn random_edit_sequences_match_a_fresh_full_calculation_after_every_step() {
                     EditBatch::new(changes),
                 )
                 .expect("generated edit");
+            if random.below(4) == 0 {
+                // Pasting over cells another formula reads is refused, so a range move may not
+                // apply.
+                match session.apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([random_range_move(&mut random, sheets)]),
+                ) {
+                    Ok(_)
+                    | Err(ApplyChangesError::Validation(
+                        cellrune::ValidationError::MovedRangeOverwritesReferences { .. },
+                    )) => {}
+                    Err(error) => panic!("seed {seed}, step {step}: {error}"),
+                }
+            }
             session
                 .recalculate(
                     RecalculationMode::Auto,
@@ -2891,6 +2905,26 @@ fn random_structural_change(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookC
         }
     }
     .expect("generated structural edit")
+}
+
+/// Cuts a block of up to three by three cells of the generated grid and pastes it elsewhere.
+fn random_range_move(random: &mut Lcg, sheets: [SheetId; 2]) -> WorkbookChange {
+    let sheet = sheets[random.below(2) as usize];
+    let start = CellAddress::from_indices(random.below(22) + 1, random.below(10) + 1)
+        .expect("generated start");
+    let end = CellAddress::from_indices(
+        start.row().get() + random.below(3),
+        start.column().get() + random.below(3),
+    )
+    .expect("generated end");
+    let destination = CellAddress::from_indices(random.below(22) + 1, random.below(10) + 1)
+        .expect("generated destination");
+    WorkbookChange::move_range(
+        sheet,
+        CellRange::new(start, end).expect("generated range"),
+        destination,
+    )
+    .expect("generated range move")
 }
 
 fn row(value: u32) -> cellrune::Row {

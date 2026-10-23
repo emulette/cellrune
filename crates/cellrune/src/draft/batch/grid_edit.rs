@@ -639,6 +639,20 @@ pub(super) fn grid_change(
                 destination.get(),
             )?,
         ),
+        WorkbookChange::MoveRange {
+            sheet_id,
+            source,
+            destination,
+        } => {
+            super::change::validate_range_move(*source, *destination)?;
+            (
+                *sheet_id,
+                GridEdit::MoveRange {
+                    source: *source,
+                    destination: *destination,
+                },
+            )
+        }
         _ => return Ok(None),
     }))
 }

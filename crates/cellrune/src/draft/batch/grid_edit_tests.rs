@@ -787,3 +787,94 @@ fn moves_that_split_an_array_a_merge_or_a_table_are_refused() {
         }
     );
 }
+
+#[test]
+fn a_range_move_carries_references_wholly_inside_it_and_keeps_moved_formulas() {
+    let build = || {
+        draft(
+            vec![
+                sheet(
+                    1,
+                    "S1",
+                    &[
+                        ("A1", "1"),
+                        ("A2", "2"),
+                        ("A3", "=B1"),
+                        ("A4", "=A2"),
+                        ("A5", "5"),
+                        ("B1", "10"),
+                        ("C1", "=A5"),
+                        ("C2", "=SUM(A2:A5)"),
+                        ("C3", "=SUM(A1:A5)"),
+                        ("M2", "99"),
+                    ],
+                ),
+                sheet(2, "S2", &[("A1", "='S1'!A2")]),
+            ],
+            Vec::new(),
+        )
+    };
+    let cut = WorkbookChange::move_range(id(1), range("A2:A5"), address("M2")).expect("move");
+    let mut moved = build();
+    apply(&mut moved, cut.clone());
+    let workbook = moved.workbook();
+    for (cell, expected) in [
+        ("A2", ""),
+        ("M2", "2"),
+        ("M3", "=B1"),
+        ("M4", "=M2"),
+        ("C1", "=M5"),
+        ("C2", "=SUM(M2:M5)"),
+        ("C3", "=SUM(A1:A5)"),
+    ] {
+        assert_eq!(text(workbook, "S1", cell), expected, "{cell}");
+    }
+    assert_eq!(text(workbook, "S2", "A1"), "='S1'!M2");
+    assert_eq!(value(&moved, 1, "C2"), CellValue::number(19.0).expect("19"));
+
+    // Pasting over a cell another formula reads was not measured, so it is refused.
+    let mut reading = build();
+    reading
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_formula(
+            id(2),
+            address("B1"),
+            FormulaText::from_xlsx("'S1'!M3").expect("formula"),
+        )]))
+        .expect("reader");
+    assert!(matches!(
+        refused(&mut reading, cut),
+        ValidationError::MovedRangeOverwritesReferences { .. }
+    ));
+
+    let mut s1 = sheet(1, "S1", &[("A1", "1")]);
+    s1.set_merged_ranges(vec![range("D1:D2")]);
+    s1.set_tables(vec![table(1, "Things", "F1:G3", 0, &["key", "val"])]);
+    let mut structures = draft(vec![s1], Vec::new());
+    for (cut, error) in [
+        (
+            WorkbookChange::move_range(id(1), range("D2:D3"), address("J1")),
+            ValidationError::MergedRangeSplit {
+                sheet_id: 1,
+                row: 1,
+                column: 4,
+            },
+        ),
+        (
+            WorkbookChange::move_range(id(1), range("G1:G3"), address("J1")),
+            ValidationError::TableSplit { table_id: 1 },
+        ),
+        (
+            WorkbookChange::move_range(id(1), range("A1"), address("F2")),
+            ValidationError::TableSplit { table_id: 1 },
+        ),
+    ] {
+        assert_eq!(refused(&mut structures, cut.expect("move")), error);
+    }
+    apply(
+        &mut structures,
+        WorkbookChange::move_range(id(1), range("D1:G3"), address("D11")).expect("move"),
+    );
+    let sheet = structures.workbook().sheet_by_name("S1").expect("S1");
+    assert_eq!(sheet.tables()[0].range(), range("F11:G13"));
+    assert_eq!(sheet.merged_ranges(), &[range("D11:D12")]);
+}

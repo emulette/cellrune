@@ -211,6 +211,21 @@ pub enum WorkbookChange {
         /// Column the first moved column lands on.
         destination: Column,
     },
+    /// Moves the cells of `source` so that its top-left cell lands on `destination`, as cutting
+    /// and pasting them does, replacing the cells there.
+    ///
+    /// A reference that lies wholly inside the moved cells follows them, and one that lies only
+    /// partly inside stays as it is; moved formulas keep their text. Conditional formats and data
+    /// validations split into the cells that stay and the cells that move. Pasting over cells
+    /// that a formula outside the moved cells reads is refused.
+    MoveRange {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Cut cells.
+        source: CellRange,
+        /// Cell the top-left cut cell lands on.
+        destination: CellAddress,
+    },
     /// Replaces the font, fill, border, or alignment one cell displays with.
     ///
     /// This is a presentation change: it advances the presentation revision, not the semantic
@@ -540,6 +555,25 @@ impl WorkbookChange {
         })
     }
 
+    /// Constructs a range move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::RowOutOfRange`] or [`ValidationError::ColumnOutOfRange`] when
+    /// the moved cells would end past the last row or column.
+    pub fn move_range(
+        sheet_id: SheetId,
+        source: CellRange,
+        destination: CellAddress,
+    ) -> Result<Self, ValidationError> {
+        validate_range_move(source, destination)?;
+        Ok(Self::MoveRange {
+            sheet_id,
+            source,
+            destination,
+        })
+    }
+
     /// Constructs a cell format change.
     pub const fn set_cell_format(
         sheet_id: SheetId,
@@ -613,6 +647,22 @@ pub(super) fn validate_move(
         .ok_or_else(|| out_of_range(u32::MAX))?;
     if end > maximum {
         return Err(out_of_range(end));
+    }
+    Ok(())
+}
+
+/// Rejects a range move whose cells would land past the last row or column.
+pub(super) fn validate_range_move(
+    source: CellRange,
+    destination: CellAddress,
+) -> Result<(), ValidationError> {
+    let last_row = destination.row().get() + (source.height() - 1);
+    if last_row > crate::EXCEL_MAX_ROWS {
+        return Err(ValidationError::RowOutOfRange { value: last_row });
+    }
+    let last_column = destination.column().get() + (source.width() - 1);
+    if last_column > crate::EXCEL_MAX_COLUMNS {
+        return Err(ValidationError::ColumnOutOfRange { value: last_column });
     }
     Ok(())
 }
