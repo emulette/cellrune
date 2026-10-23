@@ -38,6 +38,7 @@ mod reference_resolution;
 mod runtime;
 mod scope;
 mod session;
+pub(crate) mod sheet_changes;
 mod sheet_span;
 mod stack;
 mod structured_reference;

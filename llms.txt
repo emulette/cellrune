@@ -566,7 +566,7 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `.set_annotated_text(...)`, `.set_phonetics(...)`, `.clear_phonetics(...)`,
   `.set_frozen_pane(...)`, `.clear_frozen_pane(...)`.
 - `.add_sheet(...)`, `.rename_sheet(...)`, `.delete_sheet(SheetId)`,
-  `.set_sheet_visibility(...)`.
+  `.move_sheet(SheetId, position)`, `.set_sheet_visibility(...)`.
 - `.set_defined_name(...)`, `.remove_defined_name(...)`,
   `.set_date_system(...)`, `.set_calculation_hints(...)`.
 - `NumberFormat::built_in(...)` and `NumberFormat::custom(...)` validate the
@@ -721,7 +721,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `WorkbookChange` is the non-exhaustive typed mutation union. Construct
   changes with `set_cell_value`, `set_cell_formula`,
   `set_cell_dynamic_formula`, `clear_cell`, `set_cell_number_format`,
-  `add_sheet`, `rename_sheet`, `delete_sheet`, `set_sheet_visibility`,
+  `add_sheet`, `rename_sheet`, `delete_sheet`,
+  `move_sheet(SheetId, position)`, `set_sheet_visibility`,
   `set_defined_name`,
   `remove_defined_name`, `set_date_system`, `set_calculation_hints`,
   `rename_table(TableId, TableName)`,
@@ -775,6 +776,24 @@ than guessing a name from a different XLSX crate (`calamine`,
   change, so a session rebuilds and recalculates fully. Deleting the last
   visible sheet fails with `ValidationError::LastVisibleSheet`
   (`validation.last_visible_sheet`), an unknown sheet with `UnknownSheetId`.
+- `move_sheet(SheetId, position)` moves a tab, a worksheet or a chartsheet,
+  to zero-based `position` of the tab order counted after the move. The tab
+  keeps its sheet ID and scoped names, which take its new `localSheetId`,
+  and stays the active sheet if it was. A 3-D reference's tabs follow tab
+  order, so it gains or loses the tabs moved across its ends and keeps its
+  text, unless the move puts its ends out of order: the moved end then
+  becomes its neighbour inside the old span, the start the next worksheet
+  and the end the previous one, and ends that meet collapse, as Excel saves
+  them (with tabs S1 to S6, moving S2 after S5 turns `'S2:S5'!A1` into
+  `'S3:S5'!A1` and `'S2:S3'!A1` into `'S3'!A1`). Names follow the same rule;
+  other references keep their text. A position past the last tab fails
+  with `validation.sheet_position_out_of_range`, an unknown tab with
+  `UnknownSheetId`; a move to the tab's own position is a no-op. The
+  receipt reports a topology change. Saving into the source package writes
+  the `<sheet>` entries in the new order, renumbers `localSheetId`, points
+  `workbookView` `activeTab` and `firstSheet` at the same tabs, replays the
+  draft's deletions and moves on 3-D references in preserved parts, and an
+  edit-only save clears the results of 3-D references and sheet functions.
 - `WorkbookCalculationSession::new(draft)` / `::create()` owns the mutable
   draft plus persistent parsed formulas, dependency state, results, dirty
   roots, and bounded delta history.

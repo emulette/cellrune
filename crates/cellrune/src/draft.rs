@@ -1,3 +1,4 @@
+use crate::calculation::sheet_changes::TabStep;
 use crate::{
     CalculationCellId, CellAddress, DocumentPresentation, SheetId, TableId, ValidationError,
     WorkbookSnapshot, XlsxDocument,
@@ -124,6 +125,9 @@ pub struct WorkbookDraft {
     added_sheets: BTreeSet<SheetId>,
     changed_table_ids: BTreeSet<TableId>,
     workbook_changed: bool,
+    /// The sheet deletions and moves in the order they were made, which the writer replays on the
+    /// 3-D references of the parts it preserves.
+    tab_steps: Vec<TabStep>,
 }
 
 impl WorkbookDraft {
@@ -139,6 +143,7 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
+            tab_steps: Vec::new(),
         }
     }
 
@@ -154,6 +159,7 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: false,
+            tab_steps: Vec::new(),
         }
     }
 
@@ -179,6 +185,10 @@ impl WorkbookDraft {
     /// Returns the monotonic presentation-only revision.
     pub const fn presentation_revision(&self) -> u64 {
         self.presentation.revision()
+    }
+
+    pub(crate) fn tab_steps(&self) -> &[TabStep] {
+        &self.tab_steps
     }
 
     /// Returns whether the draft preserves an existing XLSX or XLSM package.
@@ -214,6 +224,7 @@ impl WorkbookDraft {
             added_sheets: clone_set_cancellable(&self.added_sheets, cancelled)?,
             changed_table_ids: clone_set_cancellable(&self.changed_table_ids, cancelled)?,
             workbook_changed: self.workbook_changed,
+            tab_steps: self.tab_steps.clone(),
         })
     }
 
@@ -229,6 +240,7 @@ impl WorkbookDraft {
             added_sheets: BTreeSet::new(),
             changed_table_ids: BTreeSet::new(),
             workbook_changed: true,
+            tab_steps: Vec::new(),
         }
     }
 }

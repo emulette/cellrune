@@ -85,7 +85,8 @@ pub(super) enum WorkbookFormulaRename<'a> {
         old_name: &'a str,
         new_name: &'a str,
     },
-    SheetDeletion(SheetChanges<'a>),
+    /// Sheets deleted, moved, or copied, with their tables.
+    SheetChanges(SheetChanges<'a>),
     Table {
         old_name: &'a str,
         new_name: &'a str,
@@ -119,7 +120,7 @@ pub(super) fn rewrite_workbook_formulas(
             ..
         } => Some((target_sheet_index, target_range)),
         WorkbookFormulaRename::Sheet { .. }
-        | WorkbookFormulaRename::SheetDeletion(_)
+        | WorkbookFormulaRename::SheetChanges(_)
         | WorkbookFormulaRename::Table { .. } => None,
     };
     let mut changed = false;
@@ -196,7 +197,7 @@ pub(super) fn rewrite_workbook_formulas(
         let owner_is_target_table = match rename {
             WorkbookFormulaRename::TableColumn { table_id, .. } => current_table_id == table_id,
             WorkbookFormulaRename::Sheet { .. }
-            | WorkbookFormulaRename::SheetDeletion(_)
+            | WorkbookFormulaRename::SheetChanges(_)
             | WorkbookFormulaRename::Table { .. } => false,
         };
         let column = &mut table.columns_mut()[column_index];
@@ -246,7 +247,7 @@ fn request_for<'a>(
         WorkbookFormulaRename::Sheet { old_name, new_name } => {
             FormulaRewriteRequest::Sheet { old_name, new_name }
         }
-        WorkbookFormulaRename::SheetDeletion(changes) => FormulaRewriteRequest::Sheets(*changes),
+        WorkbookFormulaRename::SheetChanges(changes) => FormulaRewriteRequest::Sheets(*changes),
         WorkbookFormulaRename::Table { old_name, new_name } => {
             FormulaRewriteRequest::Table { old_name, new_name }
         }

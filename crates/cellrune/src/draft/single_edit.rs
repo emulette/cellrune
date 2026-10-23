@@ -152,6 +152,24 @@ impl WorkbookDraft {
         Ok(())
     }
 
+    /// Moves a tab, worksheet or not, to zero-based `position` of the tab order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError::UnknownSheetId`],
+    /// [`ValidationError::SheetPositionOutOfRange`], or
+    /// [`ValidationError::SemanticRevisionExhausted`].
+    pub fn move_sheet(
+        &mut self,
+        sheet_id: SheetId,
+        position: usize,
+    ) -> Result<(), ValidationError> {
+        self.apply_changes(EditBatch::new([WorkbookChange::move_sheet(
+            sheet_id, position,
+        )]))?;
+        Ok(())
+    }
+
     /// Changes sheet visibility while retaining at least one visible sheet.
     ///
     /// # Errors

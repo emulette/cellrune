@@ -247,12 +247,12 @@ impl TabPlacement {
         }
     }
 
-    /// Returns the source positions of the deleted tabs.
-    pub(super) fn deleted(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Reports whether a tab was deleted or changed position.
+    pub(super) fn moved(&self) -> bool {
         self.positions
             .iter()
             .enumerate()
-            .filter_map(|(position, placed)| placed.is_none().then_some(position))
+            .any(|(position, placed)| *placed != Some(position))
     }
 
     /// Returns the draft position a deleted source tab hands its place to: that of the first kept

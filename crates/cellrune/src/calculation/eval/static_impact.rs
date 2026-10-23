@@ -69,7 +69,20 @@ pub(crate) fn affected_formulas(
         )
         .map(case_insensitive_key)
         .collect::<BTreeSet<_>>();
-    let sheets_changed = !changed_sheet_names.is_empty();
+    // A moved tab changes the sheet list, which 3-D references and sheet functions read, but not
+    // what a reference to one sheet reads.
+    let tab_ids = |workbook: &WorkbookSnapshot| {
+        workbook
+            .tab_order()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>()
+    };
+    let sheets_changed = !changed_sheet_names.is_empty() || tab_ids(source) != tab_ids(draft);
+    let sheet_changes = SheetListChange {
+        names: &changed_sheet_names,
+        list_changed: sheets_changed,
+    };
     if edits.changed_cells.is_empty()
         && changed_names.is_empty()
         && edits.changed_tables.is_empty()
@@ -99,7 +112,7 @@ pub(crate) fn affected_formulas(
         draft,
         changed_names,
         &changed_table_names,
-        &changed_sheet_names,
+        sheet_changes,
         cancelled,
     )?;
 
@@ -149,7 +162,7 @@ pub(crate) fn affected_formulas(
                 let tokens = FormulaTokens::of(parsed.root());
                 tokens.references(&affected_names)
                     || tokens.references(&changed_table_names)
-                    || tokens.reads_sheets(&changed_sheet_names)
+                    || tokens.reads_sheets(sheet_changes)
             }) || targets.get(&internal).is_some_and(|formula_targets| {
                 formula_targets.iter().any(|target| {
                     matches!(
@@ -222,7 +235,7 @@ fn affected_defined_names(
     draft: &WorkbookSnapshot,
     mut affected: BTreeSet<String>,
     changed_table_names: &BTreeSet<String>,
-    changed_sheet_names: &BTreeSet<String>,
+    sheet_changes: SheetListChange<'_>,
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<String>, ()> {
     let mut definitions = Vec::new();
@@ -244,7 +257,7 @@ fn affected_defined_names(
         }
     }
     for (key, tokens) in &definitions {
-        if tokens.references(changed_table_names) || tokens.reads_sheets(changed_sheet_names) {
+        if tokens.references(changed_table_names) || tokens.reads_sheets(sheet_changes) {
             affected.insert(key.clone());
         }
     }
@@ -262,6 +275,13 @@ fn affected_defined_names(
             return Ok(affected);
         }
     }
+}
+
+/// The sheets an edit renamed, added, or deleted, and whether the sheet list or its order changed.
+#[derive(Clone, Copy)]
+struct SheetListChange<'a> {
+    names: &'a BTreeSet<String>,
+    list_changed: bool,
 }
 
 /// The names a formula mentions and whether it reads the sheet list, gathered from its syntax.
@@ -356,9 +376,9 @@ impl FormulaTokens {
     /// Reports whether the formula may read differently after sheets are added or renamed: it
     /// names one of those sheets, or it reads the sheet list through a 3-D reference or a
     /// sheet function.
-    fn reads_sheets(&self, changed_sheet_names: &BTreeSet<String>) -> bool {
-        !changed_sheet_names.is_empty()
-            && (self.depends_on_sheet_list || !self.sheet_names.is_disjoint(changed_sheet_names))
+    fn reads_sheets(&self, changes: SheetListChange<'_>) -> bool {
+        (changes.list_changed && self.depends_on_sheet_list)
+            || !self.sheet_names.is_disjoint(changes.names)
     }
 }
 

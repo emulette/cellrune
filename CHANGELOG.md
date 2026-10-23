@@ -41,6 +41,14 @@ inventories, and measurements belong in the linked documentation rather than in 
   a draft or session a deleted sheet's ID is never reused, even by a later change of the batch
   that deleted it. A saved file does not record deleted IDs, so after reopening it an added sheet
   can take one.
+- `WorkbookChange::move_sheet(SheetId, position)` and `WorkbookDraft::move_sheet` move a
+  worksheet or chartsheet to another tab position. Sheet IDs and scoped names stay with their
+  sheets and the active sheet stays the same sheet. A 3-D reference keeps its text and follows tab
+  order, unless the move reverses its ends: the moved end then becomes its neighbour inside the old
+  span, as Excel 16.114 saves it (`'S2:S5'!A1` becomes `'S3:S5'!A1` when `S2` moves after `S5`).
+  Saving into the source package reorders the `<sheet>` entries, renumbers `localSheetId`, and
+  keeps `activeTab` and `firstSheet` on their sheets. A position past the last tab fails with the
+  new `validation.sheet_position_out_of_range`.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and

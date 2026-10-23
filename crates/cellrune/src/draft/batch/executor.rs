@@ -9,6 +9,7 @@ use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
 use super::sheet_delete::delete_sheet;
+use super::sheet_move::move_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
 use super::table_edit::{
     TableEditState, TableFormulaEdit, TableResizeEdit, rename_table, rename_table_column,
@@ -95,6 +96,7 @@ impl WorkbookDraft {
         let mut previous_changed_table_ids = clone_set(&self.changed_table_ids, rewrite_budget)?;
         let mut changed_table_ids = BTreeSet::new();
         let mut workbook_changed = self.workbook_changed;
+        let mut tab_steps = clone_slice(&self.tab_steps, rewrite_budget)?;
         let mut changed_cells = BTreeSet::new();
         let mut calculation_changed_cells = BTreeSet::new();
         let mut touched_sheets = BTreeSet::new();
@@ -398,7 +400,7 @@ impl WorkbookDraft {
                     }
                 }
                 WorkbookChange::DeleteSheet { sheet_id } => {
-                    let removed = delete_sheet(
+                    let (removed, step) = delete_sheet(
                         &mut sheets,
                         &mut defined_names,
                         &mut non_worksheet_tabs,
@@ -415,6 +417,7 @@ impl WorkbookDraft {
                         },
                         *sheet_id,
                     )?;
+                    tab_steps.push(step);
                     // Nothing the draft recorded for the sheet outlives it: its cells, tables, and
                     // presentation are gone, and the writer drops its package parts.
                     let elsewhere = |cell: &CalculationCellId| cell.sheet_id() != *sheet_id;
@@ -430,6 +433,37 @@ impl WorkbookDraft {
                         changed_table_ids.remove(&table.id());
                         previous_changed_table_ids.remove(&table.id());
                     }
+                    table_locations = super::table_edit::table_locations(&sheets)?;
+                    table_formula_locations =
+                        super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
+                    workbook_changed = true;
+                    topology_changed = true;
+                    semantic_changed = true;
+                }
+                WorkbookChange::MoveSheet { sheet_id, position } => {
+                    let Some(step) = move_sheet(
+                        &mut sheets,
+                        &mut defined_names,
+                        &mut non_worksheet_tabs,
+                        WorkbookFormulaEdit {
+                            state: FormulaEditState {
+                                mutations: &mut cell_mutations,
+                                changed_cells: &mut changed_cells,
+                                calculation_changed_cells: &mut calculation_changed_cells,
+                                touched_sheets: &mut touched_sheets,
+                            },
+                            changed_table_ids: &mut changed_table_ids,
+                            table_formula_locations: &table_formula_locations,
+                            budget: rewrite_budget,
+                        },
+                        *sheet_id,
+                        *position,
+                    )?
+                    else {
+                        continue;
+                    };
+                    tab_steps.push(step);
+                    // Table locations name sheets by their index, which the move changed.
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
@@ -704,6 +738,7 @@ impl WorkbookDraft {
             .copied()
             .collect();
         self.workbook_changed = workbook_changed;
+        self.tab_steps = tab_steps;
 
         Ok(EditReceipt {
             base_revision,

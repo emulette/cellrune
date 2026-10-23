@@ -17,12 +17,13 @@ use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits, FormulaRewriteRequest,
     SheetChanges, rewrite_formula,
 };
+use crate::calculation::sheet_changes::{SheetOutcome, TabStep};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, SPREADSHEETML_STRICT,
     SPREADSHEETML_TRANSITIONAL, namespace_reader, read_event,
 };
-use crate::{WorkbookSnapshot, XlsxDocument, case_insensitive_eq};
+use crate::{SheetId, WorkbookSnapshot, XlsxDocument, case_insensitive_eq};
 
 const SPREADSHEETML: &[&str] = &[SPREADSHEETML_TRANSITIONAL, SPREADSHEETML_STRICT];
 const RELATIONSHIPS: &[&str] = &[
@@ -100,36 +101,110 @@ struct SheetReferenceRequests<'a> {
     deletions_only: FormulaRewriteRequest<'a>,
 }
 
+/// The names, steps, and tables the requests borrow: every source tab by its source name, and the
+/// draft's names, with the deleted tabs kept under their source names for the rename-only half and
+/// every tab under its source name for the deletion-only half.
+struct SheetReferenceNames<'a> {
+    before: Vec<(&'a str, SheetId)>,
+    after: Vec<(SheetId, &'a str)>,
+    after_with_deleted: Vec<(SheetId, &'a str)>,
+    kept_names: Vec<(SheetId, &'a str)>,
+    deletions: Vec<TabStep>,
+}
+
+impl<'a> SheetReferenceNames<'a> {
+    fn new(original: &'a WorkbookSnapshot, draft: &'a WorkbookSnapshot, steps: &[TabStep]) -> Self {
+        let before = original.non_worksheet_tabs().in_tab_order(
+            original
+                .sheets()
+                .iter()
+                .map(|sheet| (sheet.name().as_str(), sheet.id())),
+            |tab| (tab.name().as_str(), tab.id()),
+        );
+        let after = draft.non_worksheet_tabs().in_tab_order(
+            draft
+                .sheets()
+                .iter()
+                .map(|sheet| (sheet.id(), sheet.name().as_str())),
+            |tab| (tab.id(), tab.name().as_str()),
+        );
+        let deleted = |id: SheetId| !after.iter().any(|(kept, _)| *kept == id);
+        let after_with_deleted = after
+            .iter()
+            .copied()
+            .chain(
+                before
+                    .iter()
+                    .filter(|(_, id)| deleted(*id))
+                    .map(|(name, id)| (*id, *name)),
+            )
+            .collect();
+        let kept_names = before
+            .iter()
+            .filter(|(_, id)| !deleted(*id))
+            .map(|(name, id)| (*id, *name))
+            .collect();
+        Self {
+            after_with_deleted,
+            kept_names,
+            deletions: steps
+                .iter()
+                .filter(|step| matches!(step, TabStep::Delete { .. }))
+                .cloned()
+                .collect(),
+            before,
+            after,
+        }
+    }
+}
+
 impl<'a> SheetReferenceRequests<'a> {
-    fn new(changes: SheetChanges<'a>) -> Self {
+    fn new(
+        names: &'a SheetReferenceNames<'a>,
+        steps: &'a [TabStep],
+        deleted_tables: &'a [&'a str],
+    ) -> Self {
+        let changes = SheetChanges {
+            before: &names.before,
+            after: &names.after,
+            steps,
+            retarget: None,
+            deleted_tables,
+        };
         Self {
             changes,
             combined: FormulaRewriteRequest::Sheets(changes),
             renames_only: FormulaRewriteRequest::Sheets(SheetChanges {
-                deleted: &[],
+                after: &names.after_with_deleted,
+                steps: &[],
                 deleted_tables: &[],
                 ..changes
             }),
             deletions_only: FormulaRewriteRequest::Sheets(SheetChanges {
-                renames: &[],
+                after: &names.kept_names,
+                steps: &names.deletions,
                 ..changes
             }),
         }
     }
 
+    /// Returns the draft name of a source tab the draft renamed.
     fn renamed(&self, name: &str) -> Option<&'a str> {
-        self.changes
-            .renames
-            .iter()
-            .find(|(old_name, _)| case_insensitive_eq(name, old_name))
-            .map(|(_, new_name)| *new_name)
+        match self.changes.single(name) {
+            SheetOutcome::Renamed(new_name) => Some(new_name),
+            SheetOutcome::Unchanged | SheetOutcome::Deleted => None,
+        }
     }
 
     fn deleted(&self, name: &str) -> bool {
+        self.changes.single(name) == SheetOutcome::Deleted
+    }
+
+    fn has_deletions(&self) -> bool {
         self.changes
-            .deleted
+            .before
             .iter()
-            .any(|deleted| case_insensitive_eq(name, deleted))
+            .any(|(_, id)| !self.changes.after.iter().any(|(kept, _)| kept == id))
     }
 }
 
@@ -144,52 +219,33 @@ impl<'a> SheetReferenceRequests<'a> {
 pub(crate) fn rewrite_sheet_references(
     document: &XlsxDocument,
     draft: &WorkbookSnapshot,
+    steps: &[TabStep],
     source_reader: &mut PackageReader<'_>,
     replacements: &mut BTreeMap<PartPath, Vec<u8>>,
     removed_parts: &BTreeSet<PartPath>,
     limits: WriteLimits,
 ) -> Result<(), XlsxWriteError> {
     let original = document.workbook();
-    let renames = original
-        .sheets()
-        .iter()
-        .filter_map(|sheet| {
-            let name = draft.sheet_by_id(sheet.id())?.name();
-            (name != sheet.name()).then(|| (sheet.name().as_str(), name.as_str()))
-        })
-        .collect::<Vec<_>>();
+    let renamed = original.sheets().iter().any(|sheet| {
+        draft
+            .sheet_by_id(sheet.id())
+            .is_some_and(|kept| kept.name() != sheet.name())
+    });
     let deleted_sheets = original
         .sheets()
         .iter()
         .filter(|sheet| draft.sheet_by_id(sheet.id()).is_none())
         .collect::<Vec<_>>();
-    if renames.is_empty() && deleted_sheets.is_empty() {
+    if !renamed && deleted_sheets.is_empty() && steps.is_empty() {
         return Ok(());
     }
-    let deleted = deleted_sheets
-        .iter()
-        .map(|sheet| sheet.name().as_str())
-        .collect::<Vec<_>>();
     let deleted_tables = deleted_sheets
         .iter()
         .flat_map(|sheet| sheet.tables())
         .map(|table| table.display_name().as_str())
         .collect::<Vec<_>>();
-    let tabs = original
-        .non_worksheet_tabs()
-        .tab_names(original.sheets().iter().map(|sheet| sheet.name().as_str()));
-    let non_worksheets = original
-        .non_worksheet_tabs()
-        .iter()
-        .map(|tab| tab.name().as_str())
-        .collect::<Vec<_>>();
-    let requests = SheetReferenceRequests::new(SheetChanges {
-        renames: &renames,
-        deleted: &deleted,
-        tabs: &tabs,
-        non_worksheets: &non_worksheets,
-        deleted_tables: &deleted_tables,
-    });
+    let names = SheetReferenceNames::new(original, draft, steps);
+    let requests = SheetReferenceRequests::new(&names, steps, &deleted_tables);
     let mut parts = Vec::new();
     for sheet in draft
         .sheets()
@@ -241,7 +297,7 @@ pub(crate) fn rewrite_sheet_references(
             replacements.insert(part.clone(), bytes);
         }
     }
-    if !deleted.is_empty() {
+    if !deleted_sheets.is_empty() {
         for part in document.link_part_paths() {
             if !removed_parts.contains(part)
                 && links_deleted_sheet(&source_reader.read_part(part)?, part, &requests, limits)?
@@ -557,7 +613,7 @@ fn consolidates_deleted_sheet(
     source: &PartPath,
 ) -> Result<bool, XlsxWriteError> {
     if part != ReferencePart::Worksheet
-        || requests.changes.deleted.is_empty()
+        || !requests.has_deletions()
         || element.local_name().as_ref() != "dataRef"
         || !in_namespace(xml, element.name(), SPREADSHEETML)
     {
@@ -859,57 +915,101 @@ fn resource_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{ReferencePart, SheetReferenceRequests, patch_sheet_references};
-    use crate::calculation::formula_rewrite::SheetChanges;
+    use super::{
+        ReferencePart, SheetReferenceNames, SheetReferenceRequests, patch_sheet_references,
+    };
+    use crate::calculation::sheet_changes::{TabEntry, TabStep};
     use crate::xlsx::package::PartPath;
-    use crate::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
+    use crate::{SheetId, WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 
-    const RENAMES: &[(&str, &str)] = &[("Data", "New Data")];
-
-    fn rename_requests() -> SheetReferenceRequests<'static> {
-        SheetReferenceRequests::new(SheetChanges {
-            renames: RENAMES,
-            deleted: &[],
-            tabs: &[],
-            non_worksheets: &[],
-            deleted_tables: &[],
-        })
-    }
-
-    fn deletion_requests() -> SheetReferenceRequests<'static> {
-        SheetReferenceRequests::new(SheetChanges {
-            renames: &[("Other", "Renamed")],
-            deleted: &["Data"],
-            tabs: &["Data", "Other", "Summary"],
-            non_worksheets: &[],
-            deleted_tables: &["Things"],
-        })
+    /// Runs `patch` with requests over the tabs `Data`, `Other`, and `Summary`, renamed per
+    /// `renames`, with `Data` and its table `Things` deleted when `delete_data` is set.
+    fn with_requests<T>(
+        renames: &[(&str, &'static str)],
+        delete_data: bool,
+        patch: impl FnOnce(&SheetReferenceRequests<'_>) -> T,
+    ) -> T {
+        let id = |value| SheetId::new(value).expect("sheet ID");
+        let before = vec![("Data", id(1)), ("Other", id(2)), ("Summary", id(3))];
+        let after = before
+            .iter()
+            .filter(|(name, _)| !(delete_data && *name == "Data"))
+            .map(|(name, id)| {
+                let renamed = renames
+                    .iter()
+                    .find(|(old, _)| old == name)
+                    .map_or(*name, |(_, new)| *new);
+                (*id, renamed)
+            })
+            .collect::<Vec<_>>();
+        let tabs = before
+            .iter()
+            .map(|(_, id)| TabEntry {
+                id: *id,
+                worksheet: true,
+            })
+            .collect::<std::sync::Arc<[_]>>();
+        let steps = if delete_data {
+            vec![TabStep::Delete {
+                tabs,
+                deleted: id(1),
+            }]
+        } else {
+            Vec::new()
+        };
+        let deleted = |id: &SheetId| !after.iter().any(|(kept, _)| kept == id);
+        let names = SheetReferenceNames {
+            after_with_deleted: after
+                .iter()
+                .copied()
+                .chain(
+                    before
+                        .iter()
+                        .filter(|(_, id)| deleted(id))
+                        .map(|(name, id)| (*id, *name)),
+                )
+                .collect(),
+            kept_names: before
+                .iter()
+                .filter(|(_, id)| !deleted(id))
+                .map(|(name, id)| (*id, *name))
+                .collect(),
+            deletions: steps.clone(),
+            before,
+            after,
+        };
+        let tables: &[&str] = if delete_data { &["Things"] } else { &[] };
+        patch(&SheetReferenceRequests::new(&names, &steps, tables))
     }
 
     fn patch(part: ReferencePart, xml: &str) -> Option<String> {
         let source = PartPath::from_archive_name(b"xl/part.xml").expect("part");
-        patch_sheet_references(
-            xml.as_bytes(),
-            &source,
-            part,
-            &rename_requests(),
-            &mut false,
-            WriteLimits::default(),
-        )
+        with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                xml.as_bytes(),
+                &source,
+                part,
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect("patch")
         .map(|bytes| String::from_utf8(bytes).expect("UTF-8"))
     }
 
     fn patch_deletion(part: ReferencePart, xml: &str) -> Result<Option<String>, XlsxWriteError> {
         let source = PartPath::from_archive_name(b"xl/part.xml").expect("part");
-        patch_sheet_references(
-            xml.as_bytes(),
-            &source,
-            part,
-            &deletion_requests(),
-            &mut false,
-            WriteLimits::default(),
-        )
+        with_requests(&[("Other", "Renamed")], true, |requests| {
+            patch_sheet_references(
+                xml.as_bytes(),
+                &source,
+                part,
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .map(|bytes| bytes.map(|bytes| String::from_utf8(bytes).expect("UTF-8")))
     }
 
@@ -1023,14 +1123,16 @@ mod tests {
         let mut utf16 = vec![0xFF, 0xFE];
         utf16.extend(chart.encode_utf16().flat_map(u16::to_le_bytes));
         let source = PartPath::from_archive_name(b"xl/charts/chart1.xml").expect("part");
-        let error = patch_sheet_references(
-            &utf16,
-            &source,
-            ReferencePart::Chart,
-            &rename_requests(),
-            &mut false,
-            WriteLimits::default(),
-        )
+        let error = with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                &utf16,
+                &source,
+                ReferencePart::Chart,
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect_err("a chart that cannot be read cannot be rewritten");
         assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
     }
@@ -1054,14 +1156,16 @@ mod tests {
         );
 
         let source = PartPath::from_archive_name(b"xl/charts/chart1.xml").expect("part");
-        let error = patch_sheet_references(
-            chart(&declarations("a", 256), "").as_bytes(),
-            &source,
-            ReferencePart::Chart,
-            &rename_requests(),
-            &mut false,
-            WriteLimits::default(),
-        )
+        let error = with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                chart(&declarations("a", 256), "").as_bytes(),
+                &source,
+                ReferencePart::Chart,
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect_err("257 declarations on one element");
         assert_eq!(error.code(), XlsxWriteErrorCode::InvalidGeneratedXml);
         assert_eq!(error.detail(), None);
@@ -1075,14 +1179,16 @@ mod tests {
                 r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>{formula}</formula></cfRule></conditionalFormatting></worksheet>"#
             )
         };
-        let error = patch_sheet_references(
-            worksheet("Data!A1<!-- note -->&gt;0").as_bytes(),
-            &source,
-            ReferencePart::Worksheet,
-            &rename_requests(),
-            &mut false,
-            WriteLimits::default(),
-        )
+        let error = with_requests(&[("Data", "New Data")], false, |requests| {
+            patch_sheet_references(
+                worksheet("Data!A1<!-- note -->&gt;0").as_bytes(),
+                &source,
+                ReferencePart::Worksheet,
+                requests,
+                &mut false,
+                WriteLimits::default(),
+            )
+        })
         .expect_err("a rewrite would drop the comment");
         assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
         assert_eq!(

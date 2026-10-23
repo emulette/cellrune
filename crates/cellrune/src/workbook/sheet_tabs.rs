@@ -85,14 +85,6 @@ impl NonWorksheetTabs {
         position
     }
 
-    /// Returns every tab name in tab order, given the worksheet names in worksheet order.
-    pub(crate) fn tab_names<'a>(
-        &'a self,
-        worksheets: impl IntoIterator<Item = &'a str>,
-    ) -> Vec<&'a str> {
-        self.in_tab_order(worksheets, |tab| tab.name.as_str())
-    }
-
     /// Merges one item per worksheet, in worksheet order, with one per tab that is not a worksheet
     /// into tab order.
     pub(crate) fn in_tab_order<'a, T>(
@@ -191,12 +183,18 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(positions, [0, 1, 2]);
         assert_eq!(remaining.worksheet_position(0), 3);
+        let names = |tabs: &NonWorksheetTabs, worksheets: &[&'static str]| {
+            tabs.in_tab_order(worksheets.iter().copied(), |tab| tab.name().as_str())
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            tabs.tab_names(["First", "Second"]),
+            names(&tabs, &["First", "Second"]),
             ["Chart1", "First", "Chart2", "Chart3", "Second"]
         );
         assert_eq!(
-            remaining.tab_names(["Second"]),
+            names(&remaining, &["Second"]),
             ["Chart1", "Chart2", "Chart3", "Second"]
         );
     }

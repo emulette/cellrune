@@ -118,6 +118,7 @@ const MESSAGE_FORMULA_REWRITE_PARSE_FAILED: &str =
 const MESSAGE_NUMBER_FORMAT_BUILTIN_ID: &str = "built-in number format ID must be less than 164";
 const MESSAGE_NUMBER_FORMAT_CUSTOM_ID: &str = "custom number format ID must be at least 164";
 const MESSAGE_NUMBER_FORMAT_CODE_EMPTY: &str = "custom number format code must not be empty";
+const MESSAGE_SHEET_POSITION_OUT_OF_RANGE: &str = "sheet position is outside the tab order";
 
 /// Stable machine-readable code for a format-neutral validation failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -289,6 +290,8 @@ pub enum ValidationErrorCode {
     ColumnWideningOverlap,
     /// A target-related formula could not be parsed for typed rewriting.
     FormulaRewriteParseFailed,
+    /// A sheet move or copy names a tab position past the end of the tab order.
+    SheetPositionOutOfRange,
 }
 
 impl ValidationErrorCode {
@@ -388,6 +391,7 @@ impl ValidationErrorCode {
             Self::ColumnWideningRangeInvalid => "validation.column_widening_range_invalid",
             Self::ColumnWideningOverlap => "validation.column_widening_overlap",
             Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
+            Self::SheetPositionOutOfRange => "validation.sheet_position_out_of_range",
         }
     }
 }
@@ -783,6 +787,13 @@ pub enum ValidationError {
         /// Stable workbook owner context for the rejected formula, when available.
         owner: Option<String>,
     },
+    /// A sheet move or copy names a tab position past the end of the tab order.
+    SheetPositionOutOfRange {
+        /// Rejected zero-based tab position.
+        position: usize,
+        /// Number of positions the tab order offers.
+        tab_count: usize,
+    },
 }
 
 impl ValidationError {
@@ -910,6 +921,7 @@ impl ValidationError {
             Self::FormulaRewriteParseFailed { .. } => {
                 ValidationErrorCode::FormulaRewriteParseFailed
             }
+            Self::SheetPositionOutOfRange { .. } => ValidationErrorCode::SheetPositionOutOfRange,
         }
     }
 }
@@ -1227,6 +1239,13 @@ impl fmt::Display for ValidationError {
                 }
                 Ok(())
             }
+            Self::SheetPositionOutOfRange {
+                position,
+                tab_count,
+            } => write!(
+                formatter,
+                "{MESSAGE_SHEET_POSITION_OUT_OF_RANGE}: position {position} of {tab_count}"
+            ),
         }
     }
 }
@@ -1567,6 +1586,10 @@ mod tests {
             (
                 ValidationErrorCode::FormulaRewriteParseFailed,
                 "validation.formula_rewrite_parse_failed",
+            ),
+            (
+                ValidationErrorCode::SheetPositionOutOfRange,
+                "validation.sheet_position_out_of_range",
             ),
         ];
         let mut seen_codes = BTreeSet::new();

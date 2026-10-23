@@ -3,7 +3,9 @@ mod executor;
 mod formula_edit;
 mod receipt;
 mod sheet_delete;
+mod sheet_move;
 mod staged;
+mod tab_order;
 mod table_edit;
 mod widen_edit;
 

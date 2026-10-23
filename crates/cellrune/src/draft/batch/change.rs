@@ -71,6 +71,19 @@ pub enum WorkbookChange {
         /// Target sheet.
         sheet_id: SheetId,
     },
+    /// Moves a tab to another position of the tab order, which counts chartsheets and other tabs
+    /// that are not worksheets.
+    ///
+    /// The tab keeps its ID, its scoped names follow it, and the active sheet stays the same sheet.
+    /// A 3-D reference's tabs follow tab order, so it gains or loses the tabs moved across its
+    /// ends and keeps its text, unless the move puts its ends out of order: the moved end then
+    /// becomes its neighbour inside the old span, as Excel does.
+    MoveSheet {
+        /// Target tab.
+        sheet_id: SheetId,
+        /// Zero-based tab position the tab takes, counted after the move.
+        position: usize,
+    },
     /// Changes sheet visibility while retaining at least one visible sheet.
     SetSheetVisibility {
         /// Target sheet.
@@ -251,6 +264,11 @@ impl WorkbookChange {
     /// Constructs a sheet deletion.
     pub const fn delete_sheet(sheet_id: SheetId) -> Self {
         Self::DeleteSheet { sheet_id }
+    }
+
+    /// Constructs a tab move to zero-based `position` of the tab order.
+    pub const fn move_sheet(sheet_id: SheetId, position: usize) -> Self {
+        Self::MoveSheet { sheet_id, position }
     }
 
     /// Constructs a sheet-visibility change.
