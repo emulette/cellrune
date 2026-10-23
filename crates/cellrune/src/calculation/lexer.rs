@@ -335,7 +335,7 @@ pub(super) fn lex_spanned(input: &str, max_tokens: u64) -> Result<LexedFormula, 
                     "#REF!",
                     "#N/A",
                 ];
-                let rest = input[byte_at(&offsets, input.len(), index)..].as_bytes();
+                let rest = &input.as_bytes()[byte_at(&offsets, input.len(), index)..];
                 if let Some(literal) = ERROR_LITERALS.iter().find(|literal| {
                     rest.get(..literal.len())
                         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(literal.as_bytes()))
