@@ -10,7 +10,7 @@ use quick_xml::name::QName;
 use quick_xml::reader::NsReader;
 
 use super::canonical::StyleRegistry;
-use super::format_xml;
+use super::format_xml::{self, SourceChild};
 use super::serialization::escape_attribute;
 use super::style_records::SourceRecords;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
@@ -78,6 +78,9 @@ struct StyleAnalysis {
     sections: BTreeMap<&'static str, usize>,
     /// For `fonts`, `fills`, and `borders`, one past the highest record index an `xf` names.
     referenced: BTreeMap<&'static str, usize>,
+    /// Source `<font>` and `<border>` records by index, whose content an edit's record keeps.
+    fonts: BTreeMap<usize, Vec<Event<'static>>>,
+    borders: BTreeMap<usize, Vec<Event<'static>>>,
     /// The source font, fill, border, and xf records an edit can reuse.
     records: SourceRecords,
 }
@@ -122,7 +125,17 @@ impl StyleAnalysis {
         source: &PartPath,
     ) -> Result<(), XlsxWriteError> {
         if section != "cellXfs" {
-            return self.records.insert(section, index, &events, source);
+            self.records.insert(section, index, &events, source)?;
+            match section {
+                "fonts" => {
+                    self.fonts.insert(index, events);
+                }
+                "borders" => {
+                    self.borders.insert(index, events);
+                }
+                _ => {}
+            }
+            return Ok(());
         }
         let is_xf = matches!(
             events.first(),
@@ -142,31 +155,67 @@ impl StyleAnalysis {
 /// Font, fill, and border records appended to the styles part.
 #[derive(Default)]
 struct RecordAdditions {
-    fonts: Vec<Font>,
+    fonts: Vec<FontRecord>,
     fills: Vec<PatternFill>,
-    borders: Vec<Border>,
+    borders: Vec<BorderRecord>,
+}
+
+/// An added font with the children of the source font it edits that the model does not carry.
+#[derive(Debug, Clone, PartialEq)]
+struct FontRecord {
+    font: Font,
+    kept: Vec<SourceChild>,
+}
+
+impl FontRecord {
+    fn xml(&self, prefix: &str) -> Result<String, XlsxWriteError> {
+        format_xml::font_xml_over(&self.font, prefix, &self.kept)
+    }
+}
+
+/// An added border with the attributes and children of the source border it edits that the model
+/// does not carry.
+#[derive(Debug, Clone, PartialEq)]
+struct BorderRecord {
+    border: Border,
+    kept_attributes: Vec<(String, String)>,
+    kept_children: Vec<SourceChild>,
+}
+
+impl BorderRecord {
+    fn xml(&self, prefix: &str) -> String {
+        format_xml::border_xml_over(
+            &self.border,
+            prefix,
+            &self.kept_attributes,
+            &self.kept_children,
+        )
+    }
 }
 
 impl RecordAdditions {
     /// Returns the index of a source font equal to `font`, else of an added one.
     fn font(
         &mut self,
-        font: &Font,
+        font: FontRecord,
         analysis: &StyleAnalysis,
         source: &PartPath,
     ) -> Result<usize, XlsxWriteError> {
-        if let Some(index) = analysis
-            .records
-            .font(&format_xml::font_xml(font, "")?, source)?
-        {
+        if let Some(index) = analysis.records.font(&font.xml("")?, source)? {
             return Ok(index);
         }
         let existing = analysis.existing("fonts");
         if self.fonts.is_empty() {
             let missing = analysis.added_base("fonts") - existing;
-            self.fonts.resize(missing, Font::default());
+            self.fonts.resize(
+                missing,
+                FontRecord {
+                    font: Font::default(),
+                    kept: Vec::new(),
+                },
+            );
         }
-        Ok(existing + position_or_push(&mut self.fonts, font))
+        Ok(existing + position_or_push(&mut self.fonts, &font))
     }
 
     /// Returns the index of a source fill equal to `fill`, else of an added one.
@@ -201,31 +250,31 @@ impl RecordAdditions {
     /// Returns the index of a source border equal to `border`, else of an added one.
     fn border(
         &mut self,
-        border: &Border,
+        border: BorderRecord,
         analysis: &StyleAnalysis,
         source: &PartPath,
     ) -> Result<usize, XlsxWriteError> {
-        if let Some(index) = analysis
-            .records
-            .border(&format_xml::border_xml(border, ""), source)?
-        {
+        if let Some(index) = analysis.records.border(&border.xml(""), source)? {
             return Ok(index);
         }
         let existing = analysis.existing("borders");
         if self.borders.is_empty() {
             let missing = analysis.added_base("borders") - existing;
-            self.borders.resize(missing, Border::default());
+            self.borders.resize(
+                missing,
+                BorderRecord {
+                    border: Border::default(),
+                    kept_attributes: Vec::new(),
+                    kept_children: Vec::new(),
+                },
+            );
         }
-        Ok(existing + position_or_push(&mut self.borders, border))
+        Ok(existing + position_or_push(&mut self.borders, &border))
     }
 
     fn section_xml(&self, section: &str, prefix: &str) -> Result<Vec<String>, XlsxWriteError> {
         match section {
-            "fonts" => self
-                .fonts
-                .iter()
-                .map(|font| format_xml::font_xml(font, prefix))
-                .collect(),
+            "fonts" => self.fonts.iter().map(|font| font.xml(prefix)).collect(),
             "fills" => Ok(self
                 .fills
                 .iter()
@@ -234,7 +283,7 @@ impl RecordAdditions {
             "borders" => Ok(self
                 .borders
                 .iter()
-                .map(|border| format_xml::border_xml(border, prefix))
+                .map(|border| border.xml(prefix))
                 .collect()),
             _ => Ok(Vec::new()),
         }
@@ -348,7 +397,19 @@ fn patch_existing_styles(
                 let base_format = base_formats.style_format(request.base_index);
                 XfReplacement {
                     font: (format.font() != base_format.font())
-                        .then(|| records.font(format.font(), &analysis, source))
+                        .then(|| {
+                            let kept = kept_font_children(
+                                &analysis,
+                                base,
+                                format.font().name() == base_format.font().name(),
+                                source,
+                            )?;
+                            let font = FontRecord {
+                                font: format.font().clone(),
+                                kept,
+                            };
+                            records.font(font, &analysis, source)
+                        })
                         .transpose()?,
                     fill: match format.fill() {
                         Fill::Pattern(fill) if format.fill() != base_format.fill() => {
@@ -357,7 +418,10 @@ fn patch_existing_styles(
                         _ => None,
                     },
                     border: (format.border() != base_format.border())
-                        .then(|| records.border(&format.border(), &analysis, source))
+                        .then(|| {
+                            let border = border_record(&analysis, base, format.border(), source)?;
+                            records.border(border, &analysis, source)
+                        })
                         .transpose()?,
                     alignment: (format.alignment() != base_format.alignment())
                         .then_some(format.alignment()),
@@ -708,7 +772,20 @@ fn patch_template(
     let name = element.name().as_ref().to_owned();
     let prefix = qualified_prefix(&name);
     let mut events = vec![Event::Start(patched)];
-    if let Some(xml) = format_xml::alignment_xml(&alignment, &prefix) {
+    let kept = children
+        .iter()
+        .find_map(|event| match event {
+            Event::Start(child) | Event::Empty(child)
+                if child.local_name().as_ref() == "alignment" =>
+            {
+                Some(child)
+            }
+            _ => None,
+        })
+        .map(|child| unmodeled_attributes(child, &format_xml::MODELED_ALIGNMENT_ATTRIBUTES, source))
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(xml) = format_xml::alignment_xml_over(&alignment, &prefix, &kept) {
         events.push(single_element_event(&xml, source)?);
     }
     // The base alignment is replaced; every other child keeps its source events.
@@ -753,6 +830,128 @@ fn patch_template(
 }
 
 /// Parses one generated self-closing element into an owned event.
+/// Returns the index of the `fontId`, `fillId`, or `borderId` record an `xf` names.
+fn named_record(template: &XfTemplate, attribute: &str) -> usize {
+    match template.events.first() {
+        Some(Event::Start(element) | Event::Empty(element)) => element
+            .try_get_attribute(attribute)
+            .ok()
+            .flatten()
+            .and_then(|value| value.value.parse::<usize>().ok())
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Returns the children of the source font `base` names that the font model does not carry,
+/// without the ones bound to the font name when the edit names another font.
+fn kept_font_children(
+    analysis: &StyleAnalysis,
+    base: &XfTemplate,
+    same_name: bool,
+    source: &PartPath,
+) -> Result<Vec<SourceChild>, XlsxWriteError> {
+    let Some(events) = analysis.fonts.get(&named_record(base, "fontId")) else {
+        return Ok(Vec::new());
+    };
+    let mut kept = unmodeled_children(events, &format_xml::MODELED_FONT_CHILDREN, source)?;
+    if !same_name {
+        kept.retain(|child| {
+            !format_xml::NAME_BOUND_FONT_CHILDREN.contains(&child.local_name.as_str())
+        });
+    }
+    Ok(kept)
+}
+
+/// Returns `border` with the attributes and children of the source border `base` names that the
+/// border model does not carry.
+fn border_record(
+    analysis: &StyleAnalysis,
+    base: &XfTemplate,
+    border: Border,
+    source: &PartPath,
+) -> Result<BorderRecord, XlsxWriteError> {
+    let mut record = BorderRecord {
+        border,
+        kept_attributes: Vec::new(),
+        kept_children: Vec::new(),
+    };
+    let Some(events) = analysis.borders.get(&named_record(base, "borderId")) else {
+        return Ok(record);
+    };
+    if let Some(Event::Start(element) | Event::Empty(element)) = events.first() {
+        record.kept_attributes =
+            unmodeled_attributes(element, &format_xml::MODELED_BORDER_ATTRIBUTES, source)?;
+    }
+    record.kept_children =
+        unmodeled_children(events, &format_xml::MODELED_BORDER_CHILDREN, source)?;
+    Ok(record)
+}
+
+/// Returns an element's attributes other than `modeled` and namespace declarations, with their
+/// values escaped for a double-quoted attribute.
+fn unmodeled_attributes(
+    element: &BytesStart<'_>,
+    modeled: &[&str],
+    source: &PartPath,
+) -> Result<Vec<(String, String)>, XlsxWriteError> {
+    let mut kept = Vec::new();
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| invalid_xml(source, error))?;
+        let key = attribute.key.as_ref();
+        if modeled.contains(&attribute.key.local_name().as_ref()) || key.starts_with("xmlns") {
+            continue;
+        }
+        kept.push((key.to_owned(), attribute.value.replace('"', "&quot;")));
+    }
+    Ok(kept)
+}
+
+/// Returns the direct children of a record's events whose local name is not in `modeled`, each
+/// serialized as the source wrote it.
+fn unmodeled_children(
+    events: &[Event<'static>],
+    modeled: &[&str],
+    source: &PartPath,
+) -> Result<Vec<SourceChild>, XlsxWriteError> {
+    let body = match events.first() {
+        Some(Event::Start(_)) => &events[1..events.len().saturating_sub(1)],
+        _ => return Ok(Vec::new()),
+    };
+    let mut kept = Vec::new();
+    let mut current = None::<(String, Writer<Cursor<Vec<u8>>>)>;
+    let mut nested = 0_usize;
+    for event in body {
+        let starts = match event {
+            Event::Start(child) | Event::Empty(child) if nested == 0 => {
+                let name = child.local_name().as_ref().to_owned();
+                if !modeled.contains(&name.as_str()) {
+                    current = Some((name, Writer::new(Cursor::new(Vec::new()))));
+                }
+                true
+            }
+            _ => false,
+        };
+        if let Some((_, writer)) = &mut current {
+            write_event(writer, event.clone(), source)?;
+        }
+        match event {
+            Event::Start(_) => nested += 1,
+            Event::End(_) => nested = nested.saturating_sub(1),
+            _ => {}
+        }
+        if nested == 0
+            && (matches!(event, Event::End(_)) || (starts && matches!(event, Event::Empty(_))))
+            && let Some((local_name, writer)) = current.take()
+        {
+            let xml = String::from_utf8(writer.into_inner().into_inner())
+                .map_err(|_| invalid_generated(source, DETAIL_BASE_STYLE))?;
+            kept.push(SourceChild { local_name, xml });
+        }
+    }
+    Ok(kept)
+}
+
 fn single_element_event(xml: &str, source: &PartPath) -> Result<Event<'static>, XlsxWriteError> {
     let mut reader = quick_xml::Reader::from_str(xml);
     match reader

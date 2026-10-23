@@ -460,3 +460,55 @@ fn added_fonts_and_borders_never_take_an_index_an_unedited_style_names() {
         assert_eq!(edited.border().left(), thick);
     }
 }
+
+#[test]
+fn edits_keep_the_font_border_and_alignment_content_the_model_does_not_carry() {
+    use cellrune::{AlignmentEdit, BorderEdge, BorderEdit, BorderStyle, FontEdit};
+
+    const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><vertAlign val="superscript"/><sz val="11"/><color theme="1"/><name val="맑은 고딕"/><family val="3"/><charset val="129"/><scheme val="minor"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border outline="0"><left/><right/><top/><bottom/><diagonal/><vertical style="thin"/></border></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment horizontal="right" readingOrder="2"/></xf></cellXfs></styleSheet>"#;
+    let thick = BorderEdge::new(BorderStyle::Thick, None);
+    let output = edit_and_save(
+        &one_sheet_package(ONE_VALUE_SHEET, Some(STYLES)),
+        vec![
+            WorkbookChange::set_cell_format(
+                sheet1(),
+                address("A1"),
+                CellFormatEdit::new()
+                    .with_font(FontEdit::new().with_bold(true))
+                    .with_border(BorderEdit::new().with_top(thick))
+                    .with_alignment(AlignmentEdit::new().with_wrap_text(true)),
+            ),
+            WorkbookChange::set_cell_format(
+                sheet1(),
+                address("B1"),
+                CellFormatEdit::new()
+                    .with_font(FontEdit::new().with_name(Some("Arial")).expect("name")),
+            ),
+        ],
+    );
+    let styles = support::part_text(&output, STYLES_PART);
+    assert!(
+        styles.contains(r#"<font><b/><vertAlign val="superscript"/><sz val="11"/><color theme="1"/><name val="맑은 고딕"/><family val="3"/><charset val="129"/><scheme val="minor"/></font>"#),
+        "{styles}"
+    );
+    // A new name drops the family, character set, and theme scheme of the old one, since a
+    // `scheme` would make Excel show the theme font instead of the named one.
+    assert!(
+        styles.contains(r#"<font><vertAlign val="superscript"/><sz val="11"/><color theme="1"/><name val="Arial"/></font>"#),
+        "{styles}"
+    );
+    assert!(
+        styles.contains(r#"<border outline="0"><left/><right/><top style="thick"/><bottom/><diagonal/><vertical style="thin"/></border>"#),
+        "{styles}"
+    );
+    assert!(
+        styles.contains(r#"<alignment horizontal="right" wrapText="1" readingOrder="2"/>"#),
+        "{styles}"
+    );
+    let reopened = WorkbookDraft::from_document(
+        &open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen"),
+    );
+    let a1 = reopened.cell_format(sheet1(), address("A1")).expect("A1");
+    assert!(a1.font().bold() && a1.alignment().wrap_text());
+    assert_eq!(a1.border().top(), thick);
+}
