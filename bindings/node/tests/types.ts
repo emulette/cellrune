@@ -1,5 +1,6 @@
 import {
   type CapabilityPage,
+  type DataValidationPage,
   type CalculationLimitOptions,
   type ReadLimitOptions,
   type EditWriteReport,
@@ -151,6 +152,15 @@ async function check(): Promise<void> {
   const edited: Buffer = await reopened.editsToBytes();
   const capabilities: CapabilityPage = await reopened.scanCapabilities({ limit: 10 });
   capabilities.entries[0]?.cell.address.toUpperCase();
+  const validations: DataValidationPage = reopened.dataValidations("Sheet1", { limit: 10 });
+  for (const rule of validations.entries) {
+    rule.ranges[0]?.toUpperCase();
+    if (rule.validationType === "list") {
+      rule.formula1?.toUpperCase();
+    }
+  }
+  // @ts-expect-error Sheet metadata pages take only an offset and a limit.
+  reopened.dataValidations("Sheet1", { cursor: 1 });
   edited.byteLength.toFixed(0);
   reopened.close();
   reopened.addSheet("Scratch");

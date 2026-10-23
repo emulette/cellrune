@@ -1,5 +1,6 @@
 from cellrune import (
     CapabilityPage,
+    DataValidationPage,
     CalculationLimitOptions,
     LocaleProfile,
     ReadLimitOptions,
@@ -119,6 +120,11 @@ def check() -> None:
     capabilities: CapabilityPage = reopened.scan_capabilities(limit=10)
     for entry in capabilities["entries"]:
         entry["cell"]["address"].upper()
+    validations: DataValidationPage = reopened.data_validations("Sheet1", limit=10)
+    for rule in validations["entries"]:
+        rule["ranges"][0].upper()
+        if rule["validation_type"] == "list" and rule["formula1"] is not None:
+            rule["formula1"].upper()
     edited.hex()
     reopened.add_sheet("Scratch")
     removal: list[WorkbookChange] = [{"kind": "delete_sheet", "sheet": "Scratch"}]

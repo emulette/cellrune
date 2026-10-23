@@ -6,6 +6,7 @@ mod edit;
 mod preview;
 mod query;
 mod save;
+mod sheet_metadata;
 mod targeted;
 pub use targeted::{CompletedTargetRequest, PreparedTargetRequest};
 

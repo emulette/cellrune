@@ -14,6 +14,7 @@ from ._types import (
     CalculationDeltaPage,
     CalculationReport,
     CapabilityPage,
+    DataValidationPage,
     DefinedNameInspection,
     EditReceipt,
     EditReceiptV2,
@@ -99,6 +100,13 @@ class Workbook:
         current_sheet: str | None = None,
     ) -> DefinedNameInspection: ...
     def function_usage(self) -> FunctionUsageReport: ...
+    def data_validations(
+        self,
+        sheet: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> DataValidationPage: ...
     def scan_capabilities(
         self,
         *,

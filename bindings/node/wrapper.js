@@ -1,6 +1,7 @@
 "use strict";
 
 const native = require("./native.js");
+const { normalizeDataValidationPage } = require("./lib/sheet_metadata.js");
 const { targetRequest } = require("./lib/targeted.js");
 const {
   serializeWorkbookChange,
@@ -113,6 +114,13 @@ class Workbook {
       withSyncErrors(() =>
         this.#session().readRange(sheet, start, end, offset, limit),
       ),
+    );
+  }
+
+  dataValidations(sheet, options = {}) {
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizeDataValidationPage(
+      withSyncErrors(() => this.#session().dataValidations(sheet, offset, limit)),
     );
   }
 
@@ -505,6 +513,17 @@ class Workbook {
  * Picks the validated calculation options native code reads for calculate and recalculate. They
  * pass as JavaScript values rather than JSON so date-time serials keep every bit.
  */
+function sheetPage(sheet, options) {
+  requireString(sheet, "sheet");
+  requireOptions(options);
+  requireOptionKeys(options, ["offset", "limit"]);
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 0;
+  requireNonNegativeInteger(offset, "offset");
+  requireNonNegativeInteger(limit, "limit");
+  return { offset, limit };
+}
+
 function calculationOptions(options) {
   return {
     todaySerial: options.todaySerial,

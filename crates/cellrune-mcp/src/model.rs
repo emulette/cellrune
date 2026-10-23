@@ -27,6 +27,23 @@ pub(crate) struct SessionArgs {
     pub(crate) session_id: String,
 }
 
+/// Input for one bounded page of a sheet's read-only metadata entries.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SheetPageArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Case-insensitive sheet name.
+    pub(crate) sheet: String,
+    /// Zero-based entry offset; omitted or zero starts at the first entry.
+    #[serde(default)]
+    pub(crate) offset: u64,
+    /// Page size; omitted or zero selects the server default, with a hard maximum of 10,000.
+    #[serde(default)]
+    #[schemars(range(max = 10_000))]
+    pub(crate) limit: u32,
+}
+
 /// Input for one bounded row-major range page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -1809,6 +1809,56 @@ fn display_text_is_a_stateless_stdio_tool() {
     assert!(status.success());
 }
 
+/// Copies the shared sheet metadata fixture beneath `root` and opens it.
+fn open_sheet_metadata_fixture(mcp: &mut McpProcess, root: &Path) -> String {
+    let input = root.join("sheet-metadata.xlsx");
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../binding-contract/sheet-metadata.xlsx"),
+        &input,
+    )
+    .expect("shared sheet metadata fixture must be copied beneath the approved root");
+    let opened = successful_tool(mcp.call_tool("workbook_open", json!({"path": input})));
+    opened["session_id"]
+        .as_str()
+        .expect("open must return a session ID")
+        .to_owned()
+}
+
+#[test]
+fn data_validations_are_a_bounded_stdio_page() {
+    let root = TestDirectory::new("data-validations");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = open_sheet_metadata_fixture(&mut mcp, &root.path);
+
+    let page = successful_tool(mcp.call_tool(
+        "workbook_data_validations",
+        json!({"session_id": session_id, "sheet": "Data", "limit": 2}),
+    ));
+    assert_eq!(page["total"], 3);
+    assert_eq!(page["next_offset"], 2);
+    assert_eq!(page["entries"][0]["ranges"], json!(["A1:A5", "C1"]));
+    assert_eq!(page["entries"][0]["formula1"], "\"Yes,No\"");
+    assert_eq!(page["entries"][1]["operator"], "notBetween");
+    assert_eq!(page["entries"][1]["in_cell_dropdown"], false);
+    let rest = successful_tool(mcp.call_tool(
+        "workbook_data_validations",
+        json!({"session_id": session_id, "sheet": "Data", "offset": 2}),
+    ));
+    assert_eq!(rest["entries"][0]["formula1"], "Lists!$A$1:$A$2");
+    assert_eq!(rest["next_offset"], Value::Null);
+
+    let error = failed_tool(mcp.call_tool(
+        "workbook_data_validations",
+        json!({"session_id": session_id, "sheet": "Missing"}),
+    ));
+    assert_eq!(error["code"], "interop.sheet.not_found");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
 fn successful_tool(result: Value) -> Value {
     assert_eq!(
         result["isError"], false,

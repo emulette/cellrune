@@ -137,7 +137,8 @@ spreadsheet app to recalculate them, and formulas CellRune cannot calculate do n
 runs, so do not edit it until the returned Promise settles.
 `openPath`/`fromBytes` accept `readLimits` and `calculate`/`recalculate`/`previewChanges` accept
 `calculationLimits` to change individual default limits, and `scanCapabilities()` pages through the
-static per-formula support report.
+static per-formula support report. `dataValidations(sheet, { offset, limit })` pages through a
+sheet's read-only data validation rules.
 `close()` is idempotent. Once it returns, the binding-owned native session has
 been released. An active calculation is cooperatively cancelled, a published preview is discarded,
 and later operations fail with `interop.session.closed`.

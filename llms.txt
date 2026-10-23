@@ -95,9 +95,9 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 19 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 20 tools are `workbook_create`,
 `workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
-`workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_data_validations`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
@@ -153,7 +153,14 @@ integer with `interop.limit.payload_invalid`. `scan_capabilities`/
 carry `number_format` (`id`, `code`, `kind`); summaries carry each sheet's
 `auto_filter` range, its `auto_filter_filtered_columns`, the `hidden_rows` as
 A1 row ranges such as `2:4`, and `full_calculation_on_load`, which producers such as
-xlsxwriter set while storing placeholder results. An
+xlsxwriter set while storing placeholder results. Python
+`data_validations(sheet, offset=, limit=)` and Node.js
+`dataValidations(sheet, { offset, limit })` page through a sheet's rules
+(`WorkbookSession::data_validations(&SheetPageRequestDto)` in interop,
+`workbook_data_validations` in MCP); each entry carries `ranges`,
+`validation_type`, `operator`, and `error_style` OOXML tokens, `formula1`,
+`formula2`, `allow_blank`, `in_cell_dropdown`, the two message flags, and the
+error and prompt titles and messages. An
 `xlsx.write.incomplete_calculation` error names the first 64 unavailable
 formulas in `details.cells`. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
@@ -319,12 +326,30 @@ than guessing a name from a different XLSX crate (`calamine`,
   and `.filtered_column_ids()`, the filter columns that declare a
   `filters`, `customFilters`, `top10`, `dynamicFilter`, `colorFilter`, or
   `iconFilter` condition; the conditions and sort XML are preserved, not
-  modeled), and `.hidden_rows() -> &[Row]` (ascending rows whose `<row
+  modeled), `.hidden_rows() -> &[Row]` (ascending rows whose `<row
   hidden>` is true, read without the `zeroHeight` default) with
-  `.is_row_hidden(Row)`. Excel stores the rows a filter hides as hidden rows,
+  `.is_row_hidden(Row)`, and `.data_validations() -> &[DataValidation]`
+  (worksheet order: `<dataValidations>`, then the Excel 2010
+  `x14:dataValidations` extension). Excel stores the rows a filter hides as hidden rows,
   so a hidden row inside an autoFilter with a filter condition may be a
   filtered row. A document-backed write keeps hidden rows, and the written
   output is verified to read back the same hidden rows.
+- `DataValidation` (read-only): `.ranges() -> &[CellRange]` (`sqref`
+  order), `.validation_type() -> DataValidationType`
+  (`AnyValue | Whole | Decimal | List | Date | Time | TextLength | Custom`),
+  `.operator() -> DataValidationOperator` (`Between` when omitted),
+  `.formula1()`/`.formula2() -> Option<&str>` (stored text without `=`),
+  `.allow_blank()`, `.in_cell_dropdown()` (the inverse of OOXML
+  `showDropDown`), `.show_input_message()`, `.show_error_message()`,
+  `.error_style() -> DataValidationErrorStyle` (`Stop | Warning |
+  Information`), `.error_title()`, `.error_message()`, `.prompt_title()`,
+  and `.prompt_message()`. The three enums are `#[non_exhaustive]` and
+  `.as_str()` returns the OOXML token. A rule with a malformed `sqref`, a
+  repeated formula, or an unknown token is left unmodeled; its XML is
+  preserved. A sheet rename rewrites rule formulas as the saved part does,
+  and fails with `validation.formula_rewrite_parse_failed` when a rule
+  formula naming the sheet does not parse. Rules are not part of the
+  semantic fingerprint.
 - `Table`: `.id() -> TableId` (OOXML-valid non-zero, workbook-global stable ID),
   `.name() -> &TableName` (worksheet-local programmatic name),
   `.display_name() -> &TableName` (workbook-global formula/UI name),

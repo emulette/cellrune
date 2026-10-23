@@ -15,6 +15,7 @@ export declare class NativeWorkbook {
   close(): void
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  dataValidations(sheet: string, offset: number, limit: number): NativeDataValidationPage
   scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
   functionUsage(): NativeFunctionUsageReport
@@ -149,6 +150,32 @@ export interface NativeCellValue {
   textValue?: string
   logicalValue?: boolean
   errorValue?: string
+}
+
+export interface NativeDataValidation {
+  ranges: Array<string>
+  validationType: string
+  operator: string
+  formula1?: string
+  formula2?: string
+  allowBlank: boolean
+  inCellDropdown: boolean
+  showInputMessage: boolean
+  showErrorMessage: boolean
+  errorStyle: string
+  errorTitle?: string
+  errorMessage?: string
+  promptTitle?: string
+  promptMessage?: string
+}
+
+export interface NativeDataValidationPage {
+  schemaVersion: number
+  sheet: string
+  total: number
+  offset: number
+  nextOffset?: number
+  entries: Array<NativeDataValidation>
 }
 
 export interface NativeDefinedNameInspection {

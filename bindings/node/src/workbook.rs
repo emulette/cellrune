@@ -4,8 +4,7 @@ use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
-    RangeRequestDto, RecalculationModeDto, TransactionDetailSectionDto, WorkbookSession,
+    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto, RangeRequestDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession,
     WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::AsyncTask;
@@ -18,6 +17,7 @@ use crate::conversion::{
 };
 use crate::defined_name::NativeDefinedNameInspection;
 use crate::error::napi_error;
+use crate::sheet_metadata::NativeDataValidationPage;
 use crate::task::{
     BytesTask, CalculateTask, CapabilityTask, EditsBytesTask, PreviewTask, RecalculateTask,
     SaveEditsPathTask, SavePathTask,
@@ -81,6 +81,24 @@ impl NativeWorkbook {
                 limit,
             })
             .map(crate::conversion::range_page)
+            .map_err(napi_error)
+    }
+
+    #[napi(catch_unwind)]
+    pub fn data_validations(
+        &self,
+        sheet: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<NativeDataValidationPage> {
+        let request = SheetPageRequestDto {
+            sheet,
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        };
+        self.lock()?
+            .data_validations(&request)
+            .map(crate::sheet_metadata::data_validation_page)
             .map_err(napi_error)
     }
 

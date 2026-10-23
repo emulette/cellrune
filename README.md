@@ -33,6 +33,8 @@ cellrune = "0.1.26"
   columns, and validated worksheet-owned Excel
   tables, including stable table and column IDs, complete filter/sort/formula/style metadata, and
   case-insensitive lookup indexes;
+- reads every worksheet data validation rule, including Excel 2010 extension rules, as read-only
+  metadata;
 - resolves typed multi-area, 3-D, structured table, current-row, and spill references under
   cumulative reference and dependency budgets;
 - inspects workbook and sheet-local defined names without running a calculation session, preserving
@@ -377,6 +379,7 @@ reaches every surface:
 | Cell number formats, hidden rows, sheet autoFilter ranges and filtered columns, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
+| Data validation rules (read-only) | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
 | Defined-name inspection | yes | yes | yes | no |
 | Sheet autoFilter and table column widening edits | yes | no | no | no |
@@ -492,6 +495,9 @@ keep their defaults; a zero fails with `interop.limit.invalid`, and limits that 
 range and filtered columns, its hidden rows, and the package's `full_calculation_on_load`
 declaration: xlsxwriter and similar producers
 set it and may store placeholder results, so read such saved results only after calculating.
+`data_validations`/`dataValidations` page through a sheet's data validation rules with `offset` and
+`limit`; each rule carries its ranges, OOXML type, operator, and error-style tokens, its formulas as
+stored, and its flags and messages.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview
@@ -510,7 +516,7 @@ cargo run --locked -p cellrune-mcp -- \
 ```
 
 Its 19 tools are `workbook_create`, `workbook_open`, `workbook_close`, `workbook_summary`,
-`workbook_read_range`, `workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_read_range`, `workbook_data_validations`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`, `workbook_discard_preview`, and the

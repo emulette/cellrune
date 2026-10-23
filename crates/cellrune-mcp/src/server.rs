@@ -20,7 +20,7 @@ use crate::session::SessionCache;
 const JSON_MIME_TYPE: &str = "application/json";
 const SERVER_INSTRUCTIONS: &str = "Use high-level workbook session tools to open or create a \
 workbook, apply typed edit batches (v2 for table authoring), recalculate existing formulas with CellRune, read bounded \
-ranges, and save a verified copy. Tools are not defined per spreadsheet function. Paths must be \
+ranges and sheet metadata, and save a verified copy. Tools are not defined per spreadsheet function. Paths must be \
 absolute and remain inside an operator-approved root.";
 
 /// Local stdio-only CellRune MCP server.
@@ -211,6 +211,7 @@ mod tests {
                 "workbook_close",
                 "workbook_commit_preview",
                 "workbook_create",
+                "workbook_data_validations",
                 "workbook_discard_preview",
                 "workbook_function_usage",
                 "workbook_open",
@@ -237,6 +238,7 @@ mod tests {
         }
         for (tool_name, expected_maximum) in [
             ("workbook_read_range", 10_000_u64),
+            ("workbook_data_validations", 10_000),
             ("workbook_scan_capabilities", 10_000),
             ("workbook_changes_since", 100),
             ("workbook_preview_changes_page", 1_000),
@@ -303,6 +305,7 @@ mod tests {
             ("workbook_close", false, true, true, false),
             ("workbook_commit_preview", false, true, false, false),
             ("workbook_create", false, true, false, false),
+            ("workbook_data_validations", true, false, true, false),
             ("workbook_discard_preview", false, true, true, false),
             ("workbook_function_usage", true, false, true, false),
             ("workbook_open", false, true, false, false),

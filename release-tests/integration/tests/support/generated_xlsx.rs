@@ -881,6 +881,68 @@ pub fn generated_sheet_reference_fixture() -> Vec<u8> {
     )
 }
 
+/// Sheets `Rules` and `Lists`. `Rules` declares one data validation of every type, a custom rule
+/// whose formula names `Lists` but does not parse, five malformed rules after them, and an Excel
+/// 2010 `x14:dataValidation` whose list names `Lists`.
+pub fn generated_data_validation_workbook() -> Vec<u8> {
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Rules" sheetId="1" r:id="rId1"/>
+    <sheet name="Lists" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>"#;
+    let rules = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="B1"><v>5</v></c></row></sheetData>
+  <dataValidations count="15">
+    <dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" promptTitle="Pick" prompt="Choose a team" errorTitle="Unknown" error="Pick from the list" sqref="A1:A10 C1"><formula1>"R&amp;D,Ops"</formula1></dataValidation>
+    <dataValidation type="whole" sqref="B1"><formula1>1</formula1><formula2>10</formula2></dataValidation>
+    <dataValidation type="decimal" operator="greaterThanOrEqual" errorStyle="warning" sqref="B2"><formula1>0.5</formula1></dataValidation>
+    <dataValidation type="date" operator="lessThan" errorStyle="information" sqref="B3"><formula1>DATE(2026,1,1)</formula1></dataValidation>
+    <dataValidation type="time" operator="notBetween" sqref="B4"><formula1>0.25</formula1><formula2>0.75</formula2></dataValidation>
+    <dataValidation type="textLength" operator="lessThanOrEqual" sqref="B5"><formula1>5</formula1></dataValidation>
+    <dataValidation type="custom" sqref="B6"><formula1>ISNUMBER(B6)</formula1></dataValidation>
+    <dataValidation showInputMessage="true" prompt="Any value" sqref="B7"/>
+    <dataValidation type="list" showDropDown="1" sqref="B8"><formula1>$D$1:$D$3</formula1></dataValidation>
+    <dataValidation type="custom" sqref="H1"><formula1>Lists!A1:</formula1></dataValidation>
+    <dataValidation type="bogus" sqref="B9"/>
+    <dataValidation type="whole" sqref="NOPE"><formula1>1</formula1></dataValidation>
+    <dataValidation type="whole"><formula1>1</formula1></dataValidation>
+    <dataValidation type="whole" allowBlank="maybe" sqref="B10"><formula1>1</formula1></dataValidation>
+    <dataValidation type="whole" sqref="B11"><formula1>1</formula1><formula1>2</formula1></dataValidation>
+  </dataValidations>
+  <extLst>
+    <ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+      <x14:dataValidations count="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
+        <x14:dataValidation type="list" allowBlank="1" showErrorMessage="1"><x14:formula1><xm:f>Lists!$A$1:$A$3</xm:f></x14:formula1><xm:sqref>E1:E5 G2</xm:sqref></x14:dataValidation>
+      </x14:dataValidations>
+    </ext>
+  </extLst>
+</worksheet>"#;
+    let lists = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>North</t></is></c></row>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>South</t></is></c></row>
+    <row r="3"><c r="A3" t="inlineStr"><is><t>West</t></is></c></row>
+  </sheetData>
+</worksheet>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+            ("xl/styles.xml", STYLES),
+            ("xl/worksheets/sheet1.xml", rules),
+            ("xl/worksheets/sheet2.xml", lists),
+        ],
+        None,
+    )
+}
+
 pub fn generated_workbook_with_comment(profile: ProducerProfile, comment: &str) -> Vec<u8> {
     generated_workbook_with_archive_comment(profile, Some(comment))
 }

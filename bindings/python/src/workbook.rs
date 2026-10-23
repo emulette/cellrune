@@ -4,8 +4,7 @@ use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
-    RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, TransactionDetailSectionDto,
+    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
     WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
@@ -122,6 +121,21 @@ impl Workbook {
         });
         let page = result.map_err(|error| into_py_error(py, error))?;
         conversion::range_page(py, &page)
+    }
+
+    #[pyo3(signature = (sheet, *, offset=None, limit=None))]
+    pub fn data_validations<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        offset: Option<&Bound<'_, PyAny>>,
+        limit: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let request =
+            sheet_page_request(sheet, offset, limit).map_err(|error| into_py_error(py, error))?;
+        let result = py.detach(move || self.lock_interop_wait()?.data_validations(&request));
+        let page = result.map_err(|error| into_py_error(py, error))?;
+        conversion::json_dict(py, &page)
     }
 
     #[pyo3(signature = (*, offset=None, limit=None, today_serial=None, now_serial=None))]
@@ -670,6 +684,18 @@ impl Workbook {
 struct PreviewOptionsInput {
     mode: RecalculationModeDto,
     calculation_options: CalculationOptionsDto,
+}
+
+fn sheet_page_request(
+    sheet: String,
+    offset: Option<&Bound<'_, PyAny>>,
+    limit: Option<&Bound<'_, PyAny>>,
+) -> Result<SheetPageRequestDto, InteropError> {
+    Ok(SheetPageRequestDto {
+        sheet,
+        offset: page_offset_from_python(offset)?,
+        limit: page_limit_from_python(limit)?,
+    })
 }
 
 fn page_offset_from_python(value: Option<&Bound<'_, PyAny>>) -> Result<u64, InteropError> {

@@ -3,6 +3,7 @@ mod generated_workbook {
     mod array_follower_write;
     mod column_widening_write;
     mod contract;
+    mod data_validation_read;
     mod defined_name_write;
     mod draft_edits_write;
     mod draft_write;

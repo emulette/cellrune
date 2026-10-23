@@ -6,11 +6,16 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
 mod auto_filter;
+mod data_validation;
 mod new_cell_styles;
 mod sheet_tabs;
 mod table_index;
 
 pub use auto_filter::SheetAutoFilter;
+pub(crate) use data_validation::DataValidationRule;
+pub use data_validation::{
+    DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
+};
 pub(crate) use new_cell_styles::NewCellStyles;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
 pub(crate) use table_index::TableRangeIndex;
@@ -257,6 +262,7 @@ pub struct Sheet {
     tables: Arc<Vec<Table>>,
     auto_filter: Option<SheetAutoFilter>,
     hidden_rows: Arc<Vec<Row>>,
+    data_validations: Arc<Vec<DataValidation>>,
     new_cell_styles: Arc<NewCellStyles>,
     semantic_fingerprint: OnceLock<[u8; 32]>,
 }
@@ -283,6 +289,7 @@ impl Sheet {
             tables: Arc::clone(&self.tables),
             auto_filter: self.auto_filter.clone(),
             hidden_rows: Arc::clone(&self.hidden_rows),
+            data_validations: Arc::clone(&self.data_validations),
             new_cell_styles: Arc::clone(&self.new_cell_styles),
             semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
@@ -307,6 +314,7 @@ impl Sheet {
             tables: Arc::new(Vec::new()),
             auto_filter: None,
             hidden_rows: Arc::new(Vec::new()),
+            data_validations: Arc::new(Vec::new()),
             new_cell_styles: Arc::default(),
             semantic_fingerprint: OnceLock::new(),
         }
@@ -573,6 +581,20 @@ impl Sheet {
         self.hidden_rows.binary_search(&row).is_ok()
     }
 
+    /// Returns the sheet's data validation rules in worksheet order: the `dataValidations`
+    /// element first, then the Excel 2010 `x14:dataValidations` extension.
+    ///
+    /// A rule with a missing or malformed range list, a repeated formula, or an unknown type,
+    /// operator, error style, or flag value is left unmodeled; its XML is preserved either way.
+    /// Rules do not affect calculation and are not part of the semantic fingerprint.
+    pub fn data_validations(&self) -> &[DataValidation] {
+        self.data_validations.as_slice()
+    }
+
+    pub(crate) fn data_validations_mut(&mut self) -> &mut [DataValidation] {
+        Arc::make_mut(&mut self.data_validations).as_mut_slice()
+    }
+
     /// Returns the source styles that cells written at empty positions receive.
     pub(crate) fn new_cell_styles(&self) -> &NewCellStyles {
         &self.new_cell_styles
@@ -798,6 +820,10 @@ impl SheetBuilder {
             self.sheet.semantic_fingerprint = OnceLock::new();
             Arc::make_mut(&mut self.sheet.hidden_rows).push(row);
         }
+    }
+
+    pub(crate) fn set_data_validations(&mut self, data_validations: Vec<DataValidation>) {
+        self.sheet.data_validations = Arc::new(data_validations);
     }
 
     pub(crate) fn new_cell_styles_mut(&mut self) -> &mut NewCellStyles {

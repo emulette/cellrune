@@ -485,11 +485,63 @@ async function assertDeleteSheet() {
     () => workbook.deleteSheet("Data"),
     (error) => error.code === "interop.sheet.not_found",
   );
+}
+
+const SHEET_METADATA_FIXTURE = path.join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "binding-contract",
+  "sheet-metadata.xlsx",
+);
+
+async function assertDataValidations() {
+  const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
+  const page = workbook.dataValidations("data", { limit: 2 });
+  assert.deepEqual([page.sheet, page.total, page.nextOffset], ["Data", 3, 2]);
+  assert.deepEqual(page.entries[0], {
+    ranges: ["A1:A5", "C1"],
+    validationType: "list",
+    operator: "between",
+    formula1: '"Yes,No"',
+    formula2: null,
+    allowBlank: true,
+    inCellDropdown: true,
+    showInputMessage: false,
+    showErrorMessage: true,
+    errorStyle: "warning",
+    errorTitle: null,
+    errorMessage: "Pick one",
+    promptTitle: null,
+    promptMessage: null,
+  });
+  const whole = page.entries[1];
+  assert.deepEqual([whole.validationType, whole.operator], ["whole", "notBetween"]);
+  assert.deepEqual([whole.formula1, whole.formula2], ["1", "9"]);
+  assert.equal(whole.inCellDropdown, false);
+  assert.equal(whole.promptMessage, "Outside 1-9");
+  const rest = workbook.dataValidations("Data", { offset: 2 });
+  assert.equal(rest.entries[0].formula1, "Lists!$A$1:$A$2");
+  assert.equal(rest.nextOffset, null);
+  assert.deepEqual(workbook.dataValidations("Lists").entries, []);
+  for (const [operation, code] of [
+    [() => workbook.dataValidations("Missing"), "interop.sheet.not_found"],
+    [() => workbook.dataValidations("Data", { offset: 4 }), "interop.page.offset_out_of_range"],
+    [() => workbook.dataValidations("Data", { cursor: 1 }), "interop.input.invalid"],
+  ]) {
+    assert.throws(operation, (error) => {
+      assert.ok(error instanceof CellRuneError);
+      assert.equal(error.code, code);
+      return true;
+    });
+  }
   workbook.close();
 }
 
 async function main() {
   await assertDeleteSheet();
+  await assertDataValidations();
   await assertIncompleteSaveNamesCells();
   await assertCapabilityScan();
   await assertLimits();

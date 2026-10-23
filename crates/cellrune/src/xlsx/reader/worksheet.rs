@@ -10,6 +10,7 @@ use super::super::xml::{
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
 use super::auto_filter::SheetAutoFilterCollector;
+use super::data_validation::{self, DataValidationCollector};
 use super::formula_cell::SharedFormulaTable;
 use super::merge::MergedRangeCollector;
 use super::metadata::CellMetadata;
@@ -72,6 +73,7 @@ struct WorksheetParseState {
     table_parts_depth: Option<u64>,
     saw_table_parts: bool,
     auto_filter: SheetAutoFilterCollector,
+    data_validations: DataValidationCollector,
 }
 
 #[derive(Clone, Copy)]
@@ -149,6 +151,13 @@ pub(super) fn parse(
                 let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
+                if state.data_validations.wants(&local_name) {
+                    let namespace =
+                        data_validation::namespace(&xml, element.name(), is_spreadsheet, &budget)?;
+                    state
+                        .data_validations
+                        .start(&local_name, namespace, depth, &attributes);
+                }
                 process_start(
                     is_spreadsheet,
                     &local_name,
@@ -176,6 +185,14 @@ pub(super) fn parse(
                 let local_name = element.local_name().as_ref().as_bytes().to_vec();
                 let attributes = read_attributes(&element, &xml, &budget)?;
                 let is_spreadsheet = is_spreadsheet_element(&xml, element.name(), &budget)?;
+                if state.data_validations.wants(&local_name) {
+                    let namespace =
+                        data_validation::namespace(&xml, element.name(), is_spreadsheet, &budget)?;
+                    state
+                        .data_validations
+                        .start(&local_name, namespace, depth, &attributes);
+                    state.data_validations.end(depth);
+                }
                 if depth == 1 {
                     require_spreadsheet_element(is_spreadsheet, &local_name, WORKSHEET, &budget)?;
                     if state.saw_root {
@@ -338,21 +355,31 @@ pub(super) fn parse(
             Event::Text(text) => {
                 if let Some(cell) = &mut state.current_cell {
                     cell.append(decode_text(&text), &budget)?;
+                } else if state.data_validations.is_capturing() {
+                    state.data_validations.append(Some(&decode_text(&text)));
                 }
             }
             Event::CData(text) => {
                 if let Some(cell) = &mut state.current_cell {
                     cell.append(decode_cdata(&text), &budget)?;
+                } else if state.data_validations.is_capturing() {
+                    state.data_validations.append(Some(&decode_cdata(&text)));
                 }
             }
             Event::GeneralRef(reference) => {
                 if let Some(cell) = &mut state.current_cell {
                     cell.append(decode_reference(&reference, &budget)?, &budget)?;
+                } else if state.data_validations.is_capturing() {
+                    // Validation text was not decoded before it was modeled, so a reference that
+                    // does not decode leaves the rule unmodeled instead of failing the read.
+                    let text = decode_reference(&reference, &budget).ok();
+                    state.data_validations.append(text.as_deref());
                 }
             }
             Event::End(element) => {
                 let depth = budget.end()?;
                 let local_name = element.local_name().as_ref().as_bytes().to_vec();
+                state.data_validations.end(depth);
                 if let Some(cell) = &mut state.current_cell {
                     cell.process_end(&local_name, depth, &budget)?;
                 }
@@ -419,6 +446,7 @@ pub(super) fn parse(
     }
     sheet.set_merged_ranges(state.merged_ranges.finish(sheet_id, diagnostics, &budget)?);
     sheet.set_auto_filter(state.auto_filter.finish());
+    sheet.set_data_validations(state.data_validations.finish());
     Ok(())
 }
 

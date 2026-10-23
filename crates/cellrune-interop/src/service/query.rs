@@ -486,7 +486,7 @@ fn hidden_row_ranges(rows: &[Row]) -> Vec<String> {
         .collect()
 }
 
-fn normalized_limit(limit: u32) -> Result<u32, InteropError> {
+pub(super) fn normalized_limit(limit: u32) -> Result<u32, InteropError> {
     let limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
     if limit > MAX_PAGE_SIZE {
         return Err(InteropError::page_limit());

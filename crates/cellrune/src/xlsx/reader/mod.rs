@@ -1,5 +1,6 @@
 mod auto_filter;
 mod cell_value;
+mod data_validation;
 mod defined_name;
 mod formula_cell;
 mod formula_reference;

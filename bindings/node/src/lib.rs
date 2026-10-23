@@ -2,6 +2,7 @@ mod conversion;
 mod defined_name;
 mod error;
 mod preview_json;
+mod sheet_metadata;
 mod targeted;
 mod task;
 mod workbook;

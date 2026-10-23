@@ -105,6 +105,56 @@ export interface RangePage {
   readonly cells: readonly Cell[];
 }
 
+export interface SheetPageOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+}
+
+export interface DataValidation {
+  /** Ranges in `sqref` order; a one-cell range is a single address. */
+  readonly ranges: readonly string[];
+  readonly validationType:
+    | "none"
+    | "whole"
+    | "decimal"
+    | "list"
+    | "date"
+    | "time"
+    | "textLength"
+    | "custom";
+  readonly operator:
+    | "between"
+    | "notBetween"
+    | "equal"
+    | "notEqual"
+    | "lessThan"
+    | "lessThanOrEqual"
+    | "greaterThan"
+    | "greaterThanOrEqual";
+  /** Stored formula text without a leading `=`. */
+  readonly formula1: string | null;
+  readonly formula2: string | null;
+  readonly allowBlank: boolean;
+  /** Whether a list rule shows its in-cell dropdown (OOXML stores the inverse). */
+  readonly inCellDropdown: boolean;
+  readonly showInputMessage: boolean;
+  readonly showErrorMessage: boolean;
+  readonly errorStyle: "stop" | "warning" | "information";
+  readonly errorTitle: string | null;
+  readonly errorMessage: string | null;
+  readonly promptTitle: string | null;
+  readonly promptMessage: string | null;
+}
+
+export interface DataValidationPage {
+  readonly schemaVersion: number;
+  readonly sheet: string;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly DataValidation[];
+}
+
 export interface DefinedNameSheetSpan {
   readonly startSheetId: number;
   readonly startSheetName: string;
@@ -776,6 +826,8 @@ export class Workbook {
     options?: { readonly currentSheet?: string },
   ): DefinedNameInspection;
   functionUsage(): FunctionUsageReport;
+  /** Reads one bounded page of a sheet's read-only data validation rules. */
+  dataValidations(sheet: string, options?: SheetPageOptions): DataValidationPage;
   /** Statically reports whether each formula can be calculated, one bounded page at a time. */
   scanCapabilities(options?: CapabilityScanOptions): Promise<CapabilityPage>;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;

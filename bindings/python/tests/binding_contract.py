@@ -23,6 +23,9 @@ CORPUS_PATH = pathlib.Path(__file__).parents[3] / "binding-contract" / "v1.json"
 DEFINED_NAME_CORPUS_PATH = (
     pathlib.Path(__file__).parents[3] / "binding-contract" / "defined-name-v1.json"
 )
+SHEET_METADATA_FIXTURE_PATH = (
+    pathlib.Path(__file__).parents[3] / "binding-contract" / "sheet-metadata.xlsx"
+)
 TABLE_AUTHORING_CONTRACT_PATH = (
     pathlib.Path(__file__).parents[3]
     / "binding-contract"
@@ -508,8 +511,49 @@ def assert_delete_sheet() -> None:
         assert_error("interop.sheet.not_found", lambda: workbook.delete_sheet("Data"))
 
 
+def assert_data_validations() -> None:
+    workbook = Workbook.from_bytes(SHEET_METADATA_FIXTURE_PATH.read_bytes())
+    page = workbook.data_validations("data", limit=2)
+    assert (page["sheet"], page["total"], page["next_offset"]) == ("Data", 3, 2)
+    assert page["entries"][0] == {
+        "ranges": ["A1:A5", "C1"],
+        "validation_type": "list",
+        "operator": "between",
+        "formula1": '"Yes,No"',
+        "formula2": None,
+        "allow_blank": True,
+        "in_cell_dropdown": True,
+        "show_input_message": False,
+        "show_error_message": True,
+        "error_style": "warning",
+        "error_title": None,
+        "error_message": "Pick one",
+        "prompt_title": None,
+        "prompt_message": None,
+    }
+    whole = page["entries"][1]
+    assert (whole["validation_type"], whole["operator"]) == ("whole", "notBetween")
+    assert (whole["formula1"], whole["formula2"]) == ("1", "9")
+    assert whole["in_cell_dropdown"] is False
+    assert whole["prompt_message"] == "Outside 1-9"
+    rest = workbook.data_validations("Data", offset=2)
+    assert rest["entries"][0]["formula1"] == "Lists!$A$1:$A$2"
+    assert rest["next_offset"] is None
+    assert workbook.data_validations("Lists")["entries"] == []
+    assert_error("interop.sheet.not_found", lambda: workbook.data_validations("Missing"))
+    assert_error(
+        "interop.page.offset_out_of_range",
+        lambda: workbook.data_validations("Data", offset=4),
+    )
+    assert_error(
+        "interop.page.limit_invalid",
+        lambda: workbook.data_validations("Data", limit=cast(int, True)),
+    )
+
+
 def main() -> None:
     assert_delete_sheet()
+    assert_data_validations()
     assert_incomplete_save_names_cells()
     assert_capability_scan()
     assert_limits()

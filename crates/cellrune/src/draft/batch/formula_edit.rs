@@ -291,6 +291,14 @@ pub(super) fn rename_sheet(
         }
         .into());
     }
+    rewrite_data_validation_formulas(
+        sheets,
+        &FormulaRewriteRequest::Sheet {
+            old_name: old_name.as_str(),
+            new_name: name.as_str(),
+        },
+        &mut *edit.budget,
+    )?;
     rewrite_workbook_formulas(
         sheets,
         defined_names,
@@ -302,4 +310,42 @@ pub(super) fn rename_sheet(
     )?;
     sheet_by_id_mut(sheets, sheet_id)?.rename(name.clone());
     Ok(true)
+}
+
+/// Rewrites a renamed sheet's qualifiers in the data validation formulas the workbook model
+/// carries, as the writer rewrites them in the saved worksheet part.
+fn rewrite_data_validation_formulas(
+    sheets: &mut [Sheet],
+    request: &FormulaRewriteRequest<'_>,
+    budget: &mut FormulaRewriteBudget<'_>,
+) -> Result<(), BatchExecutionError> {
+    for sheet in sheets.iter_mut() {
+        let sheet_id = sheet.id().get();
+        let mut rewrites = Vec::new();
+        for (index, validation) in sheet.data_validations().iter().enumerate() {
+            for (slot, formula) in [validation.formula1(), validation.formula2()]
+                .into_iter()
+                .enumerate()
+            {
+                budget.check_cancelled()?;
+                let Some(formula) = formula else {
+                    continue;
+                };
+                let rewritten = rewrite_formula(formula, request, budget).map_err(|error| {
+                    error.with_owner(format!(
+                        "data_validation:sheet_id={sheet_id},index={index},formula={}",
+                        slot + 1
+                    ))
+                })?;
+                if let Some(rewritten) = rewritten {
+                    rewrites.push((index, slot, rewritten));
+                }
+            }
+        }
+        for (index, slot, rewritten) in rewrites {
+            *sheet.data_validations_mut()[index].formulas_mut()[slot] =
+                Some(rewritten.into_boxed_str());
+        }
+    }
+    Ok(())
 }

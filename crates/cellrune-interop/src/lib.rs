@@ -11,6 +11,7 @@ mod dto;
 mod error;
 mod json_object;
 mod service;
+mod sheet_metadata;
 mod targeted;
 mod usage_count;
 pub use service::{CompletedTargetRequest, PreparedTargetRequest};
@@ -48,6 +49,7 @@ pub use service::{
     PreparedPreview, PreparedRecalculation, PreparedWorkbookSave, WorkbookSession,
     format_display_text, function_catalog,
 };
+pub use sheet_metadata::{DataValidationDto, DataValidationPageDto, SheetPageRequestDto};
 
 /// Version of the serialized interop contract.
 pub const INTEROP_SCHEMA_VERSION: u32 = 1;

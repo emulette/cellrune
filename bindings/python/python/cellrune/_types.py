@@ -308,6 +308,43 @@ class SheetSummary(TypedDict):
     hidden_rows: list[str]
 
 
+class DataValidation(TypedDict):
+    ranges: list[str]
+    validation_type: Literal[
+        "none", "whole", "decimal", "list", "date", "time", "textLength", "custom"
+    ]
+    operator: Literal[
+        "between",
+        "notBetween",
+        "equal",
+        "notEqual",
+        "lessThan",
+        "lessThanOrEqual",
+        "greaterThan",
+        "greaterThanOrEqual",
+    ]
+    formula1: str | None
+    formula2: str | None
+    allow_blank: bool
+    in_cell_dropdown: bool
+    show_input_message: bool
+    show_error_message: bool
+    error_style: Literal["stop", "warning", "information"]
+    error_title: str | None
+    error_message: str | None
+    prompt_title: str | None
+    prompt_message: str | None
+
+
+class DataValidationPage(TypedDict):
+    schema_version: int
+    sheet: str
+    total: int
+    offset: int
+    next_offset: int | None
+    entries: list[DataValidation]
+
+
 class WorkbookFingerprint(TypedDict):
     schema_version: int
     digest_hex: str
