@@ -584,6 +584,10 @@ Node.js).
 `--max-response-bytes`; an oversized response fails without installing state, so callers can
 retry with fewer targets. It uses the existing request cancellation and session lifetime controls.
 
+`workbook_apply_changes` and `workbook_apply_changes_v2` stage their batch on a blocking worker
+and stop it through the same cooperative cancellation when the request is cancelled, failing with
+`mcp.operation.cancelled` without changing the session.
+
 `workbook_recalculate` always installs a completed calculation. When its delta exceeds
 `--max-response-bytes`, it reports `mcp.recalculation.response_byte_limit_exceeded` with the
 installed `result_revision` and `delta_cursor`; range reads and Save As use the installed results.

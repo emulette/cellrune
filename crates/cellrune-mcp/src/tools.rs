@@ -657,12 +657,32 @@ hints. Deleting a sheet turns references to it and its tables into #REF!.",
     async fn workbook_apply_changes(
         &self,
         Parameters(args): Parameters<ApplyChangesArgs>,
+        cancellation: CancellationToken,
     ) -> Result<Json<EditReceiptDto>, McpError> {
         let handle = self.sessions.get(&args.session_id)?;
+        let workbook = handle.workbook().clone();
+        let edit_cancellation = WorkbookCancellationToken::new();
+        let worker_cancellation = edit_cancellation.clone();
+        let expected_revision = args.expected_revision;
+        let batch = args.batch;
+        let mut worker = tokio::task::spawn_blocking(move || {
+            workbook.blocking_lock().prepare_changes_cancellable(
+                expected_revision,
+                batch,
+                &worker_cancellation,
+            )
+        });
+        let prepared = tokio::select! {
+            joined = &mut worker => join_result(joined)?,
+            () = cancellation.cancelled() => {
+                edit_cancellation.cancel();
+                let _ = worker.await;
+                return Err(McpError::cancelled());
+            }
+        };
+        self.ensure_json_size(prepared.receipt())?;
         let receipt = {
             let mut workbook = handle.workbook().lock().await;
-            let prepared = workbook.prepare_changes(args.expected_revision, args.batch)?;
-            self.ensure_json_size(prepared.receipt())?;
             workbook.install_changes(prepared)?
         };
         self.sessions.touch(&args.session_id)?;
@@ -1304,6 +1324,76 @@ mod tests {
                 .value_count,
             1
         );
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_v1_edit_waits_for_its_worker_and_changes_nothing() {
+        let config = ServerConfig::new(
+            vec![std::env::temp_dir()],
+            DEFAULT_MAX_SESSIONS,
+            DEFAULT_SESSION_TTL_SECONDS,
+            DEFAULT_MAX_RESPONSE_BYTES,
+            DEFAULT_MAX_WORKBOOK_BYTES,
+            false,
+        )
+        .expect("configuration");
+        let server = CellruneMcpServer::new(config);
+        let prepared = server
+            .sessions
+            .prepare_insert(WorkbookSession::create())
+            .expect("session");
+        let session_id = prepared.id().to_owned();
+        prepared.commit();
+        let args = || ApplyChangesArgs {
+            session_id: session_id.clone(),
+            expected_revision: 0,
+            batch: cellrune_interop::EditBatchDto {
+                changes: vec![cellrune_interop::WorkbookChangeDto::SetValue {
+                    sheet: "Sheet1".to_owned(),
+                    address: "A1".to_owned(),
+                    value: cellrune_interop::WritableCellValueDto::Number { value: 1.0 },
+                }],
+            },
+        };
+
+        // Holding the session keeps the worker from staging, so the request observes its
+        // cancellation first and then waits for the worker, which stages nothing.
+        let handle = server.sessions.get(&session_id).expect("session");
+        let guard = handle.workbook().lock().await;
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let request = tokio::spawn({
+            let server = server.clone();
+            let args = args();
+            async move {
+                server
+                    .workbook_apply_changes(Parameters(args), cancellation)
+                    .await
+            }
+        });
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !request.is_finished(),
+            "the request must wait for its worker"
+        );
+        drop(guard);
+        let error = match request.await.expect("request task") {
+            Ok(_) => panic!("a cancelled edit must not be installed"),
+            Err(error) => error,
+        };
+        assert_eq!(error.payload().code, "mcp.operation.cancelled");
+        assert_eq!(
+            handle.workbook().lock().await.summary().semantic_revision,
+            0
+        );
+
+        let receipt = server
+            .workbook_apply_changes(Parameters(args()), CancellationToken::new())
+            .await
+            .expect("an uncancelled edit installs");
+        assert_eq!(receipt.0.result_revision, 1);
     }
 
     #[tokio::test]

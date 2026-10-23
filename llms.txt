@@ -103,7 +103,12 @@ inside an allowed root and a Save As destination inside the root it names. It ha
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
-`workbook_discard_preview`, and the sessionless `format_display_text`. `workbook_save_edits_as` is the edits-only write of
+`workbook_discard_preview`, and the sessionless `format_display_text`.
+`workbook_apply_changes` and `workbook_apply_changes_v2` stage on a blocking
+worker (`WorkbookSession::prepare_changes_cancellable` and
+`prepare_changes_v2_cancellable`) and, when the MCP request is cancelled,
+cancel the staging cooperatively and fail with `mcp.operation.cancelled`
+without changing the session. `workbook_save_edits_as` is the edits-only write of
 `write_xlsx_draft_edits_bytes` for a session opened from a file. MCP clients
 always use the default read and calculation limits.
 Read-only JSON resources expose the versioned function catalog at

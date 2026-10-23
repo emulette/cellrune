@@ -49,6 +49,27 @@ impl WorkbookSession {
         Ok(PreparedChanges { prepared, receipt })
     }
 
+    /// Stages a typed edit batch with cooperative cancellation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::prepare_changes`] plus `session.cancelled` when
+    /// cancellation is requested before staging completes.
+    pub fn prepare_changes_cancellable(
+        &self,
+        expected_revision: u64,
+        batch: EditBatchDto,
+        cancellation: &CancellationToken,
+    ) -> Result<PreparedChanges, InteropError> {
+        let cancelled = || cancellation.is_cancelled();
+        let batch = convert_edit_batch(self.engine.workbook(), batch, &cancelled)?;
+        let prepared =
+            self.engine
+                .prepare_changes_cancellable(expected_revision, batch, cancellation)?;
+        let receipt = edit_receipt(prepared.workbook(), prepared.receipt());
+        Ok(PreparedChanges { prepared, receipt })
+    }
+
     /// Installs a previously staged edit batch if its source revision remains current.
     ///
     /// # Errors

@@ -46,6 +46,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- MCP `workbook_apply_changes` stages its batch on a blocking worker, as `workbook_apply_changes_v2`
+  does, so a large batch no longer holds the server's async runtime, and a cancelled request stops
+  the staging cooperatively and fails with `mcp.operation.cancelled` without changing the session.
+  Interop `WorkbookSession::prepare_changes_cancellable` stages a v1 batch with a cancellation
+  token.
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
   Supported Python versions are unchanged.
 - Formulas over overlapping ranges share the dependency areas those ranges are stored as, so a

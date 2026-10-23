@@ -296,3 +296,28 @@ fn a_caller_token_cancels_exactly_its_own_recalculation() {
     session.install_recalculation(completed).expect("install");
     assert!(!session.calculation_active());
 }
+
+#[test]
+fn a_cancelled_v1_batch_stages_nothing() {
+    let session = WorkbookSession::create();
+    let batch = || EditBatchDto {
+        changes: vec![WorkbookChangeDto::SetValue {
+            sheet: "Sheet1".to_owned(),
+            address: "A1".to_owned(),
+            value: WritableCellValueDto::Number { value: 1.0 },
+        }],
+    };
+    let token = cellrune_interop::CancellationToken::new();
+    token.cancel();
+    let error = session
+        .prepare_changes_cancellable(0, batch(), &token)
+        .expect_err("a cancelled batch is not staged");
+    assert_eq!(error.code(), "session.cancelled");
+    let mut session = session;
+    let prepared = session
+        .prepare_changes_cancellable(0, batch(), &cellrune_interop::CancellationToken::new())
+        .expect("stage");
+    assert_eq!(prepared.receipt().result_revision, 1);
+    session.install_changes(prepared).expect("install");
+    assert_eq!(session.summary().semantic_revision, 1);
+}
