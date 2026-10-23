@@ -122,15 +122,14 @@ fn choose_number_section(
     if first.holds(value) {
         return Ok(chosen(0, value, false));
     }
-    match (numeric.get(1), numeric.len()) {
-        (Some(second), _)
-            if second
-                .condition
-                .is_none_or(|condition| condition.holds(value)) =>
-        {
-            Ok(chosen(1, value, false))
-        }
-        (Some(_), 3) => Ok(chosen(2, value, false)),
+    match numeric.get(1).map(|second| second.condition) {
+        // Microsoft documents a second section without a condition as the one for the numbers the
+        // first condition rejects, as in `[<=9999999]###-####;(###) ###-####`.
+        Some(None) if numeric.len() == 2 => Ok(chosen(1, value, false)),
+        Some(Some(condition)) if condition.holds(value) => Ok(chosen(1, value, false)),
+        Some(Some(_)) if numeric.len() == 3 => Ok(chosen(2, value, false)),
+        // Which numbers a third section takes after a second section without a condition has
+        // not been established.
         _ => Err(ErrorKind::Unsupported),
     }
 }

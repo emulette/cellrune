@@ -49,7 +49,19 @@ pub(super) fn render(
     {
         return render_scientific(&items, value, signed);
     }
-    match fraction_slash(&items)? {
+    let slash = fraction_slash(&items)?;
+    // The 0.1.26 subset showed any other `/` as written, as in `0/2`. To Excel a slash before a
+    // digit is a fixed denominator, and a slash elsewhere beside digits, as in `#%/#`, is
+    // unmeasured.
+    if !earlier_subset
+        && items
+            .iter()
+            .enumerate()
+            .any(|(index, item)| *item == Item::Slash && Some(index) != slash)
+    {
+        return Err(ErrorKind::Unsupported);
+    }
+    match slash {
         Some(slash) => render_fraction(&items, slash, value, signed),
         None => render_decimal(&items, value, signed, earlier_subset),
     }
@@ -81,48 +93,22 @@ fn item(token: &Token, earlier_subset: bool) -> Result<Item, ErrorKind> {
     })
 }
 
-/// Finds the slash of a fraction layout such as `# ?/?` or `??/??`.
-///
-/// A slash between a digit placeholder and a literal digit, as in `0/8`, is a fixed denominator
-/// to Excel. 0.1.26 already rendered such codes with the slash and digits as literal text when no
-/// `?` placeholder or integer part was present, and that result is kept; the other fixed
-/// denominator codes are unsupported.
+/// Finds the slash of a fraction layout such as `# ?/?` or `??/??`: a `/` between two digit
+/// placeholders.
 fn fraction_slash(items: &[Item]) -> Result<Option<usize>, ErrorKind> {
+    let is_placeholder = |index: Option<usize>| {
+        index
+            .and_then(|index| items.get(index))
+            .is_some_and(|item| matches!(item, Item::Placeholder(_)))
+    };
     let mut found = None;
     for (index, item) in items.iter().enumerate() {
-        if *item != Item::Slash
-            || !matches!(
-                index.checked_sub(1).map(|before| &items[before]),
-                Some(Item::Placeholder(_))
-            )
+        if *item == Item::Slash
+            && is_placeholder(index.checked_sub(1))
+            && is_placeholder(Some(index + 1))
+            && found.replace(index).is_some()
         {
-            continue;
-        }
-        match items.get(index + 1) {
-            Some(Item::Placeholder(_)) => {
-                if found.replace(index).is_some() {
-                    return Err(ErrorKind::Unsupported);
-                }
-            }
-            Some(Item::Literal(text)) if text.starts_with(|digit: char| digit.is_ascii_digit()) => {
-                let numerator_start = items[..index]
-                    .iter()
-                    .rposition(|item| !matches!(item, Item::Placeholder(_)))
-                    .map_or(0, |position| position + 1);
-                let has_integer_part = items[..numerator_start]
-                    .iter()
-                    .rposition(|item| matches!(item, Item::Placeholder(_)))
-                    .is_some_and(|integer_end| {
-                        items[integer_end..numerator_start]
-                            .iter()
-                            .any(|item| matches!(item, Item::Literal(_)))
-                    });
-                let has_question = items.contains(&Item::Placeholder(Placeholder::Question));
-                if has_integer_part || has_question {
-                    return Err(ErrorKind::Unsupported);
-                }
-            }
-            _ => {}
+            return Err(ErrorKind::Unsupported);
         }
     }
     Ok(found)

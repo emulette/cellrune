@@ -130,6 +130,20 @@ fn conditions_choose_sections_and_colors_are_not_shown() {
 }
 
 #[test]
+fn unestablished_combinations_are_unsupported() {
+    // A third section after an unconditional second one.
+    assert_unsupported(2.0, "[>3]0;0.0;0.00");
+    assert_text(2.0, "[>3]0;[<1]0.0;0.00", "2.00");
+    // Elapsed time beside a half-day marker.
+    assert_unsupported(0.75, "[h]:mm AM/PM");
+    assert_unsupported(0.75, "[mm]:ss A/P");
+    // A slash that does not form a `?/?` fraction outside the 0.1.26 subset.
+    assert_unsupported(0.25, "#%/#");
+    assert_unsupported(2.5, "0/2;0");
+    assert_text(2.5, "0/2", "3/2");
+}
+
+#[test]
 fn literals_between_digit_placeholders_take_digits_from_the_right() {
     assert_text(123_456_789.0, "000-00-0000", "123-45-6789");
     assert_text(123_456.0, "##0° 00' 00''", "12° 34' 56''");

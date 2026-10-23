@@ -994,7 +994,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   without their sign), zero, and text; one section formats every number and
   shows a minus sign, and an empty section shows nothing. `[<=100]`-style
   conditions on the first two sections select a section for a non-negative
-  number; colors such as `[Red]` are accepted and not shown. Quoted text,
+  number, and a second section without a condition takes the rest when it is
+  the last; colors such as `[Red]` are accepted and not shown. Quoted text,
   `\x`, `[$symbol-lcid]` symbols, and characters other than codes and letters
   are literal. An unquoted letter that is not a code is shown as written only
   in the one-section digit codes 0.1.26 formatted (`TEXT(5,"0 x")` is `5 x`)
@@ -1030,8 +1031,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   or to the shown fraction of a second, with English month, weekday, and
   `AM`/`PM` names under the default locale profile. These stay
   `calculation.unsupported_expression`: `*` fills, fixed fraction
-  denominators such as `# ?/8`, `@` in a number section, conditional sections
-  for a negative number, lowercase `am/pm`, `aaa`, `b`, and `g` codes, system
+  denominators such as `# ?/8` and any other `/` beside digits that does not
+  form a `?/?` fraction (`#%/#`; the 0.1.26 code `0/2` keeps showing `3/2`
+  for 2.5), `@` in a number section, conditional sections for a negative
+  number, a third section after a second without a condition, elapsed codes
+  beside `AM/PM` or `A/P`, lowercase `am/pm`, `aaa`, `b`, and `g` codes, system
   formats such as `[$-F800]`, names under a `[$-lcid]` other than `[$-409]`
   or under the Korean profile, negative date-time values, fractions that
   round to a whole number, and other year, day, hour, and second code

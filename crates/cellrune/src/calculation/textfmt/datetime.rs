@@ -126,6 +126,14 @@ pub(super) fn render(
     let of_day = ticks % ticks_per_day;
     let date = date_from_serial(day as f64, context.date_system).ok_or(ErrorKind::Unsupported)?;
     let twelve_hour = parts.iter().any(|part| matches!(part, Part::Meridiem(_)));
+    // How Excel shows elapsed time beside a half-day marker has not been established.
+    if twelve_hour
+        && parts
+            .iter()
+            .any(|part| matches!(part, Part::Elapsed { .. }))
+    {
+        return Err(ErrorKind::Unsupported);
+    }
     let hour = of_day / (3_600 * ticks_per_second);
     let minute = of_day / (60 * ticks_per_second) % 60;
     let second = of_day / ticks_per_second % 60;
