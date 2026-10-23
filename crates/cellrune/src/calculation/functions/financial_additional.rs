@@ -3,7 +3,7 @@ use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
-use super::financial::{financial_value, payment, scalar_arguments};
+use super::financial::{financial_value, scalar_arguments};
 use super::kernel::FinancialAdditionalFunction;
 use super::util::{collect_argument_values, required_number};
 
@@ -47,8 +47,13 @@ enum PaymentPart {
 
 /// CUMIPMT and CUMPRINC(rate, nper, pv, start_period, end_period, type) total the interest or the
 /// principal of the level payments from `start_period` through `end_period`. With end-of-period
-/// payments the balance after k payments is pv·q^k + pmt·(q^k − 1)/rate with q = 1 + rate, so the
-/// principal is the change in that balance and the interest is the rest of the payments.
+/// payments and q = 1 + rate, the balance after j payments is pv·(q^n − q^j)/(q^n − 1), or
+/// pv·q^j·E(n − j)/E(n) with E(x) = q^x − 1. Over the m periods after the first a payments, the
+/// principal is the drop in that balance, pv·q^a·E(m)/E(n), and the interest is rate times the
+/// balances the periods start from, pv·rate·q^a·(m·E(n − a) − X(m))/E(n) with
+/// X(m) = (E(m) − m·rate)/rate. E is `exp_m1(x·ln_1p(rate))` and X a series for small m·rate, so
+/// neither total is the small difference of two large ones, as the interest is when it is taken as
+/// the payments minus the principal at a small rate.
 ///
 /// Microsoft documents the argument errors but not how fractional periods or beginning-of-period
 /// payments split interest from principal, so those calls are unsupported rather than guessed.
@@ -79,16 +84,41 @@ fn cumulative_payment(
     if start.fract() != 0.0 || end.fract() != 0.0 || payment_type == 1.0 {
         return Value::Error(ErrorKind::Unsupported);
     }
-    let level_payment = payment(rate, periods, present, 0.0, 0.0);
-    let balance = |paid: f64| {
-        let power = (1.0 + rate).powf(paid);
-        present * power + level_payment * (power - 1.0) / rate
-    };
-    let principal = balance(end) - balance(start - 1.0);
+    let log_growth = rate.ln_1p();
+    let growth = |count: f64| (count * log_growth).exp_m1();
+    let total = growth(periods);
+    if !total.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+    let (paid, count) = (start - 1.0, end - start + 1.0);
+    let scale = (paid * log_growth).exp();
     financial_value(match part {
-        PaymentPart::Principal => principal,
-        PaymentPart::Interest => (end - start + 1.0) * level_payment - principal,
+        PaymentPart::Principal => -present * (growth(count) / total) * scale,
+        PaymentPart::Interest => {
+            let balances = count * (growth(periods - paid) / total)
+                - compound_excess(rate, count, growth(count)) / total;
+            -present * rate * balances * scale
+        }
     })
+}
+
+/// ((1 + rate)^count − 1 − count·rate) / rate for a whole `count`, given the `growth`
+/// (1 + rate)^count − 1. Below count·rate = 0.5 it sums the binomial series
+/// Σ C(count, k)·rate^(k − 1) from k = 2, whose positive terms shrink at least sixfold, instead of
+/// subtracting nearly equal numbers.
+fn compound_excess(rate: f64, count: f64, growth: f64) -> f64 {
+    if count * rate >= 0.5 {
+        return (growth - count * rate) / rate;
+    }
+    let mut term = count * (count - 1.0) / 2.0 * rate;
+    let mut total = 0.0;
+    let mut k = 2.0;
+    while total + term != total {
+        total += term;
+        term *= (count - k) / (k + 1.0) * rate;
+        k += 1.0;
+    }
+    total
 }
 
 /// VDB(cost, salvage, life, start_period, end_period, [factor], [no_switch]) totals the

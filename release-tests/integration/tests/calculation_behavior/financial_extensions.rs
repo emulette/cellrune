@@ -126,6 +126,25 @@ fn cumulative_payments_split_level_payments_into_interest_and_principal() {
             -206.344_410_876_131_86,
             1e-9,
         ),
+        // At small rates the interest is far below the payments; the references are 50-digit
+        // sums of rate × balance. Excel 16.114 for Mac returns -6.500000108644599E-05 for the
+        // first, 1.6e-9 away, and -1000 for the principal.
+        (
+            "CUMIPMT(1E-8,12,1000,1,12,0)",
+            -6.500_000_119_166_666e-5,
+            1e-19,
+        ),
+        (
+            "CUMIPMT(1E-10,12,1000,1,12,0)",
+            -6.500_000_001_191_667e-7,
+            1e-21,
+        ),
+        ("CUMPRINC(1E-8,12,1000,1,12,0)", -1_000.0, 1e-12),
+        (
+            "CUMIPMT(1E-12,360,1000,1,360,0)",
+            -1.805_000_000_107_999e-7,
+            1e-21,
+        ),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula)]);
         assert!(scan_formula_capabilities(&workbook).is_supported());

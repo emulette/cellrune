@@ -916,8 +916,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `calculation.unsupported_expression`.
 - `CUMIPMT` and `CUMPRINC(rate, nper, pv, start_period, end_period, type)`
   total the interest or principal of the level payments from `start_period`
-  through `end_period` as negative amounts. A rate, `nper`, or `pv` that is
-  not positive, a start or end period below 1, a start after the end, an end
+  through `end_period` as negative amounts. Both come from closed forms of the
+  balances rather than from the payments minus the other part, so the interest
+  at a small rate such as `CUMIPMT(1E-8,12,1000,1,12,0)` keeps its digits. A
+  rate, `nper`, or `pv` that is not positive, a start or end period below 1, a start after the end, an end
   after `nper`, or a type other than 0 or 1 returns `#NUM!`. Fractional periods
   and beginning-of-period payments (type 1) report
   `calculation.unsupported_expression`.
