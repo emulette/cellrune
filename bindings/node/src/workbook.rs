@@ -5,9 +5,9 @@ use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
     FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
-    RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto, RecalculationModeDto,
-    SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto,
-    WriteOptionsDto,
+    RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto,
+    RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession,
+    WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
@@ -71,17 +71,29 @@ impl NativeWorkbook {
         end: String,
         offset: f64,
         limit: f64,
+        options: Option<NativeRangeReadOptions>,
     ) -> napi::Result<NativeRangePage> {
         let offset = offset_from_number(offset)?;
         let limit = limit_from_number(limit)?;
+        let options = options.map_or_else(RangeReadOptionsDto::default, |options| {
+            RangeReadOptionsDto {
+                omit_empty: options.omit_empty.unwrap_or(false),
+                values_only: options.values_only.unwrap_or(false),
+                compact: options.compact.unwrap_or(false),
+                max_bytes: options.max_bytes.map(|bytes| bytes as u64),
+            }
+        });
         self.lock()?
-            .read_range(&RangeRequestDto {
-                sheet,
-                start,
-                end,
-                offset,
-                limit,
-            })
+            .read_range_with_options(
+                &RangeRequestDto {
+                    sheet,
+                    start,
+                    end,
+                    offset,
+                    limit,
+                },
+                &options,
+            )
             .map(crate::conversion::range_page)
             .map_err(napi_error)
     }
@@ -619,6 +631,15 @@ fn preview_section(value: &str) -> napi::Result<TransactionDetailSectionDto> {
 /// JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
 /// own object so their errors keep the limit codes, and the policies stay strings so an unknown
 /// one keeps its own code.
+/// Optional forms of a range page, validated by the JavaScript wrapper.
+#[napi(object)]
+pub struct NativeRangeReadOptions {
+    pub omit_empty: Option<bool>,
+    pub values_only: Option<bool>,
+    pub compact: Option<bool>,
+    pub max_bytes: Option<f64>,
+}
+
 #[napi(object)]
 #[derive(Default)]
 pub struct NativeCalculationOptions {

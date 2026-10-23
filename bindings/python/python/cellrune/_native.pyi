@@ -103,6 +103,10 @@ class Workbook:
         *,
         offset: int | None = None,
         limit: int | None = None,
+        omit_empty: bool = False,
+        values_only: bool = False,
+        compact: bool = False,
+        max_bytes: int | None = None,
     ) -> RangePage: ...
     def read_formats(
         self,

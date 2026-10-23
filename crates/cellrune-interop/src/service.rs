@@ -8,6 +8,7 @@ mod format;
 mod phonetic;
 mod preview;
 mod query;
+mod range_read;
 mod save;
 mod sheet_metadata;
 mod targeted;

@@ -565,6 +565,14 @@ session's edits into the file it was opened from without calculating, under the 
 overwrite rules, and returns the edit report. MCP clients always use the default read and
 calculation limits; raising them is left to the operator.
 
+`workbook_read_range` also takes optional forms that save response bytes: `omit_empty` leaves
+out empty cells, `values_only` returns address and value pairs in `values`, `compact` returns
+`rows` of values without addresses, and `max_bytes` returns the longest prefix of the page that
+fits, continued from `next_offset`. Offset and limit always count positions of the range, and a
+read without these options returns exactly the page it did before. Python `read_range` and
+Node.js `readRange` take the same options (`omitEmpty`, `valuesOnly`, `compact`, `maxBytes` in
+Node.js).
+
 `workbook_calculate_targets` accepts `session_id`, `targets`, optional `options`, and optional
 `limits`. Its limits are capped at the defaults above. The entire partial response must fit
 `--max-response-bytes`; an oversized response fails without installing state, so callers can

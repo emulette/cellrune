@@ -775,6 +775,40 @@ def assert_range_values() -> None:
         assert workbook.summary()["semantic_revision"] == 3
 
 
+def assert_range_read_forms() -> None:
+    with Workbook.create() as workbook:
+        workbook.set_number("Sheet1", "A1", 1)
+        workbook.set_formula("Sheet1", "C2", "=A1*3")
+        workbook.calculate()
+        plain = workbook.read_range("Sheet1", "A1", "C2")
+        assert len(plain["cells"]) == 6
+        assert "values" not in plain and "rows" not in plain
+        sparse = workbook.read_range(
+            "Sheet1", "A1", "C2", omit_empty=True, values_only=True
+        )
+        assert sparse["cells"] == []
+        assert sparse.get("values") == [
+            {"address": "A1", "value": {"kind": "number", "value": 1.0}},
+            {"address": "C2", "value": {"kind": "number", "value": 3.0}},
+        ]
+        compact = workbook.read_range(
+            "Sheet1", "A1", "C2", offset=1, compact=True, omit_empty=True
+        )
+        assert compact.get("rows") == [
+            [],
+            [{"kind": "blank"}, {"kind": "blank"}, {"kind": "number", "value": 3.0}],
+        ]
+        prefix = workbook.read_range("Sheet1", "A1", "C2", max_bytes=700)
+        assert 0 < len(prefix["cells"]) < 6
+        assert prefix["next_offset"] == len(prefix["cells"])
+        try:
+            workbook.read_range("Sheet1", "A1", "C2", max_bytes=50)
+        except CellRuneError as error:
+            assert error.code == "interop.page.byte_limit_exceeded"
+        else:
+            raise AssertionError("a page with no room for a cell was returned")
+
+
 def assert_csv() -> None:
     workbook = Workbook.from_csv(
         b'item;amount\r\n"Widget; large";2.5\r\n', sheet_name="Import", delimiter=";"
@@ -803,6 +837,7 @@ def main() -> None:
     assert_delete_sheet()
     assert_surface_authoring()
     assert_range_values()
+    assert_range_read_forms()
     assert_csv()
     assert_annotations()
     assert_formats()

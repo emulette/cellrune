@@ -204,6 +204,23 @@ exceeded a calculation limit carries `limit`, its `CalculationLimitKind::as_str`
 name such as `max_formula_tokens`, and omits it otherwise. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
 
+`WorkbookSession::read_range_with_options(&RangeRequestDto,
+&RangeReadOptionsDto)` reads a range page in an optional form; default options
+return exactly the `read_range` page. `omit_empty` leaves out empty cells (no
+value, formula, or calculated result); `values_only` returns
+`values: [{address, value}]` with `value` a `RangeValueDto` and an empty
+`cells`; `compact` returns `rows`, the page's `RangeValueDto`s grouped by
+worksheet row, where only the first row can start after the range's first
+column and `omit_empty` trims each row's trailing empty cells; and `max_bytes`
+returns the longest prefix of the page whose JSON fits, failing with
+`interop.page.byte_limit_exceeded` when not even the first position fits.
+Offset, limit, and `next_offset` always count positions of the range. The
+new `values` and `rows` fields are omitted unless requested. MCP
+`workbook_read_range` takes `omit_empty`, `values_only`, `compact`, and
+`max_bytes`; Python `read_range(..., omit_empty=, values_only=, compact=,
+max_bytes=)` and Node.js `readRange(sheet, start, end, { omitEmpty,
+valuesOnly, compact, maxBytes })` pass them through.
+
 `WorkbookSession::read_values(&RangeValuesRequestDto { sheet, start, end })`
 returns `RangeValuesDto { rows }`, one row per worksheet row of
 `RangeValueDto`: a tagged `CellValueDto`, or `{"kind": "unavailable", code,

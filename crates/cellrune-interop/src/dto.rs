@@ -1054,8 +1054,18 @@ pub struct RangePageDto {
     pub offset: u64,
     /// Offset for the next page, or `None` at the end.
     pub next_offset: Option<u64>,
-    /// Returned cells in row-major order, including blanks.
+    /// Returned cells in row-major order, including blanks unless empty cells are omitted. Empty
+    /// when the request asked for values only or the compact form.
     pub cells: Vec<CellDto>,
+    /// With values only: each returned cell's address and value, in row-major order. Omitted
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<crate::RangeCellValueDto>>,
+    /// With the compact form: the page's values grouped by worksheet row, each row starting at the
+    /// page position it continues, so only the first row can start after the range's first column.
+    /// Omitted otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<Vec<crate::RangeValueDto>>>,
 }
 
 /// Request for one workbook or sheet-local defined-name inspection.

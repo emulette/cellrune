@@ -131,7 +131,24 @@ function normalizeRangePage(page) {
         kind: cell.numberFormat.kind,
       },
     })),
+    ...(page.values == null
+      ? {}
+      : {
+          values: page.values.map((entry) => ({
+            address: entry.address,
+            value: normalizeRangeValue(entry.value),
+          })),
+        }),
+    ...(page.rows == null
+      ? {}
+      : { rows: page.rows.map((row) => row.map(normalizeRangeValue)) }),
   };
+}
+
+/** Flattens a range value the native page carries as a calculation result. */
+function normalizeRangeValue(result) {
+  const normalized = normalizeResult(result);
+  return normalized.kind === "value" ? normalized.value : normalized;
 }
 
 function normalizeDefinedNameInspection(report) {

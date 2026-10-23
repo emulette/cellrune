@@ -67,7 +67,8 @@ pub use sheet_metadata::{
     HyperlinkPageDto, SheetPageRequestDto,
 };
 pub use values::{
-    RangeValueDto, RangeValuesDto, RangeValuesRequestDto, RangeWriteRequestDto, UnavailableValueDto,
+    RangeCellValueDto, RangeReadOptionsDto, RangeValueDto, RangeValuesDto, RangeValuesRequestDto,
+    RangeWriteRequestDto, UnavailableValueDto,
 };
 
 /// Version of the serialized interop contract.

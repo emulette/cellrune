@@ -147,7 +147,9 @@ cell fonts, fills, borders, and alignments with column widths and row heights, a
 `frozenPane` when it has one, and `phonetics(sheet, { offset, limit })` pages through its phonetic
 runs. A limit failure carries its figures in `error.details.limit`, and an unavailable result that
 exceeded a calculation limit names it in `limit`.
-`readValues(sheet, start, end)` reads a rectangle as rows of typed values, and
+`readRange(sheet, start, end, { omitEmpty, valuesOnly, compact, maxBytes })` returns a page without
+empty cells, as address and value pairs, as compact rows, or as the longest prefix within a byte
+limit. `readValues(sheet, start, end)` reads a rectangle as rows of typed values, and
 `writeValues(sheet, start, rows)` writes equal-length rows of values as one atomic edit.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository

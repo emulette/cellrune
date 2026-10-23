@@ -2031,6 +2031,70 @@ fn surface_authoring_edits_and_limit_figures_are_stdio_visible() {
     assert!(status.success());
 }
 
+#[test]
+fn range_reads_take_compact_and_byte_limited_forms_over_stdio() {
+    let root = TestDirectory::new("range-forms");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let session_id = successful_tool(mcp.call_tool("workbook_create", json!({})))["session_id"]
+        .as_str()
+        .expect("session")
+        .to_owned();
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "changes": [
+                {"kind": "set_value", "sheet": "Sheet1", "address": "A1",
+                 "value": {"kind": "number", "value": 1.0}},
+                {"kind": "set_formula", "sheet": "Sheet1", "address": "C2", "formula": "=A1*3"}
+            ]
+        }),
+    ));
+    successful_tool(mcp.call_tool("workbook_recalculate", json!({"session_id": session_id})));
+    let read = |mcp: &mut McpProcess, options: Value| {
+        let mut arguments =
+            json!({"session_id": session_id, "sheet": "Sheet1", "start": "A1", "end": "C2"});
+        for (key, value) in options.as_object().expect("options") {
+            arguments[key] = value.clone();
+        }
+        mcp.call_tool("workbook_read_range", arguments)
+    };
+    let plain = successful_tool(read(&mut mcp, json!({})));
+    assert_eq!(plain["cells"].as_array().map(Vec::len), Some(6));
+    assert!(plain.get("values").is_none() && plain.get("rows").is_none());
+
+    let sparse = successful_tool(read(
+        &mut mcp,
+        json!({"omit_empty": true, "values_only": true}),
+    ));
+    assert_eq!(
+        sparse["values"],
+        json!([
+            {"address": "A1", "value": {"kind": "number", "value": 1.0}},
+            {"address": "C2", "value": {"kind": "number", "value": 3.0}}
+        ])
+    );
+    let compact = successful_tool(read(&mut mcp, json!({"compact": true, "omit_empty": true})));
+    assert_eq!(
+        compact["rows"],
+        json!([
+            [{"kind": "number", "value": 1.0}],
+            [{"kind": "blank"}, {"kind": "blank"}, {"kind": "number", "value": 3.0}]
+        ])
+    );
+    let prefix = successful_tool(read(&mut mcp, json!({"max_bytes": 700})));
+    let returned = prefix["cells"].as_array().map(Vec::len).expect("cells");
+    assert!((1..6).contains(&returned));
+    assert_eq!(prefix["next_offset"], returned);
+    let error = failed_tool(read(&mut mcp, json!({"max_bytes": 50})));
+    assert_eq!(error["code"], "interop.page.byte_limit_exceeded");
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
 fn successful_tool(result: Value) -> Value {
     assert_eq!(
         result["isError"], false,

@@ -118,7 +118,27 @@ export interface RangePage {
   readonly totalCells: number;
   readonly offset: number;
   readonly nextOffset: number | null;
+  /** Full cell objects; empty when the read asked for `valuesOnly` or `compact`. */
   readonly cells: readonly Cell[];
+  /** With `valuesOnly`: each returned cell's address and value. */
+  readonly values?: readonly { readonly address: string; readonly value: RangeValue }[];
+  /**
+   * With `compact`: the page's values grouped by worksheet row; only the first row can start
+   * after the range's first column.
+   */
+  readonly rows?: readonly (readonly RangeValue[])[];
+}
+
+/** Optional forms of a range page; offset and limit always count positions of the range. */
+export interface RangeReadOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  /** Leaves out empty cells; in the compact form only each row's trailing empty cells. */
+  readonly omitEmpty?: boolean;
+  readonly valuesOnly?: boolean;
+  readonly compact?: boolean;
+  /** Largest serialized page in bytes; the page is then the longest prefix that fits. */
+  readonly maxBytes?: number;
 }
 
 export type Color =
@@ -1145,12 +1165,7 @@ export class Workbook {
   get closed(): boolean;
   close(): void;
   summary(): WorkbookSummary;
-  readRange(
-    sheet: string,
-    start: string,
-    end: string,
-    options?: { readonly offset?: number; readonly limit?: number },
-  ): RangePage;
+  readRange(sheet: string, start: string, end: string, options?: RangeReadOptions): RangePage;
   inspectDefinedName(
     name: string,
     options?: { readonly currentSheet?: string },

@@ -153,6 +153,9 @@ def check() -> None:
         rule["ranges"][0].upper()
         if rule["validation_type"] == "list" and rule["formula1"] is not None:
             rule["formula1"].upper()
+    compact_page = reopened.read_range("Sheet1", "A1", "B2", compact=True, max_bytes=4096)
+    for compact_row in compact_page.get("rows", []):
+        len(compact_row)
     grid: list[list[RangeValue]] = reopened.read_values("Sheet1", "A1", "B2")
     for grid_row in grid:
         for grid_value in grid_row:

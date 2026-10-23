@@ -630,6 +630,43 @@ async function assertRangeValues() {
   workbook.close();
 }
 
+async function assertRangeReadForms() {
+  const workbook = Workbook.create();
+  workbook.setNumber("Sheet1", "A1", 1);
+  workbook.setFormula("Sheet1", "C2", "=A1*3");
+  await workbook.calculate();
+  const plain = workbook.readRange("Sheet1", "A1", "C2");
+  assert.equal(plain.cells.length, 6);
+  assert.equal("values" in plain || "rows" in plain, false);
+  const sparse = workbook.readRange("Sheet1", "A1", "C2", { omitEmpty: true, valuesOnly: true });
+  assert.deepEqual(sparse.cells, []);
+  assert.deepEqual(sparse.values, [
+    { address: "A1", value: { kind: "number", value: 1 } },
+    { address: "C2", value: { kind: "number", value: 3 } },
+  ]);
+  const compact = workbook.readRange("Sheet1", "A1", "C2", {
+    offset: 1,
+    compact: true,
+    omitEmpty: true,
+  });
+  assert.deepEqual(compact.rows, [
+    [],
+    [{ kind: "blank" }, { kind: "blank" }, { kind: "number", value: 3 }],
+  ]);
+  const prefix = workbook.readRange("Sheet1", "A1", "C2", { maxBytes: 700 });
+  assert.ok(prefix.cells.length > 0 && prefix.cells.length < 6);
+  assert.equal(prefix.nextOffset, prefix.cells.length);
+  assert.throws(
+    () => workbook.readRange("Sheet1", "A1", "C2", { maxBytes: 50 }),
+    (error) => error.code === "interop.page.byte_limit_exceeded",
+  );
+  assert.throws(
+    () => workbook.readRange("Sheet1", "A1", "C2", { compact: 1 }),
+    (error) => error.code === "interop.input.invalid",
+  );
+  workbook.close();
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -795,6 +832,7 @@ async function main() {
   await assertDeleteSheet();
   await assertSurfaceAuthoring();
   await assertRangeValues();
+  await assertRangeReadForms();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

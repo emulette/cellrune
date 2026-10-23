@@ -182,6 +182,10 @@ async function check(): Promise<void> {
   }
   // @ts-expect-error Sheet metadata pages take only an offset and a limit.
   reopened.dataValidations("Sheet1", { cursor: 1 });
+  const compactPage = reopened.readRange("Sheet1", "A1", "B2", { compact: true, maxBytes: 4096 });
+  compactPage.rows?.[0]?.length.toFixed(0);
+  // @ts-expect-error Range forms are booleans.
+  reopened.readRange("Sheet1", "A1", "B2", { compact: 1 });
   const grid: RangeValue[][] = reopened.readValues("Sheet1", "A1", "B2");
   for (const value of grid.flat()) {
     if (value.kind === "unavailable") {

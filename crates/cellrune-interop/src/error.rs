@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 const MESSAGE_SHEET_NOT_FOUND: &str = "workbook does not contain the requested sheet";
 const MESSAGE_PAGE_LIMIT: &str = "page size exceeds the interop limit";
 const MESSAGE_PAGE_OFFSET: &str = "page offset exceeds the requested range";
+const MESSAGE_PAGE_BYTE_LIMIT: &str =
+    "range page cannot contain its first position within the byte limit";
 const MESSAGE_PAGE_OFFSET_INVALID: &str = "page offset must be a non-negative integer";
 const MESSAGE_PAGE_LIMIT_INVALID: &str =
     "page limit must be a non-negative integer within the unsigned 32-bit range";
@@ -216,6 +218,10 @@ impl InteropError {
 
     pub(crate) fn page_limit() -> Self {
         Self::input("interop.page.limit_exceeded", MESSAGE_PAGE_LIMIT)
+    }
+
+    pub(crate) fn page_byte_limit() -> Self {
+        Self::input("interop.page.byte_limit_exceeded", MESSAGE_PAGE_BYTE_LIMIT)
     }
 
     pub(crate) fn page_offset() -> Self {

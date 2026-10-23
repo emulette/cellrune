@@ -177,7 +177,17 @@ class Cell(TypedDict):
     number_format: NumberFormat
 
 
-class RangePage(TypedDict):
+class RangeCellValue(TypedDict):
+    address: str
+    value: "RangeValue"
+
+
+class RangePageOptions(TypedDict, total=False):
+    values: list[RangeCellValue]
+    rows: list[list["RangeValue"]]
+
+
+class RangePage(RangePageOptions):
     schema_version: int
     sheet: str
     start: str

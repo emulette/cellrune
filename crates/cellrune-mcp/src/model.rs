@@ -102,6 +102,21 @@ pub(crate) struct ReadRangeArgs {
     #[serde(default)]
     #[schemars(range(max = 10_000))]
     pub(crate) limit: u32,
+    /// Leave out empty cells; offset and limit still count every position, and in the compact
+    /// form only each row's trailing empty cells are left out.
+    #[serde(default)]
+    pub(crate) omit_empty: bool,
+    /// Return each cell's address and value in `values` instead of full cell objects.
+    #[serde(default)]
+    pub(crate) values_only: bool,
+    /// Return the page's values in `rows`, grouped by worksheet row and without addresses.
+    #[serde(default)]
+    pub(crate) compact: bool,
+    /// Largest serialized page in bytes; the page is then the longest prefix that fits and
+    /// `next_offset` continues after it.
+    #[serde(default)]
+    #[schemars(range(min = 1))]
+    pub(crate) max_bytes: Option<u64>,
 }
 
 /// Input for a bounded static formula-capability page.

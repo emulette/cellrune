@@ -8,6 +8,7 @@ from ._native import (
     function_catalog,
 )
 from ._types import (
+    RangeCellValue,
     RangeValue,
     ClearPhoneticsChange,
     FrozenPane,
@@ -150,6 +151,7 @@ from ._types import (
 )
 
 __all__ = [
+    "RangeCellValue",
     "RangeValue",
     "ClearPhoneticsChange",
     "FrozenPane",

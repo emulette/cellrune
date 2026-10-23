@@ -158,6 +158,8 @@ impl WorkbookSession {
             offset: request.offset,
             next_offset: (consumed < total_cells).then_some(consumed),
             cells,
+            values: None,
+            rows: None,
         })
     }
 

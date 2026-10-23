@@ -2,7 +2,8 @@ use cellrune_interop::{
     CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto,
     CalculationResultDto, CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
-    FunctionUsageReportDto, RangePageDto, SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
+    FunctionUsageReportDto, RangePageDto, RangeValueDto, SavedValueStateDto, UnavailableValueDto,
+    WorkbookSummaryDto, WriteReportDto,
 };
 use napi_derive::napi;
 
@@ -52,6 +53,14 @@ pub struct NativeRangePage {
     pub offset: f64,
     pub next_offset: Option<f64>,
     pub cells: Vec<NativeCell>,
+    pub values: Option<Vec<NativeRangeCellValue>>,
+    pub rows: Option<Vec<Vec<NativeCalculationResult>>>,
+}
+
+#[napi(object)]
+pub struct NativeRangeCellValue {
+    pub address: String,
+    pub value: NativeCalculationResult,
 }
 
 #[napi(object)]
@@ -410,7 +419,39 @@ pub(crate) fn range_page(value: RangePageDto) -> NativeRangePage {
         offset: value.offset as f64,
         next_offset: value.next_offset.map(|offset| offset as f64),
         cells: value.cells.into_iter().map(cell).collect(),
+        values: value.values.map(|values| {
+            values
+                .into_iter()
+                .map(|entry| NativeRangeCellValue {
+                    address: entry.address,
+                    value: range_value(entry.value),
+                })
+                .collect()
+        }),
+        rows: value.rows.map(|rows| {
+            rows.into_iter()
+                .map(|row| row.into_iter().map(range_value).collect())
+                .collect()
+        }),
     }
+}
+
+/// Carries a range value as a calculation result: a value, or an unavailable result.
+fn range_value(value: RangeValueDto) -> NativeCalculationResult {
+    calculation_result(match value {
+        RangeValueDto::Value(value) => CalculationResultDto::Value { value },
+        RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        }) => CalculationResultDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        },
+    })
 }
 
 pub(crate) fn function_usage(value: FunctionUsageReportDto) -> NativeFunctionUsageReport {

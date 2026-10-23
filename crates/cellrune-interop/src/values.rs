@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CellValueDto, WritableCellValueDto};
 
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Request for every value of one inclusive rectangle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -73,4 +77,37 @@ pub struct RangeWriteRequestDto {
     pub start: String,
     /// Rows from top to bottom, all of the same non-zero length; a blank value clears its cell.
     pub rows: Vec<Vec<WritableCellValueDto>>,
+}
+
+/// Optional forms of a range page. The default reads every cell of the page as a full cell object,
+/// exactly as a request without options does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RangeReadOptionsDto {
+    /// Leaves out empty cells: those holding no value or formula and no calculated result. Offset
+    /// and limit still count every position of the range; in the compact form only each row's
+    /// trailing empty cells are left out.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub omit_empty: bool,
+    /// Returns each cell's address and value, in `values`, instead of full cell objects.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub values_only: bool,
+    /// Returns the page's values in `rows`, grouped by worksheet row and without addresses.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub compact: bool,
+    /// Largest serialized page in bytes. The page is then the longest prefix of its positions that
+    /// fits, and `next_offset` continues after it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+}
+
+/// One cell's address and value in a values-only range page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RangeCellValueDto {
+    /// Unqualified A1 address.
+    pub address: String,
+    /// The cell's current calculated result once the session has calculated the current revision,
+    /// otherwise its literal or saved value.
+    pub value: RangeValueDto,
 }

@@ -240,6 +240,19 @@ pub(crate) fn range_page<'py>(
         cells.append(cell_dict(py, cell)?)?;
     }
     result.set_item("cells", cells)?;
+    if let Some(values) = &value.values {
+        let entries = PyList::empty(py);
+        for entry in values {
+            let item = PyDict::new(py);
+            item.set_item("address", &entry.address)?;
+            item.set_item("value", range_value(py, &entry.value)?)?;
+            entries.append(item)?;
+        }
+        result.set_item("values", entries)?;
+    }
+    if let Some(rows) = &value.rows {
+        result.set_item("rows", range_value_rows(py, rows)?)?;
+    }
     Ok(result)
 }
 
@@ -552,29 +565,33 @@ pub(crate) fn range_value_rows<'py>(
     for row in rows {
         let values = PyList::empty(py);
         for value in row {
-            values.append(match value {
-                RangeValueDto::Value(value) => cell_value(py, value)?,
-                RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
-                    code,
-                    message,
-                    detail,
-                    limit,
-                }) => {
-                    let unavailable = PyDict::new(py);
-                    unavailable.set_item("kind", "unavailable")?;
-                    unavailable.set_item("code", code)?;
-                    unavailable.set_item("message", message)?;
-                    unavailable.set_item("detail", detail.as_deref())?;
-                    if let Some(limit) = limit {
-                        unavailable.set_item("limit", limit)?;
-                    }
-                    unavailable
-                }
-            })?;
+            values.append(range_value(py, value)?)?;
         }
         result.append(values)?;
     }
     Ok(result)
+}
+
+fn range_value<'py>(py: Python<'py>, value: &RangeValueDto) -> PyResult<Bound<'py, PyDict>> {
+    match value {
+        RangeValueDto::Value(value) => cell_value(py, value),
+        RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        }) => {
+            let unavailable = PyDict::new(py);
+            unavailable.set_item("kind", "unavailable")?;
+            unavailable.set_item("code", code)?;
+            unavailable.set_item("message", message)?;
+            unavailable.set_item("detail", detail.as_deref())?;
+            if let Some(limit) = limit {
+                unavailable.set_item("limit", limit)?;
+            }
+            Ok(unavailable)
+        }
+    }
 }
 
 pub(crate) fn cell_reference<'py>(

@@ -14,7 +14,7 @@ export declare class NativeWorkbook {
   get closed(): boolean
   close(): void
   summary(): NativeWorkbookSummary
-  readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  readRange(sheet: string, start: string, end: string, offset: number, limit: number, options?: NativeRangeReadOptions | undefined | null): NativeRangePage
   toCsv(sheet: string, delimiter?: string | undefined | null): Buffer
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
   readValues(sheet: string, start: string, end: string): string
@@ -89,12 +89,6 @@ export interface NativeCalculationDeltaPage {
   deltas: Array<NativeCalculationDelta>
 }
 
-/**
- * Deterministic inputs and compatibility policies for `calculate` and `recalculate`, passed as
- * JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
- * own object so their errors keep the limit codes, and the policies stay strings so an unknown
- * one keeps its own code.
- */
 export interface NativeCalculationOptions {
   todaySerial?: number
   nowSerial?: number
@@ -338,6 +332,11 @@ export interface NativeNumberFormat {
   kind: string
 }
 
+export interface NativeRangeCellValue {
+  address: string
+  value: NativeCalculationResult
+}
+
 export interface NativeRangePage {
   schemaVersion: number
   sheet: string
@@ -347,6 +346,22 @@ export interface NativeRangePage {
   offset: number
   nextOffset?: number
   cells: Array<NativeCell>
+  values?: Array<NativeRangeCellValue>
+  rows?: Array<Array<NativeCalculationResult>>
+}
+
+/**
+ * Deterministic inputs and compatibility policies for `calculate` and `recalculate`, passed as
+ * JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
+ * own object so their errors keep the limit codes, and the policies stay strings so an unknown
+ * one keeps its own code.
+ * Optional forms of a range page, validated by the JavaScript wrapper.
+ */
+export interface NativeRangeReadOptions {
+  omitEmpty?: boolean
+  valuesOnly?: boolean
+  compact?: boolean
+  maxBytes?: number
 }
 
 export interface NativeSheetSummary {

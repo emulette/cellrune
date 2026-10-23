@@ -5,9 +5,9 @@ use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto, CsvReadOptionsDto,
     CsvWriteRequestDto, DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto,
     EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto,
-    PreviewCursorDto, RangeRequestDto, RangeValuesRequestDto, RangeWriteRequestDto,
-    ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    PreviewCursorDto, RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto,
+    RangeWriteRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto,
+    TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt, PyList};
@@ -131,7 +131,19 @@ impl Workbook {
         conversion::workbook_summary(py, &summary)
     }
 
-    #[pyo3(signature = (sheet, start, end, *, offset=None, limit=None))]
+    #[pyo3(signature = (
+        sheet,
+        start,
+        end,
+        *,
+        offset=None,
+        limit=None,
+        omit_empty=false,
+        values_only=false,
+        compact=false,
+        max_bytes=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     pub fn read_range<'py>(
         &self,
         py: Python<'py>,
@@ -140,17 +152,30 @@ impl Workbook {
         end: String,
         offset: Option<&Bound<'_, PyAny>>,
         limit: Option<&Bound<'_, PyAny>>,
+        omit_empty: bool,
+        values_only: bool,
+        compact: bool,
+        max_bytes: Option<u64>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let offset = page_offset_from_python(offset).map_err(|error| into_py_error(py, error))?;
         let limit = page_limit_from_python(limit).map_err(|error| into_py_error(py, error))?;
+        let options = RangeReadOptionsDto {
+            omit_empty,
+            values_only,
+            compact,
+            max_bytes,
+        };
         let result = py.detach(move || {
-            self.lock_interop_wait()?.read_range(&RangeRequestDto {
-                sheet,
-                start,
-                end,
-                offset,
-                limit,
-            })
+            self.lock_interop_wait()?.read_range_with_options(
+                &RangeRequestDto {
+                    sheet,
+                    start,
+                    end,
+                    offset,
+                    limit,
+                },
+                &options,
+            )
         });
         let page = result.map_err(|error| into_py_error(py, error))?;
         conversion::range_page(py, &page)

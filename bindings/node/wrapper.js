@@ -146,9 +146,21 @@ class Workbook {
     const limit = options.limit ?? 0;
     requireNonNegativeInteger(offset, "offset");
     requireNonNegativeInteger(limit, "limit");
+    for (const name of ["omitEmpty", "valuesOnly", "compact"]) {
+      requireOptionalBoolean(options[name], name);
+    }
+    if (options.maxBytes !== undefined) {
+      requireNonNegativeInteger(options.maxBytes, "maxBytes");
+    }
+    const forms = {
+      omitEmpty: options.omitEmpty,
+      valuesOnly: options.valuesOnly,
+      compact: options.compact,
+      maxBytes: options.maxBytes,
+    };
     return normalizeRangePage(
       withSyncErrors(() =>
-        this.#session().readRange(sheet, start, end, offset, limit),
+        this.#session().readRange(sheet, start, end, offset, limit, forms),
       ),
     );
   }

@@ -1,6 +1,8 @@
 //! Whole-rectangle value reads and writes.
 
-use cellrune::{CalculationCellId, CellAddress, CellContent, CellRange, SavedResult, Sheet};
+use cellrune::{
+    CalculationCellId, CalculationSnapshot, CellAddress, CellContent, CellRange, SavedResult, Sheet,
+};
 
 use super::WorkbookSession;
 use crate::convert::{result_to_dto, value_to_dto};
@@ -45,26 +47,10 @@ impl WorkbookSession {
             let mut values = Vec::with_capacity(range.width() as usize);
             for column in range.start().column().get()..=range.end().column().get() {
                 let address = CellAddress::from_indices(row, column)?;
-                let calculated = calculation.and_then(|calculation| {
-                    calculation
-                        .materialized_cell(CalculationCellId::new(sheet.id(), address))
-                        .map(|cell| result_to_dto(cell.result()))
-                });
-                values.push(match calculated {
-                    Some(CalculationResultDto::Value { value }) => RangeValueDto::Value(value),
-                    Some(CalculationResultDto::Unavailable {
-                        code,
-                        message,
-                        detail,
-                        limit,
-                    }) => RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
-                        code,
-                        message,
-                        detail,
-                        limit,
-                    }),
-                    None => RangeValueDto::Value(source_value(sheet, address)),
-                });
+                values.push(
+                    range_value(sheet, calculation, address)
+                        .unwrap_or(RangeValueDto::Value(CellValueDto::Blank)),
+                );
             }
             rows.push(values);
         }
@@ -121,6 +107,40 @@ fn offset_index(start: u32, offset: usize) -> u32 {
         .ok()
         .and_then(|offset| start.checked_add(offset))
         .unwrap_or(u32::MAX)
+}
+
+/// Returns the value a range read reports for a cell, or `None` for an empty cell: one holding no
+/// value or formula and no calculated result.
+pub(super) fn range_value(
+    sheet: &Sheet,
+    calculation: Option<&CalculationSnapshot>,
+    address: CellAddress,
+) -> Option<RangeValueDto> {
+    let calculated = calculation.and_then(|calculation| {
+        calculation
+            .materialized_cell(CalculationCellId::new(sheet.id(), address))
+            .map(|cell| result_to_dto(cell.result()))
+    });
+    match calculated {
+        Some(CalculationResultDto::Value { value }) => Some(RangeValueDto::Value(value)),
+        Some(CalculationResultDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        }) => Some(RangeValueDto::Unavailable(
+            UnavailableValueDto::Unavailable {
+                code,
+                message,
+                detail,
+                limit,
+            },
+        )),
+        None => sheet
+            .cell(address)
+            .is_some()
+            .then(|| RangeValueDto::Value(source_value(sheet, address))),
+    }
 }
 
 /// Returns a cell's literal value or a formula's saved value, blank when none was saved.

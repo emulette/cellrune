@@ -32,6 +32,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   numpy or Arrow dependency. A read returns each cell's current calculated result, or its
   `unavailable` result, once the workbook has calculated the current revision, and otherwise its
   literal or saved value.
+- MCP `workbook_read_range`, interop `WorkbookSession::read_range_with_options`, Python
+  `read_range`, and Node.js `readRange` take optional forms: `omit_empty` leaves out empty cells,
+  `values_only` returns address and value pairs in `values`, `compact` returns `rows` of values
+  grouped by worksheet row, and `max_bytes` returns the longest prefix that fits, failing with the
+  new `interop.page.byte_limit_exceeded` code when not even one position does. Offset and limit
+  still count positions of the range, and a read without them returns the same page as before.
 
 ### Changed
 
