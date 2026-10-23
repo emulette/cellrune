@@ -734,9 +734,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 484 official
+  `.is_official()`. The 0.1.27 catalog contains 485 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 485 accepted entries. The descriptor registry
+  dummy-function marker, for 486 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
@@ -884,6 +884,15 @@ than guessing a name from a different XLSX crate (`calamine`,
   negative date-time values, fractions that round to a whole number, and other
   year, day, hour, and second code lengths. A non-numeric text value is
   `#VALUE!`.
+- `FIXED(number, [decimals], [no_commas])`, added in 0.1.27, and `DOLLAR(number,
+  [decimals])` read numeric text as `VALUE` does, truncate `decimals` (default
+  2; outside -308 through 127 is `#VALUE!`), and round a negative `decimals`
+  to the left of the decimal point. `FIXED` rounds half away from zero first,
+  so a negative number that rounds to zero has no sign, and groups thousands
+  with `,` unless `no_commas` is true (`FIXED(-1234.567,-1,TRUE)` is `-1230`).
+  `DOLLAR` shows `$#,##0.00` with the absolute value and wraps a negative
+  number in parentheses. A `FIXED` result of 2^53 or more rounded units is
+  `calculation.unsupported_expression`.
 - The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
   `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
   `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,

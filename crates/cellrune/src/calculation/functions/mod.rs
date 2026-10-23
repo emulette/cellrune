@@ -999,10 +999,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 485);
+        assert_eq!(catalog.len(), 486);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            484
+            485
         );
         assert!(
             catalog
@@ -1161,7 +1161,7 @@ mod tests {
                 "{name}",
             );
         }
-        for name in ["KURT", "RAND", "RANDBETWEEN", "SKEW", "SKEW.P"] {
+        for name in ["FIXED", "KURT", "RAND", "RANDBETWEEN", "SKEW", "SKEW.P"] {
             assert!(
                 catalog
                     .iter()

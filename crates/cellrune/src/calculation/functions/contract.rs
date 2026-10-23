@@ -536,6 +536,18 @@ const DOLLAR_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     DefaultTrigger::AbsentOrMissing,
     ArgumentDefaultValue::Number(2.0),
 )];
+const FIXED_DEFAULTS: &[ArgumentDefault] = &[
+    ArgumentDefault::new(
+        1,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Number(2.0),
+    ),
+    ArgumentDefault::new(
+        2,
+        DefaultTrigger::AbsentOrMissing,
+        ArgumentDefaultValue::Logical(false),
+    ),
+];
 const LEFT_RIGHT_DEFAULTS: &[ArgumentDefault] = &[ArgumentDefault::new(
     1,
     DefaultTrigger::Absent,
@@ -1378,6 +1390,8 @@ impl TextAdditionalFunction {
             Self::Concatenate => CallContract::uniform(Arity::range(1, 255), ARRAY),
             Self::Dollar => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                 .with_defaults(DOLLAR_DEFAULTS),
+            Self::Fixed => CallContract::positional(Arity::range(1, 3), &[SCALAR, SCALAR, SCALAR])
+                .with_defaults(FIXED_DEFAULTS),
             Self::TextAfter | Self::TextBefore => CallContract::positional(
                 Arity::range(2, 6),
                 &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, DEFERRED],

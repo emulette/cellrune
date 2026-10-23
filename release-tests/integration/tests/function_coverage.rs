@@ -658,6 +658,29 @@ fn text_formats_sections_dates_times_fractions_and_exponents() {
     }
 }
 
+#[test]
+fn fixed_rounds_and_formats_decimals_with_optional_grouping() {
+    let cases = [
+        text("FIXED(1234.567,1)", "1,234.6"),
+        text("FIXED(1234.567,-1)", "1,230"),
+        text("FIXED(-1234.567,-1,TRUE)", "-1230"),
+        text("FIXED(44.332)", "44.33"),
+        text("FIXED(12345.6789,2,TRUE)", "12345.68"),
+        text("FIXED(\"2\",2,TRUE)", "2.00"),
+        text("FIXED(-0.001,2)", "0.00"),
+        text("FIXED(1234.5,0,FALSE)", "1,235"),
+        error("FIXED(\"K001\",2,TRUE)", ExcelError::Value),
+        error("FIXED(1,128)", ExcelError::Value),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    assert!(scan_formula_capabilities(&workbook).is_supported());
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
 const fn number(formula: &'static str, value: f64, tolerance: f64) -> FormulaCase {
     FormulaCase {
         formula,

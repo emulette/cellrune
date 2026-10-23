@@ -825,6 +825,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Dollar, "DOLLAR", TextAdditional),
     function!(EncodeUrl, "ENCODEURL", TextAdditional)
         .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(Fixed, "FIXED", TextAdditional).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(TextAfter, "TEXTAFTER", TextAdditional),
     function!(TextBefore, "TEXTBEFORE", TextAdditional),
     function!(UniChar, "UNICHAR", TextAdditional),

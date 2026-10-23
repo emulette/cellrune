@@ -24,6 +24,7 @@ pub(super) fn call(
         TextAdditionalFunction::Concatenate => concatenate(engine, context, args),
         TextAdditionalFunction::Dollar => dollar(engine, context, args),
         TextAdditionalFunction::EncodeUrl => super::url_encoding::encode_url(engine, context, args),
+        TextAdditionalFunction::Fixed => fixed(engine, context, args),
         TextAdditionalFunction::UniChar => unichar(engine, context, args),
         TextAdditionalFunction::Unicode => unicode(engine, context, args),
         TextAdditionalFunction::TextBefore => text_boundary(engine, context, args, false),
@@ -73,47 +74,12 @@ fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
     if args.is_empty() || args.len() > 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let number_value = engine.eval_scalar(context, &args[0]);
-    let number = match to_number(&number_value) {
-        Ok(number) => number,
-        Err(ErrorKind::Value) => match &number_value {
-            Value::Text(text) => match parse_value_number(text) {
-                Some(number) => number,
-                None => return Value::Error(ErrorKind::Value),
-            },
-            _ => return Value::Error(ErrorKind::Value),
-        },
+    let (rounded, decimals) = match rounded_to_decimals(engine, context, args) {
+        Ok(rounded) => rounded,
         Err(kind) => return Value::Error(kind),
     };
-    let decimals = match args.get(1) {
-        None | Some(Expr::Missing) => 2_i32,
-        Some(expr) => match required_number(engine, context, expr) {
-            Ok(number) => number.trunc() as i32,
-            Err(kind) => return Value::Error(kind),
-        },
-    };
-    if !(-308..=127).contains(&decimals) {
-        return Value::Error(ErrorKind::Value);
-    }
-    let rounded = if decimals < 0 {
-        let scale = 10_f64.powi(-decimals);
-        (number / scale).round() * scale
-    } else {
-        number
-    };
-    if !rounded.is_finite() {
-        return Value::Error(ErrorKind::Num);
-    }
-    let visible_decimals = decimals.max(0) as usize;
-    let mut format = String::from("$#,##0");
-    if visible_decimals > 0 {
-        format.push('.');
-        format.push_str(&"0".repeat(visible_decimals));
-    }
-    let context = FormatContext {
-        date_system: engine.date_system(),
-    };
-    let formatted = match format_number(rounded.abs(), &format, context) {
+    let format = format!("$#,##0{}", decimal_places(decimals));
+    let formatted = match format_number(rounded.abs(), &format, format_context(engine)) {
         Ok(formatted) => formatted,
         Err(kind) => return Value::Error(kind),
     };
@@ -123,6 +89,89 @@ fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
         formatted
     };
     engine.bounded_text(output)
+}
+
+fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+    if args.is_empty() || args.len() > 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let (number, decimals) = match rounded_to_decimals(engine, context, args) {
+        Ok(rounded) => rounded,
+        Err(kind) => return Value::Error(kind),
+    };
+    let no_commas = match args.get(2) {
+        None | Some(Expr::Missing) => false,
+        Some(expr) => match to_logical(&engine.eval_scalar(context, expr)) {
+            Ok(no_commas) => no_commas,
+            Err(kind) => return Value::Error(kind),
+        },
+    };
+    // FIXED rounds before it formats, so a negative number that rounds to zero shows no sign.
+    let factor = 10_f64.powi(decimals as i32);
+    let magnitude = (number.abs() * factor).round() / factor;
+    let rounded = if number < 0.0 && magnitude != 0.0 {
+        -magnitude
+    } else {
+        magnitude
+    };
+    let grouping = if no_commas { "0" } else { "#,##0" };
+    let format = format!("{grouping}{}", decimal_places(decimals));
+    match format_number(rounded, &format, format_context(engine)) {
+        Ok(text) => engine.bounded_text(text),
+        // The format engine stops at 2^53 rounded units, where Excel still shows every digit.
+        Err(ErrorKind::Num) => Value::Error(ErrorKind::Unsupported),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// Reads the number and decimals `DOLLAR` and `FIXED` share: numeric text is read as `VALUE`
+/// reads it, decimals default to two and truncate, and negative decimals round to the left of the
+/// decimal point. Returns the number and the count of decimals to show.
+fn rounded_to_decimals(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<(f64, usize), ErrorKind> {
+    let number_value = engine.eval_scalar(context, &args[0]);
+    let number = match to_number(&number_value) {
+        Ok(number) => number,
+        Err(ErrorKind::Value) => match &number_value {
+            Value::Text(text) => parse_value_number(text).ok_or(ErrorKind::Value)?,
+            _ => return Err(ErrorKind::Value),
+        },
+        Err(kind) => return Err(kind),
+    };
+    let decimals = match args.get(1) {
+        None | Some(Expr::Missing) => 2_i32,
+        Some(expr) => required_number(engine, context, expr)?.trunc() as i32,
+    };
+    if !(-308..=127).contains(&decimals) {
+        return Err(ErrorKind::Value);
+    }
+    let rounded = if decimals < 0 {
+        let scale = 10_f64.powi(-decimals);
+        (number / scale).round() * scale
+    } else {
+        number
+    };
+    if !rounded.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+    Ok((rounded, decimals.max(0) as usize))
+}
+
+fn decimal_places(decimals: usize) -> String {
+    if decimals == 0 {
+        String::new()
+    } else {
+        format!(".{}", "0".repeat(decimals))
+    }
+}
+
+fn format_context(engine: &Engine<'_>) -> FormatContext {
+    FormatContext {
+        date_system: engine.date_system(),
+    }
 }
 
 fn value(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

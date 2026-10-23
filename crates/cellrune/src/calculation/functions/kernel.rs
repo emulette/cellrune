@@ -288,6 +288,7 @@ function_enum!(TextAdditionalFunction {
     Concatenate,
     Dollar,
     EncodeUrl,
+    Fixed,
     TextAfter,
     TextBefore,
     UniChar,
