@@ -1118,6 +1118,16 @@ impl<'workbook> Engine<'workbook> {
     /// from a literal that something else overrode would let a sum snap to zero on terms that
     /// never cancelled.
     fn value_source(&self, cell: CellId) -> ValueSource<'_> {
+        // A literal outside every array area reads as stored: only formula cells and array areas
+        // have results, kept results, or the issues checked below, and an edit that turns a
+        // formula into a literal leaves the cell dirty, so no kept result applies to it.
+        if let Some(sheet) = self.workbook.sheets().get(cell.0)
+            && let Some(source) = cell_at(sheet, cell.1, cell.2)
+            && let CellContent::Literal(value) = source.content()
+            && self.array_owner(cell).is_none()
+        {
+            return ValueSource::Literal(value);
+        }
         if let Some(value) = self.results.get(&cell) {
             return ValueSource::Calculated(value);
         }

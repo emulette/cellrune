@@ -436,6 +436,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- Reading a literal cell outside every array area no longer looks it up among formula results,
+  kept results, and issue sets first, so formulas over large literal ranges calculate faster with
+  the same results.
 - MCP `workbook_apply_changes` stages its batch on a blocking worker, as `workbook_apply_changes_v2`
   does, so a large batch no longer holds the server's async runtime, and a cancelled request stops
   the staging cooperatively and fails with `mcp.operation.cancelled` without changing the session.
