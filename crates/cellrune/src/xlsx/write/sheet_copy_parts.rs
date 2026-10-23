@@ -52,6 +52,9 @@ pub(super) struct CopySource<'a> {
     pub(super) copy_id: SheetId,
     /// For each source table part, the source table and the copy's table that duplicates it.
     pub(super) tables: &'a BTreeMap<PartPath, (&'a Table, &'a Table)>,
+    /// The source table parts the copy has no table for, which are not duplicated; their
+    /// relationships keep the source targets for the caller to remove.
+    pub(super) dropped_tables: &'a BTreeSet<PartPath>,
     pub(super) content_types: &'a ContentTypes,
     pub(super) chart_parts: &'a [PartPath],
 }
@@ -88,7 +91,7 @@ pub(super) fn duplicate_sheet_parts(
             let Ok(target) = PartPath::resolve_relationship(Some(&original), target) else {
                 return Ok(None);
             };
-            if !reader.contains(&target) {
+            if !reader.contains(&target) || copy.dropped_tables.contains(&target) {
                 return Ok(None);
             }
             let local_kind = kind.rsplit('/').next().unwrap_or(kind);

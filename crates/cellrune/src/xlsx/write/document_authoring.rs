@@ -23,8 +23,8 @@ use super::sheet_reference_patch::{CopiedParts, CopyReferences};
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table::{TABLE_CONTENT_TYPE, table_xml};
 use super::table_parts::{
-    TABLE_RELATIONSHIP, TableAddition, add_table_parts, plan_table_removal, relationships_xml,
-    remove_table_parts,
+    TABLE_RELATIONSHIP, TableAddition, add_table_parts, plan_table_removal, relationship_ids_to,
+    relationships_xml, remove_table_parts,
 };
 use super::table_patch::{patch_table_xml, remove_table_columns};
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
@@ -61,7 +61,6 @@ const REL_STYLES: &str =
 const DETAIL_CALCULATION_IDENTITY: &str = "calculation does not belong to the current draft";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
 const DETAIL_MISSING_TABLE_PART: &str = "source table part mapping was not found";
-const DETAIL_COPY_TABLES_CHANGED: &str = "a sheet copy cannot save a table created or converted to a range on the copy or on its source before the copy";
 const DETAIL_EDITED_CELL_COUNT: &str = "max_edited_cells";
 const DETAIL_EDITED_SHEET_COUNT: &str = "max_edited_sheets";
 const DETAIL_DYNAMIC_FORMULA_METADATA: &str =
@@ -741,6 +740,7 @@ pub(super) fn write_document_package(
 
     // A copy duplicates every part its source sheet reaches, renaming and repointing them.
     let mut copy_references = Vec::new();
+    let mut copy_created_tables = BTreeMap::new();
     if !copy_parts.is_empty() {
         let content_types_part = PartPath::from_archive_name(CONTENT_TYPES_PART)
             .map_err(|error| invalid_plan_with_cause(workbook_part, error))?;
@@ -772,24 +772,36 @@ pub(super) fn write_document_package(
                 .sheet_by_id(origin)
                 .map(Sheet::tables)
                 .unwrap_or_default();
-            // Each source table part is duplicated for the copied table that duplicates its
-            // table. A table created or converted on the copy, or on its source before the copy,
-            // has no such pair, and its part or entry is not written.
+            // A source table part is duplicated for the copied table that duplicates its table.
+            // A table created on the copy, or on its source before the copy, is written new with
+            // the tables created on source sheets, and a source table the copy no longer has,
+            // converted on the copy or on its source before the copy, is dropped from it.
             let mut tables = BTreeMap::new();
+            let mut created = Vec::new();
             for copied in copy_sheet.tables() {
                 let source = draft
                     .copied_tables()
                     .get(&copied.id())
-                    .and_then(|source| origin_tables.iter().find(|table| table.id() == *source))
-                    .ok_or_else(|| copy_tables_changed(copy_part))?;
+                    .and_then(|source| origin_tables.iter().find(|table| table.id() == *source));
+                let Some(source) = source else {
+                    created.push(copied);
+                    continue;
+                };
                 let part = document
                     .table_part_path(source.id())
                     .cloned()
                     .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
                 tables.insert(part, (source, copied));
             }
-            if tables.len() != origin_tables.len() {
-                return Err(copy_tables_changed(copy_part));
+            let mut dropped_tables = BTreeSet::new();
+            for table in origin_tables {
+                let part = document
+                    .table_part_path(table.id())
+                    .cloned()
+                    .ok_or_else(|| invalid_plan(DETAIL_MISSING_TABLE_PART))?;
+                if !tables.contains_key(&part) {
+                    dropped_tables.insert(part);
+                }
             }
             let mut duplicated = duplicate_sheet_parts(
                 &mut source_reader,
@@ -798,12 +810,37 @@ pub(super) fn write_document_package(
                     copy: copy_part,
                     copy_id: *copy_id,
                     tables: &tables,
+                    dropped_tables: &dropped_tables,
                     content_types: &content_types,
                     chart_parts: document.chart_part_paths(),
                 },
                 &mut next_vml_block,
                 limits,
             )?;
+            if !dropped_tables.is_empty() {
+                let origin_relationships = origin_part
+                    .relationship_part()
+                    .map_err(|error| invalid_plan_with_cause(&origin_part, error))?;
+                let ids = relationship_ids_to(
+                    &source_reader.read_part(&origin_relationships)?,
+                    &origin_relationships,
+                    &origin_part,
+                    &dropped_tables,
+                    document.read_options().limits(),
+                )?;
+                let copy_relationships = copy_part
+                    .relationship_part()
+                    .map_err(|error| invalid_plan_with_cause(copy_part, error))?;
+                if let Some(bytes) = duplicated.parts.get_mut(&copy_relationships) {
+                    *bytes = remove_relationships(bytes, &copy_relationships, &ids, limits)?;
+                }
+                if let Some(bytes) = additions.get_mut(copy_part) {
+                    *bytes = remove_table_parts(bytes, copy_part, &ids, limits)?;
+                }
+            }
+            if !created.is_empty() {
+                copy_created_tables.insert(*copy_id, created);
+            }
             let origin_name = document
                 .workbook()
                 .sheet_by_id(origin)
@@ -880,31 +917,49 @@ pub(super) fn write_document_package(
         replacements.insert(relationship_part.clone(), relationships);
     }
 
-    // Each table the draft created on a source sheet: a new part, a relationship, and an entry.
-    for sheet in draft.workbook().sheets().iter().filter(|sheet| {
-        !draft.added_sheets().contains(&sheet.id()) && !copy_parts.contains_key(&sheet.id())
-    }) {
-        let created = sheet
-            .tables()
-            .iter()
-            .filter(|table| document.workbook().table_by_id(table.id()).is_none())
-            .collect::<Vec<_>>();
+    // Each table the draft created on a source sheet or a copy: a new part, a relationship, and
+    // an entry. A copy's worksheet and relationships are additions of their own.
+    let source_sheet_tables = draft
+        .workbook()
+        .sheets()
+        .iter()
+        .filter(|sheet| {
+            !draft.added_sheets().contains(&sheet.id()) && !copy_parts.contains_key(&sheet.id())
+        })
+        .map(|sheet| {
+            let created = sheet
+                .tables()
+                .iter()
+                .filter(|table| document.workbook().table_by_id(table.id()).is_none())
+                .collect::<Vec<_>>();
+            (sheet.id(), created, false)
+        });
+    let copy_sheet_tables = copy_created_tables
+        .into_iter()
+        .map(|(sheet_id, created)| (sheet_id, created, true));
+    for (sheet_id, created, copied) in source_sheet_tables.chain(copy_sheet_tables) {
         if created.is_empty() {
             continue;
         }
-        let worksheet = document
-            .worksheet_part_path(sheet.id())
-            .cloned()
-            .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+        let worksheet = if copied {
+            copy_parts.get(&sheet_id).cloned()
+        } else {
+            document.worksheet_part_path(sheet_id).cloned()
+        }
+        .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let sheet_relationships = worksheet
             .relationship_part()
             .map_err(|error| invalid_plan_with_cause(&worksheet, error))?;
-        let current = match replacements.get(&sheet_relationships) {
-            Some(bytes) => Some(bytes.clone()),
-            None if source_reader.contains(&sheet_relationships) => {
-                Some(source_reader.read_part(&sheet_relationships)?)
+        let current = if copied {
+            additions.get(&sheet_relationships).cloned()
+        } else {
+            match replacements.get(&sheet_relationships) {
+                Some(bytes) => Some(bytes.clone()),
+                None if source_reader.contains(&sheet_relationships) => {
+                    Some(source_reader.read_part(&sheet_relationships)?)
+                }
+                None => None,
             }
-            None => None,
         };
         let mut allocator = RelationshipIdAllocator::from_xml(
             current
@@ -932,10 +987,13 @@ pub(super) fn write_document_package(
                         target: addition.target.clone(),
                     })
                     .collect::<Vec<_>>();
-                replacements.insert(
-                    sheet_relationships.clone(),
-                    append_relationships(&bytes, &sheet_relationships, &appended, limits)?,
-                );
+                let appended =
+                    append_relationships(&bytes, &sheet_relationships, &appended, limits)?;
+                if copied {
+                    additions.insert(sheet_relationships.clone(), appended);
+                } else {
+                    replacements.insert(sheet_relationships.clone(), appended);
+                }
             }
             None => {
                 additions.insert(
@@ -948,11 +1006,16 @@ pub(super) fn write_document_package(
             .iter()
             .map(|addition| addition.relationship_id.clone())
             .collect::<Vec<_>>();
-        let base = match replacements.get(&worksheet) {
+        let parts = if copied {
+            &mut additions
+        } else {
+            &mut replacements
+        };
+        let base = match parts.get(&worksheet) {
             Some(bytes) => bytes.clone(),
             None => source_reader.read_part(&worksheet)?,
         };
-        replacements.insert(
+        parts.insert(
             worksheet.clone(),
             add_table_parts(&base, &worksheet, &ids, limits)?,
         );
@@ -1382,13 +1445,6 @@ fn invalid_plan_with_cause(
     XlsxWriteError::new(XlsxWriteErrorCode::InvalidPackagePlan)
         .at_source(source.source_id())
         .with_cause(cause)
-}
-
-/// Refuses a copy whose tables are not one copied table for each table of its source part.
-fn copy_tables_changed(copy: &PartPath) -> XlsxWriteError {
-    XlsxWriteError::new(XlsxWriteErrorCode::UnsupportedPreservation)
-        .with_detail(format!("{DETAIL_COPY_TABLES_CHANGED}: {}", copy.as_str()))
-        .at_source(copy.source_id())
 }
 
 /// Returns a copied sheet's worksheet bytes: its origin's part as the source package holds it,

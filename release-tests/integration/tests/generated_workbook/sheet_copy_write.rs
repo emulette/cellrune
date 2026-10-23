@@ -231,42 +231,74 @@ fn a_copied_table_saves_a_later_range_change_and_a_source_table_its_own() {
 }
 
 #[test]
-fn a_table_created_or_converted_on_a_copy_is_refused_with_the_copy() {
-    let (mut created, _) = copied(&fixture(), "S2", 2);
-    let copy = created
-        .workbook()
-        .sheet_by_name("S2 (2)")
-        .expect("copy")
-        .id();
-    created
-        .apply_changes(cellrune::EditBatch::new([
-            cellrune::WorkbookChange::create_table(copy, range("J1:K3"), None),
-        ]))
-        .expect("create a table on the copy");
-    let (mut converted, _) = copied(&fixture(), "S2", 2);
-    let copied_table = table_of(&converted, "S2 (2)");
-    converted
-        .apply_changes(cellrune::EditBatch::new([
-            cellrune::WorkbookChange::convert_table_to_range(copied_table),
-        ]))
-        .expect("convert the copied table");
-    for draft in [created, converted] {
-        let copy = draft.workbook().sheet_by_name("S2 (2)").expect("copy").id();
+fn tables_created_or_converted_on_a_copy_or_its_source_save_with_the_copy() {
+    use cellrune::{EditBatch, WorkbookChange};
+
+    let document = open_xlsx_document_bytes(&fixture(), OpenOptions::default()).expect("open");
+    let source = |draft: &WorkbookDraft| draft.workbook().sheet_by_name("S2").expect("S2").id();
+    let apply = |draft: &mut WorkbookDraft, change: WorkbookChange| {
+        draft
+            .apply_changes(EditBatch::new([change]))
+            .expect("table edit");
+    };
+    let mut scenarios = Vec::new();
+    // On the copy: a created table is written new, and a converted one leaves the copy.
+    let (mut draft, copy) = copied(&fixture(), "S2", 2);
+    apply(
+        &mut draft,
+        WorkbookChange::create_table(copy, range("J1:K3"), None),
+    );
+    scenarios.push(("created on the copy", draft, 2, 1));
+    let (mut draft, _) = copied(&fixture(), "S2", 2);
+    let copied_table = table_of(&draft, "S2 (2)");
+    apply(
+        &mut draft,
+        WorkbookChange::convert_table_to_range(copied_table),
+    );
+    scenarios.push(("converted on the copy", draft, 0, 1));
+    // On the source before the copy: the copy takes the source's tables as they were.
+    let mut draft = WorkbookDraft::from_document(&document);
+    let sheet = source(&draft);
+    apply(
+        &mut draft,
+        WorkbookChange::create_table(sheet, range("J1:K3"), None),
+    );
+    draft.copy_sheet(sheet, 2).expect("copy");
+    scenarios.push(("created on the source", draft, 2, 2));
+    let mut draft = WorkbookDraft::from_document(&document);
+    let sheet = source(&draft);
+    let source_table = table_of(&draft, "S2");
+    apply(
+        &mut draft,
+        WorkbookChange::convert_table_to_range(source_table),
+    );
+    draft.copy_sheet(sheet, 2).expect("copy");
+    scenarios.push(("converted on the source", draft, 0, 0));
+
+    for (scenario, draft, copy_tables, source_tables) in scenarios {
         let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
-        let Err(error) = write_xlsx_draft_bytes(&draft, &calculation, invalidating()) else {
-            panic!("the copy's tables changed");
+        let output = write_xlsx_draft_bytes(&draft, &calculation, invalidating())
+            .unwrap_or_else(|error| panic!("{scenario}: {error:?}"));
+        let reopened =
+            open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+        let tables = |workbook: &cellrune::WorkbookSnapshot, sheet: &str| {
+            workbook
+                .sheet_by_name(sheet)
+                .expect("sheet")
+                .tables()
+                .iter()
+                .map(|table| (table.name().to_owned(), table.range()))
+                .collect::<Vec<_>>()
         };
-        assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
-        assert_eq!(
-            error.detail(),
-            Some(
-                format!(
-                    "a sheet copy cannot save a table created or converted to a range on the copy or on its source before the copy: xl/worksheets/cellrune-sheet-{}.xml",
-                    copy.get()
-                )
-                .as_str()
-            )
-        );
+        for (sheet, count) in [("S2 (2)", copy_tables), ("S2", source_tables)] {
+            let saved = tables(reopened.workbook(), sheet);
+            assert_eq!(saved.len(), count, "{scenario}: {sheet}");
+            assert_eq!(
+                saved,
+                tables(draft.workbook(), sheet),
+                "{scenario}: {sheet}"
+            );
+        }
     }
 }
 

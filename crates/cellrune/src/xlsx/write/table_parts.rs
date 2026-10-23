@@ -81,18 +81,32 @@ pub(super) fn plan_table_removal(
             .relationship_part()
             .map_err(|error| invalid_plan_with_cause(&worksheet, error))?;
         let bytes = reader.read_part(&relationship_part)?;
-        let ids = scan_internal_relationships(&bytes, &relationship_part, Some(&worksheet), limits)
-            .map_err(|error| invalid_plan_with_cause(&relationship_part, error))?
-            .into_iter()
-            .filter(|relationship| converted.contains(&relationship.target))
-            .map(|relationship| relationship.id.into_string())
-            .collect();
+        let ids = relationship_ids_to(&bytes, &relationship_part, &worksheet, &converted, limits)?;
         removal
             .worksheets
             .insert(worksheet, (relationship_part, ids));
         removal.parts.extend(converted);
     }
     Ok(removal)
+}
+
+/// Returns the IDs of the relationships in `bytes`, the relationship part of `worksheet`, whose
+/// targets are among `targets`.
+pub(super) fn relationship_ids_to(
+    bytes: &[u8],
+    relationship_part: &PartPath,
+    worksheet: &PartPath,
+    targets: &BTreeSet<PartPath>,
+    limits: crate::ReadLimits,
+) -> Result<BTreeSet<String>, XlsxWriteError> {
+    Ok(
+        scan_internal_relationships(bytes, relationship_part, Some(worksheet), limits)
+            .map_err(|error| invalid_plan_with_cause(relationship_part, error))?
+            .into_iter()
+            .filter(|relationship| targets.contains(&relationship.target))
+            .map(|relationship| relationship.id.into_string())
+            .collect(),
+    )
 }
 
 /// A table the draft created on a sheet, written as a new part.

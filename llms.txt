@@ -953,10 +953,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   that reads the source becomes a scoped name of the copy. Saving into the
   source package duplicates the parts the worksheet reaches, with chart
   series naming the copy and the copied tables' later range changes, and
-  clears the copy's tab selection; a pivot table, form control, threaded
-  comment, slicer, timeline, query table, or ActiveX control, and a table
-  created or converted to a range on the copy or on its source before the
-  copy, fail with `xlsx.write.unsupported_preservation`.
+  clears the copy's tab selection; a table created on the copy, or on its
+  source before the copy, gets a new part, and one converted to a range there
+  leaves the copy. A pivot table, form control, threaded comment, slicer,
+  timeline, query table, or ActiveX control fails with
+  `xlsx.write.unsupported_preservation`.
 - `rename_defined_name(DefinedNameScope, name, new_name)` renames a defined
   name and rewrites the uses that resolve to it, as Excel does, in cell
   formulas, defined names, table formulas, and data validations, and on

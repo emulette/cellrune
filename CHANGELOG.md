@@ -88,9 +88,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   and range edits of the copy and those its source had before the copy, and the source's part
   only its own. It fails with
   `xlsx.write.unsupported_preservation` naming the part for a pivot table, form control, threaded
-  comment, slicer, timeline, query table, or ActiveX control, and naming the copy's worksheet when
-  a table was created or converted to a range on the copy, or on its source before the copy. The
-  copy does not take its source's tab selection.
+  comment, slicer, timeline, query table, or ActiveX control. A table created on the copy, or on
+  its source before the copy, is written as a new part, and a table converted to a range there
+  leaves the copy's parts. The copy does not take its source's tab selection.
 - Edit schema v1 accepts `move_sheet`, `copy_sheet`, `set_sheet_auto_filter`, and
   `rename_defined_name`, and v2 accepts `create_table`, `set_table_range`, and
   `convert_table_to_range`, so interop, Python, Node.js, and the MCP `workbook_apply_changes` tools
