@@ -255,6 +255,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   `C1`, as reading the cells it resolves to, so an unrelated edit keeps its saved result.
   `INDIRECT` and an `OFFSET` whose position reads a formula, directly or through a function such
   as `COUNTIF`, are still affected by any edit.
+- An edit-schema-v2 batch with more than one invalid operation reports the error of the first
+  invalid operation in batch order. Before, its schema-v1 operations were converted ahead of its
+  table operations, so an invalid schema-v1 operation was reported even when an invalid table
+  operation preceded it. A batch with one invalid operation reports the same error as before.
 
 ### Fixed
 
