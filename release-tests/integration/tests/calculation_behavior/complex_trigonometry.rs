@@ -58,6 +58,15 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
             "IMCOT(\"0.00001+0.0000001i\")",
             "99990.0009965667-999.900010032333i",
         ),
+        // Excel 16.114 for Mac collapses a part that underflows past an overflowing cosh.
+        ("IMTAN(\"1+400i\")", "i"),
+        ("IMSECH(\"1000\")", "0"),
+        // The same limits for the other signs and reciprocal functions, whose exact parts
+        // underflow to zero.
+        ("IMCOT(\"1-400i\")", "i"),
+        ("IMTAN(\"-1-400j\")", "-j"),
+        ("IMSEC(\"1+1000i\")", "0"),
+        ("IMCSCH(\"-1000+2i\")", "0"),
         // Real arguments and the j suffix.
         ("IMSIN(\"2j\")", "3.62686040784702j"),
         ("IMTAN(\"0\")", "0"),
@@ -88,6 +97,10 @@ fn complex_trigonometry_rejects_logical_and_invalid_inumbers() {
         ("IMSECH(\"x\")", ExcelError::Number),
         ("IMCOS(\"1+2k\")", ExcelError::Number),
         ("IMSINH(#N/A)", ExcelError::NotAvailable),
+        // Excel 16.114 for Mac at the pole zero.
+        ("IMCOT(\"0\")", ExcelError::Number),
+        ("IMCSC(\"0\")", ExcelError::Number),
+        ("IMCSCH(\"0\")", ExcelError::Number),
         // The unbounded functions overflow like IMEXP.
         ("IMSIN(\"1+1000i\")", ExcelError::Number),
         ("IMSINH(\"1000\")", ExcelError::Number),
@@ -102,14 +115,9 @@ fn complex_trigonometry_rejects_logical_and_invalid_inumbers() {
             "{formula}"
         );
     }
-    for formula in [
-        "IMCOT(\"0\")",
-        "IMCSC(\"0\")",
-        "IMCSCH(\"0\")",
-        "IMTAN(\"1+400i\")",
-        "IMSEC(\"1+1000i\")",
-        "IMSECH(\"1000\")",
-    ] {
+    // Past an overflowing cosh but before the remaining part underflows, the result would be a
+    // subnormal number Excel was not measured on.
+    for formula in ["IMTAN(\"1+360i\")", "IMSECH(\"720\")", "IMCSC(\"2-720i\")"] {
         let result = calculate_workbook(
             &workbook_with_formulas(&[(1, 1, formula)]),
             CalculationOptions::default(),

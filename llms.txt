@@ -952,8 +952,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   real pole such as `IMTAN("1.5707963")` or `IMCOT("1E-9")` keep their digits.
   A logical inumber returns `#VALUE!` and other text that
   is not a complex number `#NUM!`. `IMSIN`, `IMCOS`, and `IMSINH` return
-  `#NUM!` when the result overflows. `IMCOT`, `IMCSC`, and `IMCSCH` at zero, and
-  the bounded functions where an intermediate overflows, report
+  `#NUM!` when the result overflows, and `IMCOT`, `IMCSC`, and `IMCSCH` return
+  `#NUM!` at zero. Where the bounded functions divide by an overflowing value,
+  the result is its limit once the remaining parts underflow, as Excel returns
+  `i` for `IMTAN("1+400i")` and `0` for `IMSECH("1000")`; before they underflow
+  (`IMTAN("1+360i")`, `IMSECH("720")`) it reports
   `calculation.unsupported_expression`.
 - `ENCODEURL(text)` percent-encodes the text as RFC 3986 encodes a URI
   component: ASCII letters, digits, `-`, `.`, `_`, and `~` stay, and every other

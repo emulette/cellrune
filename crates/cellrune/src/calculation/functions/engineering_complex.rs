@@ -206,9 +206,11 @@ pub(super) enum ComplexTrigonometry {
 }
 
 /// Evaluates a complex trigonometric function. Microsoft documents `#VALUE!` for a logical
-/// inumber and `#NUM!` for other text that is not a complex number. Microsoft documents no result
-/// at the pole of the reciprocal functions, zero, or where an intermediate overflows although the
-/// function stays finite, so both are unsupported.
+/// inumber and `#NUM!` for other text that is not a complex number, and Excel returns `#NUM!` at
+/// the pole of `IMCOT`, `IMCSC`, and `IMCSCH`, zero. Where the sine, cosine, or hyperbolic
+/// counterpart that a bounded function divides by overflows, Excel returns the limit once the
+/// remaining parts underflow: `IMTAN("1+400i")` is `i` and `IMSECH("1000")` is `0`. Before they
+/// underflow the result is a subnormal number Excel was not measured on, so it is unsupported.
 pub(super) fn trigonometry(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -226,26 +228,33 @@ pub(super) fn trigonometry(
         },
     };
     let pole = value.real() == 0.0 && value.imaginary() == 0.0;
+    if pole
+        && matches!(
+            function,
+            ComplexTrigonometry::Cotangent
+                | ComplexTrigonometry::Cosecant
+                | ComplexTrigonometry::HyperbolicCosecant
+        )
+    {
+        return Value::Error(ErrorKind::Num);
+    }
     let result = match function {
         ComplexTrigonometry::Sine => value.sine(),
         ComplexTrigonometry::Cosine => value.cosine(),
         ComplexTrigonometry::Tangent => value.tangent(),
-        ComplexTrigonometry::Cotangent if pole => Err(ErrorKind::Unsupported),
         ComplexTrigonometry::Cotangent => value.cotangent(),
-        ComplexTrigonometry::Secant => value.cosine().and_then(ComplexValue::reciprocal),
-        ComplexTrigonometry::Cosecant if pole => Err(ErrorKind::Unsupported),
-        ComplexTrigonometry::Cosecant => value.sine().and_then(ComplexValue::reciprocal),
+        ComplexTrigonometry::Secant => reciprocal(value.cosine(), value.imaginary(), value),
+        ComplexTrigonometry::Cosecant => reciprocal(value.sine(), value.imaginary(), value),
         ComplexTrigonometry::HyperbolicSine => value.hyperbolic_sine(),
         ComplexTrigonometry::HyperbolicSecant => {
-            value.hyperbolic_cosine().and_then(ComplexValue::reciprocal)
+            reciprocal(value.hyperbolic_cosine(), value.real(), value)
         }
-        ComplexTrigonometry::HyperbolicCosecant if pole => Err(ErrorKind::Unsupported),
         ComplexTrigonometry::HyperbolicCosecant => {
-            value.hyperbolic_sine().and_then(ComplexValue::reciprocal)
+            reciprocal(value.hyperbolic_sine(), value.real(), value)
         }
     };
-    // The bounded functions stay finite where sine, cosine, or cosh overflow, so an overflow there
-    // is an unknown result rather than #NUM!.
+    // The bounded functions stay finite where sine, cosine, or cosh overflow, so an overflow left
+    // after the limits above is a result Excel was not measured on rather than #NUM!.
     let bounded = !matches!(
         function,
         ComplexTrigonometry::Sine
@@ -255,6 +264,23 @@ pub(super) fn trigonometry(
     match result {
         Err(ErrorKind::Num) if bounded => Value::Error(ErrorKind::Unsupported),
         result => complex_text(engine, result),
+    }
+}
+
+/// The reciprocal of a sine, cosine, or hyperbolic counterpart of `value`. When that overflowed,
+/// its magnitude is at least e^|growth| / 2 for the component `growth` that drives it, so the
+/// reciprocal is zero once 2·e^(−|growth|) underflows and `#NUM!` before that.
+fn reciprocal(
+    divisor: Result<ComplexValue, ErrorKind>,
+    growth: f64,
+    value: ComplexValue,
+) -> Result<ComplexValue, ErrorKind> {
+    match divisor {
+        Ok(divisor) => divisor.reciprocal(),
+        Err(ErrorKind::Num) if 2.0 * (-growth.abs()).exp() == 0.0 => {
+            Ok(ComplexValue::zero(value.suffix()))
+        }
+        Err(kind) => Err(kind),
     }
 }
 

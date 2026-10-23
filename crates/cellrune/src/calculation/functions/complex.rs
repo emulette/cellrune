@@ -275,7 +275,9 @@ impl ComplexValue {
     /// For |b| < 1 the denominator is the equal 2(cos² a + sinh² b), or 2(sin² a + sinh² b) for
     /// the cotangent: near a pole of a nearly real argument cos 2a ± cosh 2b cancels almost every
     /// digit, while these sums of squares do not. From |b| = 1 the subtraction loses at most a bit,
-    /// and the double-angle sum keeps the digits Microsoft publishes for `IMCOT("4+3i")`.
+    /// and the double-angle sum keeps the digits Microsoft publishes for `IMCOT("4+3i")`. Once
+    /// cosh 2b overflows the quotient is ±i plus a real part below 2·|sin 2a|·e^(−2|b|), which is
+    /// known exactly only when that bound underflows to zero; otherwise this reports `#NUM!`.
     fn double_angle_quotient(self, cotangent: bool) -> Result<Self, ErrorKind> {
         let (real, imaginary) = (2.0 * self.real, 2.0 * self.imaginary);
         let denominator = if self.imaginary.abs() < 1.0 {
@@ -292,6 +294,12 @@ impl ComplexValue {
             real.cos() + imaginary.cosh()
         };
         let direction = if cotangent { -1.0 } else { 1.0 };
+        if denominator.is_infinite() {
+            if 2.0 * real.sin() * (-imaginary.abs()).exp() != 0.0 {
+                return Err(ErrorKind::Num);
+            }
+            return Self::new(0.0, direction * self.imaginary.signum(), self.suffix);
+        }
         Self::new(
             real.sin() / denominator,
             direction * (imaginary.sinh() / denominator),
