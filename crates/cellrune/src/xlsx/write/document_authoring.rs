@@ -993,6 +993,7 @@ pub(super) fn write_document_package(
                     .sheets()
                     .iter()
                     .any(|sheet| draft.presentation().frozen_pane(sheet.id()).is_some()),
+                tab_steps: draft.tab_steps(),
             },
             limits,
         )?;

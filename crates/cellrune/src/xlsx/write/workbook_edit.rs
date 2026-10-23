@@ -12,6 +12,7 @@ use super::workbook_patch::{
     HostRecalculation, follows_calculation_properties, patch_calculation_properties_with_hints,
 };
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
+use crate::calculation::sheet_changes::TabStep;
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, namespace_reader,
@@ -29,10 +30,12 @@ const DETAIL_XML_DEPTH: &str = "max_xml_depth";
 const DETAIL_XML_BYTES: &str = "max_rewritten_xml_bytes";
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct WorkbookPatchOptions {
+pub(crate) struct WorkbookPatchOptions<'a> {
     /// The recalculation request written to `calcPr`; `None` leaves `calcPr` as it is.
     pub(crate) host_recalculation: Option<HostRecalculation>,
     pub(crate) ensure_book_view: bool,
+    /// The draft's sheet deletions and moves in the order it made them.
+    pub(crate) tab_steps: &'a [TabStep],
 }
 
 #[derive(Debug)]
@@ -113,16 +116,17 @@ pub(crate) fn patch_workbook_semantics(
     original: &WorkbookSnapshot,
     draft: &WorkbookSnapshot,
     added_relationships: &BTreeMap<SheetId, String>,
-    options: WorkbookPatchOptions,
+    options: WorkbookPatchOptions<'_>,
     limits: WriteLimits,
 ) -> Result<Vec<u8>, XlsxWriteError> {
     let WorkbookPatchOptions {
         host_recalculation,
         ensure_book_view,
+        tab_steps,
     } = options;
     enforce_bytes(bytes.len(), limits, source)?;
     // Deleted and moved tabs move `workbookView` and every sheet-scoped name's `localSheetId`.
-    let placement = TabPlacement::between(original, draft);
+    let placement = TabPlacement::between(original, draft, tab_steps);
     let tabs_moved = placement.moved();
     let source_tabs = original
         .tab_order()

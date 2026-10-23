@@ -550,3 +550,38 @@ fn canonical_draft_deletes_a_sheet_and_keeps_the_ids_of_the_rest() {
         SheetId::new(4).expect("next unused ID")
     );
 }
+
+#[test]
+fn deleting_the_active_sheet_activates_the_tab_after_it_when_it_was_deleted() {
+    // With `S2` active, a copy of `S4` placed right after `S2` is the tab after `S2` when `S2` is
+    // deleted, so it becomes active, though it is no source tab.
+    let source = support::replace_part_text(
+        &generated_sheet_deletion_fixture(),
+        WORKBOOK_PART,
+        r#"firstSheet="1" activeTab="2""#,
+        r#"activeTab="1""#,
+    );
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let mut draft = WorkbookDraft::from_document(&document);
+    let id =
+        |draft: &WorkbookDraft, name: &str| draft.workbook().sheet_by_name(name).expect(name).id();
+    let (s2, s4) = (id(&draft, "S2"), id(&draft, "S4"));
+    draft
+        .apply_changes(cellrune::EditBatch::new([
+            cellrune::WorkbookChange::copy_sheet(s4, 2),
+            cellrune::WorkbookChange::delete_sheet(s2),
+        ]))
+        .expect("copy, then delete");
+    let output = write(&draft).expect("output");
+    let workbook = support::part_text(&output, WORKBOOK_PART);
+    let order = workbook
+        .split("<sheet ")
+        .skip(1)
+        .map(|sheet| {
+            let (_, rest) = sheet.split_once("name=\"").expect("name");
+            rest.split('"').next().expect("name")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(order, ["S1", "S4 (2)", "S3", "S4"], "{workbook}");
+    assert!(workbook.contains(r#"activeTab="1""#), "{workbook}");
+}

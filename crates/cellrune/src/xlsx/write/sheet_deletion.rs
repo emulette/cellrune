@@ -11,12 +11,13 @@ use quick_xml::reader::NsReader;
 
 use super::package::PackageReader;
 use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
+use crate::calculation::sheet_changes::TabStep;
 use crate::xlsx::package::{PartPath, relationship_type, scan_internal_relationships};
 use crate::xlsx::xml::{
     DOCUMENT_RELATIONSHIPS_STRICT, DOCUMENT_RELATIONSHIPS_TRANSITIONAL, namespace_reader,
     read_event,
 };
-use crate::{SheetVisibility, WorkbookSnapshot, XlsxDocument};
+use crate::{SheetId, SheetVisibility, WorkbookSnapshot, XlsxDocument};
 
 const ROOT_RELATIONSHIPS_PART: &[u8] = b"_rels/.rels";
 const DETAIL_MISSING_SHEET_PART: &str = "source worksheet part mapping was not found";
@@ -229,10 +230,43 @@ pub(super) struct TabPlacement {
     positions: Vec<Option<usize>>,
     /// Whether each draft tab, by draft position, is visible.
     visible: Vec<bool>,
+    /// For a deleted source tab, by source position, the draft position of the tab that followed
+    /// it when it was deleted, following a chain of later deletions, or one past the last tab when
+    /// none did; `None` when the deletions do not say.
+    handed_to: Vec<Option<usize>>,
 }
 
 impl TabPlacement {
-    pub(super) fn between(original: &WorkbookSnapshot, draft: &WorkbookSnapshot) -> Self {
+    /// Places the source tabs in the draft; `steps` are the deletions and moves in the order the
+    /// draft made them.
+    pub(super) fn between(
+        original: &WorkbookSnapshot,
+        draft: &WorkbookSnapshot,
+        steps: &[TabStep],
+    ) -> Self {
+        let tab_count = draft.tab_order().len();
+        let handed_to = |mut id: SheetId| {
+            // The tab after `id` in the order it was deleted from, until one the draft keeps.
+            for _ in 0..=steps.len() {
+                let next = steps.iter().find_map(|step| match step {
+                    TabStep::Delete { tabs, deleted } if *deleted == id => Some(
+                        tabs.iter()
+                            .position(|tab| tab.id == id)
+                            .and_then(|position| tabs.get(position + 1))
+                            .map(|tab| tab.id),
+                    ),
+                    _ => None,
+                })?;
+                let Some(next) = next else {
+                    return Some(tab_count);
+                };
+                if let Some(position) = draft.sheet_tab_position(next) {
+                    return Some(position);
+                }
+                id = next;
+            }
+            None
+        };
         Self {
             positions: original
                 .tab_order()
@@ -243,6 +277,17 @@ impl TabPlacement {
                 .tab_order()
                 .into_iter()
                 .map(|(_, visibility)| visibility == SheetVisibility::Visible)
+                .collect(),
+            handed_to: original
+                .tab_order()
+                .into_iter()
+                .map(|(id, _)| {
+                    draft
+                        .sheet_tab_position(id)
+                        .is_none()
+                        .then(|| handed_to(id))
+                        .flatten()
+                })
                 .collect(),
         }
     }
@@ -256,9 +301,13 @@ impl TabPlacement {
     }
 
     /// Returns the draft position a deleted source tab hands its place to: the draft position of
-    /// the first kept source tab after it, which a move or copy may have shifted, or one past the
-    /// last tab.
+    /// the tab that followed it when it was deleted, or one past the last tab. Without the
+    /// deletion's tab order, the first kept source tab after it, which a move or copy may have
+    /// shifted.
     fn successor(&self, source: usize) -> usize {
+        if let Some(Some(position)) = self.handed_to.get(source) {
+            return *position;
+        }
         self.positions
             .iter()
             .skip(source + 1)
@@ -558,7 +607,11 @@ mod tests {
                 visible.push(!hidden.contains(&source));
             }
         }
-        let placement = TabPlacement { positions, visible };
+        let placement = TabPlacement {
+            positions,
+            visible,
+            handed_to: Vec::new(),
+        };
         let patched = patch_workbook_view(&element, &placement, &part()).expect("view");
         let mut writer = quick_xml::Writer::new(Vec::new());
         writer
@@ -633,6 +686,7 @@ mod tests {
         let placement = TabPlacement {
             positions: vec![Some(1), None, Some(2), Some(0)],
             visible: vec![true; 3],
+            handed_to: Vec::new(),
         };
         let mut reader = Reader::from_str(r#"<workbookView firstSheet="1" activeTab="1"/>"#);
         let Event::Empty(element) = reader.read_event().expect("event") else {
