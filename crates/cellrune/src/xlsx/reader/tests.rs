@@ -1549,6 +1549,39 @@ fn reads_hidden_rows_with_and_without_cells() {
     );
 }
 
+#[test]
+fn hidden_rows_without_r_follow_the_previous_row() {
+    use crate::Row;
+
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="2"><c><v>1</v></c></row>
+    <row hidden="1"><c><v>2</v></c></row>
+    <row hidden="1"/>
+    <row><c><v>4</v></c></row>
+    <row r="9" hidden="1"/>
+    <row hidden="true"><c r="A10"><v>10</v></c></row>
+  </sheetData>
+</worksheet>"#;
+    let snapshot = read_xlsx(
+        Cursor::new(build_archive(sheet, SHARED_STRINGS)),
+        ReadOptions::default(),
+    )
+    .expect("read");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    let hidden = [3, 4, 9, 10].map(|row| Row::new(row).expect("valid row"));
+    assert_eq!(first.hidden_rows(), hidden);
+    for address in ["A3", "A5"] {
+        assert!(
+            first
+                .cell(crate::CellAddress::from_a1(address).expect("valid address"))
+                .is_some(),
+            "{address}"
+        );
+    }
+}
+
 const SHEET_WITH_TABLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">

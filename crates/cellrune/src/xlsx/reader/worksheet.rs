@@ -362,13 +362,13 @@ pub(super) fn parse(
                             &budget,
                         )?;
                         process_row_style(&attributes, capture, resources.styles, sheet);
-                        process_row_hidden(&attributes, sheet);
                         process_row_height(&attributes, capture, sheet_id, presentation);
                         state.begin_row(
                             attributes
                                 .unqualified("r")
                                 .and_then(|value| value.parse::<u32>().ok()),
                         );
+                        process_row_hidden(&attributes, state.implied_row, sheet);
                     } else if local_name == CELL
                         && state.row_depth.is_some_and(|row| depth == row + 1)
                     {
@@ -670,7 +670,7 @@ fn process_start(
             );
         }
         process_row_style(&attributes, capture, styles, sheet);
-        process_row_hidden(&attributes, sheet);
+        process_row_hidden(&attributes, state.implied_row, sheet);
         process_row_height(&attributes, capture, sheet_id, presentation);
     } else if state.row_depth.is_some_and(|row| depth == row + 1) && local_name == CELL {
         increment_cell_counts(&mut state.sheet_cells, total_cells, budget.limits(), budget)?;
@@ -858,17 +858,18 @@ fn process_empty_row_visibility(
     Ok(())
 }
 
-/// Records a row that declares `hidden`. A row whose `r` or `hidden` does not resolve records
-/// nothing instead of failing the read, as row styles do.
-fn process_row_hidden(attributes: &XmlAttributes, sheet: &mut SheetBuilder) {
+/// Records a row that declares `hidden`; a row without the optional `r` is `implied_row`, the row
+/// after the previous one. A row whose `r` or `hidden` does not resolve records nothing instead of
+/// failing the read, as row styles do.
+fn process_row_hidden(attributes: &XmlAttributes, implied_row: u32, sheet: &mut SheetBuilder) {
     if !matches!(attributes.unqualified("hidden"), Some("1" | "true")) {
         return;
     }
-    if let Some(row) = attributes
-        .unqualified("r")
-        .and_then(|value| value.parse::<u32>().ok())
-        .and_then(|row| Row::new(row).ok())
-    {
+    let row = match attributes.unqualified("r") {
+        Some(value) => value.parse::<u32>().ok(),
+        None => Some(implied_row),
+    };
+    if let Some(row) = row.and_then(|row| Row::new(row).ok()) {
         sheet.push_hidden_row(row);
     }
 }
