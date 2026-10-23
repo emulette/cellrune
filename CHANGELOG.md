@@ -414,6 +414,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   whole-column, and whole-row ranges. `FormulaText::from_user_input` stores them as
   `_xlfn.TRIMRANGE(A1:B9,2,2)` with mode 1, 2, or 3; trim references read from storage text keep
   their dots through structural edits and copies.
+- `ExcelError::from_spelling(&str)` returns the error whose canonical spelling, such as `#N/A` or
+  `#PYTHON!`, is the given text, and `None` for any other text.
 
 ### Changed
 
@@ -481,6 +483,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- Saving a draft whose dynamic-array formula was set without a declared range writes the spill
+  range the calculation resolved as the anchor's `ref`, as Excel does. It was written as
+  `<f t="array">` without `ref`, so on reopening, in CellRune or Excel, the spilled values were
+  literals in the spill's way and the anchor became `#SPILL!`.
 - MCP `workbook_apply_changes_v2` keeps the session locked from staging through installation. It
   released the session in between, so a recalculation, targeted calculation, or presentation edit
   that ran in that gap failed the staged batch with `session.stale_result` or

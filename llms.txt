@@ -1032,6 +1032,19 @@ than guessing a name from a different XLSX crate (`calamine`,
   changes, reports stable `.changed_table_ids()`, and records
   topology/metadata impact. Stale writers fail with
   `SessionErrorCode::RevisionMismatch`.
+- `receipt.inverse() -> Option<&EditInverse>` is present for a batch with a
+  grid edit (insert, delete, or move rows, columns, or a range, copy a range),
+  a sheet deletion, move, or copy, a defined-name rename, or a table creation,
+  range change, conversion, or sheet auto-filter change. `EditInverse::changes()`
+  are the `WorkbookChange`s that undo the batch when applied as one batch to
+  the workbook it produced; `EditInverse::unrestored()` lists
+  `UnrestoredContent` (`.kind()`, `.sheet_id()`, `.table_id()`) whose
+  `UnrestoredContentKind` (`#[non_exhaustive]`; `.as_str()` is the snake-case
+  binding spelling) names what the changes cannot bring back: merged ranges,
+  data validations, hyperlinks, comments, hidden rows, an auto-filter, a
+  frozen pane, phonetics, cell formats no change expresses, legacy array and
+  data-table formulas, table structure, preserved package content, or a
+  deleted sheet. The engine keeps no undo stack.
 - To validate and size an edit before committing it, call
   `session.prepare_changes(expected_revision, batch)`. The returned
   `PreparedEditBatch` exposes the prospective `.workbook()` and `.receipt()`;

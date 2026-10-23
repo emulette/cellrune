@@ -113,9 +113,11 @@ impl EditReceipt {
     }
 
     /// Returns the changes that undo the batch and what they cannot restore, for a batch that
-    /// inserted, deleted, or moved rows, columns, or ranges, or copied ranges. `None` for any
-    /// other batch, and for one whose structural edits cannot be undone by changes, as when a
-    /// later change in it filled the rows a deletion freed.
+    /// inserted, deleted, or moved rows, columns, or ranges, copied ranges, deleted, moved, or
+    /// copied a sheet, renamed a defined name, created a table, changed its range, converted it to
+    /// a range, or set a sheet auto-filter. `None` for any other batch, and for one whose
+    /// structural edits cannot be undone by changes, as when a later change in it filled the rows
+    /// a deletion freed.
     pub fn inverse(&self) -> Option<&EditInverse> {
         self.inverse.as_deref()
     }

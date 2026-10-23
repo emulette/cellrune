@@ -403,6 +403,8 @@ reaches every surface:
 | Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | yes | yes | yes |
 | Rectangle value read and write as rows (interop `read_values`/`write_values`) | yes | yes | yes | no |
 | Precedent and dependent queries | yes | yes | yes | yes |
+| Range reads without empty cells, as values only, compact rows, or within a byte limit | yes | yes | yes | yes |
+| Function catalog (names, canonical names, aliases, array results; MCP pages it with `function_catalog`) | yes | yes | yes | yes |
 
 Native package availability remains platform-specific; package managers must select a wheel or
 exact-version npm platform package compatible with the current runtime.
