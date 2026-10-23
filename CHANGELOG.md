@@ -77,7 +77,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   `<autoFilter>`.
 - `WorkbookChange::copy_sheet(SheetId, position)` and `WorkbookDraft::copy_sheet` copy a worksheet
   within its workbook to a tab position as the next sheet ID, named `Name (2)` or the next free
-  number, as Excel 16.114 saves it. In the copy, single-sheet references to the source name the
+  number, and a name already ending in a number in parentheses counts on from it (`Data (2)` copies
+  as `Data (3)`), as Excel 16.114 saves it. In the copy, single-sheet references to the source name the
   copy while other sheets' and 3-D references keep their text; its tables take new IDs and Excel's
   numbered names (`Things` becomes `Things4` beside three tables), with the structured references
   inside the copy following them; the source's scoped names are copied to the copy, and a workbook

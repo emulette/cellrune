@@ -216,6 +216,43 @@ fn copy_names_count_up_and_fit_the_length_limit() {
 }
 
 #[test]
+fn copy_names_count_on_from_a_number_in_parentheses_as_excel_does() {
+    // Excel 16.114 (excel-measure G and G2): the copy of each source name, then of the same
+    // source once the first copy exists.
+    for (source, first, second) in [
+        ("Data (2)", "Data (3)", "Data (4)"),
+        ("Data (9)", "Data (10)", "Data (11)"),
+        ("Data(2)", "Data(3)", "Data(4)"),
+        ("Data (x)", "Data (x) (2)", "Data (x) (3)"),
+        ("Data (2) (2)", "Data (2) (3)", "Data (2) (4)"),
+        ("Data (01)", "Data (2)", "Data (3)"),
+        ("Data (0)", "Data (1)", "Data (2)"),
+        ("(2)", "(3)", "(4)"),
+        ("Data ( 2)", "Data (3)", "Data (4)"),
+        (
+            "Data (2147483648)",
+            "Data (2147483648) (2)",
+            "Data (2147483648) (3)",
+        ),
+        (
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZA (9)",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ (10)",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ (11)",
+        ),
+    ] {
+        let name = SheetName::new(source).expect("name");
+        let copy = name.copy_name(|candidate| candidate == source);
+        assert_eq!(copy.as_str(), first, "{source}");
+        assert_eq!(
+            name.copy_name(|candidate| candidate == source || candidate == first)
+                .as_str(),
+            second,
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn a_copy_past_the_tab_order_or_of_an_unknown_sheet_fails() {
     let mut draft = workbook();
     assert_eq!(

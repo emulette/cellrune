@@ -126,18 +126,21 @@ impl SheetName {
         &self.lookup_key
     }
 
-    /// Returns the name Excel gives a copy of this sheet: this name and ` (2)`, or the next number
-    /// for which `is_taken` is false, with the name shortened to keep the copy within 31 UTF-16
-    /// code units.
+    /// Returns the name Excel 16.114 gives a copy of this sheet. A name ending in a number in
+    /// parentheses, such as `Data (2)`, `Data(2)`, or `Data ( 2)`, counts on from that number
+    /// (`Data (3)`, `Data(3)`, `Data (3)`); any other name gets ` (2)`. The next number for which
+    /// `is_taken` is false is used, with the part before the parentheses shortened to keep the copy
+    /// within 31 UTF-16 code units.
     pub fn copy_name(&self, is_taken: impl Fn(&str) -> bool) -> Self {
-        let mut number = 2_u32;
+        let name: &str = &self.original;
+        let (stem, separator, mut number) = numbered_name(name).unwrap_or((name, " ", 2));
         loop {
-            let suffix = format!(" ({number})");
-            let mut base = self.original.to_string();
-            while base.encode_utf16().count() + suffix.encode_utf16().count() > 31 {
-                base.pop();
+            let suffix = format!("{separator}({number})");
+            let mut stem = stem.to_owned();
+            while stem.encode_utf16().count() + suffix.encode_utf16().count() > 31 {
+                stem.pop();
             }
-            if let Ok(candidate) = Self::new(format!("{base}{suffix}"))
+            if let Ok(candidate) = Self::new(format!("{stem}{suffix}"))
                 && !is_taken(candidate.as_str())
             {
                 return candidate;
@@ -145,6 +148,27 @@ impl SheetName {
             number += 1;
         }
     }
+}
+
+/// Splits a sheet name ending in a number in parentheses into the part before the spaces ahead of
+/// the parentheses, those spaces, and the number after the one written. Excel 16.114 reads spaces
+/// after `(` and leading zeros, and only numbers within `i32`: it copies `Data (2147483648)` as
+/// `Data (2147483648) (2)`.
+fn numbered_name(name: &str) -> Option<(&str, &str, u64)> {
+    let inner = name.strip_suffix(')')?;
+    let open = inner.rfind('(')?;
+    let digits = inner[open + 1..].trim_start_matches(' ');
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let written = digits.parse::<i32>().ok()?;
+    let before = &inner[..open];
+    let stem = before.trim_end_matches(' ');
+    Some((
+        stem,
+        &before[stem.len()..],
+        u64::from(written.unsigned_abs()) + 1,
+    ))
 }
 
 /// Sheet visibility as represented by `SpreadsheetML`.

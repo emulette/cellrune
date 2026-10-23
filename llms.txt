@@ -282,7 +282,8 @@ optional `name`), `set_table_range` (`table_id`, A1 `range`), and
 `convert_table_to_range` (`table_id`). Node spells them `moveSheet`,
 `copySheet`, `setSheetAutoFilter`, `renameDefinedName` (`scopeSheet`,
 `newName`), `createTable`, `setTableRange`, and `convertTableToRange`
-(`tableId`). A copy is named `Name (2)` or the next free number, reports its
+(`tableId`). A copy is named `Name (2)` or the next free number (a name
+ending in `(n)` counts on from `n`), reports its
 ID in `created_sheet_ids`, and later changes of the batch reach it by that
 name.
 
@@ -932,7 +933,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   edit-only save clears the results of 3-D references and sheet functions.
 - `copy_sheet(SheetId, position)` copies a worksheet within its workbook to
   zero-based `position` as the next sheet ID, named `Name (2)` or the next
-  free number. In the copy, single-sheet references to the source name the
+  free number; a name ending in a number in parentheses counts on from it, so
+  `Data (2)` copies as `Data (3)` and `Data(2)` as `Data(3)`. In the copy, single-sheet references to the source name the
   copy; other sheets' and 3-D references keep their text. Its tables take
   new IDs and Excel's numbered names (the name followed by the workbook's
   table count plus two plus the table's index among the copied ones, or the
