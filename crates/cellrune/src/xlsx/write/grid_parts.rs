@@ -22,6 +22,7 @@ const DETAIL_UNREWRITABLE_PART: &str =
     "a structural edit cannot rewrite the coordinates of a preserved part";
 const DETAIL_MOVED_PIVOT_TABLE: &str = "a structural edit moves or splits a preserved pivot table";
 const DETAIL_FORM_CONTROL: &str = "a structural edit cannot move a preserved form control";
+const DETAIL_ANCHOR_OFF_GRID: &str = "a drawing anchor names a cell outside the worksheet grid";
 
 /// How a part related to an edited worksheet holds its coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -381,6 +382,10 @@ fn corner(
     let (Ok(column), Ok(row)) = (u32::try_from(column), u32::try_from(row)) else {
         return Ok(None);
     };
+    // Anchor cells are zero-based; one past the grid cannot follow a line edit.
+    if column >= GridAxis::Columns.max() || row >= GridAxis::Rows.max() {
+        return Err(unrewritable(part, DETAIL_ANCHOR_OFF_GRID, part.as_str()));
+    }
     Ok(Some(Corner {
         column,
         column_offset: number("colOff")?,

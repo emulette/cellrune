@@ -742,3 +742,31 @@ fn a_shape_linked_to_moved_cells_is_refused_with_its_part() {
         Some("xl/drawings/drawing1.xml")
     );
 }
+
+#[test]
+fn a_drawing_anchor_outside_the_grid_is_refused_with_its_part() {
+    let picture = r#"<xdr:oneCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>4294967295</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="9525" cy="9525"/><xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="4" name="Far"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>"#;
+    let source = support::replace_part_text(
+        &generated_grid_edit_fixture(),
+        "xl/drawings/drawing1.xml",
+        "</xdr:wsDr>",
+        picture,
+    );
+    let draft = edited(
+        &source,
+        vec![WorkbookChange::insert_rows(sheet(1), row(3), 1).expect("insertion")],
+    );
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let error = write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        RecalculationWriteOptions::default()
+            .with_policy(RecalculationWritePolicy::InvalidateUnavailable),
+    )
+    .expect_err("the anchor cannot follow the insertion");
+    assert_eq!(error.code(), XlsxWriteErrorCode::UnsupportedPreservation);
+    assert_eq!(
+        error.source_id().map(|source| source.as_str()),
+        Some("xl/drawings/drawing1.xml")
+    );
+}
