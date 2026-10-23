@@ -170,8 +170,8 @@ object (a `dict` in Python), an unknown name, or a value that is not a positive
 integer with `interop.limit.payload_invalid`. `scan_capabilities`/
 `scanCapabilities` page through the static capability report. Range cells
 carry `number_format` (`id`, `code`, `kind`); summaries carry each sheet's
-`auto_filter` range, its `auto_filter_filtered_columns`, the `hidden_rows` as
-A1 row ranges such as `2:4`, and `full_calculation_on_load`, which producers such as
+`auto_filter` range, its `auto_filter_filtered_columns` and the `hidden_rows` as
+A1 row ranges such as `2:4` (each omitted when empty), and `full_calculation_on_load`, which producers such as
 xlsxwriter set while storing placeholder results. Python
 `data_validations(sheet, offset=, limit=)` and Node.js
 `dataValidations(sheet, { offset, limit })` page through a sheet's rules

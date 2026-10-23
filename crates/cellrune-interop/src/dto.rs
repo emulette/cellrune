@@ -1535,11 +1535,12 @@ pub struct SheetSummaryDto {
     #[serde(default)]
     pub auto_filter: Option<String>,
     /// Zero-based `filterColumn` identifiers of the worksheet-level autoFilter that declare a filter
-    /// condition.
-    #[serde(default)]
+    /// condition. Omitted when none does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub auto_filter_filtered_columns: Vec<u32>,
     /// Hidden rows as ascending A1 row ranges such as `2:4`; a filter's hidden rows are included.
-    #[serde(default)]
+    /// Omitted when the sheet hides no row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_rows: Vec<String>,
     /// Frozen rows and columns of the sheet's default view. Omitted when the sheet has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]

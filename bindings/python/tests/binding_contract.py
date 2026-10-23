@@ -392,8 +392,8 @@ def assert_edits_save() -> None:
     summary = workbook.summary()
     assert summary["full_calculation_on_load"] is True
     assert summary["sheets"][0]["auto_filter"] is None
-    assert summary["sheets"][0]["auto_filter_filtered_columns"] == []
-    assert summary["sheets"][0]["hidden_rows"] == []
+    assert "auto_filter_filtered_columns" not in summary["sheets"][0]
+    assert "hidden_rows" not in summary["sheets"][0]
     workbook.set_number("Sheet1", "A1", 3.0)
 
     edited = workbook.edits_to_bytes()

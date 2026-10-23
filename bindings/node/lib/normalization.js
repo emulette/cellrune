@@ -318,8 +318,10 @@ function normalizeSummary(summary) {
       usedRange: sheet.usedRange ?? null,
       mergedRanges: sheet.mergedRanges,
       autoFilter: sheet.autoFilter ?? null,
-      autoFilterFilteredColumns: sheet.autoFilterFilteredColumns,
-      hiddenRows: sheet.hiddenRows,
+      ...(sheet.autoFilterFilteredColumns.length === 0
+        ? {}
+        : { autoFilterFilteredColumns: sheet.autoFilterFilteredColumns }),
+      ...(sheet.hiddenRows.length === 0 ? {} : { hiddenRows: sheet.hiddenRows }),
       ...(sheet.frozenPane == null
         ? {}
         : {

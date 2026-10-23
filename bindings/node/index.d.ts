@@ -511,10 +511,16 @@ export interface SheetSummary {
   readonly mergedRanges: readonly string[];
   readonly tables: readonly TableSummary[];
   readonly autoFilter: string | null;
-  /** Zero-based `filterColumn` ids of the sheet autoFilter that declare a filter condition. */
-  readonly autoFilterFilteredColumns: readonly number[];
-  /** Hidden rows as ascending A1 row ranges such as `2:4`, including rows a filter hides. */
-  readonly hiddenRows: readonly string[];
+  /**
+   * Zero-based `filterColumn` ids of the sheet autoFilter that declare a filter condition; absent
+   * when none does.
+   */
+  readonly autoFilterFilteredColumns?: readonly number[];
+  /**
+   * Hidden rows as ascending A1 row ranges such as `2:4`, including rows a filter hides; absent
+   * when the sheet hides no row.
+   */
+  readonly hiddenRows?: readonly string[];
   /** Frozen rows and columns of the default view; absent when the sheet has none. */
   readonly frozenPane?: FrozenPane;
 }

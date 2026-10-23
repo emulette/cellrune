@@ -89,11 +89,15 @@ pub(crate) fn workbook_summary<'py>(
         }
         item.set_item("tables", tables)?;
         item.set_item("auto_filter", sheet.auto_filter.as_deref())?;
-        item.set_item(
-            "auto_filter_filtered_columns",
-            &sheet.auto_filter_filtered_columns,
-        )?;
-        item.set_item("hidden_rows", &sheet.hidden_rows)?;
+        if !sheet.auto_filter_filtered_columns.is_empty() {
+            item.set_item(
+                "auto_filter_filtered_columns",
+                &sheet.auto_filter_filtered_columns,
+            )?;
+        }
+        if !sheet.hidden_rows.is_empty() {
+            item.set_item("hidden_rows", &sheet.hidden_rows)?;
+        }
         if let Some(pane) = &sheet.frozen_pane {
             let frozen_pane = PyDict::new(py);
             frozen_pane.set_item("rows", pane.rows)?;

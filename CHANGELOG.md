@@ -298,7 +298,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   `Sheet::is_row_hidden`, and which worksheet-level autoFilter columns declare a filter condition
   into `SheetAutoFilter::filtered_column_ids`; Excel stores the rows a filter hides as hidden rows.
   The sheet summaries of interop, Python, Node.js, and MCP report `hidden_rows` as A1 row ranges and
-  `auto_filter_filtered_columns`. The workbook fingerprint folds both only when present, so
+  `auto_filter_filtered_columns` only when the sheet has them, so other summaries are unchanged. The
+  workbook fingerprint folds both only when present, so
   workbooks without them keep their fingerprints, and a document-backed write verifies that its
   output keeps the hidden rows.
 - `FIXED(number, [decimals], [no_commas])` rounds to `decimals` places (default 2, at most 127;

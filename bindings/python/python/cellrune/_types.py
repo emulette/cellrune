@@ -327,6 +327,8 @@ class FrozenPane(TypedDict):
 
 
 class SheetSummaryOptions(TypedDict, total=False):
+    auto_filter_filtered_columns: list[int]
+    hidden_rows: list[str]
     frozen_pane: FrozenPane
 
 
@@ -339,8 +341,6 @@ class SheetSummary(SheetSummaryOptions):
     merged_ranges: list[str]
     tables: list[TableSummary]
     auto_filter: str | None
-    auto_filter_filtered_columns: list[int]
-    hidden_rows: list[str]
 
 
 class DataValidation(TypedDict):
