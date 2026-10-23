@@ -947,7 +947,10 @@ than guessing a name from a different XLSX crate (`calamine`,
 - The complex trigonometric functions take one inumber and return complex text
   with the same 15-significant-digit formatting and `i`/`j` suffix as the other
   complex functions; `IMTAN` and `IMCOT` use the double-angle forms so small
-  real parts survive. A logical inumber returns `#VALUE!` and other text that
+  real parts survive, with the denominators written as 2(cos² a + sinh² b) and
+  2(sin² a + sinh² b) when the imaginary part is below 1, so arguments near a
+  real pole such as `IMTAN("1.5707963")` or `IMCOT("1E-9")` keep their digits.
+  A logical inumber returns `#VALUE!` and other text that
   is not a complex number `#NUM!`. `IMSIN`, `IMCOS`, and `IMSINH` return
   `#NUM!` when the result overflows. `IMCOT`, `IMCSC`, and `IMCSCH` at zero, and
   the bounded functions where an intermediate overflows, report

@@ -44,6 +44,20 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
             "IMCSCH(COMPLEX(3,4))",
             "-0.0648774713706355+0.0754898329158637i",
         ),
+        // Excel 16.114 for Mac near the poles of real arguments, where cos 2a ± cosh 2b cancels.
+        ("IMTAN(\"1.5707963\")", "37320539.6343548"),
+        ("IMCOT(\"0.00001\")", "99999.9999966667"),
+        ("IMCOT(\"1E-9\")", "1000000000"),
+        ("IMCOT(\"3.14159\")", "-376847.997569741"),
+        // Nearly real arguments, rounded from 40-digit references.
+        (
+            "IMTAN(\"1.5707963+0.000001i\")",
+            "26775.6725495693+999282.548623373i",
+        ),
+        (
+            "IMCOT(\"0.00001+0.0000001i\")",
+            "99990.0009965667-999.900010032333i",
+        ),
         // Real arguments and the j suffix.
         ("IMSIN(\"2j\")", "3.62686040784702j"),
         ("IMTAN(\"0\")", "0"),

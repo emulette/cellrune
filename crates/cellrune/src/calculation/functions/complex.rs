@@ -261,23 +261,40 @@ impl ComplexValue {
     /// tan(a + bi) = (sin 2a + i·sinh 2b) / (cos 2a + cosh 2b). The double-angle form keeps the
     /// small real part of a large imaginary argument, which dividing sine by cosine cancels away.
     pub(super) fn tangent(self) -> Result<Self, ErrorKind> {
-        let (real, imaginary) = (2.0 * self.real, 2.0 * self.imaginary);
-        let denominator = real.cos() + imaginary.cosh();
-        Self::new(
-            real.sin() / denominator,
-            imaginary.sinh() / denominator,
-            self.suffix,
-        )
+        self.double_angle_quotient(false)
     }
 
     /// cot(a + bi) = (sin 2a − i·sinh 2b) / (cosh 2b − cos 2a), the double-angle form of
     /// [`Self::tangent`].
     pub(super) fn cotangent(self) -> Result<Self, ErrorKind> {
+        self.double_angle_quotient(true)
+    }
+
+    /// The double-angle quotient of [`Self::tangent`] or [`Self::cotangent`].
+    ///
+    /// For |b| < 1 the denominator is the equal 2(cos² a + sinh² b), or 2(sin² a + sinh² b) for
+    /// the cotangent: near a pole of a nearly real argument cos 2a ± cosh 2b cancels almost every
+    /// digit, while these sums of squares do not. From |b| = 1 the subtraction loses at most a bit,
+    /// and the double-angle sum keeps the digits Microsoft publishes for `IMCOT("4+3i")`.
+    fn double_angle_quotient(self, cotangent: bool) -> Result<Self, ErrorKind> {
         let (real, imaginary) = (2.0 * self.real, 2.0 * self.imaginary);
-        let denominator = imaginary.cosh() - real.cos();
+        let denominator = if self.imaginary.abs() < 1.0 {
+            let circular = if cotangent {
+                self.real.sin()
+            } else {
+                self.real.cos()
+            };
+            let hyperbolic = self.imaginary.sinh();
+            2.0 * (circular * circular + hyperbolic * hyperbolic)
+        } else if cotangent {
+            imaginary.cosh() - real.cos()
+        } else {
+            real.cos() + imaginary.cosh()
+        };
+        let direction = if cotangent { -1.0 } else { 1.0 };
         Self::new(
             real.sin() / denominator,
-            -(imaginary.sinh() / denominator),
+            direction * (imaginary.sinh() / denominator),
             self.suffix,
         )
     }
