@@ -1118,6 +1118,109 @@ fn explicit_intersection_plain_range_tracks_only_the_selected_cell() {
 }
 
 #[test]
+fn number_format_edits_recalculate_only_formulas_that_read_number_formats() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_formula(
+                    sheet_id,
+                    address("B1"),
+                    formula("CELL(\"format\",A1)"),
+                ),
+                WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("B1&\"!\"")),
+                WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("Z9+1")),
+            ]),
+        )
+        .expect("valid format reader batch");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial full calculation");
+    let format_edit = || {
+        EditBatch::new([WorkbookChange::set_cell_number_format(
+            sheet_id,
+            address("A1"),
+            NumberFormat::built_in(2, NumberFormatKind::Number).expect("built-in format"),
+        )])
+    };
+
+    let preview = session
+        .prepare_transaction(
+            session.workbook().semantic_revision(),
+            format_edit(),
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("format transaction prepares")
+        .run()
+        .expect("format transaction runs");
+    assert_eq!(preview.report().direct_affected_count(), 1);
+    assert_eq!(preview.report().transitive_affected_count(), 1);
+    assert_eq!(preview.report().preview_changed_count(), 2);
+
+    session
+        .apply_changes(session.workbook().semantic_revision(), format_edit())
+        .expect("format edit");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("incremental calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.evaluated_count(), 2);
+    assert_eq!(
+        delta
+            .changed_cells()
+            .iter()
+            .map(|cell| cell.cell().address().to_string())
+            .collect::<Vec<_>>(),
+        vec!["B1", "C1"]
+    );
+    let installed = session.calculation().expect("installed calculation");
+    assert_eq!(
+        installed.cell(CalculationCellId::new(sheet_id, address("C1"))),
+        Some(&CalculationCellResult::Value(CellValue::Text(
+            "F2!".to_owned()
+        )))
+    );
+    assert_calculations_equal(
+        installed,
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+
+    // Without a formula reading number formats, a format edit leaves nothing to recalculate.
+    let mut plain = chain_session();
+    plain
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial full calculation");
+    plain
+        .apply_changes(plain.workbook().semantic_revision(), format_edit())
+        .expect("format edit");
+    let unchanged = plain
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("warm calculation");
+    assert_eq!(unchanged.evaluated_count(), 0);
+}
+
+#[test]
 fn incremental_chain_matches_full_oracle_and_reports_only_changed_results() {
     let mut session = chain_session();
     let initial = session

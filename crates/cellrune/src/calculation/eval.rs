@@ -133,19 +133,25 @@ pub(super) struct CompiledWorkbook {
     volatile_formulas: Arc<VolatileFormulas>,
 }
 
-/// Formula cells that call a function reading each volatile calculation input, directly or
-/// through defined names and LAMBDA bodies.
+/// Formula cells that call a function reading each volatile calculation input or number formats,
+/// directly or through defined names and LAMBDA bodies.
 #[derive(Debug, Clone, Default)]
 pub(super) struct VolatileFormulas {
     today: Vec<CellId>,
     now: Vec<CellId>,
     random: Vec<CellId>,
+    number_formats: Vec<CellId>,
 }
 
 impl VolatileFormulas {
     /// Drops `cells`, whose formulas changed or were removed.
     fn forget(&mut self, cells: &BTreeSet<CellId>) {
-        for list in [&mut self.today, &mut self.now, &mut self.random] {
+        for list in [
+            &mut self.today,
+            &mut self.now,
+            &mut self.random,
+            &mut self.number_formats,
+        ] {
             list.retain(|cell| !cells.contains(cell));
         }
     }
@@ -159,6 +165,9 @@ impl VolatileFormulas {
             if read.contains(volatility) {
                 cells.push(cell);
             }
+        }
+        if read.reads_number_formats() {
+            self.number_formats.push(cell);
         }
     }
 
@@ -241,6 +250,11 @@ impl CompiledWorkbook {
     /// Returns the formula cells whose own formula reads `volatility`.
     pub(super) fn volatile_formulas(&self, volatility: Volatility) -> &[CellId] {
         self.volatile_formulas.reading(volatility)
+    }
+
+    /// Returns the formula cells whose own formula reads number formats.
+    pub(super) fn number_format_formulas(&self) -> &[CellId] {
+        &self.volatile_formulas.number_formats
     }
 
     /// Returns what the formula at `cell` reads, with the values of the calculation that compiled
@@ -1347,6 +1361,15 @@ impl<'workbook> Engine<'workbook> {
             .get(cell.0)
             .and_then(|sheet| cell_at(sheet, cell.1, cell.2))
             .is_some_and(|cell| matches!(cell.content(), CellContent::Formula(_)))
+    }
+
+    /// Returns the number format of the stored cell at `cell`, or `None` for an empty position.
+    pub(super) fn cell_number_format(&self, cell: CellId) -> Option<&crate::NumberFormat> {
+        self.workbook
+            .sheets()
+            .get(cell.0)
+            .and_then(|sheet| cell_at(sheet, cell.1, cell.2))
+            .map(crate::Cell::number_format)
     }
 
     pub(super) fn cell_formula_text(&self, cell: CellId) -> Option<&str> {

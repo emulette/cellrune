@@ -15,6 +15,9 @@ pub struct EditReceipt {
     /// Whether every topology change came from a cell gaining, losing, or replacing a formula.
     pub(super) cell_formulas_changed_topology_only: bool,
     pub(super) calculation_metadata_changed: bool,
+    /// Whether a cell's number format changed with its value and formula kept, which only
+    /// formulas reading number formats see.
+    pub(super) number_formats_changed: bool,
     pub(super) inverse: Option<Box<EditInverse>>,
 }
 
@@ -48,6 +51,7 @@ impl EditReceipt {
             topology_changed: self.topology_changed,
             cell_formulas_changed_topology_only: self.cell_formulas_changed_topology_only,
             calculation_metadata_changed: self.calculation_metadata_changed,
+            number_formats_changed: self.number_formats_changed,
             inverse: self.inverse.clone(),
         })
     }
@@ -101,6 +105,11 @@ impl EditReceipt {
     /// Returns whether workbook-wide calculation interpretation changed.
     pub const fn calculation_metadata_changed(&self) -> bool {
         self.calculation_metadata_changed
+    }
+
+    /// Returns whether a cell's number format changed while its value and formula stayed.
+    pub(crate) const fn number_formats_changed(&self) -> bool {
+        self.number_formats_changed
     }
 
     /// Returns the changes that undo the batch and what they cannot restore, for a batch that

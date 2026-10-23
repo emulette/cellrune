@@ -10,8 +10,8 @@ use super::functions::{
     CallableShadow, DynamicFunction, Evaluator, builtin_invocation_arguments_are_reachable,
     callable_shadow_arguments_are_reachable, classify_callable_value, descriptor_sheet_span_policy,
     direct_builtin_callable, function_argument_is_callable, function_arguments_are_reachable,
-    function_dependency_kind, function_evaluator, function_volatility, is_supported_function,
-    normalize_name,
+    function_dependency_kind, function_evaluator, function_reads_number_formats,
+    function_volatility, is_supported_function, normalize_name,
 };
 use super::lambda::definition;
 use super::scope::DefinedLambdaId;
@@ -716,12 +716,14 @@ fn build_materialization_view_cancellable(
     Ok(materialized)
 }
 
-/// The volatile calculation inputs a formula reads.
+/// The volatile calculation inputs a formula reads, and whether it reads number formats, which
+/// a format-only edit changes without changing any cell's value.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct VolatileInputs {
     today: bool,
     now: bool,
     random: bool,
+    number_formats: bool,
 }
 
 impl VolatileInputs {
@@ -730,7 +732,12 @@ impl VolatileInputs {
             today: matches!(volatility, Volatility::Today),
             now: matches!(volatility, Volatility::Now),
             random: matches!(volatility, Volatility::Random),
+            number_formats: false,
         }
+    }
+
+    pub(super) const fn reads_number_formats(self) -> bool {
+        self.number_formats
     }
 
     pub(super) const fn contains(self, volatility: Volatility) -> bool {
@@ -751,6 +758,7 @@ impl std::ops::BitOr for VolatileInputs {
             today: self.today || other.today,
             now: self.now || other.now,
             random: self.random || other.random,
+            number_formats: self.number_formats || other.number_formats,
         }
     }
 }
@@ -849,8 +857,9 @@ fn expr_volatility(
             {
                 return VolatileInputs::default();
             }
-            let called =
+            let mut called =
                 function_volatility(name).map_or_else(VolatileInputs::default, VolatileInputs::of);
+            called.number_formats = function_reads_number_formats(name);
             match dynamic_function(name) {
                 Some(DynamicFunction::Let) => {
                     let previous_len = local_scope.len();

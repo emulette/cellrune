@@ -2,6 +2,7 @@ use super::super::ast::{Expr, column_label};
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::CellId;
 use super::super::value::{ErrorKind, Value};
+use super::cell_format_info::format_code;
 use super::util::required_text;
 
 const MAX_DISPLAYED_FORMULA_CHARACTERS: usize = 8_192;
@@ -89,15 +90,19 @@ pub(super) fn sheets(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
 /// CELL(info_type, reference) for the info types defined by the workbook alone, as Microsoft
 /// documents them and Excel 16.114 for Mac returns them: `"address"` of the upper-left cell as
 /// `$A$1` text when the reference is on the formula's sheet, `"contents"` (the upper-left cell's
-/// value, 0 for an empty cell), `"row"` of the upper-left cell, and for a single cell `"col"` and
+/// value, 0 for an empty cell), `"row"` of the upper-left cell, for a single cell `"col"` and
 /// `"type"` (`"b"` for an empty cell, `"l"` for text, including a formula's text result, and `"v"`
-/// otherwise). The info type is matched without regard to ASCII case.
+/// otherwise), and for the upper-left cell's number format `"format"` (its documented code, such
+/// as `"F2"` or `"D4"`), `"color"` (1 for a code that shows negative values in color, else 0), and
+/// `"parentheses"` (0, since no documented code shows positive values in parentheses). The info
+/// type is matched without regard to ASCII case.
 ///
-/// The other info types read the number format, column width, protection, or file path, which are
-/// not calculation inputs, an omitted or empty reference reads the selection at calculation time,
-/// and Excel prefixes the address of another sheet with the file name, so those are unsupported.
-/// So are a multi-cell `"col"` or `"type"`, which Excel was not measured on, and the `"type"` of a
-/// formula with a blank result.
+/// The other info types read the column width, alignment, protection, or file path, which are not
+/// calculation inputs, an omitted or empty reference reads the selection at calculation time, and
+/// Excel prefixes the address of another sheet with the file name, so those are unsupported. So
+/// are a multi-cell `"col"` or `"type"`, which Excel was not measured on, the `"type"` of a formula
+/// with a blank result, and the format of an empty position, whose row or column style is not a
+/// calculation input, or of a format Microsoft does not document a code for.
 pub(super) fn cell(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     let [info_type, reference] = args else {
         return Value::Error(ErrorKind::Unsupported);
@@ -140,6 +145,16 @@ pub(super) fn cell(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr])
             Ok(_) => Value::Text("v".to_owned()),
             Err(kind) => Value::Error(kind),
         },
+        "format" | "color" | "parentheses" => {
+            let Some(code) = engine.cell_number_format(first).and_then(format_code) else {
+                return Value::Error(ErrorKind::Unsupported);
+            };
+            match info_type.as_str() {
+                "format" => Value::Text(code.to_owned()),
+                "color" => Value::Number(if code.ends_with('-') { 1.0 } else { 0.0 }),
+                _ => Value::Number(0.0),
+            }
+        }
         _ => Value::Error(ErrorKind::Unsupported),
     }
 }

@@ -30,7 +30,8 @@ pub use dependencies::{CellDependents, CellPrecedents, Dependent, Precedent, Pre
 use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{
-    affected_formulas, formula_cells, formula_cells_from_workbook, volatile_input_formulas,
+    affected_formulas, formula_cells, formula_cells_from_workbook, number_format_formulas,
+    volatile_input_formulas,
 };
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
@@ -289,6 +290,12 @@ impl WorkbookCalculationSession {
             )
             .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
             dirty.extend(edited_formulas.iter().copied());
+            if receipt.number_formats_changed() {
+                let readers = number_format_formulas(draft.workbook(), compiled, &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+                dirty.extend(readers.direct);
+                dirty.extend(readers.transitive);
+            }
             dirty
         } else {
             clone_set_cancellable(&self.dirty, &cancelled)
@@ -302,8 +309,14 @@ impl WorkbookCalculationSession {
             edits.extend(edited_formulas);
             edits
         };
-        let next_calculation_changes_pending =
-            self.calculation_changes_pending || !receipt.calculation_changed_cells().is_empty();
+        let reads_changed_formats = receipt.number_formats_changed()
+            && self
+                .compiled
+                .as_ref()
+                .is_some_and(|compiled| !compiled.number_format_formulas().is_empty());
+        let next_calculation_changes_pending = self.calculation_changes_pending
+            || !receipt.calculation_changed_cells().is_empty()
+            || reads_changed_formats;
         Ok(PreparedEditBatch {
             base_revision: current_revision,
             base_presentation_revision: self.draft.presentation_revision(),

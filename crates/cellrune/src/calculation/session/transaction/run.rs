@@ -182,9 +182,12 @@ impl PreparedWorkbookTransaction {
 
         let topology_or_metadata_changed = self.edit_receipt.topology_changed()
             || self.edit_receipt.calculation_metadata_changed();
+        let reads_changed_formats = self.edit_receipt.number_formats_changed()
+            && !base_compiled.number_format_formulas().is_empty();
         let conservative_impact = topology_or_metadata_changed
             || (!base_compiled.incremental_safe()
-                && !self.edit_receipt.calculation_changed_cells().is_empty());
+                && (!self.edit_receipt.calculation_changed_cells().is_empty()
+                    || reads_changed_formats));
         let (impact_coverage, direct, transitive, conservative) = if conservative_impact {
             let formulas = formula_cells_from_workbook(self.candidate_draft.workbook(), &|| {
                 self.cancellation.is_cancelled()
@@ -205,10 +208,22 @@ impl PreparedWorkbookTransaction {
                 &|| self.cancellation.is_cancelled(),
             )
             .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+            let (mut direct, mut transitive) = (impact.direct, impact.transitive);
+            if reads_changed_formats {
+                let readers = number_format_formulas(
+                    self.candidate_draft.workbook(),
+                    &base_compiled,
+                    &|| self.cancellation.is_cancelled(),
+                )
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+                transitive.extend(readers.transitive);
+                direct.extend(readers.direct);
+                transitive.retain(|cell| !direct.contains(cell));
+            }
             (
                 TransactionImpactCoverage::Exact,
-                impact.direct,
-                impact.transitive,
+                direct,
+                transitive,
                 BTreeSet::new(),
             )
         };
@@ -221,7 +236,8 @@ impl PreparedWorkbookTransaction {
             calculation_options: Some(self.options),
             dirty: candidate_dirty,
             formula_edits: BTreeSet::new(),
-            calculation_changes_pending: !self.edit_receipt.calculation_changed_cells().is_empty(),
+            calculation_changes_pending: !self.edit_receipt.calculation_changed_cells().is_empty()
+                || reads_changed_formats,
             requires_full_rebuild: topology_or_metadata_changed,
             limits: self.limits,
             next_cursor: self.base_cursor,

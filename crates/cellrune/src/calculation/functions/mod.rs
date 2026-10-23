@@ -24,6 +24,7 @@ mod array_reshape;
 mod array_sort;
 mod baht_text;
 mod calendar;
+mod cell_format_info;
 mod combinatorics;
 mod complex;
 mod contract;
@@ -826,6 +827,12 @@ pub(super) fn function_catalog() -> Vec<super::FunctionCatalogEntry> {
 
 pub(super) fn function_volatility(name: &str) -> Option<descriptor::Volatility> {
     descriptor::resolve(name).map(FunctionDescriptor::volatility)
+}
+
+/// Reports whether `name` is `CELL`, whose `"format"`, `"color"`, and `"parentheses"` read the
+/// number format of the cell it names.
+pub(super) fn function_reads_number_formats(name: &str) -> bool {
+    function_evaluator(name) == Some(Evaluator::Information(kernel::InformationFunction::Cell))
 }
 
 pub(in crate::calculation) fn function_dependency_kind(name: &str) -> Option<DependencyKind> {

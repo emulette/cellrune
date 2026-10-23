@@ -92,6 +92,7 @@ impl WorkbookDraft {
                 topology_changed: false,
                 cell_formulas_changed_topology_only: false,
                 calculation_metadata_changed: false,
+                number_formats_changed: false,
                 inverse: None,
             });
         }
@@ -137,6 +138,7 @@ impl WorkbookDraft {
         // apply locally; every other change sets `topology_changed`.
         let mut cell_formulas_changed = false;
         let mut calculation_metadata_changed = false;
+        let mut number_formats_changed = false;
         let mut semantic_changed = false;
         // Every ID the workbook or this batch has used stays taken, including those of sheets
         // deleted since, so an added sheet takes the one after the highest.
@@ -391,6 +393,7 @@ impl WorkbookDraft {
                         changed_cells.insert(CalculationCellId::new(*sheet_id, *address));
                         touched_sheets.insert(*sheet_id);
                         semantic_changed = true;
+                        number_formats_changed = true;
                     }
                 }
                 WorkbookChange::AddSheet { name } => {
@@ -1185,6 +1188,7 @@ impl WorkbookDraft {
             topology_changed: topology_changed || cell_formulas_changed,
             cell_formulas_changed_topology_only: !topology_changed,
             calculation_metadata_changed,
+            number_formats_changed,
             inverse,
         })
     }

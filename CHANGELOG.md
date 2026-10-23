@@ -392,9 +392,13 @@ inventories, and measurements belong in the linked documentation rather than in 
   Authored `ENCODEURL` formulas are stored as `_xlfn.ENCODEURL`.
 - `CELL` returns the `"address"`, `"contents"`, `"row"`, `"col"`, and `"type"` information defined
   by the workbook alone, as Excel does for a range's row, an empty cell's contents (0), a formula's
-  text result (`"l"`), and an info type in any case. Formatting, width, protection, and file-name
-  info types, an omitted or empty reference, another sheet's address, and a range's `"col"` or
-  `"type"` report `calculation.unsupported_expression`.
+  text result (`"l"`), and an info type in any case. `"format"`, `"color"`, and `"parentheses"`
+  read the upper-left cell's number format and return the codes Microsoft documents (`"F2"`,
+  `"C2-"`, `"D4"`, ...; `yyyy-mm-dd` is `"G"` as in Excel); a session edit of a number format
+  recalculates the formulas that call `CELL`. Width, alignment, protection, and file-name info
+  types, the format of an empty position or an undocumented format, an omitted or empty reference,
+  another sheet's address, and a range's `"col"` or `"type"` report
+  `calculation.unsupported_expression`.
 - `BAHTTEXT` reads amounts as Thai baht text as Excel does, including zero, negative amounts,
   amounts below one baht, rounding to the nearest satang, and เอ็ด for every final one after a
   higher digit; a half satang whose direction depends on the rounding rule reports

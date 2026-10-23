@@ -132,29 +132,64 @@ pub(super) fn volatile_input_formulas(
     changed: &[Volatility],
     cancelled: &impl Fn() -> bool,
 ) -> Result<BTreeSet<CalculationCellId>, ()> {
+    let readers = changed
+        .iter()
+        .flat_map(|volatility| compiled.volatile_formulas(*volatility));
+    let impact = reader_impact(workbook, compiled, readers, cancelled)?;
+    let mut all = impact.direct;
+    all.extend(impact.transitive);
+    Ok(all)
+}
+
+/// Returns the formulas that read number formats, as `direct`, and every formula depending on
+/// them, as `transitive`: what a format-only edit can change.
+pub(super) fn number_format_formulas(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    cancelled: &impl Fn() -> bool,
+) -> Result<AffectedFormulaImpact, ()> {
+    reader_impact(
+        workbook,
+        compiled,
+        compiled.number_format_formulas(),
+        cancelled,
+    )
+}
+
+fn reader_impact<'a>(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    readers: impl IntoIterator<Item = &'a CellId>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<AffectedFormulaImpact, ()> {
     let mut charger = ImpactWorkCharger {
         charged: 0,
         cancelled,
     };
     let mut all = BTreeSet::new();
     let mut pending = Vec::new();
-    for volatility in changed {
-        for cell in compiled.volatile_formulas(*volatility) {
-            charger.charge()?;
-            if all.insert(*cell) {
-                pending.push(*cell);
-            }
+    for cell in readers {
+        charger.charge()?;
+        if all.insert(*cell) {
+            pending.push(*cell);
         }
     }
-    compiled.close_over_dependents(&mut all, pending, &mut || charger.charge())?;
-    let mut public = BTreeSet::new();
+    compiled.close_over_dependents(&mut all, pending.iter().copied(), &mut || charger.charge())?;
+    let mut direct = BTreeSet::new();
+    for cell in &pending {
+        charger.charge()?;
+        direct.extend(internal_to_public(workbook, *cell));
+    }
+    let mut transitive = BTreeSet::new();
     for cell in all {
         charger.charge()?;
-        if let Some(cell) = internal_to_public(workbook, cell) {
-            public.insert(cell);
+        if let Some(cell) = internal_to_public(workbook, cell)
+            && !direct.contains(&cell)
+        {
+            transitive.insert(cell);
         }
     }
-    Ok(public)
+    Ok(AffectedFormulaImpact { direct, transitive })
 }
 
 fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {

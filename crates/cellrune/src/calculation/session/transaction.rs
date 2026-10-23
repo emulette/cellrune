@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use super::delta::{DeltaMetadata, build_delta};
-use super::impact::{affected_formula_impact, formula_cells_from_workbook};
+use super::impact::{affected_formula_impact, formula_cells_from_workbook, number_format_formulas};
 use super::{
     ApplyChangesError, CalculationDecisionReason, CalculationDelta, CalculationExecutionMode,
     CancellationToken, PreparedEditBatch, RecalculationMode, SessionError, SessionErrorCode,
