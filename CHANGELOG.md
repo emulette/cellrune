@@ -55,6 +55,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   x14 formulas, and chart series. Removing a name and adding it under a new one left those uses as
   `#NAME?`. A rename fails with the new `validation.unknown_defined_name` for a missing name and
   `validation.defined_name_rename_shadowed` when the other scope already uses the new name.
+- `WorkbookChange::create_table(SheetId, CellRange, Option<TableName>)` creates a table whose first
+  row is its header, naming blank headers `Column1`, `Column2`, and so on, with Excel's default
+  name `Table` and the number after the workbook's table count. Saving into the source package adds
+  the table part. A range without a data row fails with the new `validation.table_range_invalid`,
+  and one over a merged range or legacy array with the new `validation.table_range_overlap`.
 - `WorkbookChange::convert_table_to_range(TableId)` converts a table to a plain range. Its cells
   keep their values and formulas, and every structured reference to it becomes a sheet-qualified
   absolute reference, as Excel 16.114 saves it (`Things[val]` becomes `'S2'!$D$2:$D$4`, `[@val]`

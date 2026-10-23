@@ -152,6 +152,21 @@ pub enum WorkbookChange {
         /// Last one-based data-body row.
         last_data_row: Row,
     },
+    /// Creates a table over a range whose first row is its header, as Excel's Format as Table
+    /// does.
+    ///
+    /// Each text header cell names its column, and a blank one is named `Column` and its position,
+    /// which the cell then holds. The table gets the next free table ID, a filter over its range,
+    /// Excel's default style, and `name`, or by default `Table` and the number after the
+    /// workbook's table count.
+    CreateTable {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Table range, header row included.
+        range: CellRange,
+        /// Display name, or `None` for the default.
+        name: Option<TableName>,
+    },
     /// Converts a table to a plain range, as Excel's Convert to Range does.
     ///
     /// The table leaves its sheet with its filter, its cells keep their values and formulas, and
@@ -393,6 +408,19 @@ impl WorkbookChange {
             first_data_row,
             last_data_row,
         })
+    }
+
+    /// Constructs a table creation over `range`, named `name` or by default.
+    pub const fn create_table(
+        sheet_id: SheetId,
+        range: CellRange,
+        name: Option<TableName>,
+    ) -> Self {
+        Self::CreateTable {
+            sheet_id,
+            range,
+            name,
+        }
     }
 
     /// Constructs a conversion of a table to a plain range.

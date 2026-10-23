@@ -1,11 +1,12 @@
-//! The parts and worksheet entries a table converted to a range leaves in a preserved package.
+//! The table parts and worksheet entries a preserved package gains for created tables and loses
+//! for tables converted to ranges.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
 use quick_xml::Writer;
 use quick_xml::XmlVersion;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
 
@@ -92,6 +93,182 @@ pub(super) fn plan_table_removal(
         removal.parts.extend(converted);
     }
     Ok(removal)
+}
+
+/// A table the draft created on a sheet, written as a new part.
+pub(super) struct TableAddition {
+    pub(super) part: PartPath,
+    /// The target the sheet's relationship names, relative to the worksheet.
+    pub(super) target: String,
+    pub(super) relationship_id: String,
+}
+
+impl TableAddition {
+    /// Names the new part of the created table `table_id`, which no source part uses.
+    pub(super) fn new(
+        worksheet: &PartPath,
+        table_id: u32,
+        relationship_id: String,
+    ) -> Result<Self, XlsxWriteError> {
+        let target = format!("../tables/cellrune-table-{table_id}.xml");
+        let part = PartPath::resolve_relationship(Some(worksheet), &target)
+            .map_err(|error| invalid_plan_with_cause(worksheet, error))?;
+        Ok(Self {
+            part,
+            target,
+            relationship_id,
+        })
+    }
+}
+
+/// Returns a new relationship part holding one table relationship per addition.
+pub(super) fn relationships_xml(additions: &[TableAddition]) -> String {
+    let mut xml = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+    );
+    for addition in additions {
+        xml.push_str(&format!(
+            r#"<Relationship Id="{}" Type="{TABLE_RELATIONSHIP}" Target="{}"/>"#,
+            addition.relationship_id, addition.target
+        ));
+    }
+    xml.push_str("</Relationships>");
+    xml
+}
+
+pub(super) const TABLE_RELATIONSHIP: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
+
+/// Worksheet elements that follow `<tableParts>` in CT_Worksheet order.
+const AFTER_TABLE_PARTS: &[&str] = &["extLst"];
+
+/// Adds one `<tablePart>` per relationship ID to the worksheet's `<tableParts>`, renumbering its
+/// count, or writes the container where CT_Worksheet places it. Each entry declares the
+/// relationship namespace itself, since the worksheet root need not.
+pub(super) fn add_table_parts(
+    bytes: &[u8],
+    source: &PartPath,
+    relationship_ids: &[String],
+    limits: WriteLimits,
+) -> Result<Vec<u8>, XlsxWriteError> {
+    let mut xml = namespace_reader(bytes, limits.max_xml_depth());
+    xml.config_mut().check_end_names = true;
+    xml.config_mut().allow_unmatched_ends = false;
+    xml.config_mut().expand_empty_elements = false;
+    xml.config_mut().trim_text(false);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let mut buffer = Vec::new();
+    let mut depth = 0_u64;
+    let mut root_name = String::new();
+    let mut inside = false;
+    let mut added = false;
+    let prefix = |root: &str| {
+        root.rfind(':')
+            .map_or(String::new(), |index| root[..=index].to_owned())
+    };
+    let entries = |writer: &mut Writer<Cursor<Vec<u8>>>, root: &str| {
+        for id in relationship_ids {
+            let name = format!("{}tablePart", prefix(root));
+            let mut entry = BytesStart::new(name.as_str());
+            entry.push_attribute((
+                "xmlns:r",
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            ));
+            entry.push_attribute(("r:id", id.as_str()));
+            write_event(writer, Event::Empty(entry), source)?;
+        }
+        Ok::<_, XlsxWriteError>(())
+    };
+    let container = |writer: &mut Writer<Cursor<Vec<u8>>>, root: &str, existing: Option<usize>| {
+        let name = format!("{}tableParts", prefix(root));
+        let count = (existing.unwrap_or(0) + relationship_ids.len()).to_string();
+        let mut start = BytesStart::new(name.as_str());
+        start.push_attribute(("count", count.as_str()));
+        write_event(writer, Event::Start(start), source)?;
+        entries(writer, root)?;
+        write_event(writer, Event::End(BytesEnd::new(name)), source)
+    };
+    loop {
+        let event =
+            read_event(&mut xml, &mut buffer).map_err(|error| invalid_xml(source, error))?;
+        match event {
+            Event::Start(element) => {
+                depth = depth.saturating_add(1);
+                if depth == 1 {
+                    root_name = element.name().as_ref().to_owned();
+                }
+                if depth == 2 && element.local_name().as_ref() == "tableParts" {
+                    inside = true;
+                    let existing = count_attribute(&element);
+                    let element = match existing {
+                        Some(count) => with_count(&element, count + relationship_ids.len()),
+                        None => element.into_owned(),
+                    };
+                    write_event(&mut writer, Event::Start(element), source)?;
+                } else {
+                    if !added
+                        && depth == 2
+                        && AFTER_TABLE_PARTS.contains(&element.local_name().as_ref())
+                    {
+                        container(&mut writer, &root_name, None)?;
+                        added = true;
+                    }
+                    write_event(&mut writer, Event::Start(element.into_owned()), source)?;
+                }
+            }
+            Event::Empty(element) => {
+                if depth == 1 && element.local_name().as_ref() == "tableParts" {
+                    container(&mut writer, &root_name, count_attribute(&element))?;
+                    added = true;
+                } else {
+                    if !added
+                        && depth == 1
+                        && AFTER_TABLE_PARTS.contains(&element.local_name().as_ref())
+                    {
+                        container(&mut writer, &root_name, None)?;
+                        added = true;
+                    }
+                    write_event(&mut writer, Event::Empty(element.into_owned()), source)?;
+                }
+            }
+            Event::End(element) => {
+                if inside && depth == 2 {
+                    entries(&mut writer, &root_name)?;
+                    inside = false;
+                    added = true;
+                } else if !added && depth == 1 {
+                    container(&mut writer, &root_name, None)?;
+                    added = true;
+                }
+                write_event(&mut writer, Event::End(element.into_owned()), source)?;
+                depth = depth.saturating_sub(1);
+            }
+            Event::Eof => break,
+            other => write_event(&mut writer, other.into_owned(), source)?,
+        }
+        buffer.clear();
+    }
+    let output = writer.into_inner().into_inner();
+    if output.len() as u64 > limits.max_rewritten_xml_bytes() {
+        return Err(
+            XlsxWriteError::new(XlsxWriteErrorCode::ResourceLimitExceeded)
+                .with_detail(format!(
+                    "{DETAIL_XML_BYTES}: {} > {}",
+                    output.len(),
+                    limits.max_rewritten_xml_bytes()
+                ))
+                .at_source(source.source_id()),
+        );
+    }
+    Ok(output)
+}
+
+fn count_attribute(element: &BytesStart<'_>) -> Option<usize> {
+    element
+        .try_get_attribute("count")
+        .ok()
+        .flatten()
+        .and_then(|attribute| attribute.value.parse().ok())
 }
 
 /// Removes the `<tablePart>` entries whose relationship is in `relationship_ids`, renumbering the

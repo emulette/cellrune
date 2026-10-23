@@ -729,6 +729,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   `rename_table(TableId, TableName)`,
   `rename_table_column(TableId, TableColumnId, TableColumnName)`,
   `resize_table_rows(TableId, first_data_row, last_data_row)`,
+  `create_table(SheetId, CellRange, Option<TableName>)`,
   `convert_table_to_range(TableId)`,
   `widen_table_columns(TableId, CellRange)`,
   `widen_sheet_auto_filter(SheetId, CellRange)`, and
@@ -821,6 +822,21 @@ than guessing a name from a different XLSX crate (`calamine`,
   `validation.sheet_auto_filter_overlaps_table`. Saving writes the
   worksheet `<autoFilter>` where CT_Worksheet places it, a canonical
   workbook included.
+- `create_table(SheetId, CellRange, Option<TableName>)` creates a table whose
+  first row is its header, as Format as Table does: each text header cell
+  names its column, and a blank one is named `Column` and its position,
+  which the cell then holds; a number, logical, error, or formula header
+  fails with `validation.table_header_requires_text`. The table gets the next
+  free table ID, a filter over its range, the `TableStyleMedium2` style with
+  row stripes, and the name, or by default `Table` and the number after the
+  workbook's table count, the next free one when taken (Excel names a table
+  made beside one other `Table2`). A range without a row below the header
+  fails with `validation.table_range_invalid`, one over a table with
+  `OverlappingTables`, over the sheet filter with
+  `validation.sheet_auto_filter_overlaps_table`, and over a merged range or
+  legacy array with `validation.table_range_overlap`. Saving into the source
+  package writes a new table part with its relationship, `<tablePart>`
+  entry, and content-type override.
 - `convert_table_to_range(TableId)` converts a table to a plain range, as
   Excel's Convert to Range does: the table and its filter leave the sheet,
   its cells keep their values and formulas, and every structured reference

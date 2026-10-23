@@ -16,8 +16,12 @@ use super::serialization::validate_phonetic_limits;
 use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
 use super::sheet_reference_patch::rewrite_sheet_references;
 use super::styles_patch::{StyleRequest, plan_document_styles};
+use super::table::{TABLE_CONTENT_TYPE, table_xml};
+use super::table_parts::{
+    TABLE_RELATIONSHIP, TableAddition, add_table_parts, plan_table_removal, relationships_xml,
+    remove_table_parts,
+};
 use super::table_patch::patch_table_xml;
-use super::table_removal::{plan_table_removal, remove_table_parts};
 use super::workbook_edit::{WorkbookPatchOptions, patch_workbook_semantics};
 use super::workbook_patch::HostRecalculation;
 use super::worksheet_edit::{
@@ -244,6 +248,10 @@ pub(super) fn write_document_package(
     let mut new_relationships = Vec::<NewRelationship>::new();
 
     for table_id in draft.changed_table_ids() {
+        // A table the draft created has no source part; it is added with its sheet below.
+        if document.workbook().table_by_id(*table_id).is_none() {
+            continue;
+        }
         let part = document
             .table_part_path(*table_id)
             .cloned()
@@ -637,11 +645,113 @@ pub(super) fn write_document_package(
         replacements.insert(relationship_part.clone(), relationships);
     }
 
+    // Each table the draft created on a source sheet: a new part, a relationship, and an entry.
+    for sheet in draft
+        .workbook()
+        .sheets()
+        .iter()
+        .filter(|sheet| !draft.added_sheets().contains(&sheet.id()))
+    {
+        let created = sheet
+            .tables()
+            .iter()
+            .filter(|table| document.workbook().table_by_id(table.id()).is_none())
+            .collect::<Vec<_>>();
+        if created.is_empty() {
+            continue;
+        }
+        let worksheet = document
+            .worksheet_part_path(sheet.id())
+            .cloned()
+            .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+        let sheet_relationships = worksheet
+            .relationship_part()
+            .map_err(|error| invalid_plan_with_cause(&worksheet, error))?;
+        let current = match replacements.get(&sheet_relationships) {
+            Some(bytes) => Some(bytes.clone()),
+            None if source_reader.contains(&sheet_relationships) => {
+                Some(source_reader.read_part(&sheet_relationships)?)
+            }
+            None => None,
+        };
+        let mut allocator = RelationshipIdAllocator::from_xml(
+            current
+                .as_deref()
+                .unwrap_or(relationships_xml(&[]).as_bytes()),
+            &sheet_relationships,
+            limits,
+        )?;
+        let mut table_additions = Vec::with_capacity(created.len());
+        for table in created {
+            let relationship_id =
+                allocator.allocate(&format!("rIdCellRuneTable{}", table.id().get()));
+            let addition = TableAddition::new(&worksheet, table.id().get(), relationship_id)?;
+            additions.insert(addition.part.clone(), table_xml(table)?.into_bytes());
+            new_content_types.insert(addition.part.clone(), TABLE_CONTENT_TYPE);
+            table_additions.push(addition);
+        }
+        match current {
+            Some(bytes) => {
+                let appended = table_additions
+                    .iter()
+                    .map(|addition| NewRelationship {
+                        id: addition.relationship_id.clone(),
+                        kind: TABLE_RELATIONSHIP,
+                        target: addition.target.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                replacements.insert(
+                    sheet_relationships.clone(),
+                    append_relationships(&bytes, &sheet_relationships, &appended, limits)?,
+                );
+            }
+            None => {
+                additions.insert(
+                    sheet_relationships,
+                    relationships_xml(&table_additions).into_bytes(),
+                );
+            }
+        }
+        let ids = table_additions
+            .iter()
+            .map(|addition| addition.relationship_id.clone())
+            .collect::<Vec<_>>();
+        let base = match replacements.get(&worksheet) {
+            Some(bytes) => bytes.clone(),
+            None => source_reader.read_part(&worksheet)?,
+        };
+        replacements.insert(
+            worksheet.clone(),
+            add_table_parts(&base, &worksheet, &ids, limits)?,
+        );
+    }
+
     for (sheet_id, part) in &added_parts {
         let sheet = draft
             .workbook()
             .sheet_by_id(*sheet_id)
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+        // An added sheet's worksheet names its tables `rIdCellRuneTable` and the table ID.
+        if !sheet.tables().is_empty() {
+            let mut table_additions = Vec::with_capacity(sheet.tables().len());
+            for table in sheet.tables() {
+                let addition = TableAddition::new(
+                    part,
+                    table.id().get(),
+                    super::table::table_relationship_id(table),
+                )?;
+                additions.insert(addition.part.clone(), table_xml(table)?.into_bytes());
+                new_content_types.insert(addition.part.clone(), TABLE_CONTENT_TYPE);
+                table_additions.push(addition);
+            }
+            let sheet_relationships = part
+                .relationship_part()
+                .map_err(|error| invalid_plan_with_cause(part, error))?;
+            additions.insert(
+                sheet_relationships,
+                relationships_xml(&table_additions).into_bytes(),
+            );
+        }
         let sheet_materialization = materialization
             .cells()
             .range(sheet_cell_bounds(*sheet_id))
