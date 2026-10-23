@@ -640,6 +640,51 @@ pub fn generated_empty_sheet_data_workbook() -> Vec<u8> {
     )
 }
 
+/// A one-sheet workbook whose A1:A6 holds 10, 20 in hidden row 2, 30, `#DIV/0!`, a nested
+/// `SUBTOTAL` of A1:A3, and 40 in hidden row 6; C10:C14 is an autoFilter with a condition over
+/// 5, 50 in filtered row 12, 7, and 3. Column E holds the given formulas from row 1 down.
+pub fn generated_hidden_rows_workbook(formulas: &[&str]) -> Vec<u8> {
+    let mut rows = std::collections::BTreeMap::<u32, String>::new();
+    for (row, cell) in [
+        (1, r#"<c r="A1"><v>10</v></c>"#),
+        (2, r#"<c r="A2"><v>20</v></c>"#),
+        (3, r#"<c r="A3"><v>30</v></c>"#),
+        (4, r#"<c r="A4" t="e"><v>#DIV/0!</v></c>"#),
+        (5, r#"<c r="A5"><f>SUBTOTAL(9,A1:A3)</f><v>60</v></c>"#),
+        (6, r#"<c r="A6"><v>40</v></c>"#),
+        (10, r#"<c r="C10" t="inlineStr"><is><t>v</t></is></c>"#),
+        (11, r#"<c r="C11"><v>5</v></c>"#),
+        (12, r#"<c r="C12"><v>50</v></c>"#),
+        (13, r#"<c r="C13"><v>7</v></c>"#),
+        (14, r#"<c r="C14"><v>3</v></c>"#),
+    ] {
+        rows.entry(row).or_default().push_str(cell);
+    }
+    for (offset, formula) in formulas.iter().enumerate() {
+        let row = offset as u32 + 1;
+        rows.entry(row)
+            .or_default()
+            .push_str(&format!("<c r=\"E{row}\"><f>{formula}</f></c>"));
+    }
+    let sheet_data = rows
+        .iter()
+        .map(|(row, cells)| {
+            let hidden = if matches!(row, 2 | 6 | 12) {
+                r#" hidden="1""#
+            } else {
+                ""
+            };
+            format!(r#"<row r="{row}"{hidden}>{cells}</row>"#)
+        })
+        .collect::<String>();
+    generated_workbook_with_worksheets(
+        1,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{sheet_data}</sheetData><autoFilter ref="C10:C14"><filterColumn colId="0"><customFilters><customFilter operator="lessThan" val="10"/></customFilters></filterColumn></autoFilter></worksheet>"#
+        ),
+    )
+}
+
 /// A one-sheet workbook with the legacy array formula `{=SEQUENCE(2)}` in D1:D2.
 pub fn generated_legacy_array_workbook() -> Vec<u8> {
     generated_workbook_with_worksheets(

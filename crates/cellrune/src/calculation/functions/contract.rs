@@ -1046,6 +1046,12 @@ impl AggregateFunction {
                 &[ARRAY],
                 &[],
             ),
+            Self::Aggregate => CallContract::repeating(
+                Arity::range(3, MAX_EXCEL_ARGUMENTS),
+                &[SCALAR, SCALAR],
+                &[ARRAY],
+                &[],
+            ),
             Self::SumIf | Self::AverageIf => {
                 CallContract::positional(Arity::range(2, 3), &[REFERENCE, SCALAR, REFERENCE])
                     .with_defaults(CRITERIA_RESULT_RANGE_DEFAULTS)

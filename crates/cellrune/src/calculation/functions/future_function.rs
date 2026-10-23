@@ -189,8 +189,7 @@ mod tests {
     use crate::calculation::functions::descriptor;
 
     // Future functions Excel saved with `_xlfn.` that the catalog does not calculate yet.
-    const OUTSIDE_CATALOG: [&str; 11] = [
-        "AGGREGATE",
+    const OUTSIDE_CATALOG: [&str; 10] = [
         "DETECTLANGUAGE",
         "FIELDVALUE",
         "FORECAST.ETS",

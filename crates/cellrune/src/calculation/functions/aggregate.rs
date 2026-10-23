@@ -34,6 +34,7 @@ pub(super) fn call(
         AggregateFunction::CountA => count_nonblank(engine, context, args),
         AggregateFunction::CountBlank => count_blank(engine, context, args),
         AggregateFunction::Subtotal => subtotal(engine, context, args),
+        AggregateFunction::Aggregate => super::aggregate_function::aggregate(engine, context, args),
         AggregateFunction::SumIf => {
             conditional_aggregate(engine, context, args, ConditionalAggregate::SumIf)
         }
@@ -71,6 +72,7 @@ pub(super) fn call_scope_values(
         AggregateFunction::Count => count_collected(values),
         AggregateFunction::CountA => count_nonblank_collected(&values),
         AggregateFunction::CountBlank
+        | AggregateFunction::Aggregate
         | AggregateFunction::Subtotal
         | AggregateFunction::SumIf
         | AggregateFunction::SumIfs
@@ -279,8 +281,8 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         Ok(number) => number.trunc(),
         Err(kind) => return Value::Error(kind),
     };
-    // 101 to 111 name the same aggregates while also skipping manually hidden rows, which the
-    // workbook model does not represent.
+    // 101 to 111 name the same aggregates. Excel also skips hidden rows for them, which SUBTOTAL
+    // does not do yet because it would change results it already returns.
     let operation = if (1.0..=11.0).contains(&function) {
         function
     } else if (101.0..=111.0).contains(&function) {
@@ -306,11 +308,21 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
+    subtotal_operation(engine, context, operation as u8, values)
+}
+
+/// Applies `SUBTOTAL` operation 1 through 11, which `AGGREGATE` shares, to collected values.
+pub(super) fn subtotal_operation(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    operation: u8,
+    values: Vec<ArgumentValue>,
+) -> Value {
     let variance = |values, kind, square_root| match excel_numbers(values) {
         Ok(numbers) => variance_value(engine, context, numbers, kind, square_root),
         Err(kind) => Value::Error(kind),
     };
-    match operation as u8 {
+    match operation {
         1 => aggregate_collected(engine, values, Aggregate::Average),
         2 => count_collected(values),
         3 => count_nonblank_collected(&values),
@@ -322,11 +334,11 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         9 => aggregate_collected(engine, values, Aggregate::Sum),
         10 => variance(values, VarianceKind::Sample, false),
         11 => variance(values, VarianceKind::Population, false),
-        _ => unreachable!("SUBTOTAL operation was validated above"),
+        _ => unreachable!("callers validate the operation"),
     }
 }
 
-fn contains_subtotal_call(root: &Expr) -> bool {
+pub(super) fn contains_subtotal_call(root: &Expr) -> bool {
     let mut pending = vec![root];
     while let Some(expr) = pending.pop() {
         match expr {

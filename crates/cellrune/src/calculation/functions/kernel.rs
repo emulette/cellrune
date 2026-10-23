@@ -45,6 +45,7 @@ function_enum!(LogicalFunction {
 });
 
 function_enum!(AggregateFunction {
+    Aggregate,
     Sum,
     Average,
     Min,

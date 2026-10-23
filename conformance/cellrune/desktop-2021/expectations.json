@@ -138,11 +138,10 @@
     "excel_rich_error": false
   },
   "curated:aggregates:c028": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "180",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:aggregates:c030": {
     "classification": "match",
@@ -646,18 +645,16 @@
     "excel_rich_error": false
   },
   "curated:errors:c018": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:errors:c019": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
+    "excel_rich_error": false
   },
   "curated:financial:c006": {
     "classification": "match",
@@ -1201,25 +1198,22 @@
     "excel_rich_error": false
   },
   "function:aggregate": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "2100",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:aggregate:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "20",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:aggregate:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#VALUE!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.AGGREGATE) for this oracle case."
+    "excel_rich_error": false
   },
   "function:amordegrc": {
     "classification": "match",

@@ -16,7 +16,7 @@ use super::special_functions::{
     standard_normal_density, standard_normal_lower, standard_normal_upper,
 };
 use super::util::{
-    ExcelSum, collect_argument_values, excel_numeric_arguments,
+    ArgumentValue, ExcelSum, collect_argument_values, excel_numeric_arguments,
     excel_numeric_arguments_with_policy, required_number,
 };
 
@@ -120,7 +120,7 @@ enum PairedStatistic {
 /// the n sorted values at ranks 0 through n − 1 of an interval with n − 1 gaps, while the .EXC
 /// functions place them at ranks 1 through n of an interval with n + 1 gaps, excluding its ends.
 #[derive(Debug, Clone, Copy)]
-enum RankInterval {
+pub(super) enum RankInterval {
     Inclusive,
     Exclusive,
 }
@@ -504,15 +504,22 @@ fn order_statistic(
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let mut numbers = match numeric_arguments(engine, context, &args[..1]) {
+    let numbers = match numeric_arguments(engine, context, &args[..1]) {
         Ok(numbers) => numbers,
         Err(kind) => return Value::Error(kind),
     };
-    let rank = match required_number(engine, context, &args[1]) {
-        Ok(number) if number >= 1.0 => number.trunc() as usize,
-        Ok(_) => return Value::Error(ErrorKind::Num),
-        Err(kind) => return Value::Error(kind),
-    };
+    match required_number(engine, context, &args[1]) {
+        Ok(rank) => order_statistic_of(numbers, rank, ascending),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// `LARGE` (descending) or `SMALL` (`ascending`): the `rank`-th value of `numbers`.
+pub(super) fn order_statistic_of(mut numbers: Vec<f64>, rank: f64, ascending: bool) -> Value {
+    if rank < 1.0 {
+        return Value::Error(ErrorKind::Num);
+    }
+    let rank = rank.trunc() as usize;
     if rank > numbers.len() {
         return Value::Error(ErrorKind::Num);
     }
@@ -540,11 +547,17 @@ fn minimum(numbers: &[f64]) -> f64 {
 }
 
 fn median(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    let mut numbers = match numeric_arguments(engine, context, args) {
-        Ok(numbers) if !numbers.is_empty() => numbers,
-        Ok(_) => return Value::Error(ErrorKind::Num),
-        Err(kind) => return Value::Error(kind),
-    };
+    match numeric_arguments(engine, context, args) {
+        Ok(numbers) => median_of(numbers),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// The median of `numbers`, or `#NUM!` when there are none.
+pub(super) fn median_of(mut numbers: Vec<f64>) -> Value {
+    if numbers.is_empty() {
+        return Value::Error(ErrorKind::Num);
+    }
     let middle = numbers.len() / 2;
     let upper = select_ascending(&mut numbers, middle);
     if numbers.len().is_multiple_of(2) {
@@ -595,7 +608,15 @@ fn trim_mean(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Va
 }
 
 fn mode(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    match modes(engine, context, args) {
+    match collect_argument_values(engine, context, args) {
+        Ok(values) => mode_of(values),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// `MODE.SNGL` of collected values: the most frequent number, the first on a tie.
+pub(super) fn mode_of(values: Vec<ArgumentValue>) -> Value {
+    match modes_of(values) {
         Ok(modes) => Value::Number(modes[0]),
         Err(kind) => Value::Error(kind),
     }
@@ -608,7 +629,10 @@ pub(super) fn modes(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<f64>, ErrorKind> {
-    let values = collect_argument_values(engine, context, args)?;
+    modes_of(collect_argument_values(engine, context, args)?)
+}
+
+fn modes_of(values: Vec<ArgumentValue>) -> Result<Vec<f64>, ErrorKind> {
     let mut counts = BTreeMap::<u64, (f64, usize, usize)>::new();
     for (position, item) in values.into_iter().enumerate() {
         let number = match item.value {
@@ -649,15 +673,30 @@ fn percentile(
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let mut numbers = match numeric_arguments(engine, context, &args[..1]) {
-        Ok(numbers) if !numbers.is_empty() => numbers,
-        Ok(_) => return Value::Error(ErrorKind::Num),
+    let numbers = match numeric_arguments(engine, context, &args[..1]) {
+        Ok(numbers) => numbers,
         Err(kind) => return Value::Error(kind),
     };
-    let mut probability = match required_number(engine, context, &args[1]) {
-        Ok(number) => number,
-        Err(kind) => return Value::Error(kind),
-    };
+    // An empty set fails before the probability is read.
+    if numbers.is_empty() {
+        return Value::Error(ErrorKind::Num);
+    }
+    match required_number(engine, context, &args[1]) {
+        Ok(probability) => percentile_of(numbers, probability, quartile, interval),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// `PERCENTILE` or, with `quartile`, `QUARTILE` of `numbers` over the `interval` convention.
+pub(super) fn percentile_of(
+    mut numbers: Vec<f64>,
+    mut probability: f64,
+    quartile: bool,
+    interval: RankInterval,
+) -> Value {
+    if numbers.is_empty() {
+        return Value::Error(ErrorKind::Num);
+    }
     if quartile {
         probability = probability.trunc() / 4.0;
     }

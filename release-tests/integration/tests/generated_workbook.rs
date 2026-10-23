@@ -1,4 +1,5 @@
 mod generated_workbook {
+    mod aggregate_hidden_rows;
     mod array_follower_write;
     mod column_widening_write;
     mod contract;

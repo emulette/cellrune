@@ -549,6 +549,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
         .with_builtin_aggregate(AggregateCallableCapability::Unary),
     function!(Subtotal, "SUBTOTAL", Aggregate),
+    function!(Aggregate, "AGGREGATE", Aggregate)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(SumIf, "SUMIF", Aggregate)
         .with_dependency_kind(DependencyKind::ResizedCriteriaValueRange),
     function!(SumIfs, "SUMIFS", Aggregate),

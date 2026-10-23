@@ -743,9 +743,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 494 official
+  `.is_official()`. The 0.1.27 catalog contains 495 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 495 accepted entries. The descriptor registry
+  dummy-function marker, for 496 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
@@ -920,6 +920,23 @@ than guessing a name from a different XLSX crate (`calamine`,
   count that would split a double-byte character, and `ASC` and `DBCS` under
   `Locale::EnUs` are `calculation.unsupported_expression`. `JIS`, the Japanese
   name of `DBCS`, is not in the catalog.
+- `AGGREGATE(function_num, options, ref1, ...)` and `AGGREGATE(function_num,
+  options, array, k)`, added in 0.1.27, apply function 1 `AVERAGE`, 2 `COUNT`,
+  3 `COUNTA`, 4 `MAX`, 5 `MIN`, 6 `PRODUCT`, 7 `STDEV.S`, 8 `STDEV.P`, 9 `SUM`,
+  10 `VAR.S`, 11 `VAR.P` (as `SUBTOTAL` does), 12 `MEDIAN`, 13 `MODE.SNGL`, 14
+  `LARGE`, 15 `SMALL`, 16 `PERCENTILE.INC`, 17 `QUARTILE.INC`, 18
+  `PERCENTILE.EXC`, or 19 `QUARTILE.EXC`. Options 0 to 3 skip cells whose
+  formula calls `SUBTOTAL` or `AGGREGATE`, odd options skip rows
+  `Sheet::hidden_rows` lists, and 2, 3, 6, and 7 skip error values; an
+  omitted option is 0. Functions 1 to 13 take only references (a constant
+  array is `#VALUE!`); 14 to 19 take one reference or calculated array and a
+  required `k`, and a calculated array keeps its hidden rows and nested
+  totals. 3-D references and a function or option outside 1-19 or 0-7 are
+  `#VALUE!`. An option that keeps hidden rows (0, 2, 4, 6) over a hidden row
+  inside a sheet or table autoFilter with a filter condition is
+  `calculation.unsupported_expression`, because whether Excel then keeps the
+  rows the filter hides has not been measured. Authored formulas are stored
+  as `_xlfn.AGGREGATE`.
 - The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
   `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
   `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,
