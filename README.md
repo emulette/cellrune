@@ -530,14 +530,13 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 24 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
-`workbook_summary`, `workbook_export_csv`,
-`workbook_read_range`, `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
-`workbook_comments`, `workbook_function_usage`, `workbook_scan_capabilities`,
-`workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
-`workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
-`workbook_preview_changes_page`, `workbook_commit_preview`, `workbook_discard_preview`, and the
-sessionless `format_display_text`.
+Its 25 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
+`workbook_summary`, `workbook_export_csv`, `workbook_read_range`, `workbook_read_formats`,
+`workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_function_usage`,
+`workbook_scan_capabilities`, `workbook_apply_changes`, `workbook_apply_changes_v2`,
+`workbook_recalculate`, `workbook_calculate_targets`, `workbook_changes_since`, `workbook_save_as`,
+`workbook_save_edits_as`, `workbook_preview_changes`, `workbook_preview_changes_page`,
+`workbook_commit_preview`, `workbook_discard_preview`, and the sessionless `format_display_text`.
 The v2 edit tool adds stable-ID table rename, table-column rename, and table-row resize while
 retaining the v1 edit shapes. The four preview tools are the retained immutable transaction
 workflow: preview returns a summary and ID, page returns a byte-bounded core-cursor page, and
