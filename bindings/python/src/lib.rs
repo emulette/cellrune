@@ -29,7 +29,10 @@ fn format_display_text(
     request.set_item("value", value)?;
     request.set_item("format_code", format_code)?;
     request.set_item("date_system", date_system)?;
-    if let Some(locale_profile) = locale_profile {
+    if let Some(locale_profile) = locale_profile.filter(|value| !value.is_none()) {
+        // The profile fails with the code every other Python call reports for it.
+        workbook::optional_locale_profile_from_python(Some(locale_profile))
+            .map_err(|error| into_py_error(py, error))?;
         request.set_item("locale_profile", locale_profile)?;
     }
     let json = py

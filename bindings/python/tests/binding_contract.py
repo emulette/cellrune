@@ -296,6 +296,14 @@ def assert_display_format() -> None:
             date_system=cast(Literal["excel_1900"], "excel_1901"),
         ),
     )
+    assert_error(
+        "interop.calculation.locale_profile_invalid",
+        lambda: format_display_text(
+            {"kind": "number", "value": 1.0},
+            "0",
+            locale_profile=cast(LocaleProfile, {"locale": "ja-JP"}),
+        ),
+    )
 
 
 def assert_exact_numbers() -> None:
