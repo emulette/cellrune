@@ -145,6 +145,20 @@ fn cumulative_payments_split_level_payments_into_interest_and_principal() {
             -1.805_000_000_107_999e-7,
             1e-21,
         ),
+        // Excel 16.114 for Mac with beginning-of-period payments, and with a start of 1.5, which
+        // Excel counts as period 2 alone.
+        ("CUMIPMT(0.1,3,1000,2,3,1)", -96.676_737_160_121_09, 1e-12),
+        ("CUMPRINC(0.1,3,1000,2,3,1)", -634.441_087_613_293, 1e-12),
+        ("CUMIPMT(0.1,12,1000,1.5,2,0)", -95.323_668_489_971_31, 1e-12),
+        ("CUMPRINC(0.1,12,1000,1.5,2,0)", -51.439_646_610_316_04, 1e-12),
+        // The first beginning-of-period payment is all principal, so its interest is 0, and its
+        // principal is PMT(0.1,3,1000,0,1).
+        ("CUMIPMT(0.1,3,1000,1,1,1)", 0.0, 0.0),
+        ("CUMPRINC(0.1,3,1000,1,1,1)", -365.558_912_386_706_9, 1e-12),
+        ("CUMPRINC(0.1,3,1000,1,3,1)", -1_000.0, 1e-12),
+        ("CUMIPMT(0.1,3,1000,1,3,1)", -96.676_737_160_120_85, 1e-12),
+        // 3.5 rounds up whether ties go up or to even.
+        ("CUMPRINC(0.1,12,1000,3.5,4,0)", -62.241_972_398_482_4, 1e-12),
     ] {
         let workbook = workbook_with_formulas(&[(1, 1, formula)]);
         assert!(scan_formula_capabilities(&workbook).is_supported());
@@ -168,9 +182,11 @@ fn cumulative_payments_split_level_payments_into_interest_and_principal() {
         assert_error(formula, ExcelError::Number);
     }
     assert_error("CUMPRINC(0.1,\"x\",1000,1,2,0)", ExcelError::Value);
+    // Rounding up and rounding to the nearest period disagree for 1.3, rounding half to even
+    // gives 2 for 2.5, and no fractional end was measured.
     for formula in [
-        "CUMIPMT(0.1,12,1000,1,2,1)",
-        "CUMPRINC(0.1,12,1000,1.5,2,0)",
+        "CUMIPMT(0.1,12,1000,1.3,2,0)",
+        "CUMPRINC(0.1,12,1000,2.5,3,1)",
         "CUMPRINC(0.1,12,1000,1,2.5,0)",
     ] {
         let result = calculate_workbook(

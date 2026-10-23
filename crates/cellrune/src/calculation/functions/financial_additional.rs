@@ -55,8 +55,15 @@ enum PaymentPart {
 /// neither total is the small difference of two large ones, as the interest is when it is taken as
 /// the payments minus the principal at a small rate.
 ///
-/// Microsoft documents the argument errors but not how fractional periods or beginning-of-period
-/// payments split interest from principal, so those calls are unsupported rather than guessed.
+/// With beginning-of-period payments (type 1) each payment is the end-of-period one divided by q
+/// and so is every balance after it, so a period's interest and principal are those of the
+/// end-of-period schedule divided by q, except that the first payment, made at the start, is all
+/// principal: pv·(rate·q^(n−1))/E(n). This reproduces Excel's results for type 1.
+///
+/// Excel counts a fractional `start_period` of 1.5 as period 2. That one value cannot tell
+/// rounding up from rounding to the nearest period, so a fractional start is accepted only where
+/// rounding up, half up, and half to even agree, and other fractional starts and fractional ends
+/// are unsupported rather than guessed.
 fn cumulative_payment(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -81,19 +88,33 @@ fn cumulative_payment(
     {
         return Value::Error(ErrorKind::Num);
     }
-    if start.fract() != 0.0 || end.fract() != 0.0 || payment_type == 1.0 {
+    if start.round_ties_even() != start.ceil() || end.fract() != 0.0 {
         return Value::Error(ErrorKind::Unsupported);
     }
+    let start = start.ceil();
     let log_growth = rate.ln_1p();
     let growth = |count: f64| (count * log_growth).exp_m1();
     let total = growth(periods);
     if !total.is_finite() {
         return Value::Error(ErrorKind::Num);
     }
+    let advance = payment_type == 1.0;
+    // The first beginning-of-period payment carries no interest and is all principal.
+    let first_payment = advance && start == 1.0;
+    let start = if first_payment { 2.0 } else { start };
     let (paid, count) = (start - 1.0, end - start + 1.0);
-    let scale = (paid * log_growth).exp();
+    let divided_by_growth = if advance { 1.0 } else { 0.0 };
+    let scale = ((paid - divided_by_growth) * log_growth).exp();
     financial_value(match part {
-        PaymentPart::Principal => -present * (growth(count) / total) * scale,
+        PaymentPart::Principal => {
+            let first = if first_payment {
+                rate * ((periods - 1.0) * log_growth).exp() / total
+            } else {
+                0.0
+            };
+            -present * (first + growth(count) / total * scale)
+        }
+        PaymentPart::Interest if count == 0.0 => 0.0,
         PaymentPart::Interest => {
             let balances = count * (growth(periods - paid) / total)
                 - compound_excess(rate, count, growth(count)) / total;

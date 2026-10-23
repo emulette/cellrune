@@ -920,9 +920,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   balances rather than from the payments minus the other part, so the interest
   at a small rate such as `CUMIPMT(1E-8,12,1000,1,12,0)` keeps its digits. A
   rate, `nper`, or `pv` that is not positive, a start or end period below 1, a start after the end, an end
-  after `nper`, or a type other than 0 or 1 returns `#NUM!`. Fractional periods
-  and beginning-of-period payments (type 1) report
-  `calculation.unsupported_expression`.
+  after `nper`, or a type other than 0 or 1 returns `#NUM!`. With
+  beginning-of-period payments (type 1) the first payment is all principal and
+  every later period's interest and principal are the end-of-period ones
+  divided by 1 + rate, as Excel computes them. A fractional start counts as the
+  next period, as Excel counts 1.5 as 2, where rounding up, half up, and half to
+  even agree (1.5, 1.7, 3.5); other fractional starts (1.3, 2.5) and fractional
+  ends report `calculation.unsupported_expression`.
 - `VDB(cost, salvage, life, start_period, end_period, [factor], [no_switch])`
   totals the declining-balance depreciation (factor 2 when absent) of the
   periods after `start_period` through `end_period`, never below salvage, and
