@@ -18,6 +18,7 @@ mod recalculation;
 mod report;
 mod serialization;
 mod sheet_deletion;
+mod sheet_positions;
 mod sheet_reference_patch;
 mod style_records;
 mod styles_patch;

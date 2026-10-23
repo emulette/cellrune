@@ -235,3 +235,91 @@ fn malformed_panes_open_unmodeled_with_a_diagnostic() {
         open_xlsx_document_bytes(&saved, OpenOptions::default()).expect("reopen");
     }
 }
+
+#[test]
+fn rows_and_cells_without_the_optional_reference_are_patched_at_their_positions() {
+    use cellrune::{
+        Column, EditBatch, RecalculationWriteOptions, SheetId, WorkbookChange, WorkbookDraft,
+        WriteOptions, write_recalculated_xlsx_bytes, write_xlsx_draft_bytes,
+        write_xlsx_draft_edits_bytes,
+    };
+
+    let source = package(
+        &worksheet(
+            r#"<row><c><v>1</v></c><c><f>A1*2</f><v>0</v></c></row><row><c><v>5</v></c></row><row r="4"><c><v>7</v></c><c><v>8</v></c><c><v>9</v></c></row>"#,
+            "",
+        ),
+        None,
+        "",
+    );
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let sheet = SheetId::new(1).expect("sheet");
+    let number = |value: f64| literal(CellValue::number(value).expect("number"));
+    let reopen = |bytes: &[u8]| {
+        open_xlsx_document_bytes(bytes, OpenOptions::default())
+            .expect("reopen")
+            .workbook()
+            .clone()
+    };
+
+    let calculation = calculate_workbook(document.workbook(), CalculationOptions::default());
+    let recalculated = write_recalculated_xlsx_bytes(
+        &document,
+        &calculation,
+        RecalculationWriteOptions::default(),
+    )
+    .expect("recalculated save")
+    .into_bytes();
+    let workbook = reopen(&recalculated);
+    let Some(CellContent::Formula(formula)) = cell(&workbook, "B1") else {
+        panic!("B1 keeps its formula");
+    };
+    assert_eq!(
+        formula.saved_result(),
+        &cellrune::SavedResult::Present(CellValue::number(2.0).expect("number"))
+    );
+    assert_eq!(cell(&workbook, "A2"), number(5.0));
+
+    let mut draft = WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_value(
+                sheet,
+                CellAddress::from_a1("C2").expect("address"),
+                CellValue::number(6.0).expect("number"),
+            ),
+            WorkbookChange::clear_cell(sheet, CellAddress::from_a1("A4").expect("address")),
+            WorkbookChange::set_column_width(
+                sheet,
+                Column::new(3).expect("column"),
+                Column::new(3).expect("column"),
+                Some(20.0),
+            ),
+        ]))
+        .expect("edits");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for bytes in [
+        write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+            .expect("edits save")
+            .into_bytes(),
+        write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+            .expect("recalculated edits save")
+            .into_bytes(),
+    ] {
+        let workbook = reopen(&bytes);
+        for (address, expected) in [
+            ("A1", number(1.0)),
+            ("A2", number(5.0)),
+            ("C2", number(6.0)),
+            ("A4", None),
+            ("B4", number(8.0)),
+            ("C4", number(9.0)),
+        ] {
+            assert_eq!(cell(&workbook, address), expected, "{address}");
+        }
+        assert!(matches!(
+            cell(&workbook, "B1"),
+            Some(CellContent::Formula(_))
+        ));
+    }
+}

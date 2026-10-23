@@ -8,6 +8,7 @@ use super::package::PackageWritePlan;
 use super::package_metadata_patch::{
     remove_calculation_chain_relationship, remove_content_type_overrides,
 };
+use super::sheet_positions::with_explicit_positions;
 use super::workbook_patch::{HostRecalculation, patch_calculation_properties};
 use super::worksheet_patch::{WorksheetCacheAction, WorksheetCellUpdate, patch_worksheet};
 use super::{
@@ -100,6 +101,7 @@ pub fn write_recalculated_xlsx_bytes(
                 .with_detail(DETAIL_SEMANTIC_VERIFICATION)
         })?;
         let original = source_reader.read_part(part)?;
+        let original = with_explicit_positions(&original, part, limits)?.unwrap_or(original);
         let rewritten = patch_worksheet(&original, part, updates, limits)?;
         replacements.insert(part.clone(), rewritten);
     }

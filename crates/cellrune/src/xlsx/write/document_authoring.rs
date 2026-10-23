@@ -14,6 +14,7 @@ use super::package_metadata_patch::{
 use super::phonetic_preservation::ensure_phonetic_edit_preservation;
 use super::serialization::validate_phonetic_limits;
 use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
+use super::sheet_positions::with_explicit_positions;
 use super::sheet_reference_patch::rewrite_sheet_references;
 use super::styles_patch::{StyleRequest, plan_document_styles};
 use super::table_patch::patch_table_xml;
@@ -312,6 +313,7 @@ pub(super) fn write_document_package(
             .cloned()
             .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
         let bytes = source_reader.read_part(&part)?;
+        let bytes = with_explicit_positions(&bytes, &part, limits)?.unwrap_or(bytes);
         // Only a valued source cell's own style is read. A cell written over a removed source
         // cell is styled as a new cell, and so is one written over a blank source cell: the
         // reader records a blank cell's style for new cells unless it names no `cellXfs` entry.
@@ -805,7 +807,9 @@ fn date_typed_literals_to_rewrite(
         let Some(part) = document.worksheet_part_path(sheet.id()) else {
             continue;
         };
-        let cells = read_date_typed_cells(&source_reader.read_part(part)?, part, limits)?
+        let bytes = source_reader.read_part(part)?;
+        let bytes = with_explicit_positions(&bytes, part, limits)?.unwrap_or(bytes);
+        let cells = read_date_typed_cells(&bytes, part, limits)?
             .into_iter()
             .filter(|address| {
                 matches!(
