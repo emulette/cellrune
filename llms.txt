@@ -426,7 +426,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `#NAME?`, `#NUM!`, `#N/A`, `#GETTING_DATA`, `#SPILL!`, `#CALC!`, `#FIELD!`,
   `#BLOCKED!`, `#CONNECT!`, `#BUSY!`, `#UNKNOWN!`, and `#PYTHON!`. A formula
   that reads `#GETTING_DATA` or one of the last six reports an unsupported
-  capability. A cell or row without the optional `r` follows the previous one;
+  capability. `ExcelError::from_spelling(&str)` parses a canonical spelling, and
+  interop, Python, Node.js, and MCP accept every one of them as a written value. A cell or row without the optional `r` follows the previous one;
   a shared formula's relative references wrap past the grid edge as Excel's
   copy does. A document open preserves a view or pane it cannot model with an
   `xlsx.pane.invalid` presentation diagnostic instead of failing.

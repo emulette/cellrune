@@ -184,8 +184,9 @@ impl ExcelError {
         }
     }
 
-    /// Returns the error spelled exactly `value`.
-    pub(crate) fn from_spelling(value: &str) -> Option<Self> {
+    /// Returns the error whose canonical display form, as [`Self::as_str`] returns it, is exactly
+    /// `value`.
+    pub fn from_spelling(value: &str) -> Option<Self> {
         [
             Self::Null,
             Self::DivisionByZero,

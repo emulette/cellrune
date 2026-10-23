@@ -966,20 +966,9 @@ pub(crate) fn count_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+/// Accepts every error the core reads, so a value read from a workbook can be written back.
 fn parse_excel_error(value: &str) -> Result<ExcelError, InteropError> {
-    match value {
-        "#NULL!" => Ok(ExcelError::Null),
-        "#DIV/0!" => Ok(ExcelError::DivisionByZero),
-        "#VALUE!" => Ok(ExcelError::Value),
-        "#REF!" => Ok(ExcelError::Reference),
-        "#NAME?" => Ok(ExcelError::Name),
-        "#NUM!" => Ok(ExcelError::Number),
-        "#N/A" => Ok(ExcelError::NotAvailable),
-        "#GETTING_DATA" => Ok(ExcelError::GettingData),
-        "#SPILL!" => Ok(ExcelError::Spill),
-        "#CALC!" => Ok(ExcelError::Calculation),
-        _ => Err(InteropError::excel_error(value.to_owned())),
-    }
+    ExcelError::from_spelling(value).ok_or_else(|| InteropError::excel_error(value.to_owned()))
 }
 
 pub(crate) fn value_to_dto(value: &CellValue) -> CellValueDto {

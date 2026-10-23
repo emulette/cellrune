@@ -813,3 +813,69 @@ fn cells_report_their_number_format() {
         (0, None, "general")
     );
 }
+
+#[test]
+fn every_error_the_core_reads_can_be_written_back() {
+    let mut session = WorkbookSession::create();
+    let spellings = [
+        "#NULL!",
+        "#DIV/0!",
+        "#VALUE!",
+        "#REF!",
+        "#NAME?",
+        "#NUM!",
+        "#N/A",
+        "#GETTING_DATA",
+        "#SPILL!",
+        "#CALC!",
+        "#FIELD!",
+        "#BLOCKED!",
+        "#CONNECT!",
+        "#BUSY!",
+        "#UNKNOWN!",
+        "#PYTHON!",
+    ];
+    for (index, value) in spellings.into_iter().enumerate() {
+        session
+            .set_value(
+                "Sheet1",
+                &format!("A{}", index + 1),
+                WritableCellValueDto::Error {
+                    value: value.to_owned(),
+                },
+            )
+            .unwrap_or_else(|error| panic!("{value} must be accepted: {error}"));
+    }
+    let page = session
+        .read_range(&RangeRequestDto {
+            sheet: "Sheet1".to_owned(),
+            start: "A1".to_owned(),
+            end: format!("A{}", spellings.len()),
+            offset: 0,
+            limit: 0,
+        })
+        .expect("errors must be readable");
+    for (cell, value) in page.cells.iter().zip(spellings) {
+        assert_eq!(
+            cell.source_value,
+            CellValueDto::Error {
+                value: value.to_owned()
+            }
+        );
+    }
+    for value in ["#field!", "#FIELD", "#NOPE!"] {
+        assert_eq!(
+            session
+                .set_value(
+                    "Sheet1",
+                    "B1",
+                    WritableCellValueDto::Error {
+                        value: value.to_owned(),
+                    },
+                )
+                .expect_err("an unknown spelling must be rejected")
+                .code(),
+            "interop.value.excel_error_invalid"
+        );
+    }
+}
