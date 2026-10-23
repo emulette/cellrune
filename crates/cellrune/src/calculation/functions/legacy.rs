@@ -8,7 +8,7 @@ use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
-use super::criteria_runtime::CriteriaRuntime;
+use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
 use super::lookup_index::{
     LookupArea, SearchDirection, indexed_match_offset, record_linear_search,
@@ -361,11 +361,25 @@ fn count_matches(
     let height = rects[0].height();
     let width = rects[0].width();
     let iter_rows = engine.operation_row_count(rects);
-    let visits = iter_rows
-        .checked_mul(width)
-        .and_then(|cells| cells.checked_mul(rects.len() as u64))
-        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
-    engine.ensure_array_cells(visits)?;
+    let bound = ConditionalScanBound::new(engine, iter_rows, width, rects.len());
+    let count = scan_matches(engine, context, rects, criteria, iter_rows, matcher)
+        .map_err(|kind| bound.error(kind))?;
+    let virtual_cells = (height - iter_rows) * width;
+    if virtual_cells > 0 && criteria.iter().all(CompiledCriteria::matches_blank) {
+        return Ok((count + virtual_cells) as f64);
+    }
+    Ok(count as f64)
+}
+
+fn scan_matches(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    rects: &[Rect],
+    criteria: &[CompiledCriteria],
+    iter_rows: u64,
+    matcher: &mut CriteriaRuntime<'_, '_, '_>,
+) -> Result<u64, ErrorKind> {
+    let width = rects[0].width();
     let mut count = 0_u64;
     for relative_row in 0..iter_rows {
         for relative_col in 0..width {
@@ -389,11 +403,7 @@ fn count_matches(
             }
         }
     }
-    let virtual_cells = (height - iter_rows) * width;
-    if virtual_cells > 0 && criteria.iter().all(CompiledCriteria::matches_blank) {
-        count += virtual_cells;
-    }
-    Ok(count as f64)
+    Ok(count)
 }
 
 fn kernel_countifs(

@@ -4,6 +4,7 @@ use super::super::criteria::{
     compile_criteria_with_work,
 };
 use super::super::eval::{Engine, EvalContext};
+use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
 use super::database_criteria::CompiledDatabaseCriteria;
 use std::cmp::Ordering;
@@ -123,5 +124,46 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<(), ErrorKind> {
         super::array_common::poll_cancellation(context)?;
         engine.charge_function_iterations(context, units)
+    }
+}
+
+/// How a conditional scan of SUMIFS, COUNTIFS, MAXIFS, or a sibling reports a failure.
+///
+/// A scan is charged for each cell it reads, and a row stops at its first unmatched criterion,
+/// so a scan whose ranges together hold more than `max_array_cells` cells can still fit. Such a
+/// scan calculates when it completes; if a calculation-engine issue stops it, it reports
+/// `max_array_cells`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ConditionalScanBound {
+    exceeds_array_cells: bool,
+}
+
+impl ConditionalScanBound {
+    /// The bound of a scan over `ranges` ranges of `rows` by `width` cells.
+    pub(super) fn new(engine: &Engine<'_>, rows: u64, width: u64, ranges: usize) -> Self {
+        let cells = rows
+            .checked_mul(width)
+            .and_then(|cells| cells.checked_mul(ranges as u64));
+        Self {
+            exceeds_array_cells: cells
+                .is_none_or(|cells| engine.ensure_array_cells(cells).is_err()),
+        }
+    }
+
+    /// The error the scan reports when it stops with `kind`.
+    pub(super) const fn error(self, kind: ErrorKind) -> ErrorKind {
+        if self.exceeds_array_cells && kind.is_engine_issue() {
+            ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells)
+        } else {
+            kind
+        }
+    }
+
+    /// The value the scan reports when it returns `value`.
+    pub(super) fn value(self, value: Value) -> Value {
+        match value {
+            Value::Error(kind) => Value::Error(self.error(kind)),
+            value => value,
+        }
     }
 }

@@ -1,6 +1,6 @@
 use cellrune::{
-    CalculationCellResult, CalculationIssueCode, CalculationLimits, CalculationOptions, CellValue,
-    ExcelError, calculate_workbook,
+    CalculationCellResult, CalculationIssueCode, CalculationLimitKind, CalculationLimits,
+    CalculationOptions, CalculationSnapshot, CellValue, ExcelError, calculate_workbook,
 };
 
 use super::support::{assert_issue, assert_number, cell_id, workbook_with_formulas};
@@ -128,6 +128,63 @@ fn text_comparisons_cost_one_unit_per_cell_regardless_of_text_length() {
         CalculationOptions::default().with_limits(cell_limits),
     );
     assert_issue(&calculation, 5, CalculationIssueCode::ResourceLimitExceeded);
+}
+
+#[test]
+fn conditional_scans_fit_the_cells_they_read_rather_than_every_cell_of_their_ranges() {
+    // Sixty rows, four of them "a". Every cell of their ranges would exceed the 100-cell limit,
+    // but a row stops at its first unmatched criterion: the first four scans read 64 to 68 cells.
+    let mut formulas = vec![
+        (1, 3, "SUMIFS(B1:B60,A1:A60,\"a\",B1:B60,\">1\")".to_owned()),
+        (1, 4, "COUNTIFS(A1:A60,\"a\",B1:B60,\">1\")".to_owned()),
+        (1, 5, "MAXIFS(B1:B60,A1:A60,\"a\",B1:B60,\">1\")".to_owned()),
+        (1, 6, "SUMIF(A1:A60,\"a\",B1:B60)".to_owned()),
+        // Every row matches the first criterion, so this scan reads 176 cells.
+        (1, 7, "SUMIFS(B1:B60,B1:B60,\">0\",A1:A60,\"b\")".to_owned()),
+        (1, 8, "COUNTIF(A1:A60,\"b\")".to_owned()),
+    ];
+    for row in 1..=60 {
+        let text = if row <= 4 { "\"a\"" } else { "\"b\"" };
+        formulas.push((row, 1, text.to_owned()));
+        formulas.push((row, 2, row.to_string()));
+    }
+    let workbook = workbook_with_formulas(
+        &formulas
+            .iter()
+            .map(|(row, column, text)| (*row, *column, text.as_str()))
+            .collect::<Vec<_>>(),
+    );
+    let array_limits = CalculationLimits::default()
+        .with_max_array_cells(100)
+        .expect("nonzero array limit");
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_limits(array_limits),
+    );
+    for (column, expected) in [(3, 9.0), (4, 3.0), (5, 4.0), (6, 10.0), (8, 56.0)] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+    assert_limit(&calculation, 7, CalculationLimitKind::ArrayCells);
+
+    // A scan whose ranges exceed the array limit reports that limit whatever else stops it; one
+    // within it reports the limit it reaches.
+    let work_limits = array_limits
+        .with_max_function_iterations(10)
+        .expect("nonzero function work limit");
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_limits(work_limits),
+    );
+    assert_limit(&calculation, 3, CalculationLimitKind::ArrayCells);
+    assert_limit(&calculation, 8, CalculationLimitKind::FunctionIterations);
+}
+
+fn assert_limit(calculation: &CalculationSnapshot, column: u32, expected: CalculationLimitKind) {
+    let Some(CalculationCellResult::Unavailable(issue)) = calculation.cell(cell_id(column)) else {
+        panic!("column {column} must report a resource limit");
+    };
+    assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
+    assert_eq!(issue.limit(), Some(expected), "column {column}");
 }
 
 #[test]

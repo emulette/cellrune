@@ -5,12 +5,11 @@ use super::super::ast::Expr;
 use super::super::coerce::to_logical;
 use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
-use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
-use super::criteria_runtime::CriteriaRuntime;
+use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::moments::{NumericMoments, PairedMoments, VarianceKind};
 use super::special_functions::{
     standard_normal_density, standard_normal_lower, standard_normal_upper,
@@ -800,17 +799,33 @@ fn conditional_extreme(
             .map(|(range, _)| range)
             .chain(std::iter::once(&value_range)),
     );
-    let visits = iter_rows
-        .checked_mul(value_range.width())
-        .and_then(|cells| cells.checked_mul(criteria.len() as u64 + 1));
-    if visits.is_none_or(|cells| engine.ensure_array_cells(cells).is_err()) {
-        return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells));
-    }
+    let bound =
+        ConditionalScanBound::new(engine, iter_rows, value_range.width(), criteria.len() + 1);
+    bound.value(scan_conditional_extreme(
+        engine,
+        context,
+        value_range,
+        &criteria,
+        iter_rows,
+        minimum,
+        &mut runtime,
+    ))
+}
+
+fn scan_conditional_extreme(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    value_range: Rect,
+    criteria: &[(Rect, CompiledCriteria)],
+    iter_rows: u64,
+    minimum: bool,
+    runtime: &mut CriteriaRuntime<'_, '_, '_>,
+) -> Value {
     let mut result: Option<f64> = None;
     for row in 0..iter_rows as u32 {
         for column in 0..value_range.width() as u32 {
             let mut matched = true;
-            for (rect, criterion) in &criteria {
+            for (rect, criterion) in criteria {
                 let value = match engine.read_reference_cell(
                     context,
                     (rect.sheet, rect.row_start + row, rect.col_start + column),

@@ -48,6 +48,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   distinct formula cells and array anchors its references cover, so a formula that calculated
   before still does; a 5,000-row running total over formulas no longer reports the limit for its
   last thousand rows. Calculation order and every other result are unchanged.
+- `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `COUNTIF`, `COUNTIFS`, `MAXIFS`, and `MINIFS`
+  calculate when the cells they read fit `max_array_cells`, where a row stops at its first
+  unmatched criterion, instead of reporting the limit whenever their ranges together hold more
+  cells than it allows. A call whose ranges exceed the limit and that a calculation-engine issue
+  stops still reports `max_array_cells`. A two-condition `SUMIFS` over 340,000 rows now
+  calculates.
 
 ### Fixed
 

@@ -2,12 +2,11 @@ use super::super::ast::Expr;
 use super::super::criteria::CompiledCriteria;
 use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
-use super::super::limits::CalculationLimitKind;
 use super::super::runtime::Rect;
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::criteria_runtime::CriteriaRuntime;
+use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
 use super::kernel::AggregateFunction;
 use super::moments::VarianceKind;
 use super::normalize_name;
@@ -391,12 +390,30 @@ fn conditional_aggregate(
             .map(|(range, _)| range)
             .chain(std::iter::once(&parsed.value_range)),
     );
-    let visits = iter_rows
-        .checked_mul(parsed.value_range.width())
-        .and_then(|cells| cells.checked_mul(parsed.criteria.len() as u64 + 1));
-    if visits.is_none_or(|cells| engine.ensure_array_cells(cells).is_err()) {
-        return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells));
-    }
+    let bound = ConditionalScanBound::new(
+        engine,
+        iter_rows,
+        parsed.value_range.width(),
+        parsed.criteria.len() + 1,
+    );
+    bound.value(scan_conditional_aggregate(
+        engine,
+        context,
+        &parsed,
+        iter_rows,
+        operation,
+        &mut runtime,
+    ))
+}
+
+fn scan_conditional_aggregate(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    parsed: &ConditionalArguments,
+    iter_rows: u64,
+    operation: ConditionalAggregate,
+    runtime: &mut CriteriaRuntime<'_, '_, '_>,
+) -> Value {
     let mut total = ExcelSum::new(engine);
     let mut count = 0_u64;
     for row_offset in 0..iter_rows as u32 {
