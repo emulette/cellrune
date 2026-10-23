@@ -83,6 +83,57 @@ pub(crate) struct SheetPageArgs {
     pub(crate) limit: u32,
 }
 
+/// Input for one bounded page of a cell's precedents or dependents.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CellDependencyArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Case-insensitive sheet name.
+    pub(crate) sheet: String,
+    /// Unqualified A1 address of the cell.
+    pub(crate) address: String,
+    /// Zero-based entry offset; omitted or zero starts at the first entry.
+    #[serde(default)]
+    pub(crate) offset: u64,
+    /// Page size; omitted or zero selects the server default, with a hard maximum of 10,000.
+    #[serde(default)]
+    #[schemars(range(max = 10_000))]
+    pub(crate) limit: u32,
+}
+
+impl CellDependencyArgs {
+    pub(crate) fn request(self) -> cellrune_interop::CellDependencyRequestDto {
+        cellrune_interop::CellDependencyRequestDto {
+            sheet: self.sheet,
+            address: self.address,
+            offset: self.offset,
+            limit: self.limit,
+        }
+    }
+}
+
+/// Input for one bounded row-major page of cell formats.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReadFormatsArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Case-insensitive sheet name.
+    pub(crate) sheet: String,
+    /// Inclusive unqualified A1 start address.
+    pub(crate) start: String,
+    /// Inclusive unqualified A1 end address.
+    pub(crate) end: String,
+    /// Zero-based row-major cell offset; omitted or zero starts at the first cell.
+    #[serde(default)]
+    pub(crate) offset: u64,
+    /// Page size; omitted or zero selects the server default, with a hard maximum of 10,000.
+    #[serde(default)]
+    #[schemars(range(max = 10_000))]
+    pub(crate) limit: u32,
+}
+
 /// Input for one bounded row-major range page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -102,6 +153,21 @@ pub(crate) struct ReadRangeArgs {
     #[serde(default)]
     #[schemars(range(max = 10_000))]
     pub(crate) limit: u32,
+    /// Leave out empty cells; offset and limit still count every position, and in the compact
+    /// form only each row's trailing empty cells are left out.
+    #[serde(default)]
+    pub(crate) omit_empty: bool,
+    /// Return each cell's address and value in `values` instead of full cell objects.
+    #[serde(default)]
+    pub(crate) values_only: bool,
+    /// Return the page's values in `rows`, grouped by worksheet row and without addresses.
+    #[serde(default)]
+    pub(crate) compact: bool,
+    /// Largest serialized page in bytes; the page is then the longest prefix that fits and
+    /// `next_offset` continues after it.
+    #[serde(default)]
+    #[schemars(range(min = 1))]
+    pub(crate) max_bytes: Option<u64>,
 }
 
 /// Input for a bounded static formula-capability page.

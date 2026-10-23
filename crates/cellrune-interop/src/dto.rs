@@ -554,7 +554,7 @@ pub struct UnrestoredContentDto {
     pub table_id: Option<u32>,
 }
 
-/// Table-specific operations added by edit schema v2.
+/// Table and sheet autoFilter operations added by edit schema v2.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TableChangeV2Dto {
@@ -606,13 +606,30 @@ pub enum TableChangeV2Dto {
         /// Stable workbook-local table ID.
         table_id: u32,
     },
+    /// Widens a table by columns, naming each new column from the text in its header cell.
+    WidenTableColumns {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+        /// New full table range in A1 notation, which keeps the current rows and contains the
+        /// current range.
+        range: String,
+    },
+    /// Widens a sheet-level autoFilter by columns and aligns its hidden `_xlnm._FilterDatabase`
+    /// name.
+    WidenSheetAutoFilter {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// New filter range in A1 notation, which keeps the current rows and contains the current
+        /// range.
+        range: String,
+    },
 }
 
 /// One v2 workbook mutation.
 ///
 /// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the
-/// table-authoring operations and the third the cell format, column width, and row height
-/// operations.
+/// table-authoring and autoFilter operations and the third the presentation operations: cell
+/// format, column width, row height, frozen pane, and phonetics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WorkbookChangeV2Dto {
@@ -755,6 +772,10 @@ pub enum CalculationResultDto {
         message: String,
         /// Optional source-specific context.
         detail: Option<String>,
+        /// Calculation limit a `calculation.resource_limit_exceeded` issue exceeded, such as
+        /// `max_formula_tokens`. Omitted for every other issue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<String>,
     },
 }
 
@@ -925,6 +946,10 @@ pub struct CalculationIssueDto {
     pub message: String,
     /// Optional source-specific context.
     pub detail: Option<String>,
+    /// Calculation limit a `calculation.resource_limit_exceeded` issue exceeded, such as
+    /// `max_formula_tokens`. Omitted for every other issue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<String>,
 }
 
 /// One typed transaction detail item.
@@ -1197,8 +1222,18 @@ pub struct RangePageDto {
     pub offset: u64,
     /// Offset for the next page, or `None` at the end.
     pub next_offset: Option<u64>,
-    /// Returned cells in row-major order, including blanks.
+    /// Returned cells in row-major order, including blanks unless empty cells are omitted. Empty
+    /// when the request asked for values only or the compact form.
     pub cells: Vec<CellDto>,
+    /// With values only: each returned cell's address and value, in row-major order. Omitted
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<crate::RangeCellValueDto>>,
+    /// With the compact form: the page's values grouped by worksheet row, each row starting at the
+    /// page position it continues, so only the first row can start after the range's first column.
+    /// Omitted otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<Vec<crate::RangeValueDto>>>,
 }
 
 /// Request for one workbook or sheet-local defined-name inspection.
@@ -1506,6 +1541,9 @@ pub struct SheetSummaryDto {
     /// Hidden rows as ascending A1 row ranges such as `2:4`; a filter's hidden rows are included.
     #[serde(default)]
     pub hidden_rows: Vec<String>,
+    /// Frozen rows and columns of the sheet's default view. Omitted when the sheet has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_pane: Option<crate::FrozenPaneDto>,
 }
 
 /// Transport-safe versioned workbook semantic fingerprint.
@@ -1650,6 +1688,35 @@ pub struct FunctionCatalogReportDto {
     /// Interop schema version.
     pub schema_version: u32,
     /// Deterministically ordered accepted names.
+    pub entries: Vec<FunctionCatalogEntryDto>,
+}
+
+/// Bounded request for one page of the function catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionCatalogPageRequestDto {
+    /// Zero-based entry offset.
+    #[serde(default)]
+    pub offset: u64,
+    /// Page size; zero selects the default, with a hard maximum of 10,000.
+    #[serde(default)]
+    #[schemars(range(max = 10_000))]
+    pub limit: u32,
+}
+
+/// One page of the versioned function catalog, in catalog order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionCatalogPageDto {
+    /// Interop schema version.
+    pub schema_version: u32,
+    /// Number of accepted names in the catalog.
+    pub total: u64,
+    /// Offset represented by the first returned entry.
+    pub offset: u64,
+    /// Offset for the next page, or `None` at the end.
+    pub next_offset: Option<u64>,
+    /// Returned entries.
     pub entries: Vec<FunctionCatalogEntryDto>,
 }
 

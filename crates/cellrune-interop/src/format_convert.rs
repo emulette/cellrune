@@ -3,13 +3,14 @@
 use cellrune::{
     Alignment, AlignmentEdit, Border, BorderEdge, BorderEdit, BorderStyle, CellAddress, CellFormat,
     CellFormatEdit, Color, ColorKind, Column, Fill, FillPattern, Font, FontEdit, FontUnderline,
-    HorizontalAlignment, PatternFill, Row, SheetId, VerticalAlignment, WorkbookChange,
+    FrozenPane, HorizontalAlignment, PatternFill, Row, SheetId, VerticalAlignment, WorkbookChange,
 };
 
 use crate::error::{
     DETAIL_BORDER_STYLE, DETAIL_COLOR_ARGB, DETAIL_FILL_PATTERN, DETAIL_FONT_UNDERLINE,
     DETAIL_HORIZONTAL_ALIGNMENT, DETAIL_VERTICAL_ALIGNMENT,
 };
+use crate::phonetic::{phonetic_runs, phonetic_write_options};
 use crate::{
     AlignmentDto, AlignmentEditDto, BorderDto, BorderEdgeDto, BorderEditDto, CellFormatDto,
     ColorDto, FillDto, FontDto, FontEditDto, FormatChangeV2Dto, InteropError, PatternFillDto,
@@ -193,6 +194,24 @@ pub(crate) fn format_change(
         ),
         FormatChangeV2Dto::SetRowHeight { row, height, .. } => {
             WorkbookChange::set_row_height(sheet_id, Row::new(row)?, height)
+        }
+        FormatChangeV2Dto::SetFrozenPane { rows, columns, .. } => {
+            WorkbookChange::set_frozen_pane(sheet_id, FrozenPane::new(rows, columns)?)
+        }
+        FormatChangeV2Dto::SetPhonetics {
+            address,
+            runs,
+            visible,
+            properties,
+            ..
+        } => WorkbookChange::set_phonetics(
+            sheet_id,
+            CellAddress::from_a1(&address)?,
+            phonetic_runs(runs)?,
+            phonetic_write_options(visible, properties)?,
+        ),
+        FormatChangeV2Dto::ClearPhonetics { address, .. } => {
+            WorkbookChange::clear_phonetics(sheet_id, CellAddress::from_a1(&address)?)
         }
     })
 }

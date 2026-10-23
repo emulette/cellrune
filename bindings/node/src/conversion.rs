@@ -2,7 +2,8 @@ use cellrune_interop::{
     CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto, CalculationReportDto,
     CalculationResultDto, CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
-    FunctionUsageReportDto, RangePageDto, SavedValueStateDto, WorkbookSummaryDto, WriteReportDto,
+    FunctionUsageReportDto, RangePageDto, RangeValueDto, SavedValueStateDto, UnavailableValueDto,
+    WorkbookSummaryDto, WriteReportDto,
 };
 use napi_derive::napi;
 
@@ -22,6 +23,7 @@ pub struct NativeCalculationResult {
     pub code: Option<String>,
     pub message: Option<String>,
     pub detail: Option<String>,
+    pub limit: Option<String>,
 }
 
 #[napi(object)]
@@ -51,6 +53,14 @@ pub struct NativeRangePage {
     pub offset: f64,
     pub next_offset: Option<f64>,
     pub cells: Vec<NativeCell>,
+    pub values: Option<Vec<NativeRangeCellValue>>,
+    pub rows: Option<Vec<Vec<NativeCalculationResult>>>,
+}
+
+#[napi(object)]
+pub struct NativeRangeCellValue {
+    pub address: String,
+    pub value: NativeCalculationResult,
 }
 
 #[napi(object)]
@@ -83,6 +93,13 @@ pub struct NativeSheetSummary {
     pub auto_filter: Option<String>,
     pub auto_filter_filtered_columns: Vec<u32>,
     pub hidden_rows: Vec<String>,
+    pub frozen_pane: Option<NativeFrozenPane>,
+}
+
+#[napi(object)]
+pub struct NativeFrozenPane {
+    pub rows: u32,
+    pub columns: u32,
 }
 
 #[napi(object)]
@@ -280,6 +297,10 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
                 auto_filter: sheet.auto_filter,
                 auto_filter_filtered_columns: sheet.auto_filter_filtered_columns,
                 hidden_rows: sheet.hidden_rows,
+                frozen_pane: sheet.frozen_pane.map(|pane| NativeFrozenPane {
+                    rows: pane.rows,
+                    columns: pane.columns,
+                }),
                 tables: sheet
                     .tables
                     .into_iter()
@@ -398,7 +419,39 @@ pub(crate) fn range_page(value: RangePageDto) -> NativeRangePage {
         offset: value.offset as f64,
         next_offset: value.next_offset.map(|offset| offset as f64),
         cells: value.cells.into_iter().map(cell).collect(),
+        values: value.values.map(|values| {
+            values
+                .into_iter()
+                .map(|entry| NativeRangeCellValue {
+                    address: entry.address,
+                    value: range_value(entry.value),
+                })
+                .collect()
+        }),
+        rows: value.rows.map(|rows| {
+            rows.into_iter()
+                .map(|row| row.into_iter().map(range_value).collect())
+                .collect()
+        }),
     }
+}
+
+/// Carries a range value as a calculation result: a value, or an unavailable result.
+fn range_value(value: RangeValueDto) -> NativeCalculationResult {
+    calculation_result(match value {
+        RangeValueDto::Value(value) => CalculationResultDto::Value { value },
+        RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        }) => CalculationResultDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        },
+    })
 }
 
 pub(crate) fn function_usage(value: FunctionUsageReportDto) -> NativeFunctionUsageReport {
@@ -520,17 +573,20 @@ fn calculation_result(value: CalculationResultDto) -> NativeCalculationResult {
             code: None,
             message: None,
             detail: None,
+            limit: None,
         },
         CalculationResultDto::Unavailable {
             code,
             message,
             detail,
+            limit,
         } => NativeCalculationResult {
             kind: "unavailable".to_owned(),
             value: None,
             code: Some(code),
             message: Some(message),
             detail,
+            limit,
         },
     }
 }

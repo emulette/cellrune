@@ -9,6 +9,7 @@
 
 mod config;
 mod error;
+mod error_code;
 mod model;
 mod resources;
 mod schema;

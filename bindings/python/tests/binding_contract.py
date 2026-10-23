@@ -26,6 +26,9 @@ DEFINED_NAME_CORPUS_PATH = (
 SHEET_METADATA_FIXTURE_PATH = (
     pathlib.Path(__file__).parents[3] / "binding-contract" / "sheet-metadata.xlsx"
 )
+SURFACE_AUTHORING_FIXTURE_PATH = (
+    pathlib.Path(__file__).parents[3] / "binding-contract" / "surface-authoring.xlsx"
+)
 TABLE_AUTHORING_CONTRACT_PATH = (
     pathlib.Path(__file__).parents[3]
     / "binding-contract"
@@ -829,6 +832,209 @@ def assert_annotations() -> None:
     assert_error("interop.sheet.not_found", lambda: workbook.comments("Missing"))
 
 
+def assert_surface_authoring() -> None:
+    workbook = Workbook.from_bytes(SURFACE_AUTHORING_FIXTURE_PATH.read_bytes())
+    data, filtered = workbook.summary()["sheets"]
+    assert data["frozen_pane"] == {"rows": 1, "columns": 0}
+    assert "frozen_pane" not in filtered
+    phonetics = workbook.phonetics("data")
+    assert (phonetics["sheet"], phonetics["total"], phonetics["next_offset"]) == (
+        "Data",
+        1,
+        None,
+    )
+    assert phonetics["entries"][0] == {
+        "address": "D2",
+        "runs": [
+            {"start_utf16": 0, "end_utf16": 2, "text": "トウキョウ"},
+            {"start_utf16": 2, "end_utf16": 3, "text": "ト"},
+        ],
+        "properties": {"font_id": 0, "phonetic_type": "Hiragana", "alignment": None},
+        "visible": True,
+    }
+    assert_error("interop.sheet.not_found", lambda: workbook.phonetics("Missing"))
+
+    revision = workbook.summary()["semantic_revision"]
+    receipt = workbook.apply_changes_v2(
+        revision,
+        [
+            {"kind": "widen_table_columns", "table_id": 1, "range": "A1:C3"},
+            {"kind": "widen_sheet_auto_filter", "sheet": "Filter", "range": "A1:C3"},
+        ],
+    )
+    assert receipt["changed_table_ids"] == [1]
+    presentation = workbook.apply_changes_v2(
+        receipt["result_revision"],
+        [
+            {"kind": "set_frozen_pane", "sheet": "Filter", "rows": 2, "columns": 1},
+            {
+                "kind": "set_phonetics",
+                "sheet": "Data",
+                "address": "A2",
+                "runs": [{"start_utf16": 0, "end_utf16": 5, "text": "ノース"}],
+                "visible": False,
+                "properties": {"alignment": "center"},
+            },
+            {"kind": "clear_phonetics", "sheet": "Data", "address": "D2"},
+        ],
+    )
+    assert presentation["result_revision"] == receipt["result_revision"]
+    reopened = Workbook.from_bytes(workbook.edits_to_bytes())
+    data, filtered = reopened.summary()["sheets"]
+    assert data["tables"][0]["columns"][2]["name"] == "Region"
+    assert filtered["auto_filter"] == "A1:C3"
+    assert filtered["frozen_pane"] == {"rows": 2, "columns": 1}
+    assert [entry["address"] for entry in reopened.phonetics("Data")["entries"]] == ["A2"]
+
+    try:
+        Workbook.from_bytes(
+            SURFACE_AUTHORING_FIXTURE_PATH.read_bytes(),
+            read_limits={"max_phonetic_runs_per_item": 1},
+        )
+    except CellRuneError as error:
+        assert error.code == "xlsx.too_many_phonetic_runs"
+        assert error.details["limit"] == {
+            "name": "max_phonetic_runs_per_item",
+            "observed": 2,
+        }
+    else:
+        raise AssertionError("two phonetic runs passed a per-item limit of one")
+    with Workbook.create() as limited:
+        limited.set_formula("Sheet1", "A1", "=1+2+3+4+5")
+        limited.calculate(calculation_limits={"max_formula_tokens": 3})
+        result = limited.read_range("Sheet1", "A1", "A1")["cells"][0]["calculated"]
+        assert result is not None and result["kind"] == "unavailable"
+        assert result["code"] == "calculation.resource_limit_exceeded"
+        assert result.get("limit") == "max_formula_tokens"
+        try:
+            limited.calculate_targets(
+                [{"sheet": "Sheet1", "start": "A1", "end": "A3"}],
+                limits={"max_result_cells": 2},
+            )
+        except CellRuneError as error:
+            assert error.code == "calculation.target.target_limit_exceeded"
+            assert error.details["limit"] == {"requested_cell_count": 3}
+        else:
+            raise AssertionError("three cells passed a result limit of two")
+
+
+def assert_range_values() -> None:
+    with Workbook.create() as workbook:
+        receipt = workbook.write_values(
+            "Sheet1",
+            "B2",
+            [
+                [{"kind": "number", "value": 1.5}, {"kind": "text", "value": "a"}],
+                [{"kind": "logical", "value": True}, {"kind": "error", "value": "#N/A"}],
+            ],
+        )
+        assert (receipt["base_revision"], receipt["result_revision"]) == (0, 1)
+        assert receipt["applied_change_count"] == 4
+        assert workbook.read_values("sheet1", "A2", "C3") == [
+            [{"kind": "blank"}, {"kind": "number", "value": 1.5}, {"kind": "text", "value": "a"}],
+            [
+                {"kind": "blank"},
+                {"kind": "logical", "value": True},
+                {"kind": "error", "value": "#N/A"},
+            ],
+        ]
+        workbook.set_formula("Sheet1", "D2", "=B2*2")
+        workbook.set_formula("Sheet1", "D3", "=NOT_A_FUNCTION(1)")
+        assert workbook.read_values("Sheet1", "D2", "D2") == [[{"kind": "blank"}]]
+        workbook.calculate()
+        calculated = workbook.read_values("Sheet1", "D2", "D3")
+        assert calculated[0] == [{"kind": "number", "value": 3.0}]
+        unavailable = calculated[1][0]
+        assert unavailable["kind"] == "unavailable"
+        assert unavailable["code"] == "calculation.unsupported_function"
+        for rows in ([], [[]], [[{"kind": "blank"}], []]):
+            try:
+                workbook.write_values("Sheet1", "A1", rows)
+            except CellRuneError as error:
+                assert error.code == "interop.change.invalid"
+            else:
+                raise AssertionError("a non-rectangular write was accepted")
+        assert_error(
+            "interop.change.payload_invalid",
+            lambda: workbook.write_values(
+                "Sheet1", "A1", [[{"kind": "number", "value": True}]]
+            ),
+        )
+        assert_error(
+            "interop.page.limit_exceeded",
+            lambda: workbook.read_values("Sheet1", "A1", "B1048576"),
+        )
+        assert workbook.summary()["semantic_revision"] == 3
+
+
+def assert_range_read_forms() -> None:
+    with Workbook.create() as workbook:
+        workbook.set_number("Sheet1", "A1", 1)
+        workbook.set_formula("Sheet1", "C2", "=A1*3")
+        workbook.calculate()
+        plain = workbook.read_range("Sheet1", "A1", "C2")
+        assert len(plain["cells"]) == 6
+        assert "values" not in plain and "rows" not in plain
+        sparse = workbook.read_range(
+            "Sheet1", "A1", "C2", omit_empty=True, values_only=True
+        )
+        assert sparse["cells"] == []
+        assert sparse.get("values") == [
+            {"address": "A1", "value": {"kind": "number", "value": 1.0}},
+            {"address": "C2", "value": {"kind": "number", "value": 3.0}},
+        ]
+        compact = workbook.read_range(
+            "Sheet1", "A1", "C2", offset=1, compact=True, omit_empty=True
+        )
+        assert compact.get("rows") == [
+            [],
+            [{"kind": "blank"}, {"kind": "blank"}, {"kind": "number", "value": 3.0}],
+        ]
+        prefix = workbook.read_range("Sheet1", "A1", "C2", max_bytes=700)
+        assert 0 < len(prefix["cells"]) < 6
+        assert prefix["next_offset"] == len(prefix["cells"])
+        try:
+            workbook.read_range("Sheet1", "A1", "C2", max_bytes=50)
+        except CellRuneError as error:
+            assert error.code == "interop.page.byte_limit_exceeded"
+        else:
+            raise AssertionError("a page with no room for a cell was returned")
+
+
+def assert_dependencies() -> None:
+    with Workbook.create() as workbook:
+        workbook.set_formula("Sheet1", "B1", "=SUM(A1:A3)")
+        workbook.set_formula("Sheet1", "C1", "=B1+INDIRECT(\"A2\")")
+        try:
+            workbook.precedents("Sheet1", "C1")
+        except CellRuneError as error:
+            assert error.code == "interop.calculation.required"
+        else:
+            raise AssertionError("precedents were read without a calculation")
+        workbook.calculate()
+        precedents = workbook.precedents("sheet1", "C1")
+        assert precedents["dynamic"] is True
+        assert {"sheet_id": 1, "sheet_name": "Sheet1", "range": "B1", "kind": "value"} in precedents[
+            "entries"
+        ]
+        assert workbook.precedents("Sheet1", "B1")["entries"] == [
+            {"sheet_id": 1, "sheet_name": "Sheet1", "range": "A1:A3", "kind": "value"}
+        ]
+        dependents = workbook.dependents("Sheet1", "A1", limit=1)
+        assert dependents["total"] == 1
+        assert dependents["entries"] == [
+            {
+                "cell": {"sheet_id": 1, "sheet_name": "Sheet1", "address": "B1"},
+                "dynamic": False,
+            }
+        ]
+        assert dependents["unlisted_dynamic_formulas"] == 1
+        assert_error(
+            "interop.page.offset_out_of_range",
+            lambda: workbook.dependents("Sheet1", "A1", offset=2),
+        )
+
+
 def assert_csv() -> None:
     workbook = Workbook.from_csv(
         b'item;amount\r\n"Widget; large";2.5\r\n', sheet_name="Import", delimiter=";"
@@ -858,6 +1064,10 @@ def main() -> None:
     assert_sheet_structure_changes()
     assert_delete_sheet()
     assert_grid_edits()
+    assert_surface_authoring()
+    assert_range_values()
+    assert_range_read_forms()
+    assert_dependencies()
     assert_csv()
     assert_annotations()
     assert_formats()

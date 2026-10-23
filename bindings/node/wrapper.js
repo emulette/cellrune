@@ -7,6 +7,13 @@ const {
   normalizeDataValidationPage,
   normalizeHyperlinkPage,
 } = require("./lib/sheet_metadata.js");
+const { requireOptionalAbortSignal, runAbortable } = require("./lib/abort.js");
+const {
+  normalizeDependentPage,
+  normalizePrecedentPage,
+} = require("./lib/dependencies.js");
+const { normalizePhoneticPage } = require("./lib/presentation.js");
+const { parseRangeValues, serializeRangeRows } = require("./lib/values.js");
 const { targetRequest } = require("./lib/targeted.js");
 const {
   serializeWorkbookChange,
@@ -144,9 +151,21 @@ class Workbook {
     const limit = options.limit ?? 0;
     requireNonNegativeInteger(offset, "offset");
     requireNonNegativeInteger(limit, "limit");
+    for (const name of ["omitEmpty", "valuesOnly", "compact"]) {
+      requireOptionalBoolean(options[name], name);
+    }
+    if (options.maxBytes !== undefined) {
+      requireNonNegativeInteger(options.maxBytes, "maxBytes");
+    }
+    const forms = {
+      omitEmpty: options.omitEmpty,
+      valuesOnly: options.valuesOnly,
+      compact: options.compact,
+      maxBytes: options.maxBytes,
+    };
     return normalizeRangePage(
       withSyncErrors(() =>
-        this.#session().readRange(sheet, start, end, offset, limit),
+        this.#session().readRange(sheet, start, end, offset, limit, forms),
       ),
     );
   }
@@ -159,6 +178,47 @@ class Workbook {
       withSyncErrors(() =>
         this.#session().readFormats(sheet, start, end, offset, limit),
       ),
+    );
+  }
+
+  readValues(sheet, start, end) {
+    requireString(sheet, "sheet");
+    requireString(start, "start");
+    requireString(end, "end");
+    return parseRangeValues(
+      withSyncErrors(() => this.#session().readValues(sheet, start, end)),
+    );
+  }
+
+  writeValues(sheet, start, rows) {
+    requireString(sheet, "sheet");
+    requireString(start, "start");
+    const request = { sheet, start, rows: serializeRangeRows(rows) };
+    return normalizeEditReceipt(
+      withSyncErrors(() => this.#session().writeValues(JSON.stringify(request))),
+    );
+  }
+
+  precedents(sheet, address, options = {}) {
+    requireString(address, "address");
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizePrecedentPage(
+      withSyncErrors(() => this.#session().precedents(sheet, address, offset, limit)),
+    );
+  }
+
+  dependents(sheet, address, options = {}) {
+    requireString(address, "address");
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizeDependentPage(
+      withSyncErrors(() => this.#session().dependents(sheet, address, offset, limit)),
+    );
+  }
+
+  phonetics(sheet, options = {}) {
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizePhoneticPage(
+      withSyncErrors(() => this.#session().phonetics(sheet, offset, limit)),
     );
   }
 
@@ -235,19 +295,26 @@ class Workbook {
       options.financialSolverSemantics,
       "financialSolverSemantics",
     );
-    const task = withSyncErrors(() =>
-      this.#session().calculate(
-        calculationOptions(options),
-        limitsJson(options.calculationLimits, "calculationLimits"),
-      ),
+    requireOptionalAbortSignal(options.signal);
+    const calculation = calculationOptions(options);
+    const limits = limitsJson(options.calculationLimits, "calculationLimits");
+    const session = this.#session();
+    const report = await runAbortable(options.signal, (cancellation) =>
+      session.calculate(calculation, limits, cancellation),
     );
-    return normalizeCalculationReport(await withErrors(task));
+    return normalizeCalculationReport(report);
   }
 
   async calculateTargets(targets, options = {}) {
-    const request = targetRequest(targets, options);
-    const task = withSyncErrors(() => this.#session().calculateTargets(request));
-    return normalizeTargetCalculation(parsePreviewJson(await withErrors(task)));
+    requireOptions(options);
+    const { signal, ...targetOptions } = options;
+    requireOptionalAbortSignal(signal);
+    const request = targetRequest(targets, targetOptions);
+    const session = this.#session();
+    const response = await runAbortable(signal, (cancellation) =>
+      session.calculateTargets(request, cancellation),
+    );
+    return normalizeTargetCalculation(parsePreviewJson(response));
   }
 
   async recalculate(options = {}) {
@@ -265,14 +332,14 @@ class Workbook {
       options.financialSolverSemantics,
       "financialSolverSemantics",
     );
-    const task = withSyncErrors(() =>
-      this.#session().recalculate(
-        mode,
-        calculationOptions(options),
-        limitsJson(options.calculationLimits, "calculationLimits"),
-      ),
+    requireOptionalAbortSignal(options.signal);
+    const calculation = calculationOptions(options);
+    const limits = limitsJson(options.calculationLimits, "calculationLimits");
+    const session = this.#session();
+    const delta = await runAbortable(options.signal, (cancellation) =>
+      session.recalculate(mode, calculation, limits, cancellation),
     );
-    return normalizeCalculationDelta(await withErrors(task));
+    return normalizeCalculationDelta(delta);
   }
 
   async previewChanges(expectedRevision, changes, options = {}) {
@@ -290,7 +357,9 @@ class Workbook {
       "arithmeticSemantics",
       "financialSolverSemantics",
       "calculationLimits",
+      "signal",
     ]);
+    requireOptionalAbortSignal(options.signal);
     const mode = options.mode ?? "auto";
     if (!["auto", "incremental", "full"].includes(mode)) {
       throw inputError("mode must be auto, incremental, or full");
@@ -309,24 +378,28 @@ class Workbook {
         serializeWorkbookChangeV2(change, index),
       ),
     };
-    const task = withSyncErrors(() =>
-      this.#session().previewChanges(
+    const previewOptions = JSON.stringify({
+      mode,
+      today_serial: options.todaySerial ?? null,
+      now_serial: options.nowSerial ?? null,
+      random_seed: options.randomSeed ?? null,
+      locale_profile: localeProfileWire(options.localeProfile),
+      arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
+      financial_solver_semantics:
+        options.financialSolverSemantics ?? "excel_iteration_budget",
+    });
+    const limits = limitsJson(options.calculationLimits, "calculationLimits");
+    const session = this.#session();
+    const preview = await runAbortable(options.signal, (cancellation) =>
+      session.previewChanges(
         expectedRevision.toString(),
         JSON.stringify(payload),
-        JSON.stringify({
-          mode,
-          today_serial: options.todaySerial ?? null,
-          now_serial: options.nowSerial ?? null,
-          random_seed: options.randomSeed ?? null,
-          locale_profile: localeProfileWire(options.localeProfile),
-          arithmetic_semantics: options.arithmeticSemantics ?? "excel_near_zero",
-          financial_solver_semantics:
-            options.financialSolverSemantics ?? "excel_iteration_budget",
-        }),
-        limitsJson(options.calculationLimits, "calculationLimits"),
+        previewOptions,
+        limits,
+        cancellation,
       ),
     );
-    return normalizePreviewChanges(parsePreviewJson(await withErrors(task)));
+    return normalizePreviewChanges(parsePreviewJson(preview));
   }
 
   previewChangesPage(previewId, options = {}) {

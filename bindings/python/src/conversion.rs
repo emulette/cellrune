@@ -3,8 +3,9 @@ use cellrune_interop::{
     CapabilityPageDto, CellDto, CellReferenceDto, CellValueDto, DefinedNameInspectionDto,
     DefinedNameInspectionResultDto, DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteReportDto, FunctionCatalogReportDto,
-    FunctionUsageReportDto, PreviewChangesDto, RangePageDto, TransactionImpactPageDto,
-    WorkbookFingerprintDto, WorkbookSummaryDto, WorkbookTransactionReceiptDto, WriteReportDto,
+    FunctionUsageReportDto, PreviewChangesDto, RangePageDto, RangeValueDto,
+    TransactionImpactPageDto, UnavailableValueDto, WorkbookFingerprintDto, WorkbookSummaryDto,
+    WorkbookTransactionReceiptDto, WriteReportDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -93,6 +94,12 @@ pub(crate) fn workbook_summary<'py>(
             &sheet.auto_filter_filtered_columns,
         )?;
         item.set_item("hidden_rows", &sheet.hidden_rows)?;
+        if let Some(pane) = &sheet.frozen_pane {
+            let frozen_pane = PyDict::new(py);
+            frozen_pane.set_item("rows", pane.rows)?;
+            frozen_pane.set_item("columns", pane.columns)?;
+            item.set_item("frozen_pane", frozen_pane)?;
+        }
         sheets.append(item)?;
     }
     result.set_item("sheets", sheets)?;
@@ -236,6 +243,19 @@ pub(crate) fn range_page<'py>(
         cells.append(cell_dict(py, cell)?)?;
     }
     result.set_item("cells", cells)?;
+    if let Some(values) = &value.values {
+        let entries = PyList::empty(py);
+        for entry in values {
+            let item = PyDict::new(py);
+            item.set_item("address", &entry.address)?;
+            item.set_item("value", range_value(py, &entry.value)?)?;
+            entries.append(item)?;
+        }
+        result.set_item("values", entries)?;
+    }
+    if let Some(rows) = &value.rows {
+        result.set_item("rows", range_value_rows(py, rows)?)?;
+    }
     Ok(result)
 }
 
@@ -526,14 +546,55 @@ fn calculation_result<'py>(
             code,
             message,
             detail,
+            limit,
         } => {
             result.set_item("kind", "unavailable")?;
             result.set_item("code", code)?;
             result.set_item("message", message)?;
             result.set_item("detail", detail.as_deref())?;
+            if let Some(limit) = limit {
+                result.set_item("limit", limit)?;
+            }
         }
     }
     Ok(result)
+}
+
+pub(crate) fn range_value_rows<'py>(
+    py: Python<'py>,
+    rows: &[Vec<RangeValueDto>],
+) -> PyResult<Bound<'py, PyList>> {
+    let result = PyList::empty(py);
+    for row in rows {
+        let values = PyList::empty(py);
+        for value in row {
+            values.append(range_value(py, value)?)?;
+        }
+        result.append(values)?;
+    }
+    Ok(result)
+}
+
+fn range_value<'py>(py: Python<'py>, value: &RangeValueDto) -> PyResult<Bound<'py, PyDict>> {
+    match value {
+        RangeValueDto::Value(value) => cell_value(py, value),
+        RangeValueDto::Unavailable(UnavailableValueDto::Unavailable {
+            code,
+            message,
+            detail,
+            limit,
+        }) => {
+            let unavailable = PyDict::new(py);
+            unavailable.set_item("kind", "unavailable")?;
+            unavailable.set_item("code", code)?;
+            unavailable.set_item("message", message)?;
+            unavailable.set_item("detail", detail.as_deref())?;
+            if let Some(limit) = limit {
+                unavailable.set_item("limit", limit)?;
+            }
+            Ok(unavailable)
+        }
+    }
 }
 
 pub(crate) fn cell_reference<'py>(

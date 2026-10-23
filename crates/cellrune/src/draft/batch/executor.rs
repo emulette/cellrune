@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::super::format::effective_cell_format;
+use super::super::presentation::{authored_annotation, phonetics_require_text_cell};
 use super::super::{
     SourceCells, WorkbookDraft, annotated_text_replacement_required, case_insensitive_key,
     ensure_not_array_formula_part, next_revision,
@@ -976,6 +977,43 @@ impl WorkbookDraft {
                 } => {
                     sheet_by_id_mut(&mut sheets, *sheet_id)?;
                     presentation.set_row_height(*sheet_id, *row, *height)?;
+                }
+                WorkbookChange::SetFrozenPane { sheet_id, pane } => {
+                    sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let pane = (!pane.is_clear()).then_some(*pane);
+                    if presentation.set_frozen_pane(*sheet_id, pane)? {
+                        presentation_sheet_mutations.insert(*sheet_id);
+                    }
+                }
+                WorkbookChange::SetPhonetics {
+                    sheet_id,
+                    address,
+                    runs,
+                    options,
+                } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let Some(CellContent::Literal(CellValue::Text(text))) =
+                        sheet.cell(*address).map(crate::Cell::content)
+                    else {
+                        return Err(phonetics_require_text_cell(*sheet_id, *address).into());
+                    };
+                    let annotation = authored_annotation(text, runs.clone(), options)?;
+                    if presentation.set_cell_phonetics(
+                        *sheet_id,
+                        *address,
+                        annotation,
+                        options.visible(),
+                    )? {
+                        presentation_cell_mutations
+                            .insert(CalculationCellId::new(*sheet_id, *address));
+                    }
+                }
+                WorkbookChange::ClearPhonetics { sheet_id, address } => {
+                    sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    if presentation.clear_cell_phonetics(*sheet_id, *address)? {
+                        presentation_cell_mutations
+                            .insert(CalculationCellId::new(*sheet_id, *address));
+                    }
                 }
             }
         }

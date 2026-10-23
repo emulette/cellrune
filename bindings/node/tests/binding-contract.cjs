@@ -607,6 +607,281 @@ const SHEET_METADATA_FIXTURE = path.join(
   "sheet-metadata.xlsx",
 );
 
+const SURFACE_AUTHORING_FIXTURE = path.join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "binding-contract",
+  "surface-authoring.xlsx",
+);
+
+async function assertSurfaceAuthoring() {
+  const bytes = fs.readFileSync(SURFACE_AUTHORING_FIXTURE);
+  const workbook = await Workbook.fromBytes(bytes);
+  const [data, filtered] = workbook.summary().sheets;
+  assert.deepEqual(data.frozenPane, { rows: 1, columns: 0 });
+  assert.equal("frozenPane" in filtered, false);
+  const phonetics = workbook.phonetics("data");
+  assert.equal(phonetics.total, 1);
+  assert.deepEqual(phonetics.entries[0], {
+    address: "D2",
+    runs: [
+      { startUtf16: 0, endUtf16: 2, text: "トウキョウ" },
+      { startUtf16: 2, endUtf16: 3, text: "ト" },
+    ],
+    properties: { fontId: 0, phoneticType: "Hiragana", alignment: null },
+    visible: true,
+  });
+  assert.throws(
+    () => workbook.phonetics("Missing"),
+    (error) => error.code === "interop.sheet.not_found" && !("limit" in error.details),
+  );
+
+  const widened = workbook.applyChangesV2(workbook.summary().semanticRevision, [
+    { kind: "widenTableColumns", tableId: 1, range: "A1:C3" },
+    { kind: "widenSheetAutoFilter", sheet: "Filter", range: "A1:C3" },
+  ]);
+  assert.deepEqual(widened.changedTableIds, [1]);
+  const presentation = workbook.applyChangesV2(widened.resultRevision, [
+    { kind: "setFrozenPane", sheet: "Filter", rows: 2, columns: 1 },
+    {
+      kind: "setPhonetics",
+      sheet: "Data",
+      address: "A2",
+      runs: [{ startUtf16: 0, endUtf16: 5, text: "ノース" }],
+      visible: false,
+      properties: { alignment: "center" },
+    },
+    { kind: "clearPhonetics", sheet: "Data", address: "D2" },
+  ]);
+  assert.equal(presentation.resultRevision, widened.resultRevision);
+  const reopened = await Workbook.fromBytes(await workbook.editsToBytes());
+  const [reopenedData, reopenedFilter] = reopened.summary().sheets;
+  assert.equal(reopenedData.tables[0].columns[2].name, "Region");
+  assert.equal(reopenedFilter.autoFilter, "A1:C3");
+  assert.deepEqual(reopenedFilter.frozenPane, { rows: 2, columns: 1 });
+  assert.deepEqual(reopened.phonetics("Data").entries[0].properties, {
+    fontId: 0,
+    phoneticType: null,
+    alignment: "center",
+  });
+  assert.throws(
+    () =>
+      workbook.applyChangesV2(presentation.resultRevision, [
+        { kind: "setPhonetics", sheet: "Data", address: "A3", runs: [{ start: 0 }] },
+      ]),
+    (error) => error.code === "interop.input.invalid",
+  );
+
+  await assert.rejects(
+    Workbook.fromBytes(bytes, { readLimits: { maxPhoneticRunsPerItem: 1 } }),
+    (error) => {
+      assert.equal(error.code, "xlsx.too_many_phonetic_runs");
+      assert.deepEqual(error.details.limit, { name: "max_phonetic_runs_per_item", observed: 2 });
+      return true;
+    },
+  );
+  const limited = Workbook.create();
+  limited.setFormula("Sheet1", "A1", "=1+2+3+4+5");
+  await limited.calculate({ calculationLimits: { maxFormulaTokens: 3 } });
+  const result = limited.readRange("Sheet1", "A1", "A1").cells[0].calculated;
+  assert.equal(result.code, "calculation.resource_limit_exceeded");
+  assert.equal(result.limit, "max_formula_tokens");
+  await assert.rejects(
+    limited.calculateTargets([{ sheet: "Sheet1", start: "A1", end: "A3" }], {
+      limits: { maxResultCells: 2 },
+    }),
+    (error) => {
+      assert.equal(error.code, "calculation.target.target_limit_exceeded");
+      assert.deepEqual(error.details.limit, { requestedCellCount: 3 });
+      return true;
+    },
+  );
+  limited.close();
+  reopened.close();
+  workbook.close();
+}
+
+async function assertRangeValues() {
+  const workbook = Workbook.create();
+  const receipt = workbook.writeValues("Sheet1", "B2", [
+    [{ kind: "number", value: 1.5 }, { kind: "text", value: "a" }],
+    [{ kind: "logical", value: true }, { kind: "error", value: "#N/A" }],
+  ]);
+  assert.equal(receipt.resultRevision, 1n);
+  assert.equal(receipt.appliedChangeCount, 4);
+  assert.deepEqual(workbook.readValues("sheet1", "A2", "C3"), [
+    [{ kind: "blank" }, { kind: "number", value: 1.5 }, { kind: "text", value: "a" }],
+    [{ kind: "blank" }, { kind: "logical", value: true }, { kind: "error", value: "#N/A" }],
+  ]);
+  workbook.setFormula("Sheet1", "D2", "=B2*2");
+  workbook.setFormula("Sheet1", "D3", "=NOT_A_FUNCTION(1)");
+  assert.deepEqual(workbook.readValues("Sheet1", "D2", "D2"), [[{ kind: "blank" }]]);
+  await workbook.calculate();
+  const [[doubled], [unavailable]] = workbook.readValues("Sheet1", "D2", "D3");
+  assert.deepEqual(doubled, { kind: "number", value: 3 });
+  assert.equal(unavailable.kind, "unavailable");
+  assert.equal(unavailable.code, "calculation.unsupported_function");
+  for (const rows of [[], [[]], [[{ kind: "blank" }], []]]) {
+    assert.throws(
+      () => workbook.writeValues("Sheet1", "A1", rows),
+      (error) => error.code === "interop.change.invalid",
+    );
+  }
+  assert.throws(
+    () => workbook.writeValues("Sheet1", "A1", [[{ kind: "unsupported" }]]),
+    (error) => error.code === "interop.input.invalid" && error.details.detail.includes("rows[0][0]"),
+  );
+  assert.throws(
+    () => workbook.readValues("Sheet1", "A1", "B1048576"),
+    (error) => error.code === "interop.page.limit_exceeded",
+  );
+  assert.equal(workbook.summary().semanticRevision, 3n);
+  workbook.close();
+}
+
+async function assertRangeReadForms() {
+  const workbook = Workbook.create();
+  workbook.setNumber("Sheet1", "A1", 1);
+  workbook.setFormula("Sheet1", "C2", "=A1*3");
+  await workbook.calculate();
+  const plain = workbook.readRange("Sheet1", "A1", "C2");
+  assert.equal(plain.cells.length, 6);
+  assert.equal("values" in plain || "rows" in plain, false);
+  const sparse = workbook.readRange("Sheet1", "A1", "C2", { omitEmpty: true, valuesOnly: true });
+  assert.deepEqual(sparse.cells, []);
+  assert.deepEqual(sparse.values, [
+    { address: "A1", value: { kind: "number", value: 1 } },
+    { address: "C2", value: { kind: "number", value: 3 } },
+  ]);
+  const compact = workbook.readRange("Sheet1", "A1", "C2", {
+    offset: 1,
+    compact: true,
+    omitEmpty: true,
+  });
+  assert.deepEqual(compact.rows, [
+    [],
+    [{ kind: "blank" }, { kind: "blank" }, { kind: "number", value: 3 }],
+  ]);
+  const prefix = workbook.readRange("Sheet1", "A1", "C2", { maxBytes: 700 });
+  assert.ok(prefix.cells.length > 0 && prefix.cells.length < 6);
+  assert.equal(prefix.nextOffset, prefix.cells.length);
+  assert.throws(
+    () => workbook.readRange("Sheet1", "A1", "C2", { maxBytes: 50 }),
+    (error) => error.code === "interop.page.byte_limit_exceeded",
+  );
+  assert.throws(
+    () => workbook.readRange("Sheet1", "A1", "C2", { compact: 1 }),
+    (error) => error.code === "interop.input.invalid",
+  );
+  workbook.close();
+}
+
+async function assertAbortSignal() {
+  const workbook = Workbook.create();
+  const changes = [
+    { kind: "setValue", sheet: "Sheet1", address: "A1", value: { kind: "number", value: 1 } },
+  ];
+  for (let row = 2; row <= 25_000; row += 1) {
+    changes.push({
+      kind: "setFormula",
+      sheet: "Sheet1",
+      address: `A${row}`,
+      formula: `=A${row - 1}+1`,
+    });
+  }
+  workbook.applyChanges(0n, changes);
+  const cancelled = (code) => (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, code);
+    return true;
+  };
+
+  // A signal aborted before the call cancels the calculation before it runs.
+  const aborted = AbortSignal.abort();
+  await assert.rejects(workbook.calculate({ signal: aborted }), cancelled("session.cancelled"));
+  await assert.rejects(
+    workbook.recalculate({ mode: "full", signal: aborted }),
+    cancelled("session.cancelled"),
+  );
+  await assert.rejects(
+    workbook.calculateTargets([{ sheet: "Sheet1", start: "A25000" }], { signal: aborted }),
+    cancelled("calculation.target.cancelled"),
+  );
+  await assert.rejects(
+    workbook.previewChanges(workbook.summary().semanticRevision, changes.slice(0, 1), {
+      signal: aborted,
+    }),
+    cancelled("session.cancelled"),
+  );
+  assert.equal(workbook.calculationActive(), false);
+
+  // Aborting a running calculation cancels it cooperatively and installs nothing.
+  const controller = new AbortController();
+  const running = workbook.calculate({ signal: controller.signal });
+  controller.abort();
+  await assert.rejects(running, cancelled("session.cancelled"));
+  assert.equal(workbook.readRange("Sheet1", "A2", "A2").cells[0].calculated, null);
+
+  // Without an abort the same call completes, and a later abort changes nothing.
+  const finished = new AbortController();
+  const report = await workbook.calculate({ signal: finished.signal });
+  finished.abort();
+  assert.equal(report.unavailableCount, 0);
+  assert.deepEqual(workbook.readRange("Sheet1", "A3", "A3").cells[0].calculated, {
+    kind: "value",
+    value: { kind: "number", value: 3 },
+  });
+  await assert.rejects(
+    workbook.calculate({ signal: "abort" }),
+    (error) => error.code === "interop.input.invalid",
+  );
+  workbook.close();
+}
+
+async function assertDependencies() {
+  const workbook = Workbook.create();
+  workbook.setFormula("Sheet1", "B1", "=SUM(A1:A3)");
+  workbook.setFormula("Sheet1", "C1", '=B1+INDIRECT("A2")');
+  assert.throws(
+    () => workbook.precedents("Sheet1", "C1"),
+    (error) => error.code === "interop.calculation.required",
+  );
+  await workbook.calculate();
+  const precedents = workbook.precedents("sheet1", "C1");
+  assert.equal(precedents.dynamic, true);
+  assert.ok(
+    precedents.entries.some(
+      (entry) => entry.range === "B1" && entry.kind === "value" && entry.sheetName === "Sheet1",
+    ),
+  );
+  assert.deepEqual(workbook.precedents("Sheet1", "B1").entries, [
+    { sheetId: 1, sheetName: "Sheet1", range: "A1:A3", kind: "value" },
+  ]);
+  const dependents = workbook.dependents("Sheet1", "A1", { limit: 1 });
+  assert.deepEqual(dependents.entries, [
+    { cell: { sheetId: 1, sheetName: "Sheet1", address: "B1" }, dynamic: false },
+  ]);
+  assert.equal(dependents.unlistedDynamicFormulas, 1);
+  assert.throws(
+    () => workbook.dependents("Sheet1", "A1", { offset: 2 }),
+    (error) => error.code === "interop.page.offset_out_of_range",
+  );
+  workbook.close();
+}
+
+function assertErrorCodesAreDocumented() {
+  const { ERROR } = require("../lib/errors.js");
+  const reference = fs.readFileSync(
+    path.join(__dirname, "..", "..", "..", "docs", "ERROR_CODES.md"),
+    "utf8",
+  );
+  for (const [code] of Object.values(ERROR)) {
+    assert.ok(reference.includes(`| \`${code}\` |`), `${code} is not in docs/ERROR_CODES.md`);
+  }
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -772,6 +1047,12 @@ async function assertCsv() {
 async function main() {
   await assertSheetStructureChanges();
   await assertDeleteSheet();
+  await assertSurfaceAuthoring();
+  await assertRangeValues();
+  await assertRangeReadForms();
+  await assertAbortSignal();
+  await assertDependencies();
+  assertErrorCodesAreDocumented();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

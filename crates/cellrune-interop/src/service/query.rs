@@ -13,14 +13,16 @@ use crate::convert::{
     calculation_options, cell_dto, cell_reference, count_u64, document_kind, range_text,
     visibility_name, workbook_fingerprint,
 };
+use crate::phonetic::frozen_pane_dto;
 use crate::{
     CalculationOptionsDto, CapabilityEntryDto, CapabilityPageDto, DefinedNameDynamicKindDto,
     DefinedNameExternalTargetKindDto, DefinedNameInspectionDto, DefinedNameInspectionRequestDto,
     DefinedNameInspectionResultDto, DefinedNameInvalidReasonDto, DefinedNameReferenceAreaDto,
     DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto, FunctionCatalogEntryDto,
-    FunctionCatalogReportDto, FunctionUsageEntryDto, FunctionUsageReportDto,
-    INTEROP_FUNCTION_USAGE_SCHEMA_VERSION, INTEROP_SCHEMA_VERSION, InteropError, RangePageDto,
-    RangeRequestDto, SheetSummaryDto, TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
+    FunctionCatalogPageDto, FunctionCatalogPageRequestDto, FunctionCatalogReportDto,
+    FunctionUsageEntryDto, FunctionUsageReportDto, INTEROP_FUNCTION_USAGE_SCHEMA_VERSION,
+    INTEROP_SCHEMA_VERSION, InteropError, RangePageDto, RangeRequestDto, SheetSummaryDto,
+    TableColumnDto, TableSummaryDto, WorkbookSummaryDto,
 };
 
 const UNKNOWN_RESULT_VARIANT: &str = "core_result_variant";
@@ -99,6 +101,12 @@ impl WorkbookSession {
                         .map(|filter| filter.filtered_column_ids().to_vec())
                         .unwrap_or_default(),
                     hidden_rows: hidden_row_ranges(sheet.hidden_rows()),
+                    frozen_pane: self
+                        .engine
+                        .draft()
+                        .presentation()
+                        .frozen_pane(sheet.id())
+                        .map(frozen_pane_dto),
                 })
                 .collect(),
         }
@@ -151,6 +159,8 @@ impl WorkbookSession {
             offset: request.offset,
             next_offset: (consumed < total_cells).then_some(consumed),
             cells,
+            values: None,
+            rows: None,
         })
     }
 
@@ -469,6 +479,36 @@ pub fn function_catalog() -> FunctionCatalogReportDto {
             })
             .collect(),
     }
+}
+
+/// Returns one page of the function catalog in catalog order.
+///
+/// # Errors
+///
+/// Returns a typed input error for an excessive page size or out-of-range offset.
+pub fn function_catalog_page(
+    request: FunctionCatalogPageRequestDto,
+) -> Result<FunctionCatalogPageDto, InteropError> {
+    let catalog = function_catalog();
+    let total = count_u64(catalog.entries.len());
+    if request.offset > total {
+        return Err(InteropError::page_offset());
+    }
+    let limit = normalized_limit(request.limit)?;
+    let entries = catalog
+        .entries
+        .into_iter()
+        .skip(usize::try_from(request.offset).unwrap_or(usize::MAX))
+        .take(limit as usize)
+        .collect::<Vec<_>>();
+    let consumed = request.offset + count_u64(entries.len());
+    Ok(FunctionCatalogPageDto {
+        schema_version: catalog.schema_version,
+        total,
+        offset: request.offset,
+        next_offset: (consumed < total).then_some(consumed),
+        entries,
+    })
 }
 
 /// Writes ascending hidden rows as A1 row ranges, merging consecutive rows (`2:4`).

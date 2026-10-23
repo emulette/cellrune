@@ -3,13 +3,16 @@ use std::sync::Arc;
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
-    DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto,
-    RangeRequestDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
+    CellDependencyRequestDto, DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto,
+    EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto,
+    PreviewCursorDto, RangeReadOptionsDto, RangeRequestDto, RangeValuesRequestDto,
+    RangeWriteRequestDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
     WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
+
+use crate::cancellation::NativeCancellation;
 use serde::Deserialize;
 
 use crate::conversion::{
@@ -35,6 +38,7 @@ impl NativeWorkbook {
     pub fn calculate_targets(
         &self,
         request_json: String,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<crate::targeted::TargetCalculationTask>> {
         let request =
             serde_json::from_str::<cellrune_interop::TargetCalculationRequestDto>(&request_json)
@@ -44,6 +48,7 @@ impl NativeWorkbook {
         Ok(AsyncTask::new(crate::targeted::TargetCalculationTask {
             session: Arc::clone(&self.session),
             request,
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -70,17 +75,29 @@ impl NativeWorkbook {
         end: String,
         offset: f64,
         limit: f64,
+        options: Option<NativeRangeReadOptions>,
     ) -> napi::Result<NativeRangePage> {
         let offset = offset_from_number(offset)?;
         let limit = limit_from_number(limit)?;
+        let options = options.map_or_else(RangeReadOptionsDto::default, |options| {
+            RangeReadOptionsDto {
+                omit_empty: options.omit_empty.unwrap_or(false),
+                values_only: options.values_only.unwrap_or(false),
+                compact: options.compact.unwrap_or(false),
+                max_bytes: options.max_bytes.map(|bytes| bytes as u64),
+            }
+        });
         self.lock()?
-            .read_range(&RangeRequestDto {
-                sheet,
-                start,
-                end,
-                offset,
-                limit,
-            })
+            .read_range_with_options(
+                &RangeRequestDto {
+                    sheet,
+                    start,
+                    end,
+                    offset,
+                    limit,
+                },
+                &options,
+            )
             .map(crate::conversion::range_page)
             .map_err(napi_error)
     }
@@ -111,6 +128,62 @@ impl NativeWorkbook {
             limit: limit_from_number(limit)?,
         };
         let page = self.lock()?.read_formats(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn read_values(&self, sheet: String, start: String, end: String) -> napi::Result<String> {
+        let values = self
+            .lock()?
+            .read_values(&RangeValuesRequestDto { sheet, start, end })
+            .map_err(napi_error)?;
+        serde_json::to_string(&values.rows).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn write_values(&self, request_json: String) -> napi::Result<NativeEditReceipt> {
+        let request = serde_json::from_str::<RangeWriteRequestDto>(&request_json)
+            .map_err(|error| napi_error(InteropError::invalid_change_payload(error.to_string())))?;
+        self.lock()?
+            .write_values(request)
+            .map(crate::conversion::edit_receipt)
+            .map_err(napi_error)
+    }
+
+    #[napi(catch_unwind)]
+    pub fn precedents(
+        &self,
+        sheet: String,
+        address: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<String> {
+        let request = dependency_request(sheet, address, offset, limit)?;
+        let page = self.lock()?.precedents(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn dependents(
+        &self,
+        sheet: String,
+        address: String,
+        offset: f64,
+        limit: f64,
+    ) -> napi::Result<String> {
+        let request = dependency_request(sheet, address, offset, limit)?;
+        let page = self.lock()?.dependents(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
+    pub fn phonetics(&self, sheet: String, offset: f64, limit: f64) -> napi::Result<String> {
+        let request = SheetPageRequestDto {
+            sheet,
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        };
+        let page = self.lock()?.phonetics(&request).map_err(napi_error)?;
         serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
     }
 
@@ -215,10 +288,12 @@ impl NativeWorkbook {
         &self,
         options: Option<NativeCalculationOptions>,
         limits_json: Option<String>,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<CalculateTask>> {
         Ok(AsyncTask::new(CalculateTask {
             session: Arc::clone(&self.session),
             options: calculation_options(options, limits_json.as_deref())?,
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -228,11 +303,13 @@ impl NativeWorkbook {
         mode: String,
         options: Option<NativeCalculationOptions>,
         limits_json: Option<String>,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<RecalculateTask>> {
         Ok(AsyncTask::new(RecalculateTask {
             session: Arc::clone(&self.session),
             mode: recalculation_mode(&mode)?,
             options: calculation_options(options, limits_json.as_deref())?,
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -243,6 +320,7 @@ impl NativeWorkbook {
         batch_json: String,
         options_json: String,
         limits_json: Option<String>,
+        cancellation: Option<&NativeCancellation>,
     ) -> napi::Result<AsyncTask<PreviewTask>> {
         let expected_revision = parse_u64(&expected_revision)?;
         let batch = serde_json::from_str::<EditBatchV2Dto>(&batch_json)
@@ -257,6 +335,7 @@ impl NativeWorkbook {
             batch,
             mode: options.mode,
             options: options.calculation_options(calculation_limits),
+            cancellation: crate::cancellation::token(cancellation),
         }))
     }
 
@@ -544,6 +623,20 @@ impl NativeWorkbook {
     }
 }
 
+fn dependency_request(
+    sheet: String,
+    address: String,
+    offset: f64,
+    limit: f64,
+) -> napi::Result<CellDependencyRequestDto> {
+    Ok(CellDependencyRequestDto {
+        sheet,
+        address,
+        offset: offset_from_number(offset)?,
+        limit: limit_from_number(limit)?,
+    })
+}
+
 fn offset_from_number(value: f64) -> napi::Result<u64> {
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
         return Err(napi_error(InteropError::invalid_page_offset()));
@@ -588,6 +681,15 @@ fn preview_section(value: &str) -> napi::Result<TransactionDetailSectionDto> {
 /// JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
 /// own object so their errors keep the limit codes, and the policies stay strings so an unknown
 /// one keeps its own code.
+/// Optional forms of a range page, validated by the JavaScript wrapper.
+#[napi(object)]
+pub struct NativeRangeReadOptions {
+    pub omit_empty: Option<bool>,
+    pub values_only: Option<bool>,
+    pub compact: Option<bool>,
+    pub max_bytes: Option<f64>,
+}
+
 #[napi(object)]
 #[derive(Default)]
 pub struct NativeCalculationOptions {

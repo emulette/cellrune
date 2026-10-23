@@ -75,10 +75,11 @@ pub use limits::{CalculationLimitKind, CalculationLimits, CalculationOptionsErro
 pub use locale::{Locale, LocaleProfile};
 pub use session::{
     ApplyChangesError, CalculationDecisionReason, CalculationDelta, CalculationDeltaCell,
-    CalculationDeltaPage, CalculationExecutionMode, CancellationToken, CompletedCalculation,
-    CompletedTargetCalculation, CompletedWorkbookTransaction, InstallDeltaBasisReason,
-    PreparedCalculation, PreparedEditBatch, PreparedTargetCalculation, PreparedWorkbookTransaction,
-    RecalculationMode, SessionError, SessionErrorCode, SessionLimits, TransactionAffectedFormula,
+    CalculationDeltaPage, CalculationExecutionMode, CancellationToken, CellDependents,
+    CellPrecedents, CompletedCalculation, CompletedTargetCalculation, CompletedWorkbookTransaction,
+    Dependent, InstallDeltaBasisReason, Precedent, PrecedentKind, PreparedCalculation,
+    PreparedEditBatch, PreparedTargetCalculation, PreparedWorkbookTransaction, RecalculationMode,
+    SessionError, SessionErrorCode, SessionLimits, TransactionAffectedFormula,
     TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
     TransactionImpactCoverage, TransactionImpactPage, TransactionInstallResultChange,
     TransactionIssueChange, TransactionIssueChangeKind, TransactionPageCursor,
@@ -200,7 +201,7 @@ impl CalculationIssue {
     pub(crate) fn resource_limit(limit: CalculationLimitKind) -> Self {
         Self {
             code: CalculationIssueCode::ResourceLimitExceeded,
-            detail: Some(limit.detail().into()),
+            detail: Some(limit.as_str().into()),
             limit: Some(limit),
         }
     }

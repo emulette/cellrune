@@ -65,12 +65,28 @@ impl WorkbookSession {
         mode: RecalculationModeDto,
         options: CalculationOptionsDto,
     ) -> Result<PreparedRecalculation, InteropError> {
+        self.prepare_recalculation_cancellable(mode, options, CancellationToken::new())
+    }
+
+    /// Captures a calculation job that `token` also cancels, so a caller can cancel exactly
+    /// this request; cancelling the session's active calculation or closing it cancels it too.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::prepare_recalculation`], and `session.cancelled` when the
+    /// token is already cancelled; a token cancelled while the job runs makes
+    /// [`PreparedRecalculation::run`] fail with `session.cancelled`.
+    pub fn prepare_recalculation_cancellable(
+        &mut self,
+        mode: RecalculationModeDto,
+        options: CalculationOptionsDto,
+        token: CancellationToken,
+    ) -> Result<PreparedRecalculation, InteropError> {
         let options = calculation_options(options)?;
         let request_id = self.next_calculation_id;
         let next_calculation_id = request_id
             .checked_add(1)
             .ok_or_else(InteropError::session_request_id_exhausted)?;
-        let token = CancellationToken::new();
         let prepared =
             self.engine
                 .prepare_recalculation(recalculation_mode(mode), options, token.clone())?;

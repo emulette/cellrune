@@ -249,3 +249,75 @@ fn assert_number(result: &CalculationResultDto, expected: f64) {
         }
     );
 }
+
+#[test]
+fn a_caller_token_cancels_exactly_its_own_recalculation() {
+    let mut session = WorkbookSession::create();
+    session
+        .set_formula("Sheet1", "A1", "=1+1", None)
+        .expect("formula");
+    let token = cellrune_interop::CancellationToken::new();
+    token.cancel();
+    let error = session
+        .prepare_recalculation_cancellable(
+            RecalculationModeDto::Auto,
+            CalculationOptionsDto::default(),
+            token,
+        )
+        .expect_err("a token cancelled beforehand stops the preparation");
+    assert_eq!(error.code(), "session.cancelled");
+    assert!(!session.calculation_active());
+
+    let token = cellrune_interop::CancellationToken::new();
+    let prepared = session
+        .prepare_recalculation_cancellable(
+            RecalculationModeDto::Auto,
+            CalculationOptionsDto::default(),
+            token.clone(),
+        )
+        .expect("prepare");
+    token.cancel();
+    let request_id = prepared.request_id();
+    let error = prepared.run().expect_err("a cancelled token stops the run");
+    assert_eq!(error.code(), "session.cancelled");
+    assert_eq!(error.kind(), InteropErrorKind::State);
+    session.abandon_recalculation(request_id);
+    assert!(!session.calculation_active());
+
+    // A token nobody cancels lets the same request run and install.
+    let prepared = session
+        .prepare_recalculation_cancellable(
+            RecalculationModeDto::Auto,
+            CalculationOptionsDto::default(),
+            cellrune_interop::CancellationToken::new(),
+        )
+        .expect("prepare");
+    let completed = prepared.run().expect("run");
+    session.install_recalculation(completed).expect("install");
+    assert!(!session.calculation_active());
+}
+
+#[test]
+fn a_cancelled_v1_batch_stages_nothing() {
+    let session = WorkbookSession::create();
+    let batch = || EditBatchDto {
+        changes: vec![WorkbookChangeDto::SetValue {
+            sheet: "Sheet1".to_owned(),
+            address: "A1".to_owned(),
+            value: WritableCellValueDto::Number { value: 1.0 },
+        }],
+    };
+    let token = cellrune_interop::CancellationToken::new();
+    token.cancel();
+    let error = session
+        .prepare_changes_cancellable(0, batch(), &token)
+        .expect_err("a cancelled batch is not staged");
+    assert_eq!(error.code(), "session.cancelled");
+    let mut session = session;
+    let prepared = session
+        .prepare_changes_cancellable(0, batch(), &cellrune_interop::CancellationToken::new())
+        .expect("stage");
+    assert_eq!(prepared.receipt().result_revision, 1);
+    session.install_changes(prepared).expect("install");
+    assert_eq!(session.summary().semantic_revision, 1);
+}

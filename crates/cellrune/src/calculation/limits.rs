@@ -326,7 +326,9 @@ pub enum CalculationLimitKind {
 }
 
 impl CalculationLimitKind {
-    pub(super) const fn detail(self) -> &'static str {
+    /// Returns the name of the [`CalculationLimits`] entry, such as `max_formula_tokens`, which
+    /// is also the issue's [`detail`](crate::CalculationIssue::detail).
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::FormulaTokens => MAX_FORMULA_TOKENS,
             Self::FormulaSourceBytes => MAX_FORMULA_SOURCE_BYTES,

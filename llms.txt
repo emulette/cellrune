@@ -95,15 +95,25 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 25 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 29 tools are `workbook_create`,
 `workbook_open`, `workbook_open_csv`, `workbook_close`, `workbook_summary`,
 `workbook_export_csv`, `workbook_read_range`,
 `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
-`workbook_comments`, `workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_comments`, `workbook_phonetics`, `workbook_precedents`, `workbook_dependents`,
+`workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
-`workbook_discard_preview`, and the sessionless `format_display_text`. `workbook_save_edits_as` is the edits-only write of
+`workbook_discard_preview`, and the sessionless `format_display_text` and
+`function_catalog`. `function_catalog` takes `offset` and `limit` (at most
+10,000) and returns `cellrune_interop::function_catalog_page`'s
+`FunctionCatalogPageDto` (`total`, `next_offset`, and `entries` with `name`,
+`canonical_name`, `alias`, `returns_array`, and `official`).
+`workbook_apply_changes` and `workbook_apply_changes_v2` stage on a blocking
+worker (`WorkbookSession::prepare_changes_cancellable` and
+`prepare_changes_v2_cancellable`) and, when the MCP request is cancelled,
+cancel the staging cooperatively and fail with `mcp.operation.cancelled`
+without changing the session. `workbook_save_edits_as` is the edits-only write of
 `write_xlsx_draft_edits_bytes` for a session opened from a file. MCP clients
 always use the default read and calculation limits.
 Read-only JSON resources expose the versioned function catalog at
@@ -130,7 +140,14 @@ native preview operation releases the GIL. Python returns snake-case DTO fields
 and ordinary integer IDs. Node uses Promise-backed
 `await workbook.previewChanges(expectedRevision, changes, options)`, followed
 by synchronous `previewChangesPage`, `commitPreview`, and `discardPreview`.
-Node returns camel-case DTO fields and `bigint` IDs/cursors. A failed or
+Node returns camel-case DTO fields and `bigint` IDs/cursors. Node
+`calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an
+optional `signal: AbortSignal`; aborting it cancels that call's token, which
+`WorkbookSession::prepare_recalculation_cancellable(mode, options, token)` (and
+the targeted and preview preparations) observe cooperatively, so the Promise
+rejects with `session.cancelled`, or `calculation.target.cancelled` for
+targeted calculation, without installing or publishing anything; an already
+aborted signal fails before calculating. A failed or
 cancelled replacement preserves a previous published preview; pre-commit
 cancellation or resource failure is retryable, while stale and successful
 commits consume the preview.
@@ -185,10 +202,69 @@ camel-case kinds and fields. `set_cell_format` merges: `font`, `border`, and
 style and color), while `fill` replaces the whole fill. In Rust,
 `CellFormatEdit::with_font`/`with_border`/`with_alignment` take a partial
 `FontEdit`/`BorderEdit`/`AlignmentEdit`, or a complete `Font`/`Border`/
-`Alignment`, which replaces that component. An
+`Alignment`, which replaces that component.
+It also carries `widen_table_columns`
+(`table_id`, `range`) and `widen_sheet_auto_filter` (`sheet`, `range`), the
+`WorkbookChange::widen_table_columns`/`widen_sheet_auto_filter` edits, and the
+presentation edits `set_frozen_pane` (`sheet`, `rows`, `columns`; zero rows and
+columns clear the pane), `set_phonetics` (`sheet`, `address` of a literal text
+cell, `runs` of `start_utf16`/`end_utf16`/`text`, optional `visible`
+defaulting to true, and optional `properties` with `font_id` 0,
+`phonetic_type`, and `alignment` OOXML tokens), and `clear_phonetics`
+(`sheet`, `address`), which are `WorkbookChange::set_frozen_pane`,
+`set_phonetics`, and `clear_phonetics` and keep the semantic revision; a
+batch replaces annotated text by clearing its phonetics before setting the
+value. Each summary sheet carries `frozen_pane` (`rows`, `columns`) only when
+it has one. Python `phonetics(sheet, offset=, limit=)` and Node.js
+`phonetics(sheet, { offset, limit })` (`WorkbookSession::phonetics`, MCP
+`workbook_phonetics`) page through the cells carrying phonetic runs in
+row-major order; each entry has `address`, `runs`, `properties` (`font_id`,
+`phonetic_type`, `alignment`, or null), and the effective `visible`. An
 `xlsx.write.incomplete_calculation` error names the first 64 unavailable
-formulas in `details.cells`. Python edits, setters, and `close()` release the
+formulas in `details.cells`. A limit failure carries `details.limit`, omitted
+otherwise, with the figures it has: `name` (`max_phonetic_runs_per_item` or
+`max_total_phonetic_runs` for `xlsx.too_many_phonetic_runs`), `observed` (the
+`XlsxReadError::observed` value), and for targeted calculation
+`requested_cell_count` or `evaluated_count` (Node camel case; MCP
+`details.limit` likewise). An unavailable result or calculation issue that
+exceeded a calculation limit carries `limit`, its `CalculationLimitKind::as_str`
+name such as `max_formula_tokens`, and omits it otherwise. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
+
+`WorkbookSession::read_range_with_options(&RangeRequestDto,
+&RangeReadOptionsDto)` reads a range page in an optional form; default options
+return exactly the `read_range` page. `omit_empty` leaves out empty cells (no
+value, formula, or calculated result); `values_only` returns
+`values: [{address, value}]` with `value` a `RangeValueDto` and an empty
+`cells`; `compact` returns `rows`, the page's `RangeValueDto`s grouped by
+worksheet row, where only the first row can start after the range's first
+column and `omit_empty` trims each row's trailing empty cells; and `max_bytes`
+returns the longest prefix of the page whose JSON fits, failing with
+`interop.page.byte_limit_exceeded` when not even the first position fits.
+Offset, limit, and `next_offset` always count positions of the range. The
+new `values` and `rows` fields are omitted unless requested. MCP
+`workbook_read_range` takes `omit_empty`, `values_only`, `compact`, and
+`max_bytes`; Python `read_range(..., omit_empty=, values_only=, compact=,
+max_bytes=)` and Node.js `readRange(sheet, start, end, { omitEmpty,
+valuesOnly, compact, maxBytes })` pass them through.
+
+`WorkbookSession::read_values(&RangeValuesRequestDto { sheet, start, end })`
+returns `RangeValuesDto { rows }`, one row per worksheet row of
+`RangeValueDto`: a tagged `CellValueDto`, or `{"kind": "unavailable", code,
+message, detail}` (plus `limit` when it exceeded one). A cell holds its
+current calculated result, including spill followers, when the session has
+calculated the current revision, and otherwise its literal value or a
+formula's saved value (blank when none). A rectangle over
+`MAX_RANGE_VALUE_CELLS` (1,048,576) cells fails with
+`interop.page.limit_exceeded`. `WorkbookSession::write_values(RangeWriteRequestDto
+{ sheet, start, rows })` writes equal-length rows of `WritableCellValueDto`
+from `start` as one `set_value` batch at the current revision and returns the
+edit receipt; empty or ragged rows fail with `interop.change.invalid`, and the
+session's `max_batch_operations` bounds the cell count. Python
+`read_values(sheet, start, end) -> list[list[RangeValue]]` and
+`write_values(sheet, start, rows)`, and Node.js `readValues(sheet, start,
+end)` and `writeValues(sheet, start, rows)`, expose them with no numpy or Arrow
+dependency.
 
 Sheets are deleted with the `delete_sheet` change (`{"kind": "delete_sheet",
 "sheet": name}` in interop JSON, Python, and MCP; `{ kind: "deleteSheet",
@@ -967,6 +1043,28 @@ than guessing a name from a different XLSX crate (`calamine`,
   `NoDirtyFormulas` when no formula reads the input, or a full
   `DynamicTopology` pass under uncertain dynamic topology, and forced
   `Incremental` proceeds. Any other option or limit change stays full.
+- `session.precedents(CalculationCellId) -> Option<CellPrecedents>` and
+  `session.dependents(CalculationCellId) -> Option<CellDependents>` read the
+  dependency graph of the calculation installed for the current revision and
+  return `None` before one. `CellPrecedents::precedents()` lists `Precedent`s
+  (`.sheet_id()`, `.range()`, `.kind()`: `PrecedentKind::Value`, `Spill` for
+  `A1#`, `FormulaText` for `FORMULATEXT`/`ISFORMULA`, or `ValueDependent` for
+  the cells a reference end that moves with values can reach) in sheet, row,
+  column, and kind order; `.is_dynamic()` marks a formula whose references
+  depend on values, whose precedents are those the installed values resolved.
+  `CellDependents::dependents()` lists the formulas that read the cell
+  directly (`Dependent::cell()`, `.is_dynamic()`), including a dynamic-array
+  formula whose spill range covers it, and `.unlisted_dynamic_formulas()`
+  counts the value-dependent formulas that do not read it under the current
+  values but could after a change. Interop
+  `WorkbookSession::precedents`/`dependents(&CellDependencyRequestDto { sheet,
+  address, offset, limit })` page them as `PrecedentPageDto` (`dynamic`,
+  entries of `sheet_id`, `sheet_name`, `range`, `kind`) and
+  `DependentPageDto` (`unlisted_dynamic_formulas`, entries of `cell` and
+  `dynamic`), failing with `interop.calculation.required` before a current
+  calculation; Python `precedents`/`dependents(sheet, address, offset=,
+  limit=)`, Node.js `precedents`/`dependents(sheet, address, { offset, limit
+  })`, and MCP `workbook_precedents`/`workbook_dependents` expose them.
 - For work outside a session lock, call `prepare_recalculation`, run the
   returned `PreparedCalculation`, then call `install`. `CancellationToken`
   provides cooperative cancellation. Running a prepared calculation returns
@@ -1668,6 +1766,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   by a completed write.
 
 ## Error taxonomy — pick the right one, never mix
+
+`docs/ERROR_CODES.md` lists every stable code these types, the interop layer, MCP, and the
+Node.js wrapper report.
 
 | Type | Means | Result exists? | Machine check |
 | --- | --- | --- | --- |

@@ -2,14 +2,18 @@
 
 mod calculation;
 mod csv;
+mod dependencies;
 mod display;
 mod edit;
 mod format;
+mod phonetic;
 mod preview;
 mod query;
+mod range_read;
 mod save;
 mod sheet_metadata;
 mod targeted;
+mod values;
 pub use targeted::{CompletedTargetRequest, PreparedTargetRequest};
 
 use std::collections::BTreeMap;
@@ -30,8 +34,9 @@ pub use edit::{PreparedChanges, PreparedChangesV2};
 pub use preview::{
     CompletedPreview, DEFAULT_PREVIEW_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedPreview,
 };
-pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog};
+pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog, function_catalog_page};
 pub use save::{PreparedEditsSave, PreparedWorkbookSave};
+pub use values::MAX_RANGE_VALUE_CELLS;
 
 /// An owned high-level workbook editing, calculation, and save session.
 #[derive(Debug)]

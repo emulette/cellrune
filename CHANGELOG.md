@@ -134,6 +134,54 @@ inventories, and measurements belong in the linked documentation rather than in 
   form control it moves, a linked shape or control that names cells it moves, a conditional
   format part of which a range move cuts while its formula reads relative to its cells, a pivot
   cache that reads cells it moves, and a sheet copy whose source or copy has such edits.
+- Interop, Python, Node.js, and MCP expose the sheet autoFilter and table column widening edits,
+  frozen panes, and phonetic annotations. Edit schema v2 adds `widen_table_columns`,
+  `widen_sheet_auto_filter`, and the presentation-only `set_frozen_pane`, `set_phonetics`, and
+  `clear_phonetics` operations (Node.js camel case), which are also the new `WorkbookChange`
+  kinds `SetFrozenPane`, `SetPhonetics`, and `ClearPhonetics`. Sheet summaries report a sheet's
+  `frozen_pane` when it has one, and Python and Node.js `phonetics`, interop
+  `WorkbookSession::phonetics`, and the new `workbook_phonetics` MCP tool page through a sheet's
+  phonetic runs.
+- Limit failures report their figures on every surface: errors carry an optional `details.limit`
+  with the exceeded phonetic run limit's `name`, the read error's `observed` value, and targeted
+  calculation's `requested_cell_count` or `evaluated_count`, and unavailable results and
+  calculation issues that exceeded a calculation limit name it in an optional `limit`. Both are
+  omitted when there is nothing to report, so other responses are unchanged.
+  `CalculationLimitKind::as_str` and `PhoneticRunLimitKind::as_str` return the limit names.
+- Python `read_values` and `write_values` and Node.js `readValues` and `writeValues`, over interop
+  `WorkbookSession::read_values` and `write_values`, read a rectangle of up to 1,048,576 cells as
+  rows of typed values and write equal-length rows of values as one atomic edit batch, without a
+  numpy or Arrow dependency. A read returns each cell's current calculated result, or its
+  `unavailable` result, once the workbook has calculated the current revision, and otherwise its
+  literal or saved value.
+- MCP `workbook_read_range`, interop `WorkbookSession::read_range_with_options`, Python
+  `read_range`, and Node.js `readRange` take optional forms: `omit_empty` leaves out empty cells,
+  `values_only` returns address and value pairs in `values`, `compact` returns `rows` of values
+  grouped by worksheet row, and `max_bytes` returns the longest prefix that fits, failing with the
+  new `interop.page.byte_limit_exceeded` code when not even one position does. Offset and limit
+  still count positions of the range, and a read without them returns the same page as before.
+- Node.js `calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an optional
+  `signal` (`AbortSignal`) that cancels that call cooperatively; the Promise rejects with the
+  existing `session.cancelled`, or `calculation.target.cancelled` for targeted calculation, and an
+  already aborted signal cancels before calculating. Interop
+  `WorkbookSession::prepare_recalculation_cancellable` takes the caller's token.
+- `WorkbookCalculationSession::precedents` and `dependents` report the rectangles a cell's formula
+  reads and the formulas that read a cell directly, from the dependency graph of the calculation
+  installed for the current revision, as `CellPrecedents` (`Precedent` with a `PrecedentKind`) and
+  `CellDependents`. Formulas whose references depend on values, such as `INDIRECT` and `OFFSET`,
+  are marked dynamic, and a dependents result counts the dynamic formulas it cannot list. Interop
+  `WorkbookSession::precedents` and `dependents`, Python and Node.js `precedents` and
+  `dependents`, and the new `workbook_precedents` and `workbook_dependents` MCP tools page through
+  them and fail with `interop.calculation.required` before the current revision is calculated.
+- The sessionless `function_catalog` MCP tool pages through the calculated functions with each
+  name's canonical name and alias, array-result, and official-list flags, over the new interop
+  `function_catalog_page`.
+- `docs/ERROR_CODES.md` lists every stable error and calculation issue code by surface: the Rust
+  core enums, interop, MCP, and the Node.js wrapper.
+- `bindings/scripts/mcp_registry.py` assembles one MCP Bundle, `cellrune-mcp-<version>.mcpb`, from
+  a release's three verified `cellrune-mcp` archives, running the platform's executable on one
+  approved directory, and writes the official MCP registry `server.json` that names that bundle's
+  release download URL and SHA-256.
 - Sheet deletion is the `delete_sheet` change kind in interop `WorkbookChangeDto::DeleteSheet`,
   Python (`DeleteSheetChange`), and MCP `workbook_apply_changes` and `workbook_apply_changes_v2`,
   `deleteSheet` in Node.js, and the `WorkbookSession::delete_sheet`, Python `delete_sheet`, and
@@ -313,6 +361,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- MCP `workbook_apply_changes` stages its batch on a blocking worker, as `workbook_apply_changes_v2`
+  does, so a large batch no longer holds the server's async runtime, and a cancelled request stops
+  the staging cooperatively and fails with `mcp.operation.cancelled` without changing the session.
+  Interop `WorkbookSession::prepare_changes_cancellable` stages a v1 batch with a cancellation
+  token.
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
   Supported Python versions are unchanged.
 - Formulas over overlapping ranges share the dependency areas those ranges are stored as, so a

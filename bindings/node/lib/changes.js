@@ -2,6 +2,7 @@
 
 const { inputError } = require("./errors.js");
 const { serializeFormatChange } = require("./formats.js");
+const { serializePresentationChange } = require("./presentation.js");
 const {
   requireFinite,
   requireNonNegativeInteger,
@@ -19,7 +20,7 @@ function serializeWorkbookChange(change, index) {
         kind: "set_value",
         sheet: requiredChangeString(change.sheet, index, "sheet"),
         address: requiredChangeString(change.address, index, "address"),
-        value: serializeCellValue(change.value, index),
+        value: serializeCellValue(change.value, `changes[${index}].value`),
       };
     case "setFormula":
       if (
@@ -192,6 +193,10 @@ function serializeWorkbookChangeV2(change, index) {
   if (format !== undefined) {
     return format;
   }
+  const presentation = serializePresentationChange(change, index);
+  if (presentation !== undefined) {
+    return presentation;
+  }
   validateV2ChangeKeys(change, index);
   switch (change.kind) {
     case "renameTable":
@@ -250,6 +255,19 @@ function serializeWorkbookChangeV2(change, index) {
         kind: "convert_table_to_range",
         table_id: change.tableId,
       };
+    case "widenTableColumns":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      return {
+        kind: "widen_table_columns",
+        table_id: change.tableId,
+        range: requiredChangeString(change.range, index, "range"),
+      };
+    case "widenSheetAutoFilter":
+      return {
+        kind: "widen_sheet_auto_filter",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        range: requiredChangeString(change.range, index, "range"),
+      };
     default:
       return serializeWorkbookChange(change, index);
   }
@@ -296,6 +314,8 @@ const V2_CHANGE_KEYS = new Map([
   ["createTable", ["kind", "sheet", "range", "name"]],
   ["setTableRange", ["kind", "tableId", "range"]],
   ["convertTableToRange", ["kind", "tableId"]],
+  ["widenTableColumns", ["kind", "tableId", "range"]],
+  ["widenSheetAutoFilter", ["kind", "sheet", "range"]],
 ]);
 
 function validateV2ChangeKeys(change, index) {
@@ -325,28 +345,29 @@ function validateV2CellValueKeys(value, index) {
   }
 }
 
-function serializeCellValue(value, index) {
+/** Validates one writable cell value, naming it `path` in errors. */
+function serializeCellValue(value, path) {
   requireOptions(value);
-  requireString(value.kind, `changes[${index}].value.kind`);
+  requireString(value.kind, `${path}.kind`);
   switch (value.kind) {
     case "blank":
       return { kind: "blank" };
     case "number":
-      requireFinite(value.value, `changes[${index}].value.value`);
+      requireFinite(value.value, `${path}.value`);
       return { kind: "number", value: value.value };
     case "text":
-      requireString(value.value, `changes[${index}].value.value`);
+      requireString(value.value, `${path}.value`);
       return { kind: "text", value: value.value };
     case "logical":
       if (typeof value.value !== "boolean") {
-        throw inputError(`changes[${index}].value.value must be a boolean`);
+        throw inputError(`${path}.value must be a boolean`);
       }
       return { kind: "logical", value: value.value };
     case "error":
-      requireString(value.value, `changes[${index}].value.value`);
+      requireString(value.value, `${path}.value`);
       return { kind: "error", value: value.value };
     default:
-      throw inputError(`changes[${index}].value.kind is not writable`);
+      throw inputError(`${path}.kind is not writable`);
   }
 }
 
@@ -362,4 +383,4 @@ function optionalChangeString(value, index, name) {
     : requiredChangeString(value, index, name);
 }
 
-module.exports = { serializeWorkbookChange, serializeWorkbookChangeV2 };
+module.exports = { serializeCellValue, serializeWorkbookChange, serializeWorkbookChangeV2 };

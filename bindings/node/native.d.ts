@@ -9,23 +9,35 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+/** Cancels the one calculation it is passed to, through the session's cooperative cancellation. */
+export declare class NativeCancellation {
+  constructor()
+  /** Requests cancellation of the calculation this handle was passed to. */
+  cancel(): void
+}
+
 export declare class NativeWorkbook {
-  calculateTargets(requestJson: string): Promise<string>
+  calculateTargets(requestJson: string, cancellation?: NativeCancellation | undefined | null): Promise<string>
   get closed(): boolean
   close(): void
   summary(): NativeWorkbookSummary
-  readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  readRange(sheet: string, start: string, end: string, offset: number, limit: number, options?: NativeRangeReadOptions | undefined | null): NativeRangePage
   toCsv(sheet: string, delimiter?: string | undefined | null): Buffer
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
+  readValues(sheet: string, start: string, end: string): string
+  writeValues(requestJson: string): NativeEditReceipt
+  precedents(sheet: string, address: string, offset: number, limit: number): string
+  dependents(sheet: string, address: string, offset: number, limit: number): string
+  phonetics(sheet: string, offset: number, limit: number): string
   hyperlinks(sheet: string, offset: number, limit: number): NativeHyperlinkPage
   comments(sheet: string, offset: number, limit: number): NativeCommentPage
   dataValidations(sheet: string, offset: number, limit: number): NativeDataValidationPage
   scanCapabilities(offset: number, limit: number, todaySerial?: number | undefined | null, nowSerial?: number | undefined | null): Promise<NativeCapabilityPage>
   inspectDefinedName(name: string, currentSheet?: string | undefined | null): NativeDefinedNameInspection
   functionUsage(): NativeFunctionUsageReport
-  calculate(options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationReport>
-  recalculate(mode: string, options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null): Promise<NativeCalculationDelta>
-  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string, limitsJson?: string | undefined | null): Promise<string>
+  calculate(options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null, cancellation?: NativeCancellation | undefined | null): Promise<NativeCalculationReport>
+  recalculate(mode: string, options?: NativeCalculationOptions | undefined | null, limitsJson?: string | undefined | null, cancellation?: NativeCancellation | undefined | null): Promise<NativeCalculationDelta>
+  previewChanges(expectedRevision: string, batchJson: string, optionsJson: string, limitsJson?: string | undefined | null, cancellation?: NativeCancellation | undefined | null): Promise<string>
   previewChangesPage(previewId: string, section: string, cursorJson: string | undefined | null, limit: number): string
   commitPreview(previewId: string): string
   discardPreview(previewId: string): void
@@ -86,12 +98,6 @@ export interface NativeCalculationDeltaPage {
   deltas: Array<NativeCalculationDelta>
 }
 
-/**
- * Deterministic inputs and compatibility policies for `calculate` and `recalculate`, passed as
- * JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
- * own object so their errors keep the limit codes, and the policies stay strings so an unknown
- * one keeps its own code.
- */
 export interface NativeCalculationOptions {
   todaySerial?: number
   nowSerial?: number
@@ -116,6 +122,7 @@ export interface NativeCalculationResult {
   code?: string
   message?: string
   detail?: string
+  limit?: string
 }
 
 export interface NativeCapabilityEntry {
@@ -271,6 +278,11 @@ export interface NativeEditWriteReport {
   outputSha256: string
 }
 
+export interface NativeFrozenPane {
+  rows: number
+  columns: number
+}
+
 export interface NativeFunctionCatalogEntry {
   name: string
   canonicalName: string
@@ -329,6 +341,11 @@ export interface NativeNumberFormat {
   kind: string
 }
 
+export interface NativeRangeCellValue {
+  address: string
+  value: NativeCalculationResult
+}
+
 export interface NativeRangePage {
   schemaVersion: number
   sheet: string
@@ -338,6 +355,22 @@ export interface NativeRangePage {
   offset: number
   nextOffset?: number
   cells: Array<NativeCell>
+  values?: Array<NativeRangeCellValue>
+  rows?: Array<Array<NativeCalculationResult>>
+}
+
+/**
+ * Deterministic inputs and compatibility policies for `calculate` and `recalculate`, passed as
+ * JavaScript values so serials keep every bit; `None` keeps every default. Limits travel as their
+ * own object so their errors keep the limit codes, and the policies stay strings so an unknown
+ * one keeps its own code.
+ * Optional forms of a range page, validated by the JavaScript wrapper.
+ */
+export interface NativeRangeReadOptions {
+  omitEmpty?: boolean
+  valuesOnly?: boolean
+  compact?: boolean
+  maxBytes?: number
 }
 
 export interface NativeSheetSummary {
@@ -351,6 +384,7 @@ export interface NativeSheetSummary {
   autoFilter?: string
   autoFilterFilteredColumns: Array<number>
   hiddenRows: Array<string>
+  frozenPane?: NativeFrozenPane
 }
 
 export interface NativeTableColumn {

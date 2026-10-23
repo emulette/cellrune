@@ -144,9 +144,24 @@ cell fonts, fills, borders, and alignments with column widths and row heights, a
 `applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes; a
 `setCellFormat` font, border, or alignment sets only the properties it gives, and its fill replaces
 the whole fill.
+It also takes the
+`widenTableColumns` and `widenSheetAutoFilter` widening edits, and the presentation-only
+`setFrozenPane`, `setPhonetics`, and `clearPhonetics` changes. Summaries report a sheet's
+`frozenPane` when it has one, and `phonetics(sheet, { offset, limit })` pages through its phonetic
+runs. A limit failure carries its figures in `error.details.limit`, and an unavailable result that
+exceeded a calculation limit names it in `limit`.
+`readRange(sheet, start, end, { omitEmpty, valuesOnly, compact, maxBytes })` returns a page without
+empty cells, as address and value pairs, as compact rows, or as the longest prefix within a byte
+limit. `readValues(sheet, start, end)` reads a rectangle as rows of typed values, and
+`writeValues(sheet, start, rows)` writes equal-length rows of values as one atomic edit.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
 README.
+`precedents(sheet, address, { offset, limit })` and `dependents(...)` page through what a cell's
+formula reads and the formulas that read the cell, from the current calculation's graph.
+`calculate`, `recalculate`, `calculateTargets`, and `previewChanges` accept an `AbortSignal` as
+`signal`; aborting it cancels the calculation cooperatively and rejects with `session.cancelled`
+(`calculation.target.cancelled` for `calculateTargets`).
 `close()` is idempotent. Once it returns, the binding-owned native session has
 been released. An active calculation is cooperatively cancelled, a published preview is discarded,
 and later operations fail with `interop.session.closed`.

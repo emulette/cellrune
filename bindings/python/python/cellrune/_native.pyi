@@ -17,6 +17,11 @@ from ._types import (
     CellFormatPage,
     CommentPage,
     DataValidationPage,
+    PhoneticPage,
+    PrecedentPage,
+    DependentPage,
+    RangeValue,
+    WritableCellValue,
     HyperlinkPage,
     DefinedNameInspection,
     EditReceipt,
@@ -100,6 +105,10 @@ class Workbook:
         *,
         offset: int | None = None,
         limit: int | None = None,
+        omit_empty: bool = False,
+        values_only: bool = False,
+        compact: bool = False,
+        max_bytes: int | None = None,
     ) -> RangePage: ...
     def read_formats(
         self,
@@ -124,6 +133,36 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> DataValidationPage: ...
+    def precedents(
+        self,
+        sheet: str,
+        address: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> PrecedentPage: ...
+    def dependents(
+        self,
+        sheet: str,
+        address: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> DependentPage: ...
+    def read_values(self, sheet: str, start: str, end: str) -> list[list[RangeValue]]: ...
+    def write_values(
+        self,
+        sheet: str,
+        start: str,
+        rows: Sequence[Sequence[WritableCellValue]],
+    ) -> EditReceipt: ...
+    def phonetics(
+        self,
+        sheet: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> PhoneticPage: ...
     def hyperlinks(
         self,
         sheet: str,

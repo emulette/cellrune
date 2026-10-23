@@ -9,15 +9,19 @@
 mod change_dto;
 mod convert;
 mod csv;
+mod dependencies;
 mod dto;
 mod error;
+mod error_code;
 mod format_convert;
 mod format_dto;
 mod json_object;
+mod phonetic;
 mod service;
 mod sheet_metadata;
 mod targeted;
 mod usage_count;
+mod values;
 pub use service::{CompletedTargetRequest, PreparedTargetRequest};
 pub use targeted::{
     CalculationTargetDto, TargetCalculationCellDto, TargetCalculationLimitsDto,
@@ -26,6 +30,9 @@ pub use targeted::{
 
 pub use cellrune::CancellationToken;
 pub use csv::{CsvReadOptionsDto, CsvWriteRequestDto};
+pub use dependencies::{
+    CellDependencyRequestDto, DependentDto, DependentPageDto, PrecedentDto, PrecedentPageDto,
+};
 pub use dto::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationIssueDto, CalculationLimitOptionsDto, CalculationLimitsDto, CalculationOptionsDto,
@@ -36,33 +43,41 @@ pub use dto::{
     DefinedNameReferenceAreaDto, DefinedNameSheetSpanDto, DefinedNameUnsupportedReasonDto,
     DisplayFormatRequestDto, DisplayFormatResultDto, EditBatchDto, EditBatchV2Dto, EditInverseDto,
     EditReceiptDto, EditReceiptV2Dto, EditWriteOptionsDto, EditWriteReportDto,
-    FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogReportDto,
-    FunctionUsageEntryDto, FunctionUsageReportDto, LocaleDto, LocaleProfileDto,
-    MaterializedResultOriginDto, NumberFormatDto, PreviewChangesDto, PreviewCursorDto,
-    ProviderIdentityDto, RangePageDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto,
-    SavedValueStateDto, SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto,
-    TransactionDetailCountsDto, TransactionDetailItemDto, TransactionDetailSectionDto,
-    TransactionImpactCoverageDto, TransactionImpactPageDto, UnrestoredContentDto,
-    WorkbookChangeDto, WorkbookChangeV2Dto, WorkbookFingerprintDto, WorkbookSummaryDto,
-    WorkbookTransactionReceiptDto, WorkbookTransactionReportDto, WritableCellValueDto,
-    WriteOptionsDto, WriteReportDto,
+    FinancialSolverSemanticsDto, FunctionCatalogEntryDto, FunctionCatalogPageDto,
+    FunctionCatalogPageRequestDto, FunctionCatalogReportDto, FunctionUsageEntryDto,
+    FunctionUsageReportDto, LocaleDto, LocaleProfileDto, MaterializedResultOriginDto,
+    NumberFormatDto, PreviewChangesDto, PreviewCursorDto, ProviderIdentityDto, RangePageDto,
+    RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SavedValueStateDto,
+    SheetSummaryDto, TableChangeV2Dto, TableColumnDto, TableSummaryDto, TransactionDetailCountsDto,
+    TransactionDetailItemDto, TransactionDetailSectionDto, TransactionImpactCoverageDto,
+    TransactionImpactPageDto, UnrestoredContentDto, WorkbookChangeDto, WorkbookChangeV2Dto,
+    WorkbookFingerprintDto, WorkbookSummaryDto, WorkbookTransactionReceiptDto,
+    WorkbookTransactionReportDto, WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
-pub use error::{ErrorDetails, InteropError, InteropErrorKind};
+pub use error::{ErrorDetails, InteropError, InteropErrorKind, LimitDiagnosticsDto};
 pub use format_dto::{
     AlignmentDto, AlignmentEditDto, BorderDto, BorderEdgeDto, BorderEditDto, CellFormatDto,
     CellFormatEntryDto, CellFormatPageDto, ColorDto, ColumnWidthDto, FillDto, FontDto, FontEditDto,
     FormatChangeV2Dto, PatternFillDto, RowHeightDto,
 };
 pub use json_object::{deserialize_object, deserialize_objects, deserialize_optional_object};
+pub use phonetic::{
+    FrozenPaneDto, PhoneticCellDto, PhoneticPageDto, PhoneticPropertiesDto, PhoneticRunDto,
+};
 pub use service::{
     CompletedPreview, CompletedRecalculation, DEFAULT_PAGE_SIZE, DEFAULT_PREVIEW_PAGE_SIZE,
-    MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedChanges, PreparedChangesV2, PreparedEditsSave,
-    PreparedPreview, PreparedRecalculation, PreparedWorkbookSave, WorkbookSession,
-    format_display_text, function_catalog,
+    MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, MAX_RANGE_VALUE_CELLS, PreparedChanges,
+    PreparedChangesV2, PreparedEditsSave, PreparedPreview, PreparedRecalculation,
+    PreparedWorkbookSave, WorkbookSession, format_display_text, function_catalog,
+    function_catalog_page,
 };
 pub use sheet_metadata::{
     CommentDto, CommentPageDto, DataValidationDto, DataValidationPageDto, HyperlinkDto,
     HyperlinkPageDto, SheetPageRequestDto,
+};
+pub use values::{
+    RangeCellValueDto, RangeReadOptionsDto, RangeValueDto, RangeValuesDto, RangeValuesRequestDto,
+    RangeWriteRequestDto, UnavailableValueDto,
 };
 
 /// Version of the serialized interop contract.

@@ -799,6 +799,7 @@ fn issue_to_dto(issue: &CalculationIssue) -> CalculationIssueDto {
         code: issue.code().as_str().to_owned(),
         message: issue.message().to_owned(),
         detail: issue.detail().map(str::to_owned),
+        limit: issue.limit().map(|limit| limit.as_str().to_owned()),
     }
 }
 
@@ -1001,6 +1002,7 @@ pub(crate) fn result_to_dto(result: &CalculationCellResult) -> CalculationResult
             code: issue.code().as_str().to_owned(),
             message: issue.message().to_owned(),
             detail: issue.detail().map(str::to_owned),
+            limit: issue.limit().map(|limit| limit.as_str().to_owned()),
         },
     }
 }

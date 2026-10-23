@@ -1,4 +1,9 @@
 import {
+  type DependentPage,
+  type PrecedentPage,
+  type RangeValue,
+  type PhoneticPage,
+  type LimitDiagnostics,
   type CapabilityPage,
   type CellFormatPage,
   type CommentPage,
@@ -179,6 +184,57 @@ async function check(): Promise<void> {
   }
   // @ts-expect-error Sheet metadata pages take only an offset and a limit.
   reopened.dataValidations("Sheet1", { cursor: 1 });
+  const compactPage = reopened.readRange("Sheet1", "A1", "B2", { compact: true, maxBytes: 4096 });
+  compactPage.rows?.[0]?.length.toFixed(0);
+  // @ts-expect-error Range forms are booleans.
+  reopened.readRange("Sheet1", "A1", "B2", { compact: 1 });
+  const abort = new AbortController();
+  void reopened.calculate({ signal: abort.signal });
+  void reopened.calculateTargets([{ sheet: "Sheet1", start: "A1" }], { signal: abort.signal });
+  // @ts-expect-error A signal is an AbortSignal.
+  void reopened.recalculate({ signal: true });
+  const precedentPage: PrecedentPage = reopened.precedents("Sheet1", "A1", { limit: 10 });
+  precedentPage.entries[0]?.range.toUpperCase();
+  const dependentPage: DependentPage = reopened.dependents("Sheet1", "A1");
+  dependentPage.entries[0]?.cell.address.toUpperCase();
+  const grid: RangeValue[][] = reopened.readValues("Sheet1", "A1", "B2");
+  for (const value of grid.flat()) {
+    if (value.kind === "unavailable") {
+      value.code.toUpperCase();
+    }
+  }
+  reopened.writeValues("Sheet1", "C1", [[{ kind: "number", value: 1 }, { kind: "blank" }]]);
+  // @ts-expect-error A rectangle write takes writable values only.
+  reopened.writeValues("Sheet1", "C1", [[{ kind: "unsupported" }]]);
+  const phonetics: PhoneticPage = reopened.phonetics("Sheet1", { limit: 10 });
+  for (const annotated of phonetics.entries) {
+    annotated.runs[0]?.text.toUpperCase();
+    annotated.properties?.phoneticType?.toUpperCase();
+  }
+  const pane = reopened.summary().sheets[0]?.frozenPane;
+  if (pane !== undefined) {
+    pane.rows.toFixed(0);
+  }
+  const presentation: readonly WorkbookChangeV2[] = [
+    { kind: "setFrozenPane", sheet: "Sheet1", rows: 1, columns: 0 },
+    { kind: "widenSheetAutoFilter", sheet: "Sheet1", range: "A1:C3" },
+    {
+      kind: "setPhonetics",
+      sheet: "Sheet1",
+      address: "A1",
+      runs: [{ startUtf16: 0, endUtf16: 1, text: "あ" }],
+      properties: { phoneticType: "Hiragana" },
+    },
+  ];
+  presentation.length.toFixed(0);
+  try {
+    reopened.phonetics("Missing");
+  } catch (error) {
+    if (error instanceof CellRuneError) {
+      const limit: LimitDiagnostics | undefined = error.details.limit;
+      limit?.observed?.toFixed(0);
+    }
+  }
   edited.byteLength.toFixed(0);
   reopened.close();
   reopened.addSheet("Scratch");

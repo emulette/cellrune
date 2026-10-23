@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use cellrune_binding_support::SharedWorkbookSession;
 use cellrune_interop::{
-    CalculationOptionsDto, EditBatchV2Dto, EditWriteOptionsDto, ReadLimitOptionsDto,
-    RecalculationModeDto, WorkbookSession, WriteOptionsDto,
+    CalculationOptionsDto, CancellationToken, EditBatchV2Dto, EditWriteOptionsDto,
+    ReadLimitOptionsDto, RecalculationModeDto, WorkbookSession, WriteOptionsDto,
 };
 use napi::bindgen_prelude::Buffer;
 use napi::{Env, Task};
@@ -70,6 +70,7 @@ impl Task for OpenBytesTask {
 pub struct CalculateTask {
     pub(crate) session: Arc<SharedWorkbookSession>,
     pub(crate) options: CalculationOptionsDto,
+    pub(crate) cancellation: CancellationToken,
 }
 
 impl Task for CalculateTask {
@@ -82,7 +83,11 @@ impl Task for CalculateTask {
                 self.session
                     .lock()
                     .map_err(napi_error)?
-                    .prepare_recalculation(RecalculationModeDto::Auto, self.options)
+                    .prepare_recalculation_cancellable(
+                        RecalculationModeDto::Auto,
+                        self.options,
+                        self.cancellation.clone(),
+                    )
                     .map_err(napi_error)?
             };
             let request_id = prepared.request_id();
@@ -113,6 +118,7 @@ pub struct RecalculateTask {
     pub(crate) session: Arc<SharedWorkbookSession>,
     pub(crate) mode: RecalculationModeDto,
     pub(crate) options: CalculationOptionsDto,
+    pub(crate) cancellation: CancellationToken,
 }
 
 pub struct PreviewTask {
@@ -121,6 +127,7 @@ pub struct PreviewTask {
     pub(crate) batch: EditBatchV2Dto,
     pub(crate) mode: RecalculationModeDto,
     pub(crate) options: CalculationOptionsDto,
+    pub(crate) cancellation: CancellationToken,
 }
 
 impl Task for PreviewTask {
@@ -129,7 +136,10 @@ impl Task for PreviewTask {
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
         catch_panic(|| {
-            let operation = self.session.cancellable_operation().map_err(napi_error)?;
+            let operation = self
+                .session
+                .cancellable_operation_with(self.cancellation.clone())
+                .map_err(napi_error)?;
             let cancellation = operation.token().clone();
             let prepared = {
                 self.session
@@ -190,7 +200,11 @@ impl Task for RecalculateTask {
                 self.session
                     .lock()
                     .map_err(napi_error)?
-                    .prepare_recalculation(self.mode, self.options)
+                    .prepare_recalculation_cancellable(
+                        self.mode,
+                        self.options,
+                        self.cancellation.clone(),
+                    )
                     .map_err(napi_error)?
             };
             let request_id = prepared.request_id();

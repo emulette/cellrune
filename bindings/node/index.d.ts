@@ -47,6 +47,20 @@ export interface ErrorDetails {
   readonly detail: string | null;
   /** Formula cells the failure concerns, such as those an incomplete calculation could not save. */
   readonly cells: readonly CellReference[];
+  /** Figures of a failure that exceeded a resource limit; absent when it reports none. */
+  readonly limit?: LimitDiagnostics;
+}
+
+/** Figures a resource-limit failure reports; each is absent when the failure does not measure it. */
+export interface LimitDiagnostics {
+  /** Read limit an `xlsx.too_many_phonetic_runs` failure exceeded. */
+  readonly name?: "max_phonetic_runs_per_item" | "max_total_phonetic_runs";
+  /** Measured value that exceeded the read limit the error code names, in that limit's unit. */
+  readonly observed?: number;
+  /** Requested cells counted, a lower bound, when targeted calculation passed its result limit. */
+  readonly requestedCellCount?: number;
+  /** Evaluations performed before targeted calculation stopped at its work limit. */
+  readonly evaluatedCount?: number;
 }
 
 export class CellRuneError extends Error {
@@ -71,6 +85,8 @@ export type CalculationResult =
       readonly code: string;
       readonly message: string;
       readonly detail: string | null;
+      /** Calculation limit a `calculation.resource_limit_exceeded` issue exceeded. */
+      readonly limit?: string;
     };
 
 export interface NumberFormat {
@@ -102,7 +118,27 @@ export interface RangePage {
   readonly totalCells: number;
   readonly offset: number;
   readonly nextOffset: number | null;
+  /** Full cell objects; empty when the read asked for `valuesOnly` or `compact`. */
   readonly cells: readonly Cell[];
+  /** With `valuesOnly`: each returned cell's address and value. */
+  readonly values?: readonly { readonly address: string; readonly value: RangeValue }[];
+  /**
+   * With `compact`: the page's values grouped by worksheet row; only the first row can start
+   * after the range's first column.
+   */
+  readonly rows?: readonly (readonly RangeValue[])[];
+}
+
+/** Optional forms of a range page; offset and limit always count positions of the range. */
+export interface RangeReadOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  /** Leaves out empty cells; in the compact form only each row's trailing empty cells. */
+  readonly omitEmpty?: boolean;
+  readonly valuesOnly?: boolean;
+  readonly compact?: boolean;
+  /** Largest serialized page in bytes; the page is then the longest prefix that fits. */
+  readonly maxBytes?: number;
 }
 
 export type Color =
@@ -479,6 +515,87 @@ export interface SheetSummary {
   readonly autoFilterFilteredColumns: readonly number[];
   /** Hidden rows as ascending A1 row ranges such as `2:4`, including rows a filter hides. */
   readonly hiddenRows: readonly string[];
+  /** Frozen rows and columns of the default view; absent when the sheet has none. */
+  readonly frozenPane?: FrozenPane;
+}
+
+export interface Precedent {
+  readonly sheetId: number;
+  readonly sheetName: string;
+  /** The rectangle in A1 notation; one cell is a single address. */
+  readonly range: string;
+  /**
+   * `value` for the cells' values, `spill` for the spill range anchored at the cell (`A1#`),
+   * `formula_text` for its formula, or `value_dependent` for the cells a reference end that moves
+   * with values can reach.
+   */
+  readonly kind: "value" | "spill" | "formula_text" | "value_dependent";
+}
+
+export interface PrecedentPage {
+  readonly schemaVersion: number;
+  readonly cell: CellReference;
+  /** Whether the formula's references depend on values, as `INDIRECT` and `OFFSET` do. */
+  readonly dynamic: boolean;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly Precedent[];
+}
+
+export interface Dependent {
+  readonly cell: CellReference;
+  /** Whether the formula's references depend on values, so it may stop reading the cell. */
+  readonly dynamic: boolean;
+}
+
+export interface DependentPage {
+  readonly schemaVersion: number;
+  readonly cell: CellReference;
+  /** Formulas with value-dependent references that could read the cell after a value changes. */
+  readonly unlistedDynamicFormulas: number;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly Dependent[];
+}
+
+export interface FrozenPane {
+  readonly rows: number;
+  readonly columns: number;
+}
+
+export type PhoneticType = "halfwidthKatakana" | "fullwidthKatakana" | "Hiragana" | "noConversion";
+export type PhoneticAlignment = "noControl" | "left" | "center" | "distributed";
+
+/** A phonetic run over a half-open range of the cell text, in UTF-16 code units. */
+export interface PhoneticRun {
+  readonly startUtf16: number;
+  readonly endUtf16: number;
+  readonly text: string;
+}
+
+export interface PhoneticProperties {
+  readonly fontId: number;
+  readonly phoneticType: PhoneticType | null;
+  readonly alignment: PhoneticAlignment | null;
+}
+
+export interface PhoneticCell {
+  readonly address: string;
+  readonly runs: readonly PhoneticRun[];
+  readonly properties: PhoneticProperties | null;
+  /** Whether the phonetic text is shown, resolved from the cell, row, and column. */
+  readonly visible: boolean;
+}
+
+export interface PhoneticPage {
+  readonly schemaVersion: number;
+  readonly sheet: string;
+  readonly total: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+  readonly entries: readonly PhoneticCell[];
 }
 
 export interface WorkbookFingerprint {
@@ -577,6 +694,12 @@ export interface CalculationOptions {
     | "excel_iteration_budget"
     | "extended_search";
   readonly calculationLimits?: CalculationLimitOptions;
+  /**
+   * Cancels the calculation cooperatively when aborted: the Promise rejects with the
+   * calculation's cancellation error, `session.cancelled` or, for `calculateTargets`,
+   * `calculation.target.cancelled`. An already aborted signal cancels before calculating.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface CalculationReport {
@@ -613,6 +736,12 @@ export interface CellReference {
 }
 
 export type WritableCellValue = Exclude<CellValue, { readonly kind: "unsupported" }>;
+
+/**
+ * A cell's value in a rectangle read: its current calculated result when the workbook has
+ * calculated the current revision, otherwise its literal or saved value.
+ */
+export type RangeValue = CellValue | Extract<CalculationResult, { readonly kind: "unavailable" }>;
 
 export type NumberFormatKind =
   | "general"
@@ -755,6 +884,40 @@ export type WorkbookChangeV2 =
       readonly range: string;
     }
   | { readonly kind: "convertTableToRange"; readonly tableId: number }
+  | {
+      readonly kind: "widenTableColumns";
+      readonly tableId: number;
+      /** New full table range, which keeps the current rows and contains the current range. */
+      readonly range: string;
+    }
+  | {
+      readonly kind: "widenSheetAutoFilter";
+      readonly sheet: string;
+      /** New filter range, which keeps the current rows and contains the current range. */
+      readonly range: string;
+    }
+  | {
+      readonly kind: "setFrozenPane";
+      readonly sheet: string;
+      /** Zero rows and columns clear the pane. */
+      readonly rows: number;
+      readonly columns: number;
+    }
+  | {
+      readonly kind: "setPhonetics";
+      readonly sheet: string;
+      readonly address: string;
+      readonly runs: readonly PhoneticRun[];
+      /** Whether the phonetic text is shown; omitted shows it. */
+      readonly visible?: boolean;
+      readonly properties?: {
+        /** Only `0` is accepted. */
+        readonly fontId?: number;
+        readonly phoneticType?: PhoneticType;
+        readonly alignment?: PhoneticAlignment;
+      };
+    }
+  | { readonly kind: "clearPhonetics"; readonly sheet: string; readonly address: string }
   | CellFormatChange
   | {
       readonly kind: "setColumnWidth";
@@ -959,6 +1122,8 @@ export interface CalculationIssue {
   readonly code: string;
   readonly message: string;
   readonly detail: string | null;
+  /** Calculation limit a `calculation.resource_limit_exceeded` issue exceeded. */
+  readonly limit?: string;
 }
 
 export type TransactionDetailItem =
@@ -1099,12 +1264,7 @@ export class Workbook {
   get closed(): boolean;
   close(): void;
   summary(): WorkbookSummary;
-  readRange(
-    sheet: string,
-    start: string,
-    end: string,
-    options?: { readonly offset?: number; readonly limit?: number },
-  ): RangePage;
+  readRange(sheet: string, start: string, end: string, options?: RangeReadOptions): RangePage;
   inspectDefinedName(
     name: string,
     options?: { readonly currentSheet?: string },
@@ -1123,6 +1283,19 @@ export class Workbook {
   comments(sheet: string, options?: SheetPageOptions): CommentPage;
   /** Reads one bounded page of a sheet's read-only data validation rules. */
   dataValidations(sheet: string, options?: SheetPageOptions): DataValidationPage;
+  /** Reads one bounded page of a sheet's phonetic annotations in row-major address order. */
+  phonetics(sheet: string, options?: SheetPageOptions): PhoneticPage;
+  /**
+   * Reads one page of the rectangles a cell's formula reads, from the graph of the calculation
+   * installed for the current revision; fails with `interop.calculation.required` before it.
+   */
+  precedents(sheet: string, address: string, options?: SheetPageOptions): PrecedentPage;
+  /** Reads one page of the formulas that read a cell directly, from the same graph. */
+  dependents(sheet: string, address: string, options?: SheetPageOptions): DependentPage;
+  /** Reads every value of an inclusive rectangle, at most 1,048,576 cells, as rows. */
+  readValues(sheet: string, start: string, end: string): RangeValue[][];
+  /** Writes equal-length rows of values from `start` as one atomic edit; blank clears a cell. */
+  writeValues(sheet: string, start: string, rows: readonly (readonly WritableCellValue[])[]): EditReceipt;
   /** Statically reports whether each formula can be calculated, one bounded page at a time. */
   scanCapabilities(options?: CapabilityScanOptions): Promise<CapabilityPage>;
   calculate(options?: CalculationOptions): Promise<CalculationReport>;

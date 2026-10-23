@@ -1,4 +1,8 @@
 from cellrune import (
+    DependentPage,
+    PrecedentPage,
+    RangeValue,
+    PhoneticPage,
     CapabilityPage,
     CellFormatPage,
     CommentPage,
@@ -159,6 +163,44 @@ def check() -> None:
         rule["ranges"][0].upper()
         if rule["validation_type"] == "list" and rule["formula1"] is not None:
             rule["formula1"].upper()
+    compact_page = reopened.read_range("Sheet1", "A1", "B2", compact=True, max_bytes=4096)
+    for compact_row in compact_page.get("rows", []):
+        len(compact_row)
+    reopened.calculate()
+    precedent_page: PrecedentPage = reopened.precedents("Sheet1", "A1")
+    for precedent in precedent_page["entries"]:
+        precedent["range"].upper()
+    dependent_page: DependentPage = reopened.dependents("Sheet1", "A1", limit=5)
+    for dependent in dependent_page["entries"]:
+        dependent["cell"]["address"].upper()
+    grid: list[list[RangeValue]] = reopened.read_values("Sheet1", "A1", "B2")
+    for grid_row in grid:
+        for grid_value in grid_row:
+            if grid_value["kind"] == "unavailable":
+                grid_value["code"].upper()
+    reopened.write_values(
+        "Sheet1", "C1", [[{"kind": "number", "value": 1.0}, {"kind": "blank"}]]
+    )
+    phonetics: PhoneticPage = reopened.phonetics("Sheet1", limit=10)
+    for annotated in phonetics["entries"]:
+        annotated["address"].upper()
+        for run in annotated["runs"]:
+            run["text"].upper()
+    for summary_sheet in reopened.summary()["sheets"]:
+        pane = summary_sheet.get("frozen_pane")
+        if pane is not None:
+            pane["rows"] + pane["columns"]
+    presentation: list[WorkbookChangeV2] = [
+        {"kind": "set_frozen_pane", "sheet": "Sheet1", "rows": 1, "columns": 0},
+        {"kind": "clear_phonetics", "sheet": "Sheet1", "address": "A1"},
+    ]
+    reopened.apply_changes_v2(reopened.summary()["semantic_revision"], presentation)
+    try:
+        reopened.phonetics("Missing")
+    except CellRuneError as error:
+        limit = error.details.get("limit")
+        if limit is not None:
+            limit.get("observed")
     edited.hex()
     reopened.add_sheet("Scratch")
     removal: list[WorkbookChange] = [{"kind": "delete_sheet", "sheet": "Scratch"}]

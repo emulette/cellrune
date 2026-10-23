@@ -57,8 +57,10 @@ cellrune = "0.1.26"
 - never executes macros, never follows external links, never reads the host clock for
   `TODAY()` or `NOW()`, and draws `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` from an explicit
   seed instead of host randomness;
-- returns stable error and issue codes for programmatic handling; in Rust, read, formula, and
-  targeted-calculation limit failures also name the exceeded limit or report the observed value;
+- returns stable error and issue codes for programmatic handling, listed in
+  [`docs/ERROR_CODES.md`](https://github.com/emulette/cellrune/blob/main/docs/ERROR_CODES.md);
+  read, formula, and targeted-calculation limit failures also name the exceeded limit or report
+  the observed value;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
 - writes `WorkbookDraft` edits into an existing package without calculating, clearing only the
@@ -72,6 +74,8 @@ cellrune = "0.1.26"
   Node.js/TypeScript native packages, including saves of edits without calculating, adjustable
   read and calculation limits, and capability scans; the table under
   [Language bindings](#language-bindings) lists what each surface offers;
+- reports the cells and ranges a formula reads and the formulas that read a cell, from the
+  dependency graph of the installed calculation, marking references that depend on values;
 - supports atomic typed edit batches, persistent parsed/dependency state, safe incremental
   recalculation, bounded result deltas, cooperative cancellation, stale-result rejection, and
   retained immutable change previews;
@@ -393,9 +397,11 @@ reaches every surface:
 | CSV import and export of one sheet | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
 | Defined-name inspection | yes | yes | yes | no |
-| Sheet autoFilter and table column widening edits | yes | no | no | no |
-| Phonetic annotations and frozen panes | yes | no | no | no |
-| Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | no | no | no |
+| Sheet autoFilter and table column widening edits | yes | yes | yes | yes |
+| Phonetic annotations and frozen panes (read and edit) | yes | yes | yes | yes |
+| Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | yes | yes | yes |
+| Rectangle value read and write as rows (interop `read_values`/`write_values`) | yes | yes | yes | no |
+| Precedent and dependent queries | yes | yes | yes | yes |
 
 Native package availability remains platform-specific; package managers must select a wheel or
 exact-version npm platform package compatible with the current runtime.
@@ -413,6 +419,12 @@ Python `inspect_defined_name` and Node.js `inspectDefinedName` expose the typed 
 The existing `apply_changes`/`applyChanges` v1 shapes are unchanged; the separate
 `apply_changes_v2`/`applyChangesV2` methods add stable-ID table rename, table-column rename, and
 table-row resize plus `changed_table_ids`/`changedTableIds` receipts.
+
+Node.js `calculate`, `recalculate`, `calculateTargets`, and `previewChanges` take an optional
+`signal` (`AbortSignal`). Aborting it cancels that call's calculation through the session's
+cooperative cancellation, so the Promise rejects with `session.cancelled`, or
+`calculation.target.cancelled` for `calculateTargets`, and nothing is installed or published; an
+already aborted signal cancels the call before it calculates.
 
 In the current bindings, Python exposes synchronous
 `preview_changes`, `preview_changes_page`, `commit_preview`, and `discard_preview`; the long
@@ -522,6 +534,33 @@ border, and alignment of a range's cells with its column widths and the page's r
 semantic revision. A cell format change merges into the cell's format: its `font`, `border`, and
 `alignment` set only the properties they give, so `{"font": {"bold": true}}` keeps the font's name,
 size, and color, and its `fill` replaces the whole fill.
+The v2 batch also widens a table (`widen_table_columns`/`widenTableColumns`
+with a `table_id` and the new `range`) or a sheet autoFilter
+(`widen_sheet_auto_filter`/`widenSheetAutoFilter` with a `sheet` and the new `range`), and sets a
+sheet's frozen pane (`set_frozen_pane`/`setFrozenPane` with `rows` and `columns`; zero clears it)
+or a text cell's phonetic runs (`set_phonetics`/`setPhonetics`, `clear_phonetics`/
+`clearPhonetics`), which keep the semantic revision. The summary reports a sheet's `frozen_pane`
+when it has one, and Python and Node.js `phonetics` page through a sheet's annotated cells. A
+failure that exceeded a resource limit carries its figures in `details.limit` (`name`,
+`observed`, `requested_cell_count`/`requestedCellCount`, `evaluated_count`/`evaluatedCount`), and
+an unavailable result that exceeded a calculation limit names it in `limit`; both are absent
+otherwise.
+
+Python `read_values(sheet, start, end)` and Node.js `readValues(sheet, start, end)` read a
+rectangle of up to 1,048,576 cells as rows of typed values without numpy or Arrow: each cell holds
+its current calculated result, or an `unavailable` result, once the workbook has calculated the
+current revision, and otherwise its literal or saved value. `write_values(sheet, start, rows)` and
+`writeValues(sheet, start, rows)` write equal-length rows of values from `start` as one atomic
+edit batch, where a blank value clears its cell, and return the edit receipt.
+
+Python `precedents(sheet, address)` and `dependents(sheet, address)` and the Node.js methods of
+the same names, with `offset` and `limit`, page through the cells and ranges a cell's formula
+reads and the formulas that read the cell directly. They use the dependency graph of the
+calculation installed for the current revision, so they fail with `interop.calculation.required`
+until the workbook is calculated after an edit. A formula whose references depend on values, such
+as `INDIRECT` or `OFFSET`, is marked `dynamic`: its precedents are those the installed values
+resolved, and a dependents page counts the `unlisted_dynamic_formulas` that could read the cell
+after a value changes.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview
@@ -539,13 +578,16 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 25 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
+Its 29 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
 `workbook_summary`, `workbook_export_csv`, `workbook_read_range`, `workbook_read_formats`,
-`workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_function_usage`,
+`workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_phonetics`,
+`workbook_precedents`, `workbook_dependents`, `workbook_function_usage`,
 `workbook_scan_capabilities`, `workbook_apply_changes`, `workbook_apply_changes_v2`,
 `workbook_recalculate`, `workbook_calculate_targets`, `workbook_changes_since`, `workbook_save_as`,
 `workbook_save_edits_as`, `workbook_preview_changes`, `workbook_preview_changes_page`,
-`workbook_commit_preview`, `workbook_discard_preview`, and the sessionless `format_display_text`.
+`workbook_commit_preview`, `workbook_discard_preview`, and the sessionless `format_display_text`
+and `function_catalog`, which pages through the calculated functions with their canonical name,
+alias, array-result, and official-list flags.
 The v2 edit tool adds stable-ID table rename, table-column rename, and table-row resize while
 retaining the v1 edit shapes. The four preview tools are the retained immutable transaction
 workflow: preview returns a summary and ID, page returns a byte-bounded core-cursor page, and
@@ -555,10 +597,22 @@ session's edits into the file it was opened from without calculating, under the 
 overwrite rules, and returns the edit report. MCP clients always use the default read and
 calculation limits; raising them is left to the operator.
 
+`workbook_read_range` also takes optional forms that save response bytes: `omit_empty` leaves
+out empty cells, `values_only` returns address and value pairs in `values`, `compact` returns
+`rows` of values without addresses, and `max_bytes` returns the longest prefix of the page that
+fits, continued from `next_offset`. Offset and limit always count positions of the range, and a
+read without these options returns exactly the page it did before. Python `read_range` and
+Node.js `readRange` take the same options (`omitEmpty`, `valuesOnly`, `compact`, `maxBytes` in
+Node.js).
+
 `workbook_calculate_targets` accepts `session_id`, `targets`, optional `options`, and optional
 `limits`. Its limits are capped at the defaults above. The entire partial response must fit
 `--max-response-bytes`; an oversized response fails without installing state, so callers can
 retry with fewer targets. It uses the existing request cancellation and session lifetime controls.
+
+`workbook_apply_changes` and `workbook_apply_changes_v2` stage their batch on a blocking worker
+and stop it through the same cooperative cancellation when the request is cancelled, failing with
+`mcp.operation.cancelled` without changing the session.
 
 `workbook_recalculate` always installs a completed calculation. When its delta exceeds
 `--max-response-bytes`, it reports `mcp.recalculation.response_byte_limit_exceeded` with the
