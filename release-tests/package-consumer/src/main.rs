@@ -212,7 +212,7 @@ fn main() {
     assert_eq!(
         dynamic_formula.metadata(),
         &FormulaMetadata::DynamicArray {
-            range: None,
+            range: Some(dynamic_range),
             always_calculate: false,
         }
     );
