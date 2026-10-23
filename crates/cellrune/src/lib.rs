@@ -145,11 +145,11 @@ pub use formula::{
     SharedFormulaRole,
 };
 pub use presentation::{
-    Alignment, Border, BorderEdge, BorderStyle, CellFormat, CellFormatEdit, CellPhonetics, Color,
-    ColorKind, ColumnPhoneticVisibility, ColumnWidth, DocumentPresentation, Fill, FillPattern,
-    Font, FontUnderline, FrozenPane, HorizontalAlignment, PatternFill, PhoneticAlignment,
-    PhoneticProperties, PhoneticRun, PhoneticTextRange, PhoneticType, PhoneticWriteOptions,
-    ResolvedPhoneticRun, VerticalAlignment,
+    Alignment, AlignmentEdit, Border, BorderEdge, BorderEdit, BorderStyle, CellFormat,
+    CellFormatEdit, CellPhonetics, Color, ColorKind, ColumnPhoneticVisibility, ColumnWidth,
+    DocumentPresentation, Fill, FillPattern, Font, FontEdit, FontUnderline, FrozenPane,
+    HorizontalAlignment, PatternFill, PhoneticAlignment, PhoneticProperties, PhoneticRun,
+    PhoneticTextRange, PhoneticType, PhoneticWriteOptions, ResolvedPhoneticRun, VerticalAlignment,
 };
 pub(crate) use presentation::{CellPresentation, PhoneticAnnotation};
 pub use table::{

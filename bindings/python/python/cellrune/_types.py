@@ -734,13 +734,16 @@ ColorInput = ArgbColorInput | ThemeColorInput | IndexedColorInput | AutomaticCol
 
 
 class FontInput(TypedDict, total=False):
-    name: str
-    size: float
+    """Font properties to set; omitted ones keep the cell's, and ``None`` removes a name, size,
+    or color."""
+
+    name: str | None
+    size: float | None
     bold: bool
     italic: bool
     underline: FontUnderlineName
     strike: bool
-    color: ColorInput
+    color: ColorInput | None
 
 
 class PatternFillInputOptions(TypedDict, total=False):
@@ -787,6 +790,9 @@ class SetCellFormatChangeOptions(TypedDict, total=False):
 
 
 class SetCellFormatChange(SetCellFormatChangeOptions):
+    """Sets properties of one cell's format: ``font``, ``border``, and ``alignment`` merge into
+    the cell's, setting only the properties they give, and ``fill`` replaces the whole fill."""
+
     kind: Literal["set_cell_format"]
     sheet: str
     address: str

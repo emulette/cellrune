@@ -623,7 +623,7 @@ impl WorkbookDraft {
                         &cell_mutations,
                         *address,
                     );
-                    let edited = current.edited(edit);
+                    let edited = edit.apply(&current);
                     if edited != current {
                         presentation.set_cell_format(*sheet_id, *address, edited)?;
                     }

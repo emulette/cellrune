@@ -1,14 +1,16 @@
 //! Format-neutral workbook presentation metadata.
 
 mod format;
+mod format_edit;
 mod phonetic;
 mod sheet_format;
 mod state;
 
 pub use format::{
-    Alignment, Border, BorderEdge, BorderStyle, CellFormat, CellFormatEdit, Color, ColorKind, Fill,
-    FillPattern, Font, FontUnderline, HorizontalAlignment, PatternFill, VerticalAlignment,
+    Alignment, Border, BorderEdge, BorderStyle, CellFormat, Color, ColorKind, Fill, FillPattern,
+    Font, FontUnderline, HorizontalAlignment, PatternFill, VerticalAlignment,
 };
+pub use format_edit::{AlignmentEdit, BorderEdit, CellFormatEdit, FontEdit};
 pub use sheet_format::ColumnWidth;
 
 pub use phonetic::{

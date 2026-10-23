@@ -178,7 +178,14 @@ continuing at `next_offset`. Edit schema v2 adds
 `set_cell_format` (`sheet`, `address`, optional `font`, `fill` pattern,
 `border`, `alignment`), `set_column_width` (`first`, `last`, `width` or
 null), and `set_row_height` (`row`, `height` or null); Node uses the
-camel-case kinds and fields. An
+camel-case kinds and fields. `set_cell_format` merges: `font`, `border`, and
+`alignment` set only the properties they give and keep the cell's others
+(`{"font": {"bold": true}}` keeps the name, size, and color; a font `name`,
+`size`, or `color` of `null` removes it; a border line given replaces its
+style and color), while `fill` replaces the whole fill. In Rust,
+`CellFormatEdit::with_font`/`with_border`/`with_alignment` take a partial
+`FontEdit`/`BorderEdit`/`AlignmentEdit`, or a complete `Font`/`Border`/
+`Alignment`, which replaces that component. An
 `xlsx.write.incomplete_calculation` error names the first 64 unavailable
 formulas in `details.cells`. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
@@ -734,9 +741,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   span, contains the old range, keeps filter and sort state, shifts filter
   column IDs when it grows leftward, names new table columns from their text
   header cells, and moves `_xlnm._FilterDatabase` with a sheet filter.
-  `set_cell_format(SheetId, CellAddress, CellFormatEdit)` (`.with_font`,
-  `.with_fill(PatternFill)`, `.with_border`, `.with_alignment`; unset
-  components keep their value), `set_column_width(SheetId, first: Column,
+  `set_cell_format(SheetId, CellAddress, CellFormatEdit)` (`.with_font(FontEdit
+  | Font)`, `.with_fill(PatternFill)`, `.with_border(BorderEdit | Border)`,
+  `.with_alignment(AlignmentEdit | Alignment)`; a partial edit sets only the
+  properties it names and merges into the cell's current format when the
+  change applies, a complete value replaces that component, a fill replaces
+  the whole fill, and unset components keep their value),
+  `set_column_width(SheetId, first: Column,
   last: Column, Option<f64>)` (0-255 characters), and
   `set_row_height(SheetId, Row, Option<f64>)` (0-409 points; `None`
   restores the default) are presentation changes: they advance only the

@@ -141,7 +141,9 @@ static per-formula support report. `dataValidations(sheet, { offset, limit })` p
 sheet's read-only data validation rules, and `hyperlinks` and `comments` through its hyperlinks and
 cell comments. `readFormats(sheet, start, end, { offset, limit })` reads
 cell fonts, fills, borders, and alignments with column widths and row heights, and
-`applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes.
+`applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes; a
+`setCellFormat` font, border, or alignment sets only the properties it gives, and its fill replaces
+the whole fill.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
 README.

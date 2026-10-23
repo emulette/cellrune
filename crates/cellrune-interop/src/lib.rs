@@ -47,8 +47,9 @@ pub use dto::{
 };
 pub use error::{ErrorDetails, InteropError, InteropErrorKind};
 pub use format_dto::{
-    AlignmentDto, BorderDto, BorderEdgeDto, CellFormatDto, CellFormatEntryDto, CellFormatPageDto,
-    ColorDto, ColumnWidthDto, FillDto, FontDto, FormatChangeV2Dto, PatternFillDto, RowHeightDto,
+    AlignmentDto, AlignmentEditDto, BorderDto, BorderEdgeDto, BorderEditDto, CellFormatDto,
+    CellFormatEntryDto, CellFormatPageDto, ColorDto, ColumnWidthDto, FillDto, FontDto, FontEditDto,
+    FormatChangeV2Dto, PatternFillDto, RowHeightDto,
 };
 pub use json_object::{deserialize_object, deserialize_objects, deserialize_optional_object};
 pub use service::{

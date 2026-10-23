@@ -97,7 +97,7 @@ fn v2_format_changes_keep_the_semantic_revision_and_survive_a_save() {
                 "border": {"top": {"style": "dashed"}, "diagonal_up": true},
                 "alignment": {"horizontal": "right", "vertical": "center", "indent": 3}
             },
-            {"kind": "set_cell_format", "sheet": "Data", "address": "A1", "alignment": {}},
+            {"kind": "set_cell_format", "sheet": "Data", "address": "A1", "alignment": {"horizontal": "general"}},
             {"kind": "set_column_width", "sheet": "Data", "first": 2, "last": 3, "width": 30.0},
             {"kind": "set_row_height", "sheet": "Data", "row": 1, "height": null},
             {"kind": "set_row_height", "sheet": "Report", "row": 2, "height": 33.0}
@@ -176,6 +176,35 @@ fn v2_format_changes_keep_the_semantic_revision_and_survive_a_save() {
         formats(&reopened, "A4", "A4")["row_heights"],
         json!([{"row": 4, "height": 12.0}])
     );
+}
+
+#[test]
+fn partial_format_changes_merge_into_the_current_format() {
+    let mut session = WorkbookSession::open_bytes(&fixture()).expect("open");
+    let before = formats(&session, "A1", "A1")["cells"][0]["format"].clone();
+    assert!(before["font"]["color"].is_object(), "{before}");
+    let revision = session.summary().semantic_revision;
+    let batch: EditBatchV2Dto = serde_json::from_value(json!({
+        "changes": [
+            {"kind": "set_cell_format", "sheet": "Data", "address": "A1",
+             "font": {"bold": true, "color": null},
+             "border": {"left": {"style": "thick"}},
+             "alignment": {"wrap_text": true}},
+            {"kind": "set_cell_format", "sheet": "Data", "address": "A1", "font": {"italic": true}}
+        ]
+    }))
+    .expect("v2 batch");
+    session
+        .apply_changes_v2(revision, batch)
+        .expect("format changes");
+    let after = formats(&session, "A1", "A1")["cells"][0]["format"].clone();
+    let mut expected = before;
+    expected["font"]["bold"] = json!(true);
+    expected["font"]["italic"] = json!(true);
+    expected["font"]["color"] = Value::Null;
+    expected["border"]["left"] = json!({"style": "thick", "color": null});
+    expected["alignment"]["wrap_text"] = json!(true);
+    assert_eq!(after, expected);
 }
 
 #[test]

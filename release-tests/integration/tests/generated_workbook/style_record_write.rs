@@ -249,3 +249,138 @@ fn a_package_without_styles_displays_the_default_style_it_is_saved_with() {
         (unedited.font(), Fill::Pattern(green))
     );
 }
+
+#[test]
+fn partial_font_border_and_alignment_edits_merge_into_the_current_format() {
+    use crate::support::generated_xlsx::generated_format_workbook;
+    use cellrune::{
+        AlignmentEdit, BorderEdge, BorderEdit, BorderStyle, Font, FontEdit, HorizontalAlignment,
+        VerticalAlignment,
+    };
+
+    let document = open_xlsx_document_bytes(&generated_format_workbook(), OpenOptions::default())
+        .expect("open");
+    let mut draft = WorkbookDraft::from_document(&document);
+    let sheet = draft
+        .workbook()
+        .sheet_by_name("Styled")
+        .expect("sheet")
+        .id();
+    let before = draft.cell_format(sheet, address("A1")).expect("A1");
+    let thick = BorderEdge::new(BorderStyle::Thick, None);
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_format(
+                sheet,
+                address("A1"),
+                CellFormatEdit::new()
+                    .with_font(FontEdit::new().with_italic(true))
+                    .with_border(BorderEdit::new().with_top(thick))
+                    .with_alignment(AlignmentEdit::new().with_vertical(VerticalAlignment::Top)),
+            ),
+            // A later edit of the same cell in the batch merges into the earlier one.
+            WorkbookChange::set_cell_format(
+                sheet,
+                address("A1"),
+                CellFormatEdit::new()
+                    .with_font(FontEdit::new().with_size(Some(14.0)).expect("size")),
+            ),
+        ]))
+        .expect("edits");
+    let after = draft.cell_format(sheet, address("A1")).expect("A1");
+    let font = after.font();
+    assert_eq!(
+        (
+            font.name(),
+            font.size(),
+            font.bold(),
+            font.italic(),
+            font.color()
+        ),
+        (
+            before.font().name(),
+            Some(14.0),
+            true,
+            true,
+            before.font().color()
+        )
+    );
+    assert_eq!(after.fill(), before.fill());
+    let border = after.border();
+    assert_eq!(
+        (
+            border.left(),
+            border.top(),
+            border.bottom(),
+            border.diagonal_down()
+        ),
+        (
+            before.border().left(),
+            thick,
+            before.border().bottom(),
+            before.border().diagonal_down()
+        )
+    );
+    let alignment = after.alignment();
+    assert_eq!(
+        (
+            alignment.horizontal(),
+            alignment.vertical(),
+            alignment.wrap_text()
+        ),
+        (HorizontalAlignment::Center, VerticalAlignment::Top, true)
+    );
+    let output = write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+        .expect("save")
+        .into_bytes();
+    let reopened = WorkbookDraft::from_document(
+        &open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen"),
+    );
+    assert_eq!(
+        reopened.cell_format(sheet, address("A1")).expect("A1"),
+        after
+    );
+
+    // A complete font still replaces the font as a whole.
+    let arial = Font::new().with_name("Arial").expect("name");
+    draft
+        .apply_changes(EditBatch::new([WorkbookChange::set_cell_format(
+            sheet,
+            address("A1"),
+            CellFormatEdit::new().with_font(arial.clone()),
+        )]))
+        .expect("replacement");
+    assert_eq!(
+        draft.cell_format(sheet, address("A1")).expect("A1").font(),
+        &arial
+    );
+}
+
+#[test]
+fn a_bold_edit_without_styles_keeps_the_default_font() {
+    let output = edit_and_save(
+        &one_sheet_package(ONE_VALUE_SHEET, None),
+        vec![WorkbookChange::set_cell_format(
+            sheet1(),
+            address("A1"),
+            CellFormatEdit::new().with_font(cellrune::FontEdit::new().with_bold(true)),
+        )],
+    );
+    let styles = support::part_text(&output, STYLES_PART);
+    assert!(
+        styles.contains(r#"<font><b/><sz val="11"/><name val="Calibri"/></font>"#),
+        "{styles}"
+    );
+    let reopened = WorkbookDraft::from_document(
+        &open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen"),
+    );
+    let font = reopened
+        .cell_format(sheet1(), address("A1"))
+        .expect("A1")
+        .font()
+        .clone();
+    assert_eq!(
+        (font.name(), font.size(), font.bold()),
+        (Some("Calibri"), Some(11.0), true)
+    );
+}

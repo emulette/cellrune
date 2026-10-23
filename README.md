@@ -514,7 +514,9 @@ every value at its address. `read_formats`/`readFormats` page through the font, 
 border, and alignment of a range's cells with its column widths and the page's row heights, and
 `apply_changes_v2`/`applyChangesV2` take `set_cell_format`/`setCellFormat`,
 `set_column_width`/`setColumnWidth`, and `set_row_height`/`setRowHeight` changes, which keep the
-semantic revision.
+semantic revision. A cell format change merges into the cell's format: its `font`, `border`, and
+`alignment` set only the properties they give, so `{"font": {"bold": true}}` keeps the font's name,
+size, and color, and its `fill` replaces the whole fill.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview

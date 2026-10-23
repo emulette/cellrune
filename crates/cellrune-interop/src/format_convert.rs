@@ -1,9 +1,9 @@
 //! Conversions between the cell formatting model and its DTOs.
 
 use cellrune::{
-    Alignment, Border, BorderEdge, BorderStyle, CellAddress, CellFormat, CellFormatEdit, Color,
-    ColorKind, Column, Fill, FillPattern, Font, FontUnderline, HorizontalAlignment, PatternFill,
-    Row, SheetId, VerticalAlignment, WorkbookChange,
+    Alignment, AlignmentEdit, Border, BorderEdge, BorderEdit, BorderStyle, CellAddress, CellFormat,
+    CellFormatEdit, Color, ColorKind, Column, Fill, FillPattern, FontEdit, FontUnderline,
+    HorizontalAlignment, PatternFill, Row, SheetId, VerticalAlignment, WorkbookChange,
 };
 
 use crate::error::{
@@ -11,8 +11,8 @@ use crate::error::{
     DETAIL_HORIZONTAL_ALIGNMENT, DETAIL_VERTICAL_ALIGNMENT,
 };
 use crate::{
-    AlignmentDto, BorderDto, BorderEdgeDto, CellFormatDto, ColorDto, FillDto, FontDto,
-    FormatChangeV2Dto, InteropError, PatternFillDto,
+    AlignmentDto, AlignmentEditDto, BorderDto, BorderEdgeDto, BorderEditDto, CellFormatDto,
+    ColorDto, FillDto, FontDto, FontEditDto, FormatChangeV2Dto, InteropError, PatternFillDto,
 };
 
 pub(crate) fn cell_format_dto(format: &CellFormat) -> CellFormatDto {
@@ -123,21 +123,31 @@ pub(crate) fn format_change(
     })
 }
 
-fn font_from_dto(font: FontDto) -> Result<Font, InteropError> {
-    let mut converted = Font::new()
-        .with_bold(font.bold)
-        .with_italic(font.italic)
-        .with_strike(font.strike)
-        .with_underline(
-            FontUnderline::from_token(&font.underline)
-                .ok_or_else(|| InteropError::invalid_change(DETAIL_FONT_UNDERLINE.to_owned()))?,
-        )
-        .with_color(font.color.map(color_from_dto).transpose()?);
+fn font_from_dto(font: FontEditDto) -> Result<FontEdit, InteropError> {
+    let mut converted = FontEdit::new();
     if let Some(name) = font.name {
-        converted = converted.with_name(&name)?;
+        converted = converted.with_name(name.as_deref())?;
     }
     if let Some(size) = font.size {
         converted = converted.with_size(size)?;
+    }
+    if let Some(bold) = font.bold {
+        converted = converted.with_bold(bold);
+    }
+    if let Some(italic) = font.italic {
+        converted = converted.with_italic(italic);
+    }
+    if let Some(underline) = font.underline {
+        converted = converted.with_underline(
+            FontUnderline::from_token(&underline)
+                .ok_or_else(|| InteropError::invalid_change(DETAIL_FONT_UNDERLINE.to_owned()))?,
+        );
+    }
+    if let Some(strike) = font.strike {
+        converted = converted.with_strike(strike);
+    }
+    if let Some(color) = font.color {
+        converted = converted.with_color(color.map(color_from_dto).transpose()?);
     }
     Ok(converted)
 }
@@ -150,17 +160,30 @@ fn fill_from_dto(fill: PatternFillDto) -> Result<PatternFill, InteropError> {
         .with_background(fill.background.map(color_from_dto).transpose()?))
 }
 
-fn border_from_dto(border: BorderDto) -> Result<Border, InteropError> {
-    Ok(Border::new()
-        .with_left(edge_from_dto(border.left)?)
-        .with_right(edge_from_dto(border.right)?)
-        .with_top(edge_from_dto(border.top)?)
-        .with_bottom(edge_from_dto(border.bottom)?)
-        .with_diagonal(
-            edge_from_dto(border.diagonal)?,
-            border.diagonal_up,
-            border.diagonal_down,
-        ))
+fn border_from_dto(border: BorderEditDto) -> Result<BorderEdit, InteropError> {
+    let mut converted = BorderEdit::new();
+    if let Some(edge) = border.left {
+        converted = converted.with_left(edge_from_dto(edge)?);
+    }
+    if let Some(edge) = border.right {
+        converted = converted.with_right(edge_from_dto(edge)?);
+    }
+    if let Some(edge) = border.top {
+        converted = converted.with_top(edge_from_dto(edge)?);
+    }
+    if let Some(edge) = border.bottom {
+        converted = converted.with_bottom(edge_from_dto(edge)?);
+    }
+    if let Some(edge) = border.diagonal {
+        converted = converted.with_diagonal(edge_from_dto(edge)?);
+    }
+    if let Some(up) = border.diagonal_up {
+        converted = converted.with_diagonal_up(up);
+    }
+    if let Some(down) = border.diagonal_down {
+        converted = converted.with_diagonal_down(down);
+    }
+    Ok(converted)
 }
 
 fn edge_from_dto(edge: BorderEdgeDto) -> Result<BorderEdge, InteropError> {
@@ -172,18 +195,33 @@ fn edge_from_dto(edge: BorderEdgeDto) -> Result<BorderEdge, InteropError> {
     ))
 }
 
-fn alignment_from_dto(alignment: &AlignmentDto) -> Result<Alignment, InteropError> {
-    let horizontal = HorizontalAlignment::from_token(&alignment.horizontal)
-        .ok_or_else(|| InteropError::invalid_change(DETAIL_HORIZONTAL_ALIGNMENT.to_owned()))?;
-    let vertical = VerticalAlignment::from_token(&alignment.vertical)
-        .ok_or_else(|| InteropError::invalid_change(DETAIL_VERTICAL_ALIGNMENT.to_owned()))?;
-    Ok(Alignment::new()
-        .with_horizontal(horizontal)
-        .with_vertical(vertical)
-        .with_wrap_text(alignment.wrap_text)
-        .with_shrink_to_fit(alignment.shrink_to_fit)
-        .with_indent(alignment.indent)?
-        .with_text_rotation(alignment.text_rotation)?)
+fn alignment_from_dto(alignment: &AlignmentEditDto) -> Result<AlignmentEdit, InteropError> {
+    let mut converted = AlignmentEdit::new();
+    if let Some(horizontal) = &alignment.horizontal {
+        converted =
+            converted.with_horizontal(HorizontalAlignment::from_token(horizontal).ok_or_else(
+                || InteropError::invalid_change(DETAIL_HORIZONTAL_ALIGNMENT.to_owned()),
+            )?);
+    }
+    if let Some(vertical) = &alignment.vertical {
+        converted =
+            converted.with_vertical(VerticalAlignment::from_token(vertical).ok_or_else(|| {
+                InteropError::invalid_change(DETAIL_VERTICAL_ALIGNMENT.to_owned())
+            })?);
+    }
+    if let Some(wrap_text) = alignment.wrap_text {
+        converted = converted.with_wrap_text(wrap_text);
+    }
+    if let Some(shrink_to_fit) = alignment.shrink_to_fit {
+        converted = converted.with_shrink_to_fit(shrink_to_fit);
+    }
+    if let Some(indent) = alignment.indent {
+        converted = converted.with_indent(indent)?;
+    }
+    if let Some(text_rotation) = alignment.text_rotation {
+        converted = converted.with_text_rotation(text_rotation)?;
+    }
+    Ok(converted)
 }
 
 fn color_from_dto(color: ColorDto) -> Result<Color, InteropError> {

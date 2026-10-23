@@ -47,7 +47,6 @@ impl Eq for Fill {}
 impl Eq for BorderEdge {}
 impl Eq for Border {}
 impl Eq for CellFormat {}
-impl Eq for CellFormatEdit {}
 
 impl Color {
     /// An explicit color, `0xAARRGGBB`.
@@ -145,13 +144,13 @@ impl FontUnderline {
 /// the source font record of a cell whose font is not edited.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Font {
-    name: Option<Box<str>>,
-    size: Option<f64>,
-    bold: bool,
-    italic: bool,
-    underline: FontUnderline,
-    strike: bool,
-    color: Option<Color>,
+    pub(super) name: Option<Box<str>>,
+    pub(super) size: Option<f64>,
+    pub(super) bold: bool,
+    pub(super) italic: bool,
+    pub(super) underline: FontUnderline,
+    pub(super) strike: bool,
+    pub(super) color: Option<Color>,
 }
 
 impl Font {
@@ -534,13 +533,13 @@ impl BorderEdge {
 /// A cell border.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Border {
-    left: BorderEdge,
-    right: BorderEdge,
-    top: BorderEdge,
-    bottom: BorderEdge,
-    diagonal: BorderEdge,
-    diagonal_up: bool,
-    diagonal_down: bool,
+    pub(super) left: BorderEdge,
+    pub(super) right: BorderEdge,
+    pub(super) top: BorderEdge,
+    pub(super) bottom: BorderEdge,
+    pub(super) diagonal: BorderEdge,
+    pub(super) diagonal_up: bool,
+    pub(super) diagonal_down: bool,
 }
 
 impl Border {
@@ -731,12 +730,12 @@ impl VerticalAlignment {
 /// Cell text alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Alignment {
-    horizontal: HorizontalAlignment,
-    vertical: VerticalAlignment,
-    wrap_text: bool,
-    shrink_to_fit: bool,
-    indent: u32,
-    text_rotation: u32,
+    pub(super) horizontal: HorizontalAlignment,
+    pub(super) vertical: VerticalAlignment,
+    pub(super) wrap_text: bool,
+    pub(super) shrink_to_fit: bool,
+    pub(super) indent: u32,
+    pub(super) text_rotation: u32,
 }
 
 impl Alignment {
@@ -875,96 +874,6 @@ impl CellFormat {
     /// Returns the alignment.
     pub const fn alignment(&self) -> Alignment {
         self.alignment
-    }
-
-    /// Returns this format with the components `edit` sets replaced.
-    pub(crate) fn edited(&self, edit: &CellFormatEdit) -> Self {
-        Self {
-            font: edit.font.clone().unwrap_or_else(|| self.font.clone()),
-            fill: edit.fill.map_or(self.fill, Fill::Pattern),
-            border: edit.border.unwrap_or(self.border),
-            alignment: edit.alignment.unwrap_or(self.alignment),
-        }
-    }
-}
-
-/// The format components one edit replaces; components it leaves unset keep their current value.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct CellFormatEdit {
-    font: Option<Font>,
-    fill: Option<PatternFill>,
-    border: Option<Border>,
-    alignment: Option<Alignment>,
-}
-
-impl CellFormatEdit {
-    /// An edit that replaces nothing.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns this edit replacing the font.
-    #[must_use]
-    pub fn with_font(self, font: Font) -> Self {
-        Self {
-            font: Some(font),
-            ..self
-        }
-    }
-
-    /// Returns this edit replacing the fill.
-    #[must_use]
-    pub fn with_fill(self, fill: PatternFill) -> Self {
-        Self {
-            fill: Some(fill),
-            ..self
-        }
-    }
-
-    /// Returns this edit replacing the border.
-    #[must_use]
-    pub fn with_border(self, border: Border) -> Self {
-        Self {
-            border: Some(border),
-            ..self
-        }
-    }
-
-    /// Returns this edit replacing the alignment.
-    #[must_use]
-    pub fn with_alignment(self, alignment: Alignment) -> Self {
-        Self {
-            alignment: Some(alignment),
-            ..self
-        }
-    }
-
-    /// Returns the replacement font.
-    pub const fn font(&self) -> Option<&Font> {
-        self.font.as_ref()
-    }
-
-    /// Returns the replacement fill.
-    pub const fn fill(&self) -> Option<PatternFill> {
-        self.fill
-    }
-
-    /// Returns the replacement border.
-    pub const fn border(&self) -> Option<Border> {
-        self.border
-    }
-
-    /// Returns the replacement alignment.
-    pub const fn alignment(&self) -> Option<Alignment> {
-        self.alignment
-    }
-
-    /// Returns whether the edit replaces nothing.
-    pub const fn is_empty(&self) -> bool {
-        self.font.is_none()
-            && self.fill.is_none()
-            && self.border.is_none()
-            && self.alignment.is_none()
     }
 }
 

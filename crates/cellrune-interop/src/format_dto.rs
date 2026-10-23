@@ -212,6 +212,110 @@ pub struct CellFormatDto {
     pub alignment: AlignmentDto,
 }
 
+/// The font properties a `set_cell_format` operation sets; omitted properties keep the cell's.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FontEditDto {
+    /// Typeface name, 1 through 31 UTF-16 code units; `null` removes the name.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub name: Option<Option<String>>,
+    /// Size in points from 1 through 409; `null` removes the size.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub size: Option<Option<f64>>,
+    /// Bold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+    /// Italic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub italic: Option<bool>,
+    /// `none`, `single`, `double`, `singleAccounting`, or `doubleAccounting`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub underline: Option<String>,
+    /// Struck through.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strike: Option<bool>,
+    /// Font color; `null` removes the color.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub color: Option<Option<ColorDto>>,
+}
+
+/// The border lines a `set_cell_format` operation sets; omitted lines and directions keep the
+/// cell's. A line given replaces that line's style and color together.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BorderEditDto {
+    /// Left line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<BorderEdgeDto>,
+    /// Right line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right: Option<BorderEdgeDto>,
+    /// Top line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<BorderEdgeDto>,
+    /// Bottom line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<BorderEdgeDto>,
+    /// Diagonal line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagonal: Option<BorderEdgeDto>,
+    /// Whether the diagonal runs from bottom left to top right.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagonal_up: Option<bool>,
+    /// Whether the diagonal runs from top left to bottom right.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagonal_down: Option<bool>,
+}
+
+/// The alignment properties a `set_cell_format` operation sets; omitted properties keep the
+/// cell's.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AlignmentEditDto {
+    /// `general`, `left`, `center`, `right`, `fill`, `justify`, `centerContinuous`, or
+    /// `distributed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal: Option<String>,
+    /// `top`, `center`, `bottom`, `justify`, or `distributed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical: Option<String>,
+    /// Wrap text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap_text: Option<bool>,
+    /// Shrink text to fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shrink_to_fit: Option<bool>,
+    /// Indent level from 0 through 250.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indent: Option<u32>,
+    /// 0 through 90 degrees counterclockwise, 91 through 180 for 1 through 90 degrees clockwise,
+    /// or 255 for vertically stacked text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_rotation: Option<u32>,
+}
+
+/// Reads a property that is present, so that `null` is `Some(None)` and only an omitted property
+/// is `None`.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 /// The format of one cell in a format page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -286,24 +390,26 @@ impl FormatChangeV2Dto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FormatChangeV2Dto {
-    /// Replaces the given components of one cell's format; omitted components keep their value.
+    /// Sets properties of one cell's format. Font, border, and alignment properties merge into
+    /// the cell's current ones: only the properties given change. A fill replaces the cell's fill,
+    /// pattern and colors together. Omitted components keep their value.
     SetCellFormat {
         /// Case-insensitive sheet name.
         sheet: String,
         /// Unqualified A1 address.
         address: String,
-        /// Replacement font.
+        /// Font properties to set.
         #[serde(default)]
-        font: Option<Box<FontDto>>,
+        font: Option<Box<FontEditDto>>,
         /// Replacement pattern fill.
         #[serde(default)]
         fill: Option<Box<PatternFillDto>>,
-        /// Replacement border.
+        /// Border lines to set.
         #[serde(default)]
-        border: Option<Box<BorderDto>>,
-        /// Replacement alignment.
+        border: Option<Box<BorderEditDto>>,
+        /// Alignment properties to set.
         #[serde(default)]
-        alignment: Option<Box<AlignmentDto>>,
+        alignment: Option<Box<AlignmentEditDto>>,
     },
     /// Sets or clears the width of an inclusive column span.
     SetColumnWidth {

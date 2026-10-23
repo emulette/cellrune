@@ -243,18 +243,23 @@ export interface BorderEdgeInput {
   readonly color?: ColorInput;
 }
 
+/**
+ * Sets properties of one cell's format. `font`, `border`, and `alignment` set only the properties
+ * they give and keep the cell's others; a font `name`, `size`, or `color` of `null` removes it, and
+ * a border line replaces its style and color together. `fill` replaces the whole fill.
+ */
 export interface CellFormatChange {
   readonly kind: "setCellFormat";
   readonly sheet: string;
   readonly address: string;
   readonly font?: {
-    readonly name?: string;
-    readonly size?: number;
+    readonly name?: string | null;
+    readonly size?: number | null;
     readonly bold?: boolean;
     readonly italic?: boolean;
     readonly underline?: FontUnderline;
     readonly strike?: boolean;
-    readonly color?: ColorInput;
+    readonly color?: ColorInput | null;
   };
   readonly fill?: {
     readonly pattern: FillPattern;

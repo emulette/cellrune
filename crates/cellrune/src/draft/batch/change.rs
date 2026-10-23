@@ -140,7 +140,8 @@ pub enum WorkbookChange {
         /// New filter range, which keeps the current rows and contains the current range.
         range: CellRange,
     },
-    /// Replaces the font, fill, border, or alignment one cell displays with.
+    /// Sets font, fill, border, or alignment properties of the format one cell displays with,
+    /// merged into its current format as [`CellFormatEdit`] describes.
     ///
     /// This is a presentation change: it advances the presentation revision, not the semantic
     /// one, and never invalidates calculation. The cell need not hold a value.
@@ -149,7 +150,7 @@ pub enum WorkbookChange {
         sheet_id: SheetId,
         /// Target address.
         address: CellAddress,
-        /// Components to replace; the others keep their current value.
+        /// Properties to set; the others keep their current value.
         edit: CellFormatEdit,
     },
     /// Sets or clears the width of an inclusive column span, a presentation change.
