@@ -1992,6 +1992,76 @@ fn formula_edits_evaluate_only_the_edited_formulas_and_their_dependents() {
 }
 
 #[test]
+fn a_formula_edit_the_compiled_state_cannot_take_reports_the_full_run() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut initial = Vec::new();
+    for row in 1..=3 {
+        initial.push(WorkbookChange::set_cell_value(
+            sheet_id,
+            CellAddress::from_indices(row, 1).expect("valid input"),
+            number(f64::from(row)),
+        ));
+        initial.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 2).expect("valid formula"),
+            formula(&format!("A{row}*2")),
+        ));
+    }
+    initial.push(WorkbookChange::set_cell_formula(
+        sheet_id,
+        address("C1"),
+        formula("SUM(B1:B3)"),
+    ));
+    session
+        .apply_changes(0, EditBatch::new(initial))
+        .expect("workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    // The edited formula holds a reference incremental calculation cannot follow, so the job
+    // selected to recompile it in place compiles the workbook again.
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_formula(
+                sheet_id,
+                address("D1"),
+                formula("OFFSET(A1,1,0)"),
+            )]),
+        )
+        .expect("dynamic formula edit");
+    let prepared = session
+        .prepare_recalculation(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("prepared recalculation");
+    assert_eq!(
+        prepared.execution_mode(),
+        CalculationExecutionMode::Incremental
+    );
+    let delta = session
+        .install(prepared.run().expect("completed recalculation"))
+        .expect("installed recalculation");
+
+    assert_eq!(
+        (delta.mode(), delta.reason()),
+        (
+            CalculationExecutionMode::Full,
+            CalculationDecisionReason::TopologyChanged,
+        )
+    );
+    assert_eq!(delta.dirty_count(), 5);
+    assert_eq!(delta.evaluated_count(), 5);
+}
+
+#[test]
 fn stale_and_cancelled_jobs_never_replace_current_results() {
     let mut session = chain_session();
     session

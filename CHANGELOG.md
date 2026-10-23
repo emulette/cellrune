@@ -227,7 +227,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   counts the edited formulas. A workbook that already holds references incremental calculation
   cannot follow reports `DynamicTopology`, as after a value edit. An edit that adds such a
   reference, touches a cell that is or was part of an array formula, or lets the dependency graph
-  reach `max_dependency_edges` still compiles the workbook again and reports `TopologyChanged`.
+  reach `max_dependency_edges` still compiles the workbook again and reports `Full` with
+  `TopologyChanged` and every formula as dirty.
   Forced `Incremental` and `Full` recalculation and transactions behave as before, and results are
   unchanged.
 - A full calculation with references known only from values, such as `OFFSET` or `INDIRECT` with

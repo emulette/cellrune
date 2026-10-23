@@ -156,8 +156,8 @@ impl PreparedWorkbookTransaction {
                 self.options,
                 self.cancellation.clone(),
             )?;
-            let dirty_count = prepared.dirty_cells().len();
             let execution = prepared.execute()?;
+            let dirty_count = execution.dirty_count;
             let execution_mode = execution.execution_mode;
             let decision_reason = execution.reason;
             ensure_evaluated_resource_limits(

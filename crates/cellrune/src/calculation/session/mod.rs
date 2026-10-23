@@ -783,7 +783,11 @@ impl PreparedCalculation {
         self.expected_revision
     }
 
-    /// Returns the selected execution mode.
+    /// Returns the execution mode selected for the job.
+    ///
+    /// An `Auto` job selected to apply formula edits incrementally runs in full when the compiled
+    /// state cannot take them, and its delta then reports `Full` with `TopologyChanged` and every
+    /// formula of the workbook as dirty.
     pub const fn execution_mode(&self) -> CalculationExecutionMode {
         self.execution_mode
     }
@@ -831,6 +835,7 @@ impl PreparedCalculation {
                 calculation,
                 execution_mode: self.execution_mode,
                 reason: self.reason,
+                dirty_count: self.dirty.len(),
                 evaluated_count: 0,
                 evaluated_cells: BTreeSet::new(),
                 parsed_formula_count: 0,
@@ -841,13 +846,19 @@ impl PreparedCalculation {
         let recompiled = self.recompile_formula_edits()?;
         let mut execution_mode = self.execution_mode;
         let mut reason = self.reason;
+        let mut dirty_count = self.dirty.len();
         let (calculation, compiled, work, parsed_formula_count) =
             if self.compile_required || (!self.formula_edits.is_empty() && recompiled.is_none()) {
                 if !self.compile_required {
                     // The compiled state could not take the formula edits, so the pass compiles the
-                    // workbook again as any other topology change does.
+                    // workbook again as any other topology change does, with every formula dirty.
                     execution_mode = CalculationExecutionMode::Full;
                     reason = CalculationDecisionReason::TopologyChanged;
+                    dirty_count = formula_cells_from_workbook(&self.workbook, &|| {
+                        self.cancellation.is_cancelled()
+                    })
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+                    .len();
                 }
                 let (calculation, compiled, work) =
                     calculate_and_compile(&self.workbook, self.options, || {
@@ -901,6 +912,7 @@ impl PreparedCalculation {
             calculation,
             execution_mode,
             reason,
+            dirty_count,
             evaluated_count: work.evaluated_cells.len(),
             evaluated_cells: work.evaluated_cells,
             parsed_formula_count,
@@ -961,7 +973,7 @@ impl PreparedCalculation {
                         result_revision: self.expected_revision,
                         mode: execution.execution_mode,
                         reason: execution.reason,
-                        dirty_count: self.dirty.len(),
+                        dirty_count: execution.dirty_count,
                         evaluated_count: execution.evaluated_count,
                         parsed_formula_count: execution.parsed_formula_count,
                     },
@@ -978,7 +990,7 @@ impl PreparedCalculation {
                     result_revision: self.expected_revision,
                     mode: execution.execution_mode,
                     reason: execution.reason,
-                    dirty_count: self.dirty.len(),
+                    dirty_count: execution.dirty_count,
                     evaluated_count: execution.evaluated_count,
                     parsed_formula_count: execution.parsed_formula_count,
                 },
@@ -1009,6 +1021,8 @@ pub(super) struct CalculationRunResult {
     /// could not take pending formula edits.
     pub(super) execution_mode: CalculationExecutionMode,
     pub(super) reason: CalculationDecisionReason,
+    /// The formulas the executed schedule treated as dirty.
+    pub(super) dirty_count: usize,
     pub(super) evaluated_count: usize,
     pub(super) evaluated_cells: BTreeSet<CalculationCellId>,
     pub(super) parsed_formula_count: usize,
