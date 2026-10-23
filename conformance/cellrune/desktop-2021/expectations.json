@@ -5162,25 +5162,22 @@
     "excel_rich_error": false
   },
   "function:kurt": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-1.2000000000000011",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (KURT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:kurt:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (KURT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:kurt:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (KURT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:lambda": {
     "classification": "host_unsupported",
@@ -7448,46 +7445,40 @@
     "excel_rich_error": false
   },
   "function:skew": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-1.0388051692399125E-16",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (SKEW) for this oracle case."
+    "excel_rich_error": false
   },
   "function:skew-p": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-4.4408920985006264E-17",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SKEW.P) for this oracle case."
+    "excel_rich_error": false
   },
   "function:skew-p:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SKEW.P) for this oracle case."
+    "excel_rich_error": false
   },
   "function:skew-p:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.SKEW.P) for this oracle case."
+    "excel_rich_error": false
   },
   "function:skew:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (SKEW) for this oracle case."
+    "excel_rich_error": false
   },
   "function:skew:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "#DIV/0!",
     "excel_type": "e",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (SKEW) for this oracle case."
+    "excel_rich_error": false
   },
   "function:sln": {
     "classification": "match",

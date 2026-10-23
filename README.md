@@ -135,6 +135,9 @@ Weibull, and confidence-interval functions, and `IMLOG10`/`IMLOG2`; the exact li
 
 CellRune 0.1.26 adds the seeded random functions `RAND`, `RANDBETWEEN`, and `RANDARRAY`.
 
+CellRune 0.1.27 adds the shape statistics `SKEW`, `SKEW.P`, and `KURT`; the exact list is in
+[llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
+
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
 `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. Their fixed grammar, lookup modes, calendar rules,
 wildcard behavior, and array-result boundaries are documented alongside the current function

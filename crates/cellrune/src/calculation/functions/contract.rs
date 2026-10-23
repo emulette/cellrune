@@ -1615,8 +1615,11 @@ impl StatisticalAdditionalFunction {
             | Self::DevSq
             | Self::GeoMean
             | Self::HarMean
+            | Self::Kurt
             | Self::MaxA
             | Self::MinA
+            | Self::Skew
+            | Self::SkewP
             | Self::StDevA
             | Self::StDevP
             | Self::StDevPA

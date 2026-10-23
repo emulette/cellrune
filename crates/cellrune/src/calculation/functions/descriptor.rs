@@ -146,6 +146,7 @@ pub(super) enum CompatibilityVersion {
     V0_1_20,
     V0_1_22,
     V0_1_26,
+    V0_1_27,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1005,6 +1006,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Gauss, "GAUSS", StatisticalAdditional),
     function!(GeoMean, "GEOMEAN", StatisticalAdditional),
     function!(HarMean, "HARMEAN", StatisticalAdditional),
+    function!(Kurt, "KURT", StatisticalAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(MaxA, "MAXA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
     function!(MinA, "MINA", StatisticalAdditional).with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
     function!(NormDist, "NORM.DIST", StatisticalAdditional)
@@ -1012,6 +1015,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Phi, "PHI", StatisticalAdditional),
     function!(PoissonDist, "POISSON.DIST", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("POISSON")]),
+    function!(Skew, "SKEW", StatisticalAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(SkewP, "SKEW.P", StatisticalAdditional)
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Standardize, "STANDARDIZE", StatisticalAdditional),
     function!(StDevP, "STDEV.P", StatisticalAdditional)
         .with_aliases(&[FunctionAlias::official("STDEVP")])
@@ -1666,6 +1673,27 @@ mod tests {
             actual, "8e1982322a0208193bfe6966b21fd17ab5f6bab13696194c79c9847f5eed8c5e",
             "stable v0.1.16 semantic snapshot changed:\n{snapshot}",
         );
+    }
+
+    #[test]
+    fn v0_1_27_descriptors_freeze_function_families_arity_and_array_results() {
+        for name in ["KURT", "SKEW", "SKEW.P"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_27,
+                "{name}",
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::StatisticalAdditional(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(descriptor.call_contract().arity().accepts(255), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(0), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(256), "{name}");
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
     }
 
     #[test]

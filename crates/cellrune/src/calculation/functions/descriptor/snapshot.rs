@@ -145,5 +145,6 @@ const fn compatibility_version_name(version: CompatibilityVersion) -> &'static s
         CompatibilityVersion::V0_1_20 => "0.1.20",
         CompatibilityVersion::V0_1_22 => "0.1.22",
         CompatibilityVersion::V0_1_26 => "0.1.26",
+        CompatibilityVersion::V0_1_27 => "0.1.27",
     }
 }

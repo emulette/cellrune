@@ -189,7 +189,7 @@ mod tests {
     use crate::calculation::functions::descriptor;
 
     // Future functions Excel saved with `_xlfn.` that the catalog does not calculate yet.
-    const OUTSIDE_CATALOG: [&str; 23] = [
+    const OUTSIDE_CATALOG: [&str; 22] = [
         "AGGREGATE",
         "CHISQ.INV",
         "CHISQ.INV.RT",
@@ -210,7 +210,6 @@ mod tests {
         "IMSINH",
         "IMTAN",
         "MODE.MULT",
-        "SKEW.P",
         "STOCKHISTORY",
         "TRANSLATE",
     ];

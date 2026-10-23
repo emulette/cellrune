@@ -5,7 +5,7 @@ use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
 use super::kernel::StatisticalAdditionalFunction;
-use super::moments::VarianceKind;
+use super::moments::{NumericMoments, VarianceKind};
 use super::special_functions::{
     ln_gamma, regularized_gamma_q, standard_normal_density, standard_normal_lower,
 };
@@ -62,7 +62,80 @@ pub(super) fn call(
         StatisticalAdditionalFunction::NormDist => normal_distribution(engine, context, args),
         StatisticalAdditionalFunction::ExponDist => exponential_distribution(engine, context, args),
         StatisticalAdditionalFunction::PoissonDist => poisson_distribution(engine, context, args),
+        StatisticalAdditionalFunction::Skew => shape(engine, context, args, Shape::SampleSkewness),
+        StatisticalAdditionalFunction::SkewP => {
+            shape(engine, context, args, Shape::PopulationSkewness)
+        }
+        StatisticalAdditionalFunction::Kurt => shape(engine, context, args, Shape::SampleKurtosis),
     }
+}
+
+/// The standardized third and fourth moments Microsoft documents for SKEW, SKEW.P, and KURT.
+#[derive(Debug, Clone, Copy)]
+enum Shape {
+    /// SKEW: n / ((n − 1)(n − 2)) · Σ((x − mean) / s)³ with the sample standard deviation s.
+    SampleSkewness,
+    /// SKEW.P: Σ((x − mean) / σ)³ / n with the population standard deviation σ.
+    PopulationSkewness,
+    /// KURT: n(n + 1) / ((n − 1)(n − 2)(n − 3)) · Σ((x − mean) / s)⁴ − 3(n − 1)² / ((n − 2)(n − 3)).
+    SampleKurtosis,
+}
+
+/// Collects numbers as the sample statistics do, then standardizes each one around the stable
+/// mean. Fewer than three values (four for KURT) or a zero standard deviation is `#DIV/0!`.
+fn shape(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], shape: Shape) -> Value {
+    let numbers = match numeric_arguments(engine, context, args) {
+        Ok(numbers) => numbers,
+        Err(kind) => return Value::Error(kind),
+    };
+    let minimum = match shape {
+        Shape::SampleSkewness | Shape::PopulationSkewness => 3,
+        Shape::SampleKurtosis => 4,
+    };
+    if numbers.len() < minimum {
+        return Value::Error(ErrorKind::Div0);
+    }
+    let moments = match NumericMoments::collect_with_work(numbers.iter().copied(), || {
+        poll_cancellation(context)?;
+        engine.charge_function_iterations(context, 1)
+    }) {
+        Ok(moments) => moments,
+        Err(kind) => return Value::Error(kind),
+    };
+    let variance_kind = match shape {
+        Shape::PopulationSkewness => VarianceKind::Population,
+        Shape::SampleSkewness | Shape::SampleKurtosis => VarianceKind::Sample,
+    };
+    let (mean, deviation) = match moments
+        .mean()
+        .and_then(|mean| Ok((mean, moments.variance(variance_kind)?.sqrt())))
+    {
+        Ok(statistics) => statistics,
+        Err(kind) => return Value::Error(kind),
+    };
+    if deviation == 0.0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    let power = match shape {
+        Shape::SampleSkewness | Shape::PopulationSkewness => 3,
+        Shape::SampleKurtosis => 4,
+    };
+    let mut total = 0.0;
+    for number in &numbers {
+        if let Err(kind) = poll_cancellation(context) {
+            return Value::Error(kind);
+        }
+        total += ((number - mean) / deviation).powi(power);
+    }
+    let n = numbers.len() as f64;
+    finite(match shape {
+        Shape::SampleSkewness => n / ((n - 1.0) * (n - 2.0)) * total,
+        Shape::PopulationSkewness => total / n,
+        Shape::SampleKurtosis => {
+            n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0)) * total
+                - 3.0 * (n - 1.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0))
+        }
+    })
 }
 
 #[derive(Debug, Clone, Copy)]

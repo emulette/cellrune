@@ -1,6 +1,8 @@
-use cellrune::{CalculationOptions, calculate_workbook};
+use cellrune::{
+    CalculationCellResult, CalculationOptions, CellValue, ExcelError, calculate_workbook,
+};
 
-use super::support::{assert_number, workbook_with_formulas};
+use super::support::{assert_number, cell_id, workbook_with_formulas};
 
 #[test]
 fn variance_and_paired_statistics_share_stable_moments_across_input_shapes() {
@@ -47,5 +49,74 @@ fn variance_and_paired_statistics_share_stable_moments_across_input_shapes() {
         (13, 1.0, 2.0e-15),
     ] {
         assert_number(&calculation, column, expected, tolerance);
+    }
+}
+
+#[test]
+fn skewness_and_kurtosis_standardize_the_documented_sample() {
+    // Microsoft's SKEW, SKEW.P, and KURT examples share this data set and publish 0.359543,
+    // 0.303193, and -0.151799637.
+    let data = ["3", "4", "5", "2", "3", "4", "5", "6", "4", "7"];
+    let mut formulas = data
+        .iter()
+        .enumerate()
+        .map(|(row, value)| (row as u32 + 1, 1, *value))
+        .collect::<Vec<_>>();
+    formulas.extend([
+        (1, 2, "SKEW(A1:A10)"),
+        (1, 3, "_xlfn.SKEW.P(A1:A10)"),
+        (1, 4, "KURT(A1:A10)"),
+        // Typed text numbers and logical values count; referenced text and logical values do not.
+        (1, 5, "SKEW(1,\"2\",TRUE,3,10)"),
+        (1, 6, "SKEW.P(1,2,3,10,A11:A12)"),
+        (1, 7, "KURT({1,2,3,10},A11:A12)"),
+        (11, 1, "\"text\""),
+        (12, 1, "TRUE"),
+    ]);
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&formulas),
+        CalculationOptions::default(),
+    );
+    for (column, expected) in [
+        (2, 0.359_543_071_406_797_8),
+        (3, 0.303_193_339_354_144_3),
+        (4, -0.151_799_637_208_412_7),
+        (5, 1.980_548_193_033_738_5),
+        (6, 1.018_233_764_908_628_4),
+        (7, 3.228),
+    ] {
+        assert_number(&calculation, column, expected, 1.0e-12);
+    }
+}
+
+#[test]
+fn skewness_and_kurtosis_need_enough_varying_values_and_propagate_errors() {
+    let formulas = [
+        ("SKEW(1,2)", ExcelError::DivisionByZero),
+        ("SKEW.P(1,2)", ExcelError::DivisionByZero),
+        ("KURT(1,2,3)", ExcelError::DivisionByZero),
+        ("SKEW(4,4,4)", ExcelError::DivisionByZero),
+        ("SKEW.P(4,4,4)", ExcelError::DivisionByZero),
+        ("KURT(4,4,4,4)", ExcelError::DivisionByZero),
+        ("SKEW({1,\"a\",2,TRUE})", ExcelError::DivisionByZero),
+        ("SKEW(1,2,3,#N/A)", ExcelError::NotAvailable),
+        ("KURT(1,2,3,\"four\")", ExcelError::Value),
+    ];
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(
+            &formulas
+                .iter()
+                .enumerate()
+                .map(|(index, (formula, _))| (1, index as u32 + 1, *formula))
+                .collect::<Vec<_>>(),
+        ),
+        CalculationOptions::default(),
+    );
+    for (index, (formula, expected)) in formulas.iter().enumerate() {
+        assert_eq!(
+            calculation.cell(cell_id(index as u32 + 1)),
+            Some(&CalculationCellResult::Value(CellValue::Error(*expected))),
+            "{formula}",
+        );
     }
 }

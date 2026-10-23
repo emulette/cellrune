@@ -734,12 +734,19 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.26 catalog contains 457 official
+  `.is_official()`. The 0.1.27 catalog contains 460 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 458 accepted entries. The descriptor registry
+  dummy-function marker, for 461 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
+- The official names added in 0.1.27 are `SKEW`, `SKEW.P`, and `KURT`. They
+  collect numbers as `STDEV.S` does: typed text numbers and logical values
+  count, while text, logical values, and blanks inside references and arrays
+  are skipped, and errors propagate. `SKEW` and `KURT` standardize by the sample
+  standard deviation and apply Microsoft's bias corrections; `SKEW.P` divides
+  the summed cubed population z-scores by the count. Fewer than three numbers
+  (four for `KURT`) or a zero standard deviation returns `#DIV/0!`.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
   `[0, 1)`. `RANDBETWEEN(bottom, top)` returns `#NUM!` when `bottom` exceeds
