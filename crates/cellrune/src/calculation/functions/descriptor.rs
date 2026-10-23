@@ -690,6 +690,15 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ImSqrt, "IMSQRT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImSub, "IMSUB", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImSum, "IMSUM", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImCos, "IMCOS", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImCot, "IMCOT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImCsc, "IMCSC", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImCsch, "IMCSCH", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImSec, "IMSEC", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImSech, "IMSECH", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImSin, "IMSIN", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImSinh, "IMSINH", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
+    function!(ImTan, "IMTAN", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Address, "ADDRESS", Lookup),
     function!(Choose, "CHOOSE", Lookup),
     function!(Column, "COLUMN", Lookup),
@@ -1791,6 +1800,25 @@ mod tests {
         assert!((5..=7).all(|arity| vdb.call_contract().arity().accepts(arity)));
         assert!(!vdb.call_contract().arity().accepts(4));
         assert!(!vdb.call_contract().arity().accepts(8));
+
+        for name in [
+            "IMCOS", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSIN", "IMSINH", "IMTAN",
+        ] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_27,
+                "{name}",
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Engineering(_)),
+                "{name}"
+            );
+            assert!(descriptor.call_contract().arity().accepts(1), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(0), "{name}");
+            assert!(!descriptor.call_contract().arity().accepts(2), "{name}");
+            assert!(!descriptor.catalog_returns_array(), "{name}");
+        }
     }
 
     #[test]

@@ -1198,7 +1198,16 @@ impl EngineeringFunction {
             | Self::ImLog10
             | Self::ImLog2
             | Self::ImReal
-            | Self::ImSqrt => CallContract::uniform(Arity::exact(1), SCALAR),
+            | Self::ImSqrt
+            | Self::ImCos
+            | Self::ImCot
+            | Self::ImCsc
+            | Self::ImCsch
+            | Self::ImSec
+            | Self::ImSech
+            | Self::ImSin
+            | Self::ImSinh
+            | Self::ImTan => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::ImDiv | Self::ImPower | Self::ImSub => {
                 CallContract::uniform(Arity::exact(2), SCALAR)
             }

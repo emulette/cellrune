@@ -240,6 +240,71 @@ impl ComplexValue {
         )
     }
 
+    /// sin(a + bi) = sin a·cosh b + i·cos a·sinh b.
+    pub(super) fn sine(self) -> Result<Self, ErrorKind> {
+        Self::new(
+            self.real.sin() * self.imaginary.cosh(),
+            self.real.cos() * self.imaginary.sinh(),
+            self.suffix,
+        )
+    }
+
+    /// cos(a + bi) = cos a·cosh b − i·sin a·sinh b.
+    pub(super) fn cosine(self) -> Result<Self, ErrorKind> {
+        Self::new(
+            self.real.cos() * self.imaginary.cosh(),
+            -(self.real.sin() * self.imaginary.sinh()),
+            self.suffix,
+        )
+    }
+
+    /// tan(a + bi) = (sin 2a + i·sinh 2b) / (cos 2a + cosh 2b). The double-angle form keeps the
+    /// small real part of a large imaginary argument, which dividing sine by cosine cancels away.
+    pub(super) fn tangent(self) -> Result<Self, ErrorKind> {
+        let (real, imaginary) = (2.0 * self.real, 2.0 * self.imaginary);
+        let denominator = real.cos() + imaginary.cosh();
+        Self::new(
+            real.sin() / denominator,
+            imaginary.sinh() / denominator,
+            self.suffix,
+        )
+    }
+
+    /// cot(a + bi) = (sin 2a − i·sinh 2b) / (cosh 2b − cos 2a), the double-angle form of
+    /// [`Self::tangent`].
+    pub(super) fn cotangent(self) -> Result<Self, ErrorKind> {
+        let (real, imaginary) = (2.0 * self.real, 2.0 * self.imaginary);
+        let denominator = imaginary.cosh() - real.cos();
+        Self::new(
+            real.sin() / denominator,
+            -(imaginary.sinh() / denominator),
+            self.suffix,
+        )
+    }
+
+    /// sinh(a + bi) = sinh a·cos b + i·cosh a·sin b.
+    pub(super) fn hyperbolic_sine(self) -> Result<Self, ErrorKind> {
+        Self::new(
+            self.real.sinh() * self.imaginary.cos(),
+            self.real.cosh() * self.imaginary.sin(),
+            self.suffix,
+        )
+    }
+
+    /// cosh(a + bi) = cosh a·cos b + i·sinh a·sin b.
+    pub(super) fn hyperbolic_cosine(self) -> Result<Self, ErrorKind> {
+        Self::new(
+            self.real.cosh() * self.imaginary.cos(),
+            self.real.sinh() * self.imaginary.sin(),
+            self.suffix,
+        )
+    }
+
+    /// 1/z, through the same scaled division as IMDIV.
+    pub(super) fn reciprocal(self) -> Result<Self, ErrorKind> {
+        Self::new(1.0, 0.0, self.suffix)?.divide(self)
+    }
+
     pub(super) fn logarithm(self) -> Result<Self, ErrorKind> {
         let magnitude = self.log_magnitude().ok_or(ErrorKind::Num)?;
         Self::new(magnitude, self.argument(), self.suffix)

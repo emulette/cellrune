@@ -2,7 +2,7 @@ use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::convert;
-use super::engineering_complex;
+use super::engineering_complex::{self, ComplexTrigonometry, trigonometry};
 use super::kernel::EngineeringFunction;
 use super::special_functions::bessel::{BesselFamily, worksheet_bessel};
 use super::util::{required_number, required_text};
@@ -107,6 +107,36 @@ pub(super) fn call(
         EngineeringFunction::ImSqrt => engineering_complex::square_root(engine, context, args),
         EngineeringFunction::ImSub => engineering_complex::subtract(engine, context, args),
         EngineeringFunction::ImSum => engineering_complex::sum(engine, context, args),
+        EngineeringFunction::ImSin => {
+            trigonometry(engine, context, args, ComplexTrigonometry::Sine)
+        }
+        EngineeringFunction::ImCos => {
+            trigonometry(engine, context, args, ComplexTrigonometry::Cosine)
+        }
+        EngineeringFunction::ImTan => {
+            trigonometry(engine, context, args, ComplexTrigonometry::Tangent)
+        }
+        EngineeringFunction::ImCot => {
+            trigonometry(engine, context, args, ComplexTrigonometry::Cotangent)
+        }
+        EngineeringFunction::ImSec => {
+            trigonometry(engine, context, args, ComplexTrigonometry::Secant)
+        }
+        EngineeringFunction::ImCsc => {
+            trigonometry(engine, context, args, ComplexTrigonometry::Cosecant)
+        }
+        EngineeringFunction::ImSinh => {
+            trigonometry(engine, context, args, ComplexTrigonometry::HyperbolicSine)
+        }
+        EngineeringFunction::ImSech => {
+            trigonometry(engine, context, args, ComplexTrigonometry::HyperbolicSecant)
+        }
+        EngineeringFunction::ImCsch => trigonometry(
+            engine,
+            context,
+            args,
+            ComplexTrigonometry::HyperbolicCosecant,
+        ),
     }
 }
 

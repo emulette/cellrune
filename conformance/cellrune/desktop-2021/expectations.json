@@ -4653,11 +4653,10 @@
     "excel_rich_error": false
   },
   "function:imcos": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-27.0349456030742-3.85115333481178i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (IMCOS) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imcosh": {
     "classification": "not_implemented",
@@ -4667,25 +4666,22 @@
     "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCOSH) for this oracle case."
   },
   "function:imcot": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.000187587737983659-1.00064439247156i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCOT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imcsc": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0.0051744731840194+0.036275889628626i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCSC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imcsch": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.0648774713706355+0.0754898329158637i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMCSCH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imdiv": {
     "classification": "match",
@@ -4748,32 +4744,28 @@
     "excel_rich_error": false
   },
   "function:imsec": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.0362534969158689+0.00516434460775318i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMSEC) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsech": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.065294027857947+0.0752249603027732i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMSECH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsin": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "3.85373803791938-27.0168132580039i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (IMSIN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsinh": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-6.548120040911-7.61923172032141i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMSINH) for this oracle case."
+    "excel_rich_error": false
   },
   "function:imsqrt": {
     "classification": "match",
@@ -4794,11 +4786,10 @@
     "excel_rich_error": false
   },
   "function:imtan": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "-0.000187346204629478+0.999355987381473i",
     "excel_type": "str",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.IMTAN) for this oracle case."
+    "excel_rich_error": false
   },
   "function:index": {
     "classification": "match",

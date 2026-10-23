@@ -13,6 +13,8 @@ use cellrune::{
 
 #[path = "calculation_behavior/complex_logarithms.rs"]
 mod complex_logarithms;
+#[path = "calculation_behavior/complex_trigonometry.rs"]
+mod complex_trigonometry;
 #[path = "calculation_behavior/criteria_matching.rs"]
 mod criteria_matching;
 #[path = "calculation_behavior/database.rs"]
@@ -2768,7 +2770,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        470
+        479
     );
     assert!(
         catalog

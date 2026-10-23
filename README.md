@@ -137,8 +137,9 @@ CellRune 0.1.26 adds the seeded random functions `RAND`, `RANDBETWEEN`, and `RAN
 
 CellRune 0.1.27 adds the shape statistics `SKEW`, `SKEW.P`, and `KURT`, the array statistics
 `FREQUENCY` and `MODE.MULT`, the chi-square test and quantiles `CHISQ.TEST`, `CHISQ.INV`, and
-`CHISQ.INV.RT` with their legacy names, and the financial functions `CUMIPMT`, `CUMPRINC`, and
-`VDB`; the exact list is in
+`CHISQ.INV.RT` with their legacy names, the financial functions `CUMIPMT`, `CUMPRINC`, and `VDB`,
+and the complex trigonometric functions `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`,
+`IMSINH`, `IMSECH`, and `IMCSCH`; the exact list is in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,

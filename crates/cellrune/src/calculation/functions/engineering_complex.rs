@@ -191,6 +191,73 @@ pub(super) fn square_root(engine: &Engine<'_>, context: EvalContext<'_>, args: &
     )
 }
 
+/// The complex trigonometric and hyperbolic functions IMSIN through IMSECH.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ComplexTrigonometry {
+    Sine,
+    Cosine,
+    Tangent,
+    Cotangent,
+    Secant,
+    Cosecant,
+    HyperbolicSine,
+    HyperbolicSecant,
+    HyperbolicCosecant,
+}
+
+/// Evaluates a complex trigonometric function. Microsoft documents `#VALUE!` for a logical
+/// inumber and `#NUM!` for other text that is not a complex number. Microsoft documents no result
+/// at the pole of the reciprocal functions, zero, or where an intermediate overflows although the
+/// function stays finite, so both are unsupported.
+pub(super) fn trigonometry(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    function: ComplexTrigonometry,
+) -> Value {
+    let [argument] = args else {
+        return Value::Error(ErrorKind::Value);
+    };
+    let value = match engine.eval_scalar(context, argument) {
+        Value::Logical(_) => return Value::Error(ErrorKind::Value),
+        value => match to_text(&value).and_then(|text| ComplexValue::parse(&text)) {
+            Ok(value) => value,
+            Err(kind) => return Value::Error(kind),
+        },
+    };
+    let pole = value.real() == 0.0 && value.imaginary() == 0.0;
+    let result = match function {
+        ComplexTrigonometry::Sine => value.sine(),
+        ComplexTrigonometry::Cosine => value.cosine(),
+        ComplexTrigonometry::Tangent => value.tangent(),
+        ComplexTrigonometry::Cotangent if pole => Err(ErrorKind::Unsupported),
+        ComplexTrigonometry::Cotangent => value.cotangent(),
+        ComplexTrigonometry::Secant => value.cosine().and_then(ComplexValue::reciprocal),
+        ComplexTrigonometry::Cosecant if pole => Err(ErrorKind::Unsupported),
+        ComplexTrigonometry::Cosecant => value.sine().and_then(ComplexValue::reciprocal),
+        ComplexTrigonometry::HyperbolicSine => value.hyperbolic_sine(),
+        ComplexTrigonometry::HyperbolicSecant => {
+            value.hyperbolic_cosine().and_then(ComplexValue::reciprocal)
+        }
+        ComplexTrigonometry::HyperbolicCosecant if pole => Err(ErrorKind::Unsupported),
+        ComplexTrigonometry::HyperbolicCosecant => {
+            value.hyperbolic_sine().and_then(ComplexValue::reciprocal)
+        }
+    };
+    // The bounded functions stay finite where sine, cosine, or cosh overflow, so an overflow there
+    // is an unknown result rather than #NUM!.
+    let bounded = !matches!(
+        function,
+        ComplexTrigonometry::Sine
+            | ComplexTrigonometry::Cosine
+            | ComplexTrigonometry::HyperbolicSine
+    );
+    match result {
+        Err(ErrorKind::Num) if bounded => Value::Error(ErrorKind::Unsupported),
+        result => complex_text(engine, result),
+    }
+}
+
 fn unary_complex(
     engine: &Engine<'_>,
     context: EvalContext<'_>,

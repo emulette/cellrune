@@ -197,6 +197,10 @@ function_enum!(EngineeringFunction {
     ImAbs,
     ImArgument,
     ImConjugate,
+    ImCos,
+    ImCot,
+    ImCsc,
+    ImCsch,
     ImDiv,
     ImExp,
     ImImaginary,
@@ -206,9 +210,14 @@ function_enum!(EngineeringFunction {
     ImPower,
     ImProduct,
     ImReal,
+    ImSec,
+    ImSech,
+    ImSin,
+    ImSinh,
     ImSqrt,
     ImSub,
     ImSum,
+    ImTan,
 });
 
 function_enum!(LookupFunction {

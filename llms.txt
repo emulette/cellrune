@@ -734,16 +734,17 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 470 official
+  `.is_official()`. The 0.1.27 catalog contains 479 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 471 accepted entries. The descriptor registry
+  dummy-function marker, for 480 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
 - The official names added in 0.1.27 are `SKEW`, `SKEW.P`, `KURT`,
   `FREQUENCY`, `MODE.MULT`, `CHISQ.TEST`, `CHITEST`, `CHISQ.INV`,
-  `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, and `VDB`. `CHITEST` and
-  `CHIINV` are legacy aliases of
+  `CHISQ.INV.RT`, `CHIINV`, `CUMIPMT`, `CUMPRINC`, `VDB`, `IMSIN`, `IMCOS`,
+  `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, and `IMCSCH`.
+  `CHITEST` and `CHIINV` are legacy aliases of
   `CHISQ.TEST` and `CHISQ.INV.RT`. `FREQUENCY` and `MODE.MULT` are marked
   `.returns_array()`; the others return scalars.
 - `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
@@ -792,6 +793,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   declining balance. Salvage above cost depreciates nothing. A negative cost,
   salvage, or start, a life or factor that is not positive, or an end before the
   start returns `#NUM!`; fractional periods and an end after the life report
+  `calculation.unsupported_expression`.
+- The complex trigonometric functions take one inumber and return complex text
+  with the same 15-significant-digit formatting and `i`/`j` suffix as the other
+  complex functions; `IMTAN` and `IMCOT` use the double-angle forms so small
+  real parts survive. A logical inumber returns `#VALUE!` and other text that
+  is not a complex number `#NUM!`. `IMSIN`, `IMCOS`, and `IMSINH` return
+  `#NUM!` when the result overflows. `IMCOT`, `IMCSC`, and `IMCSCH` at zero, and
+  the bounded functions where an intermediate overflows, report
   `calculation.unsupported_expression`.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
