@@ -1327,6 +1327,13 @@ pub struct SheetSummaryDto {
     /// Worksheet-level autoFilter range in A1 notation, when the sheet declares one.
     #[serde(default)]
     pub auto_filter: Option<String>,
+    /// Zero-based `filterColumn` identifiers of the worksheet-level autoFilter that declare a filter
+    /// condition.
+    #[serde(default)]
+    pub auto_filter_filtered_columns: Vec<u32>,
+    /// Hidden rows as ascending A1 row ranges such as `2:4`; a filter's hidden rows are included.
+    #[serde(default)]
+    pub hidden_rows: Vec<String>,
 }
 
 /// Transport-safe versioned workbook semantic fingerprint.

@@ -81,6 +81,8 @@ pub struct NativeSheetSummary {
     pub merged_ranges: Vec<String>,
     pub tables: Vec<NativeTableSummary>,
     pub auto_filter: Option<String>,
+    pub auto_filter_filtered_columns: Vec<u32>,
+    pub hidden_rows: Vec<String>,
 }
 
 #[napi(object)]
@@ -276,6 +278,8 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
                 used_range: sheet.used_range,
                 merged_ranges: sheet.merged_ranges,
                 auto_filter: sheet.auto_filter,
+                auto_filter_filtered_columns: sheet.auto_filter_filtered_columns,
+                hidden_rows: sheet.hidden_rows,
                 tables: sheet
                     .tables
                     .into_iter()

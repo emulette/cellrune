@@ -286,6 +286,8 @@ export interface NativeSheetSummary {
   mergedRanges: Array<string>
   tables: Array<NativeTableSummary>
   autoFilter?: string
+  autoFilterFilteredColumns: Array<number>
+  hiddenRows: Array<string>
 }
 
 export interface NativeTableColumn {

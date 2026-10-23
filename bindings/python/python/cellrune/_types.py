@@ -304,6 +304,8 @@ class SheetSummary(TypedDict):
     merged_ranges: list[str]
     tables: list[TableSummary]
     auto_filter: str | None
+    auto_filter_filtered_columns: list[int]
+    hidden_rows: list[str]
 
 
 class WorkbookFingerprint(TypedDict):

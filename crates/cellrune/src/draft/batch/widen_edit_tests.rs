@@ -107,7 +107,11 @@ fn widen_filter(start: &str, end: &str) -> WorkbookChange {
 }
 
 fn filter_on(sheet: &mut Sheet, start: &str, end: &str) {
-    sheet.set_auto_filter(Some(SheetAutoFilter::from_xlsx(range(start, end), vec![0])));
+    sheet.set_auto_filter(Some(SheetAutoFilter::from_xlsx(
+        range(start, end),
+        vec![0],
+        Vec::new(),
+    )));
 }
 
 #[test]

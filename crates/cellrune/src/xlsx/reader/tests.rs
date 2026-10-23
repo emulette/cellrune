@@ -1439,6 +1439,107 @@ fn reads_the_sheet_level_auto_filter_range_and_filter_columns() {
     }
 }
 
+#[test]
+fn reads_which_auto_filter_columns_declare_a_filter_condition() {
+    let sheet = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<autoFilter ref="A1:I1"><filterColumn colId="3"><filters><filter val="x"/></filters></filterColumn><filterColumn colId="0" hiddenButton="1"/><filterColumn colId="5"><top10 val="2"/></filterColumn><filterColumn colId="6"><customFilters><customFilter operator="greaterThan" val="1"/></customFilters></filterColumn></autoFilter></worksheet>"#,
+    );
+    let archive = build_archive(&sheet, SHARED_STRINGS);
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    let filter = snapshot
+        .sheet_by_name("First")
+        .and_then(|sheet| sheet.auto_filter())
+        .expect("sheet auto-filter");
+    assert_eq!(filter.filter_column_ids(), [3, 0, 5, 6]);
+    assert_eq!(filter.filtered_column_ids(), [3, 5, 6]);
+
+    let buttons_only = SHEET_ONE.replace(
+        "</worksheet>",
+        r#"<autoFilter ref="A1:I1"><filterColumn colId="1" showButton="0"/></autoFilter></worksheet>"#,
+    );
+    let archive = build_archive(&buttons_only, SHARED_STRINGS);
+    let snapshot = read_xlsx(Cursor::new(archive), ReadOptions::default()).expect("read");
+    let filter = snapshot
+        .sheet_by_name("First")
+        .and_then(|sheet| sheet.auto_filter())
+        .expect("sheet auto-filter");
+    assert!(filter.filtered_column_ids().is_empty());
+}
+
+#[test]
+fn reads_hidden_rows_with_and_without_cells() {
+    use crate::Row;
+
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+    <row r="2" hidden="1"><c r="A2"><v>2</v></c></row>
+    <row r="3" hidden="true"/>
+    <row r="4" hidden="0"><c r="A4"><v>4</v></c></row>
+    <row r="6" hidden="1" customHeight="1" ht="0"/>
+    <row r="7" hidden="maybe"/>
+  </sheetData>
+</worksheet>"#;
+    let archive = build_archive(sheet, SHARED_STRINGS);
+    let snapshot = read_xlsx(Cursor::new(archive.clone()), ReadOptions::default()).expect("read");
+    let first = snapshot.sheet_by_name("First").expect("sheet");
+    let rows = |rows: &[u32]| {
+        rows.iter()
+            .map(|row| Row::new(*row).expect("valid row"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(first.hidden_rows(), rows(&[2, 3, 6]));
+    assert!(first.is_row_hidden(Row::new(2).expect("valid row")));
+    assert!(!first.is_row_hidden(Row::new(4).expect("valid row")));
+    let second = snapshot.sheet_by_name("Second").expect("sheet");
+    assert!(second.hidden_rows().is_empty());
+    let shown = read_xlsx(
+        Cursor::new(build_archive(
+            &sheet
+                .replace(" hidden=\"1\"", "")
+                .replace(" hidden=\"true\"", ""),
+            SHARED_STRINGS,
+        )),
+        ReadOptions::default(),
+    )
+    .expect("read");
+    assert_ne!(
+        snapshot.fingerprint(),
+        shown.fingerprint(),
+        "hidden rows are part of the workbook's semantic content"
+    );
+
+    // An edit inside a hidden row keeps the row hidden in the written document.
+    let document =
+        crate::open_xlsx_document_bytes(&archive, crate::OpenOptions::default()).expect("document");
+    let sheet_id = first.id();
+    let mut draft = crate::WorkbookDraft::from_document(&document);
+    draft
+        .apply_changes(crate::EditBatch::new([
+            crate::WorkbookChange::set_cell_value(
+                sheet_id,
+                crate::CellAddress::from_a1("B2").expect("valid address"),
+                crate::CellValue::number(7.0).expect("finite number"),
+            ),
+        ]))
+        .expect("edit inside a hidden row");
+    let calculation =
+        crate::calculate_workbook(draft.workbook(), crate::CalculationOptions::default());
+    let written = crate::write_xlsx_draft_bytes(
+        &draft,
+        &calculation,
+        crate::RecalculationWriteOptions::default(),
+    )
+    .expect("document write");
+    let reopened = read_xlsx_bytes(written.bytes(), ReadOptions::default()).expect("reopen");
+    assert_eq!(
+        reopened.sheet_by_id(sheet_id).expect("sheet").hidden_rows(),
+        rows(&[2, 3, 6])
+    );
+}
+
 const SHEET_WITH_TABLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">

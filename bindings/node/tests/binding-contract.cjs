@@ -90,6 +90,8 @@ async function assertEditsSave() {
   const summary = workbook.summary();
   assert.equal(summary.fullCalculationOnLoad, true);
   assert.equal(summary.sheets[0].autoFilter, null);
+  assert.deepEqual(summary.sheets[0].autoFilterFilteredColumns, []);
+  assert.deepEqual(summary.sheets[0].hiddenRows, []);
   workbook.setNumber("Sheet1", "A1", 3);
 
   const edited = await workbook.editsToBytes();

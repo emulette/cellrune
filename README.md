@@ -29,7 +29,8 @@ cellrune = "0.1.26"
   vector that it keeps without copying and can hand back;
 - preserves sheet order, sparse cells, formulas, saved results, defined names, and relevant
   number-format metadata;
-- exposes merged ranges, worksheet-level autoFilter ranges, and validated worksheet-owned Excel
+- exposes merged ranges, hidden rows, worksheet-level autoFilter ranges and their filtered
+  columns, and validated worksheet-owned Excel
   tables, including stable table and column IDs, complete filter/sort/formula/style metadata, and
   case-insensitive lookup indexes;
 - resolves typed multi-area, 3-D, structured table, current-row, and spill references under
@@ -373,7 +374,7 @@ reaches every surface:
 | Open, summary, range read, v1/v2 edits, calculate, recalculate, targeted calculation, previews, function usage, capability scan | yes | yes | yes | yes |
 | Save calculated results | yes | yes | yes | yes |
 | Save edits without calculating | yes | yes | yes | yes |
-| Cell number formats, sheet autoFilter ranges, `fullCalcOnLoad` | yes | yes | yes | yes |
+| Cell number formats, hidden rows, sheet autoFilter ranges and filtered columns, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
@@ -488,7 +489,8 @@ keep their defaults; a zero fails with `interop.limit.invalid`, and limits that 
 `interop.limit.payload_invalid`. `scan_capabilities`/
 `scanCapabilities` page through the static per-formula support report. Range cells carry a
 `number_format` with its ID, code, and kind, and the summary reports each sheet's `auto_filter`
-range and the package's `full_calculation_on_load` declaration: xlsxwriter and similar producers
+range and filtered columns, its hidden rows, and the package's `full_calculation_on_load`
+declaration: xlsxwriter and similar producers
 set it and may store placeholder results, so read such saved results only after calculating.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native

@@ -16,6 +16,7 @@ pub(super) struct SheetAutoFilterCollector {
     open_depth: Option<u64>,
     range: Option<CellRange>,
     filter_column_ids: Vec<u32>,
+    filtered_column_ids: Vec<u32>,
     seen_filter_column_ids: BTreeSet<u32>,
 }
 
@@ -46,6 +47,22 @@ impl SheetAutoFilterCollector {
         }
     }
 
+    /// Returns whether an element at `depth` is a direct child of a `<filterColumn>`, where its
+    /// filter condition is declared.
+    pub(super) fn is_condition_depth(&self, depth: u64) -> bool {
+        self.open_depth.is_some_and(|parent| depth == parent + 2)
+    }
+
+    /// Records a filter condition (`<filters>`, `<customFilters>`, `<top10>`, `<dynamicFilter>`,
+    /// `<colorFilter>`, or `<iconFilter>`) of the last `<filterColumn>`.
+    pub(super) fn filter_condition(&mut self) {
+        if let Some(column_id) = self.filter_column_ids.last()
+            && self.filtered_column_ids.last() != Some(column_id)
+        {
+            self.filtered_column_ids.push(*column_id);
+        }
+    }
+
     /// Closes the open `<autoFilter>` when `depth` is its depth.
     pub(super) fn end(&mut self, depth: u64) {
         if self.open_depth == Some(depth) {
@@ -55,6 +72,10 @@ impl SheetAutoFilterCollector {
 
     pub(super) fn finish(self) -> Option<SheetAutoFilter> {
         let range = self.range.filter(|_| self.valid)?;
-        Some(SheetAutoFilter::from_xlsx(range, self.filter_column_ids))
+        Some(SheetAutoFilter::from_xlsx(
+            range,
+            self.filter_column_ids,
+            self.filtered_column_ids,
+        ))
     }
 }

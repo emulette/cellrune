@@ -93,6 +93,23 @@ pub(crate) fn sheet_fingerprint_cancellable(
             }
             hash.u32(*column_id);
         }
+        // Filter conditions and hidden rows are folded only when present, so the digests of sheets
+        // without them stay as they were.
+        if !filter.filtered_column_ids().is_empty() {
+            hash.usize(filter.filtered_column_ids().len());
+            for column_id in filter.filtered_column_ids() {
+                hash.u32(*column_id);
+            }
+        }
+    }
+    if !sheet.hidden_rows().is_empty() {
+        hash.usize(sheet.hidden_rows().len());
+        for row in sheet.hidden_rows() {
+            if cancelled() {
+                return Err(());
+            }
+            hash.u32(row.get());
+        }
     }
     Ok(hash.finish())
 }
@@ -986,7 +1003,7 @@ mod tests {
             .expect("valid workbook")
         };
         let base = workbook_with_extras(Vec::new(), Vec::new());
-        let filter = SheetAutoFilter::from_xlsx(range("A1", "C4"), vec![0, 2]);
+        let filter = SheetAutoFilter::from_xlsx(range("A1", "C4"), vec![0, 2], Vec::new());
 
         assert_eq!(
             workbook_fingerprint(&filtered(None)),
@@ -1000,7 +1017,8 @@ mod tests {
             workbook_fingerprint(&filtered(Some(filter))),
             workbook_fingerprint(&filtered(Some(SheetAutoFilter::from_xlsx(
                 range("A1", "D4"),
-                vec![0, 2]
+                vec![0, 2],
+                Vec::new()
             ))))
         );
     }

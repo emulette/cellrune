@@ -88,6 +88,11 @@ pub(crate) fn workbook_summary<'py>(
         }
         item.set_item("tables", tables)?;
         item.set_item("auto_filter", sheet.auto_filter.as_deref())?;
+        item.set_item(
+            "auto_filter_filtered_columns",
+            &sheet.auto_filter_filtered_columns,
+        )?;
+        item.set_item("hidden_rows", &sheet.hidden_rows)?;
         sheets.append(item)?;
     }
     result.set_item("sheets", sheets)?;

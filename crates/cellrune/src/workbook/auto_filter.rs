@@ -2,20 +2,26 @@ use crate::CellRange;
 
 /// A worksheet-level auto-filter that belongs to no Excel table.
 ///
-/// Only the filtered range and the columns that carry filter settings are modeled. Filter
-/// criteria and sort state stay in the source worksheet XML, which a document-backed writer
-/// preserves.
+/// The filtered range, the columns that carry filter settings, and which of them declare a filter
+/// condition are modeled. The conditions themselves and the sort state stay in the source
+/// worksheet XML, which a document-backed writer preserves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SheetAutoFilter {
     range: CellRange,
     filter_column_ids: Vec<u32>,
+    filtered_column_ids: Vec<u32>,
 }
 
 impl SheetAutoFilter {
-    pub(crate) const fn from_xlsx(range: CellRange, filter_column_ids: Vec<u32>) -> Self {
+    pub(crate) const fn from_xlsx(
+        range: CellRange,
+        filter_column_ids: Vec<u32>,
+        filtered_column_ids: Vec<u32>,
+    ) -> Self {
         Self {
             range,
             filter_column_ids,
+            filtered_column_ids,
         }
     }
 
@@ -31,17 +37,31 @@ impl SheetAutoFilter {
         &self.filter_column_ids
     }
 
+    /// Returns the `filterColumn` identifiers, in declaration order, whose column declares a
+    /// filter condition (`filters`, `customFilters`, `top10`, `dynamicFilter`, `colorFilter`, or
+    /// `iconFilter`). A filter column without one only configures its button.
+    ///
+    /// Excel stores the rows a filter hides as hidden rows, so the hidden rows of
+    /// [`crate::Sheet::hidden_rows`] inside [`Self::range`] count as filtered when this list is not
+    /// empty.
+    pub fn filtered_column_ids(&self) -> &[u32] {
+        &self.filtered_column_ids
+    }
+
     /// Returns this filter over `range`, which keeps its rows and contains its columns, with each
     /// filter column renumbered from the new first column.
     pub(crate) fn widened(&self, range: CellRange) -> Self {
         let shift = self.range.start().column().get() - range.start().column().get();
-        Self {
-            range,
-            filter_column_ids: self
-                .filter_column_ids
+        let shifted = |column_ids: &[u32]| {
+            column_ids
                 .iter()
                 .map(|column_id| column_id + shift)
-                .collect(),
+                .collect()
+        };
+        Self {
+            range,
+            filter_column_ids: shifted(&self.filter_column_ids),
+            filtered_column_ids: shifted(&self.filtered_column_ids),
         }
     }
 }

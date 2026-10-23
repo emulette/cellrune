@@ -256,6 +256,7 @@ pub struct Sheet {
     merged_ranges: Arc<Vec<CellRange>>,
     tables: Arc<Vec<Table>>,
     auto_filter: Option<SheetAutoFilter>,
+    hidden_rows: Arc<Vec<Row>>,
     new_cell_styles: Arc<NewCellStyles>,
     semantic_fingerprint: OnceLock<[u8; 32]>,
 }
@@ -281,6 +282,7 @@ impl Sheet {
             merged_ranges: Arc::clone(&self.merged_ranges),
             tables: Arc::clone(&self.tables),
             auto_filter: self.auto_filter.clone(),
+            hidden_rows: Arc::clone(&self.hidden_rows),
             new_cell_styles: Arc::clone(&self.new_cell_styles),
             semantic_fingerprint: self.semantic_fingerprint.clone(),
         })
@@ -304,6 +306,7 @@ impl Sheet {
             merged_ranges: Arc::new(Vec::new()),
             tables: Arc::new(Vec::new()),
             auto_filter: None,
+            hidden_rows: Arc::new(Vec::new()),
             new_cell_styles: Arc::default(),
             semantic_fingerprint: OnceLock::new(),
         }
@@ -558,6 +561,18 @@ impl Sheet {
         self.auto_filter = auto_filter;
     }
 
+    /// Returns the rows the worksheet hides, in ascending order. Rows a filter hides are stored the
+    /// same way, so a hidden row inside an [`Self::auto_filter`] or table auto-filter that has a
+    /// filter condition may have been hidden by that filter.
+    pub fn hidden_rows(&self) -> &[Row] {
+        &self.hidden_rows
+    }
+
+    /// Returns whether the worksheet hides `row`.
+    pub fn is_row_hidden(&self, row: Row) -> bool {
+        self.hidden_rows.binary_search(&row).is_ok()
+    }
+
     /// Returns the source styles that cells written at empty positions receive.
     pub(crate) fn new_cell_styles(&self) -> &NewCellStyles {
         &self.new_cell_styles
@@ -774,6 +789,15 @@ impl SheetBuilder {
 
     pub(crate) fn set_auto_filter(&mut self, auto_filter: Option<SheetAutoFilter>) {
         self.sheet.set_auto_filter(auto_filter);
+    }
+
+    /// Records a hidden row; the reader visits rows in ascending order, so a row at or before the
+    /// last recorded one is ignored.
+    pub(crate) fn push_hidden_row(&mut self, row: Row) {
+        if self.sheet.hidden_rows.last().is_none_or(|last| *last < row) {
+            self.sheet.semantic_fingerprint = OnceLock::new();
+            Arc::make_mut(&mut self.sheet.hidden_rows).push(row);
+        }
     }
 
     pub(crate) fn new_cell_styles_mut(&mut self) -> &mut NewCellStyles {

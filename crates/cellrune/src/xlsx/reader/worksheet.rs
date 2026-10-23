@@ -40,6 +40,15 @@ const TABLE_PARTS: &[u8] = b"tableParts";
 const TABLE_PART: &[u8] = b"tablePart";
 const AUTO_FILTER: &[u8] = b"autoFilter";
 const FILTER_COLUMN: &[u8] = b"filterColumn";
+/// The elements that declare a `<filterColumn>` condition.
+const FILTER_CONDITIONS: [&[u8]; 6] = [
+    b"filters",
+    b"customFilters",
+    b"top10",
+    b"dynamicFilter",
+    b"colorFilter",
+    b"iconFilter",
+];
 #[derive(Debug, Default)]
 struct WorksheetParseState {
     saw_root: bool,
@@ -276,6 +285,10 @@ pub(super) fn parse(
                         state
                             .auto_filter
                             .filter_column(attributes.unqualified("colId"));
+                    } else if state.auto_filter.is_condition_depth(depth)
+                        && FILTER_CONDITIONS.contains(&local_name.as_slice())
+                    {
+                        state.auto_filter.filter_condition();
                     } else if state
                         .sheet_data_depth
                         .is_some_and(|parent| depth == parent + 1)
@@ -289,6 +302,7 @@ pub(super) fn parse(
                             &budget,
                         )?;
                         process_row_style(&attributes, capture, resources.styles, sheet);
+                        process_row_hidden(&attributes, sheet);
                     } else if local_name == CELL
                         && state.row_depth.is_some_and(|row| depth == row + 1)
                     {
@@ -530,6 +544,9 @@ fn process_start(
         state
             .auto_filter
             .filter_column(attributes.unqualified("colId"));
+    } else if state.auto_filter.is_condition_depth(depth) && FILTER_CONDITIONS.contains(&local_name)
+    {
+        state.auto_filter.filter_condition();
     } else if state
         .sheet_data_depth
         .is_some_and(|sheet_data| depth == sheet_data + 1)
@@ -571,6 +588,7 @@ fn process_start(
             );
         }
         process_row_style(&attributes, capture, styles, sheet);
+        process_row_hidden(&attributes, sheet);
     } else if state.row_depth.is_some_and(|row| depth == row + 1) && local_name == CELL {
         increment_cell_counts(&mut state.sheet_cells, total_cells, budget.limits(), budget)?;
         if state.current_cell.is_some() {
@@ -702,6 +720,21 @@ fn process_empty_row_visibility(
         parse_bool(value, budget)?,
     );
     Ok(())
+}
+
+/// Records a row that declares `hidden`. A row whose `r` or `hidden` does not resolve records
+/// nothing instead of failing the read, as row styles do.
+fn process_row_hidden(attributes: &XmlAttributes, sheet: &mut SheetBuilder) {
+    if !matches!(attributes.unqualified("hidden"), Some("1" | "true")) {
+        return;
+    }
+    if let Some(row) = attributes
+        .unqualified("r")
+        .and_then(|value| value.parse::<u32>().ok())
+        .and_then(|row| Row::new(row).ok())
+    {
+        sheet.push_hidden_row(row);
+    }
 }
 
 /// Records the style of a row that declares `customFormat`, which a cell written into the row

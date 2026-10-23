@@ -3,7 +3,7 @@
 use cellrune::{
     CellAddress, CellRange, DateSystem, DefinedNameAnalysis, DefinedNameDynamicKind,
     DefinedNameExternalTargetKind, DefinedNameInvalidReason, DefinedNameReferenceArea,
-    DefinedNameSheetSpan, DefinedNameUnsupportedReason, FormulaCapability, FunctionSupport,
+    DefinedNameSheetSpan, DefinedNameUnsupportedReason, FormulaCapability, FunctionSupport, Row,
     SheetId, WorkbookSnapshot, analyze_defined_name, scan_formula_capabilities_with_options,
     scan_function_usage, supported_function_catalog,
 };
@@ -94,6 +94,11 @@ impl WorkbookSession {
                     auto_filter: sheet
                         .auto_filter()
                         .map(|filter| range_text(filter.range().start(), filter.range().end())),
+                    auto_filter_filtered_columns: sheet
+                        .auto_filter()
+                        .map(|filter| filter.filtered_column_ids().to_vec())
+                        .unwrap_or_default(),
+                    hidden_rows: hidden_row_ranges(sheet.hidden_rows()),
                 })
                 .collect(),
         }
@@ -466,6 +471,21 @@ pub fn function_catalog() -> FunctionCatalogReportDto {
     }
 }
 
+/// Writes ascending hidden rows as A1 row ranges, merging consecutive rows (`2:4`).
+fn hidden_row_ranges(rows: &[Row]) -> Vec<String> {
+    let mut spans = Vec::<(u32, u32)>::new();
+    for row in rows {
+        match spans.last_mut() {
+            Some((_, end)) if *end + 1 == row.get() => *end = row.get(),
+            _ => spans.push((row.get(), row.get())),
+        }
+    }
+    spans
+        .into_iter()
+        .map(|(start, end)| format!("{start}:{end}"))
+        .collect()
+}
+
 fn normalized_limit(limit: u32) -> Result<u32, InteropError> {
     let limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
     if limit > MAX_PAGE_SIZE {
@@ -506,6 +526,15 @@ mod tests {
             )
             .expect("install test names");
         session
+    }
+
+    #[test]
+    fn hidden_rows_merge_into_ascending_row_ranges() {
+        let rows = [2, 3, 4, 6, 9, 10]
+            .map(|row| Row::new(row).expect("valid row"))
+            .to_vec();
+        assert_eq!(hidden_row_ranges(&rows), ["2:4", "6:6", "9:10"]);
+        assert!(hidden_row_ranges(&[]).is_empty());
     }
 
     #[test]

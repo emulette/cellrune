@@ -290,6 +290,8 @@ function normalizeSummary(summary) {
       usedRange: sheet.usedRange ?? null,
       mergedRanges: sheet.mergedRanges,
       autoFilter: sheet.autoFilter ?? null,
+      autoFilterFilteredColumns: sheet.autoFilterFilteredColumns,
+      hiddenRows: sheet.hiddenRows,
       tables: sheet.tables.map((table) => ({
         id: table.id,
         name: table.name,

@@ -752,6 +752,7 @@ fn draft_semantics_match(
             || expected_sheet.visibility() != actual_sheet.visibility()
             || !tables_semantically_match(expected_sheet.tables(), actual_sheet.tables())
             || expected_sheet.auto_filter() != actual_sheet.auto_filter()
+            || expected_sheet.hidden_rows() != actual_sheet.hidden_rows()
         {
             return false;
         }
