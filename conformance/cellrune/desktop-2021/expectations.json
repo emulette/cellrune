@@ -4134,25 +4134,22 @@
     "excel_rich_error": false
   },
   "function:frequency": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "5",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FREQUENCY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:frequency:coercion": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FREQUENCY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:frequency:domain": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "0",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (FREQUENCY) for this oracle case."
+    "excel_rich_error": false
   },
   "function:ftest": {
     "classification": "match",
@@ -5776,11 +5773,10 @@
     "excel_rich_error": false
   },
   "function:mode-mult": {
-    "classification": "not_implemented",
+    "classification": "match",
     "excel_value": "1",
     "excel_type": "n",
-    "excel_rich_error": false,
-    "note": "CellRune reports calculation.unsupported_function (_XLFN.MODE.MULT) for this oracle case."
+    "excel_rich_error": false
   },
   "function:mode-sngl": {
     "classification": "match",

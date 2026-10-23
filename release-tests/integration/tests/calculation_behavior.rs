@@ -35,6 +35,8 @@ mod random;
 mod regression;
 #[path = "calculation_behavior/roman_numeral.rs"]
 mod roman_numeral;
+#[path = "calculation_behavior/statistical_arrays.rs"]
+mod statistical_arrays;
 #[path = "calculation_behavior/statistical_extensions.rs"]
 mod statistical_extensions;
 #[path = "calculation_behavior/support.rs"]
@@ -2766,7 +2768,7 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
     let catalog = supported_function_catalog();
     assert_eq!(
         catalog.iter().filter(|entry| entry.is_official()).count(),
-        460
+        462
     );
     assert!(
         catalog

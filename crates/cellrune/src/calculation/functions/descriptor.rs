@@ -884,6 +884,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Filter, "FILTER", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Filter)),
+    function!(Frequency, "FREQUENCY", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::Frequency))
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(HStack, "HSTACK", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::HStack)),
     function!(MInverse, "MINVERSE", Array)
@@ -892,6 +895,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(MDeterm, "MDETERM", Math).with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(MMult, "MMULT", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MMult)),
+    function!(ModeMult, "MODE.MULT", Array)
+        .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::ModeMult))
+        .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(MUnit, "MUNIT", Array)
         .with_array_evaluator(ArrayEvaluator::Array(ArrayFunction::MUnit))
         .with_minimum_version(CompatibilityVersion::V0_1_11),
@@ -1694,6 +1700,33 @@ mod tests {
             assert!(!descriptor.call_contract().arity().accepts(256), "{name}");
             assert!(!descriptor.catalog_returns_array(), "{name}");
         }
+
+        for name in ["FREQUENCY", "MODE.MULT"] {
+            let descriptor = descriptor(name).unwrap_or_else(|| panic!("{name} descriptor"));
+            assert_eq!(
+                descriptor.minimum_version(),
+                CompatibilityVersion::V0_1_27,
+                "{name}",
+            );
+            assert!(
+                matches!(descriptor.evaluator(), Evaluator::Array(_)),
+                "{name}"
+            );
+            assert_eq!(
+                descriptor.result_kind(),
+                FunctionResultKind::Array,
+                "{name}"
+            );
+            assert!(descriptor.catalog_returns_array(), "{name}");
+        }
+        let frequency = descriptor("FREQUENCY").expect("FREQUENCY descriptor");
+        assert!(frequency.call_contract().arity().accepts(2));
+        assert!(!frequency.call_contract().arity().accepts(1));
+        assert!(!frequency.call_contract().arity().accepts(3));
+        let mode_mult = descriptor("MODE.MULT").expect("MODE.MULT descriptor");
+        assert!(mode_mult.call_contract().arity().accepts(1));
+        assert!(mode_mult.call_contract().arity().accepts(255));
+        assert!(!mode_mult.call_contract().arity().accepts(0));
     }
 
     #[test]

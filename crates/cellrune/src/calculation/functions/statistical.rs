@@ -592,17 +592,27 @@ fn trim_mean(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Va
 }
 
 fn mode(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    let values = match collect_argument_values(engine, context, args) {
-        Ok(values) => values,
-        Err(kind) => return Value::Error(kind),
-    };
+    match modes(engine, context, args) {
+        Ok(modes) => Value::Number(modes[0]),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// Returns every number that occurs most often, at least twice, in the order each first occurs;
+/// `#N/A` when no number repeats.
+pub(super) fn modes(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Vec<f64>, ErrorKind> {
+    let values = collect_argument_values(engine, context, args)?;
     let mut counts = BTreeMap::<u64, (f64, usize, usize)>::new();
     for (position, item) in values.into_iter().enumerate() {
         let number = match item.value {
             Value::Number(number) => number,
-            Value::Error(kind) => return Value::Error(kind),
+            Value::Error(kind) => return Err(kind),
             Value::Blank if item.from_single_cell_reference => {
-                return Value::Error(ErrorKind::Value);
+                return Err(ErrorKind::Value);
             }
             Value::Blank | Value::Text(_) | Value::Logical(_) => continue,
         };
@@ -611,12 +621,19 @@ fn mode(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
             .or_insert((number, 0, position));
         entry.1 += 1;
     }
-    counts
+    let most = counts
         .values()
-        .filter(|(_, count, _)| *count > 1)
-        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.2.cmp(&left.2)))
-        .map(|(number, _, _)| Value::Number(*number))
-        .unwrap_or(Value::Error(ErrorKind::NA))
+        .map(|(_, count, _)| *count)
+        .max()
+        .filter(|count| *count > 1)
+        .ok_or(ErrorKind::NA)?;
+    let mut modes = counts
+        .into_values()
+        .filter(|(_, count, _)| *count == most)
+        .map(|(number, _, position)| (position, number))
+        .collect::<Vec<_>>();
+    modes.sort_unstable_by_key(|(position, _)| *position);
+    Ok(modes.into_iter().map(|(_, number)| number).collect())
 }
 
 fn percentile(

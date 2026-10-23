@@ -1491,7 +1491,8 @@ impl ArrayFunction {
                 CallContract::uniform(Arity::range(1, MAX_EXCEL_ARGUMENTS), ARRAY)
             }
             Self::MInverse => CallContract::uniform(Arity::exact(1), ARRAY),
-            Self::MMult => CallContract::uniform(Arity::exact(2), ARRAY),
+            Self::Frequency | Self::MMult => CallContract::uniform(Arity::exact(2), ARRAY),
+            Self::ModeMult => CallContract::uniform(Arity::range(1, MAX_EXCEL_ARGUMENTS), ARRAY),
             Self::MUnit => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::RandArray => CallContract::positional(
                 Arity::range(0, 5),

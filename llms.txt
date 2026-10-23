@@ -734,19 +734,33 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `supported_function_catalog() -> Vec<FunctionCatalogEntry>` returns the
   deterministic accepted-name catalog for this build. Each entry exposes
   `.name()`, `.canonical_name()`, `.is_alias()`, `.returns_array()`, and
-  `.is_official()`. The 0.1.27 catalog contains 460 official
+  `.is_official()`. The 0.1.27 catalog contains 462 official
   Excel-facing names and one non-official compatibility entry for the OOXML
-  dummy-function marker, for 461 accepted entries. The descriptor registry
+  dummy-function marker, for 463 accepted entries. The descriptor registry
   retains versioned semantic snapshots, while the current catalog is guarded
   by structural and behavioral assertions rather than byte hashes. The 0.1.14
   catalog contained 386 official names and 387 accepted entries.
-- The official names added in 0.1.27 are `SKEW`, `SKEW.P`, and `KURT`. They
-  collect numbers as `STDEV.S` does: typed text numbers and logical values
+- The official names added in 0.1.27 are `SKEW`, `SKEW.P`, `KURT`,
+  `FREQUENCY`, and `MODE.MULT`. `FREQUENCY` and `MODE.MULT` are marked
+  `.returns_array()`; the others return scalars.
+- `SKEW`, `SKEW.P`, and `KURT` collect numbers as `STDEV.S` does: typed text
+  numbers and logical values
   count, while text, logical values, and blanks inside references and arrays
   are skipped, and errors propagate. `SKEW` and `KURT` standardize by the sample
   standard deviation and apply Microsoft's bias corrections; `SKEW.P` divides
   the summed cubed population z-scores by the count. Fewer than three numbers
   (four for `KURT`) or a zero standard deviation returns `#DIV/0!`.
+- `FREQUENCY(data_array, bins_array)` spills one column with one more row than
+  there are bins: the count of numbers at or below the first bin, above each
+  bin through the next, and above the last bin. Text and blanks are ignored in
+  both arguments, and bins without any number return the count of numbers.
+  Bins must be in ascending order (repeats are empty intervals) and be all
+  numbers or none; other bins, and logical values or errors in either
+  argument, report `calculation.unsupported_expression`.
+- `MODE.MULT` spills one column of every number that occurs most often, at
+  least twice, in the order each first occurs, so its first row is the
+  `MODE.SNGL` result; it collects numbers as `MODE.SNGL` does and returns
+  `#N/A` when no number repeats.
 - The three official names added in 0.1.26 are `RAND`, `RANDBETWEEN`, and
   `RANDARRAY`, with the edges measured in Excel. `RAND` returns a number in
   `[0, 1)`. `RANDBETWEEN(bottom, top)` returns `#NUM!` when `bottom` exceeds

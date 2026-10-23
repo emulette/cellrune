@@ -68,6 +68,7 @@ mod roman_numeral;
 mod special_functions;
 mod statistical;
 mod statistical_additional;
+mod statistical_array;
 mod sum_of_squares;
 mod text;
 mod text_additional;
@@ -994,10 +995,10 @@ mod tests {
         );
 
         let catalog = super::function_catalog();
-        assert_eq!(catalog.len(), 461);
+        assert_eq!(catalog.len(), 463);
         assert_eq!(
             catalog.iter().filter(|entry| entry.is_official()).count(),
-            460
+            462
         );
         assert!(
             catalog
@@ -1138,10 +1139,12 @@ mod tests {
             assert!(catalog.iter().any(|entry| entry.name() == name), "{name}");
         }
         for name in [
+            "FREQUENCY",
             "GROWTH",
             "LINEST",
             "LOGEST",
             "MINVERSE",
+            "MODE.MULT",
             "MUNIT",
             "RANDARRAY",
             "TREND",

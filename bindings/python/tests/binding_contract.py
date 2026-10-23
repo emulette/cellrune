@@ -33,7 +33,7 @@ FinancialSolverSemantics = Literal["excel_iteration_budget", "extended_search"]
 def assert_catalog_contract() -> None:
     catalog = function_catalog()
     assert catalog["schema_version"] == 1
-    assert len(catalog["entries"]) == 461
+    assert len(catalog["entries"]) == 463
     entries = {entry["name"]: entry for entry in catalog["entries"]}
     assert all(
         name in entries
@@ -68,6 +68,7 @@ def assert_catalog_contract() -> None:
             "DATEVALUE", "NETWORKDAYS.INTL", "TIMEVALUE", "WORKDAY.INTL",
             "RAND", "RANDBETWEEN", "RANDARRAY",
             "KURT", "SKEW", "SKEW.P",
+            "FREQUENCY", "MODE.MULT",
         )
     )
     assert all(
@@ -75,6 +76,7 @@ def assert_catalog_contract() -> None:
         for name in (
             "GROWTH", "LINEST", "LOGEST", "MINVERSE", "MUNIT", "RANDARRAY", "TREND",
             "XLOOKUP",
+            "FREQUENCY", "MODE.MULT",
         )
     )
     assert all(entries[name]["official"] for name in entries if name != "__XLUDF.DUMMYFUNCTION")
