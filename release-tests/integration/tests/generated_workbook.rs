@@ -17,5 +17,6 @@ mod generated_workbook {
     mod round_trip_document;
     mod sheet_deletion_write;
     mod sheet_rename_write;
+    mod style_record_write;
 }
 mod support;

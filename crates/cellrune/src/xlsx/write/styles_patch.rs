@@ -16,8 +16,8 @@ use super::{WriteLimits, XlsxWriteError, XlsxWriteErrorCode};
 use crate::xlsx::package::PartPath;
 use crate::xlsx::xml::{namespace_reader, read_event};
 use crate::{
-    Alignment, Border, CalculationCellId, CellFormat, DocumentPresentation, Fill, Font,
-    NumberFormat, PatternFill,
+    Alignment, Border, CalculationCellId, CellFormat, DocumentPresentation, Fill, FillPattern,
+    Font, NumberFormat, PatternFill,
 };
 
 const DETAIL_MISSING_CELL_XFS: &str = "styles part does not contain cellXfs";
@@ -91,6 +91,16 @@ impl RecordAdditions {
     }
 
     fn fill(&mut self, fill: &PatternFill, existing: usize) -> usize {
+        // Excel reads fill records 0 and 1 as `none` and `gray125` whatever they hold, so a source
+        // with fewer than two fills first receives the missing reserved records.
+        if self.fills.is_empty() {
+            let reserved = [
+                PatternFill::default(),
+                PatternFill::new(FillPattern::Gray125),
+            ];
+            self.fills
+                .extend(reserved.into_iter().skip(existing.min(reserved.len())));
+        }
         existing + position_or_push(&mut self.fills, fill)
     }
 
