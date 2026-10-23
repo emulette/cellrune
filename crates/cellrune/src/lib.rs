@@ -82,6 +82,7 @@
 mod address;
 mod calculation;
 mod cell;
+pub mod csv;
 mod defined_name;
 mod diagnostic;
 mod draft;
@@ -131,6 +132,7 @@ pub use calculation::{
 pub use cell::{
     Cell, CellContent, CellValue, ExcelError, FiniteNumber, NumberFormat, NumberFormatKind,
 };
+pub use csv::{CsvError, CsvErrorCode, CsvReadOptions, CsvWriteOptions, read_csv, write_csv};
 pub use defined_name::{DefinedName, DefinedNameScope};
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, InputHash, OutputHash, Provenance,

@@ -464,6 +464,30 @@ impl From<ValidationError> for InteropError {
     }
 }
 
+impl From<cellrune::CsvError> for InteropError {
+    fn from(error: cellrune::CsvError) -> Self {
+        let code = error.code();
+        let kind = match code {
+            cellrune::CsvErrorCode::InvalidDelimiter => InteropErrorKind::Input,
+            cellrune::CsvErrorCode::UnknownSheet
+            | cellrune::CsvErrorCode::StaleCalculation
+            | cellrune::CsvErrorCode::UnavailableResult => InteropErrorKind::Write,
+            _ => InteropErrorKind::Read,
+        };
+        Self::new(
+            kind,
+            code.as_str(),
+            error.to_string(),
+            ErrorDetails {
+                source_code: Some(code.as_str().to_owned()),
+                source_id: None,
+                detail: error.detail().map(str::to_owned),
+                cells: Vec::new(),
+            },
+        )
+    }
+}
+
 impl From<XlsxReadError> for InteropError {
     fn from(error: XlsxReadError) -> Self {
         let code = error.code().as_str();

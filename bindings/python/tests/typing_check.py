@@ -136,6 +136,10 @@ def check() -> None:
         "font": {"bold": True},
     }
     reopened.apply_changes_v2(reopened.summary()["semantic_revision"], [bold])
+    csv_workbook = Workbook.from_csv(b"1,2", delimiter=",")
+    csv_workbook.calculate()
+    exported: bytes = csv_workbook.to_csv("Sheet1")
+    exported.hex()
     links: HyperlinkPage = reopened.hyperlinks("Sheet1")
     for link in links["entries"]:
         link["range"].upper()

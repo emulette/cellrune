@@ -1,6 +1,7 @@
 //! Stateful workbook facade and cohesive transport-service operations.
 
 mod calculation;
+mod csv;
 mod display;
 mod edit;
 mod format;

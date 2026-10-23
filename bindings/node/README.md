@@ -142,6 +142,9 @@ sheet's read-only data validation rules, and `hyperlinks` and `comments` through
 cell comments. `readFormats(sheet, start, end, { offset, limit })` reads
 cell fonts, fills, borders, and alignments with column widths and row heights, and
 `applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes.
+`Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
+`toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
+README.
 `close()` is idempotent. Once it returns, the binding-owned native session has
 been released. An active calculation is cooperatively cancelled, a published preview is discarded,
 and later operations fail with `interop.session.closed`.

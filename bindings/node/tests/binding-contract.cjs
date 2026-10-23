@@ -631,8 +631,35 @@ async function assertAnnotations() {
   workbook.close();
 }
 
+async function assertCsv() {
+  const workbook = Workbook.fromCsv(
+    Buffer.from('item;amount\r\n"Widget; large";2.5\r\n'),
+    { sheetName: "Import", delimiter: ";" },
+  );
+  const page = workbook.readRange("Import", "A2", "B2");
+  assert.deepEqual(page.cells[0].sourceValue, { kind: "text", value: "Widget; large" });
+  assert.deepEqual(page.cells[1].sourceValue, { kind: "number", value: 2.5 });
+  assert.throws(() => workbook.toCsv("Import"), (error) => {
+    assert.equal(error.code, "interop.calculation.required");
+    return true;
+  });
+  workbook.setFormula("Import", "C2", "=B2*2");
+  await workbook.calculate();
+  assert.equal(
+    workbook.toCsv("Import").toString("utf8"),
+    "item,amount,\r\nWidget; large,2.5,5\r\n",
+  );
+  assert.throws(() => Workbook.fromCsv(Buffer.from('"open')), (error) => {
+    assert.ok(error instanceof CellRuneError);
+    assert.equal(error.code, "csv.read.unterminated_quote");
+    return true;
+  });
+  workbook.close();
+}
+
 async function main() {
   await assertDeleteSheet();
+  await assertCsv();
   await assertAnnotations();
   await assertFormats();
   await assertDataValidations();

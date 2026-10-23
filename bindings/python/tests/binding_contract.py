@@ -637,8 +637,33 @@ def assert_annotations() -> None:
     assert_error("interop.sheet.not_found", lambda: workbook.comments("Missing"))
 
 
+def assert_csv() -> None:
+    workbook = Workbook.from_csv(
+        b'item;amount\r\n"Widget; large";2.5\r\n', sheet_name="Import", delimiter=";"
+    )
+    page = workbook.read_range("Import", "A2", "B2")
+    assert page["cells"][0]["source_value"] == {"kind": "text", "value": "Widget; large"}
+    assert page["cells"][1]["source_value"] == {"kind": "number", "value": 2.5}
+    try:
+        workbook.to_csv("Import")
+    except CellRuneError as error:
+        assert (error.code, error.kind) == ("interop.calculation.required", "state")
+    else:
+        raise AssertionError("an uncalculated workbook was exported")
+    workbook.set_formula("Import", "C2", "=B2*2")
+    workbook.calculate()
+    assert workbook.to_csv("Import") == b"item,amount,\r\nWidget; large,2.5,5\r\n"
+    try:
+        Workbook.from_csv(b'"open')
+    except CellRuneError as error:
+        assert (error.code, error.kind) == ("csv.read.unterminated_quote", "read")
+    else:
+        raise AssertionError("an unterminated quote was accepted")
+
+
 def main() -> None:
     assert_delete_sheet()
+    assert_csv()
     assert_annotations()
     assert_formats()
     assert_data_validations()

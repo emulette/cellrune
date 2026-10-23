@@ -2,10 +2,7 @@ use std::path::PathBuf;
 
 use cellrune_binding_support::{SharedWorkbookSession, WorkbookSessionGuard};
 use cellrune_interop::{
-    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
-    DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto,
-    FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto,
-    WorkbookSession, WritableCellValueDto, WriteOptionsDto,
+    ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto, CsvReadOptionsDto, CsvWriteRequestDto, DefinedNameInspectionRequestDto, EditBatchDto, EditBatchV2Dto, EditWriteOptionsDto, FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto, RangeRequestDto, ReadLimitOptionsDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession, WritableCellValueDto, WriteOptionsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyInt};
@@ -64,6 +61,37 @@ impl Workbook {
         py.detach(move || WorkbookSession::open_bytes_with_limits(&owned, limits))
             .map(Self::new)
             .map_err(|error| into_py_error(py, error))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (data, *, sheet_name=None, delimiter=None))]
+    pub fn from_csv(
+        py: Python<'_>,
+        data: &Bound<'_, PyBytes>,
+        sheet_name: Option<String>,
+        delimiter: Option<String>,
+    ) -> PyResult<Self> {
+        let owned = data.as_bytes().to_vec();
+        let options = CsvReadOptionsDto {
+            sheet_name,
+            delimiter,
+        };
+        py.detach(move || WorkbookSession::open_csv_bytes(&owned, &options))
+            .map(Self::new)
+            .map_err(|error| into_py_error(py, error))
+    }
+
+    #[pyo3(signature = (sheet, *, delimiter=None))]
+    pub fn to_csv<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: String,
+        delimiter: Option<String>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let request = CsvWriteRequestDto { sheet, delimiter };
+        let result = py.detach(move || self.lock_interop_wait()?.save_csv_bytes(&request));
+        let bytes = result.map_err(|error| into_py_error(py, error))?;
+        Ok(PyBytes::new(py, &bytes))
     }
 
     #[getter]

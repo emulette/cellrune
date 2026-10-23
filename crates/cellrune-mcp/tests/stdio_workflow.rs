@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 22);
+    assert_eq!(tools.len(), 24);
     assert!(
         tools
             .iter()
@@ -1823,6 +1823,34 @@ fn open_sheet_metadata_fixture(mcp: &mut McpProcess, root: &Path) -> String {
         .as_str()
         .expect("open must return a session ID")
         .to_owned()
+}
+
+#[test]
+fn csv_files_open_and_calculated_sheets_export_over_stdio() {
+    let root = TestDirectory::new("csv");
+    let input = root.path.join("input.csv");
+    fs::write(&input, "item,amount\r\nWidget,2.5\r\n").expect("csv fixture");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let opened = successful_tool(mcp.call_tool(
+        "workbook_open_csv",
+        json!({"path": input, "sheet_name": "Import"}),
+    ));
+    let session_id = opened["session_id"].as_str().expect("session").to_owned();
+    assert_eq!(opened["summary"]["sheets"][0]["name"], "Import");
+    let error = failed_tool(mcp.call_tool(
+        "workbook_export_csv",
+        json!({"session_id": session_id, "sheet": "Import"}),
+    ));
+    assert_eq!(error["code"], "interop.calculation.required");
+    successful_tool(mcp.call_tool("workbook_recalculate", json!({"session_id": session_id})));
+    let exported = successful_tool(mcp.call_tool(
+        "workbook_export_csv",
+        json!({"session_id": session_id, "sheet": "Import", "delimiter": ";"}),
+    ));
+    assert_eq!(exported["csv"], "item;amount\r\nWidget;2.5\r\n");
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
 }
 
 #[test]

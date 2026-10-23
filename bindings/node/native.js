@@ -783,5 +783,6 @@ module.exports.createWorkbook = nativeBinding.createWorkbook
 module.exports.formatDisplayText = nativeBinding.formatDisplayText
 module.exports.functionCatalog = nativeBinding.functionCatalog
 module.exports.openWorkbookBytes = nativeBinding.openWorkbookBytes
+module.exports.openWorkbookCsv = nativeBinding.openWorkbookCsv
 module.exports.openWorkbookPath = nativeBinding.openWorkbookPath
 module.exports.schemaVersion = nativeBinding.schemaVersion

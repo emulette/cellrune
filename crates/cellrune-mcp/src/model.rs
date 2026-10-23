@@ -19,6 +19,45 @@ pub(crate) struct OpenWorkbookArgs {
     pub(crate) path: String,
 }
 
+/// Input for opening an RFC 4180 CSV file beneath an approved root as a one-sheet workbook.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct OpenCsvArgs {
+    /// Absolute path to an existing UTF-8 CSV file beneath an approved root.
+    pub(crate) path: String,
+    /// Name of the sheet the input is read into; omitted selects `Sheet1`.
+    #[serde(default)]
+    pub(crate) sheet_name: Option<String>,
+    /// One ASCII field delimiter other than a quote or line break; omitted selects `,`.
+    #[serde(default)]
+    pub(crate) delimiter: Option<String>,
+}
+
+/// Input for exporting one calculated sheet as CSV text.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportCsvArgs {
+    /// Opaque resident workbook session identifier.
+    pub(crate) session_id: String,
+    /// Case-insensitive sheet name.
+    pub(crate) sheet: String,
+    /// One ASCII field delimiter other than a quote or line break; omitted selects `,`.
+    #[serde(default)]
+    pub(crate) delimiter: Option<String>,
+}
+
+/// One sheet exported as RFC 4180 CSV text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CsvExported {
+    /// Session the sheet belongs to.
+    pub(crate) session_id: String,
+    /// Requested sheet name.
+    pub(crate) sheet: String,
+    /// CSV text with CRLF after every record.
+    pub(crate) csv: String,
+}
+
 /// Input identifying one resident workbook session.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

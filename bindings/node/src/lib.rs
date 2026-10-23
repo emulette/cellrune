@@ -51,6 +51,21 @@ pub fn open_workbook_path(
     Ok(AsyncTask::new(OpenPathTask::new(path, limits)))
 }
 
+#[napi(catch_unwind)]
+pub fn open_workbook_csv(
+    bytes: Buffer,
+    sheet_name: Option<String>,
+    delimiter: Option<String>,
+) -> napi::Result<NativeWorkbook> {
+    let options = cellrune_interop::CsvReadOptionsDto {
+        sheet_name,
+        delimiter,
+    };
+    cellrune_interop::WorkbookSession::open_csv_bytes(&bytes, &options)
+        .map(NativeWorkbook::new)
+        .map_err(error::napi_error)
+}
+
 #[napi(ts_return_type = "Promise<NativeWorkbook>", catch_unwind)]
 pub fn open_workbook_bytes(
     bytes: Buffer,

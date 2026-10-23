@@ -95,8 +95,9 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 23 tools are `workbook_create`,
-`workbook_open`, `workbook_close`, `workbook_summary`, `workbook_read_range`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 25 tools are `workbook_create`,
+`workbook_open`, `workbook_open_csv`, `workbook_close`, `workbook_summary`,
+`workbook_export_csv`, `workbook_read_range`,
 `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
 `workbook_comments`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
@@ -455,6 +456,38 @@ than guessing a name from a different XLSX crate (`calamine`,
   `DefinedNameAnalysisError` reports `UnknownCurrentSheet`,
   `ResourceLimit`, or `Cancelled`, with a typed
   `DefinedNameAnalysisLimitKind` when a budget was exhausted.
+
+### CSV
+
+- `read_csv(&[u8], &CsvReadOptions) -> Result<WorkbookDraft, CsvError>`
+  reads RFC 4180 UTF-8 (optional BOM; CRLF, LF, or CR records; `""` escapes)
+  into a one-sheet draft. `CsvReadOptions::new()`, `.with_delimiter(char)`
+  (one ASCII character other than a quote or line break),
+  `.with_sheet_name(SheetName)` (default `Sheet1`), `.with_max_cells(u64)`
+  (default `ReadLimits::max_cells_per_sheet`). Value rule: an empty unquoted
+  field is no cell; a quoted field is text; an unquoted field is a number when
+  it matches `[+-]?(d+[.d*]|.d+)([eE][+-]?d+)?`, a logical for `TRUE`/`FALSE`
+  in any case, an error for an exact Excel error spelling, and text otherwise;
+  no field is a formula and no date is parsed.
+- `write_csv(&WorkbookSnapshot, &CalculationSnapshot, SheetId,
+  CsvWriteOptions) -> Result<Vec<u8>, CsvError>` writes A1 through the last
+  used cell, CRLF after every record, numbers as their shortest round-trip
+  decimal, formulas and spilled cells as their calculated values, and quotes
+  text that would read back as anything else.
+- `CsvError::code() -> CsvErrorCode`: `csv.invalid_delimiter`,
+  `csv.read.invalid_utf8`, `csv.read.unterminated_quote`,
+  `csv.read.invalid_quote`, `csv.read.too_many_rows`,
+  `csv.read.too_many_columns`, `csv.read.too_many_cells`,
+  `csv.read.invalid_value`, `csv.write.unknown_sheet`,
+  `csv.write.stale_calculation`, `csv.write.unavailable_result`; `.detail()`
+  names the line or cell.
+- Interop `WorkbookSession::open_csv_bytes(&[u8], &CsvReadOptionsDto)` and
+  `save_csv_bytes(&CsvWriteRequestDto)` (requires a current calculation);
+  Python `Workbook.from_csv(data, sheet_name=, delimiter=)`/`to_csv(sheet,
+  delimiter=)`; Node.js `Workbook.fromCsv(bytes, { sheetName, delimiter })`
+  (synchronous)/`toCsv(sheet, { delimiter })` returning a `Buffer`; MCP
+  `workbook_open_csv` (path beneath a root) and `workbook_export_csv`
+  (returns the text, bounded by the response limit).
 
 ### Package-backed document and preservation writing
 
@@ -1415,7 +1448,7 @@ structured per-cell calculation issues while independent formulas continue to
 calculate. Out of scope for the current version:
 
 - Browser, frontend/UI, WebAssembly, hosted-service, and remote-MCP transports.
-- `.xls`, `.xlsb`, `.ods`, and CSV.
+- `.xls`, `.xlsb`, and `.ods`.
 - Macro, add-in, external-workbook, query, or data-connection execution.
 - 3-D references outside the audited direct-consumer policy described under
   Calculation, and data-table calculation.

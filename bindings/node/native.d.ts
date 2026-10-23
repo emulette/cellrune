@@ -15,6 +15,7 @@ export declare class NativeWorkbook {
   close(): void
   summary(): NativeWorkbookSummary
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
+  toCsv(sheet: string, delimiter?: string | undefined | null): Buffer
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
   hyperlinks(sheet: string, offset: number, limit: number): NativeHyperlinkPage
   comments(sheet: string, offset: number, limit: number): NativeCommentPage
@@ -398,6 +399,8 @@ export interface NativeWriteReport {
 }
 
 export declare function openWorkbookBytes(bytes: Buffer, limitsJson?: string | undefined | null): Promise<NativeWorkbook>
+
+export declare function openWorkbookCsv(bytes: Buffer, sheetName?: string | undefined | null, delimiter?: string | undefined | null): NativeWorkbook
 
 export declare function openWorkbookPath(path: string, limitsJson?: string | undefined | null): Promise<NativeWorkbook>
 

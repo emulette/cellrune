@@ -7,7 +7,7 @@ use cellrune_interop::{
     FinancialSolverSemanticsDto, InteropError, LocaleDto, LocaleProfileDto, PreviewCursorDto, RangeRequestDto, RecalculationModeDto, SheetPageRequestDto, TransactionDetailSectionDto, WorkbookSession,
     WritableCellValueDto, WriteOptionsDto,
 };
-use napi::bindgen_prelude::AsyncTask;
+use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi_derive::napi;
 use serde::Deserialize;
 
@@ -82,6 +82,15 @@ impl NativeWorkbook {
             })
             .map(crate::conversion::range_page)
             .map_err(napi_error)
+    }
+
+    #[napi(catch_unwind)]
+    pub fn to_csv(&self, sheet: String, delimiter: Option<String>) -> napi::Result<Buffer> {
+        let bytes = self
+            .lock()?
+            .save_csv_bytes(&cellrune_interop::CsvWriteRequestDto { sheet, delimiter })
+            .map_err(napi_error)?;
+        Ok(bytes.into())
     }
 
     #[napi(catch_unwind)]

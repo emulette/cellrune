@@ -1037,6 +1037,13 @@ export class Workbook {
   static create(): Workbook;
   static openPath(path: string, options?: OpenOptions): Promise<Workbook>;
   static fromBytes(bytes: Buffer | Uint8Array, options?: OpenOptions): Promise<Workbook>;
+  /** Opens RFC 4180 UTF-8 CSV as a one-sheet workbook; fields never become formulas. */
+  static fromCsv(
+    bytes: Buffer | Uint8Array,
+    options?: { readonly sheetName?: string; readonly delimiter?: string },
+  ): Workbook;
+  /** Exports one sheet of the current calculated revision as CSV. */
+  toCsv(sheet: string, options?: { readonly delimiter?: string }): Buffer;
   get closed(): boolean;
   close(): void;
   summary(): WorkbookSummary;

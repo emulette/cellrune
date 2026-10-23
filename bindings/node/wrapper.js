@@ -76,6 +76,35 @@ class Workbook {
     return new Workbook(await withErrors(task));
   }
 
+  static fromCsv(bytes, options = {}) {
+    if (!(bytes instanceof Uint8Array)) {
+      throw inputError("bytes must be a Buffer or Uint8Array");
+    }
+    requireOptions(options);
+    requireOptionKeys(options, ["sheetName", "delimiter"]);
+    requireOptionalString(options.sheetName, "sheetName");
+    requireOptionalString(options.delimiter, "delimiter");
+    return new Workbook(
+      withSyncErrors(() =>
+        native.openWorkbookCsv(
+          Buffer.from(bytes),
+          options.sheetName ?? null,
+          options.delimiter ?? null,
+        ),
+      ),
+    );
+  }
+
+  toCsv(sheet, options = {}) {
+    requireString(sheet, "sheet");
+    requireOptions(options);
+    requireOptionKeys(options, ["delimiter"]);
+    requireOptionalString(options.delimiter, "delimiter");
+    return withSyncErrors(() =>
+      this.#session().toCsv(sheet, options.delimiter ?? null),
+    );
+  }
+
   static async fromBytes(bytes, options = {}) {
     if (!(bytes instanceof Uint8Array)) {
       throw inputError("bytes must be a Buffer or Uint8Array");

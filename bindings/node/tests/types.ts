@@ -164,6 +164,8 @@ async function check(): Promise<void> {
     { kind: "setCellFormat", sheet: "Sheet1", address: "A1", font: { bold: true } },
     { kind: "setRowHeight", sheet: "Sheet1", row: 1, height: null },
   ]);
+  const csv: Buffer = Workbook.fromCsv(new Uint8Array([49, 44, 50]), { delimiter: "," }).toCsv("Sheet1");
+  csv.byteLength.toFixed(0);
   const links: HyperlinkPage = reopened.hyperlinks("Sheet1");
   links.entries[0]?.target?.toUpperCase();
   const notes: CommentPage = reopened.comments("Sheet1", { offset: 0 });

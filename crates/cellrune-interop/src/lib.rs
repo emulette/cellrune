@@ -7,6 +7,7 @@
 #![deny(missing_docs)]
 
 mod convert;
+mod csv;
 mod dto;
 mod error;
 mod format_convert;
@@ -23,6 +24,7 @@ pub use targeted::{
 };
 
 pub use cellrune::CancellationToken;
+pub use csv::{CsvReadOptionsDto, CsvWriteRequestDto};
 pub use dto::{
     ArithmeticSemanticsDto, CalculationDeltaCellDto, CalculationDeltaDto, CalculationDeltaPageDto,
     CalculationIssueDto, CalculationLimitOptionsDto, CalculationLimitsDto, CalculationOptionsDto,
