@@ -5,7 +5,7 @@ use cellrune::{
     CellContent, CellValue, FiniteNumber, FormulaText, OpenOptions, RecalculationWriteOptions,
     SheetId, SheetName, WorkbookDraft, WorkbookSnapshot, calculate_workbook,
     open_xlsx_document_bytes, write_preserved_xlsx_bytes, write_recalculated_xlsx_bytes,
-    write_xlsx_draft_bytes,
+    write_xlsx_draft_bytes, write_xlsx_draft_edits_bytes,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -28,6 +28,17 @@ fn exercise_arbitrary_document(data: &[u8]) {
         &calculation,
         RecalculationWriteOptions::default(),
     );
+
+    // Saving a sheet deletion reads every relationship part of the untrusted package.
+    let Some(first_sheet) = document.workbook().sheets().first().map(|sheet| sheet.id()) else {
+        return;
+    };
+    let mut draft = WorkbookDraft::from_document(&document);
+    if draft.delete_sheet(first_sheet).is_ok() {
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        let _ = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default());
+        let _ = write_xlsx_draft_edits_bytes(&draft, cellrune::WriteOptions::default());
+    }
 }
 
 fn exercise_generated_document(data: &[u8]) {
