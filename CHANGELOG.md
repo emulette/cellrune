@@ -39,35 +39,6 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `SKEW`, `SKEW.P`, and `KURT` calculate the sample skewness, population skewness, and sample
   kurtosis Microsoft documents, collecting numbers as `STDEV.S` does. Fewer than three numbers
   (four for `KURT`) or a zero standard deviation returns `#DIV/0!`.
-- `FREQUENCY` and `MODE.MULT` spill one column. `FREQUENCY` counts numbers at or below each
-  ascending bin and above the last, ignoring text and blanks; unordered or mixed bins and logical
-  values or errors in either argument report `calculation.unsupported_expression`. `MODE.MULT`
-  returns every most frequent number in first-occurrence order, and `#N/A` when none repeats.
-- `CHISQ.TEST` (and `CHITEST`), `CHISQ.INV`, and `CHISQ.INV.RT` (and `CHIINV`) calculate the
-  chi-square test and both quantiles with Microsoft's argument errors; the right tail is inverted
-  directly so tiny probabilities keep their precision. Tables whose counts match but shapes differ,
-  non-numeric cells, and non-positive expected values report `calculation.unsupported_expression`.
-- `CUMIPMT` and `CUMPRINC` total the interest or principal of end-of-period level payments, and
-  `VDB` totals declining-balance depreciation with the switch to straight line, over whole periods
-  with Microsoft's argument errors. Fractional periods, beginning-of-period payments, and a `VDB`
-  end period after the life report `calculation.unsupported_expression`.
-- `AMORLINC` and `AMORDEGRC` calculate French accounting depreciation with the prorated first
-  period, Microsoft's `AMORDEGRC` coefficients and whole-number rounding, and `#NUM!` for a salvage
-  above cost or an `AMORDEGRC` life Microsoft rejects. Undocumented argument errors, the
-  accelerated `AMORDEGRC` periods at the end of the life, and other undocumented edges report
-  `calculation.unsupported_expression`.
-- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMSECH`, and `IMCSCH` return
-  complex text like the other complex functions, `#VALUE!` for a logical inumber, and
-  `calculation.unsupported_expression` at the pole zero or where a bounded result's intermediate
-  overflows.
-- `ENCODEURL` percent-encodes text as RFC 3986 encodes a URI component, keeping ASCII letters,
-  digits, `-`, `.`, `_`, and `~` and encoding every other UTF-8 byte.
-- `CELL` returns the `"address"`, `"contents"`, `"row"`, `"col"`, and `"type"` information Microsoft
-  defines by the workbook alone; formatting, width, protection, and file-name info types, an
-  omitted reference, and the active-cell cases report `calculation.unsupported_expression`.
-- `BAHTTEXT` reads positive amounts with whole satang as Thai baht text; zero, negative, and
-  sub-baht amounts, more than two decimal places, and a final one after a zero tens digit (101),
-  where Thai usage varies, report `calculation.unsupported_expression`.
 - `Sheet::data_validations()` reads every worksheet data validation rule as a read-only model:
   `DataValidation` exposes its ranges, `DataValidationType` (any value, whole, decimal, list, date,
   time, text length, custom), `DataValidationOperator`, `formula1`/`formula2` as stored,
