@@ -529,8 +529,8 @@ expose one tool per spreadsheet function.",
         description = "Return the text a cell holding value shows with the Excel number-format code \
 format_code, using the engine behind TEXT: sections, conditions, dates and times in the given \
 date_system (excel_1900 or excel_1904), elapsed time, scientific notation, and fractions. Text \
-goes through the code's text section, and General is not shortened to a column width. A \
-construct whose Excel display has not been established, such as a * fill, fails with \
+goes through the code's text section. A construct whose Excel display has not been \
+established, such as a * fill or a General number longer than 11 characters, fails with \
 display_format.unsupported. No workbook session is needed.",
         annotations(
             title = "Render number-format display text",

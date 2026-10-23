@@ -25,8 +25,8 @@ export interface DisplayFormatOptions {
 /**
  * Returns the text a cell holding `value` shows with the number-format code `formatCode`, using the
  * engine behind `TEXT`. Text goes through the code's text section, logical and error values show
- * as they are, and `General` is not shortened to a column width. Throws `display_format.unsupported`
- * for a construct whose Excel display has not been established, such as a `*` fill.
+ * as they are. Throws `display_format.unsupported` for a construct whose Excel display has not been
+ * established, such as a `*` fill or a `General` number longer than 11 characters.
  */
 export function formatDisplayText(
   value: Exclude<CellValue, { readonly kind: "unsupported" }>,

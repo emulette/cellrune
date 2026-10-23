@@ -170,9 +170,19 @@ fn render_literal_section(
     Ok(output)
 }
 
+/// The most characters, minus sign included, a number shows in `General`. Excel rounds a longer
+/// number or writes it in scientific notation (`TEXT(PI(),"General")` is `3.141592654` and
+/// `TEXT(1E+20,"General")` is `1E+20`), which is not reproduced.
+const GENERAL_WIDTH: usize = 11;
+
+/// The smallest magnitude `General` shows as plain decimals here; where Excel switches smaller
+/// numbers to scientific notation has not been established.
+const GENERAL_SMALLEST_DECIMAL: f64 = 0.001;
+
 fn render_general(tokens: &[Token], chosen: ChosenSection<'_>) -> Result<String, ErrorKind> {
     let mut output = String::new();
-    if chosen.signed && chosen.value < 0.0 {
+    let negative = chosen.signed && chosen.value < 0.0;
+    if negative {
         output.push('-');
     }
     let mut seen_general = false;
@@ -180,12 +190,24 @@ fn render_general(tokens: &[Token], chosen: ChosenSection<'_>) -> Result<String,
         match token {
             Token::General if !seen_general => {
                 seen_general = true;
-                output.push_str(&number_to_general_text(chosen.value.abs()));
+                output.push_str(&general_number(chosen.value.abs(), negative)?);
             }
             _ => output.push_str(&literal_text(token)?),
         }
     }
     Ok(output)
+}
+
+/// The text `General` shows for `magnitude`: only numbers Excel shows as written, without
+/// rounding or an exponent, are supported.
+fn general_number(magnitude: f64, negative: bool) -> Result<String, ErrorKind> {
+    let text = number_to_general_text(magnitude);
+    if text.chars().count() + usize::from(negative) > GENERAL_WIDTH
+        || (magnitude != 0.0 && magnitude < GENERAL_SMALLEST_DECIMAL)
+    {
+        return Err(ErrorKind::Unsupported);
+    }
+    Ok(text)
 }
 
 /// Returns the text a token shows in a section without digit placeholders.

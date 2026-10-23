@@ -40,9 +40,9 @@ impl Error for DisplayFormatError {}
 /// Numbers follow the same engine as `TEXT`, in the given date system and with the names of the
 /// profile's regional format. Text goes through the code's text section: the fourth section, or a
 /// lone section holding `@`; a code without one shows the text unchanged. Logical and error values
-/// show `TRUE`, `FALSE`, or the error, and a blank shows nothing. `General` shows a number as `TEXT`
-/// does, without the shortening Excel applies to fit a column, and a `*` fill is unsupported
-/// because the column width is not an input.
+/// show `TRUE`, `FALSE`, or the error, and a blank shows nothing. `General` shows a number of up to
+/// 11 characters as `TEXT` does; a longer one, which Excel rounds or writes in scientific notation,
+/// is unsupported, and so is a `*` fill, because the column width is not an input.
 ///
 /// # Errors
 ///
@@ -117,6 +117,20 @@ mod tests {
         );
         assert_eq!(
             display(number(1e16), "0"),
+            Err(DisplayFormatError::Unsupported)
+        );
+    }
+
+    #[test]
+    fn general_numbers_longer_than_eleven_characters_are_unsupported() {
+        assert_eq!(display(number(1234.5), "General").as_deref(), Ok("1234.5"));
+        // Excel shows "1E+20" and "3.141592654".
+        assert_eq!(
+            display(number(1e20), "General"),
+            Err(DisplayFormatError::Unsupported)
+        );
+        assert_eq!(
+            display(number(std::f64::consts::PI), "General"),
             Err(DisplayFormatError::Unsupported)
         );
     }

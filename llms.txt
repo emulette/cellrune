@@ -1005,7 +1005,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   the double, a minus sign appears only when a digit or `0` placeholder is
   shown, an integer `0` is kept unless decimals follow, the decimal point is
   omitted when no decimal digit is shown, and 2^53 or more rounded units is
-  `#NUM!`. `General` shows the number as `&` does. Date sections read `yy`,
+  `#NUM!`. `General` shows a number of up to 11 characters, minus sign
+  included, as `&` does; a longer number, which Excel rounds or writes in
+  scientific notation, and a nonzero magnitude below 0.001 are
+  `calculation.unsupported_expression`. Date sections read `yy`,
   `yyyy`, `e`, `m` through `mmmmm`, `d` through `dddd`, `h`, `hh`, minutes as
   `m`/`mm` after an hour or before a second, `s`, `ss`, `.0` to `.000`
   fractional seconds, `[h]`, `[m]`, `[s]`, `AM/PM`, and `A/P`, in the
@@ -1274,8 +1277,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   go through the `TEXT` engine with the profile's names; text goes through the
   code's text section (the fourth section, or a lone section holding `@`) and
   is otherwise unchanged; logical and error values show `TRUE`, `FALSE`, or the
-  error; a blank shows nothing. `General` is not shortened to a column width,
-  and a `*` fill is unsupported because the width is not an input.
+  error; a blank shows nothing. `General` follows `TEXT`, so a number longer
+  than 11 characters is unsupported, and a `*` fill is unsupported because the
+  width is not an input.
   `DisplayFormatError::Unsupported` (`.code()` `display_format.unsupported`)
   covers every construct `TEXT` leaves unsupported and numbers past 2^53
   rounded units. Interop `format_display_text(DisplayFormatRequestDto { value,

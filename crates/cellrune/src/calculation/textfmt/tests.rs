@@ -195,6 +195,20 @@ fn general_shows_the_number_as_text() {
     assert_text(-5.0, "General", "-5");
     assert_text(-5.0, "General;(General)", "(5)");
     assert_text(3.0, "General\" units\"", "3 units");
+    assert_text(12_345_678_901.0, "General", "12345678901");
+    assert_text(-1_234_567_890.0, "General", "-1234567890");
+    assert_text(0.3 + 0.000_000_000_000_000_04, "General", "0.3");
+    assert_text(0.001, "General", "0.001");
+}
+
+#[test]
+fn general_leaves_numbers_excel_shortens_unsupported() {
+    // Excel shows "1E+20", "1.23457E+11", "3.141592654", and "-1.23457E+10".
+    assert_unsupported(1e20, "General");
+    assert_unsupported(123_456_789_012.0, "General");
+    assert_unsupported(std::f64::consts::PI, "General");
+    assert_unsupported(-12_345_678_901.0, "General");
+    assert_unsupported(0.000_01, "General");
 }
 
 #[test]
