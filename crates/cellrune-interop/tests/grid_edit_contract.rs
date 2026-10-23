@@ -199,7 +199,7 @@ fn deleted_references_read_ref_and_refused_edits_keep_their_core_codes() {
     );
 
     let revision = session.summary().semantic_revision;
-    let error = session
+    session
         .apply_changes(
             revision,
             EditBatchDto {
@@ -210,8 +210,8 @@ fn deleted_references_read_ref_and_refused_edits_keep_their_core_codes() {
                 }],
             },
         )
-        .expect_err("pasting over a cell B1 reads");
-    assert_eq!(error.code(), "validation.moved_range_overwrites_references");
+        .expect("pasting over a cell B1 reads");
+    let revision = session.summary().semantic_revision;
     let error = session
         .apply_changes_v2(
             revision,

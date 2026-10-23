@@ -198,7 +198,6 @@ fn registry() -> Vec<Vec<&'static str>> {
             TableHeaderShift,
             TableDataRowsDeleted,
             TableSplit,
-            MovedRangeOverwritesReferences,
             MovedRangeSplitsRule,
             CopyDestinationShape,
             CopyUnsupportedFormula,

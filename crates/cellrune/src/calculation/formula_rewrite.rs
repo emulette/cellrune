@@ -240,10 +240,6 @@ pub(crate) enum FormulaRewriteError {
         owner: Option<String>,
     },
     SourceEdit(SourceEditError),
-    /// A range move would paste over cells this formula reads.
-    OverwrittenReference {
-        owner: Option<String>,
-    },
     /// A range move would move part of the cells of a rule whose formula reads relative to them.
     SplitRule {
         owner: Option<String>,
@@ -262,9 +258,6 @@ impl FormulaRewriteError {
                 span,
                 owner: Some(owner),
             },
-            Self::OverwrittenReference { owner: None } => {
-                Self::OverwrittenReference { owner: Some(owner) }
-            }
             Self::SplitRule { owner: None } => Self::SplitRule { owner: Some(owner) },
             other => other,
         }
@@ -428,8 +421,7 @@ pub(crate) fn rewrite_formula(
         let plan = match request {
             FormulaRewriteRequest::Grid(change) => {
                 let before = edits.len();
-                let plan = plan_grid_node(source, expr, source_node, change, &mut edits)
-                    .map_err(|_| FormulaRewriteError::OverwrittenReference { owner: None })?;
+                let plan = plan_grid_node(source, expr, source_node, change, &mut edits);
                 for _ in before..edits.len() {
                     budget.charge_edit()?;
                 }

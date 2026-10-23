@@ -422,6 +422,16 @@ impl GridEdit {
     }
 
     /// Reports whether a range move overwrites any cell of `range` it does not also move.
+    /// Returns the cells a range move pastes over that it does not also move: the destination
+    /// without the source, as at most four rectangles.
+    pub(crate) fn overwritten(self) -> Vec<CellRange> {
+        let Self::MoveRange { source, .. } = self else {
+            return Vec::new();
+        };
+        self.destination_range()
+            .map_or_else(Vec::new, |destination| subtract(destination, source))
+    }
+
     pub(crate) fn overwrites(self, range: CellRange) -> bool {
         let Self::MoveRange { source, .. } = self else {
             return false;

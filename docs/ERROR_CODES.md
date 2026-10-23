@@ -212,7 +212,6 @@ These codes come from the `cellrune` crate. Interop, Python, Node.js, and MCP re
 | `validation.table_header_shift` | A structural edit would delete, move, or overwrite a table's header row. |
 | `validation.table_data_rows_deleted` | A deletion would remove every data row of a table, which Excel keeps one of. |
 | `validation.table_split` | A structural edit would delete, move, or overwrite part of a table or its totals row. |
-| `validation.moved_range_overwrites_references` | A range move would paste over cells that a formula outside the moved cells reads. |
 | `validation.moved_range_splits_rule` | A range move would move part of a data validation whose formula reads relative to its cells. |
 | `validation.copy_destination_shape` | A copy destination does not repeat the source range a whole number of times. |
 | `validation.copy_unsupported_formula` | A copy would copy a formula with a spill reference, a legacy array formula, or a data-table formula. |

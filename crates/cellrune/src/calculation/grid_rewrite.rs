@@ -42,10 +42,6 @@ pub(super) enum NodePlan {
     Descend,
 }
 
-/// A range move would paste over cells a reference reads, which Excel was not measured doing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct OverwrittenReference;
-
 /// A copied reference would leave the grid, which turns the whole formula into `#REF!`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct OffGrid;
@@ -160,13 +156,13 @@ pub(super) fn plan_grid_node(
     node: &NodeSpanTree,
     change: &GridChange<'_>,
     edits: &mut Vec<SourceEdit>,
-) -> Result<NodePlan, OverwrittenReference> {
+) -> NodePlan {
     match expr {
         Expr::Ref(reference) => {
             if !targets(reference, change) {
-                return Ok(NodePlan::Done);
+                return NodePlan::Done;
             }
-            match outcome(reference.body, change.edit)? {
+            match outcome(reference.body, change.edit) {
                 Outcome::Unchanged => {}
                 Outcome::Changed(body) => {
                     if let Some(span) = body_span(node.components()) {
@@ -175,12 +171,12 @@ pub(super) fn plan_grid_node(
                 }
                 Outcome::Deleted => edits.push(deleted_reference(node)),
             }
-            Ok(NodePlan::Done)
+            NodePlan::Done
         }
         Expr::Range { start, end } => {
             let children = node.children();
             let (Some(start_node), Some(end_node)) = (children.first(), children.get(1)) else {
-                return Ok(NodePlan::Descend);
+                return NodePlan::Descend;
             };
             let start_ref = targeted_reference(start, change);
             let end_ref = targeted_reference(end, change);
@@ -197,7 +193,7 @@ pub(super) fn plan_grid_node(
             {
                 // `A1:Sheet1!B2` and `(A1):B2` name one area, which the range rule changes as a
                 // whole.
-                match outcome(RefBody::Area(*first, *last), change.edit)? {
+                match outcome(RefBody::Area(*first, *last), change.edit) {
                     Outcome::Unchanged => {}
                     Outcome::Changed(RefBody::Area(first, last)) => {
                         for (child, cell) in [(start_node, first), (end_node, last)] {
@@ -214,42 +210,42 @@ pub(super) fn plan_grid_node(
                         ));
                     }
                 }
-                return Ok(NodePlan::Done);
+                return NodePlan::Done;
             }
             for (reference, child) in [(start_ref, start_node), (end_ref, end_node)] {
                 if let Some(reference) = reference
-                    && matches!(outcome(reference.body, change.edit)?, Outcome::Deleted)
+                    && matches!(outcome(reference.body, change.edit), Outcome::Deleted)
                 {
                     edits.push(SourceEdit::new(
                         node.span(),
                         format!("{}{DELETED_REFERENCE}", qualifier_text(source, child)),
                     ));
-                    return Ok(NodePlan::Done);
+                    return NodePlan::Done;
                 }
             }
-            Ok(NodePlan::Descend)
+            NodePlan::Descend
         }
         Expr::SpillRef(operand)
         | Expr::Invoke {
             callee: operand, ..
         } => {
             let Some(child) = node.children().first() else {
-                return Ok(NodePlan::Descend);
+                return NodePlan::Descend;
             };
             if let Some(reference) = targeted_reference(operand, change)
-                && matches!(outcome(reference.body, change.edit)?, Outcome::Deleted)
+                && matches!(outcome(reference.body, change.edit), Outcome::Deleted)
             {
                 // `A1#` cannot spill from `#REF!`, so the whole spill reference becomes one.
                 edits.push(SourceEdit::new(
                     node.span(),
                     format!("{}{DELETED_REFERENCE}", qualifier_text(source, child)),
                 ));
-                return Ok(NodePlan::Done);
+                return NodePlan::Done;
             }
-            Ok(NodePlan::Descend)
+            NodePlan::Descend
         }
-        Expr::ExternalReference(_) => Ok(NodePlan::Done),
-        _ => Ok(NodePlan::Descend),
+        Expr::ExternalReference(_) => NodePlan::Done,
+        _ => NodePlan::Descend,
     }
 }
 
@@ -302,9 +298,9 @@ fn targeted_reference<'a>(mut expr: &'a Expr, change: &GridChange<'_>) -> Option
     }
 }
 
-fn outcome(body: RefBody, edit: GridEdit) -> Result<Outcome, OverwrittenReference> {
+fn outcome(body: RefBody, edit: GridEdit) -> Outcome {
     match edit.line_axis() {
-        Some(axis) => Ok(line_outcome(body, edit, axis)),
+        Some(axis) => line_outcome(body, edit, axis),
         None => moved_range_outcome(body, edit),
     }
 }
@@ -367,12 +363,17 @@ fn mapped_ordered(edit: GridEdit, first: u32, last: u32) -> Option<(u32, u32)> {
     })
 }
 
-fn moved_range_outcome(body: RefBody, edit: GridEdit) -> Result<Outcome, OverwrittenReference> {
+/// Moves a reference through a range move. A reference wholly inside the moved cells follows them.
+/// A cell or area the paste overwrites outside the moved cells, as Excel 16.114 measures
+/// (excel-measure I3): becomes `#REF!` when the overwritten cells cover it, shrinks to its part
+/// left when they cover its whole width (or height) and run past one of its ends, and otherwise
+/// keeps its text, as it does when they only reach its end or lie inside it.
+fn moved_range_outcome(body: RefBody, edit: GridEdit) -> Outcome {
     let GridEdit::MoveRange { source, .. } = edit else {
-        return Ok(Outcome::Unchanged);
+        return Outcome::Unchanged;
     };
     let Some(area) = body_area(body) else {
-        return Ok(Outcome::Unchanged);
+        return Outcome::Unchanged;
     };
     if range_contains(source, area) {
         let (rows, columns) = edit.range_offset();
@@ -384,7 +385,7 @@ fn moved_range_outcome(body: RefBody, edit: GridEdit) -> Result<Outcome, Overwri
             column: shift(cell.column, columns),
             ..cell
         };
-        return Ok(Outcome::Changed(match body {
+        return Outcome::Changed(match body {
             RefBody::Cell(cell) => RefBody::Cell(shift_cell(cell)),
             RefBody::Area(first, last) => RefBody::Area(shift_cell(first), shift_cell(last)),
             RefBody::Columns(first, last) => RefBody::Columns(
@@ -407,14 +408,73 @@ fn moved_range_outcome(body: RefBody, edit: GridEdit) -> Result<Outcome, Overwri
                     ..last
                 },
             ),
-        }));
+        });
     }
     // A whole row or column keeps its text however its cells change.
-    let bounded = matches!(body, RefBody::Cell(_) | RefBody::Area(..));
-    if bounded && edit.overwrites(area) {
-        return Err(OverwrittenReference);
+    if !matches!(body, RefBody::Cell(_) | RefBody::Area(..)) {
+        return Outcome::Unchanged;
     }
-    Ok(Outcome::Unchanged)
+    let (mut top, mut left, mut bottom, mut right) = (
+        area.start().row().get(),
+        area.start().column().get(),
+        area.end().row().get(),
+        area.end().column().get(),
+    );
+    for piece in edit.overwritten() {
+        let (piece_top, piece_left, piece_bottom, piece_right) = (
+            piece.start().row().get(),
+            piece.start().column().get(),
+            piece.end().row().get(),
+            piece.end().column().get(),
+        );
+        if piece_top <= top && bottom <= piece_bottom && piece_left <= left && right <= piece_right
+        {
+            return Outcome::Deleted;
+        }
+        if piece_left <= left && right <= piece_right {
+            (top, bottom) = shrunk(top, bottom, piece_top, piece_bottom);
+        } else if piece_top <= top && bottom <= piece_bottom {
+            (left, right) = shrunk(left, right, piece_left, piece_right);
+        }
+    }
+    let unchanged = (top, left, bottom, right)
+        == (
+            area.start().row().get(),
+            area.start().column().get(),
+            area.end().row().get(),
+            area.end().column().get(),
+        );
+    match body {
+        RefBody::Area(mut first, mut last) if !unchanged => {
+            // Each end keeps its own side, so `A6:A4` shrinks as `A5:A4`.
+            let (first_row, last_row) = if first.row <= last.row {
+                (top, bottom)
+            } else {
+                (bottom, top)
+            };
+            let (first_column, last_column) = if first.column <= last.column {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            (first.row, first.column, last.row, last.column) =
+                (first_row, first_column, last_row, last_column);
+            Outcome::Changed(RefBody::Area(first, last))
+        }
+        _ => Outcome::Unchanged,
+    }
+}
+
+/// Shrinks `start..=end` past overwritten lines `from..=to` that cover one of its ends and run past
+/// it; lines that reach no further than the interval's ends leave it whole.
+fn shrunk(start: u32, end: u32, from: u32, to: u32) -> (u32, u32) {
+    if start < from && from <= end && end < to {
+        (start, from - 1)
+    } else if from < start && start <= to && to < end {
+        (to + 1, end)
+    } else {
+        (start, end)
+    }
 }
 
 /// Returns the cells a reference body names, with whole rows and columns spanning the sheet.

@@ -110,9 +110,6 @@ impl BatchExecutionError {
                     owner,
                 }
             }
-            Self::Rewrite(FormulaRewriteError::OverwrittenReference { owner }) => {
-                ValidationError::MovedRangeOverwritesReferences { owner }
-            }
             Self::Rewrite(FormulaRewriteError::SplitRule { owner }) => {
                 ValidationError::MovedRangeSplitsRule { owner }
             }

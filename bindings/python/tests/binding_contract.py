@@ -703,23 +703,12 @@ def assert_grid_edits() -> None:
         assert "inverse" in receipt
         delta = workbook.recalculate()
         assert delta["reason"] == "topology_changed"
-        try:
-            workbook.apply_changes(
-                workbook.summary()["semantic_revision"],
-                [
-                    {
-                        "kind": "move_range",
-                        "sheet": "Sheet1",
-                        "source": "D1",
-                        "destination": "A3",
-                    }
-                ],
-            )
-        except CellRuneError as error:
-            assert error.code == "validation.moved_range_overwrites_references"
-            assert error.kind == "validation"
-        else:
-            raise AssertionError("pasting over a cell B1 reads must be refused")
+        # Pasting over A3 leaves the formula that read it a #REF!, as Excel does.
+        workbook.apply_changes(
+            workbook.summary()["semantic_revision"],
+            [{"kind": "move_range", "sheet": "Sheet1", "source": "D1", "destination": "A3"}],
+        )
+        assert (formula("B1"), formula("B2")) == ("=SUM(A1:A5)", "=#REF!*10")
         receipt = workbook.apply_changes(
             workbook.summary()["semantic_revision"],
             [{"kind": "set_value", "sheet": "Sheet1", "address": "D1", "value": {"kind": "blank"}}],

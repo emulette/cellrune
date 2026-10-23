@@ -881,7 +881,7 @@ fn a_range_move_carries_references_wholly_inside_it_and_keeps_moved_formulas() {
     assert_eq!(text(workbook, "S2", "A1"), "='S1'!M2");
     assert_eq!(value(&moved, 1, "C2"), CellValue::number(19.0).expect("19"));
 
-    // Pasting over a cell another formula reads was not measured, so it is refused.
+    // A reference to a cell the paste overwrites is gone, as in Excel.
     let mut reading = build();
     reading
         .apply_changes(EditBatch::new([WorkbookChange::set_cell_formula(
@@ -890,10 +890,8 @@ fn a_range_move_carries_references_wholly_inside_it_and_keeps_moved_formulas() {
             FormulaText::from_xlsx("'S1'!M3").expect("formula"),
         )]))
         .expect("reader");
-    assert!(matches!(
-        refused(&mut reading, cut),
-        ValidationError::MovedRangeOverwritesReferences { .. }
-    ));
+    apply(&mut reading, cut);
+    assert_eq!(text(reading.workbook(), "S2", "B1"), "='S1'!#REF!");
 
     // A formula the paste overwrites does not hold the move back, whatever it reads.
     let mut overwritten = draft(

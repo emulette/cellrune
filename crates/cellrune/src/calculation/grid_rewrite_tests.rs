@@ -175,10 +175,218 @@ fn a_range_move_carries_references_wholly_inside_it() {
             ("SUM(M:M)", "SUM(M:M)"),
         ],
     );
-    assert!(matches!(
-        rewrite("M3+1", &request),
-        Err(FormulaRewriteError::OverwrittenReference { .. })
-    ));
+    // M3 is pasted over, so a reference to it is gone.
+    check(&request, &[("M3+1", "#REF!+1")]);
+}
+
+#[test]
+fn a_range_move_rewrites_references_to_the_cells_it_pastes_over_as_excel_does() {
+    // Excel 16.114 (excel-measure I3): each cut of E-column cells pasted at the destination, and
+    // what it does to nine formulas reading around A4:A6.
+    const FORMULAS: [&str; 9] = [
+        "SUM(A4:A6)",
+        "SUM(A4:B6)",
+        "SUM(B4:B6)",
+        "A6",
+        "SUM(A4:A4)",
+        "SUM($A$4:$A$6)",
+        "SUM(4:6)",
+        "SUM(A:A)",
+        "SUM(A4:C4)",
+    ];
+    let unchanged = FORMULAS;
+    for (source, destination, expected) in [
+        (
+            "E6",
+            "A6",
+            [
+                "SUM(A4:A6)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "#REF!",
+                "SUM(A4:A4)",
+                "SUM($A$4:$A$6)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E6:E7",
+            "A6",
+            [
+                "SUM(A4:A5)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "#REF!",
+                "SUM(A4:A4)",
+                "SUM($A$4:$A$5)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E5:E6",
+            "A5",
+            unchanged.map(|formula| if formula == "A6" { "#REF!" } else { formula }),
+        ),
+        (
+            "E5:F6",
+            "A5",
+            unchanged.map(|formula| if formula == "A6" { "#REF!" } else { formula }),
+        ),
+        (
+            "E6:F7",
+            "A6",
+            [
+                "SUM(A4:A5)",
+                "SUM(A4:B5)",
+                "SUM(B4:B5)",
+                "#REF!",
+                "SUM(A4:A4)",
+                "SUM($A$4:$A$5)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E3:E4",
+            "A3",
+            [
+                "SUM(A5:A6)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "A6",
+                "SUM(#REF!)",
+                "SUM($A$5:$A$6)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E3:E5",
+            "A3",
+            [
+                "SUM(A6:A6)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "A6",
+                "SUM(#REF!)",
+                "SUM($A$6:$A$6)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E4:E6",
+            "A4",
+            [
+                "SUM(#REF!)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "#REF!",
+                "SUM(#REF!)",
+                "SUM(#REF!)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E3:E7",
+            "A3",
+            [
+                "SUM(#REF!)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "#REF!",
+                "SUM(#REF!)",
+                "SUM(#REF!)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        ("E5", "A5", unchanged),
+        (
+            "E4:F4",
+            "A4",
+            unchanged.map(|formula| {
+                if formula == "SUM(A4:A4)" {
+                    "SUM(#REF!)"
+                } else {
+                    formula
+                }
+            }),
+        ),
+        (
+            "E4",
+            "A4",
+            unchanged.map(|formula| {
+                if formula == "SUM(A4:A4)" {
+                    "SUM(#REF!)"
+                } else {
+                    formula
+                }
+            }),
+        ),
+        (
+            "E3:E4",
+            "B3",
+            unchanged.map(|formula| {
+                if formula == "SUM(B4:B6)" {
+                    "SUM(B5:B6)"
+                } else {
+                    formula
+                }
+            }),
+        ),
+        (
+            "E6:E8",
+            "A6",
+            [
+                "SUM(A4:A5)",
+                "SUM(A4:B6)",
+                "SUM(B4:B6)",
+                "#REF!",
+                "SUM(A4:A4)",
+                "SUM($A$4:$A$5)",
+                "SUM(4:6)",
+                "SUM(A:A)",
+                "SUM(A4:C4)",
+            ],
+        ),
+        (
+            "E4:G4",
+            "B4",
+            unchanged.map(|formula| {
+                if formula == "SUM(A4:C4)" {
+                    "SUM(A4:A4)"
+                } else {
+                    formula
+                }
+            }),
+        ),
+    ] {
+        let request = grid(
+            GridEdit::MoveRange {
+                source: crate::CellRange::from_sqref_item(source).expect("source"),
+                destination: CellAddress::from_a1(destination).expect("destination"),
+            },
+            true,
+        );
+        for (formula, expected) in FORMULAS.iter().zip(expected) {
+            assert_eq!(
+                rewrite(formula, &request).expect(formula),
+                expected,
+                "{source} -> {destination}: {formula}"
+            );
+        }
+    }
 }
 
 #[test]

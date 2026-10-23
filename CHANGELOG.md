@@ -111,10 +111,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   `validation.table_split` where Excel refuses it.
 - `WorkbookChange::move_range(SheetId, CellRange, CellAddress)` cuts and pastes cells within a
   sheet: references to the moved cells follow them, a range only partly moved keeps its text, and
-  moved formulas keep theirs. Pasting over cells that a formula outside the moved cells reads
-  fails with the new `validation.moved_range_overwrites_references`, and moving part of a data
-  validation whose formula reads relative to its cells with the new
-  `validation.moved_range_splits_rule`; cutting part of a spill range fails with
+  moved formulas keep theirs. As Excel 16.114 does, a reference to cells the paste overwrites
+  becomes `#REF!` when they cover it, and a range shrinks to its part left when they cover its
+  whole width or height and run past one of its ends, while a range they only reach the end of or
+  lie inside keeps its text. Moving part of a data validation whose formula reads relative to its
+  cells fails with the new `validation.moved_range_splits_rule`; cutting part of a spill range fails with
   `validation.array_formula_part_edit`, as Excel refuses it.
 - `WorkbookChange::copy_range(SheetId, CellRange, SheetId, CellRange)` copies or fills a range
   onto a destination that repeats it a whole number of times, shifting the relative parts of

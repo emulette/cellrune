@@ -126,8 +126,6 @@ const MESSAGE_TABLE_DATA_ROWS_DELETED: &str =
     "deleting every data row of a table is refused because Excel keeps one";
 const MESSAGE_TABLE_SPLIT: &str =
     "a structural edit cannot delete, move, or overwrite part of a table or its totals row";
-const MESSAGE_MOVED_RANGE_OVERWRITES_REFERENCES: &str =
-    "a range move cannot paste over cells that a formula outside the moved cells reads";
 const MESSAGE_MOVED_RANGE_SPLITS_RULE: &str = "a range move cannot move part of a data validation or conditional format whose formula reads relative to its cells";
 const MESSAGE_COPY_DESTINATION_SHAPE: &str =
     "a copy destination must repeat the source range a whole number of times";
@@ -336,8 +334,6 @@ pub enum ValidationErrorCode {
     TableDataRowsDeleted,
     /// A structural edit would delete, move, or overwrite part of a table or its totals row.
     TableSplit,
-    /// A range move would paste over cells that a formula outside the moved cells reads.
-    MovedRangeOverwritesReferences,
     /// A range move would move part of a data validation or conditional format whose formula
     /// reads relative to its cells.
     MovedRangeSplitsRule,
@@ -456,7 +452,6 @@ impl ValidationErrorCode {
             Self::TableHeaderShift => "validation.table_header_shift",
             Self::TableDataRowsDeleted => "validation.table_data_rows_deleted",
             Self::TableSplit => "validation.table_split",
-            Self::MovedRangeOverwritesReferences => "validation.moved_range_overwrites_references",
             Self::MovedRangeSplitsRule => "validation.moved_range_splits_rule",
             Self::CopyDestinationShape => "validation.copy_destination_shape",
             Self::CopyUnsupportedFormula => "validation.copy_unsupported_formula",
@@ -914,11 +909,6 @@ pub enum ValidationError {
         /// Affected table.
         table_id: u32,
     },
-    /// A range move would paste over cells that a formula outside the moved cells reads.
-    MovedRangeOverwritesReferences {
-        /// Stable workbook owner context for the formula, when available.
-        owner: Option<String>,
-    },
     /// A range move would move part of a data validation whose formula reads relative to its
     /// cells; one rule cannot read the same cells from both places.
     MovedRangeSplitsRule {
@@ -1077,9 +1067,6 @@ impl ValidationError {
             Self::TableHeaderShift { .. } => ValidationErrorCode::TableHeaderShift,
             Self::TableDataRowsDeleted { .. } => ValidationErrorCode::TableDataRowsDeleted,
             Self::TableSplit { .. } => ValidationErrorCode::TableSplit,
-            Self::MovedRangeOverwritesReferences { .. } => {
-                ValidationErrorCode::MovedRangeOverwritesReferences
-            }
             Self::MovedRangeSplitsRule { .. } => ValidationErrorCode::MovedRangeSplitsRule,
             Self::CopyDestinationShape => ValidationErrorCode::CopyDestinationShape,
             Self::CopyUnsupportedFormula { .. } => ValidationErrorCode::CopyUnsupportedFormula,
@@ -1448,13 +1435,6 @@ impl fmt::Display for ValidationError {
             }
             Self::TableSplit { table_id } => {
                 write!(formatter, "{MESSAGE_TABLE_SPLIT}: table {table_id}")
-            }
-            Self::MovedRangeOverwritesReferences { owner } => {
-                formatter.write_str(MESSAGE_MOVED_RANGE_OVERWRITES_REFERENCES)?;
-                if let Some(owner) = owner {
-                    write!(formatter, ": owner {owner}")?;
-                }
-                Ok(())
             }
             Self::MovedRangeSplitsRule { owner } => {
                 formatter.write_str(MESSAGE_MOVED_RANGE_SPLITS_RULE)?;
@@ -1854,10 +1834,6 @@ mod tests {
                 "validation.table_data_rows_deleted",
             ),
             (ValidationErrorCode::TableSplit, "validation.table_split"),
-            (
-                ValidationErrorCode::MovedRangeOverwritesReferences,
-                "validation.moved_range_overwrites_references",
-            ),
             (
                 ValidationErrorCode::MovedRangeSplitsRule,
                 "validation.moved_range_splits_rule",

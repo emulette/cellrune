@@ -688,13 +688,11 @@ async function assertGridEdits() {
     ]).inverse,
     undefined,
   );
-  assert.throws(
-    () =>
-      workbook.applyChanges(workbook.summary().semanticRevision, [
-        { kind: "moveRange", sheet: "Sheet1", source: "D1", destination: "A3" },
-      ]),
-    validationError("validation.moved_range_overwrites_references"),
-  );
+  // Pasting over A3 leaves the formula that read it a #REF!, as Excel does.
+  workbook.applyChanges(workbook.summary().semanticRevision, [
+    { kind: "moveRange", sheet: "Sheet1", source: "D1", destination: "A3" },
+  ]);
+  assert.deepEqual([formula("B1"), formula("B2")], ["=SUM(A1:A5)", "=#REF!*10"]);
   assert.throws(
     () =>
       workbook.applyChangesV2(workbook.summary().semanticRevision, [

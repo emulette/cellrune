@@ -1275,7 +1275,6 @@ fn rewrite(
     rewrite_formula(formula, request, budget).map_err(|error| match error {
         FormulaRewriteError::Parse { .. }
         | FormulaRewriteError::SourceEdit(_)
-        | FormulaRewriteError::OverwrittenReference { .. }
         | FormulaRewriteError::SplitRule { .. } => unrewritable(source),
         FormulaRewriteError::Cancelled | FormulaRewriteError::LimitExceeded { .. } => {
             unreachable!("an unbounded non-cancellable rewrite cannot exhaust rewrite control")

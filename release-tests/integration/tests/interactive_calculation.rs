@@ -3079,17 +3079,15 @@ fn random_edit_sequences(
                 Err(error) => panic!("seed {seed}, step {step}: {error}"),
             }
             if structural && generator.random.below(4) == 0 {
-                // Pasting over cells another formula reads is refused, as are cutting part of a
-                // spill range and moving references a formula that does not parse may hold, so a
-                // range move may not apply.
+                // Cutting part of a spill range and moving references a formula that does not
+                // parse may hold are refused, so a range move may not apply.
                 match session.apply_changes(
                     session.workbook().semantic_revision(),
                     EditBatch::new([random_range_move(&mut generator.random, generator.sheets)]),
                 ) {
                     Ok(_)
                     | Err(ApplyChangesError::Validation(
-                        cellrune::ValidationError::MovedRangeOverwritesReferences { .. }
-                        | cellrune::ValidationError::ArrayFormulaPartEdit { .. }
+                        cellrune::ValidationError::ArrayFormulaPartEdit { .. }
                         | cellrune::ValidationError::FormulaRewriteParseFailed { .. },
                     )) => {}
                     Err(error) => panic!("seed {seed}, step {step}: {error}"),
