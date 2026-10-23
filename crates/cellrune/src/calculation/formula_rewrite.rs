@@ -679,7 +679,10 @@ fn replacement_sheet_name(source: &str, span: SourceSpan, new_name: &str) -> Str
     }
 }
 
-fn sheet_name_needs_quotes(name: &str) -> bool {
+/// Reports whether a sheet name needs quotes in a reference: when it is not a plain identifier, or
+/// when it reads as a cell reference, such as `S2` or `R1C1`. Excel reads an unquoted `S2:S3!A1`
+/// as a range from cell `S2`, so it writes such names quoted.
+pub(crate) fn sheet_name_needs_quotes(name: &str) -> bool {
     name.is_empty()
         || !name
             .chars()
@@ -689,6 +692,31 @@ fn sheet_name_needs_quotes(name: &str) -> bool {
             .chars()
             .skip(1)
             .any(|character| !(character.is_alphanumeric() || matches!(character, '_' | '.')))
+        || reads_as_a1_cell(name)
+        || reads_as_r1c1_reference(name)
+}
+
+/// `A1` through `XFD1048576`, letters in either case.
+fn reads_as_a1_cell(name: &str) -> bool {
+    let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
+    let digits = &name[letters..];
+    (1..=3).contains(&letters)
+        && !digits.is_empty()
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+        && crate::CellAddress::from_a1(name).is_ok()
+}
+
+/// `R`, `C`, `RC`, and their numbered forms such as `R1C1`, `R2`, or `C3`, in either case.
+fn reads_as_r1c1_reference(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    let digits = |text: &str| text.bytes().all(|byte| byte.is_ascii_digit());
+    match upper.strip_prefix('R') {
+        Some(rest) => match rest.split_once('C') {
+            Some((row, column)) => digits(row) && digits(column),
+            None => digits(rest),
+        },
+        None => upper.strip_prefix('C').is_some_and(digits),
+    }
 }
 
 fn plan_column_edits(
@@ -1162,17 +1190,17 @@ mod tests {
         for (deleted, source, rewritten) in [
             (&["S2"][..], "SUM('S2:S4'!A1)", "SUM('S3:S4'!A1)"),
             (&["S2"], "SUM('S2:S3'!A1)", "SUM('S3'!A1)"),
-            (&["S2"], "SUM(S1:S2!A1)", "SUM(S1!A1)"),
-            (&["S2"], "SUM(S4:S2!A1)", "SUM(S4:S3!A1)"),
+            (&["S2"], "SUM(S1:S2!A1)", "SUM('S1'!A1)"),
+            (&["S2"], "SUM(S4:S2!A1)", "SUM('S4:S3'!A1)"),
             (&["S2"], "SUM('S2:S2'!A1)", "SUM(#REF!)"),
             (&["S2"], "SUM(S2:Missing!A1)", "SUM(#REF!)"),
             (&["S3"], "SUM('S1:S3'!A1)", "SUM('S1:S2'!A1)"),
-            (&["S3"], "SUM(S1:'S3'!A1)", "SUM(S1:'S2'!A1)"),
+            (&["S3"], "SUM(S1:'S3'!A1)", "SUM('S1:S2'!A1)"),
             (&["S4"], "SUM('S2:S4'!A1)", "SUM('S2:S3'!A1)"),
             (&["S1"], "SUM('S1:S3'!A1)", "SUM('S2:S3'!A1)"),
-            (&["S2", "S3"], "SUM(S2:S4!A1)", "SUM(S4!A1)"),
+            (&["S2", "S3"], "SUM(S2:S4!A1)", "SUM('S4'!A1)"),
             (&["S2", "S3"], "SUM('S2:S3'!A1)", "SUM(#REF!)"),
-            (&["S2", "S4"], "SUM(S1:S4!A1)", "SUM(S1:S3!A1)"),
+            (&["S2", "S4"], "SUM(S1:S4!A1)", "SUM('S1:S3'!A1)"),
         ] {
             assert_eq!(
                 rewrite(source, deletion(deleted)),
@@ -1197,8 +1225,8 @@ mod tests {
             ("SUM('S2:S3'!A1)", "SUM('New Name'!A1)"),
             ("SUM(S2:S4!A1)", "SUM('New Name:S4'!A1)"),
             ("SUM('S2:S4'!A1)", "SUM('New Name:S4'!A1)"),
-            ("SUM(S1:S4!A1)", "SUM(S2:S4!A1)"),
-            ("S2!A1+S1!A1+S3!A1", "#REF!+S2!A1+'New Name'!A1"),
+            ("SUM(S1:S4!A1)", "SUM('S2:S4'!A1)"),
+            ("S2!A1+S1!A1+S3!A1", "#REF!+'S2'!A1+'New Name'!A1"),
         ] {
             assert_eq!(
                 rewrite(source, changes(&["S2"], TABS)),
@@ -1215,7 +1243,7 @@ mod tests {
         for (source, rewritten) in [
             ("SUM(S2:S4!A1)", "SUM('My Data:S4'!A1)"),
             ("SUM('S2:S4'!A1)", "SUM('My Data:S4'!A1)"),
-            ("SUM(S1:S2!A1)", "SUM(S1!A1)"),
+            ("SUM(S1:S2!A1)", "SUM('S1'!A1)"),
             ("SUM(S1:'S2'!A1)", "SUM('S1'!A1)"),
             ("SUM(S4:S2!A1)", "SUM('S4:My Data'!A1)"),
         ] {
@@ -1257,15 +1285,41 @@ mod tests {
     }
 
     #[test]
+    fn sheet_names_that_read_as_cell_references_are_quoted() {
+        // Excel 16.114 reads an unquoted `S2:S3!A1` as a range from cell `S2`.
+        for (new_name, rewritten) in [
+            ("S2", "'S2'!A1+SUM('S2:End'!A1)"),
+            ("xfd1048576", "'xfd1048576'!A1+SUM('xfd1048576:End'!A1)"),
+            ("R1C1", "'R1C1'!A1+SUM('R1C1:End'!A1)"),
+            ("rc", "'rc'!A1+SUM('rc:End'!A1)"),
+            ("C3", "'C3'!A1+SUM('C3:End'!A1)"),
+            ("XFE1", "XFE1!A1+SUM(XFE1:End!A1)"),
+            ("Rates", "Rates!A1+SUM(Rates:End!A1)"),
+        ] {
+            assert_eq!(
+                rewrite(
+                    "Data!A1+SUM(Data:End!A1)",
+                    FormulaRewriteRequest::Sheet {
+                        old_name: "Data",
+                        new_name,
+                    }
+                ),
+                Some(rewritten.to_owned()),
+                "{new_name}"
+            );
+        }
+    }
+
+    #[test]
     fn deleted_3d_ends_skip_tabs_that_are_not_worksheets() {
         // Excel 16.114 with tabs S1, S2, a chartsheet, S3: deleting S2 turns `'S2:S3'!A1` into
         // `'S3'!A1`, since a 3-D end moves to the nearest worksheet.
         for (deleted, source, rewritten) in [
             ("S2", "SUM('S2:S3'!A1)", "SUM('S3'!A1)"),
-            ("S2", "SUM(S2:S4!A1)", "SUM(S3:S4!A1)"),
-            ("S3", "SUM(S1:S3!A1)", "SUM(S1:S2!A1)"),
+            ("S2", "SUM(S2:S4!A1)", "SUM('S3:S4'!A1)"),
+            ("S3", "SUM(S1:S3!A1)", "SUM('S1:S2'!A1)"),
             ("S3", "SUM(Chart1:S3!A1)", "SUM(#REF!)"),
-            ("S4", "SUM(Chart1:S4!A1)", "SUM(Chart1:S3!A1)"),
+            ("S4", "SUM(Chart1:S4!A1)", "SUM('Chart1:S3'!A1)"),
         ] {
             assert_eq!(
                 rewrite(

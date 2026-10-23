@@ -91,6 +91,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 - A sheet rename that gives an end of a 3-D reference a name that needs quotes writes the range as
   one quoted token, `'New Name:End'!A1`, as MS-XLSX requires, instead of `'New Name':End!A1`.
+- A rename or deletion that writes a sheet name reading as a cell reference, such as `S2` or
+  `R1C1`, quotes it (`'S2'!A1`, `'S2:S4'!A1`), as Excel writes it. Excel reads an unquoted
+  `S2:S3!A1` as a range starting at cell `S2`.
 
 ## [0.1.26] - 2026-10-23
 
