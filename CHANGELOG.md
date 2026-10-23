@@ -56,6 +56,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   `function_catalog_page`.
 - `docs/ERROR_CODES.md` lists every stable error and calculation issue code by surface: the Rust
   core enums, interop, MCP, and the Node.js wrapper.
+- `bindings/scripts/mcp_registry.py` assembles one MCP Bundle, `cellrune-mcp-<version>.mcpb`, from
+  a release's three verified `cellrune-mcp` archives, running the platform's executable on one
+  approved directory, and writes the official MCP registry `server.json` that names that bundle's
+  release download URL and SHA-256.
 
 ### Changed
 
