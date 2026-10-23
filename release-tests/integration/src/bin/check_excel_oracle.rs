@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CellAddress, CellContent, CellValue, ReadOptions,
-    SavedResult, WorkbookSnapshot, calculate_workbook, read_xlsx_path,
+    CalculationCellId, CalculationCellResult, CalculationOptions, CellAddress, CellContent,
+    CellValue, Locale, LocaleProfile, ReadOptions, SavedResult, WorkbookSnapshot,
+    calculate_workbook, read_xlsx_path,
 };
 use cellrune_integration_tests::oracle::{
     ArtifactReference, CASE_MANIFEST_SCHEMA, CacheStatus, CaseManifest, Classification, Comparator,
@@ -38,6 +39,7 @@ const EXPECTATIONS_FILE: &str = "expectations.json";
 const SUITE_FILE: &str = "suite.json";
 const OBSERVATIONS_FILE: &str = "observations.json";
 const MESSAGE_NO_ORACLES: &str = "no oracle metadata files found";
+const MESSAGE_PROFILE_LOCALE: &str = "host profile directory has no locale profile";
 const MESSAGE_EXPECTATION_KEYS: &str =
     "expectation keys must exactly equal the selected workbook cases";
 const MESSAGE_UNCLASSIFIED: &str = "unclassified oracle case";
@@ -429,7 +431,7 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
         workbook.calculation_hints().iterative_calculation(),
     )?;
     let selected_by_address = selection::select_cases(&workbook, &metadata.case_selection)?;
-    let (selected, observations) = match suite_path {
+    let (selected, observations, locale_profile) = match suite_path {
         Some(path) => {
             let binding = load_suite_binding(
                 directory,
@@ -439,9 +441,13 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
                 &workbook,
                 selected_by_address,
             )?;
-            (binding.selected, Some(binding.observations))
+            (
+                binding.selected,
+                Some(binding.observations),
+                binding.locale_profile,
+            )
         }
-        None => (selected_by_address, None),
+        None => (selected_by_address, None, LocaleProfile::default()),
     };
     let expectations_path = directory.join(EXPECTATIONS_FILE);
     let expectations = if expectations_path.exists() {
@@ -451,7 +457,10 @@ fn load_oracle(directory: &Path, require_expectations: bool) -> Result<LoadedOra
     } else {
         Expectations::new()
     };
-    let calculation = calculate_workbook(&workbook, cellrune::CalculationOptions::default());
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_locale_profile(locale_profile),
+    );
     Ok(LoadedOracle {
         directory: directory.to_path_buf(),
         expectations,
@@ -482,6 +491,7 @@ fn resolve_suite_path(
 struct SuiteBinding {
     selected: BTreeMap<String, CalculationCellId>,
     observations: BTreeMap<String, ObservedCase>,
+    locale_profile: LocaleProfile,
 }
 
 fn load_suite_binding(
@@ -632,7 +642,20 @@ fn load_suite_binding(
     Ok(SuiteBinding {
         selected,
         observations: observed_by_key,
+        locale_profile: profile_locale(profile)?,
     })
+}
+
+/// The locale conventions a host profile calculated with, passed explicitly because CellRune never
+/// reads the host locale. Both hosts ran an English interface with Korean regional settings. Excel
+/// Online labels `GROUPBY` and `PIVOTBY` totals in the regional language, while Mac Excel 2021
+/// labels them in its English interface.
+fn profile_locale(profile: &HostProfile) -> Result<LocaleProfile, String> {
+    match profile.directory.as_str() {
+        "online" => Ok(LocaleProfile::new(Locale::KoKr)),
+        "desktop-2021" => Ok(LocaleProfile::new(Locale::KoKr).with_display_language(Locale::EnUs)),
+        other => Err(format!("{other}: {MESSAGE_PROFILE_LOCALE}")),
+    }
 }
 
 fn validate_profile_metadata(

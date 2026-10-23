@@ -18,7 +18,10 @@ The checker:
 - exact-matches every formula anchor and observed array-result cell against the raw XLSX cache;
 - opens each workbook and selects the active manifest formula cells;
 - compares Excel's saved value with `expectations.json`;
-- calculates the same workbook with CellRune;
+- calculates the same workbook with CellRune under each host profile's locale conventions: both
+  hosts used Korean regional settings with an English interface, and because Excel Online labels
+  `GROUPBY` and `PIVOTBY` totals in Korean while Mac Excel 2021 labels them in English, the
+  desktop-2021 profile calculates with an English display language;
 - compares each declared array result's materialized range, shape, and cells;
 - verifies the recorded classification and the exact CellRune-side result for reviewed
   multi-cell array divergences.

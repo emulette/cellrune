@@ -107,6 +107,9 @@ Volatile functions require deterministic inputs through `CalculationOptions`:
 `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`. A draw depends only on the seed, the cell, and the
 call's position in its formula, so wherever full calculation produces a value the other
 calculation modes produce the same one; the generator is not cryptographically secure. Use
+`with_locale_profile` to select the built-in English (United States) or Korean (Korea)
+conventions that `DOLLAR`, the names `TEXT` shows, and the `GROUPBY` and `PIVOTBY` total labels
+follow; CellRune never reads the host locale. Use
 `with_arithmetic_semantics` and `with_financial_solver_semantics` to opt into the raw IEEE-754 and
 extended-search behavior shipped through 0.1.2; the defaults select Excel-compatible cancellation
 and Microsoft's function-specific solver budgets. Use

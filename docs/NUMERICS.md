@@ -95,17 +95,20 @@ produces an error, and a caller comparing the two sees a defect rather than an i
 Whichever policy is selected, both find the same root when both converge; they differ only in when
 they give up.
 
-### Deliberate difference: `DOLLAR` currency formatting
-
-`DOLLAR` returns a locale-independent `$` format, for example `$0.00`, `$1.00`, and `($1.00)`.
+### Selectable: locale conventions
 
 Microsoft documents the currency symbol of `DOLLAR` as dependent on system regional settings, so an
-Excel installation with Korean regional settings saves `₩0`, `₩1`, and `(₩1)` for the same formula.
-CellRune never reads host locale as an implicit calculation input, because doing so would make the
-same workbook calculate differently on two machines and break the determinism the rest of the API
-depends on. There is currently no explicit locale input to opt into the host convention.
-
-Differences of this kind are formatting differences, not calculation failures.
+Excel installation with Korean regional settings saves `₩0`, `₩1`, and `(₩1)` where an English
+(United States) one saves `$0.00`, `$1.00`, and `($1.00)` for the same formula. CellRune never reads
+host locale as an implicit calculation input, because doing so would make the same workbook
+calculate differently on two machines and break the determinism the rest of the API depends on.
+Instead `CalculationOptions::with_locale_profile` selects one of the built-in locales, English
+(United States) by default or Korean (Korea). The profile decides the `DOLLAR` currency symbol and
+the decimals it shows when the formula omits them, the month, weekday, and `AM`/`PM` names `TEXT`
+shows, and the `GROUPBY` and `PIVOTBY` total labels (`Total` or `합계`). The labels follow a separate
+display language, because an Excel with an English interface and Korean regional settings may
+label totals in English. The Korean names and the label of a grand total over several levels have
+not been measured, so they remain unsupported.
 
 ### Selectable: arithmetic that cancels to near zero
 
@@ -417,8 +420,8 @@ The current engine audit of the frozen 0.1.8 workbooks records:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 250 | 16 | 0 | 0 | 0 |
-| CellRune formula oracle — Excel Online | 1,496 | 1,391 | 12 | 93 | 0 | 0 |
-| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,371 | 9 | 93 | 23 | 0 |
+| CellRune formula oracle — Excel Online | 1,496 | 1,399 | 4 | 93 | 0 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,375 | 5 | 93 | 23 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
@@ -429,9 +432,9 @@ These counts are an audit inventory, not a composite score or release threshold.
 The 0.1.8 workbook has 1,527 primary cases, 1,496 active cases, and 1,892 formula cells. Excel Online
 and Mac Excel 2021 both saved the workbook without losing formulas. A host that stores no usable
 value for a case is recorded as `host_unsupported`. The three PIVOTBY cases retain semantic empty
-anchors and complete array results. All three match Mac Excel 2021; Online's nominal case is
-`divergent` only because Excel saved the locale-generated total label `합계` while CellRune emits
-`Total`, and its coercion and domain cases match. Missing host values do not require regenerating
+anchors and complete array results, and all three match on both hosts. The audit calculates each
+host with its locale conventions: Korean regional settings, with Korean total labels for Excel Online
+(`합계`) and English ones for Mac Excel 2021 (`Total`). Missing host values do not require regenerating
 the workbook or block publication.
 
 ## Unverified

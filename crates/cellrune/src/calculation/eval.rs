@@ -1335,6 +1335,18 @@ impl<'workbook> Engine<'workbook> {
         self.options.financial_solver_semantics()
     }
 
+    pub(super) const fn locale_profile(&self) -> crate::LocaleProfile {
+        self.options.locale_profile()
+    }
+
+    /// The date system and regional format a number-format code reads.
+    pub(super) fn format_context(&self) -> super::textfmt::FormatContext {
+        super::textfmt::FormatContext {
+            date_system: self.date_system(),
+            locale: self.options.locale_profile().locale(),
+        }
+    }
+
     pub(super) fn max_array_cells(&self) -> u64 {
         self.options.limits().max_array_cells()
     }

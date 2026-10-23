@@ -2,7 +2,7 @@ use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_number};
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
-use super::super::textfmt::{FormatContext, format_number};
+use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
 use super::util::{required_number, required_text};
@@ -12,6 +12,7 @@ pub(super) fn call(
     context: EvalContext<'_>,
     function: TextAdditionalFunction,
     args: &[Expr],
+    written: &[Expr],
 ) -> Value {
     match function {
         TextAdditionalFunction::BahtText => super::baht_text::baht_text(engine, context, args),
@@ -22,7 +23,7 @@ pub(super) fn call(
         }
         TextAdditionalFunction::Clean => clean(engine, context, args),
         TextAdditionalFunction::Concatenate => concatenate(engine, context, args),
-        TextAdditionalFunction::Dollar => dollar(engine, context, args),
+        TextAdditionalFunction::Dollar => dollar(engine, context, args, written),
         TextAdditionalFunction::EncodeUrl => super::url_encoding::encode_url(engine, context, args),
         TextAdditionalFunction::Fixed => fixed(engine, context, args),
         TextAdditionalFunction::UniChar => unichar(engine, context, args),
@@ -70,16 +71,30 @@ fn code(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         })
 }
 
-fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
+/// `DOLLAR`; an omitted `decimals` takes the locale's currency decimals, which `written`, the
+/// arguments as the formula wrote them, tells apart from an explicit value.
+fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], written: &[Expr]) -> Value {
     if args.is_empty() || args.len() > 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let (rounded, decimals) = match rounded_to_decimals(engine, context, args) {
+    let locale = engine.locale_profile().locale();
+    let decimals = written.get(1).filter(|expr| !matches!(expr, Expr::Missing));
+    let (rounded, decimals) = match rounded_to_decimals(
+        engine,
+        context,
+        &args[0],
+        decimals,
+        locale.currency_decimals(),
+    ) {
         Ok(rounded) => rounded,
         Err(kind) => return Value::Error(kind),
     };
-    let format = format!("$#,##0{}", decimal_places(decimals));
-    let formatted = match format_number(rounded.abs(), &format, format_context(engine)) {
+    let format = format!(
+        "\"{}\"#,##0{}",
+        locale.currency_symbol(),
+        decimal_places(decimals)
+    );
+    let formatted = match format_number(rounded.abs(), &format, engine.format_context()) {
         Ok(formatted) => formatted,
         Err(kind) => return Value::Error(kind),
     };
@@ -95,7 +110,7 @@ fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
     if args.is_empty() || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
     }
-    let (number, decimals) = match rounded_to_decimals(engine, context, args) {
+    let (number, decimals) = match rounded_to_decimals(engine, context, &args[0], args.get(1), 2) {
         Ok(rounded) => rounded,
         Err(kind) => return Value::Error(kind),
     };
@@ -116,7 +131,7 @@ fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
     };
     let grouping = if no_commas { "0" } else { "#,##0" };
     let format = format!("{grouping}{}", decimal_places(decimals));
-    match format_number(rounded, &format, format_context(engine)) {
+    match format_number(rounded, &format, engine.format_context()) {
         Ok(text) => engine.bounded_text(text),
         // The format engine stops at 2^53 rounded units, where Excel still shows every digit.
         Err(ErrorKind::Num) => Value::Error(ErrorKind::Unsupported),
@@ -125,14 +140,16 @@ fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
 }
 
 /// Reads the number and decimals `DOLLAR` and `FIXED` share: numeric text is read as `VALUE`
-/// reads it, decimals default to two and truncate, and negative decimals round to the left of the
-/// decimal point. Returns the number and the count of decimals to show.
+/// reads it, decimals truncate and take `default_decimals` when omitted, and negative decimals round
+/// to the left of the decimal point. Returns the number and the count of decimals to show.
 fn rounded_to_decimals(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    args: &[Expr],
+    number: &Expr,
+    decimals: Option<&Expr>,
+    default_decimals: i32,
 ) -> Result<(f64, usize), ErrorKind> {
-    let number_value = engine.eval_scalar(context, &args[0]);
+    let number_value = engine.eval_scalar(context, number);
     let number = match to_number(&number_value) {
         Ok(number) => number,
         Err(ErrorKind::Value) => match &number_value {
@@ -141,8 +158,8 @@ fn rounded_to_decimals(
         },
         Err(kind) => return Err(kind),
     };
-    let decimals = match args.get(1) {
-        None | Some(Expr::Missing) => 2_i32,
+    let decimals = match decimals {
+        None | Some(Expr::Missing) => default_decimals,
         Some(expr) => required_number(engine, context, expr)?.trunc() as i32,
     };
     if !(-308..=127).contains(&decimals) {
@@ -165,12 +182,6 @@ fn decimal_places(decimals: usize) -> String {
         String::new()
     } else {
         format!(".{}", "0".repeat(decimals))
-    }
-}
-
-fn format_context(engine: &Engine<'_>) -> FormatContext {
-    FormatContext {
-        date_system: engine.date_system(),
     }
 }
 

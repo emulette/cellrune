@@ -10,9 +10,6 @@ use super::array_common::{cell_count, poll_cancellation};
 use super::array_sort::{compare_sort_values, stable_sort_indexes};
 use super::grouping_options::{FieldRelationship, SortCriterion, TotalDepth, TotalPlacement};
 
-const TOTAL_LABEL: &str = "Total";
-const GRAND_TOTAL_LABEL: &str = "Grand Total";
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum KeyValue {
     Blank,
@@ -450,10 +447,11 @@ pub(super) fn add_totals(
         context,
         operations.checked_add(label_cells).ok_or(ErrorKind::Num)?,
     )?;
+    let language = engine.locale_profile().display_language();
     let grand_label = if effective_levels > 1 {
-        GRAND_TOTAL_LABEL
+        language.grand_total_label().ok_or(ErrorKind::Unsupported)?
     } else {
-        TOTAL_LABEL
+        language.total_label()
     };
     engine.ensure_text_bytes(grand_label.len())?;
     let grand_label = Value::Text(grand_label.to_owned());

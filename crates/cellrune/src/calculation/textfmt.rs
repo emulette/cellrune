@@ -15,12 +15,14 @@ mod tests;
 use lexer::{RawSection, Token};
 
 use super::value::{ErrorKind, number_to_general_text};
-use crate::DateSystem;
+use crate::{DateSystem, Locale};
 
 /// The workbook facts a format code reads besides the value.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FormatContext {
     pub(crate) date_system: DateSystem,
+    /// The regional format whose month, weekday, and `AM`/`PM` names date sections show.
+    pub(crate) locale: Locale,
 }
 
 /// Formats a number with `format`, as `TEXT` does.

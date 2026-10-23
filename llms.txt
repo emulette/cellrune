@@ -202,7 +202,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `RecalculationWriteOptions::new`,
   `CalculationOptions::with_today_serial`,
   `CalculationOptions::with_now_serial`,
-  `CalculationOptions::with_random_seed`, and
+  `CalculationOptions::with_random_seed`,
+  `CalculationOptions::with_locale_profile`, and
   `CalculationOptions::with_limits` return `Self` directly.
 - **Getters are bare nouns, never `get_`-prefixed,** and are frequently
   `const fn` (`.code()`, `.severity()`, `.limits()`,
@@ -877,12 +878,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   fractional seconds, `[h]`, `[m]`, `[s]`, `AM/PM`, and `A/P`, in the
   workbook's date system with serial 60 as 1900-02-29, rounded to the second
   or to the shown fraction of a second, with English month, weekday, and
-  `AM`/`PM` names. These stay `calculation.unsupported_expression`: `*` fills,
-  fixed fraction denominators such as `# ?/8`, `@` in a number section,
-  conditional sections for a negative number, lowercase `am/pm`, `aaa`, `b`, and `g` codes, system
-  formats such as `[$-F800]`, names under a `[$-lcid]` other than `[$-409]`,
-  negative date-time values, fractions that round to a whole number, and other
-  year, day, hour, and second code lengths. A non-numeric text value is
+  `AM`/`PM` names under the default locale profile. These stay
+  `calculation.unsupported_expression`: `*` fills, fixed fraction
+  denominators such as `# ?/8`, `@` in a number section, conditional sections
+  for a negative number, lowercase `am/pm`, `aaa`, `b`, and `g` codes, system
+  formats such as `[$-F800]`, names under a `[$-lcid]` other than `[$-409]`
+  or under the Korean profile, negative date-time values, fractions that
+  round to a whole number, and other year, day, hour, and second code
+  lengths. A non-numeric text value is
   `#VALUE!`.
 - `FIXED(number, [decimals], [no_commas])`, added in 0.1.27, and `DOLLAR(number,
   [decimals])` read numeric text as `VALUE` does, truncate `decimals` (default
@@ -1081,6 +1084,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   `=RAND()-RAND()` uses two positions and is not zero, while a `LET` binding
   draws once. The generator is a small SplitMix64-style counter mixer, not a
   cryptographically secure source.
+- `CalculationOptions::with_locale_profile(LocaleProfile)` selects built-in
+  locale conventions; CellRune never reads the host locale.
+  `LocaleProfile::new(Locale)` follows one locale for the regional format and
+  for generated labels, and `.with_display_language(Locale)` sets the labels
+  apart; `.locale()` and `.display_language()` read them back. `Locale` is
+  `#[non_exhaustive]` with `EnUs` (the default, which keeps every earlier
+  result) and `KoKr`; both use `.` and `,` as decimal and thousands
+  separators. The regional format decides the `DOLLAR` currency symbol (`$`
+  or `₩`) and the decimals it shows when the formula omits them (2 or none;
+  negative amounts are parenthesized in both), and the names `TEXT` shows:
+  English for `EnUs`, while Korean month, weekday, and `AM`/`PM` names are
+  `calculation.unsupported_expression` until measured (a `[$-409]` section
+  still shows English names). The display language decides the `GROUPBY` and
+  `PIVOTBY` total label: `Total` or `합계`, and `Grand Total` over several
+  levels in English, which is unsupported in Korean. Changing the profile is
+  a calculation-options change, so a session recalculates fully.
 - **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
   than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
   applies Excel's narrow correction only when the exact decimal/rational trace

@@ -1,9 +1,10 @@
 use super::super::value::ErrorKind;
 use super::{FormatContext, format_number};
-use crate::DateSystem;
+use crate::{DateSystem, Locale};
 
 const CONTEXT: FormatContext = FormatContext {
     date_system: DateSystem::Excel1900,
+    locale: Locale::EnUs,
 };
 
 fn text(value: f64, format: &str) -> Result<String, ErrorKind> {
@@ -146,6 +147,7 @@ fn dates_follow_both_date_systems() {
     assert_text(1.0, "dddd", "Sunday");
     let excel_1904 = FormatContext {
         date_system: DateSystem::Excel1904,
+        ..CONTEXT
     };
     assert_eq!(
         format_number(0.0, "yyyy-mm-dd", excel_1904).as_deref(),
@@ -208,4 +210,27 @@ fn unmeasured_constructs_stay_unsupported() {
     assert_unsupported(5.0, "0;0;0;0;0");
     assert_text(46_230.0, "[$-409]mmmm", "July");
     assert_text(1234.5, "[$₩-412]#,##0", "₩1,235");
+}
+
+#[test]
+fn korean_regional_format_leaves_unmeasured_names_unsupported() {
+    let korean = FormatContext {
+        locale: Locale::KoKr,
+        ..CONTEXT
+    };
+    assert_eq!(
+        format_number(46_230.0, "yyyy-mm-dd", korean).as_deref(),
+        Ok("2026-07-27")
+    );
+    assert_eq!(
+        format_number(46_230.0, "[$-409]mmm", korean).as_deref(),
+        Ok("Jul")
+    );
+    for format in ["mmm", "dddd", "h AM/PM"] {
+        assert_eq!(
+            format_number(46_230.5, format, korean),
+            Err(ErrorKind::Unsupported),
+            "{format}"
+        );
+    }
 }

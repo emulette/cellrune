@@ -27,6 +27,7 @@ pub(crate) mod identity;
 mod lambda;
 mod lexer;
 mod limits;
+mod locale;
 mod operators;
 mod parser;
 pub(crate) mod persistent_store;
@@ -66,6 +67,7 @@ pub use defined_name_analysis::{
     analyze_defined_name_with_options,
 };
 pub use limits::{CalculationLimitKind, CalculationLimits, CalculationOptionsError};
+pub use locale::{Locale, LocaleProfile};
 pub use session::{
     ApplyChangesError, CalculationDecisionReason, CalculationDelta, CalculationDeltaCell,
     CalculationDeltaPage, CalculationExecutionMode, CancellationToken, CompletedCalculation,
@@ -502,6 +504,7 @@ pub struct CalculationOptions {
     today_serial: Option<FiniteNumber>,
     now_serial: Option<FiniteNumber>,
     random_seed: Option<u32>,
+    locale_profile: LocaleProfile,
     limits: CalculationLimits,
     arithmetic: ArithmeticSemantics,
     financial_solver: FinancialSolverSemantics,
@@ -546,6 +549,19 @@ impl CalculationOptions {
     /// Returns the configured seed for the random functions, when present.
     pub const fn random_seed(self) -> Option<u32> {
         self.random_seed
+    }
+
+    /// Selects the locale conventions of `DOLLAR`, the names `TEXT` shows, and the `GROUPBY` and
+    /// `PIVOTBY` total labels. The default is English (United States); CellRune never reads the
+    /// host locale.
+    pub const fn with_locale_profile(mut self, locale_profile: LocaleProfile) -> Self {
+        self.locale_profile = locale_profile;
+        self
+    }
+
+    /// Returns the configured locale conventions.
+    pub const fn locale_profile(self) -> LocaleProfile {
+        self.locale_profile
     }
 
     /// Replaces the formula calculation resource limits.

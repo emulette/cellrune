@@ -4,6 +4,7 @@ use super::super::functions::{date_from_serial, weekday_monday_zero};
 use super::super::value::ErrorKind;
 use super::FormatContext;
 use super::lexer::{Meridiem, Placeholder, Token};
+use crate::Locale;
 
 /// The locale identifier of English (United States) in a `[$-409]` code.
 const EN_US_LOCALE_ID: u32 = 0x409;
@@ -96,15 +97,16 @@ pub(super) fn render(
     context: FormatContext,
 ) -> Result<String, ErrorKind> {
     let parts = resolve_minutes(parts(tokens)?);
-    let names = match locale_id {
-        None | Some(EN_US_LOCALE_ID) => &EN_US_NAMES,
-        Some(_) => {
-            if parts.iter().any(uses_names) {
-                return Err(ErrorKind::Unsupported);
-            }
-            &EN_US_NAMES
-        }
+    // Names are known only in English; the Korean names have not been measured.
+    let english = match locale_id {
+        Some(EN_US_LOCALE_ID) => true,
+        Some(_) => false,
+        None => context.locale == Locale::EnUs,
     };
+    if !english && parts.iter().any(uses_names) {
+        return Err(ErrorKind::Unsupported);
+    }
+    let names = &EN_US_NAMES;
     let decimals = parts
         .iter()
         .filter_map(|part| match part {

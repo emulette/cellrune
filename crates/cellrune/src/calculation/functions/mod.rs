@@ -173,6 +173,7 @@ pub(in crate::calculation) fn call_function_with_trace(
     if !call_shape_is_valid(descriptor, args) {
         return super::scope::ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
     }
+    let written = args;
     let prepared = CallArguments::prepare(descriptor, args);
     let args = prepared.as_slice();
     let context = context.with_arguments(args);
@@ -210,16 +211,19 @@ pub(in crate::calculation) fn call_function_with_trace(
             engine.scalar_from_scope(context, &value)
         }
         _ => super::scope::ScalarEvaluation::untracked(dispatch_scalar(
-            descriptor, engine, context, args,
+            descriptor, engine, context, args, written,
         )),
     }
 }
 
+/// Calls a scalar kernel with the prepared arguments; `written` holds the arguments as the formula
+/// wrote them, before omitted ones took their defaults.
 fn dispatch_scalar(
     descriptor: FunctionDescriptor,
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     args: &[Expr],
+    written: &[Expr],
 ) -> Value {
     match descriptor.evaluator() {
         Evaluator::Legacy(function) => legacy::call_legacy(engine, context, function, args),
@@ -237,7 +241,7 @@ fn dispatch_scalar(
         Evaluator::Information(function) => information::call(engine, context, function, args),
         Evaluator::Text(function) => text::call(engine, context, function, args),
         Evaluator::TextAdditional(function) => {
-            text_additional::call(engine, context, function, args)
+            text_additional::call(engine, context, function, args, written)
         }
         Evaluator::ModernText(function) => {
             modern_text::call_scalar(engine, context, function, args)

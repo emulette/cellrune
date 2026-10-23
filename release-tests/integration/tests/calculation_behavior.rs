@@ -29,6 +29,8 @@ mod distribution_extensions;
 mod distributions;
 #[path = "calculation_behavior/financial_extensions.rs"]
 mod financial_extensions;
+#[path = "calculation_behavior/locale_profile.rs"]
+mod locale_profile;
 #[path = "calculation_behavior/moments.rs"]
 mod moments;
 #[path = "calculation_behavior/normal_extensions.rs"]
