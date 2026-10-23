@@ -2,11 +2,15 @@
 //! `REPLACEB`) and the width conversions `ASC` and `DBCS`.
 //!
 //! Microsoft documents that the byte functions count two bytes for a double-byte character only
-//! when the locale uses a double-byte character set, and count characters like their non-byte
-//! forms otherwise. Korean is such a locale: its code page 949 stores ASCII in one byte and Hangul
-//! syllables, Hangul compatibility jamo, full-width ASCII forms, and the ideographic space in two.
-//! Other characters, and positions that would split a double-byte character, are unsupported
-//! until Excel's handling of them is established.
+//! when the locale uses a double-byte character set, and count like their non-byte forms
+//! otherwise. Excel 16.114 without a double-byte language counts UTF-16 code units, so
+//! `LENB("😀")` is 2 and `FINDB("b","😀b")` is 3, and leaves `ASC` and `DBCS` text unchanged
+//! (excel-measure RESULTS.md, section D); `LEN` and the other non-byte functions still count
+//! characters until 0.2.0. Korean is a double-byte locale: its code page 949 stores ASCII in one
+//! byte and Hangul syllables, Hangul compatibility jamo, full-width ASCII forms, and the
+//! ideographic space in two. Other Korean characters, and positions that would split a surrogate
+//! pair or a double-byte character, are unsupported until Excel's handling of them is
+//! established.
 
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
@@ -42,11 +46,12 @@ pub(super) fn call(
     result.unwrap_or_else(Value::Error)
 }
 
-/// The byte width of each character of `text`.
+/// The byte width of each character of `text`: its UTF-16 code units without a double-byte
+/// locale.
 fn widths(text: &str, locale: Locale) -> Result<Vec<usize>, ErrorKind> {
     text.chars()
         .map(|character| match locale {
-            Locale::EnUs => Ok(1),
+            Locale::EnUs => Ok(character.len_utf16()),
             Locale::KoKr if character.is_ascii() => Ok(1),
             Locale::KoKr if is_korean_double_byte(character) => Ok(2),
             Locale::KoKr => Err(ErrorKind::Unsupported),
@@ -61,7 +66,7 @@ fn is_korean_double_byte(character: char) -> bool {
     )
 }
 
-/// The count of leading characters within `bytes`; splitting a double-byte character is
+/// The count of leading characters within `bytes`; splitting a character wider than one byte is
 /// unsupported.
 fn leading_characters(widths: &[usize], bytes: usize) -> Result<usize, ErrorKind> {
     let mut used = 0_usize;
@@ -79,8 +84,8 @@ fn leading_characters(widths: &[usize], bytes: usize) -> Result<usize, ErrorKind
 }
 
 /// The character index that starts at the zero-based byte `offset`, the character count when
-/// `offset` is the end of the text, or `None` past the end; an offset inside a double-byte
-/// character is unsupported.
+/// `offset` is the end of the text, or `None` past the end; an offset inside a character wider than
+/// one byte is unsupported.
 fn character_at_byte(widths: &[usize], offset: usize) -> Result<Option<usize>, ErrorKind> {
     let mut used = 0_usize;
     for (index, width) in widths.iter().enumerate() {
@@ -227,7 +232,8 @@ fn replace(
     Ok(replace_characters(engine, text, first, count, &replacement))
 }
 
-/// `ASC` or `DBCS`: converts each character of the text in a double-byte locale.
+/// `ASC` or `DBCS`: converts each character of the text in a double-byte locale and leaves the
+/// text unchanged otherwise.
 fn convert(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -239,9 +245,8 @@ fn convert(
         return Err(ErrorKind::Value);
     };
     let text = required_text(engine, context, text)?;
-    // Whether a locale without a double-byte character set converts has not been established.
     if locale != Locale::KoKr {
-        return Err(ErrorKind::Unsupported);
+        return Ok(Value::Text(text));
     }
     let converted = text
         .chars()

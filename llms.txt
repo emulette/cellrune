@@ -1058,19 +1058,21 @@ than guessing a name from a different XLSX crate (`calamine`,
   `calculation.unsupported_expression`.
 - The nine names `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
   `REPLACEB`, `ASC`, and `DBCS`, added in 0.1.27, follow the locale profile's
-  double-byte rules. Under `Locale::EnUs` every character counts one byte, so
-  the byte functions return what `LEN`, `LEFT`, `RIGHT`, `MID`, `FIND`,
-  `SEARCH`, and `REPLACE` return, with the same argument coercion and
-  `#VALUE!` boundaries. Under `Locale::KoKr` (code page 949) ASCII counts one
+  double-byte rules. Under `Locale::EnUs` a character counts its UTF-16 code
+  units, as Excel without a double-byte language does (`LENB("😀")` is 2 and
+  `FINDB("b","😀b")` is 3, while `LEN("😀")` stays 1 until 0.2.0), with the
+  argument coercion and `#VALUE!` boundaries of `LEN`, `LEFT`, `RIGHT`, `MID`,
+  `FIND`, `SEARCH`, and `REPLACE`, and `ASC` and `DBCS` return the text
+  unchanged. Under `Locale::KoKr` (code page 949) ASCII counts one
   byte and Hangul syllables, Hangul compatibility jamo, full-width ASCII forms
   (U+FF01 through U+FF5E), and the ideographic space count two; positions are
   one-based bytes, `FINDB`/`SEARCHB` return byte positions, and `SEARCHB`
   keeps `SEARCH` wildcards. `ASC` maps full-width ASCII forms to ASCII and the
   ideographic space to a space, leaving ASCII and Hangul syllables; `DBCS`
   maps printable ASCII to full-width forms and the space to the ideographic
-  space, leaving double-byte characters. Other characters, a byte position or
-  count that would split a double-byte character, and `ASC` and `DBCS` under
-  `Locale::EnUs` are `calculation.unsupported_expression`. `JIS`, the Japanese
+  space, leaving double-byte characters. Other characters under
+  `Locale::KoKr`, and a byte position or count that would split a surrogate
+  pair or a double-byte character, are `calculation.unsupported_expression`. `JIS`, the Japanese
   name of `DBCS`, is not in the catalog.
 - `AGGREGATE(function_num, options, ref1, ...)` and `AGGREGATE(function_num,
   options, array, k)`, added in 0.1.27, apply function 1 `AVERAGE`, 2 `COUNT`,

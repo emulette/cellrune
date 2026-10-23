@@ -80,8 +80,19 @@ fn byte_functions_count_characters_without_a_double_byte_locale() {
             "=MIDB(\"CellRune Oracle\",0,4)",
             Expected::Error(ExcelError::Value),
         ),
-        ("=ASC(\"ＡＢＣ\")", Expected::Unsupported),
-        ("=DBCS(\"ABC\")", Expected::Unsupported),
+        // Excel 16.114 without a double-byte language counts UTF-16 code units and leaves ASC
+        // and DBCS text unchanged (excel-measure RESULTS.md, section D).
+        ("=LENB(\"😀\")", Expected::Number(2.0)),
+        ("=FINDB(\"b\",\"😀b\")", Expected::Number(3.0)),
+        ("=MIDB(\"a😀b\",2,2)", Expected::Text("😀")),
+        ("=RIGHTB(\"a😀\",2)", Expected::Text("😀")),
+        ("=REPLACEB(\"😀b\",3,1,\"c\")", Expected::Text("😀c")),
+        ("=ASC(\"ＡＢ가\")", Expected::Text("ＡＢ가")),
+        ("=DBCS(\"AB\")", Expected::Text("AB")),
+        // A cut inside a surrogate pair is unmeasured.
+        ("=MIDB(\"a😀b\",2,1)", Expected::Unsupported),
+        ("=LEFTB(\"😀\",1)", Expected::Unsupported),
+        ("=FINDB(\"b\",\"😀b\",2)", Expected::Unsupported),
     ];
     let (workbook, sheet_id) = workbook(&cases);
 
