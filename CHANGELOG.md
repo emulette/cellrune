@@ -453,7 +453,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   eight passes.
 - Packages that failed to read now open: a `cellXfs` `xf` without the optional `numFmtId` reads as
   General; a cell without the optional `r` takes the column after the previous cell of its row and
-  a row without `r` the row after the previous one; a cell holding `#FIELD!`, `#BLOCKED!`,
+  a row without `r` the row after the previous one, whose height, style, hidden state, and `ph`
+  phonetic visibility apply to that row; a cell holding `#FIELD!`, `#BLOCKED!`,
   `#CONNECT!`, `#BUSY!`, `#UNKNOWN!`, or `#PYTHON!` reads as the new `ExcelError` variant, which a
   formula reading it reports as an unsupported capability instead of a guessed value; and a
   shared formula whose relative reference shifts past the last row or column wraps around the

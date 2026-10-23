@@ -354,19 +354,32 @@ pub(super) fn parse(
                         .is_some_and(|parent| depth == parent + 1)
                         && local_name == ROW
                     {
-                        process_empty_row_visibility(
-                            &attributes,
-                            capture,
-                            sheet.id(),
-                            presentation,
-                            &budget,
-                        )?;
-                        process_row_style(&attributes, capture, resources.styles, sheet);
-                        process_row_height(&attributes, capture, sheet_id, presentation);
                         state.begin_row(
                             attributes
                                 .unqualified("r")
                                 .and_then(|value| value.parse::<u32>().ok()),
+                        );
+                        process_empty_row_visibility(
+                            &attributes,
+                            capture,
+                            state.implied_row,
+                            sheet.id(),
+                            presentation,
+                            &budget,
+                        )?;
+                        process_row_style(
+                            &attributes,
+                            state.implied_row,
+                            capture,
+                            resources.styles,
+                            sheet,
+                        );
+                        process_row_height(
+                            &attributes,
+                            state.implied_row,
+                            capture,
+                            sheet_id,
+                            presentation,
                         );
                         process_row_hidden(&attributes, state.implied_row, sheet);
                     } else if local_name == CELL
@@ -656,9 +669,7 @@ fn process_start(
         if capture == PresentationCapture::Document
             && let Some(value) = attributes.unqualified("ph")
         {
-            let row = state
-                .row_number
-                .ok_or_else(|| budget.error(XlsxErrorCode::InvalidPhoneticMetadata))?;
+            let row = state.row_number.unwrap_or(state.implied_row);
             presentation.source_row_phonetic_visibility(
                 sheet_id,
                 Row::new(row).map_err(|error| {
@@ -669,9 +680,15 @@ fn process_start(
                 parse_bool(value, budget)?,
             );
         }
-        process_row_style(&attributes, capture, styles, sheet);
+        process_row_style(&attributes, state.implied_row, capture, styles, sheet);
         process_row_hidden(&attributes, state.implied_row, sheet);
-        process_row_height(&attributes, capture, sheet_id, presentation);
+        process_row_height(
+            &attributes,
+            state.implied_row,
+            capture,
+            sheet_id,
+            presentation,
+        );
     } else if state.row_depth.is_some_and(|row| depth == row + 1) && local_name == CELL {
         increment_cell_counts(&mut state.sheet_cells, total_cells, budget.limits(), budget)?;
         if state.current_cell.is_some() {
@@ -824,9 +841,11 @@ fn process_column_visibility(
     Ok(())
 }
 
+/// Records the `ph` of a row without cells; a row without the optional `r` is `implied_row`.
 fn process_empty_row_visibility(
     attributes: &XmlAttributes,
     capture: PresentationCapture,
+    implied_row: u32,
     sheet_id: SheetId,
     presentation: &mut DocumentPresentation,
     budget: &XmlBudget,
@@ -837,15 +856,14 @@ fn process_empty_row_visibility(
     let Some(value) = attributes.unqualified("ph") else {
         return Ok(());
     };
-    let row = attributes
-        .unqualified("r")
-        .ok_or_else(|| budget.error(XlsxErrorCode::InvalidPhoneticMetadata))?
-        .parse::<u32>()
-        .map_err(|error| {
+    let row = match attributes.unqualified("r") {
+        Some(row) => row.parse::<u32>().map_err(|error| {
             budget
                 .error(XlsxErrorCode::InvalidPhoneticMetadata)
                 .with_cause(error)
-        })?;
+        })?,
+        None => implied_row,
+    };
     presentation.source_row_phonetic_visibility(
         sheet_id,
         Row::new(row).map_err(|error| {
@@ -865,22 +883,29 @@ fn process_row_hidden(attributes: &XmlAttributes, implied_row: u32, sheet: &mut 
     if !matches!(attributes.unqualified("hidden"), Some("1" | "true")) {
         return;
     }
-    let row = match attributes.unqualified("r") {
-        Some(value) => value.parse::<u32>().ok(),
-        None => Some(implied_row),
-    };
-    if let Some(row) = row.and_then(|row| Row::new(row).ok()) {
+    if let Some(row) = declared_row(attributes, implied_row) {
         sheet.push_hidden_row(row);
     }
 }
 
+/// Returns a row's `r`, or `implied_row` when the optional `r` is absent; `None` when `r` does not
+/// resolve.
+fn declared_row(attributes: &XmlAttributes, implied_row: u32) -> Option<Row> {
+    match attributes.unqualified("r") {
+        Some(value) => value.parse::<u32>().ok(),
+        None => Some(implied_row),
+    }
+    .and_then(|row| Row::new(row).ok())
+}
+
 /// Records the style of a row that declares `customFormat`, which a cell written into the row
-/// receives ahead of its column's style.
+/// receives ahead of its column's style; a row without the optional `r` is `implied_row`.
 ///
 /// Row styles were ignored before new cells inherited them, so a row whose `r`, `customFormat`,
 /// or `s` does not resolve records nothing instead of failing the read.
 fn process_row_style(
     attributes: &XmlAttributes,
+    implied_row: u32,
     capture: PresentationCapture,
     styles: &Styles,
     sheet: &mut SheetBuilder,
@@ -890,10 +915,7 @@ fn process_row_style(
     {
         return;
     }
-    let row = attributes
-        .unqualified("r")
-        .and_then(|value| value.parse::<u32>().ok())
-        .and_then(|row| Row::new(row).ok());
+    let row = declared_row(attributes, implied_row);
     if let (Some(row), Some((index, number_format))) =
         (row, source_style(attributes.unqualified("s"), styles))
     {
@@ -967,12 +989,14 @@ fn process_column_width(
     }
 }
 
-/// Records the `ht` of a row for the format read model.
+/// Records the `ht` of a row for the format read model; a row without the optional `r` is
+/// `implied_row`.
 ///
 /// Row heights were not read before they were modeled, so a row whose `r` or `ht` does not resolve
 /// records nothing instead of failing the read.
 fn process_row_height(
     attributes: &XmlAttributes,
+    implied_row: u32,
     capture: PresentationCapture,
     sheet_id: SheetId,
     presentation: &mut DocumentPresentation,
@@ -980,10 +1004,7 @@ fn process_row_height(
     if capture == PresentationCapture::None {
         return;
     }
-    let row = attributes
-        .unqualified("r")
-        .and_then(|value| value.parse::<u32>().ok())
-        .and_then(|row| Row::new(row).ok());
+    let row = declared_row(attributes, implied_row);
     let height = attributes
         .unqualified("ht")
         .and_then(|value| value.parse::<f64>().ok())

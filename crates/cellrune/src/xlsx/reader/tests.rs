@@ -1582,6 +1582,41 @@ fn hidden_rows_without_r_follow_the_previous_row() {
     }
 }
 
+#[test]
+fn heights_and_phonetics_of_rows_without_r_follow_the_previous_row() {
+    use crate::Row;
+
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="2"><c><v>1</v></c></row>
+    <row ht="30" customHeight="1" ph="1"><c><v>2</v></c></row>
+    <row ht="20" customHeight="1" ph="1"/>
+  </sheetData>
+</worksheet>"#;
+    let document = open_xlsx_document_bytes(
+        &build_archive(sheet, SHARED_STRINGS),
+        OpenOptions::default(),
+    )
+    .expect("rows without r open");
+    let sheet_id = document
+        .workbook()
+        .sheet_by_name("First")
+        .expect("sheet")
+        .id();
+    let row = |row| Row::new(row).expect("valid row");
+    let presentation = document.presentation();
+    assert_eq!(presentation.row_height(sheet_id, row(3)), Some(30.0));
+    assert_eq!(presentation.row_height(sheet_id, row(4)), Some(20.0));
+    for line in [3, 4] {
+        assert_eq!(
+            presentation.row_phonetic_visibility(sheet_id, row(line)),
+            Some(true),
+            "{line}"
+        );
+    }
+}
+
 const SHEET_WITH_TABLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
