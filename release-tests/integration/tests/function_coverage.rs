@@ -639,7 +639,7 @@ fn text_formats_sections_dates_times_fractions_and_exponents() {
         text("TEXT(60,\"yyyy-mm-dd\")", "1900-02-29"),
         text("TEXT(TIME(13,29,0),\"H:MM AM/PM\")", "1:29 PM"),
         text("TEXT(TIME(1,2,0),\"[h]:mm\")", "1:02"),
-        text("TEXT(0*-1,\"0.00;-0.00;zero\")", "z1900ro"),
+        text("TEXT(0*-1,\"0.00;-0.00;\"\"zero\"\"\")", "zero"),
         text(
             "TEXT(1234567898,\"[<=9999999]###-####;(###) ###-####\")",
             "(123) 456-7898",
