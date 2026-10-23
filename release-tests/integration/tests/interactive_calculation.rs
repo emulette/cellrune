@@ -1685,6 +1685,80 @@ fn incremental_results_report_capability_issues_as_a_full_calculation_does() {
 }
 
 #[test]
+fn incremental_readers_of_a_formula_with_a_capability_issue_read_its_value() {
+    // B1 and D1 are unavailable for their capability issues, but a full calculation lets C1 and
+    // E1 read the values they evaluate to.
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut initial = vec![
+        WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+        WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("NB*3")),
+        WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("B1+A1")),
+        WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("IF(TRUE,1,FOOBAR())")),
+        WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("D1+A1")),
+    ];
+    for row in 1..=4 {
+        initial.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 26).expect("valid filler address"),
+            formula(&format!("{row}*2")),
+        ));
+    }
+    session
+        .apply_changes(0, EditBatch::new(initial))
+        .expect("workbook with capability issues");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    let edits = [
+        WorkbookChange::set_cell_value(sheet_id, address("A1"), number(2.0)),
+        WorkbookChange::set_cell_formula(sheet_id, address("F1"), formula("B1+D1")),
+    ];
+    for change in edits {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([change]),
+            )
+            .expect("edit");
+        let delta = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("automatic recalculation");
+        assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+        assert_calculations_equal(
+            session.calculation().expect("installed calculation"),
+            &calculate_workbook(session.workbook(), CalculationOptions::default()),
+        );
+    }
+    let result = |a1: &str| {
+        session
+            .calculation()
+            .expect("installed calculation")
+            .cell(CalculationCellId::new(sheet_id, address(a1)))
+            .cloned()
+    };
+    assert_eq!(
+        result("C1"),
+        Some(CalculationCellResult::Value(CellValue::Error(
+            cellrune::ExcelError::Name
+        )))
+    );
+    assert_eq!(
+        result("E1"),
+        Some(CalculationCellResult::Value(number(3.0)))
+    );
+}
+
+#[test]
 fn formula_metadata_dependencies_dirty_without_scheduling_source_values() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");

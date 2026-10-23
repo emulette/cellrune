@@ -76,6 +76,7 @@ impl<'workbook> Engine<'workbook> {
             regex_cache: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
             read_formula_before_calculation: std::cell::Cell::new(false),
+            unavailable_previous_reads: std::cell::RefCell::default(),
         };
         if cancelled() {
             return Err(());
@@ -231,11 +232,24 @@ impl<'workbook> Engine<'workbook> {
     ) -> Result<Self, ()> {
         let mut engine =
             Self::from_compiled(workbook, options, compiled, previous, dirty, cancelled)?;
-        let dirty = engine.dirty.clone();
-        if !engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled) {
-            return Err(());
+        loop {
+            let dirty = engine.dirty.clone();
+            if !engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled) {
+                return Err(());
+            }
+            // A pass that read the kept result of a formula with a capability issue evaluates
+            // that formula too, so that its readers read the value a full calculation gives them.
+            let Some(mut dirty) = dirty else {
+                return Ok(engine);
+            };
+            let reread = engine.capability_issue_reads(&dirty, cancelled)?;
+            if reread.is_empty() {
+                return Ok(engine);
+            }
+            dirty.extend(reread);
+            engine = Self::from_compiled(workbook, options, compiled, previous, None, cancelled)?;
+            engine.dirty = Some(dirty);
         }
-        Ok(engine)
     }
 
     /// An engine over `workbook` sharing `compiled`'s formulas and dependency state, which reads
@@ -282,6 +296,7 @@ impl<'workbook> Engine<'workbook> {
             regex_cache: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
             read_formula_before_calculation: std::cell::Cell::new(false),
+            unavailable_previous_reads: std::cell::RefCell::default(),
         };
         let internal_dirty = match dirty {
             Some(cells) => {

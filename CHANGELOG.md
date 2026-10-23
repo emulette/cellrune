@@ -274,6 +274,10 @@ inventories, and measurements belong in the linked documentation rather than in 
   or `UnsupportedExpression` the formula evaluated to. A recalculated formula that a calculation
   engine issue stops while it reads such a formula reports `BlockedByUpstream`, as in a full
   calculation.
+- A formula that incremental recalculation evaluates reads the value a formula with a capability
+  issue evaluates to, as in a full calculation, instead of reporting `BlockedByUpstream`: after an
+  edit of `A1`, `B1+A1` with `B1` holding `NB*3` and no name `NB` is `#NAME?` again. The pass
+  evaluates such a formula too when it reads its result.
 
 ## [0.1.26] - 2026-10-23
 

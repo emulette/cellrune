@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::ast::{Expr, SheetPrefix};
@@ -286,9 +287,23 @@ pub(super) fn calculate_from_compiled(
         Engine::evaluate_compiled(workbook, options, compiled, previous, dirty, &cancelled)?;
     let work = calculation_work(workbook, &engine);
     let snapshot = match (previous, dirty) {
-        (Some(previous), Some(dirty)) => snapshot_from_incremental_engine_cancellable(
-            workbook, options, &engine, previous, dirty, &cancelled,
-        )?,
+        (Some(previous), Some(dirty)) => {
+            // The pass also evaluates formulas outside `dirty` whose kept results it read, and
+            // their results are classified again with the dirty ones.
+            let classified = if work.evaluated_cells.is_subset(dirty) {
+                Cow::Borrowed(dirty)
+            } else {
+                Cow::Owned(dirty.union(&work.evaluated_cells).copied().collect())
+            };
+            snapshot_from_incremental_engine_cancellable(
+                workbook,
+                options,
+                &engine,
+                previous,
+                &classified,
+                &cancelled,
+            )?
+        }
         _ => snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?,
     };
     Ok((snapshot, work))

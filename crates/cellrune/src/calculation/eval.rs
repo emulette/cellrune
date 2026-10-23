@@ -1074,6 +1074,8 @@ pub struct Engine<'workbook> {
     /// Whether a cell read during this pass found a formula that the pass calculates later, which
     /// means the dependency graph missed an edge the values now resolve.
     read_formula_before_calculation: Cell<bool>,
+    /// Formulas outside `dirty` whose kept unavailable result a read found.
+    unavailable_previous_reads: RefCell<BTreeSet<CellId>>,
     function_iterations: u64,
     reference_cells: u64,
 }
@@ -1230,8 +1232,45 @@ impl<'workbook> Engine<'workbook> {
         {
             None
         } else {
+            if matches!(materialized.result(), CalculationCellResult::Unavailable(_)) {
+                self.unavailable_previous_reads.borrow_mut().insert(owner);
+            }
             Some(materialized)
         }
+    }
+
+    /// Returns the formulas outside `dirty` whose kept result reports a capability issue and that
+    /// a read of this pass found.
+    ///
+    /// A full calculation reports such a formula unavailable but lets its readers read the value
+    /// it evaluates to, while its kept result reads as an engine issue, so a pass that read one
+    /// must evaluate it too to answer as a full calculation does.
+    pub(super) fn capability_issue_reads(
+        &self,
+        dirty: &BTreeSet<CellId>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<BTreeSet<CellId>, ()> {
+        let mut cells = BTreeSet::new();
+        for cell in self.unavailable_previous_reads.borrow().iter() {
+            if cancelled() {
+                return Err(());
+            }
+            if dirty.contains(cell) {
+                continue;
+            }
+            let Some(source) = self
+                .workbook
+                .sheets()
+                .get(cell.0)
+                .and_then(|sheet| cell_at(sheet, cell.1, cell.2))
+            else {
+                continue;
+            };
+            if !super::pipeline::formula_issues(self, cell.0, source).is_empty() {
+                cells.insert(*cell);
+            }
+        }
+        Ok(cells)
     }
 
     fn previous_numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
