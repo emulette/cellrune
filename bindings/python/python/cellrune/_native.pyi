@@ -17,6 +17,7 @@ from ._types import (
     CellFormatPage,
     CommentPage,
     DataValidationPage,
+    PhoneticPage,
     HyperlinkPage,
     DefinedNameInspection,
     EditReceipt,
@@ -124,6 +125,13 @@ class Workbook:
         offset: int | None = None,
         limit: int | None = None,
     ) -> DataValidationPage: ...
+    def phonetics(
+        self,
+        sheet: str,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> PhoneticPage: ...
     def hyperlinks(
         self,
         sheet: str,

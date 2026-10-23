@@ -17,6 +17,7 @@ export declare class NativeWorkbook {
   readRange(sheet: string, start: string, end: string, offset: number, limit: number): NativeRangePage
   toCsv(sheet: string, delimiter?: string | undefined | null): Buffer
   readFormats(sheet: string, start: string, end: string, offset: number, limit: number): string
+  phonetics(sheet: string, offset: number, limit: number): string
   hyperlinks(sheet: string, offset: number, limit: number): NativeHyperlinkPage
   comments(sheet: string, offset: number, limit: number): NativeCommentPage
   dataValidations(sheet: string, offset: number, limit: number): NativeDataValidationPage
@@ -116,6 +117,7 @@ export interface NativeCalculationResult {
   code?: string
   message?: string
   detail?: string
+  limit?: string
 }
 
 export interface NativeCapabilityEntry {
@@ -271,6 +273,11 @@ export interface NativeEditWriteReport {
   outputSha256: string
 }
 
+export interface NativeFrozenPane {
+  rows: number
+  columns: number
+}
+
 export interface NativeFunctionCatalogEntry {
   name: string
   canonicalName: string
@@ -300,12 +307,6 @@ export interface NativeFunctionUsageReport {
   entries: Array<NativeFunctionUsageEntry>
 }
 
-/** A locale profile as JavaScript passes it: BCP 47 tags that native code validates. */
-export interface NativeLocaleProfile {
-  locale: string
-  displayLanguage?: string
-}
-
 export interface NativeHyperlink {
   range: string
   target?: string
@@ -321,6 +322,12 @@ export interface NativeHyperlinkPage {
   offset: number
   nextOffset?: number
   entries: Array<NativeHyperlink>
+}
+
+/** A locale profile as JavaScript passes it: BCP 47 tags that native code validates. */
+export interface NativeLocaleProfile {
+  locale: string
+  displayLanguage?: string
 }
 
 export interface NativeNumberFormat {
@@ -351,6 +358,7 @@ export interface NativeSheetSummary {
   autoFilter?: string
   autoFilterFilteredColumns: Array<number>
   hiddenRows: Array<string>
+  frozenPane?: NativeFrozenPane
 }
 
 export interface NativeTableColumn {

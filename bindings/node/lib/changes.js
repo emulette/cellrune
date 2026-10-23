@@ -2,6 +2,7 @@
 
 const { inputError } = require("./errors.js");
 const { serializeFormatChange } = require("./formats.js");
+const { serializePresentationChange } = require("./presentation.js");
 const {
   requireFinite,
   requireNonNegativeInteger,
@@ -161,6 +162,10 @@ function serializeWorkbookChangeV2(change, index) {
   if (format !== undefined) {
     return format;
   }
+  const presentation = serializePresentationChange(change, index);
+  if (presentation !== undefined) {
+    return presentation;
+  }
   validateV2ChangeKeys(change, index);
   switch (change.kind) {
     case "renameTable":
@@ -198,6 +203,19 @@ function serializeWorkbookChangeV2(change, index) {
         table_id: change.tableId,
         first_data_row: change.firstDataRow,
         last_data_row: change.lastDataRow,
+      };
+    case "widenTableColumns":
+      requireNonNegativeInteger(change.tableId, `changes[${index}].tableId`);
+      return {
+        kind: "widen_table_columns",
+        table_id: change.tableId,
+        range: requiredChangeString(change.range, index, "range"),
+      };
+    case "widenSheetAutoFilter":
+      return {
+        kind: "widen_sheet_auto_filter",
+        sheet: requiredChangeString(change.sheet, index, "sheet"),
+        range: requiredChangeString(change.range, index, "range"),
       };
     default:
       return serializeWorkbookChange(change, index);
@@ -238,6 +256,8 @@ const V2_CHANGE_KEYS = new Map([
     "resizeTableRows",
     ["kind", "tableId", "firstDataRow", "lastDataRow"],
   ],
+  ["widenTableColumns", ["kind", "tableId", "range"]],
+  ["widenSheetAutoFilter", ["kind", "sheet", "range"]],
 ]);
 
 function validateV2ChangeKeys(change, index) {

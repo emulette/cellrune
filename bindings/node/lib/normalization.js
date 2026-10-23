@@ -75,6 +75,14 @@ function normalizeValue(value) {
   }
 }
 
+/** Adds the limit an unavailable result exceeded, which only resource-limit issues name. */
+function withLimit(result, limit) {
+  if (limit != null) {
+    result.limit = limit;
+  }
+  return result;
+}
+
 function normalizeResult(result) {
   if (result === null || result === undefined) {
     return null;
@@ -88,12 +96,15 @@ function normalizeResult(result) {
     typeof result.code === "string" &&
     typeof result.message === "string"
   ) {
-    return {
-      kind: "unavailable",
-      code: result.code,
-      message: result.message,
-      detail: result.detail ?? null,
-    };
+    return withLimit(
+      {
+        kind: "unavailable",
+        code: result.code,
+        message: result.message,
+        detail: result.detail ?? null,
+      },
+      result.limit,
+    );
   }
   throw protocolError("native calculation result is malformed");
 }
@@ -292,6 +303,14 @@ function normalizeSummary(summary) {
       autoFilter: sheet.autoFilter ?? null,
       autoFilterFilteredColumns: sheet.autoFilterFilteredColumns,
       hiddenRows: sheet.hiddenRows,
+      ...(sheet.frozenPane == null
+        ? {}
+        : {
+            frozenPane: {
+              rows: sheet.frozenPane.rows,
+              columns: sheet.frozenPane.columns,
+            },
+          }),
       tables: sheet.tables.map((table) => ({
         id: table.id,
         name: table.name,
@@ -731,12 +750,15 @@ function normalizeTransactionResult(result) {
     return { kind: "value", value: result.value };
   }
   if (result.kind === "unavailable") {
-    return {
-      kind: "unavailable",
-      code: result.code,
-      message: result.message,
-      detail: result.detail ?? null,
-    };
+    return withLimit(
+      {
+        kind: "unavailable",
+        code: result.code,
+        message: result.message,
+        detail: result.detail ?? null,
+      },
+      result.limit,
+    );
   }
   throw protocolError(PROTOCOL_DETAIL.TRANSACTION_RESULT_MALFORMED);
 }

@@ -13,6 +13,7 @@ use crate::convert::{
     calculation_options, cell_dto, cell_reference, count_u64, document_kind, range_text,
     visibility_name, workbook_fingerprint,
 };
+use crate::phonetic::frozen_pane_dto;
 use crate::{
     CalculationOptionsDto, CapabilityEntryDto, CapabilityPageDto, DefinedNameDynamicKindDto,
     DefinedNameExternalTargetKindDto, DefinedNameInspectionDto, DefinedNameInspectionRequestDto,
@@ -99,6 +100,12 @@ impl WorkbookSession {
                         .map(|filter| filter.filtered_column_ids().to_vec())
                         .unwrap_or_default(),
                     hidden_rows: hidden_row_ranges(sheet.hidden_rows()),
+                    frozen_pane: self
+                        .engine
+                        .draft()
+                        .presentation()
+                        .frozen_pane(sheet.id())
+                        .map(frozen_pane_dto),
                 })
                 .collect(),
         }

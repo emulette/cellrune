@@ -5,6 +5,7 @@ mod csv;
 mod display;
 mod edit;
 mod format;
+mod phonetic;
 mod preview;
 mod query;
 mod save;

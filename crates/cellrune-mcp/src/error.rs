@@ -3,6 +3,7 @@ use std::fmt;
 
 use cellrune_interop::{
     CellReferenceDto, ErrorDetails as InteropErrorDetails, InteropError, InteropErrorKind,
+    LimitDiagnosticsDto,
 };
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::model::{CallToolResponse, CallToolResult};
@@ -78,6 +79,10 @@ pub struct McpErrorDetails {
     /// incomplete-calculation save could not write. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cells: Vec<CellReferenceDto>,
+    /// Figures of an interop failure that exceeded a resource limit, such as the observed value of a
+    /// read limit or the evaluations a targeted calculation performed. Omitted when there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<LimitDiagnosticsDto>,
 }
 
 /// Stable error payload returned from a CellRune MCP tool.
@@ -381,6 +386,7 @@ impl From<InteropError> for McpError {
             source_id,
             detail,
             cells,
+            limit,
         } = error.details().clone();
         Self {
             payload: Box::new(McpErrorPayload {
@@ -393,6 +399,7 @@ impl From<InteropError> for McpError {
                     source_id,
                     detail,
                     cells,
+                    limit,
                     ..McpErrorDetails::default()
                 },
             }),

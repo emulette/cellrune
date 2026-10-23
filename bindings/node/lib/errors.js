@@ -38,6 +38,9 @@ class CellRuneError extends Error {
       detail: details.detail ?? null,
       cells: details.cells ?? [],
     };
+    if (details.limit !== undefined) {
+      this.details.limit = details.limit;
+    }
   }
 }
 
@@ -84,6 +87,7 @@ function convertError(error) {
                 address: cell.address,
               }))
             : [],
+          limit: limitDiagnostics(payload.details.limit),
         });
       }
     } catch {
@@ -91,6 +95,27 @@ function convertError(error) {
     }
   }
   return error instanceof Error ? error : new Error(message);
+}
+
+const LIMIT_KEYS = {
+  name: "name",
+  observed: "observed",
+  requested_cell_count: "requestedCellCount",
+  evaluated_count: "evaluatedCount",
+};
+
+/** Converts the figures of a limit failure to camel-case fields, or `undefined` without any. */
+function limitDiagnostics(limit) {
+  if (limit === null || typeof limit !== "object") {
+    return undefined;
+  }
+  const converted = {};
+  for (const [key, target] of Object.entries(LIMIT_KEYS)) {
+    if (limit[key] !== undefined) {
+      converted[target] = limit[key];
+    }
+  }
+  return converted;
 }
 
 function closedError() {

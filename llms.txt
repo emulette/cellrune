@@ -95,11 +95,11 @@ exactly except that Windows ignores ASCII case; paths outside every root,
 including UNC shares, device paths, and other spellings of a root such as
 another symlink or junction to it or a Windows 8.3 short name, return
 `mcp.path.outside_root` before any filesystem access. An input must then resolve
-inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 25 tools are `workbook_create`,
+inside an allowed root and a Save As destination inside the root it names. It has no remote transport. The 26 tools are `workbook_create`,
 `workbook_open`, `workbook_open_csv`, `workbook_close`, `workbook_summary`,
 `workbook_export_csv`, `workbook_read_range`,
 `workbook_read_formats`, `workbook_data_validations`, `workbook_hyperlinks`,
-`workbook_comments`, `workbook_function_usage`, `workbook_scan_capabilities`,
+`workbook_comments`, `workbook_phonetics`, `workbook_function_usage`, `workbook_scan_capabilities`,
 `workbook_apply_changes`, `workbook_apply_changes_v2`, `workbook_recalculate`, `workbook_calculate_targets`,
 `workbook_changes_since`, `workbook_save_as`, `workbook_save_edits_as`, `workbook_preview_changes`,
 `workbook_preview_changes_page`, `workbook_commit_preview`,
@@ -176,9 +176,32 @@ MCP `workbook_read_formats`) return each cell's `font`, `fill` (tagged
 `set_cell_format` (`sheet`, `address`, optional `font`, `fill` pattern,
 `border`, `alignment`), `set_column_width` (`first`, `last`, `width` or
 null), and `set_row_height` (`row`, `height` or null); Node uses the
-camel-case kinds and fields. An
+camel-case kinds and fields. It also carries `widen_table_columns`
+(`table_id`, `range`) and `widen_sheet_auto_filter` (`sheet`, `range`), the
+`WorkbookChange::widen_table_columns`/`widen_sheet_auto_filter` edits, and the
+presentation edits `set_frozen_pane` (`sheet`, `rows`, `columns`; zero rows and
+columns clear the pane), `set_phonetics` (`sheet`, `address` of a literal text
+cell, `runs` of `start_utf16`/`end_utf16`/`text`, optional `visible`
+defaulting to true, and optional `properties` with `font_id` 0,
+`phonetic_type`, and `alignment` OOXML tokens), and `clear_phonetics`
+(`sheet`, `address`), which are `WorkbookChange::set_frozen_pane`,
+`set_phonetics`, and `clear_phonetics` and keep the semantic revision; a
+batch replaces annotated text by clearing its phonetics before setting the
+value. Each summary sheet carries `frozen_pane` (`rows`, `columns`) only when
+it has one. Python `phonetics(sheet, offset=, limit=)` and Node.js
+`phonetics(sheet, { offset, limit })` (`WorkbookSession::phonetics`, MCP
+`workbook_phonetics`) page through the cells carrying phonetic runs in
+row-major order; each entry has `address`, `runs`, `properties` (`font_id`,
+`phonetic_type`, `alignment`, or null), and the effective `visible`. An
 `xlsx.write.incomplete_calculation` error names the first 64 unavailable
-formulas in `details.cells`. Python edits, setters, and `close()` release the
+formulas in `details.cells`. A limit failure carries `details.limit`, omitted
+otherwise, with the figures it has: `name` (`max_phonetic_runs_per_item` or
+`max_total_phonetic_runs` for `xlsx.too_many_phonetic_runs`), `observed` (the
+`XlsxReadError::observed` value), and for targeted calculation
+`requested_cell_count` or `evaluated_count` (Node camel case; MCP
+`details.limit` likewise). An unavailable result or calculation issue that
+exceeded a calculation limit carries `limit`, its `CalculationLimitKind::as_str`
+name such as `max_formula_tokens`, and omits it otherwise. Python edits, setters, and `close()` release the
 interpreter lock and wait for the session.
 
 Sheets are deleted with the `delete_sheet` change (`{"kind": "delete_sheet",

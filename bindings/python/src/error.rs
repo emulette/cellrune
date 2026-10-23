@@ -27,6 +27,11 @@ pub(crate) fn into_py_error(py: Python<'_>, error: InteropError) -> PyErr {
         }
     }
     let _ = details.set_item("cells", cells);
+    if let Some(limit) = &error.details().limit
+        && let Ok(limit) = crate::conversion::json_dict(py, limit)
+    {
+        let _ = details.set_item("limit", limit);
+    }
     let _ = value.setattr("code", error.code());
     let _ = value.setattr("kind", error_kind(error.kind()));
     let _ = value.setattr("details", details);

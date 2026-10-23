@@ -26,6 +26,9 @@ DEFINED_NAME_CORPUS_PATH = (
 SHEET_METADATA_FIXTURE_PATH = (
     pathlib.Path(__file__).parents[3] / "binding-contract" / "sheet-metadata.xlsx"
 )
+SURFACE_AUTHORING_FIXTURE_PATH = (
+    pathlib.Path(__file__).parents[3] / "binding-contract" / "surface-authoring.xlsx"
+)
 TABLE_AUTHORING_CONTRACT_PATH = (
     pathlib.Path(__file__).parents[3]
     / "binding-contract"
@@ -637,6 +640,92 @@ def assert_annotations() -> None:
     assert_error("interop.sheet.not_found", lambda: workbook.comments("Missing"))
 
 
+def assert_surface_authoring() -> None:
+    workbook = Workbook.from_bytes(SURFACE_AUTHORING_FIXTURE_PATH.read_bytes())
+    data, filtered = workbook.summary()["sheets"]
+    assert data["frozen_pane"] == {"rows": 1, "columns": 0}
+    assert "frozen_pane" not in filtered
+    phonetics = workbook.phonetics("data")
+    assert (phonetics["sheet"], phonetics["total"], phonetics["next_offset"]) == (
+        "Data",
+        1,
+        None,
+    )
+    assert phonetics["entries"][0] == {
+        "address": "D2",
+        "runs": [
+            {"start_utf16": 0, "end_utf16": 2, "text": "トウキョウ"},
+            {"start_utf16": 2, "end_utf16": 3, "text": "ト"},
+        ],
+        "properties": {"font_id": 0, "phonetic_type": "Hiragana", "alignment": None},
+        "visible": True,
+    }
+    assert_error("interop.sheet.not_found", lambda: workbook.phonetics("Missing"))
+
+    revision = workbook.summary()["semantic_revision"]
+    receipt = workbook.apply_changes_v2(
+        revision,
+        [
+            {"kind": "widen_table_columns", "table_id": 1, "range": "A1:C3"},
+            {"kind": "widen_sheet_auto_filter", "sheet": "Filter", "range": "A1:C3"},
+        ],
+    )
+    assert receipt["changed_table_ids"] == [1]
+    presentation = workbook.apply_changes_v2(
+        receipt["result_revision"],
+        [
+            {"kind": "set_frozen_pane", "sheet": "Filter", "rows": 2, "columns": 1},
+            {
+                "kind": "set_phonetics",
+                "sheet": "Data",
+                "address": "A2",
+                "runs": [{"start_utf16": 0, "end_utf16": 5, "text": "ノース"}],
+                "visible": False,
+                "properties": {"alignment": "center"},
+            },
+            {"kind": "clear_phonetics", "sheet": "Data", "address": "D2"},
+        ],
+    )
+    assert presentation["result_revision"] == receipt["result_revision"]
+    reopened = Workbook.from_bytes(workbook.edits_to_bytes())
+    data, filtered = reopened.summary()["sheets"]
+    assert data["tables"][0]["columns"][2]["name"] == "Region"
+    assert filtered["auto_filter"] == "A1:C3"
+    assert filtered["frozen_pane"] == {"rows": 2, "columns": 1}
+    assert [entry["address"] for entry in reopened.phonetics("Data")["entries"]] == ["A2"]
+
+    try:
+        Workbook.from_bytes(
+            SURFACE_AUTHORING_FIXTURE_PATH.read_bytes(),
+            read_limits={"max_phonetic_runs_per_item": 1},
+        )
+    except CellRuneError as error:
+        assert error.code == "xlsx.too_many_phonetic_runs"
+        assert error.details["limit"] == {
+            "name": "max_phonetic_runs_per_item",
+            "observed": 2,
+        }
+    else:
+        raise AssertionError("two phonetic runs passed a per-item limit of one")
+    with Workbook.create() as limited:
+        limited.set_formula("Sheet1", "A1", "=1+2+3+4+5")
+        limited.calculate(calculation_limits={"max_formula_tokens": 3})
+        result = limited.read_range("Sheet1", "A1", "A1")["cells"][0]["calculated"]
+        assert result is not None and result["kind"] == "unavailable"
+        assert result["code"] == "calculation.resource_limit_exceeded"
+        assert result.get("limit") == "max_formula_tokens"
+        try:
+            limited.calculate_targets(
+                [{"sheet": "Sheet1", "start": "A1", "end": "A3"}],
+                limits={"max_result_cells": 2},
+            )
+        except CellRuneError as error:
+            assert error.code == "calculation.target.target_limit_exceeded"
+            assert error.details["limit"] == {"requested_cell_count": 3}
+        else:
+            raise AssertionError("three cells passed a result limit of two")
+
+
 def assert_csv() -> None:
     workbook = Workbook.from_csv(
         b'item;amount\r\n"Widget; large";2.5\r\n', sheet_name="Import", delimiter=";"
@@ -663,6 +752,7 @@ def assert_csv() -> None:
 
 def main() -> None:
     assert_delete_sheet()
+    assert_surface_authoring()
     assert_csv()
     assert_annotations()
     assert_formats()

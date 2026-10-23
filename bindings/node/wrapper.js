@@ -7,6 +7,7 @@ const {
   normalizeDataValidationPage,
   normalizeHyperlinkPage,
 } = require("./lib/sheet_metadata.js");
+const { normalizePhoneticPage } = require("./lib/presentation.js");
 const { targetRequest } = require("./lib/targeted.js");
 const {
   serializeWorkbookChange,
@@ -159,6 +160,13 @@ class Workbook {
       withSyncErrors(() =>
         this.#session().readFormats(sheet, start, end, offset, limit),
       ),
+    );
+  }
+
+  phonetics(sheet, options = {}) {
+    const { offset, limit } = sheetPage(sheet, options);
+    return normalizePhoneticPage(
+      withSyncErrors(() => this.#session().phonetics(sheet, offset, limit)),
     );
   }
 

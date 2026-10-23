@@ -422,6 +422,118 @@ fn presentation_only_edits_reuse_the_existing_calculation_identity() {
 }
 
 #[test]
+fn presentation_batch_changes_author_frozen_panes_and_phonetics() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    let text = address("A1");
+    let number = address("A2");
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_cell_value(sheet_id, text, CellValue::Text("明日".to_owned())),
+            WorkbookChange::set_cell_value(
+                sheet_id,
+                number,
+                CellValue::Number(FiniteNumber::new(1.0).expect("finite")),
+            ),
+        ]))
+        .expect("values");
+    let semantic_revision = draft.semantic_revision();
+    let presentation_revision = draft.presentation_revision();
+    let run = |start, end, value: &str| {
+        PhoneticRun::new(PhoneticTextRange::new(start, end).expect("range"), value).expect("run")
+    };
+    let pane = FrozenPane::new(2, 1).expect("pane");
+
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_frozen_pane(sheet_id, pane),
+            WorkbookChange::set_phonetics(
+                sheet_id,
+                text,
+                vec![run(0, 2, "あした")],
+                PhoneticWriteOptions::show(),
+            ),
+        ]))
+        .expect("presentation batch");
+    assert_eq!(draft.semantic_revision(), semantic_revision);
+    assert!(draft.presentation_revision() > presentation_revision);
+    assert_eq!(draft.presentation().frozen_pane(sheet_id), Some(pane));
+    let phonetics = draft
+        .presentation()
+        .cell_phonetics(sheet_id, text)
+        .expect("phonetics");
+    assert_eq!(phonetics.runs()[0].text(), "あした");
+    assert!(phonetics.effective_visibility());
+
+    // A failing operation leaves the whole batch, including the pane it would clear, unapplied.
+    let presentation_revision = draft.presentation_revision();
+    assert!(matches!(
+        draft.apply_changes(EditBatch::new([
+            WorkbookChange::set_frozen_pane(sheet_id, FrozenPane::new(0, 0).expect("clear")),
+            WorkbookChange::set_phonetics(
+                sheet_id,
+                number,
+                vec![run(0, 1, "いち")],
+                PhoneticWriteOptions::show(),
+            ),
+        ])),
+        Err(ValidationError::PhoneticsRequireTextCell { .. })
+    ));
+    assert!(matches!(
+        draft.apply_changes(EditBatch::new([WorkbookChange::set_phonetics(
+            sheet_id,
+            text,
+            vec![run(1, 3, "した")],
+            PhoneticWriteOptions::show(),
+        )])),
+        Err(ValidationError::PhoneticRangeOutOfBounds { .. })
+    ));
+    assert_eq!(draft.presentation_revision(), presentation_revision);
+    assert_eq!(draft.presentation().frozen_pane(sheet_id), Some(pane));
+
+    // Clearing the phonetics first lets one batch replace annotated text.
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::clear_phonetics(sheet_id, text),
+            WorkbookChange::set_cell_value(sheet_id, text, CellValue::Text("翌日".to_owned())),
+            WorkbookChange::set_phonetics(
+                sheet_id,
+                text,
+                vec![run(0, 2, "よくじつ")],
+                PhoneticWriteOptions::hide(),
+            ),
+        ]))
+        .expect("replacement");
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+        .expect("write");
+    let reopened =
+        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
+    assert_eq!(reopened.presentation().frozen_pane(sheet_id), Some(pane));
+    let phonetics = reopened
+        .presentation()
+        .cell_phonetics(sheet_id, text)
+        .expect("phonetics");
+    assert_eq!(phonetics.runs()[0].text(), "よくじつ");
+    assert!(!phonetics.effective_visibility());
+
+    draft
+        .apply_changes(EditBatch::new([
+            WorkbookChange::set_frozen_pane(sheet_id, FrozenPane::new(0, 0).expect("clear")),
+            WorkbookChange::clear_phonetics(sheet_id, text),
+        ]))
+        .expect("clear");
+    assert_eq!(draft.presentation().frozen_pane(sheet_id), None);
+    assert!(
+        draft
+            .presentation()
+            .cell_phonetics(sheet_id, text)
+            .is_none()
+    );
+    assert_eq!(draft.semantic_revision(), semantic_revision + 1);
+}
+
+#[test]
 fn table_rename_column_rename_and_resize_are_one_stable_atomic_vertical() {
     let mut draft = table_draft();
     let table_id = TableId::new(1).expect("table ID");

@@ -115,6 +115,17 @@ impl NativeWorkbook {
     }
 
     #[napi(catch_unwind)]
+    pub fn phonetics(&self, sheet: String, offset: f64, limit: f64) -> napi::Result<String> {
+        let request = SheetPageRequestDto {
+            sheet,
+            offset: offset_from_number(offset)?,
+            limit: limit_from_number(limit)?,
+        };
+        let page = self.lock()?.phonetics(&request).map_err(napi_error)?;
+        serde_json::to_string(&page).map_err(|_| napi_error(InteropError::serialization()))
+    }
+
+    #[napi(catch_unwind)]
     pub fn hyperlinks(
         &self,
         sheet: String,

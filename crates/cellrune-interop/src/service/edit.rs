@@ -528,7 +528,7 @@ pub(super) fn convert_edit_batch_v2(
         }
         changes.push(match change {
             WorkbookChangeV2Dto::V1(change) => converter.convert(change)?,
-            WorkbookChangeV2Dto::Table(change) => table_change(change)?,
+            WorkbookChangeV2Dto::Table(change) => table_change(&converter, change)?,
             WorkbookChangeV2Dto::Format(change) => {
                 format_change(converter.resolve(change.sheet())?, change)?
             }
@@ -537,7 +537,10 @@ pub(super) fn convert_edit_batch_v2(
     Ok(EditBatch::new(changes))
 }
 
-fn table_change(change: TableChangeV2Dto) -> Result<WorkbookChange, InteropError> {
+fn table_change(
+    converter: &ChangeConverter,
+    change: TableChangeV2Dto,
+) -> Result<WorkbookChange, InteropError> {
     Ok(match change {
         TableChangeV2Dto::RenameTable {
             table_id,
@@ -563,6 +566,15 @@ fn table_change(change: TableChangeV2Dto) -> Result<WorkbookChange, InteropError
             Row::new(first_data_row)?,
             Row::new(last_data_row)?,
         )?,
+        TableChangeV2Dto::WidenTableColumns { table_id, range } => {
+            WorkbookChange::widen_table_columns(TableId::new(table_id)?, parse_range(&range)?)
+        }
+        TableChangeV2Dto::WidenSheetAutoFilter { sheet, range } => {
+            WorkbookChange::widen_sheet_auto_filter(
+                converter.resolve(&sheet)?,
+                parse_range(&range)?,
+            )
+        }
     })
 }
 

@@ -496,6 +496,102 @@ const SHEET_METADATA_FIXTURE = path.join(
   "sheet-metadata.xlsx",
 );
 
+const SURFACE_AUTHORING_FIXTURE = path.join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "binding-contract",
+  "surface-authoring.xlsx",
+);
+
+async function assertSurfaceAuthoring() {
+  const bytes = fs.readFileSync(SURFACE_AUTHORING_FIXTURE);
+  const workbook = await Workbook.fromBytes(bytes);
+  const [data, filtered] = workbook.summary().sheets;
+  assert.deepEqual(data.frozenPane, { rows: 1, columns: 0 });
+  assert.equal("frozenPane" in filtered, false);
+  const phonetics = workbook.phonetics("data");
+  assert.equal(phonetics.total, 1);
+  assert.deepEqual(phonetics.entries[0], {
+    address: "D2",
+    runs: [
+      { startUtf16: 0, endUtf16: 2, text: "トウキョウ" },
+      { startUtf16: 2, endUtf16: 3, text: "ト" },
+    ],
+    properties: { fontId: 0, phoneticType: "Hiragana", alignment: null },
+    visible: true,
+  });
+  assert.throws(
+    () => workbook.phonetics("Missing"),
+    (error) => error.code === "interop.sheet.not_found" && !("limit" in error.details),
+  );
+
+  const widened = workbook.applyChangesV2(workbook.summary().semanticRevision, [
+    { kind: "widenTableColumns", tableId: 1, range: "A1:C3" },
+    { kind: "widenSheetAutoFilter", sheet: "Filter", range: "A1:C3" },
+  ]);
+  assert.deepEqual(widened.changedTableIds, [1]);
+  const presentation = workbook.applyChangesV2(widened.resultRevision, [
+    { kind: "setFrozenPane", sheet: "Filter", rows: 2, columns: 1 },
+    {
+      kind: "setPhonetics",
+      sheet: "Data",
+      address: "A2",
+      runs: [{ startUtf16: 0, endUtf16: 5, text: "ノース" }],
+      visible: false,
+      properties: { alignment: "center" },
+    },
+    { kind: "clearPhonetics", sheet: "Data", address: "D2" },
+  ]);
+  assert.equal(presentation.resultRevision, widened.resultRevision);
+  const reopened = await Workbook.fromBytes(await workbook.editsToBytes());
+  const [reopenedData, reopenedFilter] = reopened.summary().sheets;
+  assert.equal(reopenedData.tables[0].columns[2].name, "Region");
+  assert.equal(reopenedFilter.autoFilter, "A1:C3");
+  assert.deepEqual(reopenedFilter.frozenPane, { rows: 2, columns: 1 });
+  assert.deepEqual(reopened.phonetics("Data").entries[0].properties, {
+    fontId: 0,
+    phoneticType: null,
+    alignment: "center",
+  });
+  assert.throws(
+    () =>
+      workbook.applyChangesV2(presentation.resultRevision, [
+        { kind: "setPhonetics", sheet: "Data", address: "A3", runs: [{ start: 0 }] },
+      ]),
+    (error) => error.code === "interop.input.invalid",
+  );
+
+  await assert.rejects(
+    Workbook.fromBytes(bytes, { readLimits: { maxPhoneticRunsPerItem: 1 } }),
+    (error) => {
+      assert.equal(error.code, "xlsx.too_many_phonetic_runs");
+      assert.deepEqual(error.details.limit, { name: "max_phonetic_runs_per_item", observed: 2 });
+      return true;
+    },
+  );
+  const limited = Workbook.create();
+  limited.setFormula("Sheet1", "A1", "=1+2+3+4+5");
+  await limited.calculate({ calculationLimits: { maxFormulaTokens: 3 } });
+  const result = limited.readRange("Sheet1", "A1", "A1").cells[0].calculated;
+  assert.equal(result.code, "calculation.resource_limit_exceeded");
+  assert.equal(result.limit, "max_formula_tokens");
+  await assert.rejects(
+    limited.calculateTargets([{ sheet: "Sheet1", start: "A1", end: "A3" }], {
+      limits: { maxResultCells: 2 },
+    }),
+    (error) => {
+      assert.equal(error.code, "calculation.target.target_limit_exceeded");
+      assert.deepEqual(error.details.limit, { requestedCellCount: 3 });
+      return true;
+    },
+  );
+  limited.close();
+  reopened.close();
+  workbook.close();
+}
+
 async function assertDataValidations() {
   const workbook = await Workbook.fromBytes(fs.readFileSync(SHEET_METADATA_FIXTURE));
   const page = workbook.dataValidations("data", { limit: 2 });
@@ -659,6 +755,7 @@ async function assertCsv() {
 
 async function main() {
   await assertDeleteSheet();
+  await assertSurfaceAuthoring();
   await assertCsv();
   await assertAnnotations();
   await assertFormats();

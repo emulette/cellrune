@@ -141,7 +141,12 @@ static per-formula support report. `dataValidations(sheet, { offset, limit })` p
 sheet's read-only data validation rules, and `hyperlinks` and `comments` through its hyperlinks and
 cell comments. `readFormats(sheet, start, end, { offset, limit })` reads
 cell fonts, fills, borders, and alignments with column widths and row heights, and
-`applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes.
+`applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes, the
+`widenTableColumns` and `widenSheetAutoFilter` widening edits, and the presentation-only
+`setFrozenPane`, `setPhonetics`, and `clearPhonetics` changes. Summaries report a sheet's
+`frozenPane` when it has one, and `phonetics(sheet, { offset, limit })` pages through its phonetic
+runs. A limit failure carries its figures in `error.details.limit`, and an unavailable result that
+exceeded a calculation limit names it in `limit`.
 `Workbook.fromCsv(bytes, { sheetName, delimiter })` opens RFC 4180 CSV as a one-sheet workbook, and
 `toCsv(sheet, { delimiter })` exports one calculated sheet; the value rule is in the repository
 README.

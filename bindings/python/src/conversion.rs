@@ -93,6 +93,12 @@ pub(crate) fn workbook_summary<'py>(
             &sheet.auto_filter_filtered_columns,
         )?;
         item.set_item("hidden_rows", &sheet.hidden_rows)?;
+        if let Some(pane) = &sheet.frozen_pane {
+            let frozen_pane = PyDict::new(py);
+            frozen_pane.set_item("rows", pane.rows)?;
+            frozen_pane.set_item("columns", pane.columns)?;
+            item.set_item("frozen_pane", frozen_pane)?;
+        }
         sheets.append(item)?;
     }
     result.set_item("sheets", sheets)?;
@@ -523,11 +529,15 @@ fn calculation_result<'py>(
             code,
             message,
             detail,
+            limit,
         } => {
             result.set_item("kind", "unavailable")?;
             result.set_item("code", code)?;
             result.set_item("message", message)?;
             result.set_item("detail", detail.as_deref())?;
+            if let Some(limit) = limit {
+                result.set_item("limit", limit)?;
+            }
         }
     }
     Ok(result)

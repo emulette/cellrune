@@ -12,6 +12,21 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Added
 
+- Interop, Python, Node.js, and MCP expose the sheet autoFilter and table column widening edits,
+  frozen panes, and phonetic annotations. Edit schema v2 adds `widen_table_columns`,
+  `widen_sheet_auto_filter`, and the presentation-only `set_frozen_pane`, `set_phonetics`, and
+  `clear_phonetics` operations (Node.js camel case), which are also the new `WorkbookChange`
+  kinds `SetFrozenPane`, `SetPhonetics`, and `ClearPhonetics`. Sheet summaries report a sheet's
+  `frozen_pane` when it has one, and Python and Node.js `phonetics`, interop
+  `WorkbookSession::phonetics`, and the new `workbook_phonetics` MCP tool page through a sheet's
+  phonetic runs.
+- Limit failures report their figures on every surface: errors carry an optional `details.limit`
+  with the exceeded phonetic run limit's `name`, the read error's `observed` value, and targeted
+  calculation's `requested_cell_count` or `evaluated_count`, and unavailable results and
+  calculation issues that exceeded a calculation limit name it in an optional `limit`. Both are
+  omitted when there is nothing to report, so other responses are unchanged.
+  `CalculationLimitKind::as_str` and `PhoneticRunLimitKind::as_str` return the limit names.
+
 ### Changed
 
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.

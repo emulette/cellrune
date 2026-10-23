@@ -8,6 +8,18 @@ from ._native import (
     function_catalog,
 )
 from ._types import (
+    ClearPhoneticsChange,
+    FrozenPane,
+    LimitDiagnostics,
+    PhoneticCell,
+    PhoneticPage,
+    PhoneticProperties,
+    PhoneticPropertiesInput,
+    PhoneticRun,
+    SetFrozenPaneChange,
+    SetPhoneticsChange,
+    WidenSheetAutoFilterChange,
+    WidenTableColumnsChange,
     Comment,
     CommentPage,
     Hyperlink,
@@ -137,6 +149,18 @@ from ._types import (
 )
 
 __all__ = [
+    "ClearPhoneticsChange",
+    "FrozenPane",
+    "LimitDiagnostics",
+    "PhoneticCell",
+    "PhoneticPage",
+    "PhoneticProperties",
+    "PhoneticPropertiesInput",
+    "PhoneticRun",
+    "SetFrozenPaneChange",
+    "SetPhoneticsChange",
+    "WidenSheetAutoFilterChange",
+    "WidenTableColumnsChange",
     "Comment",
     "CommentPage",
     "Hyperlink",

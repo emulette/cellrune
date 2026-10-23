@@ -60,6 +60,8 @@ pub(crate) const DETAIL_BORDER_STYLE: &str = "border style is not recognized";
 pub(crate) const DETAIL_HORIZONTAL_ALIGNMENT: &str = "horizontal alignment is not recognized";
 pub(crate) const DETAIL_VERTICAL_ALIGNMENT: &str = "vertical alignment is not recognized";
 pub(crate) const DETAIL_COLOR_ARGB: &str = "argb color must be eight hexadecimal digits";
+pub(crate) const DETAIL_PHONETIC_TYPE: &str = "phonetic type is not recognized";
+pub(crate) const DETAIL_PHONETIC_ALIGNMENT: &str = "phonetic alignment is not recognized";
 
 /// Broad error boundary used by all language bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -91,6 +93,38 @@ pub struct ErrorDetails {
     /// formulas whose results were unavailable. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cells: Vec<CellReferenceDto>,
+    /// Figures of a failure that exceeded a resource limit. Omitted when the failure reports none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<LimitDiagnosticsDto>,
+}
+
+/// Figures a resource-limit failure reports; each is omitted when the failure does not measure it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LimitDiagnosticsDto {
+    /// Read limit a `xlsx.too_many_phonetic_runs` failure exceeded: `max_phonetic_runs_per_item`
+    /// or `max_total_phonetic_runs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Measured value that exceeded the read limit the error code names, in that limit's unit: bytes,
+    /// a count, a nesting depth, or a compression ratio rounded up. A declared size or count reports
+    /// the declared value, and a running total the value counted when reading stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed: Option<u64>,
+    /// Requested cells counted when targeted calculation passed its result-cell limit: a lower
+    /// bound on the distinct cells the request names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_cell_count: Option<u64>,
+    /// Evaluator invocations performed before targeted calculation stopped at its work limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluated_count: Option<u64>,
+}
+
+impl LimitDiagnosticsDto {
+    /// Returns the figures, or `None` when there are none to report.
+    fn reported(self) -> Option<Self> {
+        (self != Self::default()).then_some(self)
+    }
 }
 
 /// Stable error object shared by Rust, Python, Node.js, and MCP.
@@ -412,11 +446,19 @@ impl From<cellrune::TargetCalculationError> for InteropError {
             Code::Cancelled | Code::StaleResult => InteropErrorKind::State,
             _ => InteropErrorKind::Input,
         };
+        let limit = LimitDiagnosticsDto {
+            requested_cell_count: error.requested_cell_count(),
+            evaluated_count: error.evaluated_count().map(crate::convert::count_u64),
+            ..LimitDiagnosticsDto::default()
+        };
         Self::new(
             kind,
             error.code().as_str(),
             error.code().message(),
-            ErrorDetails::default(),
+            ErrorDetails {
+                limit: limit.reported(),
+                ..ErrorDetails::default()
+            },
         )
     }
 }
@@ -480,9 +522,8 @@ impl From<cellrune::CsvError> for InteropError {
             error.to_string(),
             ErrorDetails {
                 source_code: Some(code.as_str().to_owned()),
-                source_id: None,
                 detail: error.detail().map(str::to_owned),
-                cells: Vec::new(),
+                ..ErrorDetails::default()
             },
         )
     }
@@ -491,6 +532,13 @@ impl From<cellrune::CsvError> for InteropError {
 impl From<XlsxReadError> for InteropError {
     fn from(error: XlsxReadError) -> Self {
         let code = error.code().as_str();
+        let limit = LimitDiagnosticsDto {
+            name: error
+                .phonetic_run_limit()
+                .map(|limit| limit.as_str().to_owned()),
+            observed: error.observed(),
+            ..LimitDiagnosticsDto::default()
+        };
         Self::new(
             InteropErrorKind::Read,
             code,
@@ -500,6 +548,7 @@ impl From<XlsxReadError> for InteropError {
                 source_id: error.source_id().map(|value| value.as_str().to_owned()),
                 detail: error.detail().map(str::to_owned),
                 cells: Vec::new(),
+                limit: limit.reported(),
             },
         )
     }
@@ -516,7 +565,7 @@ impl From<XlsxWriteError> for InteropError {
                 source_code: Some(code.to_owned()),
                 source_id: error.source_id().map(|value| value.as_str().to_owned()),
                 detail: error.detail().map(str::to_owned),
-                cells: Vec::new(),
+                ..ErrorDetails::default()
             },
         )
     }

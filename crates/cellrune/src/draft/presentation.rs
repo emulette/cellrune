@@ -66,17 +66,7 @@ impl WorkbookDraft {
     ) -> Result<(), ValidationError> {
         self.require_sheet(sheet_id)?;
         let text = text.into();
-        validate_authoring_runs(&text, &runs)?;
-        validate_authoring_properties(&options)?;
-        let annotation = Arc::new(PhoneticAnnotation::new(
-            runs,
-            Some(
-                options
-                    .properties()
-                    .cloned()
-                    .unwrap_or_else(|| crate::PhoneticProperties::new(0)),
-            ),
-        ));
+        let annotation = authored_annotation(&text, runs, &options)?;
         let mut presentation = self.presentation.clone();
         let presentation_changed =
             presentation.set_cell_phonetics(sheet_id, address, annotation, options.visible())?;
@@ -121,17 +111,7 @@ impl WorkbookDraft {
                 _ => None,
             })
             .ok_or_else(|| phonetics_require_text_cell(sheet_id, address))?;
-        validate_authoring_runs(text, &runs)?;
-        validate_authoring_properties(&options)?;
-        let annotation = Arc::new(PhoneticAnnotation::new(
-            runs,
-            Some(
-                options
-                    .properties()
-                    .cloned()
-                    .unwrap_or_else(|| crate::PhoneticProperties::new(0)),
-            ),
-        ));
+        let annotation = authored_annotation(text, runs, &options)?;
         let mut presentation = self.presentation.clone();
         if presentation.set_cell_phonetics(sheet_id, address, annotation, options.visible())? {
             self.presentation = presentation;
@@ -163,12 +143,34 @@ impl WorkbookDraft {
     }
 }
 
-fn phonetics_require_text_cell(sheet_id: SheetId, address: CellAddress) -> ValidationError {
+pub(super) fn phonetics_require_text_cell(
+    sheet_id: SheetId,
+    address: CellAddress,
+) -> ValidationError {
     ValidationError::PhoneticsRequireTextCell {
         sheet_id: sheet_id.get(),
         row: address.row().get(),
         column: address.column().get(),
     }
+}
+
+/// Validates authored runs over `text` and builds the annotation they and `options` describe.
+pub(super) fn authored_annotation(
+    text: &str,
+    runs: Vec<PhoneticRun>,
+    options: &PhoneticWriteOptions,
+) -> Result<Arc<PhoneticAnnotation>, ValidationError> {
+    validate_authoring_runs(text, &runs)?;
+    validate_authoring_properties(options)?;
+    Ok(Arc::new(PhoneticAnnotation::new(
+        runs,
+        Some(
+            options
+                .properties()
+                .cloned()
+                .unwrap_or_else(|| crate::PhoneticProperties::new(0)),
+        ),
+    )))
 }
 
 fn validate_authoring_properties(options: &PhoneticWriteOptions) -> Result<(), ValidationError> {

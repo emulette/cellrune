@@ -1,7 +1,8 @@
 use crate::{
     CalculationHints, CellAddress, CellFormatEdit, CellRange, CellValue, Column, DateSystem,
-    DefinedName, DefinedNameScope, FormulaText, NumberFormat, Row, SheetId, SheetName,
-    SheetVisibility, TableColumnId, TableColumnName, TableId, TableName, ValidationError,
+    DefinedName, DefinedNameScope, FormulaText, FrozenPane, NumberFormat, PhoneticRun,
+    PhoneticWriteOptions, Row, SheetId, SheetName, SheetVisibility, TableColumnId, TableColumnName,
+    TableId, TableName, ValidationError,
 };
 
 /// One validated workbook mutation in an atomic [`EditBatch`].
@@ -171,6 +172,35 @@ pub enum WorkbookChange {
         row: Row,
         /// Height in points from 0 through 409, or `None` for the sheet's default height.
         height: Option<f64>,
+    },
+    /// Sets the frozen rows and columns of one worksheet, a presentation change;
+    /// [`FrozenPane::is_clear`] clears the pane, as [`crate::WorkbookDraft::set_frozen_pane`]
+    /// does.
+    SetFrozenPane {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Frozen rows and columns.
+        pane: FrozenPane,
+    },
+    /// Replaces the phonetic runs of an existing literal text cell, a presentation change made
+    /// as [`crate::WorkbookDraft::set_phonetics`] makes it.
+    SetPhonetics {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Target text cell.
+        address: CellAddress,
+        /// Runs over the cell's text, in order and without overlap.
+        runs: Vec<PhoneticRun>,
+        /// Visibility and display properties.
+        options: PhoneticWriteOptions,
+    },
+    /// Removes one cell's phonetic runs, properties, and explicit visibility, a presentation
+    /// change. A batch replaces annotated text by clearing its phonetics before setting the value.
+    ClearPhonetics {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Target cell.
+        address: CellAddress,
     },
 }
 
@@ -374,6 +404,31 @@ impl WorkbookChange {
             row,
             height,
         }
+    }
+
+    /// Constructs a frozen-pane change; a clear pane removes the sheet's frozen pane.
+    pub const fn set_frozen_pane(sheet_id: SheetId, pane: FrozenPane) -> Self {
+        Self::SetFrozenPane { sheet_id, pane }
+    }
+
+    /// Constructs a phonetic-run replacement for an existing text cell.
+    pub const fn set_phonetics(
+        sheet_id: SheetId,
+        address: CellAddress,
+        runs: Vec<PhoneticRun>,
+        options: PhoneticWriteOptions,
+    ) -> Self {
+        Self::SetPhonetics {
+            sheet_id,
+            address,
+            runs,
+            options,
+        }
+    }
+
+    /// Constructs a phonetic removal for one cell.
+    pub const fn clear_phonetics(sheet_id: SheetId, address: CellAddress) -> Self {
+        Self::ClearPhonetics { sheet_id, address }
     }
 }
 

@@ -86,7 +86,18 @@ class ReadLimitOptions(TypedDict, total=False):
     max_total_phonetic_text_bytes: int
 
 
-class ErrorDetails(TypedDict):
+class LimitDiagnostics(TypedDict, total=False):
+    name: str
+    observed: int
+    requested_cell_count: int
+    evaluated_count: int
+
+
+class ErrorDetailsOptions(TypedDict, total=False):
+    limit: LimitDiagnostics
+
+
+class ErrorDetails(ErrorDetailsOptions):
     source_code: str | None
     source_id: str | None
     detail: str | None
@@ -136,7 +147,11 @@ class CalculatedValue(TypedDict):
     value: CellValue
 
 
-class UnavailableValue(TypedDict):
+class UnavailableValueOptions(TypedDict, total=False):
+    limit: str
+
+
+class UnavailableValue(UnavailableValueOptions):
     kind: Literal["unavailable"]
     code: str
     message: str
@@ -295,7 +310,16 @@ class TableSummary(TypedDict):
     columns: list[TableColumn]
 
 
-class SheetSummary(TypedDict):
+class FrozenPane(TypedDict):
+    rows: int
+    columns: int
+
+
+class SheetSummaryOptions(TypedDict, total=False):
+    frozen_pane: FrozenPane
+
+
+class SheetSummary(SheetSummaryOptions):
     id: int
     name: str
     visibility: Literal["visible", "hidden", "very_hidden"]
@@ -375,6 +399,40 @@ class CommentPage(TypedDict):
     offset: int
     next_offset: int | None
     entries: list[Comment]
+
+
+PhoneticTypeName = Literal[
+    "halfwidthKatakana", "fullwidthKatakana", "Hiragana", "noConversion"
+]
+PhoneticAlignmentName = Literal["noControl", "left", "center", "distributed"]
+
+
+class PhoneticRun(TypedDict):
+    start_utf16: int
+    end_utf16: int
+    text: str
+
+
+class PhoneticProperties(TypedDict):
+    font_id: int
+    phonetic_type: PhoneticTypeName | None
+    alignment: PhoneticAlignmentName | None
+
+
+class PhoneticCell(TypedDict):
+    address: str
+    runs: list[PhoneticRun]
+    properties: PhoneticProperties | None
+    visible: bool
+
+
+class PhoneticPage(TypedDict):
+    schema_version: int
+    sheet: str
+    total: int
+    offset: int
+    next_offset: int | None
+    entries: list[PhoneticCell]
 
 
 class WorkbookFingerprint(TypedDict):
@@ -542,6 +600,18 @@ class ResizeTableRowsChange(TypedDict):
     table_id: int
     first_data_row: int
     last_data_row: int
+
+
+class WidenTableColumnsChange(TypedDict):
+    kind: Literal["widen_table_columns"]
+    table_id: int
+    range: str
+
+
+class WidenSheetAutoFilterChange(TypedDict):
+    kind: Literal["widen_sheet_auto_filter"]
+    sheet: str
+    range: str
 
 
 FontUnderlineName = Literal[
@@ -807,14 +877,50 @@ class SetRowHeightChange(TypedDict):
     height: float | None
 
 
+class SetFrozenPaneChange(TypedDict):
+    kind: Literal["set_frozen_pane"]
+    sheet: str
+    rows: int
+    columns: int
+
+
+class PhoneticPropertiesInput(TypedDict, total=False):
+    font_id: int
+    phonetic_type: PhoneticTypeName
+    alignment: PhoneticAlignmentName
+
+
+class SetPhoneticsChangeOptions(TypedDict, total=False):
+    visible: bool
+    properties: PhoneticPropertiesInput
+
+
+class SetPhoneticsChange(SetPhoneticsChangeOptions):
+    kind: Literal["set_phonetics"]
+    sheet: str
+    address: str
+    runs: list[PhoneticRun]
+
+
+class ClearPhoneticsChange(TypedDict):
+    kind: Literal["clear_phonetics"]
+    sheet: str
+    address: str
+
+
 WorkbookChangeV2 = (
     WorkbookChange
     | RenameTableChange
     | RenameTableColumnChange
     | ResizeTableRowsChange
+    | WidenTableColumnsChange
+    | WidenSheetAutoFilterChange
     | SetCellFormatChange
     | SetColumnWidthChange
     | SetRowHeightChange
+    | SetFrozenPaneChange
+    | SetPhoneticsChange
+    | ClearPhoneticsChange
 )
 
 
@@ -995,7 +1101,11 @@ class MaterializedResultOrigin(TypedDict):
     range: str | None
 
 
-class CalculationIssue(TypedDict):
+class CalculationIssueOptions(TypedDict, total=False):
+    limit: str
+
+
+class CalculationIssue(CalculationIssueOptions):
     code: str
     message: str
     detail: str | None

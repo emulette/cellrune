@@ -409,7 +409,7 @@ pub struct EditReceiptDto {
     pub calculation_metadata_changed: bool,
 }
 
-/// Table-specific operations added by edit schema v2.
+/// Table and sheet autoFilter operations added by edit schema v2.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TableChangeV2Dto {
@@ -438,13 +438,30 @@ pub enum TableChangeV2Dto {
         /// Last one-based data-body row.
         last_data_row: u32,
     },
+    /// Widens a table by columns, naming each new column from the text in its header cell.
+    WidenTableColumns {
+        /// Stable workbook-local table ID.
+        table_id: u32,
+        /// New full table range in A1 notation, which keeps the current rows and contains the
+        /// current range.
+        range: String,
+    },
+    /// Widens a sheet-level autoFilter by columns and aligns its hidden `_xlnm._FilterDatabase`
+    /// name.
+    WidenSheetAutoFilter {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// New filter range in A1 notation, which keeps the current rows and contains the current
+        /// range.
+        range: String,
+    },
 }
 
 /// One v2 workbook mutation.
 ///
-/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the three
-/// table-authoring operations and the third the cell format, column width, and row height
-/// operations.
+/// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the
+/// table-authoring and autoFilter operations and the third the presentation operations: cell
+/// format, column width, row height, frozen pane, and phonetics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WorkbookChangeV2Dto {
@@ -587,6 +604,10 @@ pub enum CalculationResultDto {
         message: String,
         /// Optional source-specific context.
         detail: Option<String>,
+        /// Calculation limit a `calculation.resource_limit_exceeded` issue exceeded, such as
+        /// `max_formula_tokens`. Omitted for every other issue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<String>,
     },
 }
 
@@ -757,6 +778,10 @@ pub struct CalculationIssueDto {
     pub message: String,
     /// Optional source-specific context.
     pub detail: Option<String>,
+    /// Calculation limit a `calculation.resource_limit_exceeded` issue exceeded, such as
+    /// `max_formula_tokens`. Omitted for every other issue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<String>,
 }
 
 /// One typed transaction detail item.
@@ -1338,6 +1363,9 @@ pub struct SheetSummaryDto {
     /// Hidden rows as ascending A1 row ranges such as `2:4`; a filter's hidden rows are included.
     #[serde(default)]
     pub hidden_rows: Vec<String>,
+    /// Frozen rows and columns of the sheet's default view. Omitted when the sheet has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_pane: Option<crate::FrozenPaneDto>,
 }
 
 /// Transport-safe versioned workbook semantic fingerprint.

@@ -405,7 +405,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
     let tools = listed["result"]["tools"]
         .as_array()
         .expect("tool list must be an array");
-    assert_eq!(tools.len(), 25);
+    assert_eq!(tools.len(), 26);
     assert!(
         tools
             .iter()
@@ -1948,6 +1948,84 @@ fn data_validations_are_a_bounded_stdio_page() {
         json!([{"address": "A1", "author": "Ana", "text": "Ana: check & confirm"}])
     );
     assert_eq!(comments["next_offset"], 1);
+
+    let (status, _, _) = mcp.finish();
+    assert!(status.success());
+}
+
+#[test]
+fn surface_authoring_edits_and_limit_figures_are_stdio_visible() {
+    let root = TestDirectory::new("surface-authoring");
+    let input = root.path.join("surface-authoring.xlsx");
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../binding-contract/surface-authoring.xlsx"),
+        &input,
+    )
+    .expect("shared surface authoring fixture must be copied beneath the approved root");
+    let mut mcp = McpProcess::start(&root.path, &[]);
+    mcp.initialize();
+    let opened = successful_tool(mcp.call_tool("workbook_open", json!({"path": input})));
+    let session_id = opened["session_id"].as_str().expect("session").to_owned();
+    assert_eq!(
+        opened["summary"]["sheets"][0]["frozen_pane"],
+        json!({"rows": 1, "columns": 0})
+    );
+    assert!(opened["summary"]["sheets"][1].get("frozen_pane").is_none());
+
+    let phonetics = successful_tool(mcp.call_tool(
+        "workbook_phonetics",
+        json!({"session_id": session_id, "sheet": "Data"}),
+    ));
+    assert_eq!(phonetics["total"], 1);
+    assert_eq!(phonetics["entries"][0]["address"], "D2");
+    assert_eq!(phonetics["entries"][0]["runs"][0]["text"], "トウキョウ");
+
+    let revision = opened["summary"]["semantic_revision"].clone();
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": revision,
+            "changes": [
+                {"kind": "widen_table_columns", "table_id": 1, "range": "A1:C3"},
+                {"kind": "widen_sheet_auto_filter", "sheet": "Filter", "range": "A1:C3"},
+                {"kind": "set_frozen_pane", "sheet": "Filter", "rows": 1, "columns": 1},
+                {"kind": "clear_phonetics", "sheet": "Data", "address": "D2"}
+            ]
+        }),
+    ));
+    assert_eq!(receipt["changed_table_ids"], json!([1]));
+    let summary =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    let sheets = &summary["summary"]["sheets"];
+    assert_eq!(sheets[0]["tables"][0]["columns"][2]["name"], "Region");
+    assert_eq!(sheets[1]["auto_filter"], "A1:C3");
+    assert_eq!(sheets[1]["frozen_pane"], json!({"rows": 1, "columns": 1}));
+    let phonetics = successful_tool(mcp.call_tool(
+        "workbook_phonetics",
+        json!({"session_id": session_id, "sheet": "Data"}),
+    ));
+    assert_eq!(phonetics["entries"], json!([]));
+
+    let error = failed_tool(mcp.call_tool(
+        "workbook_calculate_targets",
+        json!({
+            "session_id": session_id,
+            "targets": [{"sheet": "Data", "start": "A1", "end": "B3"}],
+            "limits": {"max_result_cells": 2}
+        }),
+    ));
+    assert_eq!(error["code"], "calculation.target.target_limit_exceeded");
+    assert_eq!(
+        error["details"]["limit"],
+        json!({"requested_cell_count": 6})
+    );
+    let error = failed_tool(mcp.call_tool(
+        "workbook_phonetics",
+        json!({"session_id": session_id, "sheet": "Missing"}),
+    ));
+    assert!(error["details"].get("limit").is_none());
 
     let (status, _, _) = mcp.finish();
     assert!(status.success());

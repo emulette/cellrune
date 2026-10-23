@@ -57,7 +57,7 @@ cellrune = "0.1.26"
 - never executes macros, never follows external links, never reads the host clock for
   `TODAY()` or `NOW()`, and draws `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()` from an explicit
   seed instead of host randomness;
-- returns stable error and issue codes for programmatic handling; in Rust, read, formula, and
+- returns stable error and issue codes for programmatic handling; read, formula, and
   targeted-calculation limit failures also name the exceeded limit or report the observed value;
 - materializes recalculated typed results into existing `.xlsx`/`.xlsm` packages with strict or
   explicit cache-invalidation policies and reports a verified output SHA-256 identity;
@@ -387,9 +387,9 @@ reaches every surface:
 | CSV import and export of one sheet | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
 | Defined-name inspection | yes | yes | yes | no |
-| Sheet autoFilter and table column widening edits | yes | no | no | no |
-| Phonetic annotations and frozen panes | yes | no | no | no |
-| Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | no | no | no |
+| Sheet autoFilter and table column widening edits | yes | yes | yes | yes |
+| Phonetic annotations and frozen panes (read and edit) | yes | yes | yes | yes |
+| Typed limit diagnostics (`observed`, limit kinds, evaluation counts) | yes | yes | yes | yes |
 
 Native package availability remains platform-specific; package managers must select a wheel or
 exact-version npm platform package compatible with the current runtime.
@@ -512,7 +512,17 @@ every value at its address. `read_formats`/`readFormats` page through the font, 
 border, and alignment of a range's cells with its column widths and the page's row heights, and
 `apply_changes_v2`/`applyChangesV2` take `set_cell_format`/`setCellFormat`,
 `set_column_width`/`setColumnWidth`, and `set_row_height`/`setRowHeight` changes, which keep the
-semantic revision.
+semantic revision. The v2 batch also widens a table (`widen_table_columns`/`widenTableColumns`
+with a `table_id` and the new `range`) or a sheet autoFilter
+(`widen_sheet_auto_filter`/`widenSheetAutoFilter` with a `sheet` and the new `range`), and sets a
+sheet's frozen pane (`set_frozen_pane`/`setFrozenPane` with `rows` and `columns`; zero clears it)
+or a text cell's phonetic runs (`set_phonetics`/`setPhonetics`, `clear_phonetics`/
+`clearPhonetics`), which keep the semantic revision. The summary reports a sheet's `frozen_pane`
+when it has one, and Python and Node.js `phonetics` page through a sheet's annotated cells. A
+failure that exceeded a resource limit carries its figures in `details.limit` (`name`,
+`observed`, `requested_cell_count`/`requestedCellCount`, `evaluated_count`/`evaluatedCount`), and
+an unavailable result that exceeded a calculation limit names it in `limit`; both are absent
+otherwise.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview
@@ -530,9 +540,10 @@ cargo run --locked -p cellrune-mcp -- \
   --root /absolute/path/to/approved/workbooks
 ```
 
-Its 25 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
+Its 26 tools are `workbook_create`, `workbook_open`, `workbook_open_csv`, `workbook_close`,
 `workbook_summary`, `workbook_export_csv`, `workbook_read_range`, `workbook_read_formats`,
-`workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_function_usage`,
+`workbook_data_validations`, `workbook_hyperlinks`, `workbook_comments`, `workbook_phonetics`,
+`workbook_function_usage`,
 `workbook_scan_capabilities`, `workbook_apply_changes`, `workbook_apply_changes_v2`,
 `workbook_recalculate`, `workbook_calculate_targets`, `workbook_changes_since`, `workbook_save_as`,
 `workbook_save_edits_as`, `workbook_preview_changes`, `workbook_preview_changes_page`,

@@ -22,6 +22,7 @@ pub struct NativeCalculationResult {
     pub code: Option<String>,
     pub message: Option<String>,
     pub detail: Option<String>,
+    pub limit: Option<String>,
 }
 
 #[napi(object)]
@@ -83,6 +84,13 @@ pub struct NativeSheetSummary {
     pub auto_filter: Option<String>,
     pub auto_filter_filtered_columns: Vec<u32>,
     pub hidden_rows: Vec<String>,
+    pub frozen_pane: Option<NativeFrozenPane>,
+}
+
+#[napi(object)]
+pub struct NativeFrozenPane {
+    pub rows: u32,
+    pub columns: u32,
 }
 
 #[napi(object)]
@@ -280,6 +288,10 @@ pub(crate) fn workbook_summary(value: WorkbookSummaryDto) -> NativeWorkbookSumma
                 auto_filter: sheet.auto_filter,
                 auto_filter_filtered_columns: sheet.auto_filter_filtered_columns,
                 hidden_rows: sheet.hidden_rows,
+                frozen_pane: sheet.frozen_pane.map(|pane| NativeFrozenPane {
+                    rows: pane.rows,
+                    columns: pane.columns,
+                }),
                 tables: sheet
                     .tables
                     .into_iter()
@@ -520,17 +532,20 @@ fn calculation_result(value: CalculationResultDto) -> NativeCalculationResult {
             code: None,
             message: None,
             detail: None,
+            limit: None,
         },
         CalculationResultDto::Unavailable {
             code,
             message,
             detail,
+            limit,
         } => NativeCalculationResult {
             kind: "unavailable".to_owned(),
             value: None,
             code: Some(code),
             message: Some(message),
             detail,
+            limit,
         },
     }
 }

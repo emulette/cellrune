@@ -197,7 +197,7 @@ impl CalculationIssue {
     pub(crate) fn resource_limit(limit: CalculationLimitKind) -> Self {
         Self {
             code: CalculationIssueCode::ResourceLimitExceeded,
-            detail: Some(limit.detail().into()),
+            detail: Some(limit.as_str().into()),
             limit: Some(limit),
         }
     }

@@ -13,6 +13,7 @@ mod error;
 mod format_convert;
 mod format_dto;
 mod json_object;
+mod phonetic;
 mod service;
 mod sheet_metadata;
 mod targeted;
@@ -45,12 +46,15 @@ pub use dto::{
     WorkbookSummaryDto, WorkbookTransactionReceiptDto, WorkbookTransactionReportDto,
     WritableCellValueDto, WriteOptionsDto, WriteReportDto,
 };
-pub use error::{ErrorDetails, InteropError, InteropErrorKind};
+pub use error::{ErrorDetails, InteropError, InteropErrorKind, LimitDiagnosticsDto};
 pub use format_dto::{
     AlignmentDto, BorderDto, BorderEdgeDto, CellFormatDto, CellFormatEntryDto, CellFormatPageDto,
     ColorDto, ColumnWidthDto, FillDto, FontDto, FormatChangeV2Dto, PatternFillDto, RowHeightDto,
 };
 pub use json_object::{deserialize_object, deserialize_objects, deserialize_optional_object};
+pub use phonetic::{
+    FrozenPaneDto, PhoneticCellDto, PhoneticPageDto, PhoneticPropertiesDto, PhoneticRunDto,
+};
 pub use service::{
     CompletedPreview, CompletedRecalculation, DEFAULT_PAGE_SIZE, DEFAULT_PREVIEW_PAGE_SIZE,
     MAX_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedChanges, PreparedChangesV2, PreparedEditsSave,

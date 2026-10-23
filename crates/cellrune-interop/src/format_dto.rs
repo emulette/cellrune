@@ -276,7 +276,10 @@ impl FormatChangeV2Dto {
         match self {
             Self::SetCellFormat { sheet, .. }
             | Self::SetColumnWidth { sheet, .. }
-            | Self::SetRowHeight { sheet, .. } => sheet,
+            | Self::SetRowHeight { sheet, .. }
+            | Self::SetFrozenPane { sheet, .. }
+            | Self::SetPhonetics { sheet, .. }
+            | Self::ClearPhonetics { sheet, .. } => sheet,
         }
     }
 }
@@ -325,4 +328,41 @@ pub enum FormatChangeV2Dto {
         /// Height in points from 0 through 409; `null` restores the default height.
         height: Option<f64>,
     },
+    /// Sets the frozen rows and columns of the sheet's default view; zero rows and columns clear
+    /// the pane.
+    SetFrozenPane {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Frozen rows, below the 1,048,576-row grid.
+        rows: u32,
+        /// Frozen columns, below the 16,384-column grid.
+        columns: u32,
+    },
+    /// Replaces the phonetic runs of an existing literal text cell.
+    SetPhonetics {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Unqualified A1 address of a text cell.
+        address: String,
+        /// Runs over the cell text, in order and without overlap.
+        runs: Vec<crate::PhoneticRunDto>,
+        /// Whether the phonetic text is shown; omitted shows it.
+        #[serde(default = "shown")]
+        visible: bool,
+        /// Display properties; omitted writes the default properties.
+        #[serde(default)]
+        properties: Option<crate::PhoneticPropertiesDto>,
+    },
+    /// Removes one cell's phonetic runs, properties, and visibility. A batch replaces annotated
+    /// text by clearing its phonetics before setting the value.
+    ClearPhonetics {
+        /// Case-insensitive sheet name.
+        sheet: String,
+        /// Unqualified A1 address.
+        address: String,
+    },
+}
+
+const fn shown() -> bool {
+    true
 }

@@ -407,6 +407,17 @@ pub enum PhoneticRunLimitKind {
     Total,
 }
 
+impl PhoneticRunLimitKind {
+    /// Returns the name of the [`ReadLimits`](crate::ReadLimits) entry:
+    /// `max_phonetic_runs_per_item` or `max_total_phonetic_runs`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PerItem => "max_phonetic_runs_per_item",
+            Self::Total => "max_total_phonetic_runs",
+        }
+    }
+}
+
 /// A source-linked XLSX read failure with a stable error code.
 #[derive(Debug)]
 pub struct XlsxReadError {
