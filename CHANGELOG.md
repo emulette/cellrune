@@ -188,6 +188,22 @@ inventories, and measurements belong in the linked documentation rather than in 
   totals; 3-D references, a missing `k`, and out-of-range arguments are `#VALUE!`. `SUBTOTAL` is
   unchanged. With these and the other functions added in 0.1.27, the catalog has 495 official
   names and 496 accepted entries.
+- The functions added in 0.1.27 follow Excel 16.114 for Mac measurements at their edges, and
+  inputs Excel was not measured on still report `calculation.unsupported_expression`.
+  `FREQUENCY` keeps the given bin order and leaves text and blank bins out of the result;
+  `CHISQ.TEST` and `CHITEST` accept equal counts in different shapes, drop pairs with text, and
+  return `#DIV/0!` for an expected 0 and `#NUM!` for a negative one; `CUMIPMT` and `CUMPRINC`
+  accept beginning-of-period payments and a start such as 1.5, and keep their digits at small
+  rates; `VDB` accepts fractional periods and returns `#NUM!` for an end after the life;
+  `AMORDEGRC` and `AMORLINC` cover the end of the life, truncate the basis and period, and return
+  `#NUM!` for basis 2, a rate of 0, a negative period, or a purchase after the first period;
+  `BAHTTEXT` spells zero, negative, sub-baht, and rounded amounts and every final one after a
+  higher digit as เอ็ด; `CELL` returns the row of a range, 0 for an empty cell's contents, and `"l"`
+  for a formula's text result, in any info-type case; `IMTAN` and `IMCOT` keep their digits near a
+  real pole, `IMCOT`, `IMCSC`, and `IMCSCH` return `#NUM!` at zero, and results past an overflow
+  that underflow return their limit. `ENCODEURL` encodes only the characters Microsoft documents
+  and is stored as `_xlfn.ENCODEURL`, and `SKEW`, `SKEW.P`, and `KURT` count both passes over
+  their numbers toward `max_function_iterations`.
 
 ### Changed
 
