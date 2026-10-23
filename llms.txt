@@ -296,9 +296,14 @@ Grid edits are v1 changes in interop JSON, Python, and MCP, and camel-case
 first moved line lands on), `move_range` (`sheet`, A1 `source`, A1
 `destination` corner), and `copy_range` (`sheet`, A1 `source`, optional
 `destination_sheet`, A1 `destination` that repeats the source a whole number
-of times). Their receipt carries `inverse`: edit-schema-v2 `changes` that undo
-the batch when applied as one v2 batch, and `unrestored` content kinds the
-changes cannot bring back. Node returns `inverse.changes` as camel-case
+of times). A receipt of a batch with these, a sheet deletion, move, or copy, a
+defined-name rename, or a table creation, range change, conversion, or sheet
+autoFilter change carries `inverse`: edit-schema-v2 `changes` that undo the
+batch when applied as one v2 batch (a deleted sheet comes back through
+`add_sheet` and `move_sheet`, and a `set_formula` with `dynamic_array: true`
+restores a dynamic-array formula without a known spill range), and
+`unrestored` content kinds the changes cannot bring back; empty `changes` mean
+nothing to undo. Node returns `inverse.changes` as camel-case
 `applyChangesV2` changes and `unrestored` entries with `kind`, `sheet`, and
 `tableId`.
 

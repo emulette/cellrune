@@ -375,6 +375,7 @@ fn stdio_workflow_matches_the_rust_interop_session() {
             address: "A2".to_owned(),
             formula: "=SUM(A1,4)".to_owned(),
             dynamic_range: None,
+            dynamic_array: false,
         },
     ];
     let mut direct = WorkbookSession::create();

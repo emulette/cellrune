@@ -8,12 +8,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::WorkbookDraft;
-use super::{BatchExecutionError, EditBatch, TableMaterializationBudget, WorkbookChange};
+use super::{
+    BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
+};
 use crate::calculation::formula_rewrite::{FormulaRewriteBudget, FormulaRewriteLimits};
 use crate::grid::{GridAxis, GridEdit};
 use crate::{
-    CellAddress, CellContent, CellFormatEdit, CellValue, Column, Fill, FormulaMetadata, Row, Sheet,
-    SheetId, TableId,
+    CellAddress, CellContent, CellFormatEdit, CellRange, CellValue, Column, DefinedName,
+    DefinedNameScope, Fill, FormulaMetadata, Row, Sheet, SheetId, SheetName, Table, TableId,
+    TableName,
 };
 
 /// The changes that undo one committed batch, as far as workbook changes can express them.
@@ -133,10 +136,98 @@ impl UnrestoredContentKind {
 /// The parts of a batch its inverse is built from.
 #[derive(Debug, Default)]
 pub(super) struct InverseSeed {
-    /// The structural edits of the batch, in order.
-    pub(super) edits: Vec<(SheetId, GridEdit)>,
+    /// The batch's changes whose undo is itself a structural change, in order.
+    pub(super) steps: Vec<UndoStep>,
     /// Source sheets whose preserved package content a deletion or range move removed or moved.
     pub(super) preserved_sheets: BTreeSet<SheetId>,
+}
+
+/// One change of a batch whose undo is a structural change, with what the undo needs from the
+/// workbook before the change.
+#[derive(Debug)]
+pub(super) enum UndoStep {
+    /// A row, column, or range edit, undone by its inverse edit.
+    Grid { sheet_id: SheetId, edit: GridEdit },
+    /// A tab move, undone by moving the tab back to `position`.
+    MoveSheet { sheet_id: SheetId, position: usize },
+    /// A sheet deletion, undone by adding a sheet of the same name at `position`, whose cells and
+    /// tables the inverse then restores. `source` tells whether the sheet's package part is gone.
+    DeleteSheet {
+        sheet_id: SheetId,
+        name: SheetName,
+        position: usize,
+        tables: Vec<TableShape>,
+        source: bool,
+    },
+    /// A defined-name rename, undone by renaming `new_name` back to `name`.
+    RenameDefinedName {
+        scope: DefinedNameScope,
+        name: Box<str>,
+        new_name: Box<str>,
+    },
+    /// A table creation, undone by converting the table to a range.
+    CreateTable { table_id: TableId },
+    /// A conversion of a table to a range, undone by creating it again once its cells are back.
+    ConvertTable(TableShape),
+    /// A table range change, undone by setting `range` again.
+    TableRange { table_id: TableId, range: CellRange },
+    /// A sheet auto-filter change, undone by setting `range` again.
+    AutoFilter {
+        sheet_id: SheetId,
+        range: Option<CellRange>,
+    },
+}
+
+/// What a table creation needs to bring a table back: its sheet, its header and data rows, and its
+/// name.
+#[derive(Debug, Clone)]
+pub(super) struct TableShape {
+    table_id: TableId,
+    sheet_id: SheetId,
+    range: CellRange,
+    name: TableName,
+}
+
+impl TableShape {
+    pub(super) fn of(sheet_id: SheetId, table: &Table) -> Option<Self> {
+        let range = table.range();
+        let last_row = range
+            .end()
+            .row()
+            .get()
+            .checked_sub(table.totals_row_count())?;
+        let end = CellAddress::from_indices(last_row, range.end().column().get()).ok()?;
+        Some(Self {
+            table_id: table.id(),
+            sheet_id,
+            range: CellRange::new(range.start(), end).ok()?,
+            name: table.display_name().clone(),
+        })
+    }
+}
+
+/// The IDs that sheets and tables the inverse creates again take in place of their originals.
+#[derive(Debug, Default)]
+struct Recreated {
+    sheets: BTreeMap<SheetId, SheetId>,
+    tables: BTreeMap<TableId, TableId>,
+}
+
+impl Recreated {
+    fn sheet(&self, id: SheetId) -> SheetId {
+        self.sheets.get(&id).copied().unwrap_or(id)
+    }
+
+    fn table(&self, id: TableId) -> TableId {
+        self.tables.get(&id).copied().unwrap_or(id)
+    }
+
+    fn scope(&self, scope: DefinedNameScope) -> DefinedNameScope {
+        match scope {
+            DefinedNameScope::Sheet(id) => DefinedNameScope::Sheet(self.sheet(id)),
+            DefinedNameScope::Workbook => DefinedNameScope::Workbook,
+        }
+    }
 }
 
 /// Builds the inverse of the batch that turned `before` into `after`. Returns `None` when the
@@ -149,22 +240,101 @@ pub(super) fn edit_inverse(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Option<EditInverse>, BatchExecutionError> {
     let mut restored = after.clone();
-    let mut changes = seed
-        .edits
-        .iter()
-        .rev()
-        .filter_map(|(sheet_id, edit)| undoing_change(*sheet_id, *edit))
-        .collect::<Vec<_>>();
+    let mut changes = Vec::new();
     let mut unrestored = BTreeSet::new();
-    if !apply(&mut restored, changes.clone(), cancelled)? {
-        return Ok(None);
+    let mut recreated = Recreated::default();
+    let mut tables_to_create = Vec::new();
+    // Each step is undone in reverse order on the workbook the later steps' undo left, so the
+    // IDs a recreated sheet takes are known to the steps before it.
+    for step in seed.steps.into_iter().rev() {
+        let undo = match step {
+            UndoStep::Grid { sheet_id, edit } => {
+                // A sheet the batch deleted afterwards comes back whole from its cells.
+                if recreated.sheets.contains_key(&sheet_id) {
+                    continue;
+                }
+                undoing_change(sheet_id, edit).into_iter().collect()
+            }
+            UndoStep::MoveSheet { sheet_id, position } => {
+                vec![WorkbookChange::move_sheet(
+                    recreated.sheet(sheet_id),
+                    position,
+                )]
+            }
+            UndoStep::DeleteSheet {
+                sheet_id,
+                name,
+                position,
+                tables,
+                source,
+            } => {
+                let add = WorkbookChange::add_sheet(name);
+                let Some(receipt) =
+                    apply_with_receipt(&mut restored, vec![add.clone()], cancelled)?
+                else {
+                    return Ok(None);
+                };
+                let Some(added) = receipt.created_sheet_ids().first().copied() else {
+                    return Ok(None);
+                };
+                changes.push(add);
+                recreated.sheets.insert(sheet_id, added);
+                tables_to_create.extend(tables);
+                if source {
+                    unrestored.insert(UnrestoredContent::sheet(
+                        UnrestoredContentKind::PreservedContent,
+                        added,
+                    ));
+                }
+                vec![WorkbookChange::move_sheet(added, position)]
+            }
+            UndoStep::RenameDefinedName {
+                scope,
+                name,
+                new_name,
+            } => vec![WorkbookChange::rename_defined_name(
+                recreated.scope(scope),
+                new_name,
+                name,
+            )],
+            UndoStep::CreateTable { table_id } => vec![WorkbookChange::convert_table_to_range(
+                recreated.table(table_id),
+            )],
+            UndoStep::ConvertTable(shape) => {
+                // The cells the table covered are where the conversion left them, so the table
+                // comes back over them before earlier steps move them.
+                recreate_table(
+                    &mut restored,
+                    &shape,
+                    &mut recreated,
+                    (&mut changes, &mut unrestored),
+                    cancelled,
+                )?;
+                continue;
+            }
+            UndoStep::TableRange { table_id, range } => vec![WorkbookChange::set_table_range(
+                recreated.table(table_id),
+                range,
+            )],
+            UndoStep::AutoFilter { sheet_id, range } => {
+                vec![WorkbookChange::set_sheet_auto_filter(
+                    recreated.sheet(sheet_id),
+                    range,
+                )]
+            }
+        };
+        if !apply(&mut restored, undo.clone(), cancelled)? {
+            return Ok(None);
+        }
+        changes.extend(undo);
     }
 
     // Sheet and table renames rewrite formulas and header cells, and a table resize may write
     // cells, so they apply before the cells are compared.
     let mut renames = Vec::new();
     for sheet in before.workbook().sheets() {
-        let Some(current) = restored.workbook().sheet_by_id(sheet.id()) else {
+        let target = recreated.sheet(sheet.id());
+        let Some(current) = restored.workbook().sheet_by_id(target) else {
             unrestored.insert(UnrestoredContent::sheet(
                 UnrestoredContentKind::Sheet,
                 sheet.id(),
@@ -172,13 +342,10 @@ pub(super) fn edit_inverse(
             continue;
         };
         if current.name() != sheet.name() {
-            renames.push(WorkbookChange::rename_sheet(
-                sheet.id(),
-                sheet.name().clone(),
-            ));
+            renames.push(WorkbookChange::rename_sheet(target, sheet.name().clone()));
         }
     }
-    renames.extend(table_changes(before, &restored));
+    renames.extend(table_changes(before, &restored, &recreated));
     if !apply(&mut restored, renames.clone(), cancelled)? {
         return Ok(None);
     }
@@ -186,8 +353,9 @@ pub(super) fn edit_inverse(
 
     let mut cells = Vec::new();
     for sheet in before.workbook().sheets() {
-        if let Some(current) = restored.workbook().sheet_by_id(sheet.id()) {
-            cell_changes(sheet, current, &mut cells, &mut unrestored);
+        let target = recreated.sheet(sheet.id());
+        if let Some(current) = restored.workbook().sheet_by_id(target) {
+            cell_changes(sheet, current, target, &mut cells, &mut unrestored);
         }
     }
     if !apply(&mut restored, cells.clone(), cancelled)? {
@@ -195,27 +363,38 @@ pub(super) fn edit_inverse(
     }
     changes.extend(cells);
 
+    // A table deleted with its sheet comes back over its restored cells.
+    for shape in tables_to_create {
+        recreate_table(
+            &mut restored,
+            &shape,
+            &mut recreated,
+            (&mut changes, &mut unrestored),
+            cancelled,
+        )?;
+    }
+
     for sheet in before.workbook().sheets() {
-        let Some(current) = restored.workbook().sheet_by_id(sheet.id()) else {
+        let target = recreated.sheet(sheet.id());
+        let Some(current) = restored.workbook().sheet_by_id(target) else {
             continue;
         };
         format_changes(
             before,
             &restored,
-            sheet,
-            current,
+            (sheet, current, target),
             &mut changes,
             &mut unrestored,
         );
-        structure_differences(before, &restored, sheet, current, &mut unrestored);
+        structure_differences(before, &restored, (sheet, current, target), &mut unrestored);
         if current.visibility() != sheet.visibility() {
             changes.push(WorkbookChange::set_sheet_visibility(
-                sheet.id(),
+                target,
                 sheet.visibility(),
             ));
         }
     }
-    name_changes(before, &restored, &mut changes);
+    name_changes(before, &restored, &recreated, &mut changes);
     if before.workbook().date_system() != restored.workbook().date_system() {
         changes.push(WorkbookChange::set_date_system(
             before.workbook().date_system(),
@@ -226,12 +405,33 @@ pub(super) fn edit_inverse(
             before.workbook().calculation_hints(),
         ));
     }
-    for table in restored.workbook().sheets().iter().flat_map(Sheet::tables) {
-        if before
+    let originals = recreated
+        .tables
+        .iter()
+        .map(|(original, current)| (*current, *original))
+        .collect::<BTreeMap<_, _>>();
+    let recreated_ids = recreated.sheets.values().copied().collect::<BTreeSet<_>>();
+    // Sheets the batch added go, and their tables with them.
+    let added = restored
+        .workbook()
+        .sheets()
+        .iter()
+        .map(Sheet::id)
+        .filter(|id| before.workbook().sheet_by_id(*id).is_none() && !recreated_ids.contains(id))
+        .collect::<Vec<_>>();
+    for table in restored
+        .workbook()
+        .sheets()
+        .iter()
+        .filter(|sheet| !added.contains(&sheet.id()))
+        .flat_map(Sheet::tables)
+    {
+        let original = before
             .workbook()
-            .table_by_id(table.id())
-            .is_none_or(|original| !original.semantic_eq(table))
-        {
+            .table_by_id(originals.get(&table.id()).copied().unwrap_or(table.id()));
+        if original.is_none_or(|original| {
+            !(original.semantic_eq(table) || same_table_shape(original, table))
+        }) {
             unrestored.insert(UnrestoredContent {
                 kind: UnrestoredContentKind::Table,
                 sheet_id: None,
@@ -239,15 +439,11 @@ pub(super) fn edit_inverse(
             });
         }
     }
-    for sheet in restored.workbook().sheets() {
-        if before.workbook().sheet_by_id(sheet.id()).is_none() {
-            changes.push(WorkbookChange::delete_sheet(sheet.id()));
-        }
-    }
+    changes.extend(added.into_iter().map(WorkbookChange::delete_sheet));
     for sheet_id in seed.preserved_sheets {
         unrestored.insert(UnrestoredContent::sheet(
             UnrestoredContentKind::PreservedContent,
-            sheet_id,
+            recreated.sheet(sheet_id),
         ));
     }
     Ok(Some(EditInverse {
@@ -266,6 +462,16 @@ fn apply(
     if changes.is_empty() {
         return Ok(true);
     }
+    Ok(apply_with_receipt(draft, changes, cancelled)?.is_some())
+}
+
+/// Applies `changes` like [`apply`] and returns their receipt, or `None` when the workbook refuses
+/// them.
+fn apply_with_receipt(
+    draft: &mut WorkbookDraft,
+    changes: Vec<WorkbookChange>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Option<EditReceipt>, BatchExecutionError> {
     let mut rewrite = FormulaRewriteBudget::new(FormulaRewriteLimits::UNBOUNDED, cancelled);
     let mut materialization = TableMaterializationBudget::new(usize::MAX, cancelled);
     match draft.apply_batch(
@@ -274,14 +480,60 @@ fn apply(
         &mut materialization,
         false,
     ) {
-        Ok(_) => Ok(true),
+        Ok(receipt) => Ok(Some(receipt)),
         Err(BatchExecutionError::Validation(_) | BatchExecutionError::Rewrite(_))
             if !cancelled() =>
         {
-            Ok(false)
+            Ok(None)
         }
         Err(error) => Err(error),
     }
+}
+
+/// Creates a table again over the cells `shape` names and maps its old ID to the new one; a table
+/// the workbook refuses to create there is listed as unrestored.
+fn recreate_table(
+    restored: &mut WorkbookDraft,
+    shape: &TableShape,
+    recreated: &mut Recreated,
+    (changes, unrestored): (&mut Vec<WorkbookChange>, &mut BTreeSet<UnrestoredContent>),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), BatchExecutionError> {
+    let target = recreated.sheet(shape.sheet_id);
+    let create = WorkbookChange::create_table(target, shape.range, Some(shape.name.clone()));
+    if apply(restored, vec![create.clone()], cancelled)? {
+        changes.push(create);
+        if let Some(table) = restored.workbook().table(shape.name.as_str()) {
+            recreated.tables.insert(shape.table_id, table.id());
+        }
+    } else {
+        unrestored.insert(UnrestoredContent {
+            kind: UnrestoredContentKind::Table,
+            sheet_id: Some(target),
+            table_id: Some(shape.table_id),
+        });
+    }
+    Ok(())
+}
+
+/// Reports whether a table created again has the shape of its original: range, names, header and
+/// totals rows, and columns, whatever its ID.
+fn same_table_shape(original: &Table, current: &Table) -> bool {
+    original.range() == current.range()
+        && original.display_name() == current.display_name()
+        && original.header_row_count() == current.header_row_count()
+        && original.totals_row_count() == current.totals_row_count()
+        && original.columns().len() == current.columns().len()
+        && original
+            .columns()
+            .iter()
+            .zip(current.columns())
+            .all(|(original, current)| {
+                original.name() == current.name()
+                    && original.calculated_column_formula() == current.calculated_column_formula()
+                    && original.totals_row_function() == current.totals_row_function()
+                    && original.totals_row_label() == current.totals_row_label()
+            })
 }
 
 /// Returns the change that undoes one structural edit. A range move has none: moving the cells
@@ -353,10 +605,15 @@ fn undoing_change(sheet_id: SheetId, edit: GridEdit) -> Option<WorkbookChange> {
 }
 
 /// Returns the renames and data-row resizes that bring each table back.
-fn table_changes(before: &WorkbookDraft, restored: &WorkbookDraft) -> Vec<WorkbookChange> {
+fn table_changes(
+    before: &WorkbookDraft,
+    restored: &WorkbookDraft,
+    recreated: &Recreated,
+) -> Vec<WorkbookChange> {
     let mut changes = Vec::new();
     for table in before.workbook().sheets().iter().flat_map(Sheet::tables) {
-        let Some(current) = restored.workbook().table_by_id(table.id()) else {
+        let table_id = recreated.table(table.id());
+        let Some(current) = restored.workbook().table_by_id(table_id) else {
             continue;
         };
         if current.semantic_eq(table) {
@@ -364,7 +621,7 @@ fn table_changes(before: &WorkbookDraft, restored: &WorkbookDraft) -> Vec<Workbo
         }
         if current.display_name() != table.display_name() {
             changes.push(WorkbookChange::rename_table(
-                table.id(),
+                table_id,
                 table.display_name().clone(),
             ));
         }
@@ -376,7 +633,7 @@ fn table_changes(before: &WorkbookDraft, restored: &WorkbookDraft) -> Vec<Workbo
                 .is_some_and(|candidate| candidate.name() != column.name());
             if renamed && let Ok(name) = crate::TableColumnName::new(column.name()) {
                 changes.push(WorkbookChange::rename_table_column(
-                    table.id(),
+                    table_id,
                     column.column_id(),
                     name,
                 ));
@@ -385,7 +642,7 @@ fn table_changes(before: &WorkbookDraft, restored: &WorkbookDraft) -> Vec<Workbo
         if let (Some(data), Some(current_data)) = (table.data_range(), current.data_range())
             && data != current_data
             && let Ok(resize) =
-                WorkbookChange::resize_table_rows(table.id(), data.start().row(), data.end().row())
+                WorkbookChange::resize_table_rows(table_id, data.start().row(), data.end().row())
         {
             changes.push(resize);
         }
@@ -393,14 +650,15 @@ fn table_changes(before: &WorkbookDraft, restored: &WorkbookDraft) -> Vec<Workbo
     changes
 }
 
-/// Appends the cell changes that bring `current`'s cells back to `sheet`'s.
+/// Appends the cell changes that bring `current`'s cells back to `sheet`'s; `sheet_id` is
+/// `current`'s ID, which a recreated sheet takes in place of `sheet`'s.
 fn cell_changes(
     sheet: &Sheet,
     current: &Sheet,
+    sheet_id: SheetId,
     changes: &mut Vec<WorkbookChange>,
     unrestored: &mut BTreeSet<UnrestoredContent>,
 ) {
-    let sheet_id = sheet.id();
     let addresses = sheet
         .cells()
         .map(crate::Cell::address)
@@ -503,12 +761,11 @@ fn same_content(original: &CellContent, now: &CellContent) -> bool {
 fn format_changes(
     before: &WorkbookDraft,
     restored: &WorkbookDraft,
-    sheet: &Sheet,
-    current: &Sheet,
+    (sheet, current, sheet_id): (&Sheet, &Sheet, SheetId),
     changes: &mut Vec<WorkbookChange>,
     unrestored: &mut BTreeSet<UnrestoredContent>,
 ) {
-    let sheet_id = sheet.id();
+    let original_id = sheet.id();
     let positions = sheet
         .cells()
         .map(crate::Cell::address)
@@ -518,7 +775,7 @@ fn format_changes(
         .chain(
             before
                 .presentation()
-                .edited_cell_formats(sheet_id)
+                .edited_cell_formats(original_id)
                 .map(|(address, _)| address),
         )
         .chain(
@@ -530,7 +787,7 @@ fn format_changes(
         .collect::<BTreeSet<_>>();
     for address in positions {
         let (Ok(original), Ok(now)) = (
-            before.cell_format(sheet_id, address),
+            before.cell_format(original_id, address),
             restored.cell_format(sheet_id, address),
         ) else {
             continue;
@@ -565,13 +822,14 @@ fn format_changes(
         ));
     }
 
-    let heights = |draft: &WorkbookDraft| {
+    let heights = |draft: &WorkbookDraft, id: SheetId| {
         draft
             .presentation()
-            .row_heights(sheet_id)
+            .row_heights(id)
             .collect::<BTreeMap<_, _>>()
     };
-    let (original_heights, current_heights) = (heights(before), heights(restored));
+    let (original_heights, current_heights) =
+        (heights(before, original_id), heights(restored, sheet_id));
     for row in original_heights
         .keys()
         .chain(current_heights.keys())
@@ -583,17 +841,18 @@ fn format_changes(
             changes.push(WorkbookChange::set_row_height(sheet_id, row, height));
         }
     }
-    let widths = |draft: &WorkbookDraft| {
+    let widths = |draft: &WorkbookDraft, id: SheetId| {
         draft
             .presentation()
-            .column_widths(sheet_id)
+            .column_widths(id)
             .iter()
             .flat_map(|span| {
                 (span.first().get()..=span.last().get()).map(move |column| (column, span.width()))
             })
             .collect::<BTreeMap<_, _>>()
     };
-    let (original_widths, current_widths) = (widths(before), widths(restored));
+    let (original_widths, current_widths) =
+        (widths(before, original_id), widths(restored, sheet_id));
     let mut runs = Vec::<(u32, u32, Option<f64>)>::new();
     for column in original_widths
         .keys()
@@ -625,11 +884,10 @@ fn format_changes(
 fn structure_differences(
     before: &WorkbookDraft,
     restored: &WorkbookDraft,
-    sheet: &Sheet,
-    current: &Sheet,
+    (sheet, current, sheet_id): (&Sheet, &Sheet, SheetId),
     unrestored: &mut BTreeSet<UnrestoredContent>,
 ) {
-    let sheet_id = sheet.id();
+    let original_id = sheet.id();
     for (differs, kind) in [
         (
             sheet.merged_ranges() != current.merged_ranges(),
@@ -656,12 +914,12 @@ fn structure_differences(
             UnrestoredContentKind::AutoFilter,
         ),
         (
-            before.presentation().frozen_pane(sheet_id)
+            before.presentation().frozen_pane(original_id)
                 != restored.presentation().frozen_pane(sheet_id),
             UnrestoredContentKind::FrozenPane,
         ),
         (
-            phonetics(before, sheet_id) != phonetics(restored, sheet_id),
+            phonetics(before, original_id) != phonetics(restored, sheet_id),
             UnrestoredContentKind::Phonetics,
         ),
     ] {
@@ -691,18 +949,32 @@ fn phonetics(draft: &WorkbookDraft, sheet_id: SheetId) -> SheetPhonetics<'_> {
 fn name_changes(
     before: &WorkbookDraft,
     restored: &WorkbookDraft,
+    recreated: &Recreated,
     changes: &mut Vec<WorkbookChange>,
 ) {
-    let key = |name: &crate::DefinedName| (name.scope(), name.lookup_key().to_owned());
+    let key = |name: &DefinedName| (name.scope(), name.lookup_key().to_owned());
+    // A name scoped to a recreated sheet comes back scoped to the sheet that took its place.
+    let rescoped = before
+        .workbook()
+        .defined_names()
+        .iter()
+        .filter_map(|name| {
+            DefinedName::new(
+                name.name(),
+                recreated.scope(name.scope()),
+                name.formula().clone(),
+                name.hidden(),
+            )
+            .ok()
+        })
+        .collect::<Vec<_>>();
     let current = restored
         .workbook()
         .defined_names()
         .iter()
         .map(|name| (key(name), name))
         .collect::<BTreeMap<_, _>>();
-    let original = before
-        .workbook()
-        .defined_names()
+    let original = rescoped
         .iter()
         .map(|name| (key(name), name))
         .collect::<BTreeMap<_, _>>();
@@ -731,7 +1003,9 @@ pub(super) const fn moves_preserved_content(edit: GridEdit) -> bool {
     )
 }
 
-/// Reports whether a change makes the batch's receipt carry an inverse.
+/// Reports whether a change makes the batch's receipt carry an inverse: the structural edits of
+/// sheets, defined names, tables, and the grid that 0.1.27 added. Batches of earlier changes alone
+/// keep the receipts they had.
 pub(super) const fn has_inverse(change: &WorkbookChange) -> bool {
     matches!(
         change,
@@ -743,6 +1017,14 @@ pub(super) const fn has_inverse(change: &WorkbookChange) -> bool {
             | WorkbookChange::MoveColumns { .. }
             | WorkbookChange::MoveRange { .. }
             | WorkbookChange::CopyRange { .. }
+            | WorkbookChange::DeleteSheet { .. }
+            | WorkbookChange::MoveSheet { .. }
+            | WorkbookChange::CopySheet { .. }
+            | WorkbookChange::RenameDefinedName { .. }
+            | WorkbookChange::CreateTable { .. }
+            | WorkbookChange::ConvertTableToRange { .. }
+            | WorkbookChange::SetTableRange { .. }
+            | WorkbookChange::SetSheetAutoFilter { .. }
     )
 }
 

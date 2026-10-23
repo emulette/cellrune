@@ -196,6 +196,7 @@ fn formula_change(address: &str, formula: &str) -> WorkbookChangeV2Dto {
         address: address.to_owned(),
         formula: formula.to_owned(),
         dynamic_range: None,
+        dynamic_array: false,
     })
 }
 

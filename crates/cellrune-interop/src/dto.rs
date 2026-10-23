@@ -292,6 +292,10 @@ pub enum WorkbookChangeDto {
         formula: String,
         /// Optional dynamic spill range.
         dynamic_range: Option<String>,
+        /// Whether the formula is a dynamic-array formula without a known spill range, as an edit
+        /// inverse restores one; a `dynamic_range` makes it dynamic anyway.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        dynamic_array: bool,
     },
     /// Removes one sparse cell.
     ClearCell {

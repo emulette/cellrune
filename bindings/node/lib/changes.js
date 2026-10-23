@@ -29,12 +29,14 @@ function serializeWorkbookChange(change, index) {
       ) {
         requireString(change.dynamicRange, `changes[${index}].dynamicRange`);
       }
+      requireOptionalBoolean(change.dynamicArray, `changes[${index}].dynamicArray`);
       return {
         kind: "set_formula",
         sheet: requiredChangeString(change.sheet, index, "sheet"),
         address: requiredChangeString(change.address, index, "address"),
         formula: requiredChangeString(change.formula, index, "formula"),
         dynamic_range: change.dynamicRange ?? null,
+        ...(change.dynamicArray === true ? { dynamic_array: true } : {}),
       };
     case "clearCell":
       return {
@@ -345,7 +347,7 @@ function serializeWorkbookChangeV2(change, index) {
 
 const V2_CHANGE_KEYS = new Map([
   ["setValue", ["kind", "sheet", "address", "value"]],
-  ["setFormula", ["kind", "sheet", "address", "formula", "dynamicRange"]],
+  ["setFormula", ["kind", "sheet", "address", "formula", "dynamicRange", "dynamicArray"]],
   ["clearCell", ["kind", "sheet", "address"]],
   [
     "setNumberFormat",

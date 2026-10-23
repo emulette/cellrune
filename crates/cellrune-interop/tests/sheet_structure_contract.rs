@@ -279,12 +279,14 @@ fn a_batch_renames_a_defined_name_and_sets_and_removes_a_sheet_filter() {
                 address: "A1".to_owned(),
                 formula: "=Rate*2".to_owned(),
                 dynamic_range: None,
+                dynamic_array: false,
             },
             WorkbookChangeDto::SetFormula {
                 sheet: "Data".to_owned(),
                 address: "C1".to_owned(),
                 formula: "=Local+1".to_owned(),
                 dynamic_range: None,
+                dynamic_array: false,
             },
         ],
     )
@@ -400,6 +402,7 @@ fn a_v2_batch_creates_resizes_copies_and_converts_tables() {
                 address: "E1".to_owned(),
                 formula: "=SUM(Table1[Amount])".to_owned(),
                 dynamic_range: None,
+                dynamic_array: false,
             }),
         ],
     )

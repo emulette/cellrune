@@ -738,8 +738,9 @@ setting, removing, or renaming defined names; and the date system and calculatio
 a sheet turns references to it and its tables into #REF!. A copy is named like 'Data (2)', and \
 later changes in the batch can use that name. insert_rows, delete_rows, insert_columns, \
 delete_columns, move_rows, move_columns, move_range, and copy_range move references with the \
-cells as Excel does; their receipt carries an inverse, edit-schema-v2 changes that undo the batch \
-through workbook_apply_changes_v2, and the content they cannot restore.",
+cells as Excel does. A batch with these, or with a sheet deletion, move, or copy or a defined-name \
+rename, carries an inverse in its receipt: edit-schema-v2 changes that undo the batch through \
+workbook_apply_changes_v2, and the content they cannot restore.",
         annotations(
             title = "Apply workbook changes",
             read_only_hint = false,

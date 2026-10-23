@@ -781,6 +781,8 @@ export type WorkbookChange =
       readonly address: string;
       readonly formula: string;
       readonly dynamicRange?: string | null;
+      /** A dynamic-array formula without a known spill range, as an edit inverse restores one. */
+      readonly dynamicArray?: boolean;
     }
   | {
       readonly kind: "clearCell";

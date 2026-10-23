@@ -533,6 +533,7 @@ class SetValueChange(TypedDict):
 
 class SetFormulaChangeOptions(TypedDict, total=False):
     dynamic_range: str | None
+    dynamic_array: bool
 
 
 class SetFormulaChange(SetFormulaChangeOptions):

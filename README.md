@@ -390,7 +390,7 @@ reaches every surface:
 | Cell number formats, hidden rows, sheet autoFilter ranges and filtered columns, `fullCalcOnLoad` | yes | yes | yes | yes |
 | Sheet deletion (`delete_sheet`, Node.js `deleteSheet`) | yes | yes | yes | yes |
 | Sheet move and copy, defined-name rename, sheet autoFilter set and removal, table creation, range change, and conversion to a range | yes | yes | yes | yes |
-| Row and column insertion, deletion, and moves, range moves and copies, and the inverse changes in their receipt | yes | yes | yes | yes |
+| Row and column insertion, deletion, and moves, range moves and copies, and the inverse changes in the receipt of these and of sheet, defined-name, table, and autoFilter edits | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
 | Data validation rules, hyperlinks, and comments (read-only) | yes | yes | yes | yes |
 | Cell formats, column widths, and row heights (read and edit) | yes | yes | yes | yes |

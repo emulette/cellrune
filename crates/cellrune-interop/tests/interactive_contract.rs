@@ -138,6 +138,7 @@ fn prepared_interop_calculation_rejects_stale_install_and_supports_cancel() {
                         address: "B1".to_owned(),
                         formula: "=A1+1".to_owned(),
                         dynamic_range: None,
+                        dynamic_array: false,
                     },
                 ],
             },

@@ -12,12 +12,15 @@ use super::formula_edit::{
     FormulaEditState, WorkbookFormulaEdit, rename_sheet, table_formula_locations, upsert_formula,
 };
 use super::grid_edit::{GridEditState, apply_grid_edit, grid_change};
-use super::inverse::{InverseSeed, edit_inverse, has_inverse, moves_preserved_content};
+use super::inverse::{
+    InverseSeed, TableShape, UndoStep, edit_inverse, has_inverse, moves_preserved_content,
+};
 use super::name_rename::rename_defined_name;
 use super::sheet_copy::{SheetCopy, copy_sheet};
 use super::sheet_delete::delete_sheet;
 use super::sheet_move::move_sheet;
 use super::staged::{mark_removed, mark_upsert, sheet_by_id_mut};
+use super::tab_order::TabOrder;
 use super::table_convert::convert_table_to_range;
 use super::table_create::create_table;
 use super::table_edit::{
@@ -32,11 +35,11 @@ use super::{
 use crate::calculation::formula_rewrite::{
     FormulaRewriteBudget, FormulaRewriteError, FormulaRewriteLimits,
 };
-use crate::workbook::{WorkbookBuildError, WorkbookSnapshotInput};
+use crate::workbook::{NonWorksheetTabs, WorkbookBuildError, WorkbookSnapshotInput};
 use crate::{
-    CalculationCellId, CellContent, CellValue, FormulaCell, FormulaDialect, FormulaMetadata,
-    SavedResult, Sheet, SheetId, SheetVisibility, TableColumnName, ValidationError,
-    WorkbookSnapshot,
+    CalculationCellId, CellContent, CellRange, CellValue, FormulaCell, FormulaDialect,
+    FormulaMetadata, SavedResult, Sheet, SheetAutoFilter, SheetId, SheetVisibility, Table,
+    TableColumnName, TableId, ValidationError, WorkbookSnapshot,
 };
 
 impl WorkbookDraft {
@@ -438,6 +441,21 @@ impl WorkbookDraft {
                     }
                 }
                 WorkbookChange::DeleteSheet { sheet_id } => {
+                    let undo = sheets
+                        .iter()
+                        .find(|sheet| sheet.id() == *sheet_id)
+                        .map(|sheet| UndoStep::DeleteSheet {
+                            sheet_id: *sheet_id,
+                            name: sheet.name().clone(),
+                            position: tab_position(&sheets, &non_worksheet_tabs, *sheet_id),
+                            tables: sheet
+                                .tables()
+                                .iter()
+                                .filter_map(|table| TableShape::of(*sheet_id, table))
+                                .collect(),
+                            source: source_workbook
+                                .is_some_and(|source| source.sheet_by_id(*sheet_id).is_some()),
+                        });
                     let (removed, step) = delete_sheet(
                         &mut sheets,
                         &mut defined_names,
@@ -456,6 +474,7 @@ impl WorkbookDraft {
                         *sheet_id,
                     )?;
                     tab_steps.push(step);
+                    inverse_seed.steps.extend(undo);
                     // Nothing the draft recorded for the sheet outlives it: its cells, tables, and
                     // presentation are gone, and the writer drops its package parts.
                     let elsewhere = |cell: &CalculationCellId| cell.sheet_id() != *sheet_id;
@@ -540,6 +559,7 @@ impl WorkbookDraft {
                     semantic_changed = true;
                 }
                 WorkbookChange::MoveSheet { sheet_id, position } => {
+                    let from = tab_position(&sheets, &non_worksheet_tabs, *sheet_id);
                     let Some(step) = move_sheet(
                         &mut sheets,
                         &mut defined_names,
@@ -562,6 +582,10 @@ impl WorkbookDraft {
                         continue;
                     };
                     tab_steps.push(step);
+                    inverse_seed.steps.push(UndoStep::MoveSheet {
+                        sheet_id: *sheet_id,
+                        position: from,
+                    });
                     // Table locations name sheets by their index, which the move changed.
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
@@ -647,6 +671,11 @@ impl WorkbookDraft {
                         new_name,
                     )? {
                         name_renames.push(rename);
+                        inverse_seed.steps.push(UndoStep::RenameDefinedName {
+                            scope: *scope,
+                            name: name.clone(),
+                            new_name: new_name.clone(),
+                        });
                         workbook_changed = true;
                         topology_changed = true;
                         semantic_changed = true;
@@ -763,7 +792,7 @@ impl WorkbookDraft {
                     range,
                     name,
                 } => {
-                    create_table(
+                    let table_id = create_table(
                         &mut sheets,
                         &defined_names,
                         TableEditState {
@@ -779,6 +808,7 @@ impl WorkbookDraft {
                         *range,
                         name.as_ref(),
                     )?;
+                    inverse_seed.steps.push(UndoStep::CreateTable { table_id });
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
@@ -787,6 +817,13 @@ impl WorkbookDraft {
                     semantic_changed = true;
                 }
                 WorkbookChange::ConvertTableToRange { table_id } => {
+                    let undo = sheets.iter().find_map(|sheet| {
+                        sheet
+                            .tables()
+                            .iter()
+                            .find(|table| table.id() == *table_id)
+                            .and_then(|table| TableShape::of(sheet.id(), table))
+                    });
                     convert_table_to_range(
                         &mut sheets,
                         &mut defined_names,
@@ -806,6 +843,7 @@ impl WorkbookDraft {
                         },
                         *table_id,
                     )?;
+                    inverse_seed.steps.extend(undo.map(UndoStep::ConvertTable));
                     previous_changed_table_ids.remove(table_id);
                     table_locations = super::table_edit::table_locations(&sheets)?;
                     table_formula_locations =
@@ -815,6 +853,7 @@ impl WorkbookDraft {
                     semantic_changed = true;
                 }
                 WorkbookChange::SetTableRange { table_id, range } => {
+                    let previous = table_range(&sheets, *table_id);
                     if set_table_range(
                         &mut sheets,
                         &mut defined_names,
@@ -836,6 +875,12 @@ impl WorkbookDraft {
                         *table_id,
                         *range,
                     )? {
+                        inverse_seed
+                            .steps
+                            .extend(previous.map(|range| UndoStep::TableRange {
+                                table_id: *table_id,
+                                range,
+                            }));
                         table_formula_locations =
                             super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                         workbook_changed = true;
@@ -844,7 +889,14 @@ impl WorkbookDraft {
                     }
                 }
                 WorkbookChange::WidenTableColumns { table_id, range } => {
+                    let previous = table_range(&sheets, *table_id);
                     if widen_table_columns(&mut sheets, &table_locations, *table_id, *range)? {
+                        inverse_seed
+                            .steps
+                            .extend(previous.map(|range| UndoStep::TableRange {
+                                table_id: *table_id,
+                                range,
+                            }));
                         changed_table_ids.insert(*table_id);
                         topology_changed = true;
                         semantic_changed = true;
@@ -852,7 +904,12 @@ impl WorkbookDraft {
                 }
                 WorkbookChange::WidenSheetAutoFilter { sheet_id, range } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let previous = sheet.auto_filter().map(SheetAutoFilter::range);
                     if widen_sheet_auto_filter(sheet, *range)? {
+                        inverse_seed.steps.push(UndoStep::AutoFilter {
+                            sheet_id: *sheet_id,
+                            range: previous,
+                        });
                         touched_sheets.insert(*sheet_id);
                         semantic_changed = true;
                         if align_filter_database_name(sheet, &mut defined_names)? {
@@ -863,8 +920,13 @@ impl WorkbookDraft {
                 }
                 WorkbookChange::SetSheetAutoFilter { sheet_id, range } => {
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    let previous = sheet.auto_filter().map(SheetAutoFilter::range);
                     let edit = set_sheet_auto_filter(sheet, &mut defined_names, *range)?;
                     if edit.filter_changed {
+                        inverse_seed.steps.push(UndoStep::AutoFilter {
+                            sheet_id: *sheet_id,
+                            range: previous,
+                        });
                         touched_sheets.insert(*sheet_id);
                         semantic_changed = true;
                     }
@@ -888,7 +950,7 @@ impl WorkbookDraft {
                         .is_some_and(|workbook| workbook.sheet_by_id(sheet_id).is_some())
                         || copied_sheets.contains_key(&sheet_id))
                         && !added_sheets.contains(&sheet_id);
-                    inverse_seed.edits.push((sheet_id, edit));
+                    inverse_seed.steps.push(UndoStep::Grid { sheet_id, edit });
                     if records_history && moves_preserved_content(edit) {
                         inverse_seed.preserved_sheets.insert(sheet_id);
                     }
@@ -1146,6 +1208,28 @@ where
         cloned.insert(value.clone());
     }
     Ok(cloned)
+}
+
+/// Returns the zero-based tab position of a worksheet among every tab.
+fn tab_position(
+    sheets: &[Sheet],
+    non_worksheet_tabs: &NonWorksheetTabs,
+    sheet_id: SheetId,
+) -> usize {
+    TabOrder::of(sheets, non_worksheet_tabs)
+        .entries
+        .iter()
+        .position(|tab| tab.id == sheet_id)
+        .unwrap_or(0)
+}
+
+/// Returns the range of a table, when a sheet holds it.
+fn table_range(sheets: &[Sheet], table_id: TableId) -> Option<CellRange> {
+    sheets
+        .iter()
+        .flat_map(Sheet::tables)
+        .find(|table| table.id() == table_id)
+        .map(Table::range)
 }
 
 #[cfg(test)]

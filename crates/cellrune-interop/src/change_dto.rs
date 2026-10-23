@@ -17,8 +17,9 @@ use crate::{
 };
 
 /// Converts the inverse of a batch that produced `workbook`. Sheets are named as they are when
-/// each change applies, so a rename in the inverse renames the sheet for the changes after it.
-/// `None` when a change has no DTO spelling.
+/// each change applies, so a rename in the inverse renames the sheet for the changes after it,
+/// and a sheet the inverse adds takes the next sheet ID, as applying the inverse to `workbook`
+/// gives it. `None` when a change has no DTO spelling.
 pub(crate) fn inverse_dto(
     workbook: &WorkbookSnapshot,
     inverse: &EditInverse,
@@ -28,11 +29,14 @@ pub(crate) fn inverse_dto(
         .iter()
         .map(|sheet| (sheet.id(), sheet.name().as_str().to_owned()))
         .collect::<BTreeMap<_, _>>();
-    let mut names = initial.clone();
+    let mut sheets = InverseSheets {
+        names: initial.clone(),
+        next_id: workbook.highest_sheet_id().map_or(1, |id| id.get() + 1),
+    };
     let changes = inverse
         .changes()
         .iter()
-        .map(|change| change_dto(change, &mut names))
+        .map(|change| change_dto(change, &mut sheets))
         .collect::<Option<Vec<_>>>()?;
     let unrestored = inverse
         .unrestored()
@@ -51,10 +55,15 @@ pub(crate) fn inverse_dto(
     })
 }
 
-fn change_dto(
-    change: &WorkbookChange,
-    names: &mut BTreeMap<SheetId, String>,
-) -> Option<WorkbookChangeV2Dto> {
+/// The sheets an inverse names as each of its changes applies.
+struct InverseSheets {
+    names: BTreeMap<SheetId, String>,
+    /// The ID the next sheet the inverse adds takes.
+    next_id: u32,
+}
+
+fn change_dto(change: &WorkbookChange, sheets: &mut InverseSheets) -> Option<WorkbookChangeV2Dto> {
+    let names = &mut sheets.names;
     let name = |names: &BTreeMap<SheetId, String>, sheet_id: SheetId| names.get(&sheet_id).cloned();
     let v1 = WorkbookChangeV2Dto::V1;
     Some(match change {
@@ -76,18 +85,20 @@ fn change_dto(
             address: address.to_string(),
             formula: user_formula(formula),
             dynamic_range: None,
+            dynamic_array: false,
         }),
-        // A dynamic formula is spelled with its spill range; one without a range has none.
+        // A dynamic formula is spelled with its spill range, or as dynamic without one.
         WorkbookChange::SetCellDynamicFormula {
             sheet_id,
             address,
             formula,
-            range: Some(range),
+            range,
         } => v1(WorkbookChangeDto::SetFormula {
             sheet: name(names, *sheet_id)?,
             address: address.to_string(),
             formula: user_formula(formula),
-            dynamic_range: Some(range_text(*range)),
+            dynamic_range: range.map(range_text),
+            dynamic_array: range.is_none(),
         }),
         WorkbookChange::ClearCell { sheet_id, address } => v1(WorkbookChangeDto::ClearCell {
             sheet: name(names, *sheet_id)?,
@@ -121,6 +132,55 @@ fn change_dto(
         WorkbookChange::DeleteSheet { sheet_id } => {
             let sheet = names.remove(sheet_id)?;
             v1(WorkbookChangeDto::DeleteSheet { sheet })
+        }
+        WorkbookChange::AddSheet { name: added } => {
+            let sheet_id = SheetId::new(sheets.next_id).ok()?;
+            sheets.next_id = sheets.next_id.checked_add(1)?;
+            names.insert(sheet_id, added.as_str().to_owned());
+            v1(WorkbookChangeDto::AddSheet {
+                name: added.as_str().to_owned(),
+            })
+        }
+        WorkbookChange::MoveSheet { sheet_id, position } => v1(WorkbookChangeDto::MoveSheet {
+            sheet: name(names, *sheet_id)?,
+            position: u32::try_from(*position).ok()?,
+        }),
+        WorkbookChange::SetSheetAutoFilter { sheet_id, range } => {
+            v1(WorkbookChangeDto::SetSheetAutoFilter {
+                sheet: name(names, *sheet_id)?,
+                range: range.map(range_text),
+            })
+        }
+        WorkbookChange::RenameDefinedName {
+            scope,
+            name: renamed,
+            new_name,
+        } => v1(WorkbookChangeDto::RenameDefinedName {
+            name: renamed.to_string(),
+            scope_sheet: scope_sheet(names, *scope)?,
+            new_name: new_name.to_string(),
+        }),
+        WorkbookChange::CreateTable {
+            sheet_id,
+            range,
+            name: table_name,
+        } => WorkbookChangeV2Dto::Table(TableChangeV2Dto::CreateTable {
+            sheet: name(names, *sheet_id)?,
+            range: range_text(*range),
+            name: table_name
+                .as_ref()
+                .map(|table_name| table_name.as_str().to_owned()),
+        }),
+        WorkbookChange::ConvertTableToRange { table_id } => {
+            WorkbookChangeV2Dto::Table(TableChangeV2Dto::ConvertTableToRange {
+                table_id: table_id.get(),
+            })
+        }
+        WorkbookChange::SetTableRange { table_id, range } => {
+            WorkbookChangeV2Dto::Table(TableChangeV2Dto::SetTableRange {
+                table_id: table_id.get(),
+                range: range_text(*range),
+            })
         }
         WorkbookChange::SetSheetVisibility {
             sheet_id,

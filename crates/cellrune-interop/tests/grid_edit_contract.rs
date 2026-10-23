@@ -133,6 +133,13 @@ fn deletions_copies_and_moves_round_trip_through_their_inverse() {
                             "destination": "D1"}]),
         serde_json::json!([{"kind": "move_columns", "sheet": "Data", "first": 1, "last": 1,
                             "destination": 3}]),
+        // Sheet, name, and table edits carry an inverse too, whose added sheet the changes
+        // after it name.
+        serde_json::json!([{"kind": "delete_sheet", "sheet": "Data"}]),
+        serde_json::json!([{"kind": "move_sheet", "sheet": "Data", "position": 0},
+                           {"kind": "insert_rows", "sheet": "Data", "row": 2, "count": 1}]),
+        serde_json::json!([{"kind": "copy_sheet", "sheet": "Data", "position": 2}]),
+        serde_json::json!([{"kind": "set_sheet_auto_filter", "sheet": "Data", "range": "A1:B5"}]),
     ];
     for changes in batches {
         let mut session = session();

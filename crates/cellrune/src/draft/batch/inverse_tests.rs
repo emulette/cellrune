@@ -135,8 +135,23 @@ fn probe() -> WorkbookDraft {
     draft
 }
 
-/// Applies `changes`, then the inverse its receipt carries, and checks that the cells, names,
-/// tables, row heights, and cell formats are back. Returns what the inverse could not restore.
+/// The shape of a table that a recreated one must match: its range, names, and columns.
+fn table_shape(table: &Table) -> (CellRange, String, Vec<String>) {
+    (
+        table.range(),
+        table.display_name().as_str().to_owned(),
+        table
+            .columns()
+            .iter()
+            .map(|column| column.name().to_owned())
+            .collect(),
+    )
+}
+
+/// Applies `changes`, then the inverse its receipt carries, and checks that the sheets in tab
+/// order, their names, visibility, cells, tables, auto-filters, row heights, and cell formats, and
+/// the names are back; a recreated sheet or table may hold another ID. Returns what the inverse
+/// could not restore.
 fn round_trip(changes: Vec<WorkbookChange>) -> Vec<UnrestoredContent> {
     let original = probe();
     let mut draft = original.clone();
@@ -150,6 +165,15 @@ fn round_trip(changes: Vec<WorkbookChange>) -> Vec<UnrestoredContent> {
     draft
         .apply_changes(EditBatch::new(inverse.changes().to_vec()))
         .expect("inverse applies");
+    let names = |draft: &WorkbookDraft| {
+        draft
+            .workbook()
+            .sheets()
+            .iter()
+            .map(|sheet| (sheet.name().as_str().to_owned(), sheet.visibility()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&original), names(&draft));
     for (before, after) in original
         .workbook()
         .sheets()
@@ -157,17 +181,24 @@ fn round_trip(changes: Vec<WorkbookChange>) -> Vec<UnrestoredContent> {
         .zip(draft.workbook().sheets())
     {
         assert_eq!(
-            before.cells().collect::<Vec<_>>(),
-            after.cells().collect::<Vec<_>>(),
+            before
+                .cells()
+                .map(|cell| (cell.address(), cell.content()))
+                .collect::<Vec<_>>(),
+            after
+                .cells()
+                .map(|cell| (cell.address(), cell.content()))
+                .collect::<Vec<_>>(),
             "{}",
             before.name().as_str()
         );
-        assert!(
-            before
-                .tables()
-                .iter()
-                .zip(after.tables())
-                .all(|(before, after)| before.semantic_eq(after))
+        assert_eq!(
+            before.tables().iter().map(table_shape).collect::<Vec<_>>(),
+            after.tables().iter().map(table_shape).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            before.auto_filter().map(crate::SheetAutoFilter::range),
+            after.auto_filter().map(crate::SheetAutoFilter::range)
         );
         for line in 1..=10 {
             assert_eq!(
@@ -185,10 +216,24 @@ fn round_trip(changes: Vec<WorkbookChange>) -> Vec<UnrestoredContent> {
             }
         }
     }
-    assert_eq!(
-        original.workbook().defined_names(),
-        draft.workbook().defined_names()
-    );
+    let defined_names = |draft: &WorkbookDraft| {
+        draft
+            .workbook()
+            .defined_names()
+            .iter()
+            .map(|name| {
+                let scope = match name.scope() {
+                    DefinedNameScope::Workbook => None,
+                    DefinedNameScope::Sheet(sheet) => draft
+                        .workbook()
+                        .sheet_by_id(sheet)
+                        .map(|sheet| sheet.name().as_str().to_owned()),
+                };
+                (name.name().to_owned(), scope, name.formula().clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(defined_names(&original), defined_names(&draft));
     inverse.unrestored().to_vec()
 }
 
@@ -270,4 +315,77 @@ fn batches_without_structural_edits_carry_no_inverse() {
         )]))
         .expect("value");
     assert!(receipt.inverse().is_none());
+}
+
+#[test]
+fn sheet_name_and_table_edits_are_undone_by_changes_too() {
+    let things = TableId::new(1).expect("table ID");
+    for changes in [
+        vec![WorkbookChange::move_sheet(id(1), 1)],
+        vec![WorkbookChange::copy_sheet(id(1), 2)],
+        vec![WorkbookChange::rename_defined_name(
+            DefinedNameScope::Workbook,
+            "Block",
+            "Blk",
+        )],
+        vec![WorkbookChange::convert_table_to_range(things)],
+        vec![WorkbookChange::set_table_range(things, range("C1:D6"))],
+        vec![WorkbookChange::set_sheet_auto_filter(
+            id(1),
+            Some(range("A1:B6")),
+        )],
+        vec![
+            WorkbookChange::set_cell_value(
+                id(2),
+                address("B1"),
+                CellValue::Text("head".to_owned()),
+            ),
+            WorkbookChange::create_table(
+                id(2),
+                range("B1:B3"),
+                Some(TableName::new("Fresh").expect("name")),
+            ),
+        ],
+    ] {
+        let unrestored = round_trip(changes.clone());
+        assert!(unrestored.is_empty(), "{changes:?}: {unrestored:?}");
+    }
+}
+
+#[test]
+fn a_deleted_sheet_comes_back_with_its_cells_tables_names_and_formats() {
+    let unrestored = round_trip(vec![WorkbookChange::delete_sheet(id(1))]);
+    // A merged range is the one structure of the sheet no change can bring back.
+    assert_eq!(
+        unrestored
+            .iter()
+            .map(UnrestoredContent::kind)
+            .collect::<Vec<_>>(),
+        [UnrestoredContentKind::MergedRanges]
+    );
+    assert!(round_trip(vec![WorkbookChange::delete_sheet(id(2))]).is_empty());
+}
+
+#[test]
+fn mixed_batches_undo_every_structural_edit_in_reverse() {
+    let things = TableId::new(1).expect("table ID");
+    let insert = || WorkbookChange::insert_rows(id(1), row(2), 1).expect("insertion");
+    for changes in [
+        vec![WorkbookChange::move_sheet(id(2), 0), insert()],
+        vec![WorkbookChange::convert_table_to_range(things), insert()],
+        vec![insert(), WorkbookChange::convert_table_to_range(things)],
+        vec![
+            WorkbookChange::insert_rows(id(2), row(1), 2).expect("insertion"),
+            WorkbookChange::delete_sheet(id(2)),
+        ],
+        vec![WorkbookChange::delete_sheet(id(2)), insert()],
+        vec![
+            WorkbookChange::rename_defined_name(DefinedNameScope::Workbook, "Block", "Blk"),
+            insert(),
+            WorkbookChange::move_sheet(id(1), 1),
+        ],
+    ] {
+        let unrestored = round_trip(changes.clone());
+        assert!(unrestored.is_empty(), "{changes:?}: {unrestored:?}");
+    }
 }

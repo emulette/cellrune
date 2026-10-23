@@ -216,6 +216,7 @@ impl WorkbookSession {
                     address: address.to_owned(),
                     formula: formula.to_owned(),
                     dynamic_range: dynamic_range.map(str::to_owned),
+                    dynamic_array: false,
                 }],
             },
         )?;
@@ -424,6 +425,7 @@ impl ChangeConverter {
                 address,
                 formula,
                 dynamic_range,
+                dynamic_array,
             } => {
                 let sheet_id = resolve_sheet_map(sheets, &sheet)?;
                 let address = CellAddress::from_a1(&address)?;
@@ -435,6 +437,9 @@ impl ChangeConverter {
                         formula,
                         Some(parse_range(&range)?),
                     )?,
+                    None if dynamic_array => {
+                        WorkbookChange::set_cell_dynamic_formula(sheet_id, address, formula, None)?
+                    }
                     None => WorkbookChange::set_cell_formula(sheet_id, address, formula),
                 }
             }

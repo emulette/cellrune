@@ -127,12 +127,19 @@ inventories, and measurements belong in the linked documentation rather than in 
   off the grid becomes `#REF!`. Another shape fails with the new
   `validation.copy_destination_shape`, and a spill reference, legacy array formula, or data-table
   formula with the new `validation.copy_unsupported_formula`.
-- `EditReceipt::inverse()` returns, for a batch with these edits, an `EditInverse`: the changes that
-  undo the batch when applied as one batch to its result, and the `UnrestoredContent` they cannot
-  bring back by kind, sheet, and table; preserved package content a deletion or move changes is
-  listed. The engine keeps no undo stack, and a batch whose undo needs an edit Excel refuses, such
-  as deleting columns an insertion added inside a table, has no inverse. Interop and Python receipts
-  carry it as `inverse`, edit-schema-v2 `changes` and `unrestored`, Node.js receipts as camel-case
+- `EditReceipt::inverse()` returns, for a batch with these edits or with a sheet deletion, move, or
+  copy, a defined-name rename, or a table creation, range change, conversion to a range, or sheet
+  autoFilter change, an `EditInverse`: the changes that undo the batch when applied as one batch to
+  its result, each structural change undone by its own reverse in reverse order (a deleted sheet
+  added again under its name at its position and filled from its cells, formats, names, and
+  tables), and the `UnrestoredContent` they cannot bring back by kind, sheet, and table; preserved
+  package content a deletion or move changes is listed. An inverse without changes means the batch
+  left nothing to undo. The engine keeps no undo stack, and a batch whose undo needs an edit Excel
+  refuses, such as deleting columns an insertion added inside a table, has no inverse. Interop and
+  Python receipts
+  carry it as `inverse`, edit-schema-v2 `changes` and `unrestored` (a `set_formula` change's new
+  optional `dynamic_array` restores a dynamic-array formula without a known spill range), Node.js
+  receipts as camel-case
   `applyChangesV2` changes, and the MCP `workbook_apply_changes` tools return it; interop edit
   schema v1, Python, and MCP accept the new `insert_rows`, `delete_rows`, `insert_columns`,
   `delete_columns`, `move_rows`, `move_columns`, `move_range`, and `copy_range` kinds, and Node.js
