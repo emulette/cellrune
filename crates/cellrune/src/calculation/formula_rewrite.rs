@@ -424,7 +424,8 @@ pub(crate) fn rewrite_formula(
             }
             FormulaRewriteRequest::Copy(offset) => {
                 let before = edits.len();
-                let Ok(plan) = plan_copy_node(expr, source_node, *offset, &mut edits) else {
+                let Ok(plan) = plan_copy_node(source, expr, source_node, *offset, &mut edits)
+                else {
                     // A copied reference that leaves the grid turns the whole formula into
                     // `#REF!`, as Excel pastes it.
                     budget.charge_edit()?;

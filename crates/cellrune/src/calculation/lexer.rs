@@ -21,6 +21,9 @@ pub enum Token {
     Comma,
     Semicolon,
     Colon,
+    /// A range colon with trim dots: `.:` trims leading blanks, `:.` trailing ones, and `.:.`
+    /// both, as `TRIMRANGE` does.
+    TrimColon(TrimMode),
     Bang,
     At,
     Hash,
@@ -38,6 +41,25 @@ pub enum Token {
     Le,
     Gt,
     Ge,
+}
+
+/// Which blanks a trim reference trims, as `TRIMRANGE`'s mode 1, 2, or 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrimMode {
+    Leading,
+    Trailing,
+    Both,
+}
+
+impl TrimMode {
+    /// The `TRIMRANGE` mode for rows and columns.
+    pub(crate) const fn mode(self) -> f64 {
+        match self {
+            Self::Leading => 1.0,
+            Self::Trailing => 2.0,
+            Self::Both => 3.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -208,6 +230,38 @@ fn ends_whole_column_reference(tokens: &[SpannedToken]) -> bool {
         cursor -= 1;
     }
     cursor > 0 && tokens[cursor - 1].token == Token::Colon
+}
+
+/// Takes the dot off the end of the token before a trim colon, when that token is a reference end
+/// that only reads as one without it: a cell or column such as `A1.` or a row such as `1.`.
+fn drop_trailing_dot(previous: Option<&mut SpannedToken>, input: &str) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+    let shortened = match &previous.token {
+        Token::Ident(ident) => ident
+            .strip_suffix('.')
+            .filter(|stem| {
+                !stem.is_empty()
+                    && (looks_like_cell_reference(stem)
+                        || super::ast::column_number(stem).is_some())
+            })
+            .map(|stem| Token::Ident(stem.to_owned())),
+        Token::Number(_) => {
+            let text = &input[previous.span.start..previous.span.end];
+            text.strip_suffix('.')
+                .filter(|stem| !stem.is_empty() && stem.bytes().all(|byte| byte.is_ascii_digit()))
+                .and_then(|stem| stem.parse::<f64>().ok().map(|value| (stem, value)))
+                .map(|(stem, value)| Token::Number(NumberLiteral::from_literal(value, stem)))
+        }
+        _ => None,
+    };
+    let Some(token) = shortened else {
+        return false;
+    };
+    previous.token = token;
+    previous.span = SourceSpan::new(previous.span.start, previous.span.end - 1);
+    true
 }
 
 fn may_start_reference(previous: &[SpannedToken], token: &Token) -> bool {
@@ -456,7 +510,34 @@ pub(super) fn lex_spanned(input: &str, max_tokens: u64) -> Result<LexedFormula, 
                     '}' => (Token::RBrace, 1),
                     ',' => (Token::Comma, 1),
                     ';' => (Token::Semicolon, 1),
-                    ':' => (Token::Colon, 1),
+                    ':' => {
+                        // A dot that ends the reference before the colon, and one right after
+                        // it, make a trim reference (Microsoft: `A1:.E10` is
+                        // `TRIMRANGE(A1:E10,2,2)`).
+                        let trailing = characters.get(index + 1) == Some(&'.')
+                            && characters
+                                .get(index + 2)
+                                .is_some_and(|next| next.is_alphanumeric() || *next == '$');
+                        let leading = index > 0
+                            && characters[index - 1] == '.'
+                            && drop_trailing_dot(tokens.last_mut(), input);
+                        let mode = match (leading, trailing) {
+                            (true, true) => Some(TrimMode::Both),
+                            (true, false) => Some(TrimMode::Leading),
+                            (false, true) => Some(TrimMode::Trailing),
+                            (false, false) => None,
+                        };
+                        match mode {
+                            Some(mode) => {
+                                let token_start = if leading { index - 1 } else { index };
+                                let end = index + 1 + usize::from(trailing);
+                                push_token!(Token::TrimColon(mode), token_start, end);
+                                index = end;
+                                continue;
+                            }
+                            None => (Token::Colon, 1),
+                        }
+                    }
                     '!' => (Token::Bang, 1),
                     '@' => (Token::At, 1),
                     '&' => (Token::Amp, 1),

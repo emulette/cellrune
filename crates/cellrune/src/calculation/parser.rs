@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use super::ast::{
-    BinaryOp, CellRef, ColRef, Expr, ExternalReferenceTarget, ExternalWorkbookReference, RefBody,
-    Reference, RowRef, SheetPrefix, UnaryOp, column_number,
+    BinaryOp, CellRef, ColRef, Expr, ExternalReferenceTarget, ExternalWorkbookReference,
+    NumberLiteral, RefBody, Reference, RowRef, SheetPrefix, UnaryOp, column_number,
 };
 use super::error::ParseErrorCode;
 use super::functions::{builtin_callable, function_argument_is_callable, storage_builtin_callable};
-use super::lexer::{LexError, SpannedToken, Token, lex_spanned};
+use super::lexer::{LexError, SpannedToken, Token, TrimMode, lex_spanned};
 use super::limits::SAFE_FORMULA_NESTING_DEPTH;
 use super::structured_reference::parse_structured_reference;
 use super::syntax::{
@@ -71,6 +71,7 @@ pub(super) fn parse_formula_with_limits(
         max_ast_nodes: limits.max_formula_ast_nodes(),
         input_len: input.len(),
         node_sources: Vec::new(),
+        pending_trim: None,
     };
     let leading_prefix = parser.eat(&Token::Plus);
     let mut root = parser.parse_expr(0, true)?;
@@ -186,7 +187,12 @@ struct Parser<'a> {
     max_ast_nodes: u64,
     input_len: usize,
     node_sources: Vec<PendingNodeSource>,
+    /// The trim mode of the reference body just parsed, which the reference it makes takes.
+    pending_trim: Option<TrimMode>,
 }
+
+/// The function a trim reference stands for.
+pub(crate) const TRIM_RANGE: &str = "TRIMRANGE";
 
 fn split_cell_ident(ident: &str) -> Option<(String, Option<u32>)> {
     let letters: String = ident
@@ -317,7 +323,29 @@ impl Parser<'_> {
             depth,
             child_nodes.saturating_add(1),
         ));
+        if matches!(expr, Expr::Ref(_))
+            && let Some(mode) = self.pending_trim.take()
+        {
+            return self.trimmed(SpannedExpr { expr, span }, mode);
+        }
         Ok(SpannedExpr { expr, span })
+    }
+
+    /// Wraps a trimmed reference in the `TRIMRANGE` call it stands for, whose mode arguments are
+    /// empty nodes at the reference's end.
+    fn trimmed(&mut self, range: SpannedExpr, mode: TrimMode) -> Result<SpannedExpr, ParseError> {
+        let end = SourceSpan::empty(range.span.end);
+        let mode_literal = || Expr::Number(NumberLiteral::from_number(mode.mode()));
+        self.track(mode_literal(), end)?;
+        self.track(mode_literal(), end)?;
+        let span = range.span;
+        self.track(
+            Expr::Call {
+                name: TRIM_RANGE.to_owned(),
+                args: vec![range.expr, mode_literal(), mode_literal()],
+            },
+            span,
+        )
     }
 
     fn track_missing(&mut self, span: SourceSpan) -> Result<(), ParseError> {
@@ -459,8 +487,12 @@ impl Parser<'_> {
                 )?;
                 continue;
             }
-            if self.token(0) == Some(&Token::Colon) && 80 >= min_bp {
+            if matches!(self.token(0), Some(Token::Colon | Token::TrimColon(_))) && 80 >= min_bp {
                 let operator = self.span(0);
+                let trim = match self.token(0) {
+                    Some(Token::TrimColon(mode)) => Some(*mode),
+                    _ => None,
+                };
                 self.cursor += 1;
                 let end = self.parse_expr(81, allow_union)?;
                 if !can_be_reference_expression(&left.expr)
@@ -480,6 +512,9 @@ impl Parser<'_> {
                     },
                     span,
                 )?;
+                if let Some(mode) = trim {
+                    left = self.trimmed(left, mode)?;
+                }
                 continue;
             }
             if self.token(0) == Some(&Token::Intersection) && 75 >= min_bp {
@@ -591,7 +626,7 @@ impl Parser<'_> {
         };
         match current.token {
             Token::Number(number) => {
-                if self.token(1) == Some(&Token::Colon)
+                if matches!(self.token(1), Some(Token::Colon | Token::TrimColon(_)))
                     && matches!(self.token(2), Some(Token::Number(_) | Token::Dollar))
                 {
                     let (body, span) = self.parse_ref_body()?;
@@ -1256,9 +1291,16 @@ impl Parser<'_> {
     }
 
     fn parse_ref_body(&mut self) -> Result<(RefBody, SourceSpan), ParseError> {
+        self.pending_trim = None;
         let (first, first_span) = self.parse_endpoint()?;
         let colon_cursor = self.cursor;
-        if self.eat(&Token::Colon).is_none() {
+        let trim = match self.token(0) {
+            Some(Token::TrimColon(mode)) => Some(*mode),
+            _ => None,
+        };
+        if trim.is_some() {
+            self.cursor += 1;
+        } else if self.eat(&Token::Colon).is_none() {
             return match first {
                 Endpoint::Cell(cell) => Ok((RefBody::Cell(cell), first_span)),
                 _ => Err(self.error(ParseErrorCode::InvalidReference)),
@@ -1275,12 +1317,17 @@ impl Parser<'_> {
             }
         };
         let span = first_span.merge(second_span);
+        let body = match (first, second) {
+            (Endpoint::Cell(start), Endpoint::Cell(end)) => Some(RefBody::Area(start, end)),
+            (Endpoint::Column(start), Endpoint::Column(end)) => Some(RefBody::Columns(start, end)),
+            (Endpoint::Row(start), Endpoint::Row(end)) => Some(RefBody::Rows(start, end)),
+            _ => None,
+        };
+        if let Some(body) = body {
+            self.pending_trim = trim;
+            return Ok((body, span));
+        }
         match (first, second) {
-            (Endpoint::Cell(start), Endpoint::Cell(end)) => Ok((RefBody::Area(start, end), span)),
-            (Endpoint::Column(start), Endpoint::Column(end)) => {
-                Ok((RefBody::Columns(start, end), span))
-            }
-            (Endpoint::Row(start), Endpoint::Row(end)) => Ok((RefBody::Rows(start, end), span)),
             (Endpoint::Cell(cell), _) => {
                 self.cursor = colon_cursor;
                 Ok((RefBody::Cell(cell), first_span))

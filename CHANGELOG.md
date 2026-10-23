@@ -399,6 +399,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   amounts below one baht, rounding to the nearest satang, and เอ็ด for every final one after a
   higher digit; a half satang whose direction depends on the rounding rule reports
   `calculation.unsupported_expression`.
+- Formulas accept trim references, which Microsoft documents as `TRIMRANGE` shorthand: `A1:.B9`
+  trims trailing blank rows and columns, `A1.:B9` leading ones, and `A1.:.B9` both, on cell,
+  whole-column, and whole-row ranges. `FormulaText::from_user_input` stores them as
+  `_xlfn.TRIMRANGE(A1:B9,2,2)` with mode 1, 2, or 3; trim references read from storage text keep
+  their dots through structural edits and copies.
 
 ### Changed
 

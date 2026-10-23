@@ -413,6 +413,26 @@ fn copies_shift_only_relative_parts_and_refuse_to_leave_the_grid() {
 }
 
 #[test]
+fn trim_references_keep_their_dots_when_rewritten() {
+    check(
+        &grid(INSERT_ROWS, true),
+        &[
+            ("SUM(A1:.A3)", "SUM(A1:.A5)"),
+            ("SUM($A3.:.A$5)", "SUM($A5.:.A$7)"),
+            ("SUM(3.:5)", "SUM(5.:7)"),
+            ("SUM(A3:.INDEX(A:A,4))", "SUM(A5:.INDEX(A:A,4))"),
+        ],
+    );
+    check(
+        &FormulaRewriteRequest::Copy(CopyOffset {
+            rows: 4,
+            columns: 1,
+        }),
+        &[("SUM(A1.:B2)+SUM(A:.A)", "SUM(B5.:C6)+SUM(B:.B)")],
+    );
+}
+
+#[test]
 fn qualified_ref_errors_follow_sheet_renames_and_deletions() {
     check(
         &FormulaRewriteRequest::Sheet {

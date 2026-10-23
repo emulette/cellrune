@@ -206,7 +206,7 @@ pub(super) fn plan_grid_node(
                 Outcome::Unchanged => {}
                 Outcome::Changed(body) => {
                     if let Some(span) = body_span(node.components()) {
-                        edits.push(SourceEdit::new(span, render_body(body)));
+                        edits.push(SourceEdit::new(span, render_body_over(source, span, body)));
                     }
                 }
                 Outcome::Deleted => edits.push(deleted_reference(node)),
@@ -292,6 +292,7 @@ pub(super) fn plan_grid_node(
 /// Plans the edits a copy makes to one syntax node: every relative row and column part moves by
 /// the offset. Structured references, names, and text stay as they are.
 pub(super) fn plan_copy_node(
+    source: &str,
     expr: &Expr,
     node: &NodeSpanTree,
     offset: CopyOffset,
@@ -310,7 +311,10 @@ pub(super) fn plan_copy_node(
     if shifted != body
         && let Some(span) = body_span(node.components())
     {
-        edits.push(SourceEdit::new(span, render_body(shifted)));
+        edits.push(SourceEdit::new(
+            span,
+            render_body_over(source, span, shifted),
+        ));
     }
     Ok(NodePlan::Done)
 }
@@ -607,6 +611,19 @@ const fn ordered(first: u32, last: u32) -> (u32, u32) {
 
 fn render_body(body: RefBody) -> String {
     Reference { sheet: None, body }.to_string()
+}
+
+/// Renders a changed body in place of the body written at `span`, keeping the dots of a trim
+/// colon such as `A1:.B9`.
+fn render_body_over(source: &str, span: SourceSpan, body: RefBody) -> String {
+    let rendered = render_body(body);
+    let written = &source[span.start..span.end];
+    let Some(colon) = written.rfind(':') else {
+        return rendered;
+    };
+    let start = colon - usize::from(written[..colon].ends_with('.'));
+    let end = colon + 1 + usize::from(written[colon + 1..].starts_with('.'));
+    rendered.replacen(':', &written[start..end], 1)
 }
 
 fn body_span(components: &[SourceComponent]) -> Option<SourceSpan> {

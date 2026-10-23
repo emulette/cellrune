@@ -3406,6 +3406,75 @@ fn modern_dynamic_arrays_cover_column_axes_sort_types_and_unique_modes() {
 }
 
 #[test]
+fn trim_references_store_and_calculate_as_trimrange() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, value) in [("B10", 1.0), ("C10", 2.0), ("B11", 3.0), ("C11", 4.0)] {
+        draft
+            .set_cell_value(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid trim source address"),
+                CellValue::number(value).expect("finite trim source value"),
+            )
+            .expect("trim source mutation");
+    }
+    for (address, formula, stored) in [
+        ("E1", "=A9.:.D12", "_xlfn.TRIMRANGE(A9:D12,3,3)"),
+        ("H1", "=A9.:D12", "_xlfn.TRIMRANGE(A9:D12,1,1)"),
+        ("L1", "=$A$9:.$D$12", "_xlfn.TRIMRANGE($A$9:$D$12,2,2)"),
+        ("Q1", "=SUM(B:.B)", "SUM(_xlfn.TRIMRANGE(B:B,2,2))"),
+        ("R1", "=SUM(9.:.12)", "SUM(_xlfn.TRIMRANGE(9:12,3,3))"),
+        (
+            "S1",
+            "=SUM(B10:.INDEX(C:C,12))",
+            "SUM(_xlfn.TRIMRANGE(B10:INDEX(C:C,12),2,2))",
+        ),
+    ] {
+        let text = FormulaText::from_user_input(formula).expect("valid trim formula");
+        assert_eq!(text.as_str(), stored, "{formula}");
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid trim anchor"),
+                text,
+                None,
+            )
+            .expect("trim formula mutation");
+    }
+
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for (address, expected) in [
+        ("E1", 1.0),
+        ("F1", 2.0),
+        ("E2", 3.0),
+        ("F2", 4.0),
+        ("H1", 1.0),
+        ("I1", 2.0),
+        ("J1", 0.0),
+        ("H3", 0.0),
+        ("L1", 0.0),
+        ("N1", 0.0),
+        ("L2", 0.0),
+        ("M2", 1.0),
+        ("N2", 2.0),
+        ("M3", 3.0),
+        ("N3", 4.0),
+        ("Q1", 4.0),
+        ("R1", 10.0),
+        ("S1", 10.0),
+    ] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+    for address in ["G1", "E3", "K1", "H4", "O1", "L4"] {
+        assert_eq!(
+            materialized_result(&calculation, sheet_id, address),
+            None,
+            "trim result spilled into {address}",
+        );
+    }
+}
+
+#[test]
 fn array_reshape_and_order_functions_preserve_excel_shapes_and_defaults() {
     let mut draft = WorkbookDraft::new();
     let sheet_id = draft.workbook().sheets()[0].id();

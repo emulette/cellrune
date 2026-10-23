@@ -3,7 +3,8 @@
 //! Excel saves some authored syntax in a different spelling: future functions carry `_xlfn.`
 //! (`_xlfn._xlws.` for FILTER and SORT), LET and LAMBDA locals carry `_xlpm.`, a function passed
 //! as a LAMBDA argument carries `_xleta.`, `B1#` becomes `_xlfn.ANCHORARRAY(B1)`, and `@operand`
-//! becomes `_xlfn.SINGLE(operand)`. The parser locates those spots and only that spelling is
+//! becomes `_xlfn.SINGLE(operand)`, and a trim reference such as `A1:.B9` becomes
+//! `_xlfn.TRIMRANGE(A1:B9,2,2)`. The parser locates those spots and only that spelling is
 //! inserted, so numeric literals, whitespace, and every other character stay as authored.
 //! Re-printing the AST would normalize them.
 
@@ -17,7 +18,7 @@ use super::functions::{
     storage_builtin_callable,
 };
 use super::lambda::is_local_name;
-use super::parser::parse_formula_with_limits;
+use super::parser::{TRIM_RANGE, parse_formula_with_limits};
 use super::scope::canonical_local_name;
 use super::syntax::{NodeSpanTree, SourceSpan};
 
@@ -73,6 +74,13 @@ struct StoragePlanner<'a> {
 impl StoragePlanner<'_> {
     fn visit(&mut self, expr: &Expr, node: &NodeSpanTree, start: usize) {
         super::stack::grow(|| match expr {
+            // The parser spans the call it makes for a trim reference as the reference itself.
+            Expr::Call { name, args }
+                if name == TRIM_RANGE
+                    && node.children().first().map(NodeSpanTree::span) == Some(node.span()) =>
+            {
+                self.visit_trim_reference(&args[0], &node.children()[0], start);
+            }
             Expr::Call { name, args } => {
                 if is_local_name(name, &self.scope) {
                     self.prefix_local(name, start);
@@ -129,6 +137,42 @@ impl StoragePlanner<'_> {
             }
             _ => self.visit_children(expr, node),
         });
+    }
+
+    fn visit_trim_reference(&mut self, range: &Expr, node: &NodeSpanTree, start: usize) {
+        self.edit(SourceSpan::empty(start), "_xlfn.TRIMRANGE(");
+        // The trim colon is the last colon of a reference, or the one between a range's operands.
+        let (left, right) = match (range, node.children()) {
+            (Expr::Range { start, .. }, [left_node, right_node]) => {
+                self.visit(start, left_node, left_node.span().start);
+                (left_node.span().end, right_node.span().start)
+            }
+            _ => (start, node.span().end),
+        };
+        let colon = left
+            + self.source[left..right]
+                .rfind(':')
+                .expect("a parsed trim reference has its colon");
+        let leading = self.source[..colon].ends_with('.');
+        let trailing = self.source[colon + 1..].starts_with('.');
+        self.edit(
+            SourceSpan::new(
+                colon - usize::from(leading),
+                colon + 1 + usize::from(trailing),
+            ),
+            ":",
+        );
+        if let (Expr::Range { end, .. }, [_, right_node]) = (range, node.children()) {
+            self.visit(end, right_node, right_node.span().start);
+        }
+        self.edit(
+            SourceSpan::empty(node.span().end),
+            match (leading, trailing) {
+                (true, false) => ",1,1)",
+                (false, true) => ",2,2)",
+                _ => ",3,3)",
+            },
+        );
     }
 
     fn visit_children(&mut self, expr: &Expr, node: &NodeSpanTree) {
@@ -193,6 +237,23 @@ mod tests {
     use super::storage_formula_text;
     use crate::calculation::CalculationLimits;
     use crate::calculation::parser::parse_formula_with_limits;
+
+    #[test]
+    fn trim_references_store_as_trimrange_calls() {
+        for (authored, stored) in [
+            ("A1:.B9", "_xlfn.TRIMRANGE(A1:B9,2,2)"),
+            (
+                "SUM(Sheet1!A1.:B9)",
+                "SUM(_xlfn.TRIMRANGE(Sheet1!A1:B9,1,1))",
+            ),
+            ("A:.C+1", "_xlfn.TRIMRANGE(A:C,2,2)+1"),
+            ("@A1.:.B9", "_xlfn.SINGLE(_xlfn.TRIMRANGE(A1:B9,3,3))"),
+            ("TRIMRANGE(A1:B9)", "_xlfn.TRIMRANGE(A1:B9)"),
+        ] {
+            assert_eq!(storage_formula_text(authored), stored, "{authored}");
+            assert_eq!(storage_formula_text(stored), stored, "{authored}");
+        }
+    }
 
     #[test]
     fn generated_formulas_keep_parsing_and_convert_once() {

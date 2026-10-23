@@ -1120,8 +1120,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   `::from_user_input(String)` removes the leading `=` and adds Excel's
   storage prefixes (`_xlfn.`, `_xlfn._xlws.` for `FILTER`/`SORT`, `_xlpm.` for
   `LET`/`LAMBDA` parameters, `_xleta.` for functions passed as `LAMBDA`
-  arguments, `_xlfn.ANCHORARRAY` for `#`, `_xlfn.SINGLE` for `@`) without
-  reprinting anything else; `.as_str()` returns that storage text.
+  arguments, `_xlfn.ANCHORARRAY` for `#`, `_xlfn.SINGLE` for `@`,
+  `_xlfn.TRIMRANGE(A1:B9,n,n)` for the trim references `A1.:B9` (1), `A1:.B9`
+  (2), and `A1.:.B9` (3)) without reprinting anything else; `.as_str()`
+  returns that storage text.
 - `SavedResult`: `Missing | Present(CellValue) | Invalid(SavedResultIssue)` —
   the value the *file itself* cached. `calculate_workbook` never reads or
   writes this; it is a separate, independent fact about the source.
