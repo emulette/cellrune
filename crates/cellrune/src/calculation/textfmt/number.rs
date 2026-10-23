@@ -1,10 +1,12 @@
 //! Digit layouts: decimal, scientific, and fraction.
 //!
-//! Decimal rendering keeps the 0.1.26 rules that `TEXT` already applied to single-section codes:
-//! rounding half away from zero on the scaled double, `#NUM!` once the rounded digits reach
-//! 2^53, a minus sign only when a digit or a `0` placeholder is shown, zero padding counted by
-//! `0` placeholders, an integer `0` kept unless decimals follow, and the decimal point omitted
-//! when no decimal digit is shown.
+//! Every layout rounds half away from zero on the scaled double and pads with zeros counted by
+//! `0` placeholders. A code the 0.1.26 subset formatted also keeps that subset's rules: `#NUM!`
+//! once the rounded digits reach 2^53, a minus sign only when a digit or a `0` placeholder is
+//! shown, an integer `0` kept unless decimals follow, and the decimal point omitted when no
+//! decimal digit is shown. Other codes follow Excel, which shows nothing for a zero integer part
+//! without a `0` placeholder (`TEXT(0,"#")` is empty) and always shows the decimal point
+//! (`TEXT(1,"0.#")` is `1.`).
 
 use super::super::value::ErrorKind;
 use super::lexer::{Meridiem, Placeholder, Token};
@@ -29,8 +31,14 @@ enum Item {
     Slash,
 }
 
-/// Renders a section whose tokens contain digit placeholders.
-pub(super) fn render(tokens: &[Token], value: f64, signed: bool) -> Result<String, ErrorKind> {
+/// Renders a section whose tokens contain digit placeholders; `earlier_subset` keeps the rules of
+/// the 0.1.26 subset for a code it formatted.
+pub(super) fn render(
+    tokens: &[Token],
+    value: f64,
+    signed: bool,
+    earlier_subset: bool,
+) -> Result<String, ErrorKind> {
     let items = tokens.iter().map(item).collect::<Result<Vec<_>, _>>()?;
     if items
         .iter()
@@ -40,7 +48,7 @@ pub(super) fn render(tokens: &[Token], value: f64, signed: bool) -> Result<Strin
     }
     match fraction_slash(&items)? {
         Some(slash) => render_fraction(&items, slash, value, signed),
-        None => render_decimal(&items, value, signed),
+        None => render_decimal(&items, value, signed, earlier_subset),
     }
 }
 
@@ -154,14 +162,15 @@ fn rounded_digits(magnitude: f64, decimals: usize) -> Result<(Digits, u64), Erro
     ))
 }
 
-/// Applies the integer rules: zero padding to the count of `0` placeholders and no lone `0`
-/// before decimals when every integer placeholder is optional.
-fn integer_text(mut integer: String, places: &[Placeholder], decimals: usize) -> String {
+/// Applies the integer rules: zero padding to the count of `0` placeholders and no lone `0` when
+/// every integer placeholder is optional. The 0.1.26 subset kept that `0` unless decimals
+/// followed, which `keep_lone_zero` asks for.
+fn integer_text(mut integer: String, places: &[Placeholder], keep_lone_zero: bool) -> String {
     let zeros = count(places, Placeholder::Zero);
     while integer.len() < zeros {
         integer.insert(0, '0');
     }
-    if integer == "0" && zeros == 0 && decimals > 0 {
+    if integer == "0" && zeros == 0 && !keep_lone_zero {
         integer.clear();
     }
     integer
@@ -238,7 +247,12 @@ fn interleaved(items: &[Item], positions: &[usize]) -> bool {
         .any(|item| !matches!(item, Item::Placeholder(_) | Item::Comma))
 }
 
-fn render_decimal(items: &[Item], value: f64, signed: bool) -> Result<String, ErrorKind> {
+fn render_decimal(
+    items: &[Item],
+    value: f64,
+    signed: bool,
+    earlier_subset: bool,
+) -> Result<String, ErrorKind> {
     let mut points = items
         .iter()
         .enumerate()
@@ -311,9 +325,19 @@ fn render_decimal(items: &[Item], value: f64, signed: bool) -> Result<String, Er
     let negative = scaled < 0.0;
     let decimals = fraction_places.len();
     let (digits, units) = rounded_digits(scaled.abs(), decimals)?;
-    let integer = integer_text(digits.integer, &integer_places, decimals);
+    let integer = integer_text(
+        digits.integer,
+        &integer_places,
+        earlier_subset && decimals == 0,
+    );
     let fraction = fraction_slots(&digits.fraction, &fraction_places);
-    let fraction_shown = fraction.iter().any(|slot| !slot.is_empty());
+    let point_shown = !earlier_subset || fraction.iter().any(|slot| !slot.is_empty());
+    let zero_placeholders = count(&integer_places, Placeholder::Zero);
+    // Whether Excel signs a negative number that rounds to zero without a `0` placeholder has not
+    // been measured.
+    if signed && negative && units == 0 && zero_placeholders == 0 && !earlier_subset {
+        return Err(ErrorKind::Unsupported);
+    }
     let integer_slots = if grouping {
         let mut slots = vec![String::new(); integer_places.len()];
         slots[0] = group_thousands(&integer);
@@ -323,7 +347,7 @@ fn render_decimal(items: &[Item], value: f64, signed: bool) -> Result<String, Er
     };
 
     let mut output = String::new();
-    if signed && negative && (units > 0 || count(&integer_places, Placeholder::Zero) > 0) {
+    if signed && negative && (units > 0 || zero_placeholders > 0) {
         output.push('-');
     }
     let (mut integer_slot, mut fraction_slot) = (0, 0);
@@ -337,7 +361,7 @@ fn render_decimal(items: &[Item], value: f64, signed: bool) -> Result<String, Er
                 if integer_places.is_empty() {
                     output.push_str(&integer);
                 }
-                if fraction_shown {
+                if point_shown {
                     output.push('.');
                 }
             }
@@ -442,8 +466,16 @@ fn render_scientific(items: &[Item], value: f64, signed: bool) -> Result<String,
             break (exponent, digits);
         }
     };
-    let integer = integer_text(digits.integer, &integer_places, decimals);
+    // How Excel shows a zero mantissa without a `0` placeholder, or a decimal point without a
+    // shown decimal digit, has not been measured in scientific notation.
+    if magnitude == 0.0 && !integer_places.contains(&Placeholder::Zero) {
+        return Err(ErrorKind::Unsupported);
+    }
+    let integer = integer_text(digits.integer, &integer_places, false);
     let fraction = fraction_slots(&digits.fraction, &fraction_places).concat();
+    if point.is_some() && fraction.is_empty() {
+        return Err(ErrorKind::Unsupported);
+    }
 
     let mut output = String::new();
     if signed && value < 0.0 {

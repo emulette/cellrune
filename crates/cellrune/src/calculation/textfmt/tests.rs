@@ -53,6 +53,29 @@ fn single_section_digit_codes_keep_their_earlier_results() {
 }
 
 #[test]
+fn codes_outside_the_earlier_subset_show_the_point_and_drop_a_lone_zero() {
+    // Excel 16.114 shows TEXT(0,"#") as "" and TEXT(1,"0.#") as "1." (excel-measure RESULTS.md,
+    // section B); those two codes keep their 0.1.26 results, every other code follows Excel.
+    assert_text(0.0, "#", "0");
+    assert_text(1.0, "0.#", "1");
+    assert_text(1.0, "0.#;-0.#", "1.");
+    assert_text(-1.0, "0.#;-0.#", "-1.");
+    assert_text(1.0, "0.;-0.", "1.");
+    assert_text(0.0, "#;-#", "");
+    assert_text(1.0, "#,", "");
+    assert_text(-0.4, "#;(#)", "()");
+    assert_text(1.0, "0.#?", "1. ");
+    assert_text(0.5, "#.0?", ".5 ");
+    assert_text(-0.001, "0.0?", "-0.0 ");
+    // A negative number that rounds to zero without a `0` placeholder, and scientific layouts
+    // that would need the same rules, are unmeasured.
+    assert_unsupported(-0.001, "#.#?");
+    assert_unsupported(1.0, "0.#E+0");
+    assert_unsupported(0.0, "#.0E+0");
+    assert_text(0.0, "0.0E+0", "0.0E+0");
+}
+
+#[test]
 fn numbers_past_the_engine_digits_are_unsupported_outside_the_earlier_subset() {
     for (value, format) in [
         (1e16, "0.00;(0.00)"),

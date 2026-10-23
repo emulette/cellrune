@@ -34,10 +34,11 @@ pub(crate) fn format_number(
 ) -> Result<String, ErrorKind> {
     let sections = lexer::lex(format)?;
     let chosen = choose_number_section(&sections, value)?;
-    render_number_section(&chosen.section.tokens, chosen, context).map_err(|kind| {
+    let earlier_subset = legacy::accepts(format);
+    render_number_section(&chosen.section.tokens, chosen, context, earlier_subset).map_err(|kind| {
         // Only the 0.1.26 subset reported a number past the engine's digits as `#NUM!`; Excel
         // still shows such a number, so other codes report it as unsupported, as `FIXED` does.
-        if kind == ErrorKind::Num && !legacy::accepts(format) {
+        if kind == ErrorKind::Num && !earlier_subset {
             ErrorKind::Unsupported
         } else {
             kind
@@ -134,10 +135,13 @@ fn choose_number_section(
     }
 }
 
+/// Renders the chosen section; `earlier_subset` tells whether the code is one the 0.1.26 subset
+/// formatted, whose rules it keeps.
 fn render_number_section(
     tokens: &[Token],
     chosen: ChosenSection<'_>,
     context: FormatContext,
+    earlier_subset: bool,
 ) -> Result<String, ErrorKind> {
     if tokens.is_empty() {
         return Ok(String::new());
@@ -158,7 +162,7 @@ fn render_number_section(
         .iter()
         .any(|token| matches!(token, Token::Placeholder(_)))
     {
-        return number::render(tokens, chosen.value, chosen.signed);
+        return number::render(tokens, chosen.value, chosen.signed, earlier_subset);
     }
     render_literal_section(tokens, chosen)
 }

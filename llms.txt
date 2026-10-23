@@ -1002,14 +1002,21 @@ than guessing a name from a different XLSX crate (`calamine`,
   from the right), `E+`/`E-` scientific notation (`##0.0E+0` keeps the
   exponent a multiple of three), and `# ?/?`-style fractions with the closest
   denominator of up to four digits. Digit rounding is half away from zero on
-  the double, a minus sign appears only when a digit or `0` placeholder is
-  shown, an integer `0` is kept unless decimals follow, the decimal point is
-  omitted when no decimal digit is shown, and 2^53 or more rounded units is
-  `#NUM!` in the one-section digit codes 0.1.26 formatted and
-  `calculation.unsupported_expression` in every other code. `General` shows a number of up to 11 characters, minus sign
-  included, as `&` does; a longer number, which Excel rounds or writes in
-  scientific notation, and a nonzero magnitude below 0.001 are
-  `calculation.unsupported_expression`. Date sections read `yy`,
+  the double. The one-section digit codes 0.1.26 formatted keep its rules: a
+  minus sign appears only when a digit or `0` placeholder is shown, an
+  integer `0` is kept unless decimals follow (`TEXT(0,"#")` is `0`), the
+  decimal point is omitted when no decimal digit is shown (`TEXT(1,"0.#")` is
+  `1`), and 2^53 or more rounded units is `#NUM!`. Every other code follows
+  Excel as measured: the decimal point is always shown (`TEXT(1,"0.#;-0.#")`
+  is `1.`) and a zero integer part without a `0` placeholder shows nothing
+  (`TEXT(0,"#;-#")` is empty); 2^53 or more rounded units, a negative number
+  that rounds to zero without a `0` placeholder in a one-section code, and a
+  scientific layout with a zero mantissa and no `0` placeholder or with a
+  decimal point but no shown decimal digit are
+  `calculation.unsupported_expression`. `General` shows a number of up to 11
+  characters, minus sign included, as `&` does; a longer number, which Excel
+  rounds or writes in scientific notation, and a nonzero magnitude below
+  0.001 are `calculation.unsupported_expression`. Date sections read `yy`,
   `yyyy`, `e`, `m` through `mmmmm`, `d` through `dddd`, `h`, `hh`, minutes as
   `m`/`mm` after an hour or before a second, `s`, `ss`, `.0` to `.000`
   fractional seconds, `[h]`, `[m]`, `[s]`, `AM/PM`, and `A/P`, in the
