@@ -5,8 +5,8 @@ use std::sync::Arc;
 use super::ast::Expr;
 use super::convert::value_from_cell;
 use super::decimal::DecimalTrace;
-use super::functions::LookupIndexCache;
 use super::functions::descriptor::Volatility;
+use super::functions::{LookupIndexCache, RegexCache};
 use super::graph::{DependencyGraph, DependencyNode, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
@@ -1069,6 +1069,7 @@ pub struct Engine<'workbook> {
     evaluated_cells: BTreeSet<CellId>,
     target_pending: Option<std::cell::RefCell<BTreeSet<CellId>>>,
     lookup_indexes: RefCell<LookupIndexCache>,
+    regex_cache: RefCell<RegexCache>,
     formula_columns: std::cell::OnceCell<Vec<FormulaColumns>>,
     /// Whether a cell read during this pass found a formula that the pass calculates later, which
     /// means the dependency graph missed an edge the values now resolve.
@@ -1405,6 +1406,10 @@ impl<'workbook> Engine<'workbook> {
     /// still need.
     pub(super) const fn is_targeted(&self) -> bool {
         self.target_pending.is_some()
+    }
+
+    pub(super) const fn regex_cache(&self) -> &RefCell<RegexCache> {
+        &self.regex_cache
     }
 
     pub(super) const fn lookup_index_cache(&self) -> &RefCell<LookupIndexCache> {

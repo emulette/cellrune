@@ -83,6 +83,7 @@ pub(super) use dynamic::{
     let_reference, let_scope_value, map_scalar_with_trace, reduce_scope_value, with_let_scope,
 };
 pub(super) use lookup_index::LookupIndexCache;
+pub(super) use regex_common::RegexCache;
 
 struct CallArguments<'formula> {
     expressions: Cow<'formula, [Expr]>,

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use pcre2::bytes::{CaptureLocations, Regex, RegexBuilder};
 
@@ -12,6 +12,36 @@ use super::regex_pattern::{analyze_pattern, is_plain_literal};
 const MAX_REGEX_DEPTH: u64 = 65_536;
 const MAX_REGEX_HEAP_KIB: u64 = 8 * 1_024;
 const INITIAL_MATCH_LIMIT: u64 = 8;
+/// Native regexes kept at once by one calculation's cache.
+const MAX_CACHED_REGEXES: usize = 256;
+
+/// Native regexes one calculation compiled, by full pattern, so formulas sharing a pattern do not
+/// compile it again. A compiled regex is immutable and matches the same way however often it is
+/// reused; the work charged for compiling is charged whether or not the cache holds it.
+#[derive(Debug, Default)]
+pub(in crate::calculation) struct RegexCache {
+    case_sensitive: HashMap<String, Regex>,
+    case_insensitive: HashMap<String, Regex>,
+}
+
+impl RegexCache {
+    fn build(&mut self, pattern: &str, case_insensitive: bool) -> Result<Regex, ErrorKind> {
+        let compiled = if case_insensitive {
+            &mut self.case_insensitive
+        } else {
+            &mut self.case_sensitive
+        };
+        if let Some(regex) = compiled.get(pattern) {
+            return Ok(regex.clone());
+        }
+        let regex = build(pattern, case_insensitive)?;
+        if compiled.len() >= MAX_CACHED_REGEXES {
+            compiled.clear();
+        }
+        compiled.insert(pattern.to_owned(), regex.clone());
+        Ok(regex)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RegexCaptureSet {
@@ -308,8 +338,10 @@ fn build_tier(
         "{prefix}(*NOTEMPTY_ATSTART)\\G(?:{}{}\\E)",
         spec.remainder, spec.trailing_comment_terminator
     );
-    let regular = build(&regular_pattern, spec.case_insensitive)?;
-    let anchored_nonempty = build(&anchored_pattern, spec.case_insensitive)?;
+    let mut cache = engine.regex_cache().borrow_mut();
+    let regular = cache.build(&regular_pattern, spec.case_insensitive)?;
+    let anchored_nonempty = cache.build(&anchored_pattern, spec.case_insensitive)?;
+    drop(cache);
     poll_cancellation(context)?;
     let capture_slots = u64::try_from(regular.captures_len()).map_err(|_| ErrorKind::Num)?;
     engine

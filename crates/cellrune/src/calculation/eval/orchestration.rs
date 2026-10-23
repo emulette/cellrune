@@ -73,6 +73,7 @@ impl<'workbook> Engine<'workbook> {
             reference_cells: 0,
             target_pending: None,
             lookup_indexes: std::cell::RefCell::default(),
+            regex_cache: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
             read_formula_before_calculation: std::cell::Cell::new(false),
         };
@@ -278,6 +279,7 @@ impl<'workbook> Engine<'workbook> {
             reference_cells: 0,
             target_pending: None,
             lookup_indexes: std::cell::RefCell::default(),
+            regex_cache: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
             read_formula_before_calculation: std::cell::Cell::new(false),
         };
