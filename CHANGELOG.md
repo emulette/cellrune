@@ -121,6 +121,73 @@ inventories, and measurements belong in the linked documentation rather than in 
   `set_column_width`, and `set_row_height`. Python `Workbook.read_formats`, Node.js
   `Workbook.readFormats`, the MCP tool `workbook_read_formats`, and every surface's
   `apply_changes_v2` expose them.
+- `TEXT` formats with Excel number-format codes: up to four sections with `[<=100]`-style
+  conditions, colors and `[Color1]` through `[Color56]` (accepted and not shown), quoted and
+  escaped literals, `General` for numbers of up to 11 characters, date and time codes in both date
+  systems including serial 60 as 1900-02-29, elapsed `[h]`, `[m]`, and `[s]`, `AM/PM` and `A/P`,
+  fractional seconds, scientific notation, `# ?/?` fractions, trailing-comma thousands scaling,
+  `?` space padding, `_` spacing, `*` fills (dropped, as Excel's `TEXT` drops them), and literals
+  between digit placeholders such as `000-00-0000`. Codes 0.1.26 already formatted keep their
+  results, including its rounding, its `#NUM!` from 2^53 rounded units, and `TEXT(1,"0.#")` as
+  `1`; other codes follow Excel as measured, so `TEXT(1,"0.#;-0.#")` is `1.` and
+  `TEXT(1.999,"# ?/?")` is `2    `. Fixed fraction denominators such as `# ?/8`, conditional
+  sections that select a negative number, a third section after one without a condition, elapsed
+  codes beside `AM/PM`, lowercase `am/pm`, era, Buddhist-year, and weekday-letter codes, system
+  date formats, unquoted letters that are not codes outside the 0.1.26 codes (hosts read them
+  differently), `General` numbers Excel would shorten, and numbers past 2^53 rounded units in the
+  other codes report `calculation.unsupported_expression`. A text value is still `#VALUE!`;
+  formatting text, as Excel's `TEXT("abc","@")` does, is not in 0.1.27.
+- `CalculationOptions::with_locale_profile(LocaleProfile)` selects built-in locale conventions
+  instead of the host's: `Locale::EnUs`, the default, which keeps every earlier result, or
+  `Locale::KoKr`. The regional format decides the `DOLLAR` currency symbol (`₩` in Korean) and the
+  decimals it shows when the formula omits them (none in Korean), the names `TEXT` shows, and the
+  double-byte rules of the byte functions; `LocaleProfile::with_display_language` sets the
+  language of the `GROUPBY` and `PIVOTBY` total labels (`합계` in Korean) apart. Korean month,
+  weekday, and `AM`/`PM` names, a negative Korean `DOLLAR` amount, and the Korean label of a grand
+  total over several levels report `calculation.unsupported_expression` until measured. The Excel
+  oracle audit calculates each host profile with its locale conventions.
+- The locale profile is `CalculationOptionsDto::locale_profile`, a `LocaleProfileDto` of `"en-US"`
+  or `"ko-KR"` tags with an optional `display_language`, and the transaction report's calculation
+  options record the profile in effect. Python `locale_profile=` and Node.js `localeProfile` on
+  calculate, recalculate, targeted calculation, and previews, and MCP `locale_profile` on
+  `workbook_recalculate`, `workbook_calculate_targets` options, and `workbook_preview_changes`
+  carry it. An unknown tag or key from any Python call or from Node.js `calculate` and
+  `recalculate` reports the new `interop.calculation.locale_profile_invalid`, and Python reads a
+  `display_language` of `None` as absent; Node.js targeted and preview payloads and MCP payloads
+  fail as invalid payloads.
+- `format_display_text` returns the text a cell shows for a value, a number-format code, a date
+  system, and a locale profile, with the `TEXT` engine for numbers and the code's text section for
+  text; codes it cannot render, including a `*` fill, which needs the column width, and a
+  `General` number longer than 11 characters, report `display_format.unsupported`. Interop
+  `format_display_text`, Python `format_display_text`, Node.js `formatDisplayText`, and the MCP
+  `format_display_text` tool expose it, and a request a binding cannot read reports
+  `interop.display_format.request_invalid`.
+- The reader reads `<row hidden>`, including on rows that omit `r`, into `Sheet::hidden_rows` and
+  `Sheet::is_row_hidden`, and which worksheet-level autoFilter columns declare a filter condition
+  into `SheetAutoFilter::filtered_column_ids`; Excel stores the rows a filter hides as hidden rows.
+  The sheet summaries of interop, Python, Node.js, and MCP report `hidden_rows` as A1 row ranges and
+  `auto_filter_filtered_columns`. The workbook fingerprint folds both only when present, so
+  workbooks without them keep their fingerprints, and a document-backed write verifies that its
+  output keeps the hidden rows.
+- `FIXED(number, [decimals], [no_commas])` rounds to `decimals` places (default 2, at most 127;
+  negative values round left of the decimal point) and returns the text with `,` grouping unless
+  `no_commas` is true.
+- `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`, and `REPLACEB` count bytes, and `ASC` and
+  `DBCS` convert between half-width and full-width forms. Without a double-byte locale the byte
+  functions count UTF-16 code units, as Excel does (`LENB("😀")` is 2), and `ASC` and `DBCS`
+  leave text unchanged. Under `Locale::KoKr` ASCII counts one byte and Hangul syllables, Hangul
+  compatibility jamo, full-width ASCII forms, and the ideographic space count two; `ASC` turns
+  full-width ASCII forms and the ideographic space into ASCII, and `DBCS` does the reverse. Other
+  Korean characters and positions inside a surrogate pair or a double-byte character report
+  `calculation.unsupported_expression`.
+- `AGGREGATE(function_num, options, ref1, …)` and `AGGREGATE(function_num, options, array, k)` apply
+  the nineteen documented functions with options that skip hidden rows (1, 3, 5, 7), error values
+  (2, 3, 6, 7), and cells holding `SUBTOTAL` or `AGGREGATE` (0 to 3). As in Excel, rows a filter
+  hides count as hidden rows, so options 0, 2, 4, and 6 keep them. Functions 1 to 13 take
+  references, 14 to 19 one array and `k`, and a calculated array keeps its hidden rows and nested
+  totals; 3-D references, a missing `k`, and out-of-range arguments are `#VALUE!`. `SUBTOTAL` is
+  unchanged. With these and the other functions added in 0.1.27, the catalog has 495 official
+  names and 496 accepted entries.
 
 ### Changed
 
