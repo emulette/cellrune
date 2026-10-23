@@ -1354,11 +1354,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   Node.js `localeProfile: { locale: "ko-KR", displayLanguage: "en-US" }` work
   on `calculate`, `recalculate`, targeted calculation, and previews, and MCP
   `locale_profile` on `workbook_recalculate`, `workbook_calculate_targets`
-  `options`, and `workbook_preview_changes`. An unknown tag or key is
-  `interop.calculation.locale_profile_invalid` from Python and from Node.js
-  `calculate` and `recalculate`, Node.js rejects a value that is not an object
-  of strings with `interop.input.invalid`, and JSON targeted, Node.js preview,
-  and MCP payloads fail as invalid payloads.
+  `options`, and `workbook_preview_changes`. Python reads an explicit
+  `"display_language": None` as absent. An unknown tag or key is
+  `interop.calculation.locale_profile_invalid` from every Python call and from
+  Node.js `calculate` and `recalculate`, Node.js rejects a value that is not an
+  object of strings with `interop.input.invalid`, and Node.js targeted and
+  preview payloads and MCP payloads fail as invalid payloads.
   `docs/NUMERICS.md` records the policies and their oracles.
 - `CalculationLimits::default()` + 12 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
   budgets: formula tokens, source bytes, AST nodes, AST nesting depth,

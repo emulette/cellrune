@@ -1,8 +1,8 @@
 use crate::error::into_py_error;
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
-    CalculationTargetDto, FinancialSolverSemanticsDto, InteropError, LocaleProfileDto,
-    TargetCalculationLimitsDto, TargetCalculationRequestDto,
+    CalculationTargetDto, FinancialSolverSemanticsDto, InteropError, TargetCalculationLimitsDto,
+    TargetCalculationRequestDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
@@ -21,14 +21,14 @@ struct TargetRequestInput {
 }
 
 /// Deterministic inputs for a target calculation. Targeted calculation keeps the default
-/// calculation limits, so `calculation_limits` fails like any other unknown option.
+/// calculation limits, so `calculation_limits` fails like any other unknown option. The locale
+/// profile is read apart, as the other calls read it.
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TargetOptionsInput {
     today_serial: Option<f64>,
     now_serial: Option<f64>,
     random_seed: Option<u32>,
-    locale_profile: Option<LocaleProfileDto>,
     #[serde(default)]
     arithmetic_semantics: ArithmeticSemanticsDto,
     #[serde(default)]
@@ -43,9 +43,16 @@ pub(crate) fn request_from_python(
     let payload = PyDict::new(py);
     payload.set_item("targets", targets)?;
     let calculation_options = PyDict::new(py);
+    let mut locale_profile = None;
     if let Some(options) = options {
         for (key, value) in options.iter() {
-            if key.extract::<String>()? == "limits" {
+            let key_text = key.extract::<String>()?;
+            if key_text == "locale_profile" {
+                locale_profile = crate::workbook::optional_locale_profile_from_python(
+                    Some(&value).filter(|value| !value.is_none()),
+                )
+                .map_err(|error| into_py_error(py, error))?;
+            } else if key_text == "limits" {
                 if !value.is_none() {
                     // JSON would carry a sequence into the limits by position.
                     let limits = value.cast::<PyDict>().map_err(|error| {
@@ -75,7 +82,7 @@ pub(crate) fn request_from_python(
             today_serial: request.options.today_serial,
             now_serial: request.options.now_serial,
             random_seed: request.options.random_seed,
-            locale_profile: request.options.locale_profile,
+            locale_profile,
             arithmetic_semantics: request.options.arithmetic_semantics,
             financial_solver_semantics: request.options.financial_solver_semantics,
             calculation_limits: CalculationLimitOptionsDto::default(),

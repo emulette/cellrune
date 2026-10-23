@@ -114,6 +114,7 @@ def check() -> None:
     workbook.calculate(calculation_limits=limits)
     korean: LocaleProfile = {"locale": "ko-KR", "display_language": "en-US"}
     workbook.calculate(locale_profile=korean)
+    workbook.calculate(locale_profile={"locale": "ko-KR", "display_language": None})
     shown: str = format_display_text(
         {"kind": "number", "value": 1.5}, "0.00", date_system="excel_1904", locale_profile=korean
     )

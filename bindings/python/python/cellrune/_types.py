@@ -28,7 +28,7 @@ LocaleTag = Literal["en-US", "ko-KR"]
 
 
 class LocaleProfileOptions(TypedDict, total=False):
-    display_language: LocaleTag
+    display_language: LocaleTag | None
 
 
 class LocaleProfile(LocaleProfileOptions):

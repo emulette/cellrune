@@ -193,6 +193,12 @@ def calculate_with_invalid_locale(workbook: Workbook, value: object) -> object:
     return workbook.calculate(locale_profile=cast(LocaleProfile, value))
 
 
+def target_with_invalid_locale(workbook: Workbook, value: object) -> object:
+    return workbook.calculate_targets(
+        [{"sheet": "Sheet1", "start": "A1"}], locale_profile=cast(LocaleProfile, value)
+    )
+
+
 def assert_locale_profile() -> None:
     workbook = Workbook.create()
     workbook.set_formula("Sheet1", "A1", "=DOLLAR(1234.567,2)")
@@ -217,6 +223,9 @@ def assert_locale_profile() -> None:
         [{"sheet": "Sheet1", "start": "A1"}], locale_profile=korean
     )
     assert targeted["cells"][0]["result"]["value"]["value"] == "₩1,234.57"
+    # An explicit display_language of None is absent and follows the locale.
+    workbook.calculate(locale_profile={"locale": "ko-KR", "display_language": None})
+    assert values() == ["₩1,234.57", 4]
 
     preview = workbook.preview_changes(
         workbook.summary()["semantic_revision"],
@@ -242,10 +251,11 @@ def assert_locale_profile() -> None:
         {"locale": "ko-KR", "region": "KR"},
         {"locale": 1},
     ):
-        assert_error(
-            "interop.calculation.locale_profile_invalid",
-            lambda invalid=invalid: calculate_with_invalid_locale(workbook, invalid),
-        )
+        for operation in (calculate_with_invalid_locale, target_with_invalid_locale):
+            assert_error(
+                "interop.calculation.locale_profile_invalid",
+                lambda operation=operation, invalid=invalid: operation(workbook, invalid),
+            )
 
 
 def assert_display_format() -> None:

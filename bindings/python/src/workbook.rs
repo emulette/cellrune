@@ -826,8 +826,8 @@ fn optional_number_from_python(
 }
 
 /// Reads a locale profile: a `dict` with a `locale` tag and an optional `display_language` tag,
-/// each `"en-US"` or `"ko-KR"`.
-fn optional_locale_profile_from_python(
+/// each `"en-US"` or `"ko-KR"`; a `display_language` of `None` is absent.
+pub(crate) fn optional_locale_profile_from_python(
     value: Option<&Bound<'_, PyAny>>,
 ) -> Result<Option<LocaleProfileDto>, InteropError> {
     let Some(value) = value else {
@@ -839,13 +839,19 @@ fn optional_locale_profile_from_python(
     let mut locale = None;
     let mut display_language = None;
     for (key, tag) in profile.iter() {
+        let key = key
+            .extract::<String>()
+            .map_err(|_| InteropError::invalid_locale_profile())?;
+        if key == "display_language" && tag.is_none() {
+            continue;
+        }
         let tag = tag
             .extract::<String>()
             .map_err(|_| InteropError::invalid_locale_profile())?;
         let tag = LocaleDto::from_tag(&tag)?;
-        match key.extract::<String>().as_deref() {
-            Ok("locale") => locale = Some(tag),
-            Ok("display_language") => display_language = Some(tag),
+        match key.as_str() {
+            "locale" => locale = Some(tag),
+            "display_language" => display_language = Some(tag),
             _ => return Err(InteropError::invalid_locale_profile()),
         }
     }
