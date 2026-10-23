@@ -247,8 +247,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `COUNTIF(J1:K1,">0")` returns 2 instead of 1, `SUMIF(J1:K1,">0")` 11 instead of 2,
   `XLOOKUP(9,J1:K1,J1:K1,-1)` 9 instead of -1, and `MATCH(9,J1:K1,0)` 1 instead of `#N/A`. A cycle
   through a formula the dependency-edge limit left out, which 0.1.26 did not detect, now reports
-  `CircularReference` for each formula in it: where the limit left out `E1` holding
-  `SUM(A1:B1)+D1`, `D1` holding `COUNTIF(E1,">0")` returned 0.
+  `CircularReference` for each formula in it and `BlockedByUpstream` for the formulas that read
+  it: where the limit left out `E1` holding `SUM(A1:B1)+D1`, `D1` holding `COUNTIF(E1,">0")`
+  returned 0, and a formula reading `D1` calculated from that 0.
 - Minimal-write impact analysis treats an `OFFSET` whose position the edited workbook gives
   without calculating anything, such as `OFFSET(A1,1,0)` or `OFFSET(A1,C1,0)` with a value in
   `C1`, as reading the cells it resolves to, so an unrelated edit keeps its saved result.
