@@ -11,6 +11,7 @@ use super::graph::{DependencyGraph, DependencyNode, Schedule};
 use super::limits::CalculationLimitKind;
 use super::parser::ParseError;
 use super::pipeline::VolatileInputs;
+use super::prepared_arguments::ArgumentOwner;
 use super::random::{RandomDraws, RandomPath};
 use super::runtime::{CellId, Rect};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
@@ -870,6 +871,8 @@ pub(super) struct EvalContext<'scope> {
     cancelled: &'scope dyn Fn() -> bool,
     charge_reference_work: bool,
     random: RandomPath,
+    /// The expression whose nodes are being evaluated, with the prepared arguments it keeps.
+    arguments: Option<ArgumentOwner<'scope>>,
 }
 
 #[cfg(test)]
@@ -888,6 +891,7 @@ impl<'scope> EvalContext<'scope> {
             cancelled: &never_cancelled,
             charge_reference_work: true,
             random: RandomPath::ROOT,
+            arguments: None,
         }
     }
 
@@ -904,6 +908,7 @@ impl<'scope> EvalContext<'scope> {
             cancelled,
             charge_reference_work: true,
             random: RandomPath::ROOT,
+            arguments: None,
         }
     }
 
@@ -946,7 +951,20 @@ impl<'scope> EvalContext<'scope> {
             cancelled: self.cancelled,
             charge_reference_work: self.charge_reference_work,
             random: self.random,
+            arguments: self.arguments,
         }
+    }
+
+    /// Evaluates the nodes of `owner`, which keeps prepared arguments for them.
+    pub(super) const fn with_argument_owner(self, owner: ArgumentOwner<'scope>) -> Self {
+        Self {
+            arguments: Some(owner),
+            ..self
+        }
+    }
+
+    pub(super) const fn argument_owner(self) -> Option<ArgumentOwner<'scope>> {
+        self.arguments
     }
 
     pub(super) const fn without_bindings(self) -> Self {

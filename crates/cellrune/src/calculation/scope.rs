@@ -114,6 +114,14 @@ pub(super) struct LambdaClosure {
     pub(super) captured: Vec<ScopeEntry>,
     pub(super) lookup_scope: Option<DefinedNameScope>,
     pub(super) defined_name: Option<DefinedLambdaId>,
+    pub(super) prepared_arguments: super::prepared_arguments::PreparedArguments,
+}
+
+impl LambdaClosure {
+    /// The body with the prepared arguments it keeps.
+    pub(super) fn argument_owner(&self) -> super::prepared_arguments::ArgumentOwner<'_> {
+        super::prepared_arguments::ArgumentOwner::new(&self.body, &self.prepared_arguments)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

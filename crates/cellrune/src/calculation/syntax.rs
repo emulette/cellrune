@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::ast::{Expr, FormulaDisplayMode};
+use super::prepared_arguments::{ArgumentOwner, PreparedArguments};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceSpan {
@@ -235,6 +236,7 @@ pub struct ParsedFormula {
     original: Arc<str>,
     root: Expr,
     source_map: FormulaSourceMap,
+    prepared_arguments: PreparedArguments,
 }
 
 impl Clone for ParsedFormula {
@@ -243,6 +245,7 @@ impl Clone for ParsedFormula {
             original: Arc::clone(&self.original),
             root: self.root.clone(),
             source_map: self.source_map.clone(),
+            prepared_arguments: PreparedArguments::default(),
         })
     }
 }
@@ -253,7 +256,13 @@ impl ParsedFormula {
             original,
             root,
             source_map,
+            prepared_arguments: PreparedArguments::default(),
         }
+    }
+
+    /// The formula's root with the prepared arguments it keeps.
+    pub(super) fn argument_owner(&self) -> ArgumentOwner<'_> {
+        ArgumentOwner::new(&self.root, &self.prepared_arguments)
     }
 
     #[allow(dead_code)]

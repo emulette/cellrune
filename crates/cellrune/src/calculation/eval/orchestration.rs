@@ -405,7 +405,10 @@ impl<'workbook> Engine<'workbook> {
                     ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
                 ),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
+                Some(expr) => self.eval_final_array_with_trace(
+                    context.with_argument_owner(expr.argument_owner()),
+                    expr.root(),
+                ),
                 None => Err(ErrorKind::Unsupported),
             };
             if self.target_dependencies_pending() {
@@ -425,7 +428,10 @@ impl<'workbook> Engine<'workbook> {
                     ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
                 ),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_final_array_with_trace(context, expr.root()),
+                Some(expr) => self.eval_final_array_with_trace(
+                    context.with_argument_owner(expr.argument_owner()),
+                    expr.root(),
+                ),
                 None => Err(ErrorKind::Unsupported),
             };
             if self.target_dependencies_pending() {
@@ -447,7 +453,10 @@ impl<'workbook> Engine<'workbook> {
                 Value::Error(ErrorKind::Unsupported)
             }
             Some(expr) => {
-                let evaluated = self.eval_final_scalar_with_trace(context, expr.root());
+                let evaluated = self.eval_final_scalar_with_trace(
+                    context.with_argument_owner(expr.argument_owner()),
+                    expr.root(),
+                );
                 if self.target_dependencies_pending() {
                     self.record_evaluation_work(&budget);
                     return Ok(());

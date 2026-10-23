@@ -35,6 +35,7 @@ mod operators;
 mod parser;
 pub(crate) mod persistent_store;
 mod pipeline;
+mod prepared_arguments;
 mod random;
 mod reference_resolution;
 mod runtime;

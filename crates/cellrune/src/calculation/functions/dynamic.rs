@@ -84,6 +84,7 @@ pub(in crate::calculation) fn lambda_scope_value(
             .map(DefinedLambdaId::scope)
             .or(context.defined_name_scope()),
         defined_name,
+        prepared_arguments: super::super::prepared_arguments::PreparedArguments::default(),
     })))
 }
 
@@ -211,7 +212,8 @@ pub(in crate::calculation) fn invoke_lambda_values(
         context
             .with_bindings(&bindings)
             .with_defined_name_scope(closure.lookup_scope)
-            .in_lambda_body(),
+            .in_lambda_body()
+            .with_argument_owner(closure.argument_owner()),
         &closure.body,
     )
 }

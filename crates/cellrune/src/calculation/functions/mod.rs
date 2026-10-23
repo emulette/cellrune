@@ -62,6 +62,7 @@ mod modern_array;
 mod modern_text;
 mod moments;
 mod number_value;
+mod prepared_calls;
 mod random;
 mod reference_introspection;
 mod regex_common;
@@ -99,6 +100,48 @@ struct CallArguments<'formula> {
 }
 
 impl<'formula> CallArguments<'formula> {
+    /// The prepared arguments of a call the engine evaluates: the list the expression being
+    /// evaluated keeps for it, or a list prepared now when it keeps none.
+    fn for_call(
+        context: EvalContext<'formula>,
+        descriptor: FunctionDescriptor,
+        expressions: &'formula [Expr],
+    ) -> Self {
+        if !expressions.is_empty()
+            && Self::takes_defaults(descriptor, expressions)
+            && let Some(prepared) = context
+                .argument_owner()
+                .and_then(|owner| owner.prepared(expressions))
+        {
+            return Self {
+                expressions: Cow::Borrowed(prepared),
+            };
+        }
+        Self::prepare(descriptor, expressions)
+    }
+
+    /// Whether [`Self::prepare`] puts a default in place of an argument of `expressions`.
+    fn takes_defaults(descriptor: FunctionDescriptor, expressions: &[Expr]) -> bool {
+        let contract = descriptor.call_contract();
+        let takes = |position, trigger| {
+            contract
+                .default_at(position, trigger)
+                .and_then(materialize_default)
+                .is_some()
+        };
+        expressions
+            .iter()
+            .enumerate()
+            .any(|(position, expression)| {
+                matches!(expression, Expr::Missing)
+                    && takes(position, contract::DefaultTrigger::Missing)
+            })
+            || contract.maximum_arity().is_some_and(|maximum| {
+                expressions.len() < usize::from(maximum)
+                    && takes(expressions.len(), contract::DefaultTrigger::Absent)
+            })
+    }
+
     fn prepare(descriptor: FunctionDescriptor, expressions: &'formula [Expr]) -> Self {
         let contract = descriptor.call_contract();
         let mut prepared = Cow::Borrowed(expressions);
@@ -178,7 +221,7 @@ pub(in crate::calculation) fn call_function_with_trace(
         return super::scope::ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
     }
     let written = args;
-    let prepared = CallArguments::prepare(descriptor, args);
+    let prepared = CallArguments::for_call(context, descriptor, args);
     let args = prepared.as_slice();
     let context = context.with_arguments(args);
     if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
@@ -413,7 +456,7 @@ pub(super) fn call_function_array(
     if !call_shape_is_valid(descriptor, args) {
         return descriptor.array_evaluator().map(|_| Err(ErrorKind::Value));
     }
-    let prepared = CallArguments::prepare(descriptor, args);
+    let prepared = CallArguments::for_call(context, descriptor, args);
     let args = prepared.as_slice();
     let context = context.with_arguments(args);
     match descriptor.array_evaluator()? {
@@ -759,6 +802,8 @@ pub(in crate::calculation) fn builtin_aggregate_capability(
 ) -> Option<descriptor::AggregateCallableCapability> {
     descriptor::callable_descriptor(callable).aggregate_callable()
 }
+
+pub(in crate::calculation) use prepared_calls::prepared_argument_table;
 
 pub(in crate::calculation) fn prepare_evaluator_arguments<'formula>(
     evaluator: Evaluator,
