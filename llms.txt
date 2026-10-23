@@ -487,6 +487,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `csv.read.invalid_utf8`, `csv.read.unterminated_quote`,
   `csv.read.invalid_quote`, `csv.read.too_many_rows`,
   `csv.read.too_many_columns`, `csv.read.too_many_cells`,
+  `csv.read.field_too_long` (a field over the 32,767 UTF-16 code units a
+  cell holds),
   `csv.read.invalid_value`, `csv.write.unknown_sheet`,
   `csv.write.stale_calculation`, `csv.write.unavailable_result`; `.detail()`
   names the line or cell.

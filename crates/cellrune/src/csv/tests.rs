@@ -297,3 +297,30 @@ fn text_that_starts_with_a_byte_order_mark_keeps_it() {
         assert_eq!(literal(&reread, address), text("\u{feff}mark"), "{address}");
     }
 }
+
+#[test]
+fn rejects_a_field_longer_than_a_cell_holds() {
+    let longest = "x".repeat(32_767);
+    for (field, fits) in [
+        (format!("\"{longest}\""), true),
+        (longest.clone(), true),
+        ("é".repeat(32_767), true),
+        (format!("\"{longest}x\""), false),
+        (format!("{longest}x"), false),
+        ("\u{1F600}".repeat(16_384), false),
+    ] {
+        let input = format!("a,{field}\r\n");
+        match read_csv(input.as_bytes(), &CsvReadOptions::default()) {
+            Ok(draft) => {
+                assert!(fits, "{} bytes", field.len());
+                assert!(literal(&draft, "B1").is_some());
+            }
+            Err(error) => {
+                assert!(!fits, "{} bytes: {error}", field.len());
+                assert_eq!(error.code(), CsvErrorCode::FieldTooLong);
+                assert_eq!(error.code().as_str(), "csv.read.field_too_long");
+                assert_eq!(error.detail(), Some("B1"));
+            }
+        }
+    }
+}

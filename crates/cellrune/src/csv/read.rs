@@ -5,6 +5,8 @@ use crate::{
 };
 
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+/// The most UTF-16 code units a spreadsheet cell holds; Excel cannot open a longer cell.
+const MAX_FIELD_UTF16: usize = 32_767;
 
 /// Options for reading one CSV sheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +68,8 @@ impl CsvReadOptions {
 /// # Errors
 ///
 /// Returns a [`CsvError`] for input that is not UTF-8, a quote the format does not allow, or more
-/// rows, columns, or cells than the sheet or the limit holds.
+/// rows, columns, or cells than the sheet or the limit holds, or a field longer than the 32,767
+/// UTF-16 code units a cell holds.
 pub fn read_csv(bytes: &[u8], options: &CsvReadOptions) -> Result<WorkbookDraft, CsvError> {
     let bytes = bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes);
     let text = std::str::from_utf8(bytes).map_err(|error| {
@@ -83,6 +86,12 @@ pub fn read_csv(bytes: &[u8], options: &CsvReadOptions) -> Result<WorkbookDraft,
     }
     let mut cells = 0_u64;
     parse_records(text, options.delimiter, |row, column, field| {
+        let address = CellAddress::from_indices(row, column).expect("checked bounds");
+        let (Field::Quoted(text) | Field::Unquoted(text)) = &field;
+        // A UTF-8 field is never shorter in bytes than in UTF-16 code units.
+        if text.len() > MAX_FIELD_UTF16 && text.encode_utf16().count() > MAX_FIELD_UTF16 {
+            return Err(CsvError::new(CsvErrorCode::FieldTooLong).with_detail(address.to_string()));
+        }
         let value = match field {
             Field::Quoted(text) => CellValue::Text(text),
             Field::Unquoted(text) if text.is_empty() => return Ok(()),
@@ -93,7 +102,6 @@ pub fn read_csv(bytes: &[u8], options: &CsvReadOptions) -> Result<WorkbookDraft,
             return Err(CsvError::new(CsvErrorCode::TooManyCells)
                 .with_detail(format!("limit {}", options.max_cells)));
         }
-        let address = CellAddress::from_indices(row, column).expect("checked bounds");
         changes.push(WorkbookChange::set_cell_value(sheet_id, address, value));
         Ok(())
     })?;

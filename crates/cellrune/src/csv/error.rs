@@ -9,6 +9,8 @@ const MESSAGE_INVALID_QUOTE: &str = "CSV quoted field is followed by text before
 const MESSAGE_TOO_MANY_ROWS: &str = "CSV input has more rows than a worksheet holds";
 const MESSAGE_TOO_MANY_COLUMNS: &str = "CSV input has more columns than a worksheet holds";
 const MESSAGE_TOO_MANY_CELLS: &str = "CSV input has more cells than the read limit allows";
+const MESSAGE_FIELD_TOO_LONG: &str =
+    "CSV field is longer than the 32,767 UTF-16 code units a cell holds";
 const MESSAGE_INVALID_VALUE: &str = "CSV input holds a value the workbook rejects";
 const MESSAGE_UNKNOWN_SHEET: &str = "workbook does not contain the requested sheet";
 const MESSAGE_STALE_CALCULATION: &str = "calculation does not belong to the current workbook";
@@ -32,6 +34,8 @@ pub enum CsvErrorCode {
     TooManyColumns,
     /// The input has more cells than the read limit allows.
     TooManyCells,
+    /// A field is longer than the 32,767 UTF-16 code units a spreadsheet cell holds.
+    FieldTooLong,
     /// The workbook rejects a value or the sheet name.
     InvalidValue,
     /// The exported sheet is not in the workbook.
@@ -53,6 +57,7 @@ impl CsvErrorCode {
             Self::TooManyRows => "csv.read.too_many_rows",
             Self::TooManyColumns => "csv.read.too_many_columns",
             Self::TooManyCells => "csv.read.too_many_cells",
+            Self::FieldTooLong => "csv.read.field_too_long",
             Self::InvalidValue => "csv.read.invalid_value",
             Self::UnknownSheet => "csv.write.unknown_sheet",
             Self::StaleCalculation => "csv.write.stale_calculation",
@@ -69,6 +74,7 @@ impl CsvErrorCode {
             Self::TooManyRows => MESSAGE_TOO_MANY_ROWS,
             Self::TooManyColumns => MESSAGE_TOO_MANY_COLUMNS,
             Self::TooManyCells => MESSAGE_TOO_MANY_CELLS,
+            Self::FieldTooLong => MESSAGE_FIELD_TOO_LONG,
             Self::InvalidValue => MESSAGE_INVALID_VALUE,
             Self::UnknownSheet => MESSAGE_UNKNOWN_SHEET,
             Self::StaleCalculation => MESSAGE_STALE_CALCULATION,
