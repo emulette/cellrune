@@ -16,6 +16,39 @@ pub(crate) struct DecimalTrace {
     exponent: i32,
 }
 
+/// The `Display` text of a finite double, written into a fixed buffer.
+struct DecimalText {
+    bytes: [u8; 340],
+    len: usize,
+}
+
+impl Default for DecimalText {
+    fn default() -> Self {
+        Self {
+            bytes: [0; 340],
+            len: 0,
+        }
+    }
+}
+
+impl DecimalText {
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).expect("formatted ASCII")
+    }
+}
+
+impl std::fmt::Write for DecimalText {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let end = self.len + text.len();
+        self.bytes
+            .get_mut(self.len..end)
+            .ok_or(std::fmt::Error)?
+            .copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
 /// Returns whether one exact cancellation is also within Excel's observed binary correction
 /// boundary.
 ///
@@ -106,7 +139,11 @@ impl DecimalTrace {
                 exponent,
             });
         }
-        Self::from_literal(&value.to_string())
+        // The shortest decimal of a finite double is at most 330 characters, the subnormals
+        // written out in full, so it is formatted on the stack rather than in a new string.
+        let mut decimal = DecimalText::default();
+        std::fmt::Write::write_fmt(&mut decimal, format_args!("{value}")).ok()?;
+        Self::from_literal(decimal.as_str())
     }
 
     pub(in crate::calculation) fn add(self, right: Self) -> Option<Self> {
