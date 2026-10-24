@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use super::excel_digits::approximate_ordering;
 use super::value::{ErrorKind, Value, number_to_general_text};
 
 pub fn to_number(value: &Value) -> Result<f64, ErrorKind> {
@@ -64,7 +65,35 @@ fn blank_substitute(other: &Value) -> Value {
     }
 }
 
+/// Orders two values by Excel's comparison rules with numbers in exact order, as sorting and
+/// searching need.
 pub fn compare(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
+    compare_with(left, right, raw_ordering)
+}
+
+/// Orders two values as the comparison operators do: with `approximate`, numbers that differ only
+/// past their fifteenth significant digit are equal (see [`approximate_ordering`]).
+pub fn compare_for_operator(
+    left: &Value,
+    right: &Value,
+    approximate: bool,
+) -> Result<Ordering, ErrorKind> {
+    if approximate {
+        compare_with(left, right, approximate_ordering)
+    } else {
+        compare(left, right)
+    }
+}
+
+fn raw_ordering(left: f64, right: f64) -> Ordering {
+    left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+}
+
+fn compare_with(
+    left: &Value,
+    right: &Value,
+    numbers: fn(f64, f64) -> Ordering,
+) -> Result<Ordering, ErrorKind> {
     if let Some(kind) = left.error() {
         return Err(kind);
     }
@@ -73,12 +102,12 @@ pub fn compare(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     }
     match (left, right) {
         (Value::Blank, Value::Blank) => Ok(Ordering::Equal),
-        (Value::Blank, other) => compare(&blank_substitute(other), other),
+        (Value::Blank, other) => compare_with(&blank_substitute(other), other, numbers),
         (other, Value::Blank) => {
             let substitute = blank_substitute(other);
-            compare(other, &substitute)
+            compare_with(other, &substitute, numbers)
         }
-        (Value::Number(a), Value::Number(b)) => Ok(a.partial_cmp(b).unwrap_or(Ordering::Equal)),
+        (Value::Number(a), Value::Number(b)) => Ok(numbers(*a, *b)),
         (Value::Text(a), Value::Text(b)) => Ok(compare_text_case_insensitive(a, b)),
         (Value::Logical(a), Value::Logical(b)) => Ok(a.cmp(b)),
         _ => Ok(type_rank(left).cmp(&type_rank(right))),
@@ -91,8 +120,9 @@ pub fn compare_text_case_insensitive(left: &str, right: &str) -> Ordering {
         .cmp(right.chars().flat_map(char::to_lowercase))
 }
 
-pub fn values_equal(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
-    Ok(compare(left, right)? == Ordering::Equal)
+/// Whether two values are equal as the `=` operator compares them.
+pub fn values_equal(left: &Value, right: &Value, approximate: bool) -> Result<bool, ErrorKind> {
+    Ok(compare_for_operator(left, right, approximate)? == Ordering::Equal)
 }
 
 #[cfg(test)]

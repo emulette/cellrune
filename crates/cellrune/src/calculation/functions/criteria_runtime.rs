@@ -7,6 +7,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
 use super::database_criteria::CompiledDatabaseCriteria;
+use super::util::fifteen_digit_rules;
 use std::cmp::Ordering;
 
 /// Formula-cell criteria execution state.
@@ -30,7 +31,7 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<CompiledCriteria, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        compile_criteria_with_work(value, |units| {
+        compile_criteria_with_work(value, fifteen_digit_rules(engine), |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }
@@ -41,7 +42,7 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<CompiledDatabaseCriteria, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        CompiledDatabaseCriteria::compile_with_work(value, |units| {
+        CompiledDatabaseCriteria::compile_with_work(value, fifteen_digit_rules(engine), |units| {
             Self::charge_cumulative(engine, context, units)
         })
     }

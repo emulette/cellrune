@@ -1,5 +1,5 @@
 use super::ast::{BinaryOp, UnaryOp};
-use super::coerce::{compare, to_number, to_text};
+use super::coerce::{compare_for_operator, to_number, to_text};
 use super::limits::CalculationLimitKind;
 use super::runtime::Array;
 use super::value::{ErrorKind, Value};
@@ -15,11 +15,14 @@ pub(super) fn apply_unary(op: UnaryOp, value: &Value) -> Value {
     result.unwrap_or_else(Value::Error)
 }
 
+/// Applies a binary operator. `approximate_comparison` makes the comparison operators treat numbers
+/// that differ only past their fifteenth significant digit as equal, as Excel does.
 pub(super) fn apply_binary(
     op: BinaryOp,
     left: &Value,
     right: &Value,
     max_text_bytes: u64,
+    approximate_comparison: bool,
 ) -> Value {
     match op {
         BinaryOp::Concat => match to_text(left)
@@ -37,7 +40,7 @@ pub(super) fn apply_binary(
             Err(kind) => Value::Error(kind),
         },
         BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-            match compare(left, right) {
+            match compare_for_operator(left, right, approximate_comparison) {
                 Ok(ordering) => Value::Logical(match op {
                     BinaryOp::Eq => ordering == std::cmp::Ordering::Equal,
                     BinaryOp::Ne => ordering != std::cmp::Ordering::Equal,

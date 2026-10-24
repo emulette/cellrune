@@ -10,14 +10,15 @@
 //! changes.
 
 use std::cell::RefMut;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::super::criteria::{CompiledCriteria, ExactCriterion};
+use super::super::criteria::{CompiledCriteria, ExactCriterion, criterion_number_ordering};
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::{CellId, Rect};
 use super::super::value::{ErrorKind, Value};
-use super::lookup_index::{EqualityKey, LookupIndexCache, lowercase, number_key};
+use super::lookup_index::{EqualityKey, LookupIndexCache, lowercase};
 use crate::CalculationLimitKind;
 
 /// Ranges with fewer cells than this are scanned; an index would not pay for itself.
@@ -173,18 +174,14 @@ impl CriteriaIndexCache {
     }
 }
 
-/// What an index groups a cell under: its value, or for a text cell also the number its trimmed
-/// text parses as.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum IndexKey {
-    Value(EqualityKey),
-    NumericText(u64),
-}
-
-/// The cells of one criteria range grouped by value, as offsets in reading order.
+/// The cells of one criteria range grouped by text and logical value, as offsets in reading order,
+/// with the numbers of number cells and numeric text cells in ascending order.
 #[derive(Debug)]
 pub(in crate::calculation) struct CriteriaIndex {
-    keys: HashMap<IndexKey, u32>,
+    keys: HashMap<EqualityKey, u32>,
+    /// Each number cell's number, and each text cell's number its trimmed text parses as, with the
+    /// cell's offset, ascending by number. Zero and negative zero are one number.
+    numbers: Vec<(f64, u32)>,
     /// `offsets[starts[key]..starts[key + 1]]` are the ascending offsets grouped under `key`.
     starts: Vec<u32>,
     offsets: Vec<u32>,
@@ -206,7 +203,8 @@ impl CriteriaIndex {
         let mut entries = Vec::with_capacity(cells as usize);
         let mut texts = Bits::new(cells);
         let mut nonempty_texts = Bits::new(cells);
-        let mut key_id = |key: IndexKey| {
+        let mut numbers = Vec::new();
+        let mut key_id = |key: EqualityKey| {
             let next = keys.len() as u32;
             *keys.entry(key).or_insert(next)
         };
@@ -219,24 +217,28 @@ impl CriteriaIndex {
             let cell = area.cell(offset);
             let key = match engine.stored_cell_value(cell, stored.at(cell.1, cell.2)) {
                 Value::Blank | Value::Error(_) => continue,
-                Value::Number(number) => match number_key(number) {
-                    Some(key) => EqualityKey::Number(key),
-                    None => continue,
-                },
+                Value::Number(number) => {
+                    if !number.is_nan() {
+                        numbers.push((number + 0.0, offset));
+                    }
+                    continue;
+                }
                 Value::Logical(logical) => EqualityKey::Logical(logical),
                 Value::Text(text) => {
                     texts.set(offset);
                     if !text.is_empty() {
                         nonempty_texts.set(offset);
                     }
-                    if let Some(key) = text.trim().parse::<f64>().ok().and_then(number_key) {
-                        entries.push((key_id(IndexKey::NumericText(key)), offset));
+                    let parsed = text.trim().parse::<f64>().ok();
+                    if let Some(number) = parsed.filter(|number| !number.is_nan()) {
+                        numbers.push((number + 0.0, offset));
                     }
                     EqualityKey::Text(lowercase(&text))
                 }
             };
-            entries.push((key_id(IndexKey::Value(key)), offset));
+            entries.push((key_id(key), offset));
         }
+        numbers.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
         let mut starts = vec![0_u32; keys.len() + 1];
         for (key, _) in &entries {
             starts[*key as usize + 1] += 1;
@@ -253,6 +255,7 @@ impl CriteriaIndex {
         }
         Some(Self {
             keys,
+            numbers,
             starts,
             offsets,
             texts,
@@ -260,7 +263,7 @@ impl CriteriaIndex {
         })
     }
 
-    fn group(&self, key: &IndexKey) -> &[u32] {
+    fn group(&self, key: &EqualityKey) -> &[u32] {
         self.keys.get(key).map_or(&[], |key| {
             &self.offsets
                 [self.starts[*key as usize] as usize..self.starts[*key as usize + 1] as usize]
@@ -271,29 +274,51 @@ impl CriteriaIndex {
     /// unit to test.
     fn matching(&self, criterion: &ExactCriterion) -> (Vec<u32>, Option<&Bits>) {
         match criterion {
-            ExactCriterion::Number(number) => {
-                let Some(key) = number_key(*number) else {
-                    return (Vec::new(), Some(&self.texts));
-                };
-                (
-                    merge(
-                        self.group(&IndexKey::Value(EqualityKey::Number(key))),
-                        self.group(&IndexKey::NumericText(key)),
-                    ),
-                    Some(&self.texts),
-                )
-            }
+            ExactCriterion::Number {
+                number,
+                approximate,
+            } => (
+                self.matching_numbers(*number, *approximate),
+                Some(&self.texts),
+            ),
             ExactCriterion::Text(text) => (
-                self.group(&IndexKey::Value(EqualityKey::Text(text.as_str().into())))
+                self.group(&EqualityKey::Text(text.as_str().into()))
                     .to_vec(),
                 Some(&self.nonempty_texts),
             ),
-            ExactCriterion::Logical(logical) => (
-                self.group(&IndexKey::Value(EqualityKey::Logical(*logical)))
-                    .to_vec(),
-                None,
-            ),
+            ExactCriterion::Logical(logical) => {
+                (self.group(&EqualityKey::Logical(*logical)).to_vec(), None)
+            }
         }
+    }
+}
+
+impl CriteriaIndex {
+    /// The ascending offsets of the cells whose number equals `number`, or with `approximate`
+    /// differs from it only past the fifteenth significant digit.
+    fn matching_numbers(&self, number: f64, approximate: bool) -> Vec<u32> {
+        if number.is_nan() {
+            return Vec::new();
+        }
+        // Approximately equal numbers differ by less than `5e-15` of the smaller magnitude, so
+        // every candidate lies within this margin of `number`.
+        let margin = if approximate {
+            number.abs() * 1e-14
+        } else {
+            0.0
+        };
+        let (low, high) = (number - margin, number + margin);
+        let first = self.numbers.partition_point(|(value, _)| *value < low);
+        let mut offsets = self.numbers[first..]
+            .iter()
+            .take_while(|(value, _)| *value <= high)
+            .filter(|(value, _)| {
+                criterion_number_ordering(*value, number, approximate) == Some(Ordering::Equal)
+            })
+            .map(|(_, offset)| *offset)
+            .collect::<Vec<_>>();
+        offsets.sort_unstable();
+        offsets
     }
 }
 
@@ -460,23 +485,6 @@ fn criteria_cache<'engine>(engine: &'engine Engine<'_>) -> RefMut<'engine, Crite
         engine.lookup_index_cache().borrow_mut(),
         LookupIndexCache::criteria_mut,
     )
-}
-
-/// Merges two ascending offset lists with no offset in common.
-fn merge(left: &[u32], right: &[u32]) -> Vec<u32> {
-    let mut merged = Vec::with_capacity(left.len() + right.len());
-    let (mut left, mut right) = (left.iter().peekable(), right.iter().peekable());
-    loop {
-        let next = match (left.peek(), right.peek()) {
-            (Some(l), Some(r)) if l <= r => left.next(),
-            (Some(_), Some(_)) => right.next(),
-            (Some(_), None) => left.next(),
-            (None, Some(_)) => right.next(),
-            (None, None) => break,
-        };
-        merged.extend(next.copied());
-    }
-    merged
 }
 
 /// The offsets of `scanned` also in `matching`, both ascending.

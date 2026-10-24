@@ -3,7 +3,7 @@ use super::super::coerce::{to_logical, values_equal};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::kernel::LogicalFunction;
-use super::util::collect_argument_values;
+use super::util::{collect_argument_values, fifteen_digit_rules};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -128,7 +128,7 @@ fn switch(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
     };
     for pair in args[1..pair_end].chunks_exact(2) {
         let candidate = engine.eval_scalar(context, &pair[0]);
-        match values_equal(&target, &candidate) {
+        match values_equal(&target, &candidate, fifteen_digit_rules(engine)) {
             Ok(true) => return engine.eval_scalar(context, &pair[1]),
             Ok(false) => {}
             Err(kind) => return Value::Error(kind),

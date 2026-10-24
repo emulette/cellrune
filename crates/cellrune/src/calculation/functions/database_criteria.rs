@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
 
 use super::super::coerce::compare_text_case_insensitive;
-use super::super::criteria::{CompiledWildcardPattern, charge_text_comparison};
+use super::super::criteria::{
+    CompiledWildcardPattern, charge_text_comparison, criterion_number_ordering,
+};
 use super::super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,11 +31,14 @@ enum DatabaseCriteriaRhs {
 pub(super) struct CompiledDatabaseCriteria {
     op: DatabaseCriteriaOp,
     rhs: DatabaseCriteriaRhs,
+    /// Whether a number criterion compares as the comparison operators do.
+    approximate: bool,
 }
 
 impl CompiledDatabaseCriteria {
     pub(super) fn compile_with_work(
         value: &Value,
+        approximate: bool,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<Self, ErrorKind> {
         let (op, rhs) = match value {
@@ -68,7 +73,11 @@ impl CompiledDatabaseCriteria {
                 (op, rhs)
             }
         };
-        Ok(Self { op, rhs })
+        Ok(Self {
+            op,
+            rhs,
+            approximate,
+        })
     }
 
     pub(super) fn matches_with_work(
@@ -101,17 +110,20 @@ impl CompiledDatabaseCriteria {
     ) -> Result<bool, ErrorKind> {
         match &self.rhs {
             DatabaseCriteriaRhs::Blank => Ok(cell.is_blank_like()),
-            DatabaseCriteriaRhs::Number(expected) => match cell {
-                Value::Number(actual) => Ok(actual == expected),
-                Value::Text(text) => {
-                    on_work(1)?;
-                    Ok(text
-                        .trim()
-                        .parse::<f64>()
-                        .is_ok_and(|actual| actual == *expected))
-                }
-                _ => Ok(false),
-            },
+            DatabaseCriteriaRhs::Number(expected) => {
+                let actual = match cell {
+                    Value::Number(number) => Some(*number),
+                    Value::Text(text) => {
+                        on_work(1)?;
+                        text.trim().parse::<f64>().ok()
+                    }
+                    _ => None,
+                };
+                Ok(actual.is_some_and(|actual| {
+                    criterion_number_ordering(actual, *expected, self.approximate)
+                        == Some(Ordering::Equal)
+                }))
+            }
             DatabaseCriteriaRhs::EqualityText(pattern) => match cell {
                 Value::Text(text) if !text.is_empty() => pattern.matches_with_work(text, on_work),
                 _ => Ok(false),
@@ -145,7 +157,9 @@ impl CompiledDatabaseCriteria {
                     _ => None,
                 };
                 Ok(actual
-                    .and_then(|actual| actual.partial_cmp(expected))
+                    .and_then(|actual| {
+                        criterion_number_ordering(actual, *expected, self.approximate)
+                    })
                     .is_some_and(accept))
             }
             DatabaseCriteriaRhs::OrderedText(expected) => match cell {
@@ -190,11 +204,15 @@ mod tests {
 
     #[test]
     fn bare_text_is_prefix_while_explicit_equality_is_exact() {
-        let bare =
-            CompiledDatabaseCriteria::compile_with_work(&Value::Text("Dav".to_owned()), |_| Ok(()))
-                .expect("valid database criterion");
+        let bare = CompiledDatabaseCriteria::compile_with_work(
+            &Value::Text("Dav".to_owned()),
+            false,
+            |_| Ok(()),
+        )
+        .expect("valid database criterion");
         let exact = CompiledDatabaseCriteria::compile_with_work(
             &Value::Text("=Dav".to_owned()),
+            false,
             |_| Ok(()),
         )
         .expect("valid database criterion");

@@ -315,3 +315,80 @@ fn match_preserves_exact_approximate_error_and_resource_contracts() {
     );
     assert_issue(&limited, 1, CalculationIssueCode::ResourceLimitExceeded);
 }
+
+/// `A2:A11` hold `0.1+0.2`, which differs from `0.3` past the fifteenth digit, and `A12:A41` hold
+/// 1; row 1 compares them with `0.3`. The 40-cell range is indexed after its first calls.
+fn fifteen_digit_comparison_workbook() -> cellrune::WorkbookSnapshot {
+    let mut formulas = vec![
+        (1, 2, "COUNTIF($A$2:$A$11,0.3)"),
+        (1, 3, "COUNTIF($A$2:$A$41,0.3)"),
+        (1, 4, "COUNTIF($A$2:$A$41,0.3)"),
+        (1, 5, "COUNTIF($A$2:$A$41,0.3)"),
+        (1, 6, "COUNTIF($A$2:$A$41,0.3)"),
+        (1, 7, "COUNTIF($A$2:$A$41,\">0.3\")"),
+        (1, 8, "COUNTIF($A$2:$A$41,\"<=0.3\")"),
+        (1, 9, "IF(0.1+0.2=0.3,1,0)"),
+        (1, 10, "IF(1.1-1=0.1,1,0)"),
+        (1, 11, "IF(0.1+0.2>0.3,1,0)"),
+        (1, 12, "IF(0.1+0.2<>0.3,1,0)"),
+        (1, 13, "IF(0.1+0.2>=0.3,1,0)"),
+        (1, 14, "SWITCH(0.1+0.2,0.3,1,0)"),
+        (1, 15, "IFERROR(MATCH(0.3,$A$2:$A$11,0),0)"),
+    ];
+    for row in 2..=11 {
+        formulas.push((row, 1, "0.1+0.2"));
+    }
+    for row in 12..=41 {
+        formulas.push((row, 1, "1"));
+    }
+    workbook_with_formulas(&formulas)
+}
+
+#[test]
+fn comparisons_treat_numbers_equal_to_fifteen_digits_as_equal() {
+    let calculation = calculate_workbook(
+        &fifteen_digit_comparison_workbook(),
+        CalculationOptions::default(),
+    );
+    for (column, expected) in [
+        (2, 10.0),
+        (3, 10.0),
+        (4, 10.0),
+        (5, 10.0),
+        (6, 10.0),
+        (7, 30.0),
+        (8, 10.0),
+        (9, 1.0),
+        (10, 1.0),
+        (11, 0.0),
+        (12, 0.0),
+        (13, 1.0),
+        (14, 1.0),
+        // MATCH keeps exact equality; lookups get their own equality rule.
+        (15, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+}
+
+#[test]
+fn ieee754_comparisons_keep_exact_equality() {
+    let calculation = calculate_workbook(
+        &fifteen_digit_comparison_workbook(),
+        CalculationOptions::default()
+            .with_arithmetic_semantics(cellrune::ArithmeticSemantics::Ieee754),
+    );
+    for (column, expected) in [
+        (2, 0.0),
+        (3, 0.0),
+        (6, 0.0),
+        (7, 40.0),
+        (8, 0.0),
+        (9, 0.0),
+        (10, 0.0),
+        (12, 1.0),
+        (14, 0.0),
+    ] {
+        assert_number(&calculation, column, expected, 0.0);
+    }
+}
