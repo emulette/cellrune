@@ -154,6 +154,46 @@ fn moved_rows_carry_references_and_each_range_end() {
 }
 
 #[test]
+fn parenthesized_range_ends_change_with_the_area_they_name() {
+    check(
+        &grid(INSERT_ROWS, true),
+        &[
+            ("SUM((A3):A5)", "SUM((A5):A7)"),
+            ("SUM((A1):(A3))", "SUM((A1):(A5))"),
+            ("SUM(((A3)):A4)", "SUM(((A5)):A6)"),
+        ],
+    );
+    check(
+        &grid(DELETE_ROWS, true),
+        &[
+            ("SUM((A1):A5)", "SUM((A1):A3)"),
+            ("SUM((A3):(A4))", "SUM(#REF!)"),
+        ],
+    );
+    check(
+        &grid(DELETE_ROWS, false),
+        &[
+            // Parentheses end the qualifier, so the unqualified end stays on the host sheet.
+            ("SUM(('S1'!A1):A5)", "SUM(('S1'!A1):A5)"),
+            ("SUM(('S1'!A1):'S1'!A5)", "SUM(('S1'!A1):'S1'!A3)"),
+            ("SUM(('S1'!A3):'S1'!A4)", "SUM('S1'!#REF!)"),
+        ],
+    );
+    check(
+        &grid(
+            GridEdit::Move {
+                axis: GridAxis::Rows,
+                first: 3,
+                last: 3,
+                destination: 8,
+            },
+            true,
+        ),
+        &[("SUM((A1):A3)", "SUM((A1):A8)")],
+    );
+}
+
+#[test]
 fn a_range_move_carries_references_wholly_inside_it() {
     let request = grid(
         GridEdit::MoveRange {

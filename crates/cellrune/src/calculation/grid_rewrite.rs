@@ -215,7 +215,10 @@ pub(super) fn plan_grid_node(
         }
         Expr::Range { start, end } => {
             let children = node.children();
-            let (Some(start_node), Some(end_node)) = (children.first(), children.get(1)) else {
+            let (Some(start_node), Some(end_node)) = (
+                children.first().map(|child| unparenthesized(start, child)),
+                children.get(1).map(|child| unparenthesized(end, child)),
+            ) else {
                 return NodePlan::Descend;
             };
             let start_ref = targeted_reference(start, change);
@@ -330,6 +333,16 @@ fn targets(reference: &Reference, change: &GridChange<'_>) -> bool {
                 && case_insensitive_eq(&prefix.name, change.sheet)
         }
     }
+}
+
+/// Returns the node of the expression inside any parentheses, so the end of `(A1):B2` is edited
+/// where its reference is written.
+fn unparenthesized<'a>(mut expr: &Expr, mut node: &'a NodeSpanTree) -> &'a NodeSpanTree {
+    while let (Expr::Paren(inner), Some(child)) = (expr, node.children().first()) {
+        expr = inner;
+        node = child;
+    }
+    node
 }
 
 fn targeted_reference<'a>(mut expr: &'a Expr, change: &GridChange<'_>) -> Option<&'a Reference> {

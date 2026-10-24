@@ -22,6 +22,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `2^48 - 1`. A shift that pushed bits past 64 returned the truncated remainder, such as
   `BITLSHIFT(1073741825, 40)` returning 1099511627776.
 - `MODE`, `MODE.SNGL`, and `MODE.MULT` count `0` and `-0` as one value.
+- Inserting, deleting, or moving rows and columns rewrites both ends of a range whose end is in
+  parentheses, such as `(A3):A5`. Only the unparenthesized end moved, so the range silently
+  changed.
 
 ## [0.1.27] - 2026-10-24
 
