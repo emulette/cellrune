@@ -1083,8 +1083,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   construction.
 - `session.recalculate(RecalculationMode::Auto, options, token)` returns a
   `CalculationDelta`. `Auto` uses a proven dirty subset and falls back to
-  full calculation for name/sheet/table/options or uncertain dynamic/spill
-  topology. After edits that only add, replace, or remove cell formulas,
+  full calculation for defined-name edits, sheet deletion, reordering, copy,
+  or import, options, or uncertain dynamic/spill topology. After edits that only add, replace, or remove cell formulas,
   `Auto` parses just those formulas, updates the dependency graph in place,
   and evaluates them and their dependents (`DirtySubset`, with the parsed
   count in `.parsed_formula_count()`); it compiles the workbook again
