@@ -1,5 +1,5 @@
 use super::super::ast::Expr;
-use super::super::coerce::{to_logical, values_equal};
+use super::super::coerce::{logical_text, to_logical, values_equal};
 use super::super::eval::{Engine, EvalContext};
 use super::super::value::{ErrorKind, Value};
 use super::kernel::LogicalFunction;
@@ -67,13 +67,13 @@ fn logical_aggregate(
                 participants += 1;
                 true_count += u64::from(logical);
             }
-            Value::Text(text) if !item.from_collection => match to_logical(&Value::Text(text)) {
-                Ok(logical) => {
+            // Text other than `TRUE` and `FALSE` takes no part, as in `AND`.
+            Value::Text(text) if !item.from_collection => {
+                if let Some(logical) = logical_text(&text) {
                     participants += 1;
                     true_count += u64::from(logical);
                 }
-                Err(kind) => return Value::Error(kind),
-            },
+            }
             Value::Blank if !item.from_collection => participants += 1,
             Value::Error(kind) => return Value::Error(kind),
             Value::Blank | Value::Text(_) => {}

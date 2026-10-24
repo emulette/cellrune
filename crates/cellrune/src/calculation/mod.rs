@@ -30,6 +30,7 @@ mod lambda;
 mod lexer;
 mod limits;
 mod locale;
+mod numeric_text;
 mod operators;
 mod parser;
 pub(crate) mod persistent_store;

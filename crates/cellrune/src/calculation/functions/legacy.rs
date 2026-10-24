@@ -1,5 +1,5 @@
 use super::super::ast::Expr;
-use super::super::coerce::{to_logical, to_number, to_text};
+use super::super::coerce::{logical_text, to_logical, to_number, to_text};
 use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
@@ -232,11 +232,12 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
             }
             continue;
         }
-        match to_logical_aggregate_argument(&value, is_text_literal(arg)) {
-            Ok(logical) => {
+        match to_logical_aggregate_argument(&value) {
+            Ok(Some(logical)) => {
                 participants += 1;
                 all_true &= logical;
             }
+            Ok(None) => {}
             Err(kind) => return Value::Error(kind),
         }
     }
@@ -246,36 +247,12 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
     Value::Logical(all_true)
 }
 
-fn to_logical_aggregate_argument(
-    value: &Value,
-    coerce_numeric_text: bool,
-) -> Result<bool, ErrorKind> {
+/// Reads a direct argument of `AND`, `OR`, or `XOR`: text other than `TRUE` and `FALSE` takes no
+/// part, whether typed or computed, so `AND("0",1)` and `AND("x",1)` are `TRUE` (Mac Excel 16.114).
+fn to_logical_aggregate_argument(value: &Value) -> Result<Option<bool>, ErrorKind> {
     match value {
-        Value::Text(text) if coerce_numeric_text => text
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .filter(|number| number.is_finite())
-            .map(|number| number != 0.0)
-            .or_else(|| {
-                if text.eq_ignore_ascii_case("TRUE") {
-                    Some(true)
-                } else if text.eq_ignore_ascii_case("FALSE") {
-                    Some(false)
-                } else {
-                    None
-                }
-            })
-            .ok_or(ErrorKind::Value),
-        _ => to_logical(value),
-    }
-}
-
-fn is_text_literal(expr: &Expr) -> bool {
-    match expr {
-        Expr::Text(_) => true,
-        Expr::Paren(inner) => is_text_literal(inner),
-        _ => false,
+        Value::Text(text) => Ok(logical_text(text)),
+        _ => to_logical(value).map(Some),
     }
 }
 
@@ -306,7 +283,10 @@ fn kernel_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let number = match to_number(&engine.eval_scalar(context, &args[0])) {
+    let number = match to_number(
+        &engine.eval_scalar(context, &args[0]),
+        engine.numeric_text(),
+    ) {
         Ok(number) => number,
         Err(kind) => return Value::Error(kind),
     };
@@ -607,7 +587,7 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     }
     // Excel selects the mode by sign, so any positive type behaves as 1 and any negative as -1.
     let match_type = match args.get(2) {
-        Some(expr) => match to_number(&engine.eval_scalar(context, expr)) {
+        Some(expr) => match to_number(&engine.eval_scalar(context, expr), engine.numeric_text()) {
             Ok(number) if number > 0.0 => 1.0,
             Ok(number) if number < 0.0 => -1.0,
             Ok(_) => 0.0,

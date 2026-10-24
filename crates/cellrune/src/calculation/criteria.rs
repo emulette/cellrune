@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 
 use super::coerce::compare_text_case_insensitive;
 use super::excel_digits::approximately_equal;
+use super::numeric_text::NumericText;
 use super::value::{ErrorKind, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,9 @@ pub struct CompiledCriteria {
     /// Whether a number criterion treats numbers that differ only past their fifteenth significant
     /// digit as equal, as the comparison operators do.
     approximate: bool,
+    /// How a text cell reads as the number an equality criterion compares it to; `None` for a
+    /// lookup's equality, under which a number equals number cells only.
+    numeric_text: Option<NumericText>,
 }
 
 /// Orders a cell's number against a criterion's number. With `approximate`, numbers that differ
@@ -47,22 +51,26 @@ pub(in crate::calculation) fn criterion_number_ordering(
 }
 
 /// Compiles a COUNTIF-style criterion. `approximate` makes a number criterion compare as the
-/// comparison operators do; see [`criterion_number_ordering`].
+/// comparison operators do; see [`criterion_number_ordering`]. Text after the operator, and text
+/// cells an equality compares to a number, read as numbers as `numeric_text` reads them.
 pub fn compile_criteria_with_work(
     value: &Value,
     approximate: bool,
+    numeric_text: NumericText,
     on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<CompiledCriteria, ErrorKind> {
-    let (op, rhs) = compile_operator_and_value(value, on_work)?;
+    let (op, rhs) = compile_operator_and_value(value, numeric_text, on_work)?;
     Ok(CompiledCriteria {
         op,
         rhs,
         approximate,
+        numeric_text: Some(numeric_text),
     })
 }
 
 fn compile_operator_and_value(
     value: &Value,
+    numeric_text: NumericText,
     mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<(CriteriaOp, CompiledCriteriaRhs), ErrorKind> {
     match value {
@@ -90,7 +98,7 @@ fn compile_operator_and_value(
             };
             let rhs = if rest.is_empty() {
                 CompiledCriteriaRhs::Blank
-            } else if let Ok(number) = rest.trim().parse::<f64>() {
+            } else if let Some(number) = numeric_text.number(rest) {
                 CompiledCriteriaRhs::Number(number)
             } else if rest.eq_ignore_ascii_case("TRUE") {
                 CompiledCriteriaRhs::Logical(true)
@@ -107,6 +115,9 @@ fn compile_operator_and_value(
 }
 
 impl CompiledCriteria {
+    /// The exact equality of a `MATCH` lookup: text matches text case-insensitively and with
+    /// wildcards, and a number matches number cells only (`MATCH(5,{"5";5},0)` is 2, Mac Excel
+    /// 16.114).
     pub fn exact_equality_with_work(
         value: &Value,
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
@@ -124,6 +135,7 @@ impl CompiledCriteria {
             op: CriteriaOp::Eq,
             rhs,
             approximate: false,
+            numeric_text: None,
         }))
     }
 
@@ -133,8 +145,10 @@ impl CompiledCriteria {
         mut on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
     ) -> Result<bool, ErrorKind> {
         match self.op {
-            CriteriaOp::Eq => self.eq_matches(cell, &mut on_work),
-            CriteriaOp::Ne => Ok(!self.eq_matches(cell, &mut on_work)?),
+            CriteriaOp::Eq => self.eq_matches(cell, &mut on_work, true),
+            // A text cell is unequal to a number even when its text reads as that number: `"<>5"`
+            // counts a cell holding the text `5` (Mac Excel 16.114).
+            CriteriaOp::Ne => Ok(!self.eq_matches(cell, &mut on_work, false)?),
             CriteriaOp::Lt => {
                 self.ord_matches(cell, &mut on_work, |ordering| ordering == Ordering::Less)
             }
@@ -150,20 +164,26 @@ impl CompiledCriteria {
         }
     }
 
+    /// Whether `cell` equals the criterion's value; with `text_numbers`, a text cell equals a number
+    /// its text reads as.
     fn eq_matches(
         &self,
         cell: &Value,
         on_work: &mut impl FnMut(u64) -> Result<(), ErrorKind>,
+        text_numbers: bool,
     ) -> Result<bool, ErrorKind> {
         match &self.rhs {
             CompiledCriteriaRhs::Blank => Ok(cell.is_blank_like()),
             CompiledCriteriaRhs::Number(expected) => {
                 let actual = match cell {
                     Value::Number(number) => Some(*number),
-                    Value::Text(text) => {
-                        charge_preprocessing(on_work)?;
-                        text.trim().parse::<f64>().ok()
-                    }
+                    Value::Text(text) => match self.numeric_text {
+                        Some(numeric_text) if text_numbers => {
+                            charge_preprocessing(on_work)?;
+                            numeric_text.number(text)
+                        }
+                        _ => None,
+                    },
                     _ => None,
                 };
                 Ok(actual.is_some_and(|actual| {
@@ -194,21 +214,15 @@ impl CompiledCriteria {
         accept: impl Fn(Ordering) -> bool,
     ) -> Result<bool, ErrorKind> {
         match &self.rhs {
-            CompiledCriteriaRhs::Number(expected) => {
-                let actual = match cell {
-                    Value::Number(number) => Some(*number),
-                    Value::Text(text) => {
-                        charge_preprocessing(on_work)?;
-                        text.trim().parse::<f64>().ok()
-                    }
-                    _ => None,
-                };
-                Ok(actual
-                    .and_then(|actual| {
-                        criterion_number_ordering(actual, *expected, self.approximate)
-                    })
-                    .is_some_and(accept))
-            }
+            // A number orders only number cells: `">4"` does not count the text `5` (Mac Excel
+            // 16.114).
+            CompiledCriteriaRhs::Number(expected) => Ok(match cell {
+                Value::Number(actual) => {
+                    criterion_number_ordering(*actual, *expected, self.approximate)
+                        .is_some_and(accept)
+                }
+                _ => false,
+            }),
             CompiledCriteriaRhs::OrderedText(expected) => match cell {
                 Value::Text(text) if !text.is_empty() => {
                     charge_text_comparison(on_work)?;
@@ -230,7 +244,7 @@ impl CompiledCriteria {
     /// The one value this criterion matches cells equal to, or `None` for a comparison, an
     /// inequality, a wildcard pattern, a blank, or an error.
     ///
-    /// A number matches number cells equal to it and text cells whose trimmed text parses as it.
+    /// A number matches number cells equal to it and text cells whose text reads as it.
     /// A text matches nonempty text cells whose case-folded characters equal it. A logical matches
     /// the equal logical.
     pub(in crate::calculation) fn exact_value(&self) -> Option<ExactCriterion> {
@@ -445,10 +459,15 @@ mod tests {
         CompiledCriteria, CompiledCriteriaRhs, CompiledWildcardPattern,
         charge_value_comparison_work, compile_criteria_with_work,
     };
+    use crate::DateSystem;
     use crate::calculation::limits::CalculationLimitKind;
+    use crate::calculation::locale::Locale;
+    use crate::calculation::numeric_text::NumericText;
     use crate::calculation::session::CancellationToken;
     use crate::calculation::value::ErrorKind;
     use crate::calculation::value::Value;
+
+    const US: NumericText = NumericText::new(Locale::EnUs, DateSystem::Excel1900);
 
     fn charge(used: &mut u64, limit: u64, units: u64) -> Result<(), ErrorKind> {
         *used = used.checked_add(units).ok_or(ErrorKind::ResourceLimit(
@@ -509,14 +528,15 @@ mod tests {
     #[test]
     fn compiled_criteria_reuses_one_equality_pattern_and_keeps_ordered_text_raw() {
         let criterion =
-            compile_criteria_with_work(&Value::Text("a*".to_owned()), false, |_| Ok(()))
+            compile_criteria_with_work(&Value::Text("a*".to_owned()), false, US, |_| Ok(()))
                 .expect("valid criterion");
         assert!(matches!(
             criterion.rhs,
             CompiledCriteriaRhs::EqualityText(_)
         ));
-        let ordered = compile_criteria_with_work(&Value::Text(">a*".to_owned()), false, |_| Ok(()))
-            .expect("valid ordered criterion");
+        let ordered =
+            compile_criteria_with_work(&Value::Text(">a*".to_owned()), false, US, |_| Ok(()))
+                .expect("valid ordered criterion");
         assert_eq!(
             ordered.rhs,
             CompiledCriteriaRhs::OrderedText("a*".to_owned())
@@ -546,8 +566,9 @@ mod tests {
 
     #[test]
     fn bare_text_keeps_countif_exact_semantics() {
-        let countif = compile_criteria_with_work(&Value::Text("Dav".to_owned()), false, |_| Ok(()))
-            .expect("valid COUNTIF criterion");
+        let countif =
+            compile_criteria_with_work(&Value::Text("Dav".to_owned()), false, US, |_| Ok(()))
+                .expect("valid COUNTIF criterion");
         assert_eq!(
             countif.matches_with_work(&Value::Text("David".to_owned()), |_| Ok(())),
             Ok(false)
@@ -602,7 +623,7 @@ mod tests {
 
     #[test]
     fn numeric_and_ordered_text_work_is_charged_before_comparison() {
-        let numeric = compile_criteria_with_work(&Value::Number(12.0), false, |_| Ok(()))
+        let numeric = compile_criteria_with_work(&Value::Number(12.0), false, US, |_| Ok(()))
             .expect("numeric criterion");
         let mut numeric_work = 0_u64;
         assert_eq!(
@@ -615,7 +636,7 @@ mod tests {
         assert_eq!(numeric_work, 1);
 
         let ordered =
-            compile_criteria_with_work(&Value::Text(">alpha".to_owned()), false, |_| Ok(()))
+            compile_criteria_with_work(&Value::Text(">alpha".to_owned()), false, US, |_| Ok(()))
                 .expect("ordered criterion");
         let mut ordered_work = 0_u64;
         assert_eq!(

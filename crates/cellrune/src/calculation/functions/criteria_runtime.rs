@@ -31,9 +31,12 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<CompiledCriteria, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        compile_criteria_with_work(value, fifteen_digit_rules(engine), |units| {
-            Self::charge_cumulative(engine, context, units)
-        })
+        compile_criteria_with_work(
+            value,
+            fifteen_digit_rules(engine),
+            engine.numeric_text(),
+            |units| Self::charge_cumulative(engine, context, units),
+        )
     }
 
     pub(super) fn compile_database_criteria(
@@ -42,9 +45,12 @@ impl<'engine, 'workbook, 'scope> CriteriaRuntime<'engine, 'workbook, 'scope> {
     ) -> Result<CompiledDatabaseCriteria, ErrorKind> {
         let engine = self.engine;
         let context = self.context;
-        CompiledDatabaseCriteria::compile_with_work(value, fifteen_digit_rules(engine), |units| {
-            Self::charge_cumulative(engine, context, units)
-        })
+        CompiledDatabaseCriteria::compile_with_work(
+            value,
+            fifteen_digit_rules(engine),
+            engine.numeric_text(),
+            |units| Self::charge_cumulative(engine, context, units),
+        )
     }
 
     pub(super) fn compile_exact_equality(

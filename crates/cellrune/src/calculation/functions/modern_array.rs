@@ -110,7 +110,8 @@ fn choose(
     for argument in &args[1..] {
         let values = engine.eval_array(context, argument)?;
         for value in values.data {
-            let index = resolve_index(to_number(&value)?.trunc(), dimension)?;
+            let index =
+                resolve_index(to_number(&value, engine.numeric_text())?.trunc(), dimension)?;
             let index_count = u32::try_from(indexes.len() + 1).map_err(|_| ErrorKind::Num)?;
             let (rows, cols) = match axis {
                 Axis::Rows => (index_count, source.cols),
@@ -210,7 +211,7 @@ fn array_count(
     expr: &Expr,
     maximum: u32,
 ) -> Result<i64, ErrorKind> {
-    let value = to_number(&engine.eval_scalar(context, expr))?.trunc();
+    let value = to_number(&engine.eval_scalar(context, expr), engine.numeric_text())?.trunc();
     if !value.is_finite() {
         return Err(ErrorKind::Num);
     }
@@ -473,7 +474,9 @@ fn optional_integer(
 ) -> Result<i64, ErrorKind> {
     match expr {
         Some(Expr::Missing) | None => Ok(default),
-        Some(expr) => Ok(to_number(&engine.eval_scalar(context, expr))?.trunc() as i64),
+        Some(expr) => Ok(
+            to_number(&engine.eval_scalar(context, expr), engine.numeric_text())?.trunc() as i64,
+        ),
     }
 }
 

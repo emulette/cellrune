@@ -392,3 +392,113 @@ fn ieee754_comparisons_keep_exact_equality() {
         assert_number(&calculation, column, expected, 0.0);
     }
 }
+
+/// Row 1 matches criteria against `A2:A9`, which hold the date 2024-01-15, the text `2024-01-15`,
+/// 5, the text `5`, the text `1,000`, 1000, 0.5, and the text `50%`, above 32 rows of 1. Each
+/// criterion of the 40-cell range is counted three times so that later calls use its index.
+fn numeric_text_criteria_workbook() -> cellrune::WorkbookSnapshot {
+    let criteria = [
+        "\">=2024-01-10\"",
+        "\"2024-01-15\"",
+        "\"<>2024-01-15\"",
+        "\">4\"",
+        "\"5\"",
+        "\"<>5\"",
+        "\"1,000\"",
+        "\"50%\"",
+        "1000",
+    ];
+    let mut formulas = criteria
+        .iter()
+        .enumerate()
+        .flat_map(|(index, criterion)| {
+            (0..3).map(move |repeat| {
+                (
+                    1,
+                    (index * 3 + repeat) as u32 + 2,
+                    format!("COUNTIF($A$2:$A$41,{criterion})"),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    formulas.push((
+        1,
+        30,
+        "SUMIF($A$2:$A$9,\">=2024-01-10\",$A$2:$A$9)".to_owned(),
+    ));
+    for (row, value) in [
+        (2, "DATE(2024,1,15)"),
+        (3, "\"2024-01-15\""),
+        (4, "5"),
+        (5, "\"5\""),
+        (6, "\"1,000\""),
+        (7, "1000"),
+        (8, "0.5"),
+        (9, "\"50%\""),
+    ] {
+        formulas.push((row, 1, value.to_owned()));
+    }
+    for row in 10..=41 {
+        formulas.push((row, 1, "1".to_owned()));
+    }
+    let formulas = formulas
+        .iter()
+        .map(|(row, column, formula)| (*row, *column, formula.as_str()))
+        .collect::<Vec<_>>();
+    workbook_with_formulas(&formulas)
+}
+
+#[test]
+fn criteria_read_numeric_text_for_equality_but_order_only_numbers() {
+    // Mac Excel 16.114: an equality reads text cells as numbers, `<>` counts them as unequal, and
+    // an ordering compares number cells only.
+    let calculation = calculate_workbook(
+        &numeric_text_criteria_workbook(),
+        CalculationOptions::default(),
+    );
+    for (criterion, expected) in [
+        (0, 1.0),
+        (1, 2.0),
+        (2, 39.0),
+        (3, 3.0),
+        (4, 2.0),
+        (5, 39.0),
+        (6, 2.0),
+        (7, 2.0),
+        (8, 2.0),
+    ] {
+        for repeat in 0..3 {
+            assert_number(&calculation, criterion * 3 + repeat + 2, expected, 0.0);
+        }
+    }
+    assert_number(&calculation, 30, 45_306.0, 0.0);
+}
+
+#[test]
+fn exact_match_compares_numbers_with_number_cells_only() {
+    // Mac Excel 16.114: `MATCH(5,{"5";5},0)` is 2, as are `VLOOKUP` and `HLOOKUP`. `A2:A40` hold
+    // the text `5` and `A41` the number; repeated searches of the 40 cells use their index.
+    let mut formulas = (2..=13)
+        .map(|column| (1, column, "MATCH(5,$A$2:$A$41,0)"))
+        .collect::<Vec<_>>();
+    formulas.push((1, 14, "MATCH(\"5\",$A$2:$A$41,0)"));
+    formulas.push((1, 15, "MATCH(1000,$B$2:$B$3,0)"));
+    formulas.push((1, 16, "VLOOKUP(5,$A$40:$A$41,1,FALSE)"));
+    for row in 2..=40 {
+        formulas.push((row, 1, "\"5\""));
+    }
+    formulas.push((41, 1, "5"));
+    formulas.push((2, 2, "\"1,000\""));
+    formulas.push((3, 2, "1000"));
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&formulas),
+        CalculationOptions::default(),
+    );
+
+    for column in 2..=13 {
+        assert_number(&calculation, column, 40.0, 0.0);
+    }
+    assert_number(&calculation, 14, 1.0, 0.0);
+    assert_number(&calculation, 15, 2.0, 0.0);
+    assert_number(&calculation, 16, 5.0, 0.0);
+}

@@ -1501,6 +1501,14 @@ impl<'workbook> Engine<'workbook> {
         self.options.locale_profile()
     }
 
+    /// How text reads as a number: by the regional format and the workbook's date system.
+    pub(super) fn numeric_text(&self) -> super::numeric_text::NumericText {
+        super::numeric_text::NumericText::new(
+            self.options.locale_profile().locale(),
+            self.date_system(),
+        )
+    }
+
     /// The date system and regional format a number-format code reads in `TEXT`, `DOLLAR`, and
     /// `FIXED`, which drop a `*` fill.
     pub(super) fn format_context(&self) -> super::textfmt::FormatContext {

@@ -80,10 +80,10 @@ fn evaluate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Res
     }
     Ok(match function {
         1..=11 => subtotal_operation(engine, context, function, values),
-        12 => excel_numbers(values).map_or_else(Value::Error, median_of),
+        12 => excel_numbers(values, engine.numeric_text()).map_or_else(Value::Error, median_of),
         13 => mode_of(values),
         _ => {
-            let numbers = excel_numbers(values).map_err(Value::Error)?;
+            let numbers = excel_numbers(values, engine.numeric_text()).map_err(Value::Error)?;
             let k = required_number(engine, context, k.expect("functions 14 to 19 read k"))
                 .map_err(Value::Error)?;
             match function {

@@ -205,7 +205,6 @@ fn a_result_written_inside_an_indexed_range_drops_the_index() {
     };
     let index = std::sync::Arc::new(super::ExactLookupIndex {
         values: std::collections::HashMap::new(),
-        numeric_texts: std::collections::HashMap::new(),
         blanks: None,
         contains_nan: false,
         texts_before: vec![0; 41],
@@ -231,7 +230,6 @@ fn empty_index(length: u32) -> std::sync::Arc<super::ExactLookupIndex> {
     let prefix = vec![0; length as usize + 1];
     std::sync::Arc::new(super::ExactLookupIndex {
         values: std::collections::HashMap::new(),
-        numeric_texts: std::collections::HashMap::new(),
         blanks: None,
         contains_nan: false,
         texts_before: prefix.clone(),

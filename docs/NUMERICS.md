@@ -53,8 +53,9 @@ parity functions; other information functions keep their type-inspection semanti
 and skips blank or error keys. A blank search value follows the existing numeric-zero
 comparison. Other lookup functions retain their own comparison rules.
 
-Standard `WORKDAY`/`NETWORKDAYS` holidays accept numeric serials and numeric text and
-reject other text, including date strings. No locale-dependent date parser is implied.
+Standard `WORKDAY`/`NETWORKDAYS` holidays accept numeric serials and text that reads as a
+number, including date text such as `2026-01-02` in the locale profile's date order, and reject
+other text.
 `WORKDAY.INTL`/`NETWORKDAYS.INTL` preserve their existing numeric-only holiday collection:
 text and logical entries are ignored. Both families ignore blank/logical entries,
 propagate Excel errors, truncate valid fractional serials, and deduplicate holidays

@@ -1,19 +1,16 @@
 use std::cmp::Ordering;
 
 use super::excel_digits::approximate_ordering;
+use super::numeric_text::NumericText;
 use super::value::{ErrorKind, Value, number_to_general_text};
 
-pub fn to_number(value: &Value) -> Result<f64, ErrorKind> {
+/// Converts a value to a number, reading text as `numeric_text` does.
+pub fn to_number(value: &Value, numeric_text: NumericText) -> Result<f64, ErrorKind> {
     match value {
         Value::Number(number) => Ok(*number),
         Value::Blank => Ok(0.0),
         Value::Logical(logical) => Ok(if *logical { 1.0 } else { 0.0 }),
-        Value::Text(text) => text
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .filter(|number| number.is_finite())
-            .ok_or(ErrorKind::Value),
+        Value::Text(text) => numeric_text.number(text).ok_or(ErrorKind::Value),
         Value::Error(kind) => Err(*kind),
     }
 }
@@ -34,16 +31,19 @@ pub fn to_logical(value: &Value) -> Result<bool, ErrorKind> {
         Value::Logical(logical) => Ok(*logical),
         Value::Number(number) => Ok(*number != 0.0),
         Value::Blank => Ok(false),
-        Value::Text(text) => {
-            if text.eq_ignore_ascii_case("TRUE") {
-                Ok(true)
-            } else if text.eq_ignore_ascii_case("FALSE") {
-                Ok(false)
-            } else {
-                Err(ErrorKind::Value)
-            }
-        }
+        Value::Text(text) => logical_text(text).ok_or(ErrorKind::Value),
         Value::Error(kind) => Err(*kind),
+    }
+}
+
+/// The logical value text spells as `TRUE` or `FALSE` in any case.
+pub fn logical_text(text: &str) -> Option<bool> {
+    if text.eq_ignore_ascii_case("TRUE") {
+        Some(true)
+    } else if text.eq_ignore_ascii_case("FALSE") {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -123,22 +123,4 @@ pub fn compare_text_case_insensitive(left: &str, right: &str) -> Ordering {
 /// Whether two values are equal as the `=` operator compares them.
 pub fn values_equal(left: &Value, right: &Value, approximate: bool) -> Result<bool, ErrorKind> {
     Ok(compare_for_operator(left, right, approximate)? == Ordering::Equal)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ErrorKind, Value, to_number};
-
-    #[test]
-    fn numeric_text_rejects_non_finite_rust_spellings() {
-        assert_eq!(
-            to_number(&Value::Text("NaN".to_owned())),
-            Err(ErrorKind::Value)
-        );
-        assert_eq!(
-            to_number(&Value::Text("inf".to_owned())),
-            Err(ErrorKind::Value)
-        );
-        assert_eq!(to_number(&Value::Text(" 12.5 ".to_owned())), Ok(12.5));
-    }
 }

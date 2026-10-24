@@ -179,7 +179,7 @@ fn multiple(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], ceilin
     if matches!(significance_value, Value::Blank) {
         return Value::Number(0.0);
     }
-    let significance = match to_number(&significance_value) {
+    let significance = match to_number(&significance_value, engine.numeric_text()) {
         Ok(significance) if significance == 0.0 && number == 0.0 => {
             return Value::Number(0.0);
         }

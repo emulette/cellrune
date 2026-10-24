@@ -373,7 +373,7 @@ fn positive_wrap_count(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Result<u32, ErrorKind> {
-    let value = to_number(&engine.eval_scalar(context, expr))?.trunc();
+    let value = to_number(&engine.eval_scalar(context, expr), engine.numeric_text())?.trunc();
     if !value.is_finite() || value > f64::from(u32::MAX) {
         return Err(ErrorKind::Num);
     }
@@ -392,7 +392,7 @@ fn optional_dimension(
     let Some(expr) = expr.filter(|expr| !matches!(expr, Expr::Missing)) else {
         return Ok(default);
     };
-    let value = to_number(&engine.eval_scalar(context, expr))?.trunc();
+    let value = to_number(&engine.eval_scalar(context, expr), engine.numeric_text())?.trunc();
     if !value.is_finite() || value > f64::from(u32::MAX) {
         return Err(ErrorKind::Num);
     }
@@ -411,7 +411,7 @@ fn optional_integer(
     let Some(expr) = expr.filter(|expr| !matches!(expr, Expr::Missing)) else {
         return Ok(default);
     };
-    let value = to_number(&engine.eval_scalar(context, expr))?.trunc();
+    let value = to_number(&engine.eval_scalar(context, expr), engine.numeric_text())?.trunc();
     if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
         return Err(ErrorKind::Num);
     }

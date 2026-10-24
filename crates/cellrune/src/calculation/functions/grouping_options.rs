@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_number};
 use super::super::eval::{Engine, EvalContext};
+use super::super::numeric_text::NumericText;
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::validate_array_input;
@@ -151,7 +152,7 @@ pub(super) fn parse_sort_order(
     )?;
     for value in &values.data {
         super::array_common::poll_cancellation(context)?;
-        let signed = integer_value(value)?;
+        let signed = integer_value(value, engine.numeric_text())?;
         let magnitude = signed.unsigned_abs();
         if magnitude == 0 || magnitude > maximum as u64 {
             return Err(ErrorKind::Value);
@@ -240,11 +241,11 @@ fn present(expr: Option<&Expr>) -> Option<&Expr> {
 }
 
 fn integer(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) -> Result<i64, ErrorKind> {
-    integer_value(&engine.eval_scalar(context, expr))
+    integer_value(&engine.eval_scalar(context, expr), engine.numeric_text())
 }
 
-fn integer_value(value: &Value) -> Result<i64, ErrorKind> {
-    let number = to_number(value)?;
+fn integer_value(value: &Value, numeric_text: NumericText) -> Result<i64, ErrorKind> {
+    let number = to_number(value, numeric_text)?;
     if !number.is_finite() || number < i64::MIN as f64 || number > i64::MAX as f64 {
         return Err(ErrorKind::Num);
     }

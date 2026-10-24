@@ -179,8 +179,8 @@ impl CriteriaIndexCache {
 #[derive(Debug)]
 pub(in crate::calculation) struct CriteriaIndex {
     keys: HashMap<EqualityKey, u32>,
-    /// Each number cell's number, and each text cell's number its trimmed text parses as, with the
-    /// cell's offset, ascending by number. Zero and negative zero are one number.
+    /// Each number cell's number, and the number each text cell's text reads as, with the cell's
+    /// offset, ascending by number. Zero and negative zero are one number.
     numbers: Vec<(f64, u32)>,
     /// `offsets[starts[key]..starts[key + 1]]` are the ascending offsets grouped under `key`.
     starts: Vec<u32>,
@@ -204,6 +204,7 @@ impl CriteriaIndex {
         let mut texts = Bits::new(cells);
         let mut nonempty_texts = Bits::new(cells);
         let mut numbers = Vec::new();
+        let numeric_text = engine.numeric_text();
         let mut key_id = |key: EqualityKey| {
             let next = keys.len() as u32;
             *keys.entry(key).or_insert(next)
@@ -229,9 +230,8 @@ impl CriteriaIndex {
                     if !text.is_empty() {
                         nonempty_texts.set(offset);
                     }
-                    let parsed = text.trim().parse::<f64>().ok();
-                    if let Some(number) = parsed.filter(|number| !number.is_nan()) {
-                        numbers.push((number + 0.0, offset));
+                    if let Some(number) = numeric_text.number(&text) {
+                        numbers.push((number, offset));
                     }
                     EqualityKey::Text(lowercase(&text))
                 }

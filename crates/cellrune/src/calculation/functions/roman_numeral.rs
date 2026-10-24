@@ -120,7 +120,7 @@ fn roman_form(
     let form = match value {
         Value::Logical(true) => 0.0,
         Value::Logical(false) => 4.0,
-        value => to_number(&value)?,
+        value => to_number(&value, engine.numeric_text())?,
     };
     let form = form.trunc();
     if !form.is_finite() || !(0.0..=4.0).contains(&form) {

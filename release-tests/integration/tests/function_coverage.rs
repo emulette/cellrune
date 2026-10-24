@@ -507,6 +507,69 @@ fn powers_and_logarithms_follow_excel_zero_and_odd_root_rules() {
 }
 
 #[test]
+fn text_reads_as_a_number_in_the_forms_excel_accepts() {
+    // Mac Excel 16.114.
+    let time = |hours: f64, minutes: f64| (hours * 3_600.0 + minutes * 60.0) / 86_400.0;
+    let cases = [
+        number("VALUE(\"1,234\")", 1_234.0, 0.0),
+        number("\"1,000\"+1", 1_001.0, 0.0),
+        number("\"50%\"*2", 1.0, 0.0),
+        number("VALUE(\"1.1%\")", 0.011, 0.0),
+        number("--\"%5\"", 0.05, 0.0),
+        number("--\"(5)\"", -5.0, 0.0),
+        number("--\"$1,000\"", 1_000.0, 0.0),
+        number("--\" 1 1/2 \"", 1.5, 0.0),
+        number("VALUE(\"1234567890123456\")", 1_234_567_890_123_450.0, 0.0),
+        number("VALUE(\"2024-01-15\")", 45_306.0, 0.0),
+        number("VALUE(\"1/15/2024\")", 45_306.0, 0.0),
+        number("YEAR(\"2024-01-15\")", 2_024.0, 0.0),
+        number("DAY(\"2024-01-15 12:30\")", 15.0, 0.0),
+        number(
+            "VALUE(\"2024-01-15 12:30\")",
+            45_306.0 + time(12.0, 30.0),
+            0.0,
+        ),
+        number("--\"12:30\"", time(12.0, 30.0), 0.0),
+        number("HOUR(\"2:30 PM\")", 14.0, 0.0),
+        number("TIMEVALUE(\"2:30 PM\")", time(14.0, 30.0), 0.0),
+        number("DATEVALUE(\"2024-01-15 12:30\")", 45_306.0, 0.0),
+        number("SUM(\" 5 \")", 5.0, 0.0),
+        number("SUM(\"2024-01-15\")", 45_306.0, 0.0),
+        number("COUNT(\"1,000\",\"nan\",\"x\")", 1.0, 0.0),
+        number("AVERAGEA(\"50%\")", 0.5, 0.0),
+        number("SQRT(\"1,600\")", 40.0, 0.0),
+        number("CHOOSE(\"2\",1,2,3)", 2.0, 0.0),
+        text("LEFT(\"abc\",\"200%\")", "ab"),
+        number("ROUND(\"1,234.567\",1)", 1_234.6, 0.0),
+        error("VALUE(\"1,2\")", ExcelError::Value),
+        error("VALUE(\"(-5)\")", ExcelError::Value),
+        error("VALUE(\"$5%\")", ExcelError::Value),
+        error("VALUE(\"inf\")", ExcelError::Value),
+        error("VALUE(\"1E+308\")", ExcelError::Value),
+        error("--(CHAR(160)&\"5\")", ExcelError::Value),
+        error("VALUE(\"2:30PM\")", ExcelError::Value),
+        error("SUM(\"x\")", ExcelError::Value),
+        error("DATEVALUE(\"5\")", ExcelError::Value),
+        // Excel reads these as dates in the current year; CellRune leaves them unread.
+        error("VALUE(\"1/2\")", ExcelError::Value),
+        error("VALUE(\"5-3\")", ExcelError::Value),
+        // Text other than TRUE and FALSE takes no part in AND, OR, and XOR.
+        logical("AND(\"0\",1)", true),
+        logical("AND(\"x\",1)", true),
+        logical("AND(\"\"&\"FALSE\",1)", false),
+        logical("OR(\"1\",0)", false),
+        logical("XOR(\"1\",TRUE)", true),
+        error("OR(\"x\")", ExcelError::Value),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn ieee754_rounding_keeps_the_binary_quotient() {
     let cases = [
         number("ROUND(1.005,2)", 1.0, 0.0),
@@ -752,7 +815,7 @@ fn corpus_driven_functions_match_excel_scalar_contracts() {
         number("VALUE(\"0.33\")", 0.33, 0.0),
         number("VALUE(\"$1,000\")", 1_000.0, 0.0),
         number("VALUE(\"12.5%\")", 0.125, 0.0),
-        number("VALUE(\"(₩1,234)\")", -1_234.0, 0.0),
+        number("VALUE(\"($1,234)\")", -1_234.0, 0.0),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 

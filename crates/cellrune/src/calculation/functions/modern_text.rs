@@ -53,7 +53,10 @@ fn array_to_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
     }
     let strict = match args.get(1) {
         None | Some(Expr::Missing) => false,
-        Some(expression) => match to_number(&engine.eval_scalar(context, expression)) {
+        Some(expression) => match to_number(
+            &engine.eval_scalar(context, expression),
+            engine.numeric_text(),
+        ) {
             Ok(number) if number.trunc() == 0.0 => false,
             Ok(number) if number.trunc() == 1.0 => true,
             Ok(_) => return Value::Error(ErrorKind::Value),

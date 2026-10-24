@@ -199,7 +199,6 @@ impl LookupIndexCache {
 #[derive(Debug)]
 pub(in crate::calculation) struct ExactLookupIndex {
     values: HashMap<EqualityKey, Span>,
-    numeric_texts: HashMap<u64, Span>,
     blanks: Option<Span>,
     contains_nan: bool,
     texts_before: Vec<u32>,
@@ -407,7 +406,6 @@ impl ExactLookupIndex {
         let length = area.length as usize;
         let mut index = Self {
             values: HashMap::new(),
-            numeric_texts: HashMap::new(),
             blanks: None,
             contains_nan: false,
             texts_before: Vec::with_capacity(length + 1),
@@ -445,9 +443,6 @@ impl ExactLookupIndex {
                     if !text.is_empty() {
                         nonempty_texts += 1;
                     }
-                    if let Some(key) = text.trim().parse::<f64>().ok().and_then(number_key) {
-                        Span::record(&mut index.numeric_texts, key, offset);
-                    }
                     EqualityKey::Text(lowercase(&text))
                 }
             };
@@ -481,13 +476,11 @@ impl ExactLookupIndex {
     /// the index cannot answer.
     fn criteria_equal(&self, lookup: &Value) -> Option<Option<Span>> {
         match lookup {
-            Value::Number(number) => {
-                let key = number_key(*number)?;
-                Some(union(
-                    self.values.get(&EqualityKey::Number(key)).copied(),
-                    self.numeric_texts.get(&key).copied(),
-                ))
-            }
+            Value::Number(number) => Some(
+                self.values
+                    .get(&EqualityKey::Number(number_key(*number)?))
+                    .copied(),
+            ),
             Value::Text(text) if !text.is_empty() && !has_wildcard_syntax(text) => Some(
                 self.values
                     .get(&EqualityKey::Text(lowercase(text)))
@@ -534,7 +527,7 @@ pub(super) fn indexed_lookup_offset(
         .map(|charged| charged.and_then(|()| found.ok_or(ErrorKind::NA)))
 }
 
-/// The offset of an exact MATCH, whose criterion compares numbers with numeric text and text
+/// The offset of an exact MATCH, whose criterion compares numbers with number cells and text
 /// case-insensitively, or `None` when the caller must scan.
 pub(super) fn indexed_match_offset(
     engine: &Engine<'_>,
@@ -546,10 +539,8 @@ pub(super) fn indexed_match_offset(
     let span = index.criteria_equal(lookup)?;
     let found = span.map(|span| span.first);
     let reads = found.map_or(area.length, |offset| offset + 1);
-    // A number criterion parses every text cell it meets, and a text criterion compares every
-    // nonempty text cell; each costs one work unit.
+    // A text criterion compares every nonempty text cell it meets, which costs one work unit.
     let (work, full_work) = match lookup {
-        Value::Number(_) => (index.texts_in(0, reads), index.texts_in(0, area.length)),
         Value::Text(_) => (
             index.nonempty_texts_in(0, reads),
             index.nonempty_texts_in(0, area.length),

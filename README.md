@@ -167,7 +167,7 @@ result rather than a guess; the details are in
 [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 
 CellRune 0.1.16 added `XLOOKUP`, `DATEVALUE`, `TIMEVALUE`,
-`NETWORKDAYS.INTL`, and `WORKDAY.INTL`. Their fixed grammar, lookup modes, calendar rules,
+`NETWORKDAYS.INTL`, and `WORKDAY.INTL`. Their date and time text, lookup modes, calendar rules,
 wildcard behavior, and array-result boundaries are documented alongside the current function
 catalog in [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt).
 

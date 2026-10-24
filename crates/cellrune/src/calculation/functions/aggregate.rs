@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
 use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
+use super::super::numeric_text::NumericText;
 use super::super::runtime::Rect;
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
@@ -68,7 +69,7 @@ pub(super) fn call_scope_values(
         AggregateFunction::Min => aggregate_collected(engine, values, Aggregate::Min),
         AggregateFunction::Max => aggregate_collected(engine, values, Aggregate::Max),
         AggregateFunction::Product => aggregate_collected(engine, values, Aggregate::Product),
-        AggregateFunction::Count => count_collected(values),
+        AggregateFunction::Count => count_collected(values, engine.numeric_text()),
         AggregateFunction::CountA => count_nonblank_collected(&values),
         AggregateFunction::CountBlank
         | AggregateFunction::Aggregate
@@ -135,9 +136,9 @@ fn aggregate_collected(
                     0.0
                 }
             }
-            Value::Text(text) if !from_collection => match text.parse::<f64>() {
-                Ok(number) => number,
-                Err(_) => return Value::Error(ErrorKind::Value),
+            Value::Text(text) if !from_collection => match engine.numeric_text().number(&text) {
+                Some(number) => number,
+                None => return Value::Error(ErrorKind::Value),
             },
             Value::Error(kind) => return Value::Error(kind),
             Value::Blank | Value::Text(_) | Value::Logical(_) => continue,
@@ -184,10 +185,10 @@ fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    count_collected(values)
+    count_collected(values, engine.numeric_text())
 }
 
-fn count_collected(values: Vec<ArgumentValue>) -> Value {
+fn count_collected(values: Vec<ArgumentValue>, numeric_text: NumericText) -> Value {
     let mut count = 0_u64;
     for ArgumentValue {
         value,
@@ -198,7 +199,9 @@ fn count_collected(values: Vec<ArgumentValue>) -> Value {
         match value {
             Value::Number(_) => count += 1,
             Value::Logical(_) if !from_collection => count += 1,
-            Value::Text(text) if !from_collection && text.parse::<f64>().is_ok() => count += 1,
+            Value::Text(text) if !from_collection && numeric_text.number(&text).is_some() => {
+                count += 1;
+            }
             Value::Error(kind) if kind.is_engine_issue() => return Value::Error(kind),
             Value::Error(_) => {}
             Value::Blank | Value::Text(_) | Value::Logical(_) => {}
@@ -305,13 +308,13 @@ pub(super) fn subtotal_operation(
     operation: u8,
     values: Vec<ArgumentValue>,
 ) -> Value {
-    let variance = |values, kind, square_root| match excel_numbers(values) {
+    let variance = |values, kind, square_root| match excel_numbers(values, engine.numeric_text()) {
         Ok(numbers) => variance_value(engine, context, numbers, kind, square_root),
         Err(kind) => Value::Error(kind),
     };
     match operation {
         1 => aggregate_collected(engine, values, Aggregate::Average),
-        2 => count_collected(values),
+        2 => count_collected(values, engine.numeric_text()),
         3 => count_nonblank_collected(&values),
         4 => aggregate_collected(engine, values, Aggregate::Max),
         5 => aggregate_collected(engine, values, Aggregate::Min),

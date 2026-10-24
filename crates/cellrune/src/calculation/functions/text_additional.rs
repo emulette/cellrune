@@ -1,5 +1,5 @@
 use super::super::ast::Expr;
-use super::super::coerce::{to_logical, to_number};
+use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::textfmt::format_number;
@@ -144,15 +144,7 @@ fn rounded_to_decimals(
     decimals: Option<&Expr>,
     default_decimals: i32,
 ) -> Result<(f64, usize), ErrorKind> {
-    let number_value = engine.eval_scalar(context, number);
-    let number = match to_number(&number_value) {
-        Ok(number) => number,
-        Err(ErrorKind::Value) => match &number_value {
-            Value::Text(text) => parse_value_number(text).ok_or(ErrorKind::Value)?,
-            _ => return Err(ErrorKind::Value),
-        },
-        Err(kind) => return Err(kind),
-    };
+    let number = required_number(engine, context, number)?;
     let decimals = match decimals {
         None | Some(Expr::Missing) => default_decimals,
         Some(expr) => required_number(engine, context, expr)?.trunc() as i32,
@@ -188,7 +180,10 @@ fn value(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
         Ok(text) => text,
         Err(kind) => return Value::Error(kind),
     };
-    parse_value_number(&text).map_or(Value::Error(ErrorKind::Value), Value::Number)
+    engine
+        .numeric_text()
+        .number(&text)
+        .map_or(Value::Error(ErrorKind::Value), Value::Number)
 }
 
 fn clean(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -429,105 +424,13 @@ fn cp1252_character(code: u8) -> Option<char> {
     Some(character)
 }
 
-fn parse_value_number(text: &str) -> Option<f64> {
-    let mut value = text.trim();
-    if value.is_empty() {
-        return None;
-    }
-    let parenthesized = value.starts_with('(') && value.ends_with(')');
-    if parenthesized {
-        value = value.get(1..value.len().checked_sub(1)?)?.trim();
-    } else if value.starts_with('(') || value.ends_with(')') {
-        return None;
-    }
-    let percent = value.ends_with('%');
-    if percent {
-        value = value.get(..value.len().checked_sub(1)?)?.trim_end();
-    }
-    if value
-        .chars()
-        .next()
-        .is_some_and(|character| "$₩€£¥".contains(character))
-    {
-        value = value.get(value.chars().next()?.len_utf8()..)?.trim_start();
-    }
-    let normalized = normalize_grouped_number(value)?;
-    let mut number = normalized.parse::<f64>().ok()?;
-    if !number.is_finite() {
-        return None;
-    }
-    if parenthesized {
-        number = -number;
-    }
-    if percent {
-        number /= 100.0;
-    }
-    Some(number)
-}
-
-fn normalize_grouped_number(value: &str) -> Option<String> {
-    if !value.contains(',') {
-        return Some(value.to_owned());
-    }
-    let exponent_at = value
-        .char_indices()
-        .find_map(|(index, character)| matches!(character, 'e' | 'E').then_some(index));
-    let (mantissa, exponent) = exponent_at.map_or((value, ""), |index| value.split_at(index));
-    let (integer, fraction) = mantissa
-        .split_once('.')
-        .map_or((mantissa, None), |(integer, fraction)| {
-            (integer, Some(fraction))
-        });
-    let (sign, unsigned_integer) = integer.strip_prefix('+').map_or_else(
-        || {
-            integer
-                .strip_prefix('-')
-                .map_or(("", integer), |digits| ("-", digits))
-        },
-        |digits| ("+", digits),
-    );
-    let groups = unsigned_integer.split(',').collect::<Vec<_>>();
-    if groups.len() < 2
-        || groups[0].is_empty()
-        || groups[0].len() > 3
-        || !groups
-            .iter()
-            .all(|group| group.bytes().all(|byte| byte.is_ascii_digit()))
-        || groups[1..].iter().any(|group| group.len() != 3)
-        || fraction.is_some_and(|fraction| {
-            fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit())
-        })
-    {
-        return None;
-    }
-    let mut normalized = String::from(sign);
-    for group in groups {
-        normalized.push_str(group);
-    }
-    if let Some(fraction) = fraction {
-        normalized.push('.');
-        normalized.push_str(fraction);
-    }
-    normalized.push_str(exponent);
-    Some(normalized)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{cp1252_character, parse_value_number, text_matches};
+    use super::{cp1252_character, text_matches};
 
     #[test]
     fn case_insensitive_boundaries_keep_original_utf8_offsets() {
         assert_eq!(text_matches("Ä-one-ä", "ä", true), vec![(0, 2), (7, 9)]);
-    }
-
-    #[test]
-    fn invariant_value_parser_handles_currency_grouping_percent_and_parentheses() {
-        assert_eq!(parse_value_number("$1,000.50"), Some(1_000.5));
-        assert_eq!(parse_value_number("12.5%"), Some(0.125));
-        assert_eq!(parse_value_number("(₩1,234)"), Some(-1_234.0));
-        assert_eq!(parse_value_number("1,00"), None);
-        assert_eq!(parse_value_number("NaN"), None);
     }
 
     #[test]

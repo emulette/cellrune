@@ -59,7 +59,12 @@ pub(super) fn call_array(
         if matches!(expression, Expr::Missing) {
             Ok(false)
         } else {
-            match to_number(&engine.eval_scalar(context, expression))?.trunc() {
+            match to_number(
+                &engine.eval_scalar(context, expression),
+                engine.numeric_text(),
+            )?
+            .trunc()
+            {
                 0.0 => Ok(false),
                 1.0 => Ok(true),
                 _ => Err(ErrorKind::Value),

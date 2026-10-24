@@ -63,32 +63,34 @@ fn assert_error(result: &CalculationCellResult, expected: ExcelError) {
 }
 
 #[test]
-fn datevalue_and_timevalue_freeze_ascii_grammar_and_both_date_systems() {
+fn datevalue_and_timevalue_read_date_and_time_text_in_both_date_systems() {
     let formulas = [
         "=DATEVALUE(\"2024-02-29\")",
         "=DATE(2024,2,29)",
-        "=DATEVALUE(\" \t2024-02-29\t \")",
+        "=DATEVALUE(\"  2024/2/29 \")",
         "=DATEVALUE(\"9999-12-31\")",
         "=DATE(9999,12,31)",
         "=DATEVALUE(\"1900-02-29\")",
+        "=DATEVALUE(\"2/29/2024 23:59\")",
         "=DATEVALUE(\"2023-02-29\")",
-        "=DATEVALUE(\"2024/02/29\")",
+        "=DATEVALUE(\" \t2024-02-29\t \")",
         "=DATEVALUE(\"February 29, 2024\")",
         "=DATEVALUE(\"2024-02-29T00:00:00\")",
         "=DATEVALUE(\"２０２４-02-29\")",
         "=DATEVALUE(1)",
         "=DATEVALUE(TRUE)",
         "=DATEVALUE(\"0000-01-01\")",
+        "=DATEVALUE(\"5\")",
         "=TIMEVALUE(\"00:00\")",
         "=TIMEVALUE(\"14:35:42\")",
         "=TIMEVALUE(\"23:59:59.1\")",
         "=TIMEVALUE(\"00:00:00.123456789\")",
-        "=TIMEVALUE(\"12:34:56.1234567890\")",
         "=TIMEVALUE(\"24:00\")",
-        "=TIMEVALUE(\"12:60\")",
-        "=TIMEVALUE(\"12:00:60\")",
         "=TIMEVALUE(\"11:00 PM\")",
         "=TIMEVALUE(\"2024-02-29 12:00\")",
+        "=TIMEVALUE(\"12:60\")",
+        "=TIMEVALUE(\"12:00:60\")",
+        "=TIMEVALUE(\"12\")",
         "=TIMEVALUE(1)",
     ];
     let excel_1900 = calculate(DateSystem::Excel1900, &formulas, None);
@@ -96,18 +98,21 @@ fn datevalue_and_timevalue_freeze_ascii_grammar_and_both_date_systems() {
     assert_eq!(excel_1900[0], excel_1900[2]);
     assert_eq!(excel_1900[3], excel_1900[4]);
     assert_close(&excel_1900[5], 60.0);
-    for result in &excel_1900[6..=12] {
+    assert_eq!(excel_1900[0], excel_1900[6]);
+    for result in &excel_1900[7..=15] {
         assert_error(result, ExcelError::Value);
     }
-    assert_error(&excel_1900[13], ExcelError::Number);
-    assert_close(&excel_1900[14], 0.0);
+    assert_close(&excel_1900[16], 0.0);
     assert_close(
-        &excel_1900[15],
+        &excel_1900[17],
         (14.0 * 3_600.0 + 35.0 * 60.0 + 42.0) / 86_400.0,
     );
-    assert_close(&excel_1900[16], (86_399.0 + 0.1) / 86_400.0);
-    assert_close(&excel_1900[17], 0.123_456_789 / 86_400.0);
-    for result in &excel_1900[18..] {
+    assert_close(&excel_1900[18], (86_399.0 + 0.1) / 86_400.0);
+    assert_close(&excel_1900[19], 0.123 / 86_400.0);
+    assert_close(&excel_1900[20], 0.0);
+    assert_close(&excel_1900[21], 23.0 / 24.0);
+    assert_close(&excel_1900[22], 0.5);
+    for result in &excel_1900[23..] {
         assert_error(result, ExcelError::Value);
     }
 
@@ -128,7 +133,7 @@ fn datevalue_and_timevalue_freeze_ascii_grammar_and_both_date_systems() {
     assert_eq!(number(&excel_1900[0]) - number(&excel_1904[0]), 1_462.0);
     assert_eq!(number(&excel_1900[3]) - number(&excel_1904[3]), 1_462.0);
     assert_error(&excel_1904[4], ExcelError::Value);
-    assert_error(&excel_1904[5], ExcelError::Number);
+    assert_error(&excel_1904[5], ExcelError::Value);
 }
 
 #[test]

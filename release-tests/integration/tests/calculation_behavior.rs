@@ -5549,7 +5549,7 @@ fn xlookup_supports_exact_vector_lookup_and_excel_resave_prefixes() {
 }
 
 #[test]
-fn datevalue_timevalue_and_intl_workdays_follow_the_released_ascii_contract() {
+fn datevalue_timevalue_and_intl_workdays_read_dates_and_times_as_excel_does() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "DATEVALUE(\"2024-02-29\")"),
         (1, 2, "DATEVALUE(\"1900-02-29\")"),
@@ -5574,7 +5574,9 @@ fn datevalue_timevalue_and_intl_workdays_follow_the_released_ascii_contract() {
     for (column, expected) in [
         (1, 45_351.0),
         (2, 60.0),
+        (3, 45_351.0),
         (4, (14.0 * 3_600.0 + 35.0 * 60.0 + 42.0) / 86_400.0),
+        (5, 0.0),
         (6, 7.0),
         (7, -7.0),
         (8, 0.0),
@@ -5583,7 +5585,7 @@ fn datevalue_timevalue_and_intl_workdays_follow_the_released_ascii_contract() {
     ] {
         assert_number(&calculation, column, expected, 1e-15);
     }
-    for column in [3, 5, 9, 12] {
+    for column in [9, 12] {
         assert_eq!(
             calculation.cell(cell_id(column)),
             Some(&CalculationCellResult::Value(CellValue::Error(

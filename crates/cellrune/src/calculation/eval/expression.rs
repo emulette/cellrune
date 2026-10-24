@@ -13,6 +13,7 @@ use crate::calculation::functions::{
     reduce_scope_value,
 };
 use crate::calculation::limits::CalculationLimitKind;
+use crate::calculation::numeric_text::NumericText;
 use crate::calculation::operators::{apply_binary, apply_unary, broadcast_shape, element_at};
 use crate::calculation::runtime::{Array, ArrayExtent, Rect, ReferenceValue};
 use crate::calculation::scope::{
@@ -60,10 +61,11 @@ fn evaluate_binary(
     right: &Value,
     max_text_bytes: u64,
     arithmetic: ArithmeticSemantics,
+    numeric_text: NumericText,
     place: OperatorPlace,
 ) -> Value {
     let excel_rules = matches!(arithmetic, ArithmeticSemantics::ExcelNearZero);
-    let value = apply_binary(op, left, right, max_text_bytes, excel_rules);
+    let value = apply_binary(op, left, right, max_text_bytes, excel_rules, numeric_text);
     match (op, place, left, right, value) {
         (
             BinaryOp::Add | BinaryOp::Subtract,
@@ -200,6 +202,7 @@ impl Engine<'_> {
                     &self.eval_scalar(context, right),
                     self.options.limits().max_text_bytes(),
                     self.arithmetic_semantics(),
+                    self.numeric_text(),
                     OperatorPlace::Root,
                 ))
             });
@@ -470,15 +473,18 @@ impl Engine<'_> {
                 context,
                 &invoke_expr_scope_value(self, context, callee, args),
             ),
-            Expr::Unary { op, operand } => {
-                ScalarEvaluation::new(apply_unary(*op, &self.eval_scalar(context, operand)))
-            }
+            Expr::Unary { op, operand } => ScalarEvaluation::new(apply_unary(
+                *op,
+                &self.eval_scalar(context, operand),
+                self.numeric_text(),
+            )),
             Expr::Binary { op, left, right } => ScalarEvaluation::new(evaluate_binary(
                 *op,
                 &self.eval_scalar(context, left),
                 &self.eval_scalar(context, right),
                 self.options.limits().max_text_bytes(),
                 self.arithmetic_semantics(),
+                self.numeric_text(),
                 OperatorPlace::Nested,
             )),
         })
@@ -675,7 +681,7 @@ impl Engine<'_> {
                     .array
                     .data
                     .into_iter()
-                    .map(|value| apply_unary(*op, &value))
+                    .map(|value| apply_unary(*op, &value, self.numeric_text()))
                     .collect();
                 Ok(ArrayEvaluation::new(Array { rows, cols, data }))
             }
@@ -751,6 +757,7 @@ impl Engine<'_> {
                     element_at(&right.array, row, column),
                     self.options.limits().max_text_bytes(),
                     self.arithmetic_semantics(),
+                    self.numeric_text(),
                     place,
                 ));
             }

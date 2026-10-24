@@ -1546,11 +1546,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   binary, and descending binary search. Binary search assumes correctly sorted
   caller input and wildcard mode rejects binary search. `if_not_found` is lazy
   and is evaluated only for no-match.
-- `DATEVALUE` accepts space/tab-trimmed ASCII `YYYY-MM-DD`; `TIMEVALUE` accepts
-  the same trimming with ASCII `HH:MM`, optional seconds, and one-to-nine
-  fractional-second digits.
-  Both reject locale-dependent input. `DATEVALUE` validates Gregorian fields
-  and maps `1900-02-29` to serial 60 only in the Excel 1900 system.
+- `DATEVALUE` and `TIMEVALUE` read the dates and times that text reads as
+  (see the text-to-number rule below), including a date followed by a time,
+  and return the serial's whole day and its fraction; a plain number such as
+  `"5"` is `#VALUE!`. Dates must exist in the workbook's date system, and
+  `1900-02-29` is serial 60 only in the Excel 1900 system.
   `NETWORKDAYS.INTL` and `WORKDAY.INTL` support numeric weekend codes 1..7 and
   11..17 or a seven-bit Monday-first mask, deduplicate numeric holidays, and
   charge the iteration budget while observing cancellation.
@@ -1693,7 +1693,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   result) and `KoKr`; both use `.` and `,` as decimal and thousands
   separators. The regional format decides the `DOLLAR` currency symbol (`$`
   or `₩`; both default to two decimals and parenthesize a negative amount,
-  as in `(₩1.50)`), and the names `TEXT` shows:
+  as in `(₩1.50)`), the currency symbol text may carry when it reads as a
+  number and whether a date may begin with its month (only under `EnUs`),
+  and the names `TEXT` shows:
   English for `EnUs`, while Korean month, weekday, and `AM`/`PM` names are
   `calculation.unsupported_expression` until measured (a `[$-409]` section
   still shows English names), and the double-byte rules of `LENB`, `LEFTB`,
@@ -1744,6 +1746,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   `0.666666666666667`, `1E+20&""` is `1E+20`), and a number written in a
   formula keeps fifteen significant digits (`1234567890123456` reads as
   `1234567890123450`).
+  Text where a formula needs a number — operators, function arguments,
+  `VALUE`, direct arguments of `SUM`, `COUNT`, and the statistics, criteria,
+  and holidays — reads as Excel reads a typed entry, in either mode: spaces
+  around it are ignored; it may hold thousands separators (`1,234`), an
+  exponent, a percent sign before or after the number, parentheses for a
+  negative number, the locale's currency symbol, a whole number and a
+  fraction (`1 1/2`), a date (`2024-01-15`, `2024/1/5`, and under `EnUs`
+  `1/15/2024` or `1/15/24`), a time (`14:30:15.5`, `2:30 PM`, `25:00`), or a
+  date and a time. Digits past the fifteenth read as zeros. Other text,
+  including forms Excel reads from the current date (`1/2`), month names,
+  minutes or seconds past 59, and whitespace other than spaces, is
+  `#VALUE!`. In criteria an equality reads text cells the same way
+  (`COUNTIF(r,1000)` counts the text `1,000`), `<>` counts such a text cell
+  as unequal, and an ordering compares number cells only. `MATCH` with match
+  type 0 matches a number with number cells only. `AND`, `OR`, and `XOR` skip
+  a text argument other than `TRUE` and `FALSE`.
   `FinancialSolverSemantics`: `ExcelIterationBudget` (default) applies
   Microsoft's per-function budget — 20 iterations/`1e-7` for `IRR` and `RATE`,
   100/`1e-8` for `XIRR` — so inputs Excel abandons yield `#NUM!` here too;

@@ -1,6 +1,7 @@
 use super::super::super::ast::Expr;
 use super::super::super::coerce::to_number;
 use super::super::super::eval::{Engine, EvalContext};
+use super::super::super::numeric_text::NumericText;
 use super::super::super::runtime::Array;
 use super::super::super::value::{ErrorKind, Value};
 
@@ -178,11 +179,12 @@ fn present(expression: Option<&Expr>) -> Option<&Expr> {
 struct EvaluatedArray {
     array: Array,
     scalar_coercion: bool,
+    numeric_text: NumericText,
 }
 
 impl EvaluatedArray {
     fn into_numbers(self) -> Result<Vec<f64>, ErrorKind> {
-        coerce_cells(self.array.data, self.scalar_coercion)
+        coerce_cells(self.array.data, self.scalar_coercion, self.numeric_text)
     }
 }
 
@@ -198,15 +200,20 @@ fn evaluated_array(
     Ok(EvaluatedArray {
         array,
         scalar_coercion,
+        numeric_text: engine.numeric_text(),
     })
 }
 
-fn coerce_cells(values: Vec<Value>, scalar_coercion: bool) -> Result<Vec<f64>, ErrorKind> {
+fn coerce_cells(
+    values: Vec<Value>,
+    scalar_coercion: bool,
+    numeric_text: NumericText,
+) -> Result<Vec<f64>, ErrorKind> {
     values
         .into_iter()
         .map(|value| {
             if scalar_coercion {
-                to_number(&value)
+                to_number(&value, numeric_text)
             } else {
                 match value {
                     Value::Number(number) if number.is_finite() => Ok(number),
@@ -248,24 +255,29 @@ fn is_scalar_expression(expression: &Expr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::coerce_cells;
+    use crate::DateSystem;
+    use crate::calculation::locale::Locale;
+    use crate::calculation::numeric_text::NumericText;
     use crate::calculation::value::{ErrorKind, Value};
+
+    const US: NumericText = NumericText::new(Locale::EnUs, DateSystem::Excel1900);
 
     #[test]
     fn regression_coercion_table_distinguishes_scalars_and_collections() {
         assert_eq!(
-            coerce_cells(vec![Value::Text("2".into())], true),
+            coerce_cells(vec![Value::Text("2".into())], true, US),
             Ok(vec![2.0])
         );
         assert_eq!(
-            coerce_cells(vec![Value::Logical(true)], true),
+            coerce_cells(vec![Value::Logical(true)], true, US),
             Ok(vec![1.0])
         );
-        assert_eq!(coerce_cells(vec![Value::Blank], true), Ok(vec![0.0]));
+        assert_eq!(coerce_cells(vec![Value::Blank], true, US), Ok(vec![0.0]));
         for value in [Value::Text("2".into()), Value::Logical(true), Value::Blank] {
-            assert_eq!(coerce_cells(vec![value], false), Err(ErrorKind::Value));
+            assert_eq!(coerce_cells(vec![value], false, US), Err(ErrorKind::Value));
         }
         assert_eq!(
-            coerce_cells(vec![Value::Error(ErrorKind::Ref)], false),
+            coerce_cells(vec![Value::Error(ErrorKind::Ref)], false, US),
             Err(ErrorKind::Ref)
         );
     }

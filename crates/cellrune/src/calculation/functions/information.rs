@@ -1,6 +1,7 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
+use super::super::numeric_text::NumericText;
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::{InformationArrayFunction, InformationFunction};
@@ -57,7 +58,7 @@ pub(super) fn call(
     if matches!(value, Value::Error(kind) if kind.is_engine_issue()) {
         return value;
     }
-    apply(function, value)
+    apply(function, value, engine.numeric_text())
 }
 
 pub(super) fn call_array(
@@ -80,12 +81,12 @@ pub(super) fn call_array(
         data: array
             .data
             .into_iter()
-            .map(|value| apply(function.scalar_function(), value))
+            .map(|value| apply(function.scalar_function(), value, engine.numeric_text()))
             .collect(),
     }))
 }
 
-fn apply(function: InformationFunction, value: Value) -> Value {
+fn apply(function: InformationFunction, value: Value, numeric_text: NumericText) -> Value {
     if matches!(value, Value::Error(kind) if kind.is_engine_issue()) {
         return value;
     }
@@ -101,8 +102,8 @@ fn apply(function: InformationFunction, value: Value) -> Value {
         InformationFunction::IsNonText => Value::Logical(!matches!(value, Value::Text(_))),
         InformationFunction::IsNumber => Value::Logical(matches!(value, Value::Number(_))),
         InformationFunction::IsText => Value::Logical(matches!(value, Value::Text(_))),
-        InformationFunction::IsEven => parity(value, false),
-        InformationFunction::IsOdd => parity(value, true),
+        InformationFunction::IsEven => parity(value, false, numeric_text),
+        InformationFunction::IsOdd => parity(value, true, numeric_text),
         InformationFunction::N => n(value),
         InformationFunction::T => t(value),
         InformationFunction::Type => value_type(value),
@@ -117,11 +118,11 @@ fn apply(function: InformationFunction, value: Value) -> Value {
     }
 }
 
-fn parity(value: Value, odd: bool) -> Value {
+fn parity(value: Value, odd: bool, numeric_text: NumericText) -> Value {
     if matches!(value, Value::Blank | Value::Logical(_)) {
         return Value::Error(ErrorKind::Value);
     }
-    match to_number(&value) {
+    match to_number(&value, numeric_text) {
         // Keeping the remainder in f64 avoids saturating an out-of-range integer cast.
         Ok(number) => Value::Logical((number.abs().trunc() % 2.0 == 1.0) == odd),
         Err(kind) => Value::Error(kind),

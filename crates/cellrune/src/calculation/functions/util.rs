@@ -3,6 +3,7 @@ use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::excel_digits::cancel_near_zero;
 use super::super::limits::CalculationLimitKind;
+use super::super::numeric_text::NumericText;
 use super::super::runtime::{CellId, Rect};
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
@@ -326,7 +327,7 @@ pub(super) fn required_number(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Result<f64, ErrorKind> {
-    super::super::coerce::to_number(&engine.eval_scalar(context, expr))
+    super::super::coerce::to_number(&engine.eval_scalar(context, expr), engine.numeric_text())
 }
 
 pub(super) fn required_text(
@@ -410,21 +411,28 @@ pub(super) fn excel_numeric_arguments_with_policy(
     sheet_span_policy: SheetSpanPolicy,
 ) -> Result<Vec<f64>, ErrorKind> {
     let mut visited_cells = 0_u64;
-    excel_numbers(collect_filtered_argument_values(
-        engine,
-        context,
-        args,
-        &mut visited_cells,
-        sheet_span_policy,
-        &CellSelection {
-            include: &include_every_cell,
-        },
-    )?)
+    excel_numbers(
+        collect_filtered_argument_values(
+            engine,
+            context,
+            args,
+            &mut visited_cells,
+            sheet_span_policy,
+            &CellSelection {
+                include: &include_every_cell,
+            },
+        )?,
+        engine.numeric_text(),
+    )
 }
 
 /// Converts collected values to numbers with the direct-argument coercion of Excel's numeric
-/// statistics: referenced text and logical values are skipped and errors propagate.
-pub(super) fn excel_numbers(values: Vec<ArgumentValue>) -> Result<Vec<f64>, ErrorKind> {
+/// statistics: text typed directly as an argument reads as `numeric_text` reads it, referenced
+/// text and logical values are skipped, and errors propagate.
+pub(super) fn excel_numbers(
+    values: Vec<ArgumentValue>,
+    numeric_text: NumericText,
+) -> Result<Vec<f64>, ErrorKind> {
     let mut numbers = Vec::new();
     for ArgumentValue {
         value,
@@ -438,13 +446,7 @@ pub(super) fn excel_numbers(values: Vec<ArgumentValue>) -> Result<Vec<f64>, Erro
                 numbers.push(if logical { 1.0 } else { 0.0 });
             }
             Value::Text(text) if !from_collection => {
-                let number = text
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|number| number.is_finite())
-                    .ok_or(ErrorKind::Value)?;
-                numbers.push(number);
+                numbers.push(numeric_text.number(&text).ok_or(ErrorKind::Value)?);
             }
             Value::Error(kind) => return Err(kind),
             Value::Blank | Value::Text(_) | Value::Logical(_) => {}

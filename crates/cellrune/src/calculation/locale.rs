@@ -14,9 +14,10 @@ pub enum Locale {
 
 /// The locale conventions a calculation follows.
 ///
-/// `locale` stands for Excel's regional format: the `DOLLAR` currency symbol, the month, weekday, and `AM`/`PM` names of `TEXT`, and the
+/// `locale` stands for Excel's regional format: the `DOLLAR` currency symbol, the month, weekday, and `AM`/`PM` names of `TEXT`, the
 /// double-byte character rules of `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
-/// `REPLACEB`, `ASC`, and `DBCS`.
+/// `REPLACEB`, `ASC`, and `DBCS`, and how text reads as a number: the currency symbol it may carry
+/// and whether a date may begin with its month (`1/15/2024` reads only under [`Locale::EnUs`]).
 /// `display_language` stands for the language of the labels Excel generates, such as the
 /// `GROUPBY` and `PIVOTBY` total row; it follows `locale` unless set. Both built-in locales use
 /// `.` as the decimal separator and `,` as the thousands separator.
@@ -59,6 +60,15 @@ impl Locale {
         match self {
             Self::EnUs => "$",
             Self::KoKr => "₩",
+        }
+    }
+
+    /// Whether a date written in numbers may begin with its month, as `1/15/2024` does. A date
+    /// that begins with a four-digit year reads in every locale.
+    pub(in crate::calculation) const fn writes_month_first(self) -> bool {
+        match self {
+            Self::EnUs => true,
+            Self::KoKr => false,
         }
     }
 

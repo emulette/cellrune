@@ -240,120 +240,32 @@ fn datevalue(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Va
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let text = match exact_ascii_text(engine, context, &args[0]) {
-        Ok(text) => text,
-        Err(kind) => return Value::Error(kind),
-    };
-    let date = match parse_iso_date(&text) {
-        Some(date) => date,
-        None => return Value::Error(ErrorKind::Value),
-    };
-    if date
-        == (Date {
-            year: 1900,
-            month: 2,
-            day: 29,
-        })
-        && engine.date_system() == DateSystem::Excel1900
-    {
-        return Value::Number(60.0);
-    }
-    if date.month == 0
-        || date.month > 12
-        || date.day == 0
-        || date.day > days_in_month(date.year, date.month)
-    {
-        return Value::Error(ErrorKind::Value);
-    }
-    serial_from_date(date, engine.date_system())
-        .map(Value::Number)
-        .unwrap_or(Value::Error(ErrorKind::Num))
+    date_time_text(engine, context, &args[0])
+        .map_or_else(Value::Error, |serial| Value::Number(serial.floor()))
 }
 
 fn timevalue(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let text = match exact_ascii_text(engine, context, &args[0]) {
-        Ok(text) => text,
-        Err(kind) => return Value::Error(kind),
-    };
-    parse_iso_time(&text)
-        .map(Value::Number)
-        .unwrap_or(Value::Error(ErrorKind::Value))
+    date_time_text(engine, context, &args[0])
+        .map_or_else(Value::Error, |serial| Value::Number(serial.fract()))
 }
 
-fn exact_ascii_text(
+/// The serial of the date, time, or both that a text argument writes; only text is read.
+fn date_time_text(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     expr: &Expr,
-) -> Result<String, ErrorKind> {
+) -> Result<f64, ErrorKind> {
     match engine.eval_scalar(context, expr) {
-        Value::Text(text) => {
-            let text = text.trim_matches([' ', '\t']);
-            if text.is_empty() {
-                Err(ErrorKind::Value)
-            } else {
-                Ok(text.to_owned())
-            }
-        }
+        Value::Text(text) => engine
+            .numeric_text()
+            .date_time(&text)
+            .ok_or(ErrorKind::Value),
         Value::Error(kind) => Err(kind),
         Value::Blank | Value::Number(_) | Value::Logical(_) => Err(ErrorKind::Value),
     }
-}
-
-fn parse_iso_date(text: &str) -> Option<Date> {
-    let bytes = text.as_bytes();
-    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return None;
-    }
-    Some(Date {
-        year: fixed_ascii_digits(&bytes[0..4])? as i32,
-        month: fixed_ascii_digits(&bytes[5..7])?,
-        day: fixed_ascii_digits(&bytes[8..10])?,
-    })
-}
-
-fn parse_iso_time(text: &str) -> Option<f64> {
-    let bytes = text.as_bytes();
-    if bytes.len() < 5 || bytes[2] != b':' {
-        return None;
-    }
-    let hour = fixed_ascii_digits(&bytes[0..2])?;
-    let minute = fixed_ascii_digits(&bytes[3..5])?;
-    if hour > 23 || minute > 59 {
-        return None;
-    }
-    if bytes.len() == 5 {
-        return Some(f64::from(hour * 3_600 + minute * 60) / 86_400.0);
-    }
-    if bytes.len() < 8 || bytes[5] != b':' {
-        return None;
-    }
-    let second = fixed_ascii_digits(&bytes[6..8])?;
-    if second > 59 {
-        return None;
-    }
-    let mut nanoseconds = 0_u32;
-    if bytes.len() > 8 {
-        let fraction_digits = bytes.len().checked_sub(9)?;
-        if bytes[8] != b'.' || !(1..=9).contains(&fraction_digits) {
-            return None;
-        }
-        let fraction = fixed_ascii_digits(&bytes[9..])?;
-        nanoseconds = fraction.checked_mul(10_u32.pow(u32::try_from(9 - fraction_digits).ok()?))?;
-    }
-    let seconds = hour * 3_600 + minute * 60 + second;
-    Some(f64::from(seconds) / 86_400.0 + f64::from(nanoseconds) / 86_400_000_000_000.0)
-}
-
-fn fixed_ascii_digits(bytes: &[u8]) -> Option<u32> {
-    bytes.iter().try_fold(0_u32, |value, digit| {
-        digit
-            .is_ascii_digit()
-            .then(|| value.checked_mul(10)?.checked_add(u32::from(*digit - b'0')))
-            .flatten()
-    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -761,7 +673,7 @@ fn holiday_serials(
             Value::Error(kind) => return Err(kind),
             Value::Text(_) if matches!(text_policy, HolidayTextPolicy::NumericSerial) => {
                 holidays.insert(date_serial_from_number(
-                    to_number(&item.value)?,
+                    to_number(&item.value, engine.numeric_text())?,
                     engine.date_system(),
                 )?);
             }
@@ -814,7 +726,7 @@ fn weekend_mask(
         Value::Text(mask) => parse_weekend_mask(&mask),
         Value::Error(kind) => Err(kind),
         value => {
-            let number = to_number(&value)?;
+            let number = to_number(&value, engine.numeric_text())?;
             if !number.is_finite() {
                 return Err(ErrorKind::Value);
             }

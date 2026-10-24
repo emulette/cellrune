@@ -44,6 +44,31 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A number written in a formula keeps fifteen significant digits, as Excel reads it:
   `1234567890123456` is `1234567890123450` and `=0.30000000000000004=0.3` is `TRUE`. Formulas
   that spell more digits calculate with the shortened number.
+- Text where a formula needs a number reads as Excel reads a typed entry, in the arithmetic
+  operators, function arguments, `VALUE`, the direct arguments of `SUM`, `COUNT`, and the
+  statistics, criteria, and holidays: with thousands separators (`"1,000"+1` is `1001`), a percent
+  sign before or after the number (`"50%"*2` is `1`), parentheses for a negative number, the
+  locale's currency symbol, a whole number and a fraction (`"1 1/2"`), as a date (`2024-01-15`, and
+  `1/15/2024` under `Locale::EnUs`), and as a time (`12:30`, `2:30 PM`). So `YEAR("2024-01-15")` is
+  `2024` and `SUMIF(A1:A3,">=2024-01-10",B1:B3)` compares dates. Only spaces around the text are
+  ignored, not tabs or other whitespace, and digits past the fifteenth significant one read as
+  zeros. Text Excel reads from the current date, such as `"1/2"`, stays `#VALUE!`. `VALUE` and
+  `FIXED` read only the locale's currency symbol, so under the default `Locale::EnUs`
+  `VALUE("₩5")` is `#VALUE!` where it was `5`, and `€`, `£`, and `¥` no longer read. Either
+  `ArithmeticSemantics` reads text this way.
+- `DATEVALUE` and `TIMEVALUE` read those dates and times and a date followed by a time, returning
+  the serial's whole day and its fraction: `DATEVALUE("2024/02/29")` is `45351` and
+  `TIMEVALUE("24:00")` is `0` instead of `#VALUE!`, and fractional seconds are read to the
+  millisecond. A date outside the workbook's date system is `#VALUE!` instead of `#NUM!`, and tabs
+  around the text are no longer ignored.
+- A number criterion of `COUNTIF(S)`, `SUMIF(S)`, `AVERAGEIF(S)`, `MAXIFS`, `MINIFS`, and the
+  database functions compares by order only with number cells, and `<>` counts a text cell as
+  unequal even when its text reads as the number, as Excel does: `">4"` no longer counts the text
+  `5`, and `"<>5"` counts it. An equality still matches it.
+- `MATCH` with match type 0 matches a number only with number cells, as `VLOOKUP` and `HLOOKUP`
+  already did: `MATCH(5,{"5";5},0)` is `2` instead of `1`.
+- `AND`, `OR`, and `XOR` skip a text argument other than `TRUE` and `FALSE`, typed or computed,
+  as Excel does: `AND("0",1)` and `AND("x",1)` are `TRUE` where they were `FALSE` and `#VALUE!`.
 - `^` and `POWER` return `#DIV/0!` instead of `#NUM!` for zero raised to a negative power, and
   give the odd root of a negative base whose fractional exponent has an odd whole reciprocal, read
   to fifteen significant digits: `(-8)^(1/3)` is `-1.9999999999999998` instead of `#NUM!`, while

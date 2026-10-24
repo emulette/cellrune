@@ -211,7 +211,7 @@ fn aggregate_a(
 }
 
 /// Collects the values of the *A statistics: logical values count as 1 or 0, text typed directly
-/// as an argument must be numeric, text inside references and arrays counts as 0, and blanks are
+/// as an argument must read as a number, text inside references and arrays counts as 0, and blanks are
 /// skipped.
 fn numbers_a(
     engine: &Engine<'_>,
@@ -230,13 +230,12 @@ fn numbers_a(
             Value::Number(number) => numbers.push(number),
             Value::Logical(logical) => numbers.push(if logical { 1.0 } else { 0.0 }),
             Value::Text(text) if !item.from_collection => {
-                let number = text
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|number| number.is_finite())
-                    .ok_or(ErrorKind::Value)?;
-                numbers.push(number);
+                numbers.push(
+                    engine
+                        .numeric_text()
+                        .number(&text)
+                        .ok_or(ErrorKind::Value)?,
+                );
             }
             Value::Text(_) => numbers.push(0.0),
             Value::Error(kind) => return Err(kind),

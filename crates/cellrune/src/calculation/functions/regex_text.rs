@@ -373,7 +373,11 @@ fn integer_option(
     if matches!(expression, Expr::Missing) {
         return Ok(default);
     }
-    let number = to_number(&engine.eval_scalar(context, expression))?.trunc();
+    let number = to_number(
+        &engine.eval_scalar(context, expression),
+        engine.numeric_text(),
+    )?
+    .trunc();
     if number < i64::MIN as f64 || number >= i64::MAX as f64 {
         return Err(ErrorKind::Value);
     }

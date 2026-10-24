@@ -15,7 +15,6 @@ mod tests;
 mod xpath;
 
 use super::super::ast::Expr;
-use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
@@ -85,7 +84,7 @@ pub(super) fn call_array(
     for value in values {
         // Whether Excel turns a value that reads as a number, or an empty one, into a number is
         // not documented.
-        if value.is_empty() || to_number(&Value::Text(value.clone())).is_ok() {
+        if value.is_empty() || engine.numeric_text().number(&value).is_some() {
             return Err(ErrorKind::Unsupported);
         }
         engine.ensure_text_bytes(value.len())?;

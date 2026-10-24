@@ -262,7 +262,16 @@ fn holiday_serials_preserve_date_systems_deduplication_and_intl_contracts() {
                 "{formula}"
             );
         }
-        for text in ["bad", "2026-01-02", "", "inf"] {
+        assert_eq!(
+            result_in_system(
+                "NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),A1)",
+                Some(CellValue::Text("2026-01-02".into())),
+                system
+            ),
+            number(1.0),
+            "a date text holiday"
+        );
+        for text in ["bad", "", "inf"] {
             assert_eq!(
                 result_in_system(
                     "NETWORKDAYS(DATE(2026,1,1),DATE(2026,1,2),A1)",

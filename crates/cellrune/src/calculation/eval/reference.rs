@@ -437,7 +437,7 @@ impl Engine<'_> {
         let reference = self.resolve_reference_value_expr(context, &args[0])?;
         let area_index = match args.get(3) {
             Some(Expr::Missing) | None => 1.0,
-            Some(expr) => to_number(&self.eval_scalar(context, expr))?.trunc(),
+            Some(expr) => to_number(&self.eval_scalar(context, expr), self.numeric_text())?.trunc(),
         };
         if !area_index.is_finite() || area_index < 1.0 {
             return Err(ErrorKind::Value);
@@ -447,10 +447,13 @@ impl Engine<'_> {
             return Err(ErrorKind::Value);
         }
         let rect = span.into_rect().map_err(|_| ErrorKind::Value)?;
-        let first_index = to_number(&self.eval_scalar(context, &args[1]))?.trunc();
+        let first_index =
+            to_number(&self.eval_scalar(context, &args[1]), self.numeric_text())?.trunc();
         let second_index = match args.get(2) {
             Some(Expr::Missing) | None => None,
-            Some(expr) => Some(to_number(&self.eval_scalar(context, expr))?.trunc()),
+            Some(expr) => {
+                Some(to_number(&self.eval_scalar(context, expr), self.numeric_text())?.trunc())
+            }
         };
         let single_row = rect.height() == 1 && rect.width() > 1;
         let (row_index, col_index) = if single_row && second_index.is_none() {
@@ -535,15 +538,21 @@ impl Engine<'_> {
             return Err(ErrorKind::Ref);
         }
         let base = span.into_rect().map_err(|_| ErrorKind::Ref)?;
-        let rows = to_number(&self.eval_scalar(context, &args[1]))?.trunc() as i64;
-        let columns = to_number(&self.eval_scalar(context, &args[2]))?.trunc() as i64;
+        let rows =
+            to_number(&self.eval_scalar(context, &args[1]), self.numeric_text())?.trunc() as i64;
+        let columns =
+            to_number(&self.eval_scalar(context, &args[2]), self.numeric_text())?.trunc() as i64;
         let height = match args.get(3) {
             Some(Expr::Missing) | None => base.height() as i64,
-            Some(expr) => to_number(&self.eval_scalar(context, expr))?.trunc() as i64,
+            Some(expr) => {
+                to_number(&self.eval_scalar(context, expr), self.numeric_text())?.trunc() as i64
+            }
         };
         let width = match args.get(4) {
             Some(Expr::Missing) | None => base.width() as i64,
-            Some(expr) => to_number(&self.eval_scalar(context, expr))?.trunc() as i64,
+            Some(expr) => {
+                to_number(&self.eval_scalar(context, expr), self.numeric_text())?.trunc() as i64
+            }
         };
         let Some(row_start) = i64::from(base.row_start).checked_add(rows) else {
             return Err(ErrorKind::Ref);

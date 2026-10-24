@@ -124,7 +124,7 @@ fn sort_order(
 }
 
 fn integer(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) -> Result<i64, ErrorKind> {
-    let value = to_number(&engine.eval_scalar(context, expr))?.trunc();
+    let value = to_number(&engine.eval_scalar(context, expr), engine.numeric_text())?.trunc();
     if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
         return Err(ErrorKind::Num);
     }

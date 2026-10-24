@@ -1,6 +1,6 @@
 use cellrune::{
     CalculationCellResult, CalculationIssueCode, CalculationOptions, CalculationSnapshot,
-    CellAddress, CellValue, FormulaText, Locale, LocaleProfile, SheetId, WorkbookDraft,
+    CellAddress, CellValue, ExcelError, FormulaText, Locale, LocaleProfile, SheetId, WorkbookDraft,
     WorkbookSnapshot, calculate_workbook,
 };
 
@@ -145,4 +145,40 @@ fn the_display_language_labels_totals_apart_from_the_regional_format() {
     assert_eq!(text_at(&calculation, sheet_id, "A5"), "Total");
     assert!(grouped_labels(&calculation, sheet_id).contains(&"Grand Total".to_owned()));
     assert_unsupported(&calculation, sheet_id, "C1");
+}
+
+#[test]
+fn text_reads_as_a_number_with_the_profile_currency_and_date_order() {
+    let workbook = super::support::workbook_with_formulas(&[
+        (1, 1, "VALUE(\"$1,234\")"),
+        (1, 2, "VALUE(\"₩1,234\")"),
+        (1, 3, "VALUE(\"1/15/2024\")"),
+        (1, 4, "VALUE(\"2024/1/15\")"),
+    ]);
+    let read = |locale| {
+        let calculation = calculate_workbook(
+            &workbook,
+            CalculationOptions::default().with_locale_profile(LocaleProfile::new(locale)),
+        );
+        (1..=4)
+            .map(
+                |column| match calculation.cell(super::support::cell_id(column)) {
+                    Some(CalculationCellResult::Value(CellValue::Number(number))) => {
+                        Some(number.get())
+                    }
+                    Some(CalculationCellResult::Value(CellValue::Error(ExcelError::Value))) => None,
+                    other => panic!("unexpected result in column {column}: {other:?}"),
+                },
+            )
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        read(Locale::EnUs),
+        [Some(1_234.0), None, Some(45_306.0), Some(45_306.0)]
+    );
+    assert_eq!(
+        read(Locale::KoKr),
+        [None, Some(1_234.0), None, Some(45_306.0)]
+    );
 }

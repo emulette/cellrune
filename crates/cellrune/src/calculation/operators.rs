@@ -2,28 +2,34 @@ use super::ast::{BinaryOp, UnaryOp};
 use super::coerce::{compare_for_operator, to_number, to_text};
 use super::excel_digits::fifteen_significant_digits;
 use super::limits::CalculationLimitKind;
+use super::numeric_text::NumericText;
 use super::runtime::Array;
 use super::value::{ErrorKind, Value};
 
 const NOT_AVAILABLE: Value = Value::Error(ErrorKind::NA);
 
-pub(super) fn apply_unary(op: UnaryOp, value: &Value) -> Value {
+/// Applies a unary operator, reading a text operand as `numeric_text` does.
+pub(super) fn apply_unary(op: UnaryOp, value: &Value, numeric_text: NumericText) -> Value {
     let result = match op {
-        UnaryOp::Negate => to_number(value).map(|number| Value::Number(-number)),
-        UnaryOp::Plus => to_number(value).map(Value::Number),
-        UnaryOp::Percent => to_number(value).map(|number| Value::Number(number / 100.0)),
+        UnaryOp::Negate => to_number(value, numeric_text).map(|number| Value::Number(-number)),
+        UnaryOp::Plus => to_number(value, numeric_text).map(Value::Number),
+        UnaryOp::Percent => {
+            to_number(value, numeric_text).map(|number| Value::Number(number / 100.0))
+        }
     };
     result.unwrap_or_else(Value::Error)
 }
 
 /// Applies a binary operator. `approximate_comparison` makes the comparison operators treat numbers
-/// that differ only past their fifteenth significant digit as equal, as Excel does.
+/// that differ only past their fifteenth significant digit as equal, as Excel does; arithmetic
+/// reads a text operand as `numeric_text` does.
 pub(super) fn apply_binary(
     op: BinaryOp,
     left: &Value,
     right: &Value,
     max_text_bytes: u64,
     approximate_comparison: bool,
+    numeric_text: NumericText,
 ) -> Value {
     match op {
         BinaryOp::Concat => match to_text(left)
@@ -59,7 +65,9 @@ pub(super) fn apply_binary(
         | BinaryOp::Multiply
         | BinaryOp::Divide
         | BinaryOp::Power => {
-            match to_number(left).and_then(|left| to_number(right).map(|right| (left, right))) {
+            match to_number(left, numeric_text)
+                .and_then(|left| to_number(right, numeric_text).map(|right| (left, right)))
+            {
                 Ok((left, right)) => evaluate_arithmetic(op, left, right),
                 Err(kind) => Value::Error(kind),
             }
