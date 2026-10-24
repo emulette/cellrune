@@ -463,6 +463,50 @@ fn numbers_join_text_with_fifteen_digits_and_literals_keep_fifteen() {
 }
 
 #[test]
+fn powers_and_logarithms_follow_excel_zero_and_odd_root_rules() {
+    // Mac Excel 16.114: a negative base takes an exponent whose reciprocal is an odd whole number.
+    let odd_root = |base: f64, exponent: f64| -(base.powf(exponent));
+    let cases = [
+        number("(-8)^(1/3)", odd_root(8.0, 1.0 / 3.0), 0.0),
+        number("POWER(-8,1/3)", odd_root(8.0, 1.0 / 3.0), 0.0),
+        number("(-27)^(1/3)", odd_root(27.0, 1.0 / 3.0), 0.0),
+        number("(-32)^0.2", odd_root(32.0, 0.2), 0.0),
+        number("(-8)^(-1/3)", odd_root(8.0, -1.0 / 3.0), 0.0),
+        number(
+            "(-8)^0.333333333333333",
+            odd_root(8.0, 0.333_333_333_333_333),
+            0.0,
+        ),
+        number("(-8)^(1/1000001)", odd_root(8.0, 1.0 / 1_000_001.0), 0.0),
+        number("(-8)^3", -512.0, 0.0),
+        error("(-8)^(2/3)", ExcelError::Number),
+        error("(-8)^0.5", ExcelError::Number),
+        error("(-8)^(1/3+1E-12)", ExcelError::Number),
+        error("(-8)^(1/1000000)", ExcelError::Number),
+        error("0^-1", ExcelError::DivisionByZero),
+        error("POWER(0,-1)", ExcelError::DivisionByZero),
+        error("0^-0.5", ExcelError::DivisionByZero),
+        error("0^0", ExcelError::Number),
+        error("POWER(0,0)", ExcelError::Number),
+        error("LOG(10,1)", ExcelError::DivisionByZero),
+        error("LOG(1,1)", ExcelError::DivisionByZero),
+        error("LOG(0,1)", ExcelError::Number),
+        error("LOG(10,0)", ExcelError::Number),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    for options in [
+        CalculationOptions::default(),
+        CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
+    ] {
+        let calculation = calculate_workbook(&workbook, options);
+        for (offset, case) in cases.iter().enumerate() {
+            assert_expected(&calculation, offset as u32 + 1, case);
+        }
+    }
+}
+
+#[test]
 fn ieee754_rounding_keeps_the_binary_quotient() {
     let cases = [
         number("ROUND(1.005,2)", 1.0, 0.0),

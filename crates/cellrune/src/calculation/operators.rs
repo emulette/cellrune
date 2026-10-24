@@ -1,5 +1,6 @@
 use super::ast::{BinaryOp, UnaryOp};
 use super::coerce::{compare_for_operator, to_number, to_text};
+use super::excel_digits::fifteen_significant_digits;
 use super::limits::CalculationLimitKind;
 use super::runtime::Array;
 use super::value::{ErrorKind, Value};
@@ -73,8 +74,10 @@ fn evaluate_arithmetic(op: BinaryOp, left: f64, right: f64) -> Value {
         BinaryOp::Multiply => left * right,
         BinaryOp::Divide if right == 0.0 => return Value::Error(ErrorKind::Div0),
         BinaryOp::Divide => left / right,
-        BinaryOp::Power if left == 0.0 && right == 0.0 => return Value::Error(ErrorKind::Num),
-        BinaryOp::Power => left.powf(right),
+        BinaryOp::Power => match power(left, right) {
+            Ok(result) => result,
+            Err(kind) => return Value::Error(kind),
+        },
         _ => return Value::Error(ErrorKind::Value),
     };
     if result.is_finite() {
@@ -82,6 +85,29 @@ fn evaluate_arithmetic(op: BinaryOp, left: f64, right: f64) -> Value {
     } else {
         Value::Error(ErrorKind::Num)
     }
+}
+
+/// Raises `base` to `exponent` as `^` and `POWER` do. `0^0` is `#NUM!` and zero to a negative
+/// power is `#DIV/0!`. A negative base takes a fractional exponent only when its reciprocal, read to
+/// fifteen significant digits, is an odd whole number, and then yields the odd root it stands for:
+/// `(-8)^(1/3)` is `-(8^(1/3))`, `-1.9999999999999998`, while `(-8)^(2/3)` is `#NUM!` (Mac Excel
+/// 16.114). The result may be infinite, which the callers report as `#NUM!`.
+pub(super) fn power(base: f64, exponent: f64) -> Result<f64, ErrorKind> {
+    if base == 0.0 && exponent == 0.0 {
+        return Err(ErrorKind::Num);
+    }
+    if base == 0.0 && exponent < 0.0 {
+        return Err(ErrorKind::Div0);
+    }
+    if base < 0.0 && exponent.fract() != 0.0 {
+        let root = fifteen_significant_digits(1.0 / exponent);
+        return if root.fract() == 0.0 && root % 2.0 != 0.0 {
+            Ok(-(-base).powf(exponent))
+        } else {
+            Err(ErrorKind::Num)
+        };
+    }
+    Ok(base.powf(exponent))
 }
 
 pub(super) fn broadcast_shape(left: &Array, right: &Array) -> Result<(u32, u32), ErrorKind> {

@@ -2,6 +2,7 @@ use super::super::ast::Expr;
 use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
 use super::super::excel_digits::{Rounding, round_quotient, round_to_digits};
+use super::super::operators::power;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::MathFunction;
 use super::util::{collect_argument_values, fifteen_digit_rules, required_number, required_text};
@@ -32,7 +33,7 @@ pub(super) fn call(
         }
         MathFunction::RoundUp => round(engine, context, args, Rounding::AwayFromZero),
         MathFunction::Mod => checked_binary(engine, context, args, excel_mod),
-        MathFunction::Power => checked_binary(engine, context, args, excel_power),
+        MathFunction::Power => checked_binary(engine, context, args, power),
         MathFunction::Ceiling => multiple(engine, context, args, true),
         MathFunction::Floor => multiple(engine, context, args, false),
         MathFunction::Even => parity_round(engine, context, args, false),
@@ -138,14 +139,6 @@ fn excel_mod(number: f64, divisor: f64) -> Result<f64, ErrorKind> {
     }
 }
 
-fn excel_power(base: f64, exponent: f64) -> Result<f64, ErrorKind> {
-    if base == 0.0 && exponent == 0.0 {
-        Err(ErrorKind::Num)
-    } else {
-        Ok(base.powf(exponent))
-    }
-}
-
 fn round(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -243,8 +236,11 @@ fn logarithm(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Va
         },
         None => 10.0,
     };
-    if number <= 0.0 || base <= 0.0 || base == 1.0 {
+    if number <= 0.0 || base <= 0.0 {
         Value::Error(ErrorKind::Num)
+    } else if base == 1.0 {
+        // The logarithm of base one divides by its zero logarithm (Mac Excel 16.114).
+        Value::Error(ErrorKind::Div0)
     } else {
         finite(number.log(base))
     }
@@ -447,7 +443,7 @@ fn finite(number: f64) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{excel_mod, excel_power, excel_sign};
+    use super::{excel_mod, excel_sign};
     use crate::calculation::value::ErrorKind;
 
     #[test]
@@ -458,9 +454,8 @@ mod tests {
     }
 
     #[test]
-    fn sign_and_power_handle_excel_zero_boundaries() {
+    fn sign_handles_negative_zero() {
         assert_eq!(excel_sign(0.0), 0.0);
         assert_eq!(excel_sign(-0.0), 0.0);
-        assert_eq!(excel_power(0.0, 0.0), Err(ErrorKind::Num));
     }
 }

@@ -44,6 +44,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A number written in a formula keeps fifteen significant digits, as Excel reads it:
   `1234567890123456` is `1234567890123450` and `=0.30000000000000004=0.3` is `TRUE`. Formulas
   that spell more digits calculate with the shortened number.
+- `^` and `POWER` return `#DIV/0!` instead of `#NUM!` for zero raised to a negative power, and
+  give the odd root of a negative base whose fractional exponent has an odd whole reciprocal, read
+  to fifteen significant digits: `(-8)^(1/3)` is `-1.9999999999999998` instead of `#NUM!`, while
+  `(-8)^(2/3)` stays `#NUM!`. `LOG` with base 1 is `#DIV/0!` instead of `#NUM!`. Either
+  `ArithmeticSemantics` computes powers this way.
 
 ### Fixed
 

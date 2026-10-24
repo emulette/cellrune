@@ -267,7 +267,7 @@ pub(crate) fn fifteen_digit_literal(literal: &str) -> Cow<'_, str> {
 const EXCEL_SIGNIFICANT_DIGITS: usize = 15;
 
 /// Returns the double nearest to `value` written with fifteen significant digits.
-fn fifteen_significant_digits(value: f64) -> f64 {
+pub(super) fn fifteen_significant_digits(value: f64) -> f64 {
     if value == 0.0 || !value.is_finite() {
         return value;
     }
