@@ -31,7 +31,7 @@ use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{
     affected_formulas, formula_cells, formula_cells_from_workbook, moved_cells,
-    number_format_formulas, volatile_input_formulas,
+    number_format_formulas, sheet_name_readers, volatile_input_formulas,
 };
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
@@ -268,7 +268,7 @@ impl WorkbookCalculationSession {
             && self.compiled.is_some();
         // Cells a row, column, or range move shifted changed where they left and where they
         // landed, as formula and value edits there would change them.
-        let calculation_changed_cells =
+        let mut calculation_changed_cells =
             if local_formula_edits && !receipt.moved_cell_sheets().is_empty() {
                 let mut cells = receipt
                     .calculation_changed_cells()
@@ -297,9 +297,37 @@ impl WorkbookCalculationSession {
         } else {
             BTreeSet::new()
         };
+        // A sheet added or renamed changes the formulas naming it or reading sheet names, which
+        // recompile in place unless a defined name reads them.
+        if local_formula_edits
+            && !receipt.sheet_names_changed().is_empty()
+            && let Some(compiled) = &self.compiled
+        {
+            match sheet_name_readers(
+                draft.workbook(),
+                compiled,
+                receipt.sheet_names_changed(),
+                &cancelled,
+            )
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            {
+                // The readers' results can change, so their own readers recalculate too.
+                Some(readers) => {
+                    let changed = calculation_changed_cells.to_mut();
+                    changed.extend(readers.iter().copied());
+                    changed.sort_unstable();
+                    changed.dedup();
+                    edited_formulas.extend(readers);
+                }
+                None => {
+                    local_formula_edits = false;
+                    edited_formulas.clear();
+                }
+            }
+        }
         // Compiling formulas one by one costs more than compiling the workbook once they are
-        // most of it, so a move that shifted that many compiles the workbook again.
-        if !receipt.moved_cell_sheets().is_empty()
+        // most of it, so a move or a sheet change that reached that many compiles it again.
+        if (!receipt.moved_cell_sheets().is_empty() || !receipt.sheet_names_changed().is_empty())
             && self.compiled.as_ref().is_some_and(|compiled| {
                 edited_formulas.len().saturating_mul(2) > compiled.formula_count()
             })
@@ -307,6 +335,7 @@ impl WorkbookCalculationSession {
             local_formula_edits = false;
             edited_formulas.clear();
         }
+        let formulas_edited = !edited_formulas.is_empty();
         let next_requires_full_rebuild =
             self.requires_full_rebuild || (topology_or_metadata_changed && !local_formula_edits);
         let replacement_dirty_state = if (!topology_or_metadata_changed || local_formula_edits)
@@ -348,6 +377,7 @@ impl WorkbookCalculationSession {
                 .is_some_and(|compiled| !compiled.number_format_formulas().is_empty());
         let next_calculation_changes_pending = self.calculation_changes_pending
             || !calculation_changed_cells.is_empty()
+            || formulas_edited
             || reads_changed_formats;
         Ok(PreparedEditBatch {
             base_revision: current_revision,

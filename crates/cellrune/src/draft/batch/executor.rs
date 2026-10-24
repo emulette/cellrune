@@ -94,6 +94,7 @@ impl WorkbookDraft {
                 calculation_metadata_changed: false,
                 number_formats_changed: false,
                 moved_cell_sheets: Vec::new(),
+                sheet_names_changed: Vec::new(),
                 inverse: None,
             });
         }
@@ -141,6 +142,7 @@ impl WorkbookDraft {
         let mut calculation_metadata_changed = false;
         let mut number_formats_changed = false;
         let mut moved_cell_sheets = BTreeSet::new();
+        let mut sheet_names_changed = Vec::new();
         let mut semantic_changed = false;
         // Every ID the workbook or this batch has used stays taken, including those of sheets
         // deleted since, so an added sheet takes the one after the highest.
@@ -418,10 +420,19 @@ impl WorkbookDraft {
                     added_sheets.insert(sheet_id);
                     created_sheet_ids.push(sheet_id);
                     workbook_changed = true;
-                    topology_changed = true;
+                    // The sheet goes last and holds no cells, so only formulas naming it or
+                    // counting sheets read differently.
+                    cell_formulas_changed = true;
+                    sheet_names_changed.push(name.clone());
                     semantic_changed = true;
                 }
                 WorkbookChange::RenameSheet { sheet_id, name } => {
+                    let names_before = defined_names.clone();
+                    let tables_changed_before = changed_table_ids.len();
+                    let old_name = sheets
+                        .iter()
+                        .find(|sheet| sheet.id() == *sheet_id)
+                        .map(|sheet| sheet.name().clone());
                     if rename_sheet(
                         &mut sheets,
                         &mut defined_names,
@@ -441,7 +452,18 @@ impl WorkbookDraft {
                     )? {
                         touched_sheets.insert(*sheet_id);
                         workbook_changed = true;
-                        topology_changed = true;
+                        // The formulas the rename rewrote are among the changed cells; formulas
+                        // naming either name without being rewritten, or reading sheet names,
+                        // read differently too.
+                        if defined_names != names_before
+                            || changed_table_ids.len() != tables_changed_before
+                        {
+                            topology_changed = true;
+                        } else {
+                            cell_formulas_changed = true;
+                            sheet_names_changed.extend(old_name);
+                            sheet_names_changed.push(name.clone());
+                        }
                         semantic_changed = true;
                     }
                 }
@@ -1234,6 +1256,7 @@ impl WorkbookDraft {
             calculation_metadata_changed,
             number_formats_changed,
             moved_cell_sheets: moved_cell_sheets.into_iter().collect(),
+            sheet_names_changed,
             inverse,
         })
     }

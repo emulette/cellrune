@@ -25,9 +25,30 @@ pub(crate) struct FormulaReferences {
 /// Returns the references of `text`, or `None` when it does not parse.
 pub(crate) fn formula_references(text: &str) -> Option<FormulaReferences> {
     let parsed = parse_formula_with_limits(text, CalculationLimits::default()).ok()?;
+    Some(expression_references(parsed.root()))
+}
+
+/// Returns the references of a parsed formula.
+pub(in crate::calculation) fn expression_references(root: &Expr) -> FormulaReferences {
     let mut references = FormulaReferences::default();
-    visit(parsed.root(), &mut references);
-    Some(references)
+    visit(root, &mut references);
+    references
+}
+
+impl FormulaReferences {
+    /// Whether the formula names a sheet whose lookup key is in `sheets`, or calls a function that
+    /// reads sheet names or the number of sheets, which adding or renaming a sheet changes.
+    pub(crate) fn reads_sheet_names(&self, sheets: &BTreeSet<String>) -> bool {
+        self.sheets.iter().any(|sheet| {
+            crate::SheetName::new(sheet.as_str())
+                .is_ok_and(|name| sheets.contains(name.lookup_key()))
+        }) || self.names.iter().any(|name| {
+            matches!(
+                super::functions::normalize_name(name).as_str(),
+                "SHEET" | "SHEETS" | "CELL"
+            )
+        })
+    }
 }
 
 fn visit(expr: &Expr, references: &mut FormulaReferences) {

@@ -216,6 +216,27 @@ impl CompiledWorkbook {
         self.asts.len() + self.parse_failures.len()
     }
 
+    /// Returns the formula cells whose formula reads a sheet by one of the `sheets` lookup keys,
+    /// or reads sheet names or the number of sheets.
+    pub(super) fn sheet_name_readers(
+        &self,
+        sheets: &BTreeSet<String>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<CellId>, ()> {
+        let mut readers = Vec::new();
+        for (cell, parsed) in self.asts.iter() {
+            if cancelled() {
+                return Err(());
+            }
+            if super::formula_references::expression_references(parsed.root())
+                .reads_sheet_names(sheets)
+            {
+                readers.push(*cell);
+            }
+        }
+        Ok(readers)
+    }
+
     pub(super) fn formula_cells(&self) -> impl Iterator<Item = CellId> + '_ {
         self.asts.keys().chain(self.parse_failures.keys()).copied()
     }

@@ -1,5 +1,5 @@
 use super::EditInverse;
-use crate::{CalculationCellId, SheetId, TableId};
+use crate::{CalculationCellId, SheetId, SheetName, TableId};
 
 /// Result of committing one atomic edit batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +22,9 @@ pub struct EditReceipt {
     /// name or a table. The cells it vacated and filled are not in `calculation_changed_cells`,
     /// which the sheets' contents before and after tell.
     pub(super) moved_cell_sheets: Vec<SheetId>,
+    /// The names that find another sheet, or a sheet where none was, because a sheet was added
+    /// or renamed without changing a defined name or a table.
+    pub(super) sheet_names_changed: Vec<SheetName>,
     pub(super) inverse: Option<Box<EditInverse>>,
 }
 
@@ -57,6 +60,7 @@ impl EditReceipt {
             calculation_metadata_changed: self.calculation_metadata_changed,
             number_formats_changed: self.number_formats_changed,
             moved_cell_sheets: clone_copy_slice(&self.moved_cell_sheets, cancelled)?,
+            sheet_names_changed: self.sheet_names_changed.clone(),
             inverse: self.inverse.clone(),
         })
     }
@@ -117,6 +121,13 @@ impl EditReceipt {
     /// them: the cells that moved changed as formula and value edits would change them.
     pub(crate) fn moved_cell_sheets(&self) -> &[SheetId] {
         &self.moved_cell_sheets
+    }
+
+    /// Returns the sheet names that find a different sheet than before, as
+    /// [`Self::cell_formulas_changed_topology_only`] counts them: formulas naming them, or reading
+    /// sheet names or the number of sheets, read differently.
+    pub(crate) fn sheet_names_changed(&self) -> &[SheetName] {
+        &self.sheet_names_changed
     }
 
     pub(crate) const fn number_formats_changed(&self) -> bool {

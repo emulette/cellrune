@@ -3171,6 +3171,98 @@ fn a_row_insertion_recalculates_only_the_formulas_it_moved_or_rewrote() {
 }
 
 #[test]
+fn adding_or_renaming_a_sheet_recalculates_only_the_formulas_reading_its_names() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let data = session
+        .apply_changes(
+            0,
+            EditBatch::new([WorkbookChange::add_sheet(
+                SheetName::new("Data").expect("valid sheet name"),
+            )]),
+        )
+        .expect("second sheet")
+        .created_sheet_ids()[0];
+    let mut changes = vec![WorkbookChange::set_cell_value(
+        data,
+        address("A1"),
+        number(7.0),
+    )];
+    for (cell, text) in [
+        ("B1", "Data!A1*2"),
+        ("B2", "Other!A1+1"),
+        ("B3", "SHEET(\"Other\")"),
+        ("B4", "SHEETS()"),
+        ("B5", "New!A1+3"),
+        ("C1", "B4*10"),
+    ] {
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            address(cell),
+            formula(text),
+        ));
+    }
+    for row in 6..=30 {
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 2).expect("address"),
+            formula(&format!("{row}*2")),
+        ));
+    }
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new(changes),
+        )
+        .expect("formulas");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    // The rename rewrites B1, B2 names the new name, and B3 and B4 read sheet names; the added
+    // sheet changes B5, which names it, and B3 and B4 again. C1 reads B4 each time.
+    for (change, evaluated) in [
+        (
+            WorkbookChange::rename_sheet(data, SheetName::new("Other").expect("valid sheet name")),
+            5,
+        ),
+        (
+            WorkbookChange::add_sheet(SheetName::new("New").expect("valid sheet name")),
+            4,
+        ),
+    ] {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([change]),
+            )
+            .expect("sheet change");
+        let delta = session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("recalculation");
+        assert_eq!(
+            (delta.mode(), delta.reason()),
+            (
+                CalculationExecutionMode::Incremental,
+                CalculationDecisionReason::DirtySubset,
+            )
+        );
+        assert_eq!(delta.evaluated_count(), evaluated);
+        assert_calculations_equal(
+            session.calculation().expect("installed result"),
+            &calculate_workbook(session.workbook(), CalculationOptions::default()),
+        );
+    }
+}
+
+#[test]
 fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
     let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108, false);
     assert!(

@@ -1094,8 +1094,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   `DynamicTopology` when the workbook already held such a reference.
   Inserting, deleting, or moving rows, columns, or a range without changing
   a defined name or a table counts as editing the cells it vacated, filled,
-  and rewrote, unless they hold more than half of the workbook's formulas,
-  which compiles the workbook again (`TopologyChanged`).
+  and rewrote; adding a sheet, or renaming one without changing a defined
+  name or a table, counts as editing the formulas it rewrote, the formulas
+  naming the added or either renamed name, and those calling `SHEET`,
+  `SHEETS`, or `CELL`. Either compiles the workbook again (`TopologyChanged`)
+  when those formulas are more than half of the workbook's or a defined name
+  reads the sheet names.
   Forced `Incremental` fails closed when
   unsafe, including after formula edits. When the only
   options that differ from the installed calculation are the `TODAY()` serial,

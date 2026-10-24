@@ -5,7 +5,7 @@ use super::super::functions::descriptor::Volatility;
 use super::super::runtime::CellId;
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, SheetId,
-    WorkbookSnapshot,
+    SheetName, WorkbookSnapshot,
 };
 
 const CHARGED_WORK_POLL_INTERVAL: u32 = 256;
@@ -295,4 +295,32 @@ fn sheet_cells(
         .sheet_by_id(sheet_id)
         .into_iter()
         .flat_map(crate::Sheet::cells)
+}
+
+/// Returns the formulas whose results a sheet added or renamed as `names` can change without
+/// rewriting them: those naming one of `names` and those reading sheet names or the number of
+/// sheets. Returns `None` when a defined name reads them, which changes every formula using it.
+pub(super) fn sheet_name_readers(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    names: &[SheetName],
+    cancelled: &impl Fn() -> bool,
+) -> Result<Option<BTreeSet<CalculationCellId>>, ()> {
+    let keys = names
+        .iter()
+        .map(|name| name.lookup_key().to_owned())
+        .collect::<BTreeSet<_>>();
+    if workbook.defined_names().iter().any(|name| {
+        crate::calculation::formula_references::formula_references(name.formula().as_str())
+            .is_some_and(|references| references.reads_sheet_names(&keys))
+    }) {
+        return Ok(None);
+    }
+    Ok(Some(
+        compiled
+            .sheet_name_readers(&keys, cancelled)?
+            .into_iter()
+            .filter_map(|cell| internal_to_public(workbook, cell))
+            .collect(),
+    ))
 }
